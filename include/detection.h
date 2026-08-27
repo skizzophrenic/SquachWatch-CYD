@@ -2,6 +2,7 @@
 #pragma once
 #include "state.h"
 #include "sd_log.h"
+#include <Preferences.h>
 
 class DetectionEngine {
 public:
@@ -12,6 +13,10 @@ public:
     const Detection* logAt(uint8_t idx) const;     // 0 = newest
     const Detection* latest() const { return _latest; }
     uint16_t countByType(DetectionType t) const { return _typeCounts[(uint8_t)t]; }
+
+    // Lifetime total across reboots (persisted to NVS), unlike the
+    // live _typeCounts above which decay when a detection goes stale.
+    uint32_t lifetimeTotal() const { return _lifetimeTotal; }
 
     // Called from the promiscuous WiFi Rx callback (IRAM_ATTR context).
     // Posts a 6-byte MAC + RSSI for later processing in loop().
@@ -54,7 +59,9 @@ private:
     // Live counters (one per DetectionType)
     uint16_t _typeCounts[(uint8_t)DetectionType::COUNT] = {0};
 
-    SdLog     _sd;
+    SdLog       _sd;
+    Preferences _prefs;
+    uint32_t    _lifetimeTotal = 0;
 
     void pushLog(const Detection& d);
     void processWiFiQ();

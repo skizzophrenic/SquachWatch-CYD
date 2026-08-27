@@ -7,6 +7,25 @@ namespace Squachy {
 
 enum class Mood : uint8_t { IDLE, WAVE, SHOCKED, BOUNCE };
 
+// Which reaction pose a SHOCKED mood strikes — varies by what triggered
+// it so a detection actually reads differently depending on the type,
+// instead of every alert getting the same generic startle.
+enum class ReactPose : uint8_t { STARTLED, HANDS_UP, COVER_FACE, POINT_SHADES, DISGUST, LOOK_UP, LOOK_AROUND };
+
+static ReactPose reactPoseFor(DetectionType t) {
+    switch (t) {
+        case DetectionType::AXON:    return ReactPose::HANDS_UP;    // "don't shoot" — it's law enforcement gear
+        case DetectionType::FLOCK:
+        case DetectionType::ALPR:
+        case DetectionType::CAMERA:  return ReactPose::COVER_FACE;  // something's taking his picture
+        case DetectionType::META:    return ReactPose::POINT_SHADES;// smart glasses — he points at his own shades
+        case DetectionType::SKIMMER: return ReactPose::DISGUST;     // a skimmer is just gross
+        case DetectionType::DRONE:   return ReactPose::LOOK_UP;     // eyes in the sky
+        case DetectionType::AIRTAG:  return ReactPose::LOOK_AROUND; // something's tracking him
+        default:                     return ReactPose::STARTLED;   // UNKNOWN, RAVEN
+    }
+}
+
 // ---- Line banks (string literals live in flash, not RAM) ----
 static const char* IDLE_LINES[] = {
     "Stay squachy out there.",
@@ -84,13 +103,27 @@ static const DetLines DET_LINES[] = {
 };
 static const uint8_t DET_LINES_N = sizeof(DET_LINES) / sizeof(DET_LINES[0]);
 
+// Lifetime-detection-count thresholds Squachy calls out by name. Bigger
+// than any of these and he just keeps quiet about the exact number.
+static const uint32_t MILESTONES[] = { 10, 25, 50, 100, 250, 500, 1000, 2500, 5000 };
+static const uint8_t  MILESTONES_N = sizeof(MILESTONES) / sizeof(MILESTONES[0]);
+
 // ---- Runtime state ----
-static Mood     mood            = Mood::IDLE;
-static uint32_t moodUntil       = 0;
-static const char* bubbleText   = nullptr;
-static uint32_t bubbleUntil     = 0;
-static uint32_t nextIdleAt      = 4000;
-static uint32_t lastInteraction = 0;
+static Mood          mood            = Mood::IDLE;
+static uint32_t      moodUntil       = 0;
+static const char*   bubbleText      = nullptr;
+static uint32_t      bubbleUntil     = 0;
+static uint32_t      nextIdleAt      = 4000;
+static uint32_t      lastInteraction = 0;
+static DetectionType s_reactType     = DetectionType::UNKNOWN;
+static uint32_t      s_lastMilestone = 0;
+static bool          s_milestoneInit = false;
+static char          s_milestoneBuf[48];
+
+// A very rare idle flourish — his fur shimmers through the vaporwave
+// palette for a few seconds. Purely cosmetic, no gameplay meaning.
+static bool     s_legendary      = false;
+static uint32_t s_legendaryUntil = 0;
 
 static const char* pick(const char* const* arr, int n) {
     return arr[random(0, n)];
@@ -104,16 +137,40 @@ static void say(const char* line, uint32_t ms) {
 // Every bubble stays up at least this long, no matter which line fires.
 static const uint32_t MIN_BUBBLE_MS = 4000;
 
-void trigger(Event evt, DetectionType dt) {
+void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal) {
     uint32_t now = millis();
     lastInteraction = now;
     switch (evt) {
         case Event::DETECTION: {
             mood = Mood::SHOCKED;
             moodUntil = now + 1400;
-            uint8_t idx = (uint8_t)dt;
-            if (idx >= DET_LINES_N) idx = 0;
-            say(random(0, 2) ? DET_LINES[idx].a : DET_LINES[idx].b, 4500);
+            s_reactType = dt;
+
+            // First call this boot: don't re-announce milestones the
+            // lifetime counter already passed in a previous session.
+            if (!s_milestoneInit) {
+                s_milestoneInit = true;
+                for (uint8_t i = 0; i < MILESTONES_N; i++) {
+                    if (lifetimeTotal >= MILESTONES[i]) s_lastMilestone = MILESTONES[i];
+                }
+            }
+            uint32_t hit = 0;
+            for (uint8_t i = 0; i < MILESTONES_N; i++) {
+                if (lifetimeTotal >= MILESTONES[i] && MILESTONES[i] > s_lastMilestone) {
+                    hit = MILESTONES[i];
+                }
+            }
+
+            if (hit > 0) {
+                s_lastMilestone = hit;
+                snprintf(s_milestoneBuf, sizeof(s_milestoneBuf),
+                         "Detection #%lu! Milestone.", (unsigned long)hit);
+                say(s_milestoneBuf, 5500);
+            } else {
+                uint8_t idx = (uint8_t)dt;
+                if (idx >= DET_LINES_N) idx = 0;
+                say(random(0, 2) ? DET_LINES[idx].a : DET_LINES[idx].b, 4500);
+            }
             break;
         }
         case Event::LOG_OPENED:
@@ -168,50 +225,82 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
 
     using namespace Theme;
 
+    // Once every so often (see tick()'s idle branch), his fur shimmers
+    // through the vaporwave palette for a few seconds instead of the
+    // usual brown — a rare, purely-cosmetic flourish.
+    uint16_t furMain = FUR_MAIN, furLight = FUR_LIGHT;
+    if (s_legendary && now < s_legendaryUntil) {
+        float ph = (float)(now % 900) / 900.0f;
+        furMain  = blend(CYAN, VAPOR_PINK, (uint16_t)(ph * 256.0f));
+        furLight = blend(VAPOR_PINK, VAPOR_PURPLE, (uint16_t)(ph * 256.0f));
+    }
+
     // Shadow (fixed, doesn't bob)
     t.fillEllipse(cx2, headTopY + S(62), S(18), S(4), blend(BG, FUR_DARK, 70));
 
     // Legs + big bigfoot feet
-    t.fillRect(cx2 - S(10), hy + S(40), S(8), S(10), FUR_MAIN);
-    t.fillRect(cx2 + S(2),  hy + S(40), S(8), S(10), FUR_MAIN);
-    t.fillRoundRect(cx2 - S(13), hy + S(49), S(12), S(6), 2, FUR_LIGHT);
-    t.fillRoundRect(cx2 + S(1),  hy + S(49), S(12), S(6), 2, FUR_LIGHT);
+    t.fillRect(cx2 - S(10), hy + S(40), S(8), S(10), furMain);
+    t.fillRect(cx2 + S(2),  hy + S(40), S(8), S(10), furMain);
+    t.fillRoundRect(cx2 - S(13), hy + S(49), S(12), S(6), 2, furLight);
+    t.fillRoundRect(cx2 + S(1),  hy + S(49), S(12), S(6), 2, furLight);
 
     // Body — broad, stocky torso instead of a slim rounded rect.
-    t.fillRoundRect(cx2 - S(15), hy + S(23), S(30), S(18), S(5), FUR_MAIN);
-    t.fillRect(cx2 - S(15), hy + S(23), S(5), S(18), FUR_LIGHT);
-    t.fillRect(cx2 + S(10), hy + S(23), S(5), S(18), FUR_LIGHT);
+    t.fillRoundRect(cx2 - S(15), hy + S(23), S(30), S(18), S(5), furMain);
+    t.fillRect(cx2 - S(15), hy + S(23), S(5), S(18), furLight);
+    t.fillRect(cx2 + S(10), hy + S(23), S(5), S(18), furLight);
 
-    // Arms — long, ape-like, hanging past the waist. Depend on mood.
+    // Arms — long, ape-like, hanging past the waist. Depend on mood; a
+    // SHOCKED reaction further varies pose by what triggered it.
     if (m == Mood::WAVE) {
         float wa = -1.0f + sinf((float)(now % 400) / 400.0f * 6.2831853f) * 0.5f;
         float ex = cx2 + S(13) + cosf(wa) * (18.0f * scale);
         float ey = hy + S(28) + sinf(wa) * (18.0f * scale);
-        t.drawWideLine(cx2 + S(11), hy + S(28), ex, ey, S(7), FUR_LIGHT);
-        t.fillRoundRect(cx2 - S(18), hy + S(22), S(8), S(22), S(3), FUR_LIGHT);
+        t.drawWideLine(cx2 + S(11), hy + S(28), ex, ey, S(7), furLight);
+        t.fillRoundRect(cx2 - S(18), hy + S(22), S(8), S(22), S(3), furLight);
     } else if (m == Mood::SHOCKED) {
-        t.drawWideLine(cx2 - S(11), hy + S(26), cx2 - S(23), hy + S(10), S(7), FUR_LIGHT);
-        t.drawWideLine(cx2 + S(11), hy + S(26), cx2 + S(23), hy + S(10), S(7), FUR_LIGHT);
+        switch (reactPoseFor(s_reactType)) {
+            case ReactPose::HANDS_UP:
+                t.drawWideLine(cx2 - S(11), hy + S(26), cx2 - S(14), hy - S(10), S(7), furLight);
+                t.drawWideLine(cx2 + S(11), hy + S(26), cx2 + S(14), hy - S(10), S(7), furLight);
+                break;
+            case ReactPose::COVER_FACE:
+                // The crossing lines land on the face — drawn later,
+                // after the head/eyes, so they show up in front of it.
+                break;
+            case ReactPose::POINT_SHADES:
+            case ReactPose::DISGUST:
+                // Resting arm now; the pointing/covering arm is drawn
+                // after the head for the same in-front-of-face reason.
+                t.fillRoundRect(cx2 - S(18), hy + S(22), S(8), S(22), S(3), furLight);
+                break;
+            case ReactPose::LOOK_UP:
+            case ReactPose::LOOK_AROUND:
+            case ReactPose::STARTLED:
+            default:
+                t.drawWideLine(cx2 - S(11), hy + S(26), cx2 - S(23), hy + S(10), S(7), furLight);
+                t.drawWideLine(cx2 + S(11), hy + S(26), cx2 + S(23), hy + S(10), S(7), furLight);
+                break;
+        }
     } else {
-        t.fillRoundRect(cx2 - S(18), hy + S(22), S(8), S(22), S(3), FUR_LIGHT);
-        t.fillRoundRect(cx2 + S(10), hy + S(22), S(8), S(22), S(3), FUR_LIGHT);
+        t.fillRoundRect(cx2 - S(18), hy + S(22), S(8), S(22), S(3), furLight);
+        t.fillRoundRect(cx2 + S(10), hy + S(22), S(8), S(22), S(3), furLight);
     }
 
     // Head — broader jaw than before, brow ridge over the eyes.
-    t.fillRoundRect(cx2 - S(15), hy, S(30), S(24), S(7), FUR_LIGHT);
-    t.fillRoundRect(cx2 - S(12), hy + S(2), S(24), S(19), S(5), FUR_MAIN);
+    t.fillRoundRect(cx2 - S(15), hy, S(30), S(24), S(7), furLight);
+    t.fillRoundRect(cx2 - S(12), hy + S(2), S(24), S(19), S(5), furMain);
     t.fillRoundRect(cx2 - S(9),  hy + S(7), S(18), S(11), S(4), SKIN_TAN);
 
     // Sagittal crest (the pronounced skull peak real bigfoot sightings
     // always mention) plus a couple of smaller shaggy fringe tufts.
-    t.fillTriangle(cx2 - S(6), hy + S(2), cx2, hy - S(14), cx2 + S(6), hy + S(2), FUR_LIGHT);
-    t.fillTriangle(cx2 - S(13), hy + S(3), cx2 - S(9), hy - S(4), cx2 - S(5), hy + S(3), FUR_LIGHT);
-    t.fillTriangle(cx2 + S(5),  hy + S(3), cx2 + S(9), hy - S(4), cx2 + S(13),hy + S(3), FUR_LIGHT);
+    t.fillTriangle(cx2 - S(6), hy + S(2), cx2, hy - S(14), cx2 + S(6), hy + S(2), furLight);
+    t.fillTriangle(cx2 - S(13), hy + S(3), cx2 - S(9), hy - S(4), cx2 - S(5), hy + S(3), furLight);
+    t.fillTriangle(cx2 + S(5),  hy + S(3), cx2 + S(9), hy - S(4), cx2 + S(13),hy + S(3), furLight);
 
     // Ears — small and tucked close, like a real sasquatch rather than
     // a cartoon animal's.
-    t.fillCircle(cx2 - S(15), hy + S(13), S(3), FUR_MAIN);
-    t.fillCircle(cx2 + S(15), hy + S(13), S(3), FUR_MAIN);
+    t.fillCircle(cx2 - S(15), hy + S(13), S(3), furMain);
+    t.fillCircle(cx2 + S(15), hy + S(13), S(3), furMain);
     t.fillCircle(cx2 - S(15), hy + S(13), S(1), SKIN_DARK);
     t.fillCircle(cx2 + S(15), hy + S(13), S(1), SKIN_DARK);
 
@@ -221,11 +310,30 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
 
     // Eyes / sunglasses + mouth
     if (m == Mood::SHOCKED) {
+        ReactPose pose = reactPoseFor(s_reactType);
+        int pdx = 0, pdy = 0;
+        if (pose == ReactPose::LOOK_UP) {
+            pdy = -S(2);
+        } else if (pose == ReactPose::LOOK_AROUND) {
+            pdx = (int)(sinf((float)(now % 600) / 600.0f * 6.2831853f) * S(2));
+        }
         t.fillEllipse(cx2 - S(5), hy + S(9), S(3), S(4), WHITE);
         t.fillEllipse(cx2 + S(5), hy + S(9), S(3), S(4), WHITE);
-        t.fillCircle(cx2 - S(5), hy + S(9), S(1), BLACK);
-        t.fillCircle(cx2 + S(5), hy + S(9), S(1), BLACK);
+        t.fillCircle(cx2 - S(5) + pdx, hy + S(9) + pdy, S(1), BLACK);
+        t.fillCircle(cx2 + S(5) + pdx, hy + S(9) + pdy, S(1), BLACK);
         t.fillEllipse(cx2, hy + S(18), S(4), S(5), BLACK);
+
+        // The pointing/covering gesture for these reactions lands on
+        // the face, so it's drawn last, in front of the head just
+        // painted above, instead of underneath it with the other arm.
+        if (pose == ReactPose::COVER_FACE) {
+            t.drawWideLine(cx2 - S(11), hy + S(26), cx2 + S(7), hy + S(6), S(7), furLight);
+            t.drawWideLine(cx2 + S(11), hy + S(26), cx2 - S(7), hy + S(6), S(7), furLight);
+        } else if (pose == ReactPose::POINT_SHADES) {
+            t.drawWideLine(cx2 + S(11), hy + S(26), cx2 + S(4), hy + S(8), S(7), furLight);
+        } else if (pose == ReactPose::DISGUST) {
+            t.drawWideLine(cx2 + S(11), hy + S(26), cx2, hy + S(17), S(7), furLight);
+        }
     } else {
         bool blink = ((now / 2200) % 40) < 3;
         uint16_t lens = blink ? BLACK : blend(BG, CYAN, 60);
@@ -281,15 +389,24 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now) {
     // triggered a reaction recently.
     if (mood == Mood::IDLE && now >= nextIdleAt) {
         bool longIdle = (now - lastInteraction) > 90000;
-        if (longIdle && random(0, 3) == 0) {
-            say(pick(BORED_LINES, 4), MIN_BUBBLE_MS);
-        } else if (random(0, 4) == 0) {
-            say(pick(ENCOURAGE_LINES, 8), MIN_BUBBLE_MS);
+        if (random(0, 250) == 0) {
+            // Rare shimmering flourish — see drawBody's fur-color swap.
+            say("Whoa. Did you just see that?", 5000);
+            mood = Mood::BOUNCE;
+            moodUntil = now + 2000;
+            s_legendary = true;
+            s_legendaryUntil = now + 5000;
         } else {
-            say(pick(IDLE_LINES, 18), MIN_BUBBLE_MS);
+            if (longIdle && random(0, 3) == 0) {
+                say(pick(BORED_LINES, 4), MIN_BUBBLE_MS);
+            } else if (random(0, 4) == 0) {
+                say(pick(ENCOURAGE_LINES, 8), MIN_BUBBLE_MS);
+            } else {
+                say(pick(IDLE_LINES, 18), MIN_BUBBLE_MS);
+            }
+            mood = random(0, 2) ? Mood::WAVE : Mood::BOUNCE;
+            moodUntil = now + 1200;
         }
-        mood = random(0, 2) ? Mood::WAVE : Mood::BOUNCE;
-        moodUntil = now + 1200;
         nextIdleAt = now + 12000 + random(0, 18000);
     }
 

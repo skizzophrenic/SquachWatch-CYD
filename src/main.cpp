@@ -47,6 +47,11 @@ const uint16_t      TOUCH_DEBOUNCE_MS = 200;
 // TFT_eSPI rotation: all four orientations are supported (0/2 portrait,
 // 1/3 landscape), cycled in order by the rotate button in the title bar.
 uint8_t             screenRotation = 1;
+// Timestamp of the last screen/rotation change — drives a brief CRT
+// tear/glitch overlay on the new frame so transitions have some punch
+// instead of just snapping straight to the next screen.
+uint32_t            transitionStart = 0;
+static const uint32_t TRANSITION_MS = 220;
 
 // ---- Touch helpers ----
 struct TouchPoint { bool valid; int x; int y; };
@@ -85,23 +90,27 @@ static TouchPoint pollTouch() {
 static void enterBoot() {
     state = AppState::BOOT;
     bootStart = millis();
+    transitionStart = bootStart;
     uiBootInit(frame);
 }
 
 static void enterClear() {
     state = AppState::CLEAR;
+    transitionStart = millis();
     uiClearInit(frame);
 }
 
 static void enterAlert(const Detection& d) {
     state = AppState::ALERT;
     alertStart = millis();
+    transitionStart = alertStart;
     lastAlertType = d.type;
     uiAlertInit(frame, d);
 }
 
 static void enterLog() {
     state = AppState::LOG;
+    transitionStart = millis();
     uiLogInit(frame);
 }
 
@@ -165,6 +174,7 @@ void loop() {
         frame.deleteSprite();
         frame.setColorDepth(8);
         frame.createSprite(tft.width(), tft.height());
+        transitionStart = now;
     }
 
     switch (state) {
@@ -196,10 +206,10 @@ void loop() {
             uiAlertTick(frame, now);
             if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 lastTouch = now;
-                Squachy::trigger(Squachy::Event::DETECTION, lastAlertType);
+                Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal());
                 enterClear();
             } else if ((now - alertStart) > 5000) {
-                Squachy::trigger(Squachy::Event::DETECTION, lastAlertType);
+                Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal());
                 enterClear();
             }
             break;
@@ -232,5 +242,8 @@ void loop() {
         }
     }
 
+    if (now - transitionStart < TRANSITION_MS) {
+        Theme::drawTransitionGlitch(frame, now - transitionStart, TRANSITION_MS);
+    }
     frame.pushSprite(0, 0);
 }

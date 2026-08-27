@@ -98,4 +98,18 @@ namespace Theme {
     // Horizontal jitter of +/-2 px every ~150 ms.
     void drawGlitchText(TFT_eSPI& t, int y, const char* text,
                         uint16_t color, uint32_t now);
+
+    // Brief CRT-tear overlay drawn on top of an already-fully-drawn
+    // frame right after a screen/rotation change — a few rows get
+    // pixel-shifted sideways, fading out over totalMs. Call every
+    // frame while elapsedMs < totalMs; a no-op once it's expired.
+    void drawTransitionGlitch(TFT_eSPI& t, uint32_t elapsedMs, uint32_t totalMs);
+
+    // Small rotating radar widget for the ALERT screen: a few range
+    // rings, a continuously-rotating sweep, and a blip whose distance
+    // from center reflects signal strength (closer = stronger) at a
+    // bearing that's stable for a given MAC (so it doesn't jump around
+    // between frames of the same alert).
+    void drawSignalRadar(TFT_eSPI& t, int cx, int cy, int r, uint32_t now,
+                        int8_t rssi, float bearingRad);
 }

@@ -16,7 +16,10 @@ namespace Squachy {
     };
 
     // Call once from an event site (main.cpp) to make Squachy react.
-    void trigger(Event evt, DetectionType dt = DetectionType::UNKNOWN);
+    // lifetimeTotal (DETECTION only) is the engine's persisted
+    // across-reboot detection count — used to fire milestone quips.
+    void trigger(Event evt, DetectionType dt = DetectionType::UNKNOWN,
+                 uint32_t lifetimeTotal = 0);
 
     // Draws Squachy and his speech bubble, and advances his idle
     // animation/quip timers. Call every tick from the CLEAR screen.

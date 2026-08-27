@@ -93,6 +93,13 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now) {
     t.setCursor((w - iw) / 2, 160);
     t.print(info);
 
+    // Signal radar: bearing is derived from the MAC so it stays put
+    // for the duration of this alert instead of jittering every frame;
+    // distance from center reflects RSSI (closer = stronger signal).
+    float bearing = (float)((s_last.mac[4] ^ (s_last.mac[5] << 3)) & 0xFF)
+                    / 255.0f * 6.2831853f;
+    Theme::drawSignalRadar(t, w / 2, 192, 22, now, s_last.rssi, bearing);
+
     // Scanline
     int phase = (now / 90) % h;
     Theme::drawScanline(t, phase, Theme::VAPOR_PURPLE);

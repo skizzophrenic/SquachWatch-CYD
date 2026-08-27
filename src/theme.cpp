@@ -393,4 +393,65 @@ void drawGlitchText(TFT_eSPI& t, int y, const char* text,
     t.print(text);
 }
 
+void drawTransitionGlitch(TFT_eSPI& t, uint32_t elapsedMs, uint32_t totalMs) {
+    if (elapsedMs >= totalMs) return;
+    int w = t.width();
+    int h = t.height();
+    float fade = 1.0f - (float)elapsedMs / (float)totalMs;
+    int bands = 2 + (int)(fade * 5);
+
+    static const int MAX_W = 400;
+    static uint16_t rowBuf[MAX_W];
+    int useW = (w < MAX_W) ? w : MAX_W;
+
+    for (int i = 0; i < bands; i++) {
+        int maxY = (h > 3) ? h - 3 : 1;
+        int by   = random(0, maxY);
+        int bh   = 1 + random(0, 2);
+        int xoff = random(-10, 11);
+        if (xoff == 0) xoff = 4;
+        for (int row = 0; row < bh && (by + row) < h; row++) {
+            int y = by + row;
+            for (int x = 0; x < useW; x++) rowBuf[x] = t.readPixel(x, y);
+            for (int x = 0; x < useW; x++) {
+                int sx = x - xoff;
+                if (sx < 0) sx = 0;
+                if (sx >= useW) sx = useW - 1;
+                t.drawPixel(x, y, rowBuf[sx]);
+            }
+        }
+    }
+    if (random(0, 3) == 0) {
+        t.drawFastHLine(0, random(0, h), w, blend(BG, WHITE, (uint16_t)(fade * 200)));
+    }
+}
+
+void drawSignalRadar(TFT_eSPI& t, int cx, int cy, int r, uint32_t now,
+                     int8_t rssi, float bearingRad) {
+    t.drawCircle(cx, cy, r,           blend(BG, CYAN, 90));
+    t.drawCircle(cx, cy, r * 2 / 3,   blend(BG, CYAN, 60));
+    t.drawCircle(cx, cy, r / 3,       blend(BG, CYAN, 40));
+    t.drawFastHLine(cx - r, cy, 2 * r, blend(BG, CYAN, 30));
+    t.drawFastVLine(cx, cy - r, 2 * r, blend(BG, CYAN, 30));
+
+    // Continuously rotating sweep line.
+    float sweep = (float)(now % 2000) / 2000.0f * 6.2831853f;
+    int sx = cx + (int)(sinf(sweep) * r);
+    int sy = cy - (int)(cosf(sweep) * r);
+    t.drawLine(cx, cy, sx, sy, blend(BG, GREEN, 200));
+
+    // Blip: stronger signal (less negative rssi) sits closer to center.
+    float sigT = (float)(rssi + 90) / 60.0f;   // -90dBm..-30dBm -> 0..1
+    if (sigT < 0.0f) sigT = 0.0f;
+    if (sigT > 1.0f) sigT = 1.0f;
+    float blipR = r * (1.0f - sigT * 0.85f);
+    int bx = cx + (int)(sinf(bearingRad) * blipR);
+    int by = cy - (int)(cosf(bearingRad) * blipR);
+    uint16_t blipCol = (sigT > 0.66f) ? RED : (sigT > 0.33f ? AMBER : GREEN);
+    t.fillCircle(bx, by, 3, blipCol);
+    t.drawCircle(bx, by, 5, blend(BG, blipCol, 120));
+
+    t.drawCircle(cx, cy, r, VAPOR_PINK);
+}
+
 }  // namespace Theme

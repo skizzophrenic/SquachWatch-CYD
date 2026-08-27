@@ -39,6 +39,13 @@ bool DetectionEngine::init() {
     // 1. SD card (best-effort)
     _sd.begin();
 
+    // Lifetime detection count survives reboots — Squachy references it
+    // for milestone quips. Live _typeCounts above deliberately don't
+    // persist (they decay when a detection goes stale), so this is
+    // tracked separately.
+    _prefs.begin("squachwatch", false);
+    _lifetimeTotal = _prefs.getUInt("total", 0);
+
     // 2. WiFi promiscuous mode for OUI/SSID detection
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
@@ -275,6 +282,8 @@ void DetectionEngine::pushLog(const Detection& d) {
     _latest = &_log[(_logHead + LOG_CAP - 1) % LOG_CAP];
     _latestChangeMs = millis();
     _typeCounts[(uint8_t)d.type]++;
+    _lifetimeTotal++;
+    _prefs.putUInt("total", _lifetimeTotal);
     _sd.logEvent(d);
 }
 
