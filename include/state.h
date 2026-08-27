@@ -1,0 +1,60 @@
+// SquachWatch-CYD — shared state types
+// Standalone header; only <stdint.h> dependency.
+#pragma once
+#include <stdint.h>
+
+enum class DetectionType : uint8_t {
+    UNKNOWN = 0,
+    FLOCK   = 1,   // Flock Safety camera / sensor
+    AXON    = 2,   // Axon body camera / LE equipment
+    META    = 3,   // Ray-Ban Meta smart glasses
+    SKIMMER = 4,   // HC-05/06/03 Bluetooth skimmer
+    RAVEN   = 5,   // Raven gunshot detector
+    AIRTAG  = 6,   // Apple AirTag / FindMy
+    DRONE   = 7,   // OpenDroneID drone
+    ALPR    = 8,   // Motorola / Vigilant ALPR
+    CAMERA  = 9,   // Generic camera (existing OUI list)
+    COUNT   = 10
+};
+
+inline const char* detectionTypeName(DetectionType t) {
+    switch (t) {
+        case DetectionType::FLOCK:   return "FLOCK";
+        case DetectionType::AXON:    return "AXON";
+        case DetectionType::META:    return "META";
+        case DetectionType::SKIMMER: return "SKIMMER";
+        case DetectionType::RAVEN:   return "RAVEN";
+        case DetectionType::AIRTAG:  return "AIRTAG";
+        case DetectionType::DRONE:   return "DRONE";
+        case DetectionType::ALPR:    return "ALPR";
+        case DetectionType::CAMERA:  return "CAMERA";
+        default:                     return "UNKNOWN";
+    }
+}
+
+struct Detection {
+    uint8_t        mac[6];
+    int8_t         rssi;
+    uint8_t        channel;        // 0 if N/A
+    DetectionType  type;
+    char           vendor[12];
+    char           name[20];
+    uint32_t       firstSeen;
+    uint32_t       lastSeen;
+    uint16_t       hits;
+    bool           active;
+};
+
+enum class AppState : uint8_t {
+    BOOT  = 0,
+    CLEAR = 1,
+    ALERT = 2,
+    LOG   = 3
+};
+
+enum class ButtonId : uint8_t {
+    NONE  = 255,
+    SCAN  = 0,
+    LOG   = 1,
+    CLR   = 2
+};
