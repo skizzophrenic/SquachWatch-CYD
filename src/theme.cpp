@@ -187,7 +187,7 @@ void drawMatrixRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         "01" "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         "!@#$%^&*<>{}[]/\\|+=~" "SASQUACH";
     static const int  GLN   = sizeof(GLYPHS) - 1;
-    static const int  TRAIL = 11;
+    static const int  TRAIL = 22;
     static const uint16_t HEADS[3] = { VAPOR_PINK, CYAN, GREEN };
 
     int cols = t.width() / SPACING;
