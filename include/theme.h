@@ -82,7 +82,7 @@ namespace Theme {
     void drawSunsetSky(TFT_eSPI& t, uint32_t now, int yTop, int yHoriz);
     void drawSunsetSun(TFT_eSPI& t, int cx, int cy, int r, int yTop, int yHoriz);
     void drawSeagulls(TFT_eSPI& t, uint32_t now, int yTop, int yHoriz);
-    void drawRetroFloor(TFT_eSPI& t, int yHoriz, int yBottom);
+    void drawRetroFloor(TFT_eSPI& t, uint32_t now, int yHoriz, int yBottom);
 
     // Decorative sasquatch silhouette in the boot splash.
     // ~40 px tall, drawn at (cx, baseY) with PURPLE outline. Note:

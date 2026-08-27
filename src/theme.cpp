@@ -352,7 +352,7 @@ void drawSeagulls(TFT_eSPI& t, uint32_t now, int yTop, int yHoriz) {
     }
 }
 
-void drawRetroFloor(TFT_eSPI& t, int yHoriz, int yBottom) {
+void drawRetroFloor(TFT_eSPI& t, uint32_t now, int yHoriz, int yBottom) {
     int w = t.width();
     for (int y = yHoriz; y < yBottom; y++) {
         float tt = (float)(y - yHoriz) / (float)(yBottom - yHoriz);
@@ -368,10 +368,17 @@ void drawRetroFloor(TFT_eSPI& t, int yHoriz, int yBottom) {
         int xBot = (int)(((float)i / 8.0f) * w);
         t.drawLine(xBot, yBottom, vanishX, yHoriz, gridCol);
     }
-    for (int i = 1; i <= 5; i++) {
-        float tt = (float)i / 5.0f;
+
+    // Horizontal rungs scroll outward from the horizon toward the
+    // viewer on a loop — a static grid read as the animation being
+    // absent entirely down here, next to the moving sky above it.
+    const uint32_t period = 900;
+    float basePhase = (float)(now % period) / (float)period;
+    for (int i = 0; i < 5; i++) {
+        float tt = fmodf(basePhase + (float)i / 5.0f, 1.0f);
         int y = yHoriz + (int)(tt * tt * (yBottom - yHoriz));
-        t.drawFastHLine(0, y, w, gridCol);
+        uint8_t fade = (uint8_t)(255 - tt * 120);
+        t.drawFastHLine(0, y, w, blend(BG, gridCol, fade));
     }
 }
 

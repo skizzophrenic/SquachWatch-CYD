@@ -23,7 +23,7 @@ void uiBootTick(TFT_eSPI& t, uint32_t now) {
     Theme::drawSunsetSky(t, now, 0, yHoriz);
     Theme::drawSunsetSun(t, w / 2, yHoriz - 25, 30, 0, yHoriz);
     Theme::drawSeagulls(t, now, 0, yHoriz);
-    Theme::drawRetroFloor(t, yHoriz, h);
+    Theme::drawRetroFloor(t, now, yHoriz, h);
 
     // Big title (Font4)
     t.setTextSize(4);
