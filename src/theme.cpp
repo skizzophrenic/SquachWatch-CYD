@@ -181,8 +181,8 @@ void drawMatrixRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // correctly) drawn from a dense symbol/letter/digit set. Column
     // count adapts to the current width so it works in portrait
     // (240px) as well as landscape (320px) without overflowing.
-    static const int  MAX_COLS = 36;
-    static const int  SPACING  = 9;
+    static const int  MAX_COLS = 64;
+    static const int  SPACING  = 5;
     static const char GLYPHS[] =
         "01" "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         "!@#$%^&*<>{}[]/\\|+=~" "SASQUACH";
