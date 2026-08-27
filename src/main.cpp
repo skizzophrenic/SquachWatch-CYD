@@ -44,6 +44,11 @@ uint32_t            alertStart= 0;
 uint32_t            lastTouch = 0;
 DetectionType       lastAlertType = DetectionType::UNKNOWN;
 const uint16_t      TOUCH_DEBOUNCE_MS = 200;
+// The ALERT screen carries real information (type, confidence, MAC,
+// RSSI) — tapping it away is the expected dismiss, but nobody should
+// feel rushed reading it, so the automatic fallback is generous rather
+// than a quick blink-and-you-missed-it 5 seconds.
+const uint32_t      ALERT_AUTO_DISMISS_MS = 60000;
 // TFT_eSPI rotation: all four orientations are supported (0/2 portrait,
 // 1/3 landscape), cycled in order by the rotate button in the title bar.
 uint8_t             screenRotation = 1;
@@ -208,7 +213,7 @@ void loop() {
                 lastTouch = now;
                 Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal());
                 enterClear();
-            } else if ((now - alertStart) > 5000) {
+            } else if ((now - alertStart) > ALERT_AUTO_DISMISS_MS) {
                 Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal());
                 enterClear();
             }

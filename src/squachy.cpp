@@ -1,6 +1,7 @@
 // SquachWatch-CYD — Squachy implementation
 #include "squachy.h"
 #include "theme.h"
+#include "signatures.h"
 #include <Arduino.h>
 
 namespace Squachy {
@@ -119,6 +120,7 @@ static DetectionType s_reactType     = DetectionType::UNKNOWN;
 static uint32_t      s_lastMilestone = 0;
 static bool          s_milestoneInit = false;
 static char          s_milestoneBuf[48];
+static char          s_detBuf[56];
 
 // A very rare idle flourish — his fur shimmers through the vaporwave
 // palette for a few seconds. Purely cosmetic, no gameplay meaning.
@@ -169,7 +171,19 @@ void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal) {
             } else {
                 uint8_t idx = (uint8_t)dt;
                 if (idx >= DET_LINES_N) idx = 0;
-                say(random(0, 2) ? DET_LINES[idx].a : DET_LINES[idx].b, 4500);
+                const char* base = random(0, 2) ? DET_LINES[idx].a : DET_LINES[idx].b;
+                // High confidence hits get the line straight — no need
+                // to hedge on something we're actually sure about. Med
+                // /Low get an honest number tacked on so a shakier
+                // match doesn't read as equally certain.
+                Confidence conf = confidenceFor(dt);
+                if (conf == Confidence::HIGH_CONF) {
+                    say(base, 4500);
+                } else {
+                    snprintf(s_detBuf, sizeof(s_detBuf), "%s (~%u%%)",
+                             base, confidencePercent(conf));
+                    say(s_detBuf, 5500);
+                }
             }
             break;
         }
@@ -204,6 +218,12 @@ static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text) {
     int bw = tw + 10;
     int bh = 14;
     int bx = cx - bw / 2;
+    // Keep the whole bubble on-screen even for an unusually long line
+    // (e.g. a detection quip with a confidence suffix on a narrow
+    // portrait screen) instead of letting it run off either edge.
+    int screenW = t.width();
+    if (bx + bw > screenW - 2) bx = screenW - 2 - bw;
+    if (bx < 2) bx = 2;
     t.fillRoundRect(bx, topY, bw, bh, 3, Theme::BG);
     t.drawRoundRect(bx, topY, bw, bh, 3, Theme::VAPOR_PINK);
     t.setTextColor(Theme::WHITE, Theme::BG);

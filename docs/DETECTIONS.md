@@ -163,9 +163,13 @@ Blink, Reolink, Hikvision, Amazon, Realtek, and Tuya.
 (this author's earlier work, MIT) + Gemini additions for the Tuya
 and Wyze-module prefixes.
 
-**Confidence in v1.0:** **High** for the listed vendors. **Low** for
-the generic ESP32 fallback (lots of false positives, by design — we
-flag anything with an ESP32 OUI as a possible camera).
+**Confidence in v1.0:** **High** for the listed vendors — that's the
+only camera-matching path actually implemented right now. A
+generic "flag any Espressif OUI as a possible camera" fallback was
+discussed (see the note atop `kOuiTable` in `signatures.cpp`) but
+would need a real audit of Espressif's OUI ranges against known false
+positives before shipping — it is **not** built, and the UI does not
+show a Low-confidence camera reading in v1.0.
 
 ---
 

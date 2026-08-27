@@ -178,3 +178,44 @@ bool isAirTagSubtype(const uint8_t* mfgPayload, uint8_t len) {
     uint8_t subtype = mfgPayload[2];
     return (subtype == 0x12 || subtype == 0x1E);
 }
+
+Confidence confidenceFor(DetectionType t) {
+    // Per docs/DETECTIONS.md. FLOCK/AXON/META/SKIMMER/CAMERA are graded
+    // High there for the signature path actually active in v1.0 (the
+    // wildcard-probe and ESP32-generic-fallback ideas mentioned in that
+    // doc as lower-confidence alternates aren't implemented — see the
+    // note at the top of kOuiTable). RAVEN/AIRTAG/DRONE/ALPR are graded
+    // Medium — unverified against real hardware, address rotation, or
+    // thin OUI coverage, respectively.
+    switch (t) {
+        case DetectionType::FLOCK:
+        case DetectionType::AXON:
+        case DetectionType::META:
+        case DetectionType::SKIMMER:
+        case DetectionType::CAMERA:
+            return Confidence::HIGH_CONF;
+        case DetectionType::RAVEN:
+        case DetectionType::AIRTAG:
+        case DetectionType::DRONE:
+        case DetectionType::ALPR:
+            return Confidence::MED_CONF;
+        default:
+            return Confidence::LOW_CONF;
+    }
+}
+
+const char* confidenceLabel(Confidence c) {
+    switch (c) {
+        case Confidence::HIGH_CONF:   return "HIGH CONF";
+        case Confidence::MED_CONF: return "MED CONF";
+        default:                 return "LOW CONF";
+    }
+}
+
+uint8_t confidencePercent(Confidence c) {
+    switch (c) {
+        case Confidence::HIGH_CONF:   return 90;
+        case Confidence::MED_CONF: return 60;
+        default:                 return 30;
+    }
+}

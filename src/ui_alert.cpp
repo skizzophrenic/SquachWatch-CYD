@@ -1,6 +1,7 @@
 // SquachWatch-CYD — ALERT screen implementation
 #include "ui_alert.h"
 #include "theme.h"
+#include "signatures.h"
 #include <Arduino.h>
 
 static const char* targetLabel(DetectionType t) {
@@ -67,6 +68,22 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now) {
     int t2 = t.textWidth(tgt);
     t.setCursor((w - t2) / 2, 60);
     t.print(tgt);
+
+    // How sure we actually are — see docs/DETECTIONS.md. This is the
+    // whole point of showing it here: a Medium/Low reading should look
+    // visibly less certain than a High one, not get the same treatment.
+    Confidence conf = confidenceFor(s_last.type);
+    uint16_t confColor = (conf == Confidence::HIGH_CONF) ? Theme::GREEN
+                        : (conf == Confidence::MED_CONF) ? Theme::AMBER
+                        : Theme::RED;
+    char confBuf[32];
+    snprintf(confBuf, sizeof(confBuf), "%s  ~%u%%",
+             confidenceLabel(conf), confidencePercent(conf));
+    t.setTextSize(1);
+    t.setTextColor(confColor, Theme::BG);
+    int ccw = t.textWidth(confBuf);
+    t.setCursor((w - ccw) / 2, 94);
+    t.print(confBuf);
 
     // Vendor
     t.setTextSize(2);
