@@ -1,254 +1,117 @@
-// SquachWatch-CYD — main firmware
-// Wires the state machine (DESIGN.md §9) across the UI modules
-// and the DetectionEngine.
+// PROBE BUILD — throwaway hardware diagnostic for the JC2432W328C
+// capacitive-touch CYD variant. NOT the real app; branch
+// probe/jc2432w328c only, discard/checkout master to restore main.cpp.
+//
+// What it does:
+//   1. Explicitly drives the backlight pin (GPIO21) high, in case it
+//      isn't on by default on this variant.
+//   2. Draws a sequence of known reference color swatches full-screen
+//      with on-screen labels, so a human can visually confirm whether
+//      colors render correctly or inverted against this board's
+//      specific ST7789V panel/glass.
+//   3. Scans the I2C bus on SDA=33 / SCL=32 (the CST816/CST820
+//      capacitive touch controller's documented pins for this board)
+//      and reports any responding addresses, both on-screen and over
+//      Serial, so we can confirm the exact address before writing a
+//      real touch driver.
+// Uses the project's existing cyd_user_setup.h (already ST7789 on the
+// same SPI pins this board uses), so the display config needs no
+// changes to test on this hardware.
 
 #include <Arduino.h>
 #include <SPI.h>
+#include <Wire.h>
 #include <TFT_eSPI.h>
-#include <XPT2046_Touchscreen.h>
-#include "state.h"
-#include "theme.h"
-#include "detection.h"
-#include "ui_boot.h"
-#include "ui_clear.h"
-#include "ui_alert.h"
-#include "ui_log.h"
-#include "squachy.h"
 
-// Touch is on its OWN dedicated SPI bus, entirely separate from the
-// display — NOT a shared bus, despite that being the near-universal
-// (and wrong, for this board revision) assumption in CYD community
-// docs. Confirmed against Espressif's official board-variant file for
-// this exact board (arduino-esp32 variants/jczn_2432s028r/pins_arduino.h):
-//   display: DC=2 MISO=12 MOSI=13 SCK=14 CS=15 BL=21   (VSPI, via TFT_eSPI)
-//   touch:   CS=33 IRQ=36 SCK=25  MOSI=32 MISO=39       (independent bus)
-#define TOUCH_SCK  25
-#define TOUCH_MOSI 32
-#define TOUCH_MISO 39
-#define TOUCH_CS   33
-#define TOUCH_IRQ  36
+TFT_eSPI tft = TFT_eSPI();
 
-// ---- Globals ----
-TFT_eSPI            tft = TFT_eSPI();
-// All screens draw into this off-screen buffer, pushed to the physical
-// display in one shot at the end of each loop(). Without it, every
-// screen's erase-then-redraw sequence is briefly visible on real
-// hardware — most noticeable as flickering text.
-TFT_eSprite         frame = TFT_eSprite(&tft);
-XPT2046_Touchscreen touch(TOUCH_CS, TOUCH_IRQ);
-SPIClass            touchSPI(HSPI);
-DetectionEngine     engine;
-AppState            state     = AppState::BOOT;
-uint32_t            bootStart = 0;
-uint32_t            alertStart= 0;
-uint32_t            lastTouch = 0;
-DetectionType       lastAlertType = DetectionType::UNKNOWN;
-const uint16_t      TOUCH_DEBOUNCE_MS = 200;
-// The ALERT screen carries real information (type, confidence, MAC,
-// RSSI) — tapping it away is the expected dismiss, but nobody should
-// feel rushed reading it, so the automatic fallback is generous rather
-// than a quick blink-and-you-missed-it 5 seconds.
-const uint32_t      ALERT_AUTO_DISMISS_MS = 60000;
-// TFT_eSPI rotation: all four orientations are supported (0/2 portrait,
-// 1/3 landscape), cycled in order by the rotate button in the title bar.
-uint8_t             screenRotation = 1;
-// Timestamp of the last screen/rotation change — drives a brief CRT
-// tear/glitch overlay on the new frame so transitions have some punch
-// instead of just snapping straight to the next screen.
-uint32_t            transitionStart = 0;
-static const uint32_t TRANSITION_MS = 220;
+static const int BL_PIN   = 21;
+static const int I2C_SDA  = 33;
+static const int I2C_SCL  = 32;
 
-// ---- Touch helpers ----
-struct TouchPoint { bool valid; int x; int y; };
+struct Swatch { uint16_t color; const char* name; };
+static const Swatch SWATCHES[] = {
+    { TFT_RED,   "RED"   },
+    { TFT_GREEN, "GREEN" },
+    { TFT_BLUE,  "BLUE"  },
+    { TFT_WHITE, "WHITE" },
+    { TFT_BLACK, "BLACK" },
+};
+static const int N_SWATCHES = sizeof(SWATCHES) / sizeof(SWATCHES[0]);
 
-static TouchPoint pollTouch() {
-    TouchPoint tp = { false, 0, 0 };
-    if (!touch.tirqTouched()) return tp;
-    if (touch.touched()) {
-        TS_Point p = touch.getPoint();
-        int w = tft.width(), h = tft.height();
-        // XPT2046 raw ADC axes, solved back to the panel's native
-        // (rotation 0, portrait) frame from the landscape (rotation 1)
-        // calibration measured against known button positions: raw X
-        // maps directly to native column, raw Y directly to native
-        // row — no swap in the native frame itself. Each TFT_eSPI
-        // rotation is then a fixed transform of that native frame:
-        // odd rotations (1,3) are landscape and swap the axes; the
-        // "flipped" pair (2,3 vs 0,1) reverses both directions. This
-        // reproduces the two empirically-verified landscape mappings
-        // exactly, so the same method should hold for portrait.
-        bool landscape = (screenRotation % 2) == 1;
-        bool flipped   = screenRotation >= 2;
-        if (!landscape) {
-            tp.x = flipped ? map(p.x, 200, 3800, w, 0) : map(p.x, 200, 3800, 0, w);
-            tp.y = flipped ? map(p.y, 200, 3800, h, 0) : map(p.y, 200, 3800, 0, h);
-        } else {
-            tp.x = flipped ? map(p.y, 200, 3800, w, 0) : map(p.y, 200, 3800, 0, w);
-            tp.y = flipped ? map(p.x, 200, 3800, 0, h) : map(p.x, 200, 3800, h, 0);
+static void i2cScan() {
+    Wire.begin(I2C_SDA, I2C_SCL);
+    tft.fillScreen(TFT_BLACK);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setTextSize(2);
+    tft.setCursor(4, 4);
+    tft.println("I2C SCAN");
+    tft.println("SDA=33 SCL=32");
+    tft.println();
+
+    Serial.println();
+    Serial.println("=== I2C scan (SDA=33, SCL=32) ===");
+    int found = 0;
+    int y = tft.getCursorY();
+    for (uint8_t addr = 1; addr < 127; addr++) {
+        Wire.beginTransmission(addr);
+        uint8_t err = Wire.endTransmission();
+        if (err == 0) {
+            found++;
+            char buf[32];
+            snprintf(buf, sizeof(buf), "FOUND: 0x%02X", addr);
+            Serial.println(buf);
+            tft.setCursor(4, y);
+            tft.println(buf);
+            y = tft.getCursorY();
         }
-        tp.valid = (tp.x >= 0 && tp.x < w && tp.y >= 0 && tp.y < h);
     }
-    return tp;
+    if (found == 0) {
+        Serial.println("No I2C devices found.");
+        tft.setCursor(4, y);
+        tft.println("(none found)");
+    }
+    Serial.println("=== scan done ===");
+    Serial.println();
 }
 
-// ---- State transitions ----
-static void enterBoot() {
-    state = AppState::BOOT;
-    bootStart = millis();
-    transitionStart = bootStart;
-    uiBootInit(frame);
-}
-
-static void enterClear() {
-    state = AppState::CLEAR;
-    transitionStart = millis();
-    uiClearInit(frame);
-}
-
-static void enterAlert(const Detection& d) {
-    state = AppState::ALERT;
-    alertStart = millis();
-    transitionStart = alertStart;
-    lastAlertType = d.type;
-    uiAlertInit(frame, d);
-}
-
-static void enterLog() {
-    state = AppState::LOG;
-    transitionStart = millis();
-    uiLogInit(frame);
-}
-
-// ---- Arduino setup / loop ----
 void setup() {
     Serial.begin(115200);
-    delay(200);
+    delay(300);
     Serial.println();
-    Serial.println("SquachWatch-CYD v1.0  --  TALKING SASQUACH");
+    Serial.println("=== JC2432W328C PROBE BUILD ===");
+
+    pinMode(BL_PIN, OUTPUT);
+    digitalWrite(BL_PIN, HIGH);
+    Serial.println("Backlight (GPIO21) driven HIGH.");
 
     tft.init();
-    // Landscape (320 wide × 240 tall) — the CYD's natural orientation
-    // with the ST7789 driver. The 0xC2 unlock that was here was for
-    // ST7796U and will lock up an ST7789 panel; do not re-add it unless
-    // we confirm the panel is actually ST7796.
-    tft.setRotation(screenRotation);
-    tft.fillScreen(Theme::BG);
+    tft.setRotation(1);
+    Serial.printf("tft.width()=%d tft.height()=%d\n", tft.width(), tft.height());
 
-    // 8-bit (palette) mode: 320x240 needs ~75KB instead of ~150KB at
-    // 16-bit — the full 16-bit buffer didn't fit in the available
-    // contiguous heap on this board.
-    frame.setColorDepth(8);
-    if (!frame.createSprite(tft.width(), tft.height())) {
-        Serial.println("ERROR: frame buffer allocation failed (low memory)");
-    }
-    frame.setTextSize(1);
-
-    // Touch has its own dedicated SPI bus (see pin table above) — a
-    // genuinely separate HSPI peripheral on pins that don't overlap the
-    // display's VSPI pins at all, so there's no GPIO-matrix conflict.
-    touchSPI.begin(TOUCH_SCK, TOUCH_MISO, TOUCH_MOSI, TOUCH_CS);
-    touch.begin(touchSPI);
-    touch.setRotation(0);
-
-    // Seed the PRNG so the matrix rain starts in a fresh-looking state
-    // on every boot. Analog read on a floating pin is plenty.
-    randomSeed(analogRead(34));
-
-    engine.init();
-    Squachy::trigger(Squachy::Event::BOOTED);
-    enterBoot();
+    i2cScan();
+    delay(6000);
 }
 
 void loop() {
+    static uint32_t lastSwitch = 0;
+    static int idx = 0;
     uint32_t now = millis();
-    TouchPoint tp = pollTouch();
-    engine.loop();
-
-    // Rotate button lives in the title bar's top-right corner, shown on
-    // the CLEAR and LOG screens only.
-    if (tp.valid && (state == AppState::CLEAR || state == AppState::LOG) &&
-        Theme::rotateButtonHit(tp.x, tp.y, tft.width()) &&
-        (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
-        lastTouch = now;
-        Squachy::trigger(Squachy::Event::ROTATED);
-        screenRotation = (screenRotation + 1) % 4;
-        tft.setRotation(screenRotation);
-        // Landscape and portrait need differently-shaped buffers —
-        // recreate at the new dimensions rather than trying to reuse
-        // the old (now wrong-shaped) one.
-        frame.deleteSprite();
-        frame.setColorDepth(8);
-        frame.createSprite(tft.width(), tft.height());
-        transitionStart = now;
+    if (now - lastSwitch > 2500) {
+        lastSwitch = now;
+        const Swatch& s = SWATCHES[idx];
+        tft.fillScreen(s.color);
+        uint16_t textCol = (s.color == TFT_WHITE) ? TFT_BLACK : TFT_WHITE;
+        tft.setTextColor(textCol, s.color);
+        tft.setTextSize(3);
+        tft.setCursor(10, 10);
+        tft.println(s.name);
+        tft.setTextSize(1);
+        tft.setCursor(10, 40);
+        tft.println("If this doesn't match the label,");
+        tft.setCursor(10, 50);
+        tft.println("colors are likely inverted.");
+        Serial.printf("Showing swatch: %s\n", s.name);
+        idx = (idx + 1) % N_SWATCHES;
     }
-
-    switch (state) {
-        case AppState::BOOT: {
-            uiBootTick(frame, now);
-            if (uiBootDone(bootStart)) {
-                enterClear();
-            }
-            break;
-        }
-        case AppState::CLEAR: {
-            uiClearTick(frame, now, engine);
-            // Check for new detection
-            const Detection* latest = engine.latest();
-            if (latest && (now - latest->firstSeen) < 200) {
-                enterAlert(*latest);
-            }
-            // Buttons
-            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
-                ButtonId b = Theme::hitTestButtonBar(tp.x, tp.y, tft.width(), tft.height());
-                lastTouch = now;
-                if (b == ButtonId::LOG)  { Squachy::trigger(Squachy::Event::LOG_OPENED); enterLog(); }
-                if (b == ButtonId::CLR)  { engine.clearLog(); Squachy::trigger(Squachy::Event::LOG_CLEARED); enterClear(); }
-                // SCAN is a no-op in CLEAR (we're already there)
-            }
-            break;
-        }
-        case AppState::ALERT: {
-            uiAlertTick(frame, now);
-            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
-                lastTouch = now;
-                Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal());
-                enterClear();
-            } else if ((now - alertStart) > ALERT_AUTO_DISMISS_MS) {
-                Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal());
-                enterClear();
-            }
-            break;
-        }
-        case AppState::LOG: {
-            uiLogTick(frame, now, engine, 0);
-            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
-                ButtonId b = Theme::hitTestButtonBar(tp.x, tp.y, tft.width(), tft.height());
-                lastTouch = now;
-                if (b == ButtonId::SCAN) { enterClear(); }
-                if (b == ButtonId::CLR)  { engine.clearLog(); enterClear(); }
-                if (b == ButtonId::LOG)  { enterClear(); }   // toggle off
-            }
-            // Swipe to scroll: detect Y delta from prior touch
-            static int lastY = -1;
-            if (tp.valid) {
-                if (lastY >= 0) {
-                    int dy = tp.y - lastY;
-                    if (abs(dy) > 10) {
-                        uiLogScroll(dy > 0 ? 1 : -1);
-                        lastY = tp.y;
-                    }
-                } else {
-                    lastY = tp.y;
-                }
-            } else {
-                lastY = -1;
-            }
-            break;
-        }
-    }
-
-    if (now - transitionStart < TRANSITION_MS) {
-        Theme::drawTransitionGlitch(frame, now - transitionStart, TRANSITION_MS);
-    }
-    frame.pushSprite(0, 0);
 }
