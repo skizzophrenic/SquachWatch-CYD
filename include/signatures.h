@@ -25,6 +25,12 @@ DetectionType lookupOui(const uint8_t* mac);
 DetectionType lookupUuid(uint16_t uuid16);
 DetectionType lookupBtName(const char* name);
 DetectionType lookupSsid(const char* ssid);   // case-insensitive prefix
+
+// Friendly vendor label for whichever kSsidPrefixes entry matched
+// (e.g. "Axon-Body2"), or nullptr if none did. Same matching rule as
+// lookupSsid — kept separate rather than changing that function's
+// signature, since other callers just want the DetectionType.
+const char* ssidVendorName(const char* ssid);
 DetectionType lookupMfgId(uint16_t mfgId);
 
 // Apple AirTag subtype check: 0x12 (near owner) or 0x1E (separated).

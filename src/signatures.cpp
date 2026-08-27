@@ -166,6 +166,17 @@ DetectionType lookupSsid(const char* ssid) {
     return DetectionType::UNKNOWN;
 }
 
+const char* ssidVendorName(const char* ssid) {
+    if (!ssid) return nullptr;
+    for (uint16_t i = 0; i < kSsidCount; i++) {
+        size_t n = strlen(kSsidPrefixes[i].prefix);
+        if (strncasecmp(ssid, kSsidPrefixes[i].prefix, n) == 0) {
+            return kSsidPrefixes[i].name;
+        }
+    }
+    return nullptr;
+}
+
 DetectionType lookupMfgId(uint16_t mfgId) {
     for (uint16_t i = 0; i < kMfgIdCount; i++) {
         if (kMfgIdTable[i].mfgId == mfgId) return kMfgIdTable[i].type;

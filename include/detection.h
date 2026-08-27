@@ -19,8 +19,14 @@ public:
     uint32_t lifetimeTotal() const { return _lifetimeTotal; }
 
     // Called from the promiscuous WiFi Rx callback (IRAM_ATTR context).
-    // Posts a 6-byte MAC + RSSI for later processing in loop().
-    void IRAM_ATTR postWiFi(const uint8_t* mac, int8_t rssi, uint8_t channel);
+    // Posts a 6-byte MAC + RSSI for later processing in loop(). ssid is
+    // optional (nullptr/empty for probe requests and data frames, which
+    // don't carry one) — beacon frames pass the AP's SSID so it can be
+    // matched against the SSID-prefix table as a fallback when the OUI
+    // itself doesn't match anything (e.g. an Axon/Flock unit in pairing
+    // mode, running on a WiFi module OUI we don't otherwise recognize).
+    void IRAM_ATTR postWiFi(const uint8_t* mac, int8_t rssi, uint8_t channel,
+                            const char* ssid = nullptr);
 
     // Called from the BLE scan callback when a hit is found.
     void postBle(Detection d);
@@ -41,6 +47,7 @@ private:
         uint8_t mac[6];
         int8_t  rssi;
         uint8_t channel;
+        char    ssid[33];  // empty string if none (see postWiFi)
     };
 
     // WiFi mailbox (filled in IRAM, drained in loop)

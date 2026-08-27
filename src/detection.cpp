@@ -74,8 +74,25 @@ bool DetectionEngine::init() {
             g_engine->postWiFi(frame + 4,  pkt->rx_ctrl.rssi, pkt->rx_ctrl.channel);
             g_engine->postWiFi(frame + 10, pkt->rx_ctrl.rssi, pkt->rx_ctrl.channel);
         } else if (type == 0 && subtype == 8) {
-            // Beacon: SSID in IE; for now just record the BSSID (addr3)
-            g_engine->postWiFi(frame + 16, pkt->rx_ctrl.rssi, pkt->rx_ctrl.channel);
+            // Beacon: fixed params (timestamp+interval+capability) run
+            // 12 bytes after the 24-byte header, then the SSID is the
+            // first information element — tag 0x00, 1-byte length,
+            // then up to 32 bytes of SSID (unescaped, not
+            // null-terminated in the frame itself).
+            char ssid[33] = {0};
+            uint32_t sigLen = pkt->rx_ctrl.sig_len;
+            if (sigLen > 37) {
+                const uint8_t* ie = frame + 36;
+                if (ie[0] == 0x00) {
+                    uint8_t ssidLen = ie[1];
+                    if (ssidLen > 32) ssidLen = 32;
+                    if (36 + 2 + ssidLen <= sigLen) {
+                        memcpy(ssid, ie + 2, ssidLen);
+                        ssid[ssidLen] = 0;
+                    }
+                }
+            }
+            g_engine->postWiFi(frame + 16, pkt->rx_ctrl.rssi, pkt->rx_ctrl.channel, ssid);
         }
     });
 
@@ -194,7 +211,8 @@ void DetectionEngine::clearLog() {
     }
 }
 
-void IRAM_ATTR DetectionEngine::postWiFi(const uint8_t* mac, int8_t rssi, uint8_t channel) {
+void IRAM_ATTR DetectionEngine::postWiFi(const uint8_t* mac, int8_t rssi, uint8_t channel,
+                                         const char* ssid) {
     if (!mac) return;
     uint8_t next = (_wifiQHead + 1) % WIFI_Q_CAP;
     if (next == _wifiQTail) return;            // queue full, drop
@@ -202,6 +220,12 @@ void IRAM_ATTR DetectionEngine::postWiFi(const uint8_t* mac, int8_t rssi, uint8_
     memcpy((void*)e.mac, mac, 6);
     e.rssi    = rssi;
     e.channel = channel;
+    if (ssid && ssid[0]) {
+        strncpy((char*)e.ssid, ssid, sizeof(e.ssid) - 1);
+        e.ssid[sizeof(e.ssid) - 1] = 0;
+    } else {
+        e.ssid[0] = 0;
+    }
     _wifiQHead = next;
 }
 
@@ -235,8 +259,16 @@ void DetectionEngine::processWiFiQ() {
             _wifiQTail = (_wifiQTail + 1) % WIFI_Q_CAP;
             interrupts();
         }
-        // Check OUI
+        // Check OUI first (per DESIGN.md §6.2 precedence); fall back to
+        // the SSID prefix (e.g. an Axon/Flock unit in pairing mode,
+        // broadcasting from a WiFi module OUI we don't otherwise know)
+        // if the OUI itself didn't match anything.
         DetectionType t = lookupOui(e.mac);
+        bool matchedBySsid = false;
+        if (t == DetectionType::UNKNOWN && e.ssid[0]) {
+            t = lookupSsid(e.ssid);
+            matchedBySsid = (t != DetectionType::UNKNOWN);
+        }
         if (t == DetectionType::UNKNOWN) continue;
         // Try to dedupe / merge
         bool merged = false;
@@ -259,13 +291,19 @@ void DetectionEngine::processWiFiQ() {
         d.rssi    = e.rssi;
         d.channel = e.channel;
         d.type    = t;
-        // Vendor label from table
-        for (uint16_t k = 0; k < kOuiCount; k++) {
-            if (e.mac[0] == kOuiTable[k].b[0] &&
-                e.mac[1] == kOuiTable[k].b[1] &&
-                e.mac[2] == kOuiTable[k].b[2]) {
-                strncpy(d.vendor, kOuiTable[k].name, sizeof(d.vendor) - 1);
-                break;
+        // Vendor label: from the SSID-prefix table if that's what
+        // matched, otherwise from the OUI table.
+        if (matchedBySsid) {
+            const char* name = ssidVendorName(e.ssid);
+            if (name) strncpy(d.vendor, name, sizeof(d.vendor) - 1);
+        } else {
+            for (uint16_t k = 0; k < kOuiCount; k++) {
+                if (e.mac[0] == kOuiTable[k].b[0] &&
+                    e.mac[1] == kOuiTable[k].b[1] &&
+                    e.mac[2] == kOuiTable[k].b[2]) {
+                    strncpy(d.vendor, kOuiTable[k].name, sizeof(d.vendor) - 1);
+                    break;
+                }
             }
         }
         d.firstSeen = d.lastSeen = millis();
