@@ -7,9 +7,13 @@
 #include <stdint.h>
 
 namespace CapTouch {
-    // Starts the I2C bus on the given pins. Call once from setup(),
+    // Starts the I2C bus on the given pins and pulses the controller's
+    // reset line (active-low, per this board's vendor docs). Without
+    // this the chip can power up in a stale/undefined state — X moved
+    // sensibly across taps in early testing but Y stayed frozen, which
+    // looks exactly like an unreset chip. Call once from setup(),
     // before probe().
-    void begin(int sda, int scl);
+    void begin(int sda, int scl, int rst);
 
     // True if a CST816/CST820 answers at its known I2C address (0x15).
     // Call after begin(); if this returns false, call Wire.end() and
