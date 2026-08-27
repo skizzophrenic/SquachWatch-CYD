@@ -156,8 +156,8 @@ static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text) {
     lastBubbleW = bw;
 }
 
-// Squachy's base design is ~62px tall (head to shadow) at scale 1.0.
-static const int BASE_HEIGHT = 62;
+// Squachy's base design is ~68px tall (crest to shadow) at scale 1.0.
+static const int BASE_HEIGHT = 68;
 
 // Draws Squachy at an already-animated anchor (hy = head-top Y for this
 // exact frame). Bob is computed once in tick() so it can also drive the
@@ -171,47 +171,49 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     // Shadow (fixed, doesn't bob)
     t.fillEllipse(cx2, headTopY + S(62), S(18), S(4), blend(BG, FUR_DARK, 70));
 
-    // Legs + feet
-    t.fillRect(cx2 - S(9), hy + S(40), S(7), S(10), FUR_MAIN);
-    t.fillRect(cx2 + S(2), hy + S(40), S(7), S(10), FUR_MAIN);
-    t.fillRect(cx2 - S(10), hy + S(50), S(9), S(5), FUR_LIGHT);
-    t.fillRect(cx2 + S(1),  hy + S(50), S(9), S(5), FUR_LIGHT);
+    // Legs + big bigfoot feet
+    t.fillRect(cx2 - S(10), hy + S(40), S(8), S(10), FUR_MAIN);
+    t.fillRect(cx2 + S(2),  hy + S(40), S(8), S(10), FUR_MAIN);
+    t.fillRoundRect(cx2 - S(13), hy + S(49), S(12), S(6), 2, FUR_LIGHT);
+    t.fillRoundRect(cx2 + S(1),  hy + S(49), S(12), S(6), 2, FUR_LIGHT);
 
-    // Body
-    t.fillRoundRect(cx2 - S(12), hy + S(24), S(24), S(17), S(5), FUR_MAIN);
-    t.fillRect(cx2 - S(12), hy + S(24), S(4), S(17), FUR_LIGHT);
-    t.fillRect(cx2 + S(8),  hy + S(24), S(4), S(17), FUR_LIGHT);
+    // Body — broad, stocky torso instead of a slim rounded rect.
+    t.fillRoundRect(cx2 - S(15), hy + S(23), S(30), S(18), S(5), FUR_MAIN);
+    t.fillRect(cx2 - S(15), hy + S(23), S(5), S(18), FUR_LIGHT);
+    t.fillRect(cx2 + S(10), hy + S(23), S(5), S(18), FUR_LIGHT);
 
-    // Arms — depend on mood
+    // Arms — long, ape-like, hanging past the waist. Depend on mood.
     if (m == Mood::WAVE) {
         float wa = -1.0f + sinf((float)(now % 400) / 400.0f * 6.2831853f) * 0.5f;
-        float ex = cx2 + S(12) + cosf(wa) * (16.0f * scale);
-        float ey = hy + S(30) + sinf(wa) * (16.0f * scale);
-        t.drawWideLine(cx2 + S(10), hy + S(30), ex, ey, S(6), FUR_LIGHT);
-        t.fillRect(cx2 - S(15), hy + S(26), S(6), S(14), FUR_LIGHT);
+        float ex = cx2 + S(13) + cosf(wa) * (18.0f * scale);
+        float ey = hy + S(28) + sinf(wa) * (18.0f * scale);
+        t.drawWideLine(cx2 + S(11), hy + S(28), ex, ey, S(7), FUR_LIGHT);
+        t.fillRoundRect(cx2 - S(18), hy + S(22), S(8), S(22), S(3), FUR_LIGHT);
     } else if (m == Mood::SHOCKED) {
-        t.drawWideLine(cx2 - S(10), hy + S(28), cx2 - S(22), hy + S(12), S(6), FUR_LIGHT);
-        t.drawWideLine(cx2 + S(10), hy + S(28), cx2 + S(22), hy + S(12), S(6), FUR_LIGHT);
+        t.drawWideLine(cx2 - S(11), hy + S(26), cx2 - S(23), hy + S(10), S(7), FUR_LIGHT);
+        t.drawWideLine(cx2 + S(11), hy + S(26), cx2 + S(23), hy + S(10), S(7), FUR_LIGHT);
     } else {
-        t.fillRect(cx2 - S(15), hy + S(26), S(6), S(14), FUR_LIGHT);
-        t.fillRect(cx2 + S(9),  hy + S(26), S(6), S(14), FUR_LIGHT);
+        t.fillRoundRect(cx2 - S(18), hy + S(22), S(8), S(22), S(3), FUR_LIGHT);
+        t.fillRoundRect(cx2 + S(10), hy + S(22), S(8), S(22), S(3), FUR_LIGHT);
     }
 
-    // Head
-    t.fillRoundRect(cx2 - S(14), hy, S(28), S(24), S(8), FUR_LIGHT);
-    t.fillRoundRect(cx2 - S(11), hy + S(2), S(22), S(19), S(6), FUR_MAIN);
-    t.fillRoundRect(cx2 - S(9),  hy + S(4), S(18), S(14), S(4), SKIN_TAN);
+    // Head — broader jaw than before, brow ridge over the eyes.
+    t.fillRoundRect(cx2 - S(15), hy, S(30), S(24), S(7), FUR_LIGHT);
+    t.fillRoundRect(cx2 - S(12), hy + S(2), S(24), S(19), S(5), FUR_MAIN);
+    t.fillRoundRect(cx2 - S(9),  hy + S(7), S(18), S(11), S(4), SKIN_TAN);
 
-    // Hair tufts
-    t.fillTriangle(cx2 - S(12), hy + S(2), cx2 - S(7), hy - S(6), cx2 - S(3), hy + S(2), FUR_LIGHT);
-    t.fillTriangle(cx2 - S(4),  hy,        cx2,        hy - S(8), cx2 + S(4), hy,        FUR_LIGHT);
-    t.fillTriangle(cx2 + S(3),  hy + S(2), cx2 + S(8),  hy - S(6), cx2 + S(12),hy + S(2), FUR_LIGHT);
+    // Sagittal crest (the pronounced skull peak real bigfoot sightings
+    // always mention) plus a couple of smaller shaggy fringe tufts.
+    t.fillTriangle(cx2 - S(6), hy + S(2), cx2, hy - S(14), cx2 + S(6), hy + S(2), FUR_LIGHT);
+    t.fillTriangle(cx2 - S(13), hy + S(3), cx2 - S(9), hy - S(4), cx2 - S(5), hy + S(3), FUR_LIGHT);
+    t.fillTriangle(cx2 + S(5),  hy + S(3), cx2 + S(9), hy - S(4), cx2 + S(13),hy + S(3), FUR_LIGHT);
 
-    // Ears
-    t.fillCircle(cx2 - S(14), hy + S(12), S(4), FUR_MAIN);
-    t.fillCircle(cx2 + S(14), hy + S(12), S(4), FUR_MAIN);
-    t.fillCircle(cx2 - S(14), hy + S(12), S(2), SKIN_DARK);
-    t.fillCircle(cx2 + S(14), hy + S(12), S(2), SKIN_DARK);
+    // Ears — small and tucked close, like a real sasquatch rather than
+    // a cartoon animal's.
+    t.fillCircle(cx2 - S(15), hy + S(13), S(3), FUR_MAIN);
+    t.fillCircle(cx2 + S(15), hy + S(13), S(3), FUR_MAIN);
+    t.fillCircle(cx2 - S(15), hy + S(13), S(1), SKIN_DARK);
+    t.fillCircle(cx2 + S(15), hy + S(13), S(1), SKIN_DARK);
 
     // Blush
     t.fillCircle(cx2 - S(8), hy + S(15), S(2), VAPOR_PINK);
@@ -263,11 +265,11 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
 // are the only part that changes the horizontal extent by mood; the
 // vertical extent (hair tuft peak to feet) is the same for all of them.
 static void bodyBounds(Mood m, int& xMin, int& xMax, int& yMin, int& yMax) {
-    yMin = -10; yMax = 58;
+    yMin = -18; yMax = 58; // -18 covers the sagittal crest peak
     switch (m) {
-        case Mood::WAVE:    xMin = -20; xMax = 31; break;
-        case Mood::SHOCKED: xMin = -27; xMax = 27; break;
-        default:            xMin = -20; xMax = 20; break; // ears are the widest resting feature
+        case Mood::WAVE:    xMin = -21; xMax = 32; break;
+        case Mood::SHOCKED: xMin = -30; xMax = 30; break;
+        default:            xMin = -21; xMax = 21; break; // long resting arms are the widest feature
     }
 }
 
