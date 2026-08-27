@@ -1,117 +1,75 @@
-// PROBE BUILD — throwaway hardware diagnostic for the JC2432W328C
-// capacitive-touch CYD variant. NOT the real app; branch
-// probe/jc2432w328c only, discard/checkout master to restore main.cpp.
+// PROBE BUILD — capacitive touch coordinate calibration for the
+// JC2432W328C. NOT the real app; branch probe/jc2432w328c only.
 //
-// What it does:
-//   1. Explicitly drives the backlight pin (GPIO21) high, in case it
-//      isn't on by default on this variant.
-//   2. Draws a sequence of known reference color swatches full-screen
-//      with on-screen labels, so a human can visually confirm whether
-//      colors render correctly or inverted against this board's
-//      specific ST7789V panel/glass.
-//   3. Scans the I2C bus on SDA=33 / SCL=32 (the CST816/CST820
-//      capacitive touch controller's documented pins for this board)
-//      and reports any responding addresses, both on-screen and over
-//      Serial, so we can confirm the exact address before writing a
-//      real touch driver.
-// Uses the project's existing cyd_user_setup.h (already ST7789 on the
-// same SPI pins this board uses), so the display config needs no
-// changes to test on this hardware.
+// Draws small yellow crosshair reference marks at known screen
+// positions (corners + center) and, on every touch, plots a red dot
+// at the RAW (x, y) the CST816/820 reports — no rotation/calibration
+// applied. Also prints the raw values over Serial. Comparing where a
+// physical tap lands vs. where the dot appears tells us exactly what
+// transform (swap axes / invert one or both) turns raw controller
+// coordinates into real screen coordinates, the same way the original
+// board's resistive-touch mapping was derived.
 
 #include <Arduino.h>
 #include <SPI.h>
 #include <Wire.h>
 #include <TFT_eSPI.h>
+#include "cap_touch.h"
 
 TFT_eSPI tft = TFT_eSPI();
-
-static const int BL_PIN   = 21;
-static const int I2C_SDA  = 33;
-static const int I2C_SCL  = 32;
-
-struct Swatch { uint16_t color; const char* name; };
-static const Swatch SWATCHES[] = {
-    { TFT_RED,   "RED"   },
-    { TFT_GREEN, "GREEN" },
-    { TFT_BLUE,  "BLUE"  },
-    { TFT_WHITE, "WHITE" },
-    { TFT_BLACK, "BLACK" },
-};
-static const int N_SWATCHES = sizeof(SWATCHES) / sizeof(SWATCHES[0]);
-
-static void i2cScan() {
-    Wire.begin(I2C_SDA, I2C_SCL);
-    tft.fillScreen(TFT_BLACK);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
-    tft.setTextSize(2);
-    tft.setCursor(4, 4);
-    tft.println("I2C SCAN");
-    tft.println("SDA=33 SCL=32");
-    tft.println();
-
-    Serial.println();
-    Serial.println("=== I2C scan (SDA=33, SCL=32) ===");
-    int found = 0;
-    int y = tft.getCursorY();
-    for (uint8_t addr = 1; addr < 127; addr++) {
-        Wire.beginTransmission(addr);
-        uint8_t err = Wire.endTransmission();
-        if (err == 0) {
-            found++;
-            char buf[32];
-            snprintf(buf, sizeof(buf), "FOUND: 0x%02X", addr);
-            Serial.println(buf);
-            tft.setCursor(4, y);
-            tft.println(buf);
-            y = tft.getCursorY();
-        }
-    }
-    if (found == 0) {
-        Serial.println("No I2C devices found.");
-        tft.setCursor(4, y);
-        tft.println("(none found)");
-    }
-    Serial.println("=== scan done ===");
-    Serial.println();
-}
 
 void setup() {
     Serial.begin(115200);
     delay(300);
     Serial.println();
-    Serial.println("=== JC2432W328C PROBE BUILD ===");
+    Serial.println("=== CAP TOUCH CALIBRATION PROBE ===");
 
-    pinMode(BL_PIN, OUTPUT);
-    digitalWrite(BL_PIN, HIGH);
-    Serial.println("Backlight (GPIO21) driven HIGH.");
+    // Confirmed by the backlight sweep: driving both candidate pins
+    // HIGH lights the panel, and it's harmless on either board variant.
+    pinMode(21, OUTPUT); digitalWrite(21, HIGH);
+    pinMode(27, OUTPUT); digitalWrite(27, HIGH);
 
     tft.init();
-    tft.setRotation(1);
-    Serial.printf("tft.width()=%d tft.height()=%d\n", tft.width(), tft.height());
+    tft.setRotation(1);  // landscape — matches the real app's default
+    tft.fillScreen(TFT_BLACK);
 
-    i2cScan();
-    delay(6000);
+    CapTouch::begin(33, 32);
+    bool found = CapTouch::probe();
+    Serial.printf("Cap touch probe: %s\n", found ? "FOUND (0x15)" : "NOT FOUND");
+
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setTextSize(2);
+    tft.setCursor(10, 10);
+    tft.println("Tap the yellow crosses");
+    tft.setTextSize(1);
+    tft.setCursor(10, 40);
+    tft.println("A RED dot is drawn at the raw");
+    tft.setCursor(10, 50);
+    tft.println("(x,y) the chip reports — no");
+    tft.setCursor(10, 60);
+    tft.println("correction applied yet.");
+    tft.setCursor(10, 75);
+    tft.println("Values also print over Serial.");
+
+    int w = tft.width(), h = tft.height();
+    int pts[5][2] = { {10, 100}, {w - 10, 100}, {10, h - 10}, {w - 10, h - 10}, {w / 2, h / 2} };
+    for (auto& p : pts) {
+        tft.drawFastHLine(p[0] - 5, p[1], 11, TFT_YELLOW);
+        tft.drawFastVLine(p[0], p[1] - 5, 11, TFT_YELLOW);
+    }
 }
 
 void loop() {
-    static uint32_t lastSwitch = 0;
-    static int idx = 0;
-    uint32_t now = millis();
-    if (now - lastSwitch > 2500) {
-        lastSwitch = now;
-        const Swatch& s = SWATCHES[idx];
-        tft.fillScreen(s.color);
-        uint16_t textCol = (s.color == TFT_WHITE) ? TFT_BLACK : TFT_WHITE;
-        tft.setTextColor(textCol, s.color);
-        tft.setTextSize(3);
-        tft.setCursor(10, 10);
-        tft.println(s.name);
-        tft.setTextSize(1);
-        tft.setCursor(10, 40);
-        tft.println("If this doesn't match the label,");
-        tft.setCursor(10, 50);
-        tft.println("colors are likely inverted.");
-        Serial.printf("Showing swatch: %s\n", s.name);
-        idx = (idx + 1) % N_SWATCHES;
+    static uint32_t lastPrint = 0;
+    uint16_t rx, ry;
+    if (CapTouch::read(rx, ry)) {
+        if (rx < (uint16_t)tft.width() && ry < (uint16_t)tft.height()) {
+            tft.fillCircle(rx, ry, 2, TFT_RED);
+        }
+        uint32_t now = millis();
+        if (now - lastPrint > 150) {
+            lastPrint = now;
+            Serial.printf("raw x=%u y=%u  (screen %dx%d)\n", rx, ry, tft.width(), tft.height());
+        }
     }
 }
