@@ -4,6 +4,7 @@
 
 #include <Arduino.h>
 #include <SPI.h>
+#include <Wire.h>
 #include <TFT_eSPI.h>
 #include <XPT2046_Touchscreen.h>
 #include "state.h"
@@ -14,19 +15,30 @@
 #include "ui_alert.h"
 #include "ui_log.h"
 #include "squachy.h"
+#include "cap_touch.h"
 
-// Touch is on its OWN dedicated SPI bus, entirely separate from the
-// display — NOT a shared bus, despite that being the near-universal
-// (and wrong, for this board revision) assumption in CYD community
-// docs. Confirmed against Espressif's official board-variant file for
-// this exact board (arduino-esp32 variants/jczn_2432s028r/pins_arduino.h):
-//   display: DC=2 MISO=12 MOSI=13 SCK=14 CS=15 BL=21   (VSPI, via TFT_eSPI)
-//   touch:   CS=33 IRQ=36 SCK=25  MOSI=32 MISO=39       (independent bus)
+// Two CYD board variants are supported from this one firmware:
+//   - jczn_2432s028r (original): resistive XPT2046 touch on its own
+//     dedicated SPI bus, backlight on GPIO21. Confirmed against
+//     Espressif's official board-variant file for this exact board
+//     (arduino-esp32 variants/jczn_2432s028r/pins_arduino.h):
+//       display: DC=2 MISO=12 MOSI=13 SCK=14 CS=15 BL=21  (VSPI, via TFT_eSPI)
+//       touch:   CS=33 IRQ=36 SCK=25  MOSI=32 MISO=39      (independent bus)
+//   - JC2432W328C: capacitive CST816/CST820 touch over I2C, backlight
+//     on GPIO27. Confirmed empirically against a physical unit: same
+//     display driver/pins as above, touch chip answers at I2C 0x15 on
+//     SDA=33/SCL=32 with a reset pulse on GPIO25.
+// Both variants route their touch controller through the same
+// GPIO25/32/33 trio (SPI vs I2C), so probing for the I2C chip at boot
+// tells us which board this is — see setup().
 #define TOUCH_SCK  25
 #define TOUCH_MOSI 32
 #define TOUCH_MISO 39
 #define TOUCH_CS   33
 #define TOUCH_IRQ  36
+#define CAP_SDA    33
+#define CAP_SCL    32
+#define CAP_RST    25
 
 // ---- Globals ----
 TFT_eSPI            tft = TFT_eSPI();
@@ -37,6 +49,9 @@ TFT_eSPI            tft = TFT_eSPI();
 TFT_eSprite         frame = TFT_eSprite(&tft);
 XPT2046_Touchscreen touch(TOUCH_CS, TOUCH_IRQ);
 SPIClass            touchSPI(HSPI);
+// Set once in setup() by probing for the capacitive controller —
+// decides which branch pollTouch() takes for the rest of the run.
+bool                usingCapTouch = false;
 DetectionEngine     engine;
 AppState            state     = AppState::BOOT;
 uint32_t            bootStart = 0;
@@ -61,24 +76,46 @@ static const uint32_t TRANSITION_MS = 220;
 // ---- Touch helpers ----
 struct TouchPoint { bool valid; int x; int y; };
 
+// CST816/CST820 native coordinate range measured against this exact
+// JC2432W328C unit's 4 corners in landscape (rotation 1) — the chip's
+// usable range falls short of the theoretical 0-239/0-319 panel
+// resolution (bezel/active-area margin), so these are the real
+// measured extremes, not assumed ones.
+static const uint16_t CAP_NX_MIN = 32,  CAP_NX_MAX = 166;
+static const uint16_t CAP_NY_MIN = 10,  CAP_NY_MAX = 308;
+
 static TouchPoint pollTouch() {
     TouchPoint tp = { false, 0, 0 };
+    int w = tft.width(), h = tft.height();
+    bool landscape = (screenRotation % 2) == 1;
+    bool flipped   = screenRotation >= 2;
+
+    if (usingCapTouch) {
+        uint16_t nx, ny;
+        if (!CapTouch::read(nx, ny)) return tp;
+        // Same "native portrait frame, rotate per TFT_eSPI rotation"
+        // structure as the XPT2046 path below — nx/ny stand in for
+        // the XPT2046's raw p.x/p.y, just with the CST816's own
+        // measured range instead of raw ADC counts. Only rotation 1
+        // (landscape) is confirmed against real taps on this unit;
+        // 0/2/3 are derived by the same symmetry that held for
+        // XPT2046 and are worth spot-checking in portrait.
+        if (!landscape) {
+            tp.x = flipped ? map(nx, CAP_NX_MIN, CAP_NX_MAX, w, 0) : map(nx, CAP_NX_MIN, CAP_NX_MAX, 0, w);
+            tp.y = flipped ? map(ny, CAP_NY_MIN, CAP_NY_MAX, h, 0) : map(ny, CAP_NY_MIN, CAP_NY_MAX, 0, h);
+        } else {
+            tp.x = flipped ? map(ny, CAP_NY_MIN, CAP_NY_MAX, w, 0) : map(ny, CAP_NY_MIN, CAP_NY_MAX, 0, w);
+            tp.y = flipped ? map(nx, CAP_NX_MIN, CAP_NX_MAX, 0, h) : map(nx, CAP_NX_MIN, CAP_NX_MAX, h, 0);
+        }
+        tp.valid = (tp.x >= 0 && tp.x < w && tp.y >= 0 && tp.y < h);
+        return tp;
+    }
+
+    // Resistive XPT2046 path (original jczn_2432s028r board) —
+    // unchanged from the earlier single-board firmware.
     if (!touch.tirqTouched()) return tp;
     if (touch.touched()) {
         TS_Point p = touch.getPoint();
-        int w = tft.width(), h = tft.height();
-        // XPT2046 raw ADC axes, solved back to the panel's native
-        // (rotation 0, portrait) frame from the landscape (rotation 1)
-        // calibration measured against known button positions: raw X
-        // maps directly to native column, raw Y directly to native
-        // row — no swap in the native frame itself. Each TFT_eSPI
-        // rotation is then a fixed transform of that native frame:
-        // odd rotations (1,3) are landscape and swap the axes; the
-        // "flipped" pair (2,3 vs 0,1) reverses both directions. This
-        // reproduces the two empirically-verified landscape mappings
-        // exactly, so the same method should hold for portrait.
-        bool landscape = (screenRotation % 2) == 1;
-        bool flipped   = screenRotation >= 2;
         if (!landscape) {
             tp.x = flipped ? map(p.x, 200, 3800, w, 0) : map(p.x, 200, 3800, 0, w);
             tp.y = flipped ? map(p.y, 200, 3800, h, 0) : map(p.y, 200, 3800, 0, h);
@@ -126,6 +163,15 @@ void setup() {
     Serial.println();
     Serial.println("SquachWatch-CYD v1.0  --  TALKING SASQUACH");
 
+    // Backlight: the original board uses GPIO21 for this, the
+    // JC2432W328C uses GPIO27 (confirmed by sweeping candidate pins on
+    // a physical unit). Driving both HIGH is harmless either way —
+    // each is simply an unused GPIO on the "other" board — and means
+    // the screen lights up before we've even figured out which board
+    // this is.
+    pinMode(21, OUTPUT); digitalWrite(21, HIGH);
+    pinMode(27, OUTPUT); digitalWrite(27, HIGH);
+
     tft.init();
     // Landscape (320 wide × 240 tall) — the CYD's natural orientation
     // with the ST7789 driver. The 0xC2 unlock that was here was for
@@ -143,12 +189,24 @@ void setup() {
     }
     frame.setTextSize(1);
 
-    // Touch has its own dedicated SPI bus (see pin table above) — a
-    // genuinely separate HSPI peripheral on pins that don't overlap the
-    // display's VSPI pins at all, so there's no GPIO-matrix conflict.
-    touchSPI.begin(TOUCH_SCK, TOUCH_MISO, TOUCH_MOSI, TOUCH_CS);
-    touch.begin(touchSPI);
-    touch.setRotation(0);
+    // Touch: probe for the capacitive controller first (I2C 0x15 on
+    // SDA=33/SCL=32, reset on GPIO25 — the JC2432W328C). If it doesn't
+    // answer, release the I2C bus and fall back to the resistive
+    // XPT2046 on its own dedicated SPI bus (the original board) — a
+    // genuinely separate HSPI peripheral on pins that don't overlap
+    // the display's VSPI pins at all, so there's no GPIO-matrix
+    // conflict either way.
+    CapTouch::begin(CAP_SDA, CAP_SCL, CAP_RST);
+    usingCapTouch = CapTouch::probe();
+    if (usingCapTouch) {
+        Serial.println("Capacitive touch (CST816/820) detected -- JC2432W328C-style board.");
+    } else {
+        Wire.end();
+        Serial.println("No capacitive touch found -- assuming resistive XPT2046.");
+        touchSPI.begin(TOUCH_SCK, TOUCH_MISO, TOUCH_MOSI, TOUCH_CS);
+        touch.begin(touchSPI);
+        touch.setRotation(0);
+    }
 
     // Seed the PRNG so the matrix rain starts in a fresh-looking state
     // on every boot. Analog read on a floating pin is plenty.
