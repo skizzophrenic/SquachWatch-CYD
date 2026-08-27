@@ -174,19 +174,20 @@ void drawSasquatchSilhouette(TFT_eSPI& t, int cx, int baseY) {
 }
 
 void drawMatrixRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
-    // Independent fall speeds, 7-char trails. Glyphs are plain ASCII
+    // Dense columns (narrow gutters) with long, smoothly-decaying
+    // trails so this reads as a code-rain backdrop rather than a
+    // handful of isolated falling raindrops. Glyphs are plain ASCII
     // (the default GLCD font can't render the old UTF-8 katakana bytes
-    // correctly) drawn from a dense symbol/letter/digit set so the
-    // rain reads as glitchy code rather than plain text. Column count
-    // adapts to the current width so it works in portrait (240px) as
-    // well as landscape (320px) without overflowing.
-    static const int  MAX_COLS = 22;
-    static const int  SPACING  = 15;
+    // correctly) drawn from a dense symbol/letter/digit set. Column
+    // count adapts to the current width so it works in portrait
+    // (240px) as well as landscape (320px) without overflowing.
+    static const int  MAX_COLS = 36;
+    static const int  SPACING  = 9;
     static const char GLYPHS[] =
         "01" "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         "!@#$%^&*<>{}[]/\\|+=~" "SASQUACH";
     static const int  GLN   = sizeof(GLYPHS) - 1;
-    static const int  TRAIL = 7;
+    static const int  TRAIL = 11;
     static const uint16_t HEADS[3] = { VAPOR_PINK, CYAN, GREEN };
 
     int cols = t.width() / SPACING;
@@ -196,13 +197,19 @@ void drawMatrixRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     static int16_t yPos[MAX_COLS];
     static uint8_t ySpeed[MAX_COLS];
     static uint8_t yTick[MAX_COLS] = {0};
+    // The glyph at each trailing position, so a character keeps
+    // decaying (dimming) as it falls instead of reshuffling every
+    // frame — that reshuffle is what read as noisy "raindrops" rather
+    // than a settled backdrop.
+    static uint8_t charBuf[MAX_COLS][TRAIL];
     static bool    initialized = false;
     static int     lastCols = -1;
 
     if (!initialized || cols != lastCols) {
         for (int i = 0; i < cols; i++) {
-            yPos[i]   = (int16_t)(yStart - random(0, 60));
-            ySpeed[i] = 2 + (uint8_t)(i % 2);
+            yPos[i]   = (int16_t)(yStart - random(0, 80));
+            ySpeed[i] = 2 + (uint8_t)random(0, 3);
+            for (int j = 0; j < TRAIL; j++) charBuf[i][j] = (uint8_t)random(0, GLN);
         }
         initialized = true;
         lastCols = cols;
@@ -213,22 +220,30 @@ void drawMatrixRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         if (++yTick[i] >= ySpeed[i]) {
             yTick[i] = 0;
             yPos[i] += 8;
+            // A fresh glyph enters at the head; everything already in
+            // the buffer shifts one slot further from it (still the
+            // same characters, just older/dimmer).
+            for (int j = TRAIL - 1; j > 0; j--) charBuf[i][j] = charBuf[i][j - 1];
+            charBuf[i][0] = (uint8_t)random(0, GLN);
             if (yPos[i] > yEnd + TRAIL * 8) {
-                yPos[i] = (int16_t)(yStart - random(0, 60));
+                yPos[i] = (int16_t)(yStart - random(0, 80));
                 ySpeed[i] = 2 + (uint8_t)random(0, 3);
             }
         }
         uint16_t head = HEADS[i % 3];
         int x = 3 + i * SPACING;
-        for (int j = TRAIL - 1; j >= 0; j--) {
+        for (int j = 0; j < TRAIL; j++) {
             int16_t ry = yPos[i] - j * 8;
             if (ry < yStart || ry >= yEnd) continue;
-            uint32_t cell = (uint32_t)(i * 13 + j * 7) + now / 350;
-            char buf[2] = { GLYPHS[cell % GLN], 0 };
+            char buf[2] = { GLYPHS[charBuf[i][j]], 0 };
             if (j == 0) {
                 t.setTextColor(head, BG);
             } else {
-                uint8_t b = (uint8_t)(200 * (TRAIL - j) / TRAIL);
+                // Eased falloff (stays brighter a little longer right
+                // behind the head, then tails off) instead of a flat
+                // linear ramp — a longer, softer decay.
+                float f = 1.0f - (float)j / (float)TRAIL;
+                uint8_t b = (uint8_t)(210.0f * f * f);
                 t.setTextColor(blend(BG, head, b), BG);
             }
             t.setCursor(x, ry);
