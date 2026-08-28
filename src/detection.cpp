@@ -30,6 +30,96 @@ static void copyMac(char* dst12, const uint8_t* mac6) {
     dst12[11] = 0;
 }
 
+// scan->start(0, cb, ...) starts an indefinite scan (0 = "forever" per
+// NimBLEScan::start()'s own implementation) — cb is a *scan-complete*
+// callback, which for a forever-scan never fires under normal
+// operation. That's the real reason BLE detection (AirTag, Meta
+// glasses, Raven, Tile, DroneID) never worked at all, confirmed
+// against a real AirTag that other detectors picked up fine but this
+// one never did — not just the earlier nullptr-restart bug (a real
+// bug too, but not the actual root cause). The correct API for
+// continuous scanning is setAdvertisedDeviceCallbacks(), which fires
+// onResult() in real time for every advertisement seen, live, with no
+// restart needed.
+class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
+    void onResult(NimBLEAdvertisedDevice* adv) override {
+        if (!g_engine) return;
+        Detection det;
+        memset(&det, 0, sizeof(det));
+        const uint8_t* mac = adv->getAddress().getNative();
+        memcpy(det.mac, mac, 6);
+        det.rssi   = adv->getRSSI();
+        det.channel= 0;
+        det.firstSeen = det.lastSeen = millis();
+        det.hits   = 1;
+        det.active = true;
+        const char* name = adv->getName().c_str();
+        if (name && name[0]) {
+            strncpy(det.name, name, sizeof(det.name) - 1);
+        }
+        // Manufacturer data
+        if (adv->haveManufacturerData()) {
+            std::string mfg = adv->getManufacturerData();
+            if (mfg.size() >= 2) {
+                uint16_t mfgId = (uint8_t)mfg[0] | ((uint8_t)mfg[1] << 8);
+                det.type = lookupMfgId(mfgId);
+                if (det.type == DetectionType::AIRTAG && mfg.size() >= 3) {
+                    if (!isAirTagSubtype((const uint8_t*)mfg.data(), mfg.size())) {
+                        det.type = DetectionType::UNKNOWN;
+                    }
+                }
+            }
+        }
+        // Service UUIDs
+        if (det.type == DetectionType::UNKNOWN && adv->haveServiceUUID()) {
+            for (int j = 0; j < adv->getServiceUUIDCount(); j++) {
+                NimBLEUUID u = adv->getServiceUUID(j);
+                // 16-bit UUID match: avoid touching ble_uuid_t's
+                // internals (the struct layout varies between
+                // NimBLE-Arduino versions). The equals() method is
+                // a stable API and compares the logical 16-bit value.
+                if (u.bitSize() == 16) {
+                    static const uint16_t kKnown16[] = {
+                        0x1101,  // SPP — skimmer
+                        0xFEED,  // Tile tracker
+                        0xFD5F,  // Ray-Ban Meta glasses
+                        0x3100, 0x3200, 0x3300, 0x3400, 0x3500,  // Raven
+                        0xFFFA,  // OpenDroneID
+                    };
+                    for (uint16_t k : kKnown16) {
+                        if (u.equals(NimBLEUUID((uint16_t)k))) {
+                            det.type = lookupUuid(k);
+                            break;
+                        }
+                    }
+                    if (det.type != DetectionType::UNKNOWN) break;
+                }
+            }
+        }
+        // Name fallback
+        if (det.type == DetectionType::UNKNOWN && det.name[0]) {
+            det.type = lookupBtName(det.name);
+        }
+        if (det.type == DetectionType::UNKNOWN) return;
+        // Set vendor label based on the matched table entry.
+        if (det.type == DetectionType::AIRTAG) {
+            strncpy(det.vendor, "Apple", sizeof(det.vendor) - 1);
+        } else if (det.type == DetectionType::DRONE) {
+            strncpy(det.vendor, "DroneID", sizeof(det.vendor) - 1);
+        } else if (det.type == DetectionType::META) {
+            strncpy(det.vendor, "Meta", sizeof(det.vendor) - 1);
+        } else if (det.type == DetectionType::RAVEN) {
+            strncpy(det.vendor, "Raven", sizeof(det.vendor) - 1);
+        } else if (det.type == DetectionType::FLOCK) {
+            strncpy(det.vendor, "Flock-BLE", sizeof(det.vendor) - 1);
+        } else {
+            strncpy(det.vendor, "BLE", sizeof(det.vendor) - 1);
+        }
+        g_engine->postBle(det);
+    }
+};
+static BleScanCallbacks g_bleScanCallbacks;
+
 // -------- DetectionEngine --------
 
 bool DetectionEngine::init() {
@@ -96,95 +186,20 @@ bool DetectionEngine::init() {
         }
     });
 
-    // 3. NimBLE scan
+    // 3. NimBLE scan — onResult() fires live per-advertisement via
+    // g_bleScanCallbacks (see above), not via a scan-complete callback
+    // that would never fire on an indefinite (duration 0) scan.
     NimBLEDevice::init("");
     NimBLEScan* scan = NimBLEDevice::getScan();
     scan->setActiveScan(true);
     scan->setInterval(100);
     scan->setWindow(99);
     scan->setDuplicateFilter(false);
-    scan->start(0, [](NimBLEScanResults results) {
-        if (!g_engine) return;
-        for (int i = 0; i < results.getCount(); i++) {
-            // Newer NimBLE-Arduino returns the advertised device by value
-            // and the getters are non-const, so we copy it locally.
-            NimBLEAdvertisedDevice d = results.getDevice(i);
-            Detection det;
-            memset(&det, 0, sizeof(det));
-            const uint8_t* mac = d.getAddress().getNative();
-            memcpy(det.mac, mac, 6);
-            det.rssi   = d.getRSSI();
-            det.channel= 0;
-            det.firstSeen = det.lastSeen = millis();
-            det.hits   = 1;
-            det.active = true;
-            const char* name = d.getName().c_str();
-            if (name && name[0]) {
-                strncpy(det.name, name, sizeof(det.name) - 1);
-            }
-            // Manufacturer data
-            if (d.haveManufacturerData()) {
-                std::string mfg = d.getManufacturerData();
-                if (mfg.size() >= 2) {
-                    uint16_t mfgId = (uint8_t)mfg[0] | ((uint8_t)mfg[1] << 8);
-                    det.type = lookupMfgId(mfgId);
-                    if (det.type == DetectionType::AIRTAG && mfg.size() >= 3) {
-                        if (!isAirTagSubtype((const uint8_t*)mfg.data(), mfg.size())) {
-                            det.type = DetectionType::UNKNOWN;
-                        }
-                    }
-                }
-            }
-            // Service UUIDs
-            if (det.type == DetectionType::UNKNOWN && d.haveServiceUUID()) {
-                for (int j = 0; j < d.getServiceUUIDCount(); j++) {
-                    NimBLEUUID u = d.getServiceUUID(j);
-                    // 16-bit UUID match: avoid touching ble_uuid_t's
-                    // internals (the struct layout varies between
-                    // NimBLE-Arduino versions). The equals() method is
-                    // a stable API and compares the logical 16-bit value.
-                    if (u.bitSize() == 16) {
-                        static const uint16_t kKnown16[] = {
-                            0x1101,  // SPP — skimmer
-                            0xFEED,  // Tile tracker
-                            0xFD5F,  // Ray-Ban Meta glasses
-                            0x3100, 0x3200, 0x3300, 0x3400, 0x3500,  // Raven
-                            0xFFFA,  // OpenDroneID
-                        };
-                        for (uint16_t k : kKnown16) {
-                            if (u.equals(NimBLEUUID((uint16_t)k))) {
-                                det.type = lookupUuid(k);
-                                break;
-                            }
-                        }
-                        if (det.type != DetectionType::UNKNOWN) break;
-                    }
-                }
-            }
-            // Name fallback
-            if (det.type == DetectionType::UNKNOWN && det.name[0]) {
-                det.type = lookupBtName(det.name);
-            }
-            if (det.type == DetectionType::UNKNOWN) continue;
-            // Set vendor label based on the matched table entry.
-            if (det.type == DetectionType::AIRTAG) {
-                strncpy(det.vendor, "Apple", sizeof(det.vendor) - 1);
-            } else if (det.type == DetectionType::DRONE) {
-                strncpy(det.vendor, "DroneID", sizeof(det.vendor) - 1);
-            } else if (det.type == DetectionType::META) {
-                strncpy(det.vendor, "Meta", sizeof(det.vendor) - 1);
-            } else if (det.type == DetectionType::RAVEN) {
-                strncpy(det.vendor, "Raven", sizeof(det.vendor) - 1);
-            } else if (det.type == DetectionType::FLOCK) {
-                strncpy(det.vendor, "Flock-BLE", sizeof(det.vendor) - 1);
-            } else {
-                strncpy(det.vendor, "BLE", sizeof(det.vendor) - 1);
-            }
-            g_engine->postBle(det);
-        }
-        // keep scanning
-        NimBLEDevice::getScan()->start(0, nullptr, false);
-    }, false);
+    // wantDuplicates=true: we want onResult() called on every sighting
+    // of a device, not just the first, so lastSeen/RSSI keep updating
+    // (postBle()/expireStale() rely on that for the still-active log).
+    scan->setAdvertisedDeviceCallbacks(&g_bleScanCallbacks, true);
+    scan->start(0, nullptr, false);
 
     // 4. BT Classic inquiry for skimmer names (best-effort, every 60 s)
     if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED) {
@@ -197,9 +212,23 @@ bool DetectionEngine::init() {
 }
 
 void DetectionEngine::loop() {
+    hopChannel();
     processWiFiQ();
     expireStale();
     _sd.tick();
+}
+
+void DetectionEngine::hopChannel() {
+    // Dwell ~300ms per channel, cycling 1-13 — without this the
+    // promiscuous sniffer stays parked on whatever channel the radio
+    // defaulted to and only ever sees traffic on that one channel,
+    // missing anything (real hardware included, not just test rigs)
+    // transmitting elsewhere in the band.
+    uint32_t now = millis();
+    if (now - _lastHopMs < 300) return;
+    _lastHopMs = now;
+    _wifiChannel = (_wifiChannel % 13) + 1;
+    esp_wifi_set_channel(_wifiChannel, WIFI_SECOND_CHAN_NONE);
 }
 
 void DetectionEngine::clearLog() {

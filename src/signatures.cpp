@@ -187,7 +187,15 @@ DetectionType lookupMfgId(uint16_t mfgId) {
 bool isAirTagSubtype(const uint8_t* mfgPayload, uint8_t len) {
     if (!mfgPayload || len < 3) return false;
     uint8_t subtype = mfgPayload[2];
-    return (subtype == 0x12 || subtype == 0x1E);
+    // 0x12/0x1E: Find My "offline finding" beacon — only broadcast
+    // once a tag has been separated from its registered owner for a
+    // while. 0x07: "Proximity Pairing" — also what a freshly-powered
+    // or newly-orphaned tag broadcasts before/while it determines it
+    // can't reach an owner, confirmed against a real AirTag whose
+    // registered iPhone no longer exists. Apple's other accessories
+    // (AirPods, etc.) use 0x07 too, so this trades some false-positive
+    // risk for actually catching a tag before it reaches lost-mode.
+    return (subtype == 0x12 || subtype == 0x1E || subtype == 0x07);
 }
 
 Confidence confidenceFor(DetectionType t) {

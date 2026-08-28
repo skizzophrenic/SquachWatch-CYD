@@ -70,7 +70,15 @@ private:
     Preferences _prefs;
     uint32_t    _lifetimeTotal = 0;
 
+    // Promiscuous mode only ever receives on whatever channel the
+    // radio is currently tuned to — without actively hopping, the
+    // sniffer stays parked on one channel and misses anything
+    // transmitting on the other 12. See hopChannel().
+    uint8_t     _wifiChannel = 1;
+    uint32_t    _lastHopMs   = 0;
+
     void pushLog(const Detection& d);
     void processWiFiQ();
     void expireStale();
+    void hopChannel();
 };

@@ -102,16 +102,25 @@ verified them against a physical Raven device. Likely works.
 ## Apple AirTag / FindMy — `AIRTAG` — **High confidence**
 
 **Why it works:** AirTags broadcast a manufacturer data payload
-from Apple (`0x004C`) with a known subtype byte. Subtype `0x12`
-indicates "near owner", `0x1E` indicates "separated".
+from Apple (`0x004C`) with a known subtype byte. Originally
+documented here as `0x12` ("near owner") / `0x1E` ("separated") per
+the Apple FindMy spec — but a real AirTag test (registered to an
+Apple ID whose iPhone no longer exists, battery freshly reinserted)
+showed it broadcasting subtype `0x07` ("Proximity Pairing", the same
+message used for "Connect to AirTag?" setup prompts) rather than
+`0x12`/`0x1E`, which only start once a tag has been in "separated"
+state for a while. `0x07` is now matched too, so a tag is caught
+before it reaches full lost-mode — at the cost of some false-positive
+risk, since other Apple accessories (AirPods, etc.) also use `0x07`.
 
 **Source:** Apple FindMy spec (public) + the
 [ESP32Marauder AirTag sniffer](https://github.com/justcallmekoko/ESP32Marauder)
 + the [Eye Spy](https://simeononsecurity.com/articles/eye-spy-passive-surveillance-detector-esp32-2026/) scoring table.
 
-**Confidence in v1.0:** **High** for the manufacturer-ID + subtype
-match. Note: AirTags rotate their address frequently, so detection
-may flicker in and out.
+**Confidence in v1.0:** **Medium** — the `0x12`/`0x1E` match alone
+would be High, but including `0x07` for faster detection trades some
+of that away (see above). Note: AirTags rotate their address
+frequently, so detection may flicker in and out.
 
 ---
 
