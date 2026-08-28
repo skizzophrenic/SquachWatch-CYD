@@ -86,14 +86,16 @@ void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int scroll
         t.setCursor(4, y + 14);
         t.print(mac);
 
-        // RSSI
+        // RSSI — MAC above runs "XX:XX:XX:XX:XX:XX" (17 chars, 102px
+        // at this font size) starting from x=4, so this column can't
+        // start before ~110 without drawing on top of it.
         t.setTextColor(Theme::CYAN, Theme::BG);
-        t.setCursor(96, y + 14);
+        t.setCursor(112, y + 14);
         t.printf("%ddBm", d->rssi);
 
         // Hits
         t.setTextColor(Theme::VAPOR_PURPLE, Theme::BG);
-        t.setCursor(150, y + 14);
+        t.setCursor(164, y + 14);
         t.printf("x%u", d->hits);
 
         // Timestamp (right edge)
