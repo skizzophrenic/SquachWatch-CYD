@@ -13,17 +13,32 @@ void uiClearInit(TFT_eSPI& t) {
 
 static const char* counterLabel(DetectionType t) {
     switch (t) {
-        case DetectionType::FLOCK:   return "FLOCK";
-        case DetectionType::AXON:    return "AXON";
-        case DetectionType::META:    return "META";
-        case DetectionType::SKIMMER: return "SKIM";
-        case DetectionType::AIRTAG:  return "AIR";
-        case DetectionType::DRONE:   return "DRONE";
-        case DetectionType::RAVEN:   return "RAV";
-        case DetectionType::ALPR:    return "ALPR";
-        case DetectionType::CAMERA:  return "CAM";
-        default:                     return "?";
+        case DetectionType::FLOCK:       return "FLOCK";
+        case DetectionType::AXON:        return "AXON";
+        case DetectionType::META:        return "META";
+        case DetectionType::SKIMMER:     return "SKIM";
+        case DetectionType::AIRTAG:      return "AIR";
+        case DetectionType::DRONE:       return "DRONE";
+        case DetectionType::RAVEN:       return "RAV";
+        case DetectionType::ALPR:        return "ALPR";
+        case DetectionType::CAMERA:      return "CAM";
+        case DetectionType::SAMSUNG_TAG: return "STAG";
+        case DetectionType::GOOGLE_TAG:  return "GTAG";
+        default:                         return "?";
     }
+}
+
+static void drawCounterLine(TFT_eSPI& t, int w, int y, const DetectionEngine& eng,
+                            const DetectionType* types, uint8_t n) {
+    char buf[56] = "";
+    int off = 0;
+    for (uint8_t i = 0; i < n; i++) {
+        off += snprintf(buf + off, sizeof(buf) - off, "%s:%u  ",
+                        counterLabel(types[i]), eng.countByType(types[i]));
+    }
+    int tw = t.textWidth(buf);
+    t.setCursor((w - tw) / 2, y);
+    t.print(buf);
 }
 
 void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
@@ -31,7 +46,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
 
     Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, t.height());
     const int lineH          = 14;
-    const int countersTop    = bar.y - 2 * lineH - 6;
+    const int countersTop    = bar.y - 3 * lineH - 6;
     const int countersBottom = bar.y - 4;
 
     // Status line sits directly against the counter lines (no gap) —
@@ -83,9 +98,10 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
         t.print(seen);
     }
 
-    // Counter lines above the buttons — a fixed, centered two-line
-    // split (FLOCK/AXON/META/SKIM/RAV, then AIR/DRONE/ALPR/CAM). Whole
-    // label:count tokens only, so nothing ever breaks mid-word.
+    // Counter lines above the buttons — a fixed, centered three-line
+    // split (FLOCK/AXON/META/SKIM/RAV, then AIR/DRONE/ALPR/CAM, then
+    // the two Find My Device Network-style trackers). Whole label:count
+    // tokens only, so nothing ever breaks mid-word.
     t.setTextSize(1);
     t.setTextColor(Theme::CYAN, Theme::BG);
     t.setTextWrap(false);
@@ -99,24 +115,13 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
         DetectionType::AIRTAG, DetectionType::DRONE, DetectionType::ALPR,
         DetectionType::CAMERA
     };
+    static const DetectionType LINE3[] = {
+        DetectionType::SAMSUNG_TAG, DetectionType::GOOGLE_TAG
+    };
 
-    char line1[48] = "";
-    char line2[48] = "";
-    int off1 = 0, off2 = 0;
-    for (uint8_t i = 0; i < 5; i++) {
-        off1 += snprintf(line1 + off1, sizeof(line1) - off1, "%s:%u  ",
-                         counterLabel(LINE1[i]), eng.countByType(LINE1[i]));
-    }
-    for (uint8_t i = 0; i < 4; i++) {
-        off2 += snprintf(line2 + off2, sizeof(line2) - off2, "%s:%u  ",
-                         counterLabel(LINE2[i]), eng.countByType(LINE2[i]));
-    }
-    int w1 = t.textWidth(line1);
-    t.setCursor((w - w1) / 2, countersTop);
-    t.print(line1);
-    int w2 = t.textWidth(line2);
-    t.setCursor((w - w2) / 2, countersTop + lineH);
-    t.print(line2);
+    drawCounterLine(t, w, countersTop,              eng, LINE1, 5);
+    drawCounterLine(t, w, countersTop + lineH,       eng, LINE2, 4);
+    drawCounterLine(t, w, countersTop + 2 * lineH,   eng, LINE3, 2);
 
     // Soft buttons
     Theme::drawButtonBar(t, ButtonId::NONE);

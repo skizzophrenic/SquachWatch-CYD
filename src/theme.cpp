@@ -16,6 +16,8 @@ uint16_t colorFor(DetectionType t) {
             return AMBER;
         case DetectionType::AIRTAG:
         case DetectionType::DRONE:
+        case DetectionType::SAMSUNG_TAG:
+        case DetectionType::GOOGLE_TAG:
             return VAPOR_PURPLE;
         case DetectionType::CAMERA:
             return CYAN;

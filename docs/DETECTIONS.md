@@ -166,11 +166,17 @@ the one prefix.
 
 **Why it works:** Most consumer IP cameras use WiFi modules from a
 small set of manufacturers. We match OUIs from Wyze, Ring, Arlo,
-Blink, Reolink, Hikvision, Amazon, Realtek, and Tuya.
+Blink, Reolink, Hikvision, Amazon, Realtek, and Tuya on the consumer
+side, plus Verkada, Avigilon (Alta), and Axis Communications on the
+commercial/institutional side — the brands actually installed in
+offices, stores, and public spaces, not just homes.
 
 **Source:** [`skizzophrenic/Cardputer-CSI-Human-Detector`](https://github.com/skizzophrenic/Cardputer-CSI-Human-Detector)
 (this author's earlier work, MIT) + Gemini additions for the Tuya
-and Wyze-module prefixes.
+and Wyze-module prefixes. Commercial-vendor OUIs (Verkada `E0:A7:00`,
+Avigilon Alta `70:1A:D5`, Axis `00:40:8C`/`B8:A4:4F`) are from the
+public IEEE MA-L registry via [maclookup.app](https://maclookup.app),
+cross-checked per-vendor.
 
 **Confidence in v1.0:** **High** for the listed vendors — that's the
 only camera-matching path actually implemented right now. A
@@ -179,6 +185,46 @@ discussed (see the note atop `kOuiTable` in `signatures.cpp`) but
 would need a real audit of Espressif's OUI ranges against known false
 positives before shipping — it is **not** built, and the UI does not
 show a Low-confidence camera reading in v1.0.
+
+---
+
+## Samsung Galaxy SmartTag / SmartTag+ — `SAMSUNG_TAG` — **High confidence**
+
+**Why it works:** SmartTags advertise Samsung's own Bluetooth SIG-
+assigned 16-bit service UUID, `0xFD5A`, used specifically for SmartTag
+discovery (Samsung also has separate assigned UUIDs for onboarding,
+`0xFD59`, and firmware update, `0xFE59`, which we don't need for
+detection). Unlike AirTag's manufacturer-ID scheme, this UUID isn't
+shared with any of Samsung's other product lines.
+
+**Source:** Bluetooth SIG's public 16-bit UUID assignment registry
+(`0xFD5A` → Samsung Electronics) + [arXiv:2210.14702](https://arxiv.org/pdf/2210.14702),
+an academic security/privacy analysis of Samsung's crowd-sourced
+Bluetooth location system that reverse-engineered the SmartTag
+protocol.
+
+**Confidence in v1.0:** **High** — a dedicated, SIG-assigned UUID
+specific to this product line, same tier as the META match.
+
+---
+
+## Google Find My Device Network trackers — `GOOGLE_TAG` — **Medium confidence**
+
+**Why it works:** Trackers on Google's Find My Device Network
+(Chipolo ONE/CARD Point, Pebblebee Card/Clip/Tag, Moto Tag) advertise
+under Google's `0xFEAA` service UUID — the same UUID Google has used
+for years for general-purpose "Eddystone" beacons. That reuse is the
+catch: retail/asset/museum Eddystone beacons unrelated to tracking
+also use `0xFEAA`, so a match here means "some Google-beacon-class
+device," not specifically a tracker.
+
+**Source:** [Google's official Find My Device Network (FMDN)
+specification](https://developers.google.com/nearby/fast-pair/specifications/extensions/fmdn)
+(Fast Pair extension docs).
+
+**Confidence in v1.0:** **Medium** — real, current Google documentation,
+but the UUID itself is shared with non-tracker Eddystone beacons, so
+higher false-positive risk than the Samsung match above.
 
 ---
 
@@ -193,6 +239,9 @@ show a Low-confidence camera reading in v1.0.
 | Sparkfun Skimmer Scanner | MIT | Skimmer BT name list |
 | Apple FindMy spec | public | AirTag manufacturer format |
 | Google Gemini | (compilation assistance) | SSID prefixes, SPP UUID, Sierra Wireless OUI |
+| arXiv:2210.14702 (academic paper) | public | Samsung SmartTag UUID |
+| Google Find My Device Network spec | public | Google tracker service UUID |
+| maclookup.app (IEEE MA-L registry) | public data | Verkada / Avigilon / Axis OUIs |
 
 We use signature *data* (OUIs, UUIDs, names) as facts; we don't
 copy GPL code into this project.

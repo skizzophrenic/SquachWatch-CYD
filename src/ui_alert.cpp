@@ -15,6 +15,8 @@ static const char* targetLabel(DetectionType t) {
         case DetectionType::DRONE:   return "DRONE";
         case DetectionType::ALPR:    return "ALPR";
         case DetectionType::CAMERA:  return "GAMERA";
+        case DetectionType::SAMSUNG_TAG: return "SAMSUNG TAG";
+        case DetectionType::GOOGLE_TAG:  return "GOOGLE TAG";
         default:                     return "UNKNOWN";
     }
 }

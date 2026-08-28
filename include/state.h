@@ -14,21 +14,25 @@ enum class DetectionType : uint8_t {
     DRONE   = 7,   // OpenDroneID drone
     ALPR    = 8,   // Motorola / Vigilant ALPR
     CAMERA  = 9,   // Generic camera (existing OUI list)
-    COUNT   = 10
+    SAMSUNG_TAG = 10,  // Samsung Galaxy SmartTag / SmartTag+
+    GOOGLE_TAG  = 11,  // Google Find My Device network tracker (Chipolo/Pebblebee/Moto Tag)
+    COUNT   = 12
 };
 
 inline const char* detectionTypeName(DetectionType t) {
     switch (t) {
-        case DetectionType::FLOCK:   return "FLOCK";
-        case DetectionType::AXON:    return "AXON";
-        case DetectionType::META:    return "META";
-        case DetectionType::SKIMMER: return "SKIMMER";
-        case DetectionType::RAVEN:   return "RAVEN";
-        case DetectionType::AIRTAG:  return "AIRTAG";
-        case DetectionType::DRONE:   return "DRONE";
-        case DetectionType::ALPR:    return "ALPR";
-        case DetectionType::CAMERA:  return "CAMERA";
-        default:                     return "UNKNOWN";
+        case DetectionType::FLOCK:       return "FLOCK";
+        case DetectionType::AXON:        return "AXON";
+        case DetectionType::META:        return "META";
+        case DetectionType::SKIMMER:     return "SKIMMER";
+        case DetectionType::RAVEN:       return "RAVEN";
+        case DetectionType::AIRTAG:      return "AIRTAG";
+        case DetectionType::DRONE:       return "DRONE";
+        case DetectionType::ALPR:        return "ALPR";
+        case DetectionType::CAMERA:      return "CAMERA";
+        case DetectionType::SAMSUNG_TAG: return "SAMSUNG_TAG";
+        case DetectionType::GOOGLE_TAG:  return "GOOGLE_TAG";
+        default:                         return "UNKNOWN";
     }
 }
 

@@ -22,7 +22,9 @@ static ReactPose reactPoseFor(DetectionType t) {
         case DetectionType::META:    return ReactPose::POINT_SHADES;// smart glasses — he points at his own shades
         case DetectionType::SKIMMER: return ReactPose::DISGUST;     // a skimmer is just gross
         case DetectionType::DRONE:   return ReactPose::LOOK_UP;     // eyes in the sky
-        case DetectionType::AIRTAG:  return ReactPose::LOOK_AROUND; // something's tracking him
+        case DetectionType::AIRTAG:
+        case DetectionType::SAMSUNG_TAG:
+        case DetectionType::GOOGLE_TAG: return ReactPose::LOOK_AROUND; // something's tracking him
         default:                     return ReactPose::STARTLED;   // UNKNOWN, RAVEN
     }
 }
@@ -101,6 +103,8 @@ static const DetLines DET_LINES[] = {
     { "Eyes in the sky. Literally.",         "Drone up. Wave if ready." },         // DRONE
     { "Plate reader spotted. Classic.",      "ALPR sees you. Smile." },            // ALPR
     { "Camera detected. Smile, legend.",     "Someone's watching. Look good." },   // CAMERA
+    { "Samsung tag pinged. Somebody's tagged.","Galaxy SmartTag nearby. Hm." },     // SAMSUNG_TAG
+    { "Google's tracking network says hi.",  "Find My Device? Found by me." },     // GOOGLE_TAG
 };
 static const uint8_t DET_LINES_N = sizeof(DET_LINES) / sizeof(DET_LINES[0]);
 

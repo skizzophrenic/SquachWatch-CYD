@@ -70,6 +70,14 @@ const OuiEntry kOuiTable[] = {
     {{0xBC, 0xDD, 0xC2}, "Arlo",         DetectionType::CAMERA},
     {{0x4C, 0x69, 0x05}, "Blink",        DetectionType::CAMERA},
     {{0xA4, 0xC1, 0x38}, "Tuya",         DetectionType::CAMERA},
+
+    // ---- Commercial / institutional camera vendors ----
+    // Source: public IEEE MA-L registry (maclookup.app), cross-checked
+    // per-vendor registration records.
+    {{0xE0, 0xA7, 0x00}, "Verkada",      DetectionType::CAMERA},  // registered 2016-09-22
+    {{0x70, 0x1A, 0xD5}, "Avigilon",     DetectionType::CAMERA},  // Avigilon Alta, registered 2021-04-27
+    {{0x00, 0x40, 0x8C}, "Axis",         DetectionType::CAMERA},  // Axis Communications, registered 1998
+    {{0xB8, 0xA4, 0x4F}, "Axis",         DetectionType::CAMERA},
 };
 const uint16_t kOuiCount = sizeof(kOuiTable) / sizeof(kOuiTable[0]);
 
@@ -86,6 +94,8 @@ const UuidEntry kUuidTable[] = {
     {0x3400, "Raven",      DetectionType::RAVEN},
     {0x3500, "Raven",      DetectionType::RAVEN},
     {0xFFFA, "DroneID",    DetectionType::DRONE},     // OpenDroneID
+    {0xFD5A, "SmartTag",   DetectionType::SAMSUNG_TAG}, // Samsung's own SIG-assigned UUID for SmartTag discovery
+    {0xFEAA, "FindMyDev",  DetectionType::GOOGLE_TAG},  // Google "Eddystone" service UUID, also used by the Find My Device network
 };
 const uint16_t kUuidCount = sizeof(kUuidTable) / sizeof(kUuidTable[0]);
 
@@ -205,18 +215,24 @@ Confidence confidenceFor(DetectionType t) {
     // doc as lower-confidence alternates aren't implemented — see the
     // note at the top of kOuiTable). RAVEN/AIRTAG/DRONE/ALPR are graded
     // Medium — unverified against real hardware, address rotation, or
-    // thin OUI coverage, respectively.
+    // thin OUI coverage, respectively. SAMSUNG_TAG is High: 0xFD5A is
+    // Samsung's own dedicated SIG-assigned UUID, not shared with
+    // anything else. GOOGLE_TAG is Medium: 0xFEAA is the general
+    // "Eddystone" service UUID, also used by unrelated retail/asset
+    // beacons, not exclusively Find My Device Network trackers.
     switch (t) {
         case DetectionType::FLOCK:
         case DetectionType::AXON:
         case DetectionType::META:
         case DetectionType::SKIMMER:
         case DetectionType::CAMERA:
+        case DetectionType::SAMSUNG_TAG:
             return Confidence::HIGH_CONF;
         case DetectionType::RAVEN:
         case DetectionType::AIRTAG:
         case DetectionType::DRONE:
         case DetectionType::ALPR:
+        case DetectionType::GOOGLE_TAG:
             return Confidence::MED_CONF;
         default:
             return Confidence::LOW_CONF;

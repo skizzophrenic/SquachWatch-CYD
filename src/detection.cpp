@@ -85,6 +85,8 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
                         0xFD5F,  // Ray-Ban Meta glasses
                         0x3100, 0x3200, 0x3300, 0x3400, 0x3500,  // Raven
                         0xFFFA,  // OpenDroneID
+                        0xFD5A,  // Samsung SmartTag
+                        0xFEAA,  // Google Find My Device Network (Eddystone)
                     };
                     for (uint16_t k : kKnown16) {
                         if (u.equals(NimBLEUUID((uint16_t)k))) {
@@ -112,6 +114,10 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             strncpy(det.vendor, "Raven", sizeof(det.vendor) - 1);
         } else if (det.type == DetectionType::FLOCK) {
             strncpy(det.vendor, "Flock-BLE", sizeof(det.vendor) - 1);
+        } else if (det.type == DetectionType::SAMSUNG_TAG) {
+            strncpy(det.vendor, "Samsung", sizeof(det.vendor) - 1);
+        } else if (det.type == DetectionType::GOOGLE_TAG) {
+            strncpy(det.vendor, "Google", sizeof(det.vendor) - 1);
         } else {
             strncpy(det.vendor, "BLE", sizeof(det.vendor) - 1);
         }
