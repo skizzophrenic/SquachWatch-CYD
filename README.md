@@ -9,8 +9,8 @@ skimmers, AirTags, drones, and more. It runs standalone on a bare CYD board
 — no PC, no extras, just plug it into USB.
 
 The UI is a vaporwave-themed take on the **SquachWare** aesthetic: matrix
-digital rain, ghost avatar, full-screen dramatic ALERT overlays, and the
-talking sasquatch wordmark.
+digital rain, Squachy the mascot, full-screen dramatic ALERT overlays, and
+the glitchy SquachWatch wordmark.
 
 ## What it detects
 
@@ -65,9 +65,10 @@ A full beginner-friendly walkthrough is in [docs/BUILD.md](docs/BUILD.md).
    - **`[ LOG ]`** — open the rolling 32-entry detection log.
    - **`[ CLR ]`** — wipe the log and return to clear.
 5. When something is detected, the device **flashes a full-screen
-   ALERT** for 5 seconds — pulsing vapor-pink border, target type,
-   MAC, RSSI, channel, and the glitchy `TALKING SASQUACH` wordmark.
-   Tap anywhere to dismiss early.
+   ALERT** — pulsing vapor-pink border, target type, confidence,
+   MAC, RSSI, channel, a signal radar, and the glitchy `SQUACHWATCH`
+   wordmark. Tap anywhere to dismiss early, or it clears itself after
+   60 seconds.
 
 If a microSD card is present, every detection is also appended to
 `squachwatch-<day>.log` (CSV: `ts,type,rssi,mac,channel,vendor,ssid`).
@@ -128,8 +129,7 @@ SquachWatch-CYD/
   belong to **skizzophrenic / Talking Sasquach** — see
   [talkingsasquach.com](https://talkingsasquach.com) and the
   [SquachWare-CFW](https://github.com/skizzophrenic/SquachWare-CFW)
-  project. The "sasquatch" silhouette in the splash is the cryptid,
-  not the brand.
+  project.
 
 ## Status
 

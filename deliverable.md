@@ -33,7 +33,7 @@ Total: ~2,789 lines across 27 files.
   probe doesn't get demoted to "generic camera".
 - **Displays** on a SquachWare-themed SquachWatch-CYD UI:
   - Splash (1.5 s) with `SQUACHWATCH` / `v1.0` / `TALKING SASQUACH` /
-    sasquatch silhouette / scanline animation
+    Sasquach silhouette / scanline animation
   - Clear screen with 14-column matrix digital rain (the
     `SASQUACH` token is in the charset), ghost avatar, live counters,
     three soft buttons

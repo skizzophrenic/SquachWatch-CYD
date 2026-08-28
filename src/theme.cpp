@@ -150,10 +150,9 @@ void drawPulsingBorder(TFT_eSPI& t, uint32_t now, uint16_t a, uint16_t b,
     }
 }
 
-void drawSasquatchSilhouette(TFT_eSPI& t, int cx, int baseY) {
-    // Decorative sasquatch silhouette (the cryptid, NOT the brand).
-    // ~40 px tall, drawn at (cx, baseY) — baseY is the feet line.
-    // Outline only, in PURPLE.
+void drawSasquachSilhouette(TFT_eSPI& t, int cx, int baseY) {
+    // Decorative Sasquach silhouette. ~40 px tall, drawn at (cx,
+    // baseY) — baseY is the feet line. Outline only, in PURPLE.
     int h = 40;
     int top = baseY - h;
     // Head

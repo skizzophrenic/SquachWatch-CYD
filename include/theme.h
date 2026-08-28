@@ -22,7 +22,7 @@ namespace Theme {
     constexpr uint16_t WHITE        = 0xFFFF;
     constexpr uint16_t BLACK        = 0x0000;
 
-    // Squachy's fur — real sasquatch brown, matching the original
+    // Squachy's fur — real Sasquach brown, matching the original
     // talkingsasquach.com drawSquachy() palette (not the neon set above).
     constexpr uint16_t FUR_DARK     = 0x38C0;  // #3d1800 shadow only
     constexpr uint16_t FUR_MAIN     = 0x5941;  // #5a2808 body/head fill
@@ -84,11 +84,9 @@ namespace Theme {
     void drawSeagulls(TFT_eSPI& t, uint32_t now, int yTop, int yHoriz);
     void drawRetroFloor(TFT_eSPI& t, uint32_t now, int yHoriz, int yBottom);
 
-    // Decorative sasquatch silhouette in the boot splash.
-    // ~40 px tall, drawn at (cx, baseY) with PURPLE outline. Note:
-    // the user is sensitive to brand-name vs. cryptid spelling —
-    // "sasquatch" is the cryptid, "Sasquach" is the brand.
-    void drawSasquatchSilhouette(TFT_eSPI& t, int cx, int baseY);
+    // Decorative Sasquach silhouette in the boot splash.
+    // ~40 px tall, drawn at (cx, baseY) with PURPLE outline.
+    void drawSasquachSilhouette(TFT_eSPI& t, int cx, int baseY);
 
     // 20-column Matrix digital rain tick. Columns fall at independent
     // speeds, heads cycle pink/cyan/green, trails fade to BG.

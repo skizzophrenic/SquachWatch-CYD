@@ -54,9 +54,8 @@ void uiBootTick(TFT_eSPI& t, uint32_t now) {
     t.setCursor((w - sw) / 2, 100);
     t.print(sub);
 
-    // Sasquatch silhouette (the cryptid, NOT the brand), standing on
-    // the floor just past the horizon.
-    Theme::drawSasquatchSilhouette(t, w / 2, yHoriz + 45);
+    // Sasquach silhouette, standing on the floor just past the horizon.
+    Theme::drawSasquachSilhouette(t, w / 2, yHoriz + 45);
 
     // INITIALIZING...
     t.setTextSize(1);

@@ -488,10 +488,11 @@ sent back.
 - **Log rows** are colored by `Theme::colorFor(type)`.
 - **Logos / wordmarks**:
   - Splash title text: `SQUACHWATCH v1.0` (caps, all one word, no hyphen
-    on splash). Subtitle: `TALKING SASQUACH` in vapor-pink.
-  - Never write "Sasquatch" (the cryptid). "Sasquach" (the brand) is fine.
-  - Sasquatch silhouette in the splash bottom-right, drawn in vapor-purple
-    outline, ~40 px tall. Pure decorative, no text on it.
+    on splash). Subtitle: `SQUACH WATCH` in vapor-purple. The ALERT
+    screen's glitchy bottom wordmark reads `SQUACHWATCH`.
+  - Always write "Sasquach" — never "Sasquatch".
+  - Sasquach silhouette in the splash, standing near the horizon, drawn
+    in purple outline, ~40 px tall. Pure decorative, no text on it.
 
 ## 12. Boot Order
 

@@ -122,7 +122,7 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now) {
     Theme::drawScanline(t, phase, Theme::VAPOR_PURPLE);
 
     // Glitchy wordmark
-    Theme::drawGlitchText(t, 220, "TALKING SASQUACH", Theme::VAPOR_PINK, now);
+    Theme::drawGlitchText(t, 220, "SQUACHWATCH", Theme::VAPOR_PINK, now);
 }
 
 bool uiAlertTouched() {

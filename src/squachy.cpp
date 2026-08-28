@@ -46,7 +46,7 @@ static const char* IDLE_LINES[] = {
     "Every good cryptid needs a hobby.",
     "Scanning is my cardio.",
     "Cryptid by night, operator by day.",
-    "Nobody suspects the sasquatch.",
+    "Nobody suspects the Sasquach.",
 };
 
 static const char* ENCOURAGE_LINES[] = {
@@ -317,7 +317,7 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     t.fillTriangle(cx2 - S(13), hy + S(3), cx2 - S(9), hy - S(4), cx2 - S(5), hy + S(3), furLight);
     t.fillTriangle(cx2 + S(5),  hy + S(3), cx2 + S(9), hy - S(4), cx2 + S(13),hy + S(3), furLight);
 
-    // Ears — small and tucked close, like a real sasquatch rather than
+    // Ears — small and tucked close, like a real Sasquach rather than
     // a cartoon animal's.
     t.fillCircle(cx2 - S(15), hy + S(13), S(3), furMain);
     t.fillCircle(cx2 + S(15), hy + S(13), S(3), furMain);
