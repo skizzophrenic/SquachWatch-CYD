@@ -153,6 +153,29 @@
   .squachy-sprite:active{ transform:scale(0.94); }
   .squachy-sprite.face-left{ transform:scaleX(-1); }
 
+  /* Card gets a comedic wobble while Squachy is "fixing" it */
+  @keyframes cardWiggle{
+    0%, 100%{ transform:rotate(0deg) translateX(0); }
+    20%{ transform:rotate(-1.1deg) translateX(-3px); }
+    40%{ transform:rotate(0.9deg) translateX(3px); }
+    60%{ transform:rotate(-0.7deg) translateX(-2px); }
+    80%{ transform:rotate(0.5deg) translateX(2px); }
+  }
+  .card.dd-wiggle{ animation:cardWiggle 0.35s ease-in-out 4; }
+
+  /* Bolt he "removes" from the card during the dismantle bit */
+  .bolt-emoji{
+    position:fixed;
+    font-size:1.6rem;
+    z-index:30;
+    opacity:0;
+    pointer-events:none;
+    transform:translate(-50%,-50%) rotate(0deg);
+    transition:left 0.55s ease, top 0.55s ease, opacity 0.25s ease, transform 0.55s ease;
+  }
+  .bolt-emoji.show{ opacity:1; }
+  .bolt-emoji.spin{ transform:translate(-50%,-50%) rotate(320deg); }
+
   /* ---- Flasher card ---- */
   .card{
     background:var(--panel);
@@ -297,6 +320,8 @@
   </div>
 </main>
 
+<div class="bolt-emoji" id="boltEmoji">&#x1F529;</div>
+
 <footer>Stay squachy out there.</footer>
 
 <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
@@ -307,28 +332,44 @@
   var ctx = sprite.getContext('2d');
   var bubble = document.getElementById('bubble');
   var stage = document.querySelector('.squachy-stage');
+  var card = document.querySelector('.card');
+  var bolt = document.getElementById('boltEmoji');
 
   // Ported straight from talkingsasquach.com's own drawSquachy() so the
   // mascot here is pixel-for-pixel the same character, not a lookalike —
-  // same fur/frame colors, same wayfarers, same grin. The only addition
-  // is a walk cycle (arms/legs swing) for when he's actually in motion
-  // crossing the stage; the site's original is a stationary idle/wave.
+  // same fur/frame colors, same wayfarers, same grin. Extended with a
+  // few extra modes ('dance'/'sleep') on top of the site's original
+  // stationary idle/wave so he has more going on here than just pacing.
   var anim = 0, animDir = 1, blink = 0, waveTimer = 0, walkPhase = 0;
 
-  function drawSquachy(walking) {
+  function drawSquachy(mode) {
     var c = ctx;
     c.clearRect(0, 0, 96, 96);
+
+    var sleeping = mode === 'sleep';
+    var dancing  = mode === 'dance';
+    var walking  = mode === 'walk';
 
     anim += 0.08 * animDir;
     if (anim > 1) animDir = -1;
     if (anim < 0) animDir = 1;
-    var bob = Math.sin(anim * Math.PI) * 4;
+    var bob = Math.sin(anim * Math.PI) * (sleeping ? 1 : 4);
     blink++;
-    var blinking = blink % 80 < 4;
+    // "Blinking" doubles as closed-eyes-while-asleep — same flat dark
+    // lens fill either way, just held the whole time instead of a
+    // once-in-a-while flicker.
+    var blinking = sleeping || (blink % 80 < 4);
     if (waveTimer > 0) waveTimer--;
-    if (walking) walkPhase += 0.35;
+    if (walking || dancing) walkPhase += dancing ? 0.22 : 0.35;
 
     var by = 4 + bob;
+    // Head-lolled-to-the-side tilt while asleep; a small drunken sway
+    // while dancing. Wrapped around a pivot near his feet so he still
+    // reads as standing on the ground rather than floating off-axis.
+    var lean = sleeping ? 0.22 : (dancing ? Math.sin(walkPhase * 0.6) * 0.12 : 0);
+
+    c.save();
+    if (lean) { c.translate(48, 90); c.rotate(lean); c.translate(-48, -90); }
 
     // Shadow
     c.fillStyle = 'rgba(180,0,255,0.25)';
@@ -390,6 +431,12 @@
       c.fillRect(0, -6, 22, 12);
       c.restore();
       c.fillStyle = '#3d1800'; c.fillRect(8, by + 50, 18, 12);
+    } else if (dancing) {
+      var aL = -0.6 + Math.sin(walkPhase) * 0.9;
+      var aR = -0.6 + Math.sin(walkPhase + Math.PI) * 0.9;
+      c.fillStyle = '#5a2808';
+      c.save(); c.translate(20, by + 50); c.rotate(aL);  c.fillRect(-22, -6, 22, 12); c.restore();
+      c.save(); c.translate(76, by + 50); c.rotate(-aR); c.fillRect(0, -6, 22, 12);   c.restore();
     } else if (walking) {
       var armSwing = Math.sin(walkPhase) * 0.7;
       c.fillStyle = '#3d1800';
@@ -404,7 +451,15 @@
     }
 
     // Legs
-    if (walking) {
+    if (dancing) {
+      var danceKick = Math.sin(walkPhase * 1.4) * 0.35;
+      c.fillStyle = '#2a1000';
+      c.save(); c.translate(34, by + 74); c.rotate(danceKick);  c.fillRect(-8, 0, 16, 14); c.restore();
+      c.save(); c.translate(62, by + 74); c.rotate(-danceKick); c.fillRect(-8, 0, 16, 14); c.restore();
+      c.fillStyle = '#1a0800';
+      c.save(); c.translate(34, by + 86); c.rotate(danceKick);  c.fillRect(-11, 0, 22, 8); c.restore();
+      c.save(); c.translate(62, by + 86); c.rotate(-danceKick); c.fillRect(-11, 0, 22, 8); c.restore();
+    } else if (walking) {
       var legSwing = Math.sin(walkPhase) * 0.5;
       c.fillStyle = '#2a1000';
       c.save(); c.translate(34, by + 74); c.rotate(legSwing);  c.fillRect(-8, 0, 16, 14); c.restore();
@@ -417,6 +472,18 @@
       c.fillRect(26, by + 74, 16, 14); c.fillRect(54, by + 74, 16, 14);
       c.fillStyle = '#1a0800';
       c.fillRect(22, by + 86, 22, 8); c.fillRect(52, by + 86, 22, 8);
+    }
+
+    c.restore(); // end lean transform
+
+    // Drifting "Z" while asleep — drawn unrotated so it stays upright
+    // even though he's leaning.
+    if (sleeping) {
+      var zt = (Date.now() / 900) % 3;
+      var za = Math.max(0, 1 - zt / 3);
+      c.fillStyle = 'rgba(200,225,255,' + za.toFixed(2) + ')';
+      c.font = 'bold ' + Math.round(12 + zt * 3) + 'px monospace';
+      c.fillText('Z', 68 + zt * 5, by - 6 - zt * 12);
     }
   }
 
@@ -438,6 +505,20 @@
     "Somewhere, a camera just got nervous.",
     "Go touch grass after this. Bring the detector.",
     "Nobody suspects the Sasquach.",
+    "Fun fact: license plate readers can't identify Bigfoot. We checked.",
+    "Your smart doorbell is not your friend. Neither is its subscription.",
+    "I don't do social media. I do antisocial media.",
+    "They see everything except me. That's the whole business model.",
+    "Encrypt it, then encrypt the encryption, then go live in the woods.",
+    "A tracker's only weakness is not knowing where it is.",
+    "Every AirTag has a home. It's just not supposed to be your car.",
+    "If it's ‘smart,’ assume it's talking about you behind your back.",
+    "MAC randomization: your phone doesn't need a permanent name tag.",
+    "Free WiFi is never free. Someone's always buying something.",
+    "I read an entire Terms of Service once. It changed me.",
+    "Privacy isn't paranoia. It's just good manners.",
+    "Somewhere a drone just lost signal. Unrelated to me standing near it.",
+    "I don't hide from cameras. Cameras hide from me.",
   ];
 
   var PET_LINES = [
@@ -445,6 +526,42 @@
     "Petting a cryptid through a browser. Bold.",
     "This is why they never get good photos of me.",
     "Ten out of ten, would be spotted again.",
+  ];
+
+  var JOKES = [
+    ["Why don't hackers ever get cold?", "...They always leave too many Windows open."],
+    ["Why did the AirTag break up with the backpack?", "...It felt like it was being followed."],
+    ["What do you call a Sasquatch with a Faraday bag?", "...Untrackable. Also, my cousin."],
+    ["Why was the WiFi router bad at relationships?", "...Terrible at commitment. Kept dropping the connection."],
+    ["What's a surveillance camera's least favorite forest?", "...One with really good foliage. And me."],
+    ["How does a cryptid stay off the grid?", "...Mostly by not being on one in the first place."],
+  ];
+
+  var DANCE_LINES = [
+    "nobody's watching. well — ironically.",
+    "this is not on any surveillance footage. I checked.",
+    "big feet, bigger dance moves.",
+    "cryptids DO dance. we just don't get filmed doing it.",
+    "no rhythm detector has ever caught me either.",
+  ];
+
+  var SLEEP_LINES = [
+    "gonna just... rest my eyes for a sec.",
+    "zzz... no signal... zzz...",
+    "five more minutes of being a legend.",
+    "don't tell the discord I dozed off.",
+  ];
+
+  var WAKE_LINES = [
+    "huh — what — I was scanning. Definitely scanning.",
+    "I wasn't asleep, I was 'listening for RF activity.'",
+    "back. did I miss anything? probably not.",
+  ];
+
+  var DISMANTLE_CLOSERS = [
+    "aaaand... there. good as new. probably.",
+    "fixed. don't ask what 'it' was.",
+    "all better. that's a load-bearing bolt, by the way.",
   ];
 
   function say(text, ms) {
@@ -458,17 +575,29 @@
 
   function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
-  // Walk him back and forth across the stage, flipping to face travel
-  // direction. rAF-driven so it adapts to the actual stage width
-  // instead of guessing in percentages.
+  function moveBoltTo(el) {
+    var r = el.getBoundingClientRect();
+    bolt.style.left = (r.left + r.width / 2) + 'px';
+    bolt.style.top  = (r.top + r.height / 2) + 'px';
+    bolt.classList.toggle('spin');
+  }
+
+  // ---- Movement + render loop -------------------------------------
+  // mode drives drawSquachy(); moving gates whether frame() advances
+  // his position — the two are independent so a behavior can hold him
+  // still (moving=false) while still animating in place (mode='dance'
+  // etc), or vice versa.
+  var mode = 'walk', moving = true;
   var x = 0, dir = 1, speed = 0.55;
   function frame() {
-    var maxX = Math.max(0, stage.clientWidth - wrap.offsetWidth);
-    x += dir * speed;
-    if (x >= maxX) { x = maxX; dir = -1; sprite.classList.add('face-left'); }
-    if (x <= 0) { x = 0; dir = 1; sprite.classList.remove('face-left'); }
-    wrap.style.transform = 'translateX(' + x + 'px)';
-    drawSquachy(true);
+    if (moving) {
+      var maxX = Math.max(0, stage.clientWidth - wrap.offsetWidth);
+      x += dir * speed;
+      if (x >= maxX) { x = maxX; dir = -1; sprite.classList.add('face-left'); }
+      if (x <= 0) { x = 0; dir = 1; sprite.classList.remove('face-left'); }
+      wrap.style.transform = 'translateX(' + x + 'px)';
+    }
+    drawSquachy(mode);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
@@ -478,8 +607,92 @@
     say(pick(PET_LINES), 3000);
   });
 
-  // Walk through the how-to lines once on load, then settle into
-  // random idle chatter.
+  // ---- Idle behavior scheduler --------------------------------------
+  // Mostly he just patrols and occasionally chatters, but every so
+  // often (roughly every 6-13s once the intro's done) he stops to do
+  // a whole bit instead — dancing, telling a joke, dozing off, or
+  // "fixing" something on the page — before going back to walking.
+  var BEHAVIOR_WEIGHTS = ['chatter', 'chatter', 'chatter', 'dance', 'joke', 'sleep', 'dismantle'];
+
+  function scheduleIdle() {
+    setTimeout(runRandomBehavior, 6000 + Math.random() * 7000);
+  }
+
+  function resumeWalking() {
+    mode = 'walk';
+    moving = true;
+    scheduleIdle();
+  }
+
+  function runRandomBehavior() {
+    var b = pick(BEHAVIOR_WEIGHTS);
+    if (b === 'chatter') { say(pick(IDLE_LINES), 3600); scheduleIdle(); return; }
+    moving = false;
+    if (b === 'dance') return doDance();
+    if (b === 'joke') return doJoke();
+    if (b === 'sleep') return doSleep();
+    if (b === 'dismantle') return doDismantle();
+  }
+
+  function doDance() {
+    mode = 'dance';
+    say(pick(DANCE_LINES), 3200);
+    setTimeout(resumeWalking, 3400);
+  }
+
+  function doJoke() {
+    mode = 'idle';
+    var j = pick(JOKES);
+    say(j[0], 2200);
+    setTimeout(function () {
+      say(j[1], 2600);
+      setTimeout(resumeWalking, 2700);
+    }, 2200);
+  }
+
+  function doSleep() {
+    mode = 'sleep';
+    say(pick(SLEEP_LINES), 4200);
+    setTimeout(function () {
+      mode = 'idle';
+      say(pick(WAKE_LINES), 2200);
+      setTimeout(resumeWalking, 2300);
+    }, 4200);
+  }
+
+  function doDismantle() {
+    mode = 'idle';
+    say('hey uh — hold on a sec', 1800);
+
+    setTimeout(function () {
+      say('I think there’s a loose bolt back here', 2200);
+      bolt.style.transition = 'none';
+      moveBoltTo(card);
+      bolt.classList.add('show');
+      void bolt.offsetWidth; // force reflow so the fly-out actually animates
+      bolt.style.transition = '';
+      moveBoltTo(sprite);
+    }, 1800);
+
+    setTimeout(function () {
+      card.classList.add('dd-wiggle');
+      say('found it. this is fine, this is normal', 2200);
+    }, 4000);
+
+    setTimeout(function () {
+      card.classList.remove('dd-wiggle');
+      moveBoltTo(card);
+      say(pick(DISMANTLE_CLOSERS), 2600);
+    }, 6200);
+
+    setTimeout(function () {
+      bolt.classList.remove('show');
+      resumeWalking();
+    }, 8800);
+  }
+
+  // Walk through the how-to lines once on load, then hand off to the
+  // behavior scheduler.
   var step = 0;
   function nextHowTo() {
     if (step < HOW_TO.length) {
@@ -489,12 +702,6 @@
     } else {
       scheduleIdle();
     }
-  }
-  function scheduleIdle() {
-    setTimeout(function () {
-      say(pick(IDLE_LINES), 3600);
-      scheduleIdle();
-    }, 7000 + Math.random() * 8000);
   }
   setTimeout(nextHowTo, 900);
 })();
