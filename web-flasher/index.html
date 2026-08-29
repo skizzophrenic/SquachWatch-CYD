@@ -45,6 +45,17 @@
     z-index:50;
   }
 
+  /* Ambient matrix-rain, same visual language as the firmware's own
+     background — full viewport, sits behind everything, low opacity
+     so it reads as texture rather than competing with the content. */
+  #ambientRain{
+    position:fixed; inset:0;
+    width:100%; height:100%;
+    z-index:1;
+    pointer-events:none;
+    opacity:0.16;
+  }
+
   /* Synthwave horizon grid, fixed to the bottom of the viewport */
   .horizon{
     position:fixed; left:0; right:0; bottom:0; height:38vh;
@@ -152,6 +163,7 @@
   }
   .squachy-sprite:active{ transform:scale(0.94); }
   .squachy-sprite.face-left{ transform:scaleX(-1); }
+  .squachy-sprite.grabbing{ cursor:grabbing; }
 
   /* Card gets a comedic wobble while Squachy is "fixing" it */
   @keyframes cardWiggle{
@@ -256,6 +268,37 @@
     text-align:center;
   }
 
+  .identify-row{
+    margin-top:16px;
+    text-align:center;
+  }
+  .identify-btn{
+    font-family:'VT323', monospace;
+    font-size:0.95rem;
+    letter-spacing:0.06em;
+    padding:6px 16px;
+    background:transparent;
+    color:var(--cyan);
+    border:1px solid rgba(0,255,245,0.5);
+    border-radius:6px;
+    cursor:pointer;
+    transition:all 0.15s;
+  }
+  .identify-btn:hover:not(:disabled){
+    background:rgba(0,255,245,0.1);
+    box-shadow:0 0 12px rgba(0,255,245,0.3);
+  }
+  .identify-btn:disabled{ opacity:0.45; cursor:default; }
+  .identify-result{
+    margin-top:8px;
+    font-family:'VT323', monospace;
+    font-size:0.95rem;
+    letter-spacing:0.03em;
+    color:var(--vapor-yellow);
+    min-height:1.3em;
+  }
+  .identify-result.err{ color:var(--pink); }
+
   .about{
     margin-top:36px;
     text-align:center;
@@ -273,6 +316,50 @@
   .driver-note a{ color:var(--vapor-blue); border-bottom-color:var(--vapor-blue); }
   .driver-note a:hover{ color:var(--vapor-pink); border-color:var(--vapor-pink); }
 
+  /* Fake ALERT screen — click Squachy 10x fast. Styled after the
+     firmware's actual detection alert. */
+  .fake-alert{
+    position:fixed; inset:0;
+    z-index:9999;
+    background:var(--bg);
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    gap:10px;
+    text-align:center;
+    padding:24px;
+    cursor:pointer;
+    animation:alertBorderPulse 0.5s ease-in-out infinite alternate;
+  }
+  @keyframes alertBorderPulse{
+    0%{ box-shadow:inset 0 0 0 6px var(--vapor-pink); }
+    100%{ box-shadow:inset 0 0 0 6px var(--pink); }
+  }
+  .fake-alert .fa-title{
+    font-family:'Orbitron', sans-serif;
+    font-weight:900;
+    font-size:clamp(1.6rem, 8vw, 3rem);
+    color:var(--pink);
+    letter-spacing:0.08em;
+    animation:alertBlink 0.4s steps(1) infinite;
+  }
+  @keyframes alertBlink{ 50%{ opacity:0; } }
+  .fake-alert .fa-target{
+    font-family:'Orbitron', sans-serif;
+    font-weight:900;
+    font-size:clamp(2rem, 10vw, 3.8rem);
+    color:var(--vapor-pink);
+    letter-spacing:0.05em;
+  }
+  .fake-alert .fa-conf{ font-family:'VT323', monospace; font-size:1.3rem; color:var(--green); }
+  .fake-alert .fa-vendor{ font-family:'VT323', monospace; font-size:1.6rem; color:var(--cyan); }
+  .fake-alert .fa-line{ font-family:'Share Tech Mono', monospace; font-size:0.95rem; color:#fff; }
+  .fake-alert .fa-hint{
+    margin-top:20px;
+    font-family:'VT323', monospace;
+    font-size:0.9rem;
+    color:rgba(255,255,255,0.4);
+    letter-spacing:0.1em;
+  }
+
   footer{
     text-align:center;
     padding:24px 16px 40px;
@@ -282,6 +369,7 @@
 </style>
 </head>
 <body>
+<canvas id="ambientRain"></canvas>
 <div class="horizon"></div>
 
 <header>
@@ -319,6 +407,11 @@
     </ol>
 
     <p class="browser-note">Works in Chrome / Edge / Brave on desktop. No app to install — just the browser.</p>
+
+    <div class="identify-row">
+      <button id="identifyBtn" class="identify-btn">[ IDENTIFY MY BOARD ]</button>
+      <div class="identify-result" id="identifyResult"></div>
+    </div>
   </div>
 
   <div class="about">
@@ -594,30 +687,167 @@
     bolt.classList.toggle('spin');
   }
 
+  var FLING_LINES = [
+    "WHOA—",
+    "okay that's a new one.",
+    "I have complaints.",
+    "cryptid, not a plaything. ...fine, a little bit a plaything.",
+    "sticking the landing. mostly.",
+  ];
+
   // ---- Movement + render loop -------------------------------------
   // mode drives drawSquachy(); moving gates whether frame() advances
   // his position — the two are independent so a behavior can hold him
   // still (moving=false) while still animating in place (mode='dance'
-  // etc), or vice versa.
+  // etc), or vice versa. phase is the outer switch: 'auto' is the
+  // normal walk+behavior system above; 'drag'/'fling' hijack his
+  // position entirely while you're holding or have just thrown him.
   var mode = 'walk', moving = true;
   var x = 0, dir = 1, speed = 0.55;
-  function frame() {
-    if (moving) {
-      var maxX = Math.max(0, stage.clientWidth - wrap.offsetWidth);
-      x += dir * speed;
-      if (x >= maxX) { x = maxX; dir = -1; sprite.classList.add('face-left'); }
-      if (x <= 0) { x = 0; dir = 1; sprite.classList.remove('face-left'); }
-      wrap.style.transform = 'translateX(' + x + 'px)';
+  var phase = 'auto';
+  var offsetY = 0, velX = 0, velY = 0, spin = 0, spinVel = 0;
+  var dragDX = 0, dragDY = 0, ptrLastX = 0, ptrLastY = 0, ptrLastT = 0, dragMoved = 0;
+  var rapidTaps = 0, lastTapAt = 0;
+
+  // Click him 10x fast and he "detects" himself — a meta callback to
+  // the actual firmware's ALERT screen for anyone who's used the
+  // device and will recognize the layout.
+  function triggerFakeAlert() {
+    var overlay = document.createElement('div');
+    overlay.className = 'fake-alert';
+    overlay.innerHTML =
+      '<div class="fa-title">!! DETECTION !!</div>' +
+      '<div class="fa-target">CRYPTID</div>' +
+      '<div class="fa-conf">HIGH CONFIDENCE &nbsp;~420%</div>' +
+      '<div class="fa-vendor">TALKING SASQUACH INDUSTRIES</div>' +
+      '<div class="fa-line">MAC: DE:AD:BE:EF:CA:FE</div>' +
+      '<div class="fa-line">RSSI: -12 dBm &nbsp; CH: 6 &nbsp; (very close)</div>' +
+      '<div class="fa-hint">tap anywhere to dismiss</div>';
+    document.body.appendChild(overlay);
+    function dismiss() {
+      overlay.remove();
+      say('yeah, that was me. hi.', 3000);
     }
-    drawSquachy(mode);
+    overlay.addEventListener('click', dismiss);
+    setTimeout(dismiss, 5000);
+  }
+
+  function frame() {
+    if (phase === 'auto') {
+      if (moving) {
+        var maxX = Math.max(0, stage.clientWidth - wrap.offsetWidth);
+        x += dir * speed;
+        if (x >= maxX) { x = maxX; dir = -1; sprite.classList.add('face-left'); }
+        if (x <= 0) { x = 0; dir = 1; sprite.classList.remove('face-left'); }
+        wrap.style.transform = 'translate(' + x + 'px, 0px)';
+      }
+    } else if (phase === 'fling') {
+      velY += 0.9; // gravity
+      velX *= 0.99;
+      x += velX;
+      offsetY += velY;
+      var maxX2 = Math.max(0, stage.clientWidth - wrap.offsetWidth);
+      var floorY = stage.clientHeight - wrap.offsetHeight - 20 - 4;
+      if (x < 0) { x = 0; velX = -velX * 0.55; }
+      if (x > maxX2) { x = maxX2; velX = -velX * 0.55; }
+      if (offsetY > floorY) { offsetY = floorY; velY = -velY * 0.45; velX *= 0.7; }
+      if (offsetY < -20) { offsetY = -20; velY = -velY * 0.45; }
+      spin += spinVel;
+      spinVel *= 0.96;
+      wrap.style.transform = 'translate(' + x + 'px, ' + offsetY + 'px)';
+      sprite.style.transform = 'rotate(' + spin.toFixed(1) + 'deg)';
+      if (Math.abs(velX) < 0.15 && Math.abs(velY) < 0.15 && Math.abs(offsetY - floorY) < 1) {
+        phase = 'auto';
+        offsetY = 0; spin = 0; spinVel = 0;
+        sprite.style.transform = '';
+        wrap.style.transform = 'translate(' + x + 'px, 0px)';
+        moving = true;
+        mode = 'walk';
+        scheduleIdle();
+      }
+    }
+    // phase 'drag' updates position directly in onDragMove — nothing to do here.
+    drawSquachy(phase === 'auto' ? mode : 'idle');
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
 
-  sprite.addEventListener('click', function () {
-    waveTimer = 30;
-    say(pick(PET_LINES), 3000);
-  });
+  function pointerXY(e) {
+    var t = e.touches ? (e.touches[0] || e.changedTouches[0]) : e;
+    return { x: t.clientX, y: t.clientY };
+  }
+
+  function startDrag(e) {
+    e.preventDefault();
+    var p = pointerXY(e);
+    var r = stage.getBoundingClientRect();
+    phase = 'drag';
+    moving = false;
+    sprite.classList.add('grabbing');
+    dragDX = p.x - r.left - x;
+    dragDY = p.y - r.top - (20 + offsetY);
+    ptrLastX = p.x; ptrLastY = p.y; ptrLastT = performance.now();
+    dragMoved = 0;
+    velX = 0; velY = 0;
+    document.addEventListener('mousemove', onDragMove);
+    document.addEventListener('mouseup', endDrag);
+    document.addEventListener('touchmove', onDragMove, { passive: false });
+    document.addEventListener('touchend', endDrag);
+  }
+
+  function onDragMove(e) {
+    if (phase !== 'drag') return;
+    e.preventDefault();
+    var p = pointerXY(e);
+    var r = stage.getBoundingClientRect();
+    var now = performance.now();
+    var dt = Math.max(1, now - ptrLastT);
+    velX = (p.x - ptrLastX) / dt * 16;
+    velY = (p.y - ptrLastY) / dt * 16;
+    dragMoved += Math.abs(p.x - ptrLastX) + Math.abs(p.y - ptrLastY);
+    ptrLastX = p.x; ptrLastY = p.y; ptrLastT = now;
+    x = p.x - r.left - dragDX;
+    offsetY = (p.y - r.top - dragDY) - 20;
+    var maxX3 = Math.max(0, stage.clientWidth - wrap.offsetWidth);
+    x = Math.max(0, Math.min(maxX3, x));
+    wrap.style.transform = 'translate(' + x + 'px, ' + offsetY + 'px)';
+  }
+
+  function endDrag() {
+    if (phase !== 'drag') return;
+    document.removeEventListener('mousemove', onDragMove);
+    document.removeEventListener('mouseup', endDrag);
+    document.removeEventListener('touchmove', onDragMove);
+    document.removeEventListener('touchend', endDrag);
+    sprite.classList.remove('grabbing');
+    if (dragMoved < 10) {
+      // Barely moved — treat it as a pet tap, not a throw.
+      phase = 'auto';
+      mode = 'walk';
+      moving = true;
+      offsetY = 0;
+      wrap.style.transform = 'translate(' + x + 'px, 0px)';
+
+      var tapNow = Date.now();
+      rapidTaps = (tapNow - lastTapAt < 500) ? rapidTaps + 1 : 1;
+      lastTapAt = tapNow;
+      if (rapidTaps >= 10) {
+        rapidTaps = 0;
+        triggerFakeAlert();
+        return;
+      }
+
+      waveTimer = 30;
+      say(pick(PET_LINES), 3000);
+      return;
+    }
+    phase = 'fling';
+    spinVel = velX * 0.15;
+    say(pick(FLING_LINES), 2200);
+  }
+
+  sprite.addEventListener('mousedown', startDrag);
+  sprite.addEventListener('touchstart', startDrag, { passive: false });
 
   // ---- Idle behavior scheduler --------------------------------------
   // Mostly he just patrols and occasionally chatters, but every so
@@ -631,12 +861,17 @@
   }
 
   function resumeWalking() {
+    // If he's being dragged or is still mid-fling, the drag/fling code
+    // re-establishes the scheduler itself once it settles back to
+    // 'auto' — jumping in here too would fight it for control.
+    if (phase !== 'auto') return;
     mode = 'walk';
     moving = true;
     scheduleIdle();
   }
 
   function runRandomBehavior() {
+    if (phase !== 'auto') { scheduleIdle(); return; }
     var b = pick(BEHAVIOR_WEIGHTS);
     if (b === 'chatter') { say(pick(IDLE_LINES), 3600); scheduleIdle(); return; }
     moving = false;
@@ -716,6 +951,138 @@
     }
   }
   setTimeout(nextHowTo, 900);
+
+  // ---- Celebrate a successful flash ---------------------------------
+  // esp-web-tools doesn't fire any public "done" event — the dialog
+  // it creates just reflects its own UI step as a `state` attribute
+  // (used for its internal CSS hooks: INSTALL/ASK_ERASE while
+  // flashing, DASHBOARD once connected and ready). That's the only
+  // externally-observable signal available, so this watches for a
+  // transition into DASHBOARD that was actually preceded by being in
+  // the install flow — not just clicking Connect to browse. It's
+  // watching an implementation detail rather than a documented API,
+  // so it's wrapped defensively and just quietly does nothing if a
+  // future esp-web-tools release stops matching this shape.
+  var VICTORY_LINES = [
+    "IT WORKED. Go be mysterious.",
+    "Flashed and ready. Nobody saw that.",
+    "That's a wrap — your detector's alive.",
+    "Boom. Go find some cameras.",
+  ];
+
+  function watchInstallDialog(dialog) {
+    var wasInstalling = false;
+    try {
+      var attrObserver = new MutationObserver(function () {
+        var state = dialog.getAttribute('state');
+        if (state === 'INSTALL' || state === 'ASK_ERASE') wasInstalling = true;
+        if (state === 'DASHBOARD' && wasInstalling) {
+          wasInstalling = false;
+          if (phase === 'auto') {
+            mode = 'dance';
+            moving = false;
+            say(pick(VICTORY_LINES), 4000);
+            setTimeout(resumeWalking, 4200);
+          }
+        }
+      });
+      attrObserver.observe(dialog, { attributes: true, attributeFilter: ['state'] });
+    } catch (e) { /* fine if a future esp-web-tools version doesn't match this shape */ }
+  }
+
+  try {
+    var bodyObserver = new MutationObserver(function (mutations) {
+      mutations.forEach(function (m) {
+        m.addedNodes.forEach(function (node) {
+          if (node.nodeName && node.nodeName.toLowerCase() === 'ewt-install-dialog') {
+            watchInstallDialog(node);
+          }
+        });
+      });
+    });
+    bodyObserver.observe(document.body, { childList: true });
+  } catch (e) {}
+
+  // ---- Identify board -------------------------------------------------
+  // Uses esptool-js directly — the same library esp-web-tools itself
+  // uses internally — over its own independent serial connection
+  // (separate port request from the install button), and disconnects
+  // cleanly afterward so the install button can use the port next.
+  var identifyBtn = document.getElementById('identifyBtn');
+  var identifyResult = document.getElementById('identifyResult');
+
+  if (identifyBtn) {
+    if (!('serial' in navigator)) {
+      identifyBtn.disabled = true;
+      identifyBtn.textContent = '[ IDENTIFY MY BOARD ] (needs Chrome/Edge)';
+    } else {
+      identifyBtn.addEventListener('click', identifyBoard);
+    }
+  }
+
+  async function identifyBoard() {
+    identifyBtn.disabled = true;
+    identifyResult.className = 'identify-result';
+    identifyResult.textContent = 'Connecting...';
+    var port, transport, esploader;
+    try {
+      port = await navigator.serial.requestPort();
+      await port.open({ baudRate: 115200, bufferSize: 8192 });
+      var mod = await import('https://unpkg.com/esptool-js@0.6.1/lib/index.js');
+      transport = new mod.Transport(port);
+      esploader = new mod.ESPLoader({ transport: transport, baudrate: 115200, enableTracing: false });
+      var chipDesc = await esploader.main();
+      var mac = await esploader.chip.readMac(esploader);
+      identifyResult.textContent = 'IDENTIFIED: ' + chipDesc + '  ·  MAC ' + mac;
+      say('That’s a ' + chipDesc + '. I know a fellow cryptid when I see one.', 3800);
+      await transport.setRTS(true);
+      await new Promise(function (r) { setTimeout(r, 100); });
+      await esploader.after();
+      await transport.disconnect();
+    } catch (err) {
+      identifyResult.className = 'identify-result err';
+      identifyResult.textContent = 'Couldn’t identify it: ' + (err && err.message ? err.message : 'unknown error');
+      try {
+        if (transport) await transport.disconnect();
+        else if (port) await port.close();
+      } catch (e2) { /* already gone, nothing to clean up */ }
+    } finally {
+      identifyBtn.disabled = false;
+    }
+  }
+})();
+
+// ---- Ambient background rain -----------------------------------------
+// Same visual language as the firmware's own matrix-rain background,
+// kept faint (see #ambientRain's opacity) so it's texture, not noise.
+(function () {
+  var cv = document.getElementById('ambientRain');
+  var c = cv.getContext('2d');
+  var chars = 'アイウエオカキクケコサシスセソ0123456789ABCDEFSQUACHWATCH';
+  var cols, drops, W, H;
+
+  function resize() {
+    W = cv.width = window.innerWidth;
+    H = cv.height = window.innerHeight;
+    cols = Math.floor(W / 18);
+    drops = new Array(cols).fill(0).map(function () { return Math.random() * -50; });
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  function draw() {
+    c.fillStyle = 'rgba(5,0,15,0.07)';
+    c.fillRect(0, 0, W, H);
+    c.font = '14px "Share Tech Mono", monospace';
+    for (var i = 0; i < cols; i++) {
+      var ch = chars[Math.floor(Math.random() * chars.length)];
+      c.fillStyle = Math.random() > 0.85 ? 'rgba(255,113,206,0.9)' : 'rgba(0,255,245,0.85)';
+      c.fillText(ch, i * 18, drops[i] * 18);
+      if (drops[i] * 18 > H && Math.random() > 0.975) drops[i] = 0;
+      drops[i]++;
+    }
+  }
+  setInterval(draw, 60);
 })();
 </script>
 </body>
