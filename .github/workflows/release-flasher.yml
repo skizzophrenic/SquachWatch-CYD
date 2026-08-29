@@ -4,9 +4,13 @@ name: Build and release firmware
 # Release for that tag with the three raw PlatformIO artifacts
 # attached (bootloader/partitions/firmware — the human-facing source
 # of truth), then also merge them into one flashable image and attach
-# that plus a version-stamped manifest.json. The web flasher itself
-# lives on talkingsasquach.com, not GitHub Pages — pull these two
-# release assets over to that site's repo whenever you cut a release.
+# that plus a version-stamped manifest.json. The repo is public now, so
+# the web flasher itself is deployed straight to this repo's own
+# GitHub Pages site (github.io/SquachWatch-CYD) as part of this same
+# run — firmware-merged.bin and manifest.json are copied alongside
+# index.html there so the browser fetches them same-origin (GitHub
+# release assets don't send CORS headers, so the flasher page can't
+# fetch them directly from the Releases tab).
 on:
   push:
     tags:
@@ -15,10 +19,15 @@ on:
 
 permissions:
   contents: write   # create the GitHub Release
+  pages: write       # deploy the flasher site
+  id-token: write    # required by actions/deploy-pages
 
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -78,3 +87,19 @@ jobs:
             .pio/build/cyd/firmware.bin \
             firmware-merged.bin \
             manifest.json
+
+      - name: Assemble Pages site
+        run: |
+          mkdir -p _site
+          cp web-flasher/index.html _site/index.html
+          cp web-flasher/manifest.json _site/manifest.json
+          cp firmware-merged.bin _site/firmware-merged.bin
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
