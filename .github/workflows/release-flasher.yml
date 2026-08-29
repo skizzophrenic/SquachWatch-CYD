@@ -1,0 +1,90 @@
+name: Build release and deploy web flasher
+
+# Push a tag like v1.2.0 to: build the firmware, attach the three
+# PlatformIO artifacts (bootloader/partitions/firmware) to a new
+# GitHub Release for that tag, then merge them into one flashable
+# image and deploy web-flasher/ (pointing at that image) to GitHub
+# Pages. The Pages copy is just an auto-synced mirror — the Release
+# stays the human-facing source of truth for the individual .bin files.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # create the GitHub Release
+  pages: write       # deploy to GitHub Pages
+  id-token: write    # required by actions/deploy-pages
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-release-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build firmware
+        run: pio run
+
+      - name: Determine version
+        id: ver
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release with build artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.ver.outputs.tag }}" \
+            --title "SquachWatch-CYD ${{ steps.ver.outputs.tag }}" \
+            --generate-notes \
+            .pio/build/cyd/bootloader.bin \
+            .pio/build/cyd/partitions.bin \
+            .pio/build/cyd/firmware.bin
+
+      - name: Merge into one flashable image
+        run: |
+          pip install esptool
+          python -m esptool --chip esp32 merge_bin \
+            -o web-flasher/firmware-merged.bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            0x1000  .pio/build/cyd/bootloader.bin \
+            0x8000  .pio/build/cyd/partitions.bin \
+            0x10000 .pio/build/cyd/firmware.bin
+
+      - name: Stamp manifest version
+        run: |
+          python - <<'PY'
+          import json
+          p = "web-flasher/manifest.json"
+          m = json.load(open(p))
+          m["version"] = "${{ steps.ver.outputs.version }}"
+          json.dump(m, open(p, "w"), indent=2)
+          PY
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload flasher site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: web-flasher
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

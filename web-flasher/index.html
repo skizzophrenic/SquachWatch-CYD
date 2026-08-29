@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SquachWatch Flasher</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=VT323&family=Orbitron:wght@700;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a000f;
+    --taskbar:#0d001a;
+    --panel:rgba(13,0,26,0.85);
+    --cyan:#00fff5;
+    --pink:#ff2d78;
+    --purple:#b400ff;
+    --vapor-pink:#ff71ce;
+    --vapor-purple:#b967ff;
+    --vapor-blue:#01cdfe;
+    --vapor-yellow:#fffb96;
+    --green:#00ff88;
+    --text:#e8e8ff;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    min-height:100vh;
+    font-family:'Share Tech Mono', monospace;
+    color:var(--text);
+    background:
+      radial-gradient(ellipse at 50% -10%, rgba(180,0,255,0.35), transparent 55%),
+      linear-gradient(180deg, #150022 0%, #0a000f 45%, #05000a 100%);
+    overflow-x:hidden;
+    position:relative;
+  }
+
+  /* CRT scanlines, faint, over everything */
+  body::before{
+    content:"";
+    position:fixed; inset:0;
+    background:repeating-linear-gradient(
+      to bottom, rgba(255,255,255,0.035) 0px, rgba(255,255,255,0.035) 1px,
+      transparent 1px, transparent 3px
+    );
+    pointer-events:none;
+    z-index:50;
+  }
+
+  /* Synthwave horizon grid, fixed to the bottom of the viewport */
+  .horizon{
+    position:fixed; left:0; right:0; bottom:0; height:38vh;
+    background:linear-gradient(180deg, transparent 0%, rgba(180,0,255,0.12) 100%);
+    overflow:hidden;
+    z-index:0;
+    pointer-events:none;
+  }
+  .horizon::before{
+    content:"";
+    position:absolute; left:50%; bottom:-20%; width:220%; height:140%;
+    transform:translateX(-50%) perspective(220px) rotateX(60deg);
+    background-image:
+      repeating-linear-gradient(90deg, rgba(0,255,245,0.35) 0, rgba(0,255,245,0.35) 2px, transparent 2px, transparent 60px),
+      repeating-linear-gradient(0deg, rgba(255,45,120,0.3) 0, rgba(255,45,120,0.3) 2px, transparent 2px, transparent 40px);
+  }
+  .horizon::after{
+    content:"";
+    position:absolute; left:0; right:0; top:0; height:2px;
+    background:linear-gradient(90deg, var(--cyan), var(--vapor-pink), var(--vapor-purple), var(--cyan));
+    box-shadow:0 0 12px 2px rgba(0,255,245,0.6);
+  }
+
+  header, main, footer{ position:relative; z-index:2; }
+
+  header{
+    text-align:center;
+    padding:48px 16px 8px;
+  }
+  .wordmark{
+    font-family:'Orbitron', sans-serif;
+    font-weight:900;
+    font-size:clamp(2.2rem, 7vw, 3.6rem);
+    letter-spacing:0.04em;
+    margin:0;
+    background:linear-gradient(90deg, var(--cyan), var(--vapor-pink) 50%, var(--vapor-purple));
+    -webkit-background-clip:text;
+    background-clip:text;
+    color:transparent;
+    text-shadow:0 0 30px rgba(180,0,255,0.35);
+  }
+  .tagline{
+    font-family:'VT323', monospace;
+    font-size:1.3rem;
+    letter-spacing:0.08em;
+    color:var(--vapor-blue);
+    margin:6px 0 0;
+  }
+
+  main{
+    max-width:640px;
+    margin:0 auto;
+    padding:0 16px 80px;
+  }
+
+  /* ---- Squachy ---- */
+  .squachy-stage{
+    position:relative;
+    height:200px;
+    margin:28px 0 8px;
+  }
+  .squachy-wrap{
+    position:absolute;
+    top:20px; left:0;
+    width:132px;
+  }
+  .bubble{
+    position:absolute;
+    left:50%;
+    bottom:138px;
+    transform:translateX(-50%);
+    min-width:180px;
+    max-width:280px;
+    background:var(--bg);
+    border:2px solid var(--vapor-pink);
+    border-radius:8px;
+    padding:8px 12px;
+    font-size:0.95rem;
+    line-height:1.3;
+    text-align:center;
+    color:#fff;
+    box-shadow:0 0 16px rgba(255,113,206,0.35);
+    opacity:0;
+    transition:opacity 0.25s ease;
+    pointer-events:none;
+    white-space:normal;
+  }
+  .bubble.show{ opacity:1; }
+  .bubble::after{
+    content:"";
+    position:absolute; left:50%; bottom:-9px; transform:translateX(-50%);
+    border:6px solid transparent;
+    border-top-color:var(--vapor-pink);
+  }
+
+  .squachy-sprite{
+    width:132px; height:132px;
+    image-rendering:pixelated;
+    cursor:pointer;
+    transition:transform 0.08s;
+    filter:
+      drop-shadow(0 0 8px rgba(180,0,255,0.9))
+      drop-shadow(0 0 16px rgba(180,0,255,0.6))
+      drop-shadow(0 0 32px rgba(180,0,255,0.3));
+  }
+  .squachy-sprite:active{ transform:scale(0.94); }
+  .squachy-sprite.face-left{ transform:scaleX(-1); }
+
+  /* ---- Flasher card ---- */
+  .card{
+    background:var(--panel);
+    border:1px solid var(--purple);
+    border-radius:10px;
+    padding:24px 20px;
+    box-shadow:0 0 24px rgba(180,0,255,0.2);
+    backdrop-filter:blur(2px);
+  }
+  .card h2{
+    font-family:'VT323', monospace;
+    font-size:1.7rem;
+    letter-spacing:0.06em;
+    color:var(--vapor-yellow);
+    margin:0 0 14px;
+    text-align:center;
+  }
+
+  .install-btn{
+    display:block;
+    width:100%;
+    font-family:'VT323', monospace;
+    font-size:1.4rem;
+    letter-spacing:0.08em;
+    padding:14px;
+    background:linear-gradient(90deg, var(--purple), var(--vapor-pink));
+    color:#fff;
+    border:none;
+    border-radius:8px;
+    cursor:pointer;
+    box-shadow:0 0 18px rgba(180,0,255,0.5);
+    transition:transform 0.1s, box-shadow 0.2s;
+  }
+  .install-btn:hover{ box-shadow:0 0 26px rgba(255,113,206,0.7); }
+  .install-btn:active{ transform:scale(0.98); }
+
+  .unsupported, .not-allowed{
+    display:block;
+    text-align:center;
+    color:var(--pink);
+    font-size:0.95rem;
+    padding:10px;
+    border:1px dashed var(--pink);
+    border-radius:6px;
+  }
+
+  .steps{
+    margin:20px 0 0;
+    padding-left:0;
+    list-style:none;
+    counter-reset:step;
+  }
+  .steps li{
+    counter-increment:step;
+    position:relative;
+    padding:6px 0 6px 40px;
+    font-size:0.95rem;
+    line-height:1.4;
+    border-bottom:1px solid rgba(180,0,255,0.15);
+  }
+  .steps li:last-child{ border-bottom:none; }
+  .steps li::before{
+    content:counter(step);
+    position:absolute; left:0; top:4px;
+    width:26px; height:26px;
+    display:flex; align-items:center; justify-content:center;
+    font-family:'VT323', monospace;
+    font-size:1.1rem;
+    color:var(--bg);
+    background:var(--cyan);
+    border-radius:50%;
+  }
+
+  .browser-note{
+    margin-top:16px;
+    font-size:0.85rem;
+    color:var(--vapor-blue);
+    text-align:center;
+  }
+
+  .about{
+    margin-top:36px;
+    text-align:center;
+    font-size:0.9rem;
+    color:#b9a8d8;
+    line-height:1.6;
+  }
+  .about a{ color:var(--cyan); text-decoration:none; border-bottom:1px dotted var(--cyan); }
+  .about a:hover{ color:var(--vapor-pink); border-color:var(--vapor-pink); }
+
+  footer{
+    text-align:center;
+    padding:24px 16px 40px;
+    font-size:0.8rem;
+    color:#5a4a72;
+  }
+</style>
+</head>
+<body>
+<div class="horizon"></div>
+
+<header>
+  <h1 class="wordmark">SQUACHWATCH</h1>
+  <p class="tagline">&gt;&gt; WEB FLASHER &lt;&lt;</p>
+</header>
+
+<main>
+  <div class="squachy-stage">
+    <div class="squachy-wrap" id="squachyWrap">
+      <div class="bubble" id="bubble"></div>
+      <canvas class="squachy-sprite" id="squachySprite" width="96" height="96" title="pet the cryptid"></canvas>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>FLASH YOUR DETECTOR</h2>
+
+    <esp-web-install-button manifest="./manifest.json">
+      <button slot="activate" class="install-btn">[ CONNECT &amp; INSTALL ]</button>
+      <span slot="unsupported" class="unsupported">
+        Your browser can't do this. Web Serial only works in Chrome, Edge,
+        or another Chromium browser, on a computer (not a phone).
+      </span>
+      <span slot="not-allowed" class="not-allowed">
+        This page needs to be loaded over HTTPS to flash a device.
+      </span>
+    </esp-web-install-button>
+
+    <ol class="steps">
+      <li>Plug your SquachWatch-CYD into this computer over USB.</li>
+      <li>Click <strong>Connect &amp; Install</strong> above.</li>
+      <li>Pick the right serial port from the browser's popup.</li>
+      <li>Click Install and leave it be — don't unplug until it says done.</li>
+    </ol>
+
+    <p class="browser-note">Works in Chrome / Edge / Brave on desktop. No app, no drivers, nothing to install on your end — just the browser.</p>
+  </div>
+
+  <div class="about">
+    <p>SquachWatch-CYD is an open-source surveillance detector for the ESP32 "Cheap Yellow Display" board.</p>
+    <p><a href="https://github.com/skizzophrenic/SquachWatch-CYD" target="_blank" rel="noopener">Source on GitHub</a> &middot; <a href="https://talkingsasquach.com" target="_blank" rel="noopener">talkingsasquach.com</a></p>
+  </div>
+</main>
+
+<footer>Stay squachy out there.</footer>
+
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+<script>
+(function () {
+  var wrap = document.getElementById('squachyWrap');
+  var sprite = document.getElementById('squachySprite');
+  var ctx = sprite.getContext('2d');
+  var bubble = document.getElementById('bubble');
+  var stage = document.querySelector('.squachy-stage');
+
+  // Ported straight from talkingsasquach.com's own drawSquachy() so the
+  // mascot here is pixel-for-pixel the same character, not a lookalike —
+  // same fur/frame colors, same wayfarers, same grin. The only addition
+  // is a walk cycle (arms/legs swing) for when he's actually in motion
+  // crossing the stage; the site's original is a stationary idle/wave.
+  var anim = 0, animDir = 1, blink = 0, waveTimer = 0, walkPhase = 0;
+
+  function drawSquachy(walking) {
+    var c = ctx;
+    c.clearRect(0, 0, 96, 96);
+
+    anim += 0.08 * animDir;
+    if (anim > 1) animDir = -1;
+    if (anim < 0) animDir = 1;
+    var bob = Math.sin(anim * Math.PI) * 4;
+    blink++;
+    var blinking = blink % 80 < 4;
+    if (waveTimer > 0) waveTimer--;
+    if (walking) walkPhase += 0.35;
+
+    var by = 4 + bob;
+
+    // Shadow
+    c.fillStyle = 'rgba(180,0,255,0.25)';
+    c.beginPath(); c.ellipse(48, 91, 22, 5, 0, 0, Math.PI * 2); c.fill();
+
+    // Fur body
+    c.fillStyle = '#5a2808'; c.fillRect(22, by + 42, 52, 36);
+    c.fillStyle = '#3d1800'; c.fillRect(20, by + 44, 6, 28); c.fillRect(70, by + 44, 6, 28);
+
+    // Head — bigger and rounder
+    c.fillStyle = '#3d1800'; c.fillRect(16, by + 6, 64, 44);
+    c.fillStyle = '#7a4818'; c.fillRect(22, by + 8, 52, 40);
+    c.fillStyle = '#f4c07a'; c.fillRect(26, by + 10, 44, 32);
+
+    // Hair/fur top
+    c.fillStyle = '#2a1000';
+    c.fillRect(12, by + 2, 10, 24); c.fillRect(74, by + 2, 10, 24);
+    c.fillRect(18, by, 60, 12);
+    c.fillRect(24, by - 4, 12, 8); c.fillRect(42, by - 6, 14, 8); c.fillRect(60, by - 4, 12, 8);
+    c.fillStyle = '#4a2010';
+    c.fillRect(20, by - 2, 6, 6); c.fillRect(70, by - 2, 6, 6);
+
+    // Wayfarer sunglasses
+    c.fillStyle = '#111';
+    c.fillRect(18, by + 14, 60, 5);
+    c.fillRect(18, by + 14, 5, 18); c.fillRect(18, by + 30, 26, 4); c.fillRect(40, by + 14, 5, 20);
+    c.fillRect(51, by + 14, 5, 20); c.fillRect(51, by + 30, 26, 4); c.fillRect(73, by + 14, 5, 18);
+    c.fillRect(43, by + 17, 10, 6);
+    c.fillStyle = '#111';
+    c.fillRect(23, by + 19, 17, 11);
+    c.fillRect(56, by + 19, 17, 11);
+    c.fillStyle = 'rgba(0,220,255,0.18)';
+    c.fillRect(23, by + 19, 17, 11); c.fillRect(56, by + 19, 17, 11);
+    c.fillStyle = 'rgba(255,255,255,0.25)';
+    c.fillRect(25, by + 20, 5, 4); c.fillRect(58, by + 20, 5, 4);
+    c.fillStyle = '#444';
+    c.fillRect(19, by + 14, 58, 2);
+    if (blinking) {
+      c.fillStyle = '#111';
+      c.fillRect(23, by + 19, 17, 11); c.fillRect(56, by + 19, 17, 11);
+    }
+
+    // Big grin
+    c.fillStyle = '#1a0800'; c.fillRect(28, by + 34, 40, 12);
+    c.fillStyle = '#fff';    c.fillRect(30, by + 35, 36, 5);
+    c.fillStyle = '#ff4444'; c.fillRect(30, by + 40, 36, 6);
+    c.fillStyle = '#cc2222'; c.fillRect(32, by + 42, 32, 4);
+
+    // Ears
+    c.fillStyle = '#f4c07a'; c.fillRect(14, by + 20, 10, 14); c.fillRect(72, by + 20, 10, 14);
+    c.fillStyle = '#c87040'; c.fillRect(15, by + 21, 8, 10); c.fillRect(73, by + 21, 8, 10);
+
+    // Arms
+    if (waveTimer > 0) {
+      c.fillStyle = '#5a2808';
+      c.save();
+      c.translate(76, by + 50);
+      c.rotate(-0.8 + Math.sin(waveTimer * 0.4) * 0.5);
+      c.fillRect(0, -6, 22, 12);
+      c.restore();
+      c.fillStyle = '#3d1800'; c.fillRect(8, by + 50, 18, 12);
+    } else if (walking) {
+      var armSwing = Math.sin(walkPhase) * 0.7;
+      c.fillStyle = '#3d1800';
+      c.save(); c.translate(8, by + 50); c.rotate(-armSwing); c.fillRect(0, -6, 18, 12); c.restore();
+      c.save(); c.translate(70, by + 50); c.rotate(armSwing); c.fillRect(0, -6, 18, 12); c.restore();
+    } else {
+      c.fillStyle = '#3d1800';
+      c.fillRect(8, by + 44, 16, 28);
+      c.fillRect(72, by + 44, 16, 28);
+      c.fillStyle = '#2a1000';
+      c.fillRect(6, by + 68, 18, 10); c.fillRect(72, by + 68, 18, 10);
+    }
+
+    // Legs
+    if (walking) {
+      var legSwing = Math.sin(walkPhase) * 0.5;
+      c.fillStyle = '#2a1000';
+      c.save(); c.translate(34, by + 74); c.rotate(legSwing);  c.fillRect(-8, 0, 16, 14); c.restore();
+      c.save(); c.translate(62, by + 74); c.rotate(-legSwing); c.fillRect(-8, 0, 16, 14); c.restore();
+      c.fillStyle = '#1a0800';
+      c.save(); c.translate(34, by + 86); c.rotate(legSwing);  c.fillRect(-11, 0, 22, 8); c.restore();
+      c.save(); c.translate(62, by + 86); c.rotate(-legSwing); c.fillRect(-11, 0, 22, 8); c.restore();
+    } else {
+      c.fillStyle = '#2a1000';
+      c.fillRect(26, by + 74, 16, 14); c.fillRect(54, by + 74, 16, 14);
+      c.fillStyle = '#1a0800';
+      c.fillRect(22, by + 86, 22, 8); c.fillRect(52, by + 86, 22, 8);
+    }
+  }
+
+  var HOW_TO = [
+    "Hey. Plug the board in over USB first.",
+    "Then hit Connect & Install down there.",
+    "Chrome or Edge only — I don't make the rules.",
+    "Pick the right port, click Install, and don't unplug on me.",
+    "That's it. I'll be here the whole time."
+  ];
+
+  var IDLE_LINES = [
+    "Stay squachy out there.",
+    "I live in your walls now. No big deal.",
+    "Cryptid by trade, flasher-page mascot by necessity.",
+    "Big feet, bigger opsec.",
+    "This is a browser tab. I contain multitudes.",
+    "No drivers. No installer. Just vibes and Web Serial.",
+    "Somewhere, a camera just got nervous.",
+    "Go touch grass after this. Bring the detector.",
+    "Nobody suspects the Sasquach.",
+  ];
+
+  var PET_LINES = [
+    "Hey! Personal space. ...okay one more.",
+    "Petting a cryptid through a browser. Bold.",
+    "This is why they never get good photos of me.",
+    "Ten out of ten, would be spotted again.",
+  ];
+
+  function say(text, ms) {
+    bubble.textContent = text;
+    bubble.classList.add('show');
+    clearTimeout(say._t);
+    say._t = setTimeout(function () {
+      bubble.classList.remove('show');
+    }, ms || 3600);
+  }
+
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  // Walk him back and forth across the stage, flipping to face travel
+  // direction. rAF-driven so it adapts to the actual stage width
+  // instead of guessing in percentages.
+  var x = 0, dir = 1, speed = 0.55;
+  function frame() {
+    var maxX = Math.max(0, stage.clientWidth - wrap.offsetWidth);
+    x += dir * speed;
+    if (x >= maxX) { x = maxX; dir = -1; sprite.classList.add('face-left'); }
+    if (x <= 0) { x = 0; dir = 1; sprite.classList.remove('face-left'); }
+    wrap.style.transform = 'translateX(' + x + 'px)';
+    drawSquachy(true);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+
+  sprite.addEventListener('click', function () {
+    waveTimer = 30;
+    say(pick(PET_LINES), 3000);
+  });
+
+  // Walk through the how-to lines once on load, then settle into
+  // random idle chatter.
+  var step = 0;
+  function nextHowTo() {
+    if (step < HOW_TO.length) {
+      say(HOW_TO[step], 3400);
+      step++;
+      setTimeout(nextHowTo, 3800);
+    } else {
+      scheduleIdle();
+    }
+  }
+  function scheduleIdle() {
+    setTimeout(function () {
+      say(pick(IDLE_LINES), 3600);
+      scheduleIdle();
+    }, 7000 + Math.random() * 8000);
+  }
+  setTimeout(nextHowTo, 900);
+})();
+</script>
+</body>
+</html>
