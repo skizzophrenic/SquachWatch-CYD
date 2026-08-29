@@ -265,6 +265,13 @@
   }
   .about a{ color:var(--cyan); text-decoration:none; border-bottom:1px dotted var(--cyan); }
   .about a:hover{ color:var(--vapor-pink); border-color:var(--vapor-pink); }
+  .driver-note{
+    margin-top:18px;
+    font-size:0.82rem;
+    color:#7a6a95;
+  }
+  .driver-note a{ color:var(--vapor-blue); border-bottom-color:var(--vapor-blue); }
+  .driver-note a:hover{ color:var(--vapor-pink); border-color:var(--vapor-pink); }
 
   footer{
     text-align:center;
@@ -311,12 +318,17 @@
       <li>Click Install and leave it be — don't unplug until it says done.</li>
     </ol>
 
-    <p class="browser-note">Works in Chrome / Edge / Brave on desktop. No app, no drivers, nothing to install on your end — just the browser.</p>
+    <p class="browser-note">Works in Chrome / Edge / Brave on desktop. No app to install — just the browser.</p>
   </div>
 
   <div class="about">
     <p>SquachWatch-CYD is an open-source surveillance detector for the ESP32 "Cheap Yellow Display" board.</p>
     <p><a href="https://github.com/skizzophrenic/SquachWatch-CYD" target="_blank" rel="noopener">Source on GitHub</a> &middot; <a href="https://talkingsasquach.com" target="_blank" rel="noopener">talkingsasquach.com</a></p>
+    <p class="driver-note">Board not showing up as a port? Most CYDs use a CH340 USB chip — grab the driver:
+      <a href="https://www.wch-ic.com/downloads/ch341ser_exe.html" target="_blank" rel="noopener">Windows</a> &middot;
+      <a href="https://www.wch-ic.com/downloads/CH34XSER_MAC_ZIP.html" target="_blank" rel="noopener">macOS</a> &middot;
+      <a href="https://www.wch-ic.com/downloads/CH341SER_LINUX_ZIP.html" target="_blank" rel="noopener">Linux</a>
+      — most Mac/Linux/ChromeOS machines already have this built in, it's mainly a Windows thing.</p>
   </div>
 </main>
 
