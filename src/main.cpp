@@ -15,6 +15,7 @@
 #include "ui_alert.h"
 #include "ui_log.h"
 #include "ui_settings.h"
+#include "ui_diary.h"
 #include "squachy.h"
 #include "cap_touch.h"
 #include "touch_cal.h"
@@ -35,9 +36,20 @@
 // Both variants route their touch controller through the same
 // GPIO25/32/33 trio (SPI vs I2C), so probing for the I2C chip at boot
 // tells us which board this is — see setup().
-#define TOUCH_SCK  25
-#define TOUCH_MOSI 32
-#define TOUCH_MISO 39
+//   - ESP32-3248S035R (3.5", built separately as env:cyd35): resistive
+//     XPT2046 again, but CS=33/IRQ=36 share the *display's* SPI bus
+//     (SCK/MOSI/MISO = 14/13/12) instead of getting a dedicated
+//     peripheral — this board has no capacitive-touch chip at all, so
+//     the I2C probe below is skipped entirely rather than just failing.
+#if defined(CYD35)
+    #define TOUCH_SCK  TFT_SCLK
+    #define TOUCH_MOSI TFT_MOSI
+    #define TOUCH_MISO TFT_MISO
+#else
+    #define TOUCH_SCK  25
+    #define TOUCH_MOSI 32
+    #define TOUCH_MISO 39
+#endif
 #define TOUCH_CS   33
 #define TOUCH_IRQ  36
 #define CAP_SDA    33
@@ -59,9 +71,28 @@ TFT_eSPI            tft = TFT_eSPI();
 // display in one shot at the end of each loop(). Without it, every
 // screen's erase-then-redraw sequence is briefly visible on real
 // hardware — most noticeable as flickering text.
+//
+// cyd35 exception: at 320x480 this sprite needs ~150KB contiguous heap
+// (8-bit), and that board's largest free block measured ~110KB on real
+// hardware (no PSRAM, and WiFi/BLE fragment the heap before setup()
+// even runs) -- createSprite() reliably fails there. Rather than a
+// banded/partial-height rewrite of every draw call, cyd35 skips the
+// double buffer entirely and draws straight to the panel via `canvas`
+// below, accepting the erase/redraw flicker the buffer normally hides.
 TFT_eSprite         frame = TFT_eSprite(&tft);
+#if defined(CYD35)
+    TFT_eSPI&        canvas = tft;
+#else
+    TFT_eSPI&        canvas = frame;
+#endif
 XPT2046_Touchscreen touch(TOUCH_CS, TOUCH_IRQ);
-SPIClass            touchSPI(HSPI);
+// cyd35's touch bus IS the display's bus, shared via CS rather than a
+// separate peripheral — see the CYD35 touch-init branch in setup(),
+// which uses tft.getSPIinstance() instead of this object. A second,
+// independent SPIClass(VSPI) pointed at the same pins TFT_eSPI already
+// owns fights it at the GPIO-matrix level rather than sharing cleanly;
+// touchSPI here is only ever used on the original (HSPI) board.
+SPIClass         touchSPI(HSPI);
 // Set once in setup() by probing for the capacitive controller —
 // decides which branch pollTouch() takes for the rest of the run.
 bool                usingCapTouch = false;
@@ -71,6 +102,7 @@ uint32_t            bootStart = 0;
 uint32_t            alertStart= 0;
 uint32_t            lastTouch = 0;
 DetectionType       lastAlertType = DetectionType::UNKNOWN;
+uint32_t            lastAlertHits = 1; // times this exact MAC+type has ever matched — see Squachy's "seen before" reaction
 const uint16_t      TOUCH_DEBOUNCE_MS = 200;
 // The ALERT screen carries real information (type, confidence, MAC,
 // RSSI) — tapping it away is the expected dismiss, but the automatic
@@ -127,6 +159,13 @@ static TouchPoint pollTouch() {
         tp.valid = (tp.x >= 0 && tp.x < w && tp.y >= 0 && tp.y < h);
         return tp;
     }
+
+#if defined(CYD35)
+    // Touch is disabled on this board for now (see the setup() comment
+    // by TOUCH_CS/TOUCH_IRQ) -- `touch` was never begin()'d, so don't
+    // call into it at all.
+    return tp;
+#endif
 
     // Resistive XPT2046 path (original jczn_2432s028r board) —
     // unchanged from the earlier single-board firmware.
@@ -192,13 +231,13 @@ static void enterBoot() {
     state = AppState::BOOT;
     bootStart = millis();
     transitionStart = bootStart;
-    uiBootInit(frame);
+    uiBootInit(canvas);
 }
 
 static void enterClear() {
     state = AppState::CLEAR;
     transitionStart = millis();
-    uiClearInit(frame);
+    uiClearInit(canvas);
 }
 
 static void enterAlert(const Detection& d) {
@@ -206,19 +245,26 @@ static void enterAlert(const Detection& d) {
     alertStart = millis();
     transitionStart = alertStart;
     lastAlertType = d.type;
-    uiAlertInit(frame, d);
+    lastAlertHits = d.hits;
+    uiAlertInit(canvas, d);
 }
 
 static void enterLog() {
     state = AppState::LOG;
     transitionStart = millis();
-    uiLogInit(frame);
+    uiLogInit(canvas);
 }
 
 static void enterSettings() {
     state = AppState::SETTINGS;
     transitionStart = millis();
-    uiSettingsInit(frame);
+    uiSettingsInit(canvas);
+}
+
+static void enterDiary() {
+    state = AppState::DIARY;
+    transitionStart = millis();
+    uiDiaryInit(canvas);
 }
 
 // ---- Arduino setup / loop ----
@@ -248,7 +294,20 @@ void setup() {
     // boot itself already reflects the saved theme/invert choice
     // instead of flashing the defaults for a moment first.
     Settings::load();
-    tft.invertDisplay(Settings::inverted());
+    // invertDisplay() sets an ABSOLUTE panel state -- it doesn't toggle
+    // relative to whatever TFT_INVERSION_ON/OFF set at compile time, it
+    // just overwrites it. Settings::inverted() is a cosmetic per-user
+    // theme toggle (originally for the other board), unrelated to a
+    // given panel's actual required polarity, so XOR the two: cyd35's
+    // ST7796 needs INVON to render correctly (confirmed on real
+    // hardware), the original board needs INVOFF, and either way the
+    // user's cosmetic toggle still flips it relative to that baseline.
+#if defined(CYD35)
+    constexpr bool PANEL_NEEDS_INVERSION = true;
+#else
+    constexpr bool PANEL_NEEDS_INVERSION = false;
+#endif
+    tft.invertDisplay(PANEL_NEEDS_INVERSION != Settings::inverted());
     tft.fillScreen(Theme::BG);
 
     // Hand the digitalWrite(HIGH) backlight pins above off to LEDC PWM
@@ -262,6 +321,28 @@ void setup() {
     ledcAttachPin(BL_PIN_CAP, BL_CH_CAP);
     applyBrightness();
 
+#if defined(CYD35)
+    // No FULL-screen double buffer on this board — confirmed on real
+    // hardware that the 320x480 panel's ~150KB sprite need exceeds the
+    // largest contiguous free heap block (~110KB, no PSRAM). `canvas`
+    // aliases `tft` directly for this build (see its declaration up
+    // top) and is what most screens draw into, unbuffered.
+    //
+    // The CLEAR screen is the exception: it's the most visibly animated
+    // (Squachy + a background effect), so it gets a real half-height
+    // sprite (~76KB at 8-bit, comfortably fits) and renders in two
+    // bands via setViewport() -- see the AppState::CLEAR case in
+    // loop(). `advance` on uiClearTick()/Squachy::tick()/
+    // Theme::drawMatrixRain() gates state mutation to the first band
+    // only, so calling them twice per logical frame doesn't double
+    // animation speed.
+    canvas.setTextSize(1);
+    frame.setColorDepth(8);
+    if (!frame.createSprite(tft.width(), tft.height() / 2)) {
+        Serial.println("ERROR: cyd35 half-height frame buffer allocation failed");
+    }
+    frame.setTextSize(1);
+#else
     // 8-bit (palette) mode: 320x240 needs ~75KB instead of ~150KB at
     // 16-bit — the full 16-bit buffer didn't fit in the available
     // contiguous heap on this board.
@@ -270,7 +351,22 @@ void setup() {
         Serial.println("ERROR: frame buffer allocation failed (low memory)");
     }
     frame.setTextSize(1);
+#endif
 
+#if defined(CYD35)
+    // TEMPORARILY DISABLED: touch.begin()'d against CS=33/IRQ=36 on the
+    // display's shared SPI bus produced constant garbage reads (SPI
+    // transfers all reading back 0xFFFF -- nothing answering) AND the
+    // IRQ line fires continuously even with isrWake forced false right
+    // after begin(), which rules out a library quirk and points at
+    // TOUCH_CS/TOUCH_IRQ just being the wrong pins for this specific
+    // board's touch controller. Left uninitialized on purpose so the
+    // display can be evaluated on its own, without a free-running IRQ
+    // hammering the shared SPI bus. See TOUCH_CS/TOUCH_IRQ up top once
+    // the real pins are confirmed.
+    usingCapTouch = false;
+    Serial.println("cyd35 build -- touch DISABLED pending real CS/IRQ pin confirmation.");
+#else
     // Touch: probe for the capacitive controller first (I2C 0x15 on
     // SDA=33/SCL=32, reset on GPIO25 — the JC2432W328C). If it doesn't
     // answer, release the I2C bus and fall back to the resistive
@@ -289,12 +385,17 @@ void setup() {
         touch.begin(touchSPI);
         touch.setRotation(0);
     }
+#endif
 
     // Recovery escape hatch: hold touch ANYWHERE for ~1s right here to
     // wipe a saved calibration back to defaults. A bad calibration can
     // make touch too inaccurate to reliably re-tap a "recalibrate"
     // button, so this needs no precision at all — just a hold anywhere
     // during the window right after boot.
+#if !defined(CYD35)
+    // Skipped on cyd35: touch isn't begin()'d there right now (see the
+    // TOUCH_CS/TOUCH_IRQ comment above), so rawReadResistive() would be
+    // reading from an uninitialized driver.
     tft.fillScreen(Theme::BG);
     tft.setTextColor(Theme::AMBER, Theme::BG);
     tft.setTextSize(1);
@@ -325,6 +426,7 @@ void setup() {
             delay(10);
         }
     }
+#endif
     tft.fillScreen(Theme::BG);
 
     // Apply a saved touch calibration if one exists (long-press the
@@ -342,7 +444,7 @@ void setup() {
     randomSeed(analogRead(34));
 
     engine.init();
-    Squachy::trigger(Squachy::Event::BOOTED);
+    Squachy::trigger(Squachy::Event::BOOTED, DetectionType::UNKNOWN, engine.lifetimeTotal());
     enterBoot();
 }
 
@@ -364,10 +466,20 @@ void loop() {
         tft.setRotation(screenRotation);
         // Landscape and portrait need differently-shaped buffers —
         // recreate at the new dimensions rather than trying to reuse
-        // the old (now wrong-shaped) one.
+        // the old (now wrong-shaped) one. canvas (most cyd35 screens)
+        // draws straight to tft, which already reports its new rotated
+        // width()/height() from setRotation() above and needs nothing
+        // here; frame (cyd35's CLEAR-screen half-height band buffer, or
+        // the other board's full-screen one) does.
+#if defined(CYD35)
+        frame.deleteSprite();
+        frame.setColorDepth(8);
+        frame.createSprite(tft.width(), tft.height() / 2);
+#else
         frame.deleteSprite();
         frame.setColorDepth(8);
         frame.createSprite(tft.width(), tft.height());
+#endif
         transitionStart = now;
     }
 
@@ -395,7 +507,7 @@ void loop() {
             calHoldStart = 0;
             lastTouch = now;
             TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
-            TouchCal::Cal newCal = TouchCal::runInteractive(frame, reader, Theme::BG, Theme::WHITE, Theme::CYAN);
+            TouchCal::Cal newCal = TouchCal::runInteractive(canvas, reader, Theme::BG, Theme::WHITE, Theme::CYAN);
             applyCal(newCal);
             enterClear();
         }
@@ -405,14 +517,30 @@ void loop() {
 
     switch (state) {
         case AppState::BOOT: {
-            uiBootTick(frame, now);
+            uiBootTick(canvas, now);
             if (uiBootDone(bootStart)) {
                 enterClear();
             }
             break;
         }
         case AppState::CLEAR: {
-            uiClearTick(frame, now, engine);
+#if defined(CYD35)
+            // Two passes through the half-height `frame` sprite instead
+            // of one direct-to-tft pass -- see the setup() comment by
+            // its creation. advance=true only on the first pass so
+            // Squachy/matrix-rain state advances once per logical frame
+            // even though this draws twice.
+            int halfH = tft.height() / 2;
+            frame.setViewport(0, 0, tft.width(), tft.height(), true);
+            uiClearTick(frame, now, engine, true);
+            frame.pushSprite(0, 0);
+            frame.setViewport(0, -halfH, tft.width(), tft.height(), true);
+            uiClearTick(frame, now, engine, false);
+            frame.pushSprite(0, halfH);
+            frame.resetViewport();
+#else
+            uiClearTick(canvas, now, engine);
+#endif
             // Check for new detection — gated by the settings-menu
             // confidence filter (LOW_CONF/default = no filtering, every
             // match still interrupts with the ALERT screen).
@@ -421,12 +549,23 @@ void loop() {
                 confidenceFor(latest->type) >= Settings::minConfidence()) {
                 enterAlert(*latest);
             }
-            // Tap Squachy directly to pet him — a reaction quip/heart
-            // flourish, and (since that's basically him showing off)
-            // the background cycles to something new too. Checked
-            // before the button bar since his region is nowhere near
-            // it, but this keeps the two exclusive either way.
-            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS && Squachy::hitTest(tp.x, tp.y)) {
+            // First-boot walkthrough: tapping its bubble advances (or
+            // ends) it. Checked before everything else below so it eats
+            // the tap on a hit — but it only ever hits its own bubble,
+            // never Squachy himself or the button bar, so pet-tap,
+            // background-cycling and the buttons all keep working
+            // normally throughout the walkthrough, same as any other
+            // time on this screen. Both this and the pet-tap check are
+            // skipped outright in "boring mode": uiClearTick() never
+            // draws him there, so hitTest() would otherwise still be
+            // checking against wherever he last stood before the mode
+            // was turned on — a tap on empty background shouldn't pet
+            // a mascot that isn't there.
+            bool boring = Settings::boringMode();
+            if (!boring && Squachy::onboardingActive() && tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
+                Squachy::onboardingTapAdvance(tp.x, tp.y)) {
+                lastTouch = now;
+            } else if (!boring && tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS && Squachy::hitTest(tp.x, tp.y)) {
                 lastTouch = now;
                 Squachy::trigger(Squachy::Event::PETTED);
                 Settings::cycleBackground();
@@ -434,25 +573,32 @@ void loop() {
                 ButtonId b = Theme::hitTestButtonBar(tp.x, tp.y, tft.width(), tft.height());
                 lastTouch = now;
                 if (b == ButtonId::LOG)  { Squachy::trigger(Squachy::Event::LOG_OPENED); enterLog(); }
-                if (b == ButtonId::CLR)  { engine.clearLog(); Squachy::trigger(Squachy::Event::LOG_CLEARED); enterClear(); }
+                else if (b == ButtonId::CLR) { engine.clearLog(); Squachy::trigger(Squachy::Event::LOG_CLEARED); enterClear(); }
                 // SCAN is a no-op in CLEAR (we're already there)
+                else if (boring && tp.y >= 20) {
+                    // No Squachy to tap for this in boring mode — any tap
+                    // on the main content area (below the title bar, not
+                    // a real button) cycles the background instead, so
+                    // it's still reachable without him.
+                    Settings::cycleBackground();
+                }
             }
             break;
         }
         case AppState::ALERT: {
-            uiAlertTick(frame, now);
+            uiAlertTick(canvas, now);
             if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 lastTouch = now;
-                Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal());
+                Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits);
                 enterClear();
             } else if ((now - alertStart) > ALERT_AUTO_DISMISS_MS) {
-                Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal());
+                Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits);
                 enterClear();
             }
             break;
         }
         case AppState::LOG: {
-            uiLogTick(frame, now, engine, 0);
+            uiLogTick(canvas, now, engine, 0);
             if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 ButtonId b = Theme::hitTestButtonBar(tp.x, tp.y, tft.width(), tft.height());
                 lastTouch = now;
@@ -478,7 +624,7 @@ void loop() {
             break;
         }
         case AppState::SETTINGS: {
-            uiSettingsTick(frame, now, engine);
+            uiSettingsTick(canvas, now, engine);
             if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 lastTouch = now;
                 SettingsRow row = uiSettingsHitTest(tp.x, tp.y, tft.width(), tft.height());
@@ -489,6 +635,7 @@ void loop() {
                         Settings::toggleInvert();
                         tft.invertDisplay(Settings::inverted());
                         break;
+                    case SettingsRow::BORING_MODE: Settings::toggleBoringMode(); break;
                     case SettingsRow::BRIGHTNESS:
                         Settings::adjustBrightness(tp.x < tft.width() / 2 ? -16 : 16);
                         applyBrightness();
@@ -496,11 +643,18 @@ void loop() {
                     case SettingsRow::CONFIDENCE: Settings::cycleMinConfidence(); break;
                     case SettingsRow::CALIBRATE: {
                         TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
-                        TouchCal::Cal newCal = TouchCal::runInteractive(frame, reader, Theme::BG, Theme::WHITE, Theme::CYAN);
+                        TouchCal::Cal newCal = TouchCal::runInteractive(canvas, reader, Theme::BG, Theme::WHITE, Theme::CYAN);
                         applyCal(newCal);
                         enterSettings();
                         break;
                     }
+                    case SettingsRow::REPLAY_INTRO:
+                        Squachy::replayIntro();
+                        enterClear();
+                        break;
+                    case SettingsRow::NICKNAME:     Squachy::cycleNickname(); break;
+                    case SettingsRow::SHADES_COLOR: Squachy::cycleShadesColor(); break;
+                    case SettingsRow::VIEW_DIARY:   enterDiary(); break;
                     case SettingsRow::RESET_STATS: engine.resetLifetime(); break;
                     case SettingsRow::BACK:        enterClear(); break;
                     default: break;
@@ -508,10 +662,28 @@ void loop() {
             }
             break;
         }
+        case AppState::DIARY: {
+            uiDiaryTick(canvas, now, engine);
+            // Simple read-only info panel — any tap takes you back,
+            // no button bar or scroll needed.
+            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                lastTouch = now;
+                enterClear();
+            }
+            break;
+        }
     }
 
+#if !defined(CYD35)
+    // Skipped on cyd35: this effect reads back already-drawn pixels to
+    // shift them sideways, which is instant/reliable against the sprite
+    // in RAM but would mean a live SPI readback from the panel itself
+    // with no sprite buffer -- pixel readback (MISO) is a known-flaky
+    // path on cheap SPI panels, not worth the risk for a 220ms cosmetic
+    // transition effect.
     if (now - transitionStart < TRANSITION_MS) {
         Theme::drawTransitionGlitch(frame, now - transitionStart, TRANSITION_MS);
     }
     frame.pushSprite(0, 0);
+#endif
 }

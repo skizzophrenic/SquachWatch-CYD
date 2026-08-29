@@ -32,6 +32,13 @@ namespace Settings {
     bool       inverted();
     void       toggleInvert();       // persists only — caller applies tft.invertDisplay()
 
+    // "Boring mode" — all detection features stay exactly as they are,
+    // this only turns off Squachy's on-screen presence (the CLEAR-
+    // screen mascot/animations/speech bubbles and the boot-splash
+    // cameo) for anyone who just wants a plain detector.
+    bool       boringMode();
+    void       toggleBoringMode();
+
     // 32..255 — floor keeps the backlight from going fully dark and
     // unreadable via the settings screen itself.
     uint8_t    brightness();

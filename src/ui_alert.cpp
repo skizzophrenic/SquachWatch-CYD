@@ -49,6 +49,12 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now) {
     int w = t.width();
     int h = t.height();
 
+    // Ambient background, themed to what was actually detected — draws
+    // first since it fully repaints the whole w x h region every call,
+    // same as the CLEAR-screen backgrounds. Everything below (border,
+    // text) draws on top of it.
+    Theme::drawAlertFx(t, s_last.type, now, w, h);
+
     // Pulsing border (6 px, PINK <-> VAPOR_PINK)
     Theme::drawPulsingBorder(t, now, Theme::VAPOR_PINK, Theme::PINK, 6);
 
@@ -127,10 +133,6 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now) {
     float bearing = (float)((s_last.mac[4] ^ (s_last.mac[5] << 3)) & 0xFF)
                     / 255.0f * 6.2831853f;
     Theme::drawSignalRadar(t, w / 2, 192, 22, now, s_last.rssi, bearing);
-
-    // Scanline
-    int phase = (now / 90) % h;
-    Theme::drawScanline(t, phase, Theme::VAPOR_PURPLE);
 
     // Glitchy wordmark
     Theme::drawGlitchText(t, 220, "SQUACHWATCH", Theme::VAPOR_PINK, now);

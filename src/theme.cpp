@@ -199,6 +199,143 @@ void drawScanline(TFT_eSPI& t, int y, uint16_t color) {
     t.drawFastHLine(0, y, t.width(), color);
 }
 
+// Shared by a few of drawAlertFx's cases below: expanding rings from a
+// center point that fade as they grow, like a location/acoustic ping.
+// Three staggered so there's always at least one on screen instead of
+// a single ring popping in and out.
+static void alertFxPing(TFT_eSPI& t, int cx, int cy, uint32_t now, uint16_t col,
+                        uint32_t periodMs, int maxR) {
+    for (uint8_t i = 0; i < 3; i++) {
+        uint32_t phase = (now + i * (periodMs / 3)) % periodMs;
+        float p = (float)phase / (float)periodMs;
+        int r = (int)(p * maxR);
+        if (r < 1) continue;
+        uint16_t c = blend(BG, col, (uint16_t)((1.0f - p) * 220.0f));
+        t.drawCircle(cx, cy, r, c);
+    }
+}
+
+void drawAlertFx(TFT_eSPI& t, DetectionType type, uint32_t now, int w, int h) {
+    // Full repaint every call — the old single scanline this replaced
+    // never erased its own trail, so it just accumulated into a wash
+    // across the screen the longer an alert stayed up. Same "always
+    // fully repaint" discipline the CLEAR-screen backgrounds already
+    // use, for the same reason.
+    t.fillRect(0, 0, w, h, BG);
+    int cx = w / 2;
+    // The rest of this screen's text layout is dense (title, target
+    // type, confidence, vendor, MAC, RSSI, radar all stacked between
+    // y=4 and y=220 at fixed pixel positions) — centering a new icon
+    // at h/2 would sit right on top of the RSSI line and the radar
+    // widget. Anchoring to the bottom of whatever height this rotation
+    // actually has, with icons kept small, gives it real clearance on
+    // the common portrait rotation without needing to redo the whole
+    // screen's layout for this.
+    int cy = h - 46;
+
+    switch (type) {
+        case DetectionType::AIRTAG: {
+            // An apple — not the corporate logo, just a plain apple —
+            // since that's the one everyone already associates with
+            // AirTag/FindMy.
+            float bob = sinf((float)(now % 2000) / 2000.0f * 6.2831853f) * 3.0f;
+            int ay = cy + (int)bob;
+            int r = 16;
+            t.fillCircle(cx - 6, ay, r, RED);
+            t.fillCircle(cx + 6, ay, r, RED);
+            t.fillRect(cx - 6, ay - r, 12, r + 5, RED);
+            t.fillCircle(cx + r - 3, ay - r + 5, 5, BG);           // bite notch
+            t.fillRect(cx - 1, ay - r - 6, 2, 7, AMBER);           // stem
+            t.fillTriangle(cx, ay - r - 3, cx + 10, ay - r - 8, cx + 6, ay - r - 1, GREEN); // leaf
+            alertFxPing(t, cx, ay, now, VAPOR_PURPLE, 2200, 42);
+            break;
+        }
+        case DetectionType::SAMSUNG_TAG:
+        case DetectionType::GOOGLE_TAG: {
+            // Generic keyring tracker tag (not either company's real
+            // logo) — same location-ping language as AirTag above, so
+            // the tracker family reads as a family, minus the fruit.
+            t.fillRoundRect(cx - 13, cy - 9, 26, 18, 5, VAPOR_PURPLE);
+            t.fillCircle(cx - 8, cy, 3, BG);
+            alertFxPing(t, cx, cy, now, VAPOR_PURPLE, 2200, 42);
+            break;
+        }
+        case DetectionType::FLOCK:
+        case DetectionType::AXON:
+        case DetectionType::ALPR:
+        case DetectionType::CAMERA: {
+            // Camera body + lens, a blinking REC dot, and a real
+            // shutter flash every couple seconds.
+            uint16_t tint = colorFor(type);
+            uint32_t fc = now % 2400;
+            if (fc < 120) {
+                float f = 1.0f - (float)fc / 120.0f;
+                t.fillRect(0, 0, w, h, blend(BG, WHITE, (uint16_t)(f * 200.0f)));
+            }
+            t.fillRoundRect(cx - 20, cy - 13, 40, 26, 5, blend(BG, tint, 70));
+            t.drawCircle(cx, cy, 11, tint);
+            t.drawCircle(cx, cy, 6, tint);
+            if ((now / 500) % 2 == 0) t.fillCircle(cx + 15, cy - 8, 2, RED);
+            break;
+        }
+        case DetectionType::META: {
+            // Sunglasses — matches Squachy's own look — with a glint
+            // sweeping across the lenses.
+            uint16_t tint = colorFor(type);
+            t.fillRoundRect(cx - 20, cy - 5, 15, 11, 3, BLACK);
+            t.fillRoundRect(cx + 5,  cy - 5, 15, 11, 3, BLACK);
+            t.fillRect(cx - 5, cy - 1, 10, 2, BLACK);
+            t.fillRoundRect(cx - 18, cy - 4, 11, 8, 2, blend(BLACK, tint, 60));
+            t.fillRoundRect(cx + 7,  cy - 4, 11, 8, 2, blend(BLACK, tint, 60));
+            float sweep = (float)(now % 1800) / 1800.0f;
+            int gx = cx - 18 + (int)(sweep * 39);
+            t.drawFastVLine(gx, cy - 4, 8, WHITE);
+            break;
+        }
+        case DetectionType::SKIMMER: {
+            // Card shape with a scanning line — something's wrong with
+            // this one.
+            t.fillRoundRect(cx - 21, cy - 13, 42, 26, 4, blend(BG, VAPOR_YELLOW, 60));
+            t.drawRoundRect(cx - 21, cy - 13, 42, 26, 4, VAPOR_YELLOW);
+            t.fillRect(cx - 21, cy - 6, 42, 4, BLACK);
+            float sweep = (float)(now % 1200) / 1200.0f;
+            int sy = cy - 13 + (int)(sweep * 26);
+            t.drawFastHLine(cx - 21, sy, 42, RED);
+            break;
+        }
+        case DetectionType::RAVEN: {
+            // An acoustic event, not an object — concentric rings from
+            // a burst point rather than any kind of icon.
+            alertFxPing(t, cx, cy, now, RED, 1400, 46);
+            alertFxPing(t, cx, cy, now, AMBER, 1400, 30);
+            break;
+        }
+        case DetectionType::DRONE: {
+            // Quadcopter silhouette, hovering, with alternating rotor
+            // rings standing in for motion blur.
+            float bob = sinf((float)(now % 1600) / 1600.0f * 6.2831853f) * 4.0f;
+            int dy = cy + (int)bob;
+            t.fillRoundRect(cx - 7, dy - 4, 14, 8, 2, VAPOR_PURPLE);
+            int arm = 17;
+            bool rotorPhase = ((now / 120) % 2) == 0;
+            static const int8_t ox[4] = { -1, 1, -1, 1 };
+            static const int8_t oy[4] = { -1, -1, 1, 1 };
+            for (uint8_t i = 0; i < 4; i++) {
+                int rx = cx + ox[i] * arm, ry = dy + oy[i] * (arm / 2);
+                t.drawLine(cx, dy, rx, ry, VAPOR_PURPLE);
+                t.drawCircle(rx, ry, rotorPhase ? 6 : 4, blend(BG, VAPOR_PURPLE, 150));
+            }
+            break;
+        }
+        default:
+            // UNKNOWN and anything else — no specific icon makes sense,
+            // so keep the plain sweep, just properly erased each frame
+            // now instead of trailing.
+            t.drawFastHLine(0, (int)(now / 90) % h, w, VAPOR_PURPLE);
+            break;
+    }
+}
+
 void drawPulsingBorder(TFT_eSPI& t, uint32_t now, uint16_t a, uint16_t b,
                        uint8_t thick) {
     // 1.5 s sine pulse, fade between a and b
@@ -215,7 +352,7 @@ void drawPulsingBorder(TFT_eSPI& t, uint32_t now, uint16_t a, uint16_t b,
     }
 }
 
-void drawMatrixRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
+void drawMatrixRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advance) {
     // Dense columns (narrow gutters) with long, smoothly-decaying
     // trails so this reads as a code-rain backdrop rather than a
     // handful of isolated falling raindrops. Glyphs are plain ASCII
@@ -268,20 +405,27 @@ void drawMatrixRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     t.fillRect(0, yStart, t.width(), yEnd - yStart, BG);
 
     t.setTextSize(1);
-    for (int i = 0; i < cols; i++) {
-        if (++yTick[i] >= ySpeed[i]) {
-            yTick[i] = 0;
-            yPos[i] += 8;
-            // A fresh glyph enters at the head; everything already in
-            // the buffer shifts one slot further from it (still the
-            // same characters, just older/dimmer).
-            for (int j = TRAIL - 1; j > 0; j--) charBuf[i][j] = charBuf[i][j - 1];
-            charBuf[i][0] = (uint8_t)random(0, GLN);
-            if (yPos[i] > yEnd + TRAIL * 8) {
-                yPos[i] = (int16_t)(yStart - random(0, 80));
-                ySpeed[i] = 2 + (uint8_t)random(0, 3);
+    // Column advance is gated (see the header comment) -- yTick is a
+    // call-counted divider, not now-based, so calling this twice per
+    // logical frame would fall the rain at double speed otherwise.
+    if (advance) {
+        for (int i = 0; i < cols; i++) {
+            if (++yTick[i] >= ySpeed[i]) {
+                yTick[i] = 0;
+                yPos[i] += 8;
+                // A fresh glyph enters at the head; everything already in
+                // the buffer shifts one slot further from it (still the
+                // same characters, just older/dimmer).
+                for (int j = TRAIL - 1; j > 0; j--) charBuf[i][j] = charBuf[i][j - 1];
+                charBuf[i][0] = (uint8_t)random(0, GLN);
+                if (yPos[i] > yEnd + TRAIL * 8) {
+                    yPos[i] = (int16_t)(yStart - random(0, 80));
+                    ySpeed[i] = 2 + (uint8_t)random(0, 3);
+                }
             }
         }
+    }
+    for (int i = 0; i < cols; i++) {
         uint16_t head = HEADS[i % 3];
         int x = 3 + i * SPACING;
         for (int j = 0; j < TRAIL; j++) {
@@ -311,11 +455,25 @@ void drawMatrixRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     static uint32_t glitchNextAt = 0, glitchStart = 0;
     static uint8_t  glitchIdx = 0;
     static bool     glitchInited = false;
-    if (!glitchInited) { glitchNextAt = now + (uint32_t)random(10000, 20000); glitchInited = true; }
-    if (!glitchActive && now >= glitchNextAt) {
-        glitchActive = true;
-        glitchStart  = now;
-        glitchIdx    = (uint8_t)random(0, 4);
+    // Jitter is re-rolled once per logical frame and reused by every
+    // band's render below -- otherwise each band would pick its own
+    // random offset for the same frame, visibly tearing the message.
+    static int      glitchJitter = 0;
+    if (advance) {
+        if (!glitchInited) { glitchNextAt = now + (uint32_t)random(10000, 20000); glitchInited = true; }
+        if (!glitchActive && now >= glitchNextAt) {
+            glitchActive = true;
+            glitchStart  = now;
+            glitchIdx    = (uint8_t)random(0, 4);
+        }
+        if (glitchActive) {
+            if (now - glitchStart < 850) {
+                glitchJitter = (int)random(-2, 3);
+            } else {
+                glitchActive = false;
+                glitchNextAt = now + (uint32_t)random(12000, 25000);
+            }
+        }
     }
     if (glitchActive) {
         uint32_t age = now - glitchStart;
@@ -323,14 +481,11 @@ void drawMatrixRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             t.setTextSize(2);
             const char* msg = GLITCH_MSGS[glitchIdx];
             int mw = t.textWidth(msg);
-            int mx = (t.width() - mw) / 2 + (int)random(-2, 3);
+            int mx = (t.width() - mw) / 2 + glitchJitter;
             int my = yStart + (yEnd - yStart) / 2 - 8;
             t.setTextColor(blend(BG, VAPOR_PINK, (age < 700) ? 230 : (uint16_t)(230 - (age - 700) * 2)), BG);
             t.setCursor(mx, my);
             t.print(msg);
-        } else {
-            glitchActive = false;
-            glitchNextAt = now + (uint32_t)random(12000, 25000);
         }
     }
 }

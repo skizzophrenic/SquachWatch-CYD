@@ -100,8 +100,16 @@ namespace Theme {
     void drawButtonBar(TFT_eSPI& t, ButtonId highlighted);
     ButtonId hitTestButtonBar(int x, int y, int screenW, int screenH);
 
-    // 1-pixel horizontal scanline (used on boot + alert screens).
+    // 1-pixel horizontal scanline (used on the boot screen).
     void drawScanline(TFT_eSPI& t, int y, uint16_t color = VAPOR_PURPLE);
+
+    // The ALERT screen's ambient background — a small animated scene
+    // themed to whatever was actually detected (an apple for AirTag, a
+    // camera+shutter for FLOCK/AXON/ALPR/CAMERA, sunglasses for META,
+    // etc.) instead of one generic effect for every type. Fully
+    // repaints the w x h region every call, same discipline as the
+    // CLEAR-screen backgrounds, so nothing trails between frames.
+    void drawAlertFx(TFT_eSPI& t, DetectionType type, uint32_t now, int w, int h);
 
     // Animated pulsing border (call once per frame from a ui tick).
     void drawPulsingBorder(TFT_eSPI& t, uint32_t now, uint16_t a, uint16_t b,
@@ -124,7 +132,11 @@ namespace Theme {
 
     // 20-column Matrix digital rain tick. Columns fall at independent
     // speeds, heads cycle pink/cyan/green, trails fade to BG.
-    void drawMatrixRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);
+    // advance: gates state mutation (column position/speed, the rare
+    // glitch-message trigger) to once per logical frame -- see the
+    // matching comment on Squachy::tick(). Boards that render in a
+    // single pass never need to touch this (defaults to true).
+    void drawMatrixRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advance = true);
 
     // Classic "flying through space" starfield: points radiate outward
     // from the band's center, accelerating and brightening as they

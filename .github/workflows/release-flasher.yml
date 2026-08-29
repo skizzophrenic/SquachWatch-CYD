@@ -32,7 +32,11 @@ jobs:
         run: pip install --upgrade platformio
 
       - name: Build firmware
-        run: pio run
+        # cyd35 (3.5" board port) is a second environment in
+        # platformio.ini now but isn't public-release-ready yet (known
+        # display/touch issues) -- scope the release build to the 2.8"
+        # board only until that changes.
+        run: pio run -e cyd
 
       - name: Determine version
         id: ver

@@ -11,6 +11,7 @@ static Background  s_background = Background::MATRIX;
 static bool        s_inverted   = false;
 static uint8_t     s_brightness = 255;
 static Confidence  s_minConf    = Confidence::LOW_CONF;
+static bool        s_boringMode = false;
 
 const char* backgroundName(Background b) {
     switch (b) {
@@ -44,6 +45,7 @@ void load() {
     if (s_brightness < 32) s_brightness = 32;
     s_minConf    = (Confidence)s_prefs.getUChar("conf", (uint8_t)Confidence::LOW_CONF);
     if ((uint8_t)s_minConf > (uint8_t)Confidence::HIGH_CONF) s_minConf = Confidence::LOW_CONF;
+    s_boringMode = s_prefs.getBool("boring", false);
 
     Theme::applyPalette(s_palette);
 }
@@ -68,6 +70,13 @@ bool inverted() { return s_inverted; }
 void toggleInvert() {
     s_inverted = !s_inverted;
     s_prefs.putBool("inv", s_inverted);
+}
+
+bool boringMode() { return s_boringMode; }
+
+void toggleBoringMode() {
+    s_boringMode = !s_boringMode;
+    s_prefs.putBool("boring", s_boringMode);
 }
 
 uint8_t brightness() { return s_brightness; }

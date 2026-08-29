@@ -2,6 +2,7 @@
 #include "ui_boot.h"
 #include "theme.h"
 #include "squachy.h"
+#include "settings.h"
 
 // A dozen one-liners for Squachy's boot-splash speech bubble — one is
 // picked at random each boot (see uiBootInit) so the splash doesn't
@@ -73,8 +74,12 @@ void uiBootTick(TFT_eSPI& t, uint32_t now) {
     // everything spins up. Sized as big as the gap between the
     // subtitle and INITIALIZING... below allows — dropping the v1.0
     // line and tightening the title stack above is what buys him the
-    // extra room to be this big.
-    Squachy::drawWaving(t, w / 2, yHoriz + 50, now, 1.6f, BOOT_LINES[s_bootLineIdx]);
+    // extra room to be this big. Skipped in "boring mode" — the rest
+    // of the boot splash (wordmark, subtitle, INITIALIZING...) is
+    // unaffected, this only cuts the mascot cameo.
+    if (!Settings::boringMode()) {
+        Squachy::drawWaving(t, w / 2, yHoriz + 50, now, 1.6f, BOOT_LINES[s_bootLineIdx]);
+    }
 
     // INITIALIZING...
     t.setTextSize(1);

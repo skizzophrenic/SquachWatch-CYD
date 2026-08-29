@@ -19,14 +19,63 @@ namespace Squachy {
     // Call once from an event site (main.cpp) to make Squachy react.
     // lifetimeTotal (DETECTION only) is the engine's persisted
     // across-reboot detection count — used to fire milestone quips.
+    // hitCount (DETECTION only) is that specific MAC+type's own total
+    // hit count from its log entry — a device that's matched several
+    // times is a real pattern (something following you, not a one-off
+    // ping), so a high count gets its own "seen you before" reaction
+    // instead of the normal fresh-detection line.
     void trigger(Event evt, DetectionType dt = DetectionType::UNKNOWN,
-                 uint32_t lifetimeTotal = 0);
+                 uint32_t lifetimeTotal = 0, uint32_t hitCount = 1);
 
     // Hit test against wherever he was actually drawn last tick() call
     // (position/scale tracked internally) — call this before falling
     // through to any other touch handling on the CLEAR screen, so a
     // tap on him pets him instead of doing nothing.
     bool hitTest(int x, int y);
+
+    // Re-runs the first-boot walkthrough on demand (wired to Settings'
+    // "REPLAY INTRO" row). trigger(Event::BOOTED) also starts it
+    // automatically the very first time the device ever boots — this
+    // is only for replaying it later.
+    void replayIntro();
+
+    // True while the walkthrough above is in progress. It runs on top
+    // of the normal CLEAR screen — pet-tap, the background-cycle-on-
+    // tap, and the button bar all keep working exactly as usual
+    // throughout, so the caller doesn't need to change any of its own
+    // touch handling except for the one addition below.
+    bool onboardingActive();
+
+    // Call this first, before any other CLEAR-screen touch handling,
+    // whenever onboardingActive() is true. If the tap landed on the
+    // walkthrough's speech bubble, advances (or, on the last step,
+    // ends) it and returns true — the caller should treat the tap as
+    // consumed. Returns false for a tap anywhere else, so the caller's
+    // normal hit-testing (pet, buttons, etc.) still runs untouched.
+    bool onboardingTapAdvance(int x, int y);
+
+    // ---- Companion stats -----------------------------------------
+    // All persisted, all derived from data already tracked elsewhere
+    // (or trivially added) — no wall-clock/RTC dependency, since this
+    // device doesn't have one. Shown on the Diary screen and worked
+    // into idle chatter every so often.
+    uint32_t petCount();
+    uint32_t bootCount();
+    uint32_t bestClearStreakMs();     // longest-ever gap between detections
+    uint32_t currentClearStreakMs();  // the one happening right now
+    uint32_t bestSessionCount();      // most detections seen in one boot
+    DetectionType firstDetectionType(); // UNKNOWN if nothing's been caught yet
+
+    // ---- Cosmetics --------------------------------------------------
+    // Both persisted and both wired to Settings rows ("NICKNAME",
+    // "SHADES COLOR") that just cycle through a short curated list —
+    // free-text entry isn't worth the keyboard UI it'd need. Shade
+    // options unlock progressively with pet count; cycling only ever
+    // lands on ones already unlocked.
+    const char* nickname();
+    void        cycleNickname();
+    const char* shadesColorName();
+    void        cycleShadesColor();
 
     // Draws Squachy and his speech bubble, and advances his idle
     // animation/quip timers. Call every tick from the CLEAR screen.
@@ -35,7 +84,15 @@ namespace Squachy {
     // down to wherever the caller's next element starts (e.g. the status
     // line) — Squachy scales himself up to fill it, so give him
     // everything that isn't needed for something else.
-    void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now);
+    // advance: true = normal single-pass rendering (default, unchanged
+    // behavior). Boards that render in multiple physical bands per
+    // logical frame (no room for a full-screen sprite buffer) call
+    // tick() once per band with the SAME `now`, but must only pass
+    // true on exactly one of those calls -- state mutation (mood
+    // changes, idle-quip rolls, walk/confetti updates, the bubble's
+    // erase-tracking) only happens when advance is true; the actual
+    // pixel drawing runs every call so each band still gets painted.
+    void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now, bool advance = true);
 
     // A lightweight cameo draw for screens that just want him standing
     // and waving (the boot splash) without the full idle/quip state

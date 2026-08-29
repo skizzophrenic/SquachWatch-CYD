@@ -42,7 +42,7 @@ static void drawCounterLine(TFT_eSPI& t, int w, int y, const DetectionEngine& en
     t.print(buf);
 }
 
-void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
+void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance) {
     int w = t.width();
 
     Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, t.height());
@@ -81,7 +81,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
         case Settings::Background::SNOWFALL:   Theme::drawSnowfall(t, now, titleBottom, rainEnd); break;
         case Settings::Background::SPECTRUM:   Theme::drawSpectrumWaterfall(t, now, titleBottom, rainEnd, eng); break;
         case Settings::Background::TUNNEL:     Theme::drawWireframeTunnel(t, now, titleBottom, rainEnd); break;
-        default:                               Theme::drawMatrixRain(t, now, titleBottom, rainEnd); break;
+        default:                               Theme::drawMatrixRain(t, now, titleBottom, rainEnd, advance); break;
     }
 
     // Squachy: main character, reacts to events, cracks jokes when idle.
@@ -91,7 +91,18 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     // bar's row, so the title bar is drawn AFTER him — it fully
     // repaints its own row every frame, so it always ends up on top
     // and never shows any bleed-over from his clear box.
-    Squachy::tick(t, w / 2, titleBottom, statusTop - titleBottom, now);
+    //
+    // "Boring mode" skips this call entirely — his internal state
+    // (mood/quip timers, the stats Squachy::trigger() tracks for the
+    // Diary screen) keeps updating regardless since that's driven from
+    // main.cpp's trigger() calls, not from here; this only turns off
+    // his actual on-screen presence. The background above already
+    // fully repaints this whole region every frame, so skipping him
+    // just leaves it as animated negative space — no layout changes
+    // needed anywhere else on this screen.
+    if (!Settings::boringMode()) {
+        Squachy::tick(t, w / 2, titleBottom, statusTop - titleBottom, now, advance);
+    }
 
     // Title bar at the top
     Theme::drawTitleBar(t, ">> SQUACHWATCH <<  SCANNING");

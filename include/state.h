@@ -54,7 +54,8 @@ enum class AppState : uint8_t {
     CLEAR    = 1,
     ALERT    = 2,
     LOG      = 3,
-    SETTINGS = 4
+    SETTINGS = 4,
+    DIARY    = 5
 };
 
 enum class ButtonId : uint8_t {

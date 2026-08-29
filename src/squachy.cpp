@@ -2,12 +2,13 @@
 #include "squachy.h"
 #include "theme.h"
 #include "signatures.h"
+#include "settings.h"
 #include <Arduino.h>
 #include <Preferences.h>
 
 namespace Squachy {
 
-enum class Mood : uint8_t { IDLE, WAVE, SHOCKED, BOUNCE, SLEEPY };
+enum class Mood : uint8_t { IDLE, WAVE, SHOCKED, BOUNCE, SLEEPY, WALK };
 
 // Which reaction pose a SHOCKED mood strikes — varies by what triggered
 // it so a detection actually reads differently depending on the type,
@@ -70,10 +71,70 @@ static const char* BORED_LINES[] = {
     "Send help. Or snacks.",
 };
 
+// Biased in for a while after real detection activity, instead of the
+// usual idle pool — see s_activityHeat. Makes idle chatter read as
+// connected to what the device is actually doing.
+static const char* ALERT_MOOD_LINES[] = {
+    "Staying sharp. Lot going on today.",
+    "Busy shift. Not complaining though.",
+    "Eyes open. Things keep showing up.",
+    "Feels like a lot of company lately.",
+};
+
+// The opposite bias — a long stretch of nothing at all.
+static const char* RELAXED_MOOD_LINES[] = {
+    "Quiet enough to nap standing up.",
+    "Nothing but vibes today.",
+    "Slow day. I'll take it.",
+    "Peaceful out here. Suspiciously peaceful.",
+};
+
+// A little wander — see the Mood::WALK handling in tick()/drawBody().
+static const char* WALK_LINES[] = {
+    "Just stretching my legs.",
+    "Patrol time.",
+    "Gotta walk the perimeter.",
+    "Somebody's gotta pace around here.",
+};
+
+// "Seen you before" reactions — see trigger()'s DETECTION case. Keyed
+// off a log entry's own hit count, not the lifetime total: a MAC
+// that's matched a handful of times is a real pattern, not a
+// coincidence, so it gets called out distinctly from a fresh sighting.
+static const char* SEEN_BEFORE_LINES[] = {
+    "Seen this one before.",
+    "We meet again.",
+    "This one's a regular.",
+    "Recognize this one.",
+};
+
+static const char* PERSISTENT_LINES[] = {
+    "This one keeps coming back. Worth noting.",
+    "Not a one-time thing anymore. Keep an eye on it.",
+    "Same one, again. That's a pattern, not a coincidence.",
+    "This one's really sticking around.",
+};
+
 static const char* BOOT_LINES[] = {
     "SquachWatch online. Let's find something.",
     "Booted. Don't just stare at your phone.",
 };
+
+// First-boot walkthrough — see startOnboardingInternal(). Kept to
+// short, complete sentences (each wraps to at most ONBOARD_MAX_LINES
+// lines in drawOnboardBubble) rather than the terse one-liners the
+// rest of these banks use, since this is the one place Squachy needs
+// to actually explain something instead of just cracking a joke.
+static const char* const ONBOARD_LINES[] = {
+    "Hey! First boot -- I'm Squachy. Two minutes, then I'll let you go.",
+    "SquachWatch listens for surveillance nearby -- cameras, plate readers, trackers like AirTags.",
+    "No magic. Just WiFi and Bluetooth, matching known hardware as it passes by.",
+    "ALL CLEAR means nothing's around. It flips to a big flashing ALERT the second something matches.",
+    "Down there: SCAN rescans, LOG shows history, CLR wipes it. That's the whole interface.",
+    "That's everything. Tap me anytime, and stay squachy.",
+};
+static const uint8_t  ONBOARD_N        = sizeof(ONBOARD_LINES) / sizeof(ONBOARD_LINES[0]);
+static const uint32_t ONBOARD_STEP_MS  = 11000; // auto-advances if nobody taps
 
 static const char* LOG_OPEN_LINES[] = {
     "Snooping the log? Bold. Respect.",
@@ -154,6 +215,16 @@ static const uint8_t  PET_MILESTONES_N = sizeof(PET_MILESTONES) / sizeof(PET_MIL
 // ---- Runtime state ----
 static Mood          mood            = Mood::IDLE;
 static uint32_t      moodUntil       = 0;
+
+// A little wander away from center and back — see tick()'s idle-quip
+// scheduler and the bodyCx computation further down. s_walkStart
+// anchors a 0..1 progress ratio through WALK_DURATION_MS; the actual
+// offset is a sine hump over that (0 at both ends, peak at the
+// midpoint) so he always ends up back at center exactly as the mood
+// naturally expires, with no separate "walk back" step needed.
+static const uint32_t WALK_DURATION_MS = 5000;
+static uint32_t       s_walkStart = 0;
+static int8_t         s_walkDir   = 1;
 static const char*   bubbleText      = nullptr;
 static uint32_t      bubbleUntil     = 0;
 static uint32_t      nextIdleAt      = 4000;
@@ -181,6 +252,36 @@ static bool        s_petPrefsLoaded = false;
 static uint32_t    s_petCount       = 0;
 static uint32_t    s_petFxStart     = 0;
 static uint32_t    s_petFxUntil     = 0;
+
+// First-boot walkthrough (see replayIntro()/onboardingActive() in the
+// header). "onboarded" is persisted in the same NVS namespace as the
+// pet count above, loaded the same lazy way.
+static bool    s_onboardActive = false;
+static uint8_t s_onboardStep   = 0;
+
+// ---- Companion stats / cosmetics (see squachy.h) ----
+// Persisted fields, all loaded together by ensurePrefsLoaded() below.
+static uint32_t s_bootCount        = 0;
+static uint32_t s_bestClearMs      = 0;  // longest-ever gap between detections
+static uint32_t s_bestSessionCount = 0;  // most detections seen in one boot
+static uint8_t  s_firstType        = (uint8_t)DetectionType::UNKNOWN;
+static uint8_t  s_shadeIdx         = 0;
+static uint8_t  s_nickIdx          = 0;
+
+// Runtime-only — reset every boot, not persisted.
+static uint32_t s_cachedLifetimeTotal = 0;  // from the last DETECTION trigger (or BOOTED)
+static uint32_t s_sessionDetections   = 0;  // this boot's count, vs. s_bestSessionCount
+static uint32_t s_lastDetectionAt     = 0;  // millis() of the last catch, for the live streak
+static bool     s_haveLastDetection   = false;
+
+// A rolling "how much has been happening lately" signal — nudged up on
+// every real detection, decayed back down over time — that biases
+// which idle-line pool tick() picks from (see ALERT_MOOD_LINES /
+// RELAXED_MOOD_LINES) so idle chatter reads as connected to what the
+// device is actually doing instead of generic filler regardless of
+// activity.
+static float    s_activityHeat    = 0.0f;
+static uint32_t s_lastHeatDecayAt = 0;
 
 // Confetti for the rare "party mode" flourish (see s_legendary) —
 // seeded once when it triggers, then just falls and recycles for the
@@ -213,7 +314,120 @@ static void say(const char* line, uint32_t ms) {
 // Every bubble stays up at least this long, no matter which line fires.
 static const uint32_t MIN_BUBBLE_MS = 4000;
 
-void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal) {
+// Curated, cycle-through options rather than free-text entry — there's
+// no keyboard UI on this device worth building just for a nickname.
+static const char* const NICKNAMES[] = {
+    "SQUACHY", "BIGSY", "FOOTS", "STOMPER", "SHADOW",
+    "TRACKER", "CHONK", "WOODS", "YETI", "SASSY",
+};
+static const uint8_t NICKNAMES_N = sizeof(NICKNAMES) / sizeof(NICKNAMES[0]);
+
+// Shades lens tint options — unlockedShadeCount() below gates how many
+// of these cycleShadesColor() can actually reach, based on pet count.
+static const char* const SHADE_NAMES[] = { "CYAN", "PINK", "GREEN", "PURPLE" };
+static const uint8_t SHADE_NAMES_N = sizeof(SHADE_NAMES) / sizeof(SHADE_NAMES[0]);
+
+static uint8_t unlockedShadeCount() {
+    if (s_petCount >= 50) return 4;
+    if (s_petCount >= 25) return 3;
+    if (s_petCount >= 10) return 2;
+    return 1;
+}
+
+// Permanent fur re-tint milestones, gated off the same lifetime total
+// as the detection-milestone quips (see MILESTONES) rather than a
+// separate threshold set — reuses s_cachedLifetimeTotal, which is kept
+// current by every DETECTION/BOOTED trigger. Legend also unlocks the
+// small hat drawn in drawBody().
+enum class GrowthStage : uint8_t { FLEDGLING, TRACKER, VETERAN, LEGEND };
+
+static GrowthStage currentStage() {
+    if (s_cachedLifetimeTotal >= 500) return GrowthStage::LEGEND;
+    if (s_cachedLifetimeTotal >= 100) return GrowthStage::VETERAN;
+    if (s_cachedLifetimeTotal >= 25)  return GrowthStage::TRACKER;
+    return GrowthStage::FLEDGLING;
+}
+
+static char s_statBuf[56];
+
+// A line built from real numbers instead of picked from a static pool
+// -- "we've caught 47 things together" style. Folded into the idle
+// chatter pool at low frequency (see tick()), only once there's
+// actually a meaningful number to report.
+static const char* buildStatLine() {
+    switch (random(0, 4)) {
+        case 0:
+            snprintf(s_statBuf, sizeof(s_statBuf),
+                     "We've caught %lu things together.", (unsigned long)s_cachedLifetimeTotal);
+            break;
+        case 1:
+            snprintf(s_statBuf, sizeof(s_statBuf),
+                     "Boot #%lu. Still watching.", (unsigned long)s_bootCount);
+            break;
+        case 2:
+            snprintf(s_statBuf, sizeof(s_statBuf),
+                     "You've petted me %lu times. Not that I'm counting.", (unsigned long)s_petCount);
+            break;
+        default: {
+            uint32_t mins = s_bestClearMs / 60000;
+            snprintf(s_statBuf, sizeof(s_statBuf),
+                     "Best clear streak: %lu min. Bet we beat it.", (unsigned long)mins);
+            break;
+        }
+    }
+    return s_statBuf;
+}
+
+// A comment on whichever background is currently active — indexed
+// directly by Settings::Background, so it always tracks BACKGROUND_COUNT
+// without a switch to keep in sync. Folded into idle chatter alongside
+// buildStatLine() (see tick()).
+static const char* const BG_LINES[15][3] = {
+    /* MATRIX    */ { "Matrix rain again. Very hacker of me.", "Green code, brown fur. Bold combo.", "I could read this if I tried. I won't." },
+    /* STARFIELD */ { "Starfield's up. Feeling cosmic.", "Somewhere out there, a bigger cryptid.", "Space is just the woods, but darker." },
+    /* TOASTERS  */ { "Flying toasters. A classic.", "Nobody needs that much toast airborne.", "After Dark energy today." },
+    /* LAVALAMP  */ { "Lava lamp's mesmerizing. Don't judge me.", "Slow blobs. Relatable pace.", "This is basically my whole personality." },
+    /* CRYPTID   */ { "Cryptid cam's on. My people.", "Mothman says hi. Probably.", "We don't do interviews. We do vibes." },
+    /* RADAR     */ { "Radar sweep. Very serious equipment vibes.", "Sweeping for threats. And snacks.", "Beep boop. That's radar for 'all good.'" },
+    /* RAIN      */ { "Rain on the glass. Cozy scan today.", "Perfect weather for staying hidden.", "Rain washes away footprints. Mine especially." },
+    /* AQUARIUM  */ { "Aquarium mode. Very zen.", "Fish don't do opsec. Rookies.", "I'd get a tank but I'm camera-shy." },
+    /* TERMINAL  */ { "Terminal log background. Very my speed.", "Green text, brown fur, good times.", "Looks official. It's mostly vibes though." },
+    /* FIREFLIES */ { "Fireflies out tonight. Nice.", "Little lights, big ambiance.", "They're not surveillance. I checked." },
+    /* AURORA    */ { "Aurora's gorgeous today.", "Nature's own light show. No permit required.", "Even the sky's got better lighting than most cameras." },
+    /* FIRE      */ { "Fire background. Cozy, not concerning.", "Warm vibes, zero smoke alarms.", "Nothing's actually burning. Probably." },
+    /* SNOWFALL  */ { "Snowing again. Big feet, better traction.", "Perfect weather for leaving mysterious tracks.", "Cold out. I'm built for this." },
+    /* SPECTRUM  */ { "RF spectrum's live. That's the real stuff.", "This is actual signal data. Neat, right?", "Watching the airwaves. Very on-brand." },
+    /* TUNNEL    */ { "Wireframe tunnel. Very retro-future.", "Feels like we're going somewhere. We're not.", "80s sci-fi vibes today." },
+};
+
+static const char* pickBackgroundLine() {
+    uint8_t idx = (uint8_t)Settings::background();
+    if (idx >= 15) idx = 0;
+    return BG_LINES[idx][random(0, 3)];
+}
+
+// All of this module's persisted fields share one NVS namespace and
+// used to each have their own duplicated lazy-load guard at every call
+// site that needed one; now there's one shared loader instead.
+static void ensurePrefsLoaded() {
+    if (s_petPrefsLoaded) return;
+    s_petPrefs.begin("squachy", false);
+    s_petCount        = s_petPrefs.getUInt("pets", 0);
+    s_bootCount       = s_petPrefs.getUInt("boots", 0);
+    s_bestClearMs     = s_petPrefs.getUInt("bestClrMs", 0);
+    s_bestSessionCount = s_petPrefs.getUInt("bestSess", 0);
+    s_firstType       = s_petPrefs.getUChar("firstType", (uint8_t)DetectionType::UNKNOWN);
+    s_shadeIdx        = s_petPrefs.getUChar("shadeIdx", 0);
+    s_nickIdx         = s_petPrefs.getUChar("nick", 0);
+    s_petPrefsLoaded  = true;
+}
+
+// Defined further down (needs drawOnboardBubble's constants) — forward
+// declared so trigger()'s BOOTED case can start the walkthrough on a
+// device's very first boot.
+static void startOnboardingInternal();
+
+void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal, uint32_t hitCount) {
     uint32_t now = millis();
     lastInteraction = now;
     switch (evt) {
@@ -221,6 +435,31 @@ void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal) {
             mood = Mood::SHOCKED;
             moodUntil = now + 1400;
             s_reactType = dt;
+            ensurePrefsLoaded();
+            s_cachedLifetimeTotal = lifetimeTotal;
+
+            // Streak/session/heat bookkeeping for the Diary screen and
+            // the activity-biased idle chatter below — none of this
+            // needs wall-clock time, just gaps between millis().
+            if (s_haveLastDetection) {
+                uint32_t gap = now - s_lastDetectionAt;
+                if (gap > s_bestClearMs) {
+                    s_bestClearMs = gap;
+                    s_petPrefs.putUInt("bestClrMs", s_bestClearMs);
+                }
+            }
+            s_lastDetectionAt   = now;
+            s_haveLastDetection = true;
+            s_sessionDetections++;
+            if (s_sessionDetections > s_bestSessionCount) {
+                s_bestSessionCount = s_sessionDetections;
+                s_petPrefs.putUInt("bestSess", s_bestSessionCount);
+            }
+            if (s_firstType == (uint8_t)DetectionType::UNKNOWN && dt != DetectionType::UNKNOWN) {
+                s_firstType = (uint8_t)dt;
+                s_petPrefs.putUChar("firstType", s_firstType);
+            }
+            s_activityHeat = s_activityHeat + 30.0f > 100.0f ? 100.0f : s_activityHeat + 30.0f;
 
             // First call this boot: don't re-announce milestones the
             // lifetime counter already passed in a previous session.
@@ -242,6 +481,17 @@ void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal) {
                 snprintf(s_milestoneBuf, sizeof(s_milestoneBuf),
                          "Detection #%lu! Milestone.", (unsigned long)hit);
                 say(s_milestoneBuf, 5500);
+            } else if (hitCount >= 8) {
+                // A device that's matched this many times isn't a
+                // one-off ping — that's a real pattern worth calling
+                // out plainly, every time (no dice roll), since it's
+                // the more actionable signal.
+                say(pick(PERSISTENT_LINES, 4), 5500);
+            } else if (hitCount >= 3 && random(0, 2) == 0) {
+                // A lighter "I recognize this one" tier — rolled, not
+                // guaranteed, so a device that legitimately racks up
+                // repeats doesn't say the same thing every single time.
+                say(pick(SEEN_BEFORE_LINES, 4), 5000);
             } else {
                 uint8_t idx = (uint8_t)dt;
                 if (idx >= DET_LINES_N) idx = 0;
@@ -271,18 +521,22 @@ void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal) {
             say(pick(ROTATE_LINES, 3), MIN_BUBBLE_MS);
             break;
         case Event::BOOTED:
-            if (!s_petPrefsLoaded) {
-                s_petPrefs.begin("squachy", false);
-                s_petCount = s_petPrefs.getUInt("pets", 0);
-                s_petPrefsLoaded = true;
+            ensurePrefsLoaded();
+            s_cachedLifetimeTotal = lifetimeTotal;
+            s_bootCount++;
+            s_petPrefs.putUInt("boots", s_bootCount);
+            if (!s_petPrefs.getBool("onboarded", false)) {
+                startOnboardingInternal();
+            } else {
+                say(pick(BOOT_LINES, 2), MIN_BUBBLE_MS);
             }
-            say(pick(BOOT_LINES, 2), MIN_BUBBLE_MS);
             break;
         case Event::PETTED: {
             mood = Mood::BOUNCE;
             moodUntil = now + 1200;
             s_petFxStart = now;
             s_petFxUntil = now + 1900;
+            ensurePrefsLoaded();
             s_petCount++;
             s_petPrefs.putUInt("pets", s_petCount);
 
@@ -316,11 +570,12 @@ bool hitTest(int x, int y) {
 }
 
 // ---- Drawing ----
-// Tracks the previous frame's bubble footprint so we can erase exactly
-// that rectangle (and nothing more) when the bubble changes or goes
-// away — the rest of the row stays untouched, so matrix rain shows
-// through whenever Squachy isn't actively saying something.
-static int  lastBubbleX = 0, lastBubbleW = 0;
+// Tracks the previous frame's bubble footprint (whichever of the two
+// draw functions below drew it) so we can erase exactly that
+// rectangle when the bubble changes or goes away — the rest of the
+// row stays untouched, so matrix rain shows through whenever Squachy
+// isn't actively saying something.
+static int  lastBubbleX = 0, lastBubbleY = 0, lastBubbleW = 0, lastBubbleH = 0;
 static bool hadBubble   = false;
 
 static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text) {
@@ -342,7 +597,179 @@ static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text) {
     t.setCursor(bx + 5, topY + 3);
     t.print(text);
     lastBubbleX = bx;
+    lastBubbleY = topY;
     lastBubbleW = bw;
+    lastBubbleH = bh;
+}
+
+// Multi-line variant for the first-boot walkthrough — the compact
+// one-liner bubble above has no word-wrap and would just run off the
+// edge of the screen for anything longer than a short quip. Fixed
+// height regardless of how many lines the text actually wraps to
+// (1-3), so tick()'s layout math doesn't need to know per-step.
+static const uint8_t ONBOARD_MAX_LINES = 3;
+static const int     ONBOARD_BUBBLE_H  = 52;
+
+// Greedy word-wrap using the currently-set font's real measured
+// widths (not an assumed char width), so it stays correct even if the
+// font ever changes. No dynamic allocation — fixed small buffers,
+// which is fine for the short strings this only ever runs on.
+static uint8_t wrapText(TFT_eSPI& t, const char* text, int maxW,
+                        char lines[][40], uint8_t maxLines) {
+    char buf[160];
+    strncpy(buf, text, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = 0;
+
+    uint8_t n = 0;
+    char lineBuf[40] = "";
+    char* word = strtok(buf, " ");
+    while (word) {
+        char trial[40];
+        if (lineBuf[0]) snprintf(trial, sizeof(trial), "%s %s", lineBuf, word);
+        else            snprintf(trial, sizeof(trial), "%s", word);
+        if (lineBuf[0] && t.textWidth(trial) > maxW) {
+            if (n >= maxLines - 1) break; // out of lines -- let the rest go rather than drop it silently
+            strncpy(lines[n], lineBuf, 39); lines[n][39] = 0; n++;
+            strncpy(lineBuf, word, sizeof(lineBuf) - 1); lineBuf[sizeof(lineBuf) - 1] = 0;
+        } else {
+            strncpy(lineBuf, trial, sizeof(lineBuf) - 1); lineBuf[sizeof(lineBuf) - 1] = 0;
+        }
+        word = strtok(nullptr, " ");
+    }
+    if (lineBuf[0] && n < maxLines) { strncpy(lines[n], lineBuf, 39); lines[n][39] = 0; n++; }
+    return n;
+}
+
+static void drawOnboardBubble(TFT_eSPI& t, int cx, int topY, const char* text,
+                              uint8_t step, uint8_t total) {
+    t.setTextSize(1);
+    t.setTextWrap(false);
+    int screenW = t.width();
+    int bw = screenW - 16;
+    if (bw > 210) bw = 210;
+    int bx = cx - bw / 2;
+    if (bx < 4) bx = 4;
+    if (bx + bw > screenW - 4) bx = screenW - 4 - bw;
+
+    char lines[ONBOARD_MAX_LINES][40];
+    uint8_t n = wrapText(t, text, bw - 12, lines, ONBOARD_MAX_LINES);
+
+    t.fillRoundRect(bx, topY, bw, ONBOARD_BUBBLE_H, 5, Theme::BG);
+    t.drawRoundRect(bx, topY, bw, ONBOARD_BUBBLE_H, 5, Theme::VAPOR_PINK);
+
+    t.setTextColor(Theme::WHITE, Theme::BG);
+    const int lineH = 11;
+    for (uint8_t i = 0; i < n; i++) {
+        int tw = t.textWidth(lines[i]);
+        t.setCursor(bx + (bw - tw) / 2, topY + 6 + i * lineH);
+        t.print(lines[i]);
+    }
+
+    char stepBuf[8];
+    snprintf(stepBuf, sizeof(stepBuf), "%u/%u", (unsigned)step + 1, (unsigned)total);
+    t.setTextColor(Theme::VAPOR_BLUE, Theme::BG);
+    t.setCursor(bx + 6, topY + ONBOARD_BUBBLE_H - 12);
+    t.print(stepBuf);
+
+    // Blinking so it reads as "there's more" rather than static UI
+    // chrome — the whole box already gets a full repaint every call
+    // above, so this just naturally toggles on/off with no smear.
+    if ((millis() / 500) % 2 == 0) {
+        const char* tap = "tap to continue >";
+        int tw2 = t.textWidth(tap);
+        t.setCursor(bx + bw - tw2 - 6, topY + ONBOARD_BUBBLE_H - 12);
+        t.print(tap);
+    }
+
+    lastBubbleX = bx;
+    lastBubbleY = topY;
+    lastBubbleW = bw;
+    lastBubbleH = ONBOARD_BUBBLE_H;
+}
+
+// ---- First-boot walkthrough state machine ----
+static void finishOnboarding() {
+    s_onboardActive = false;
+    s_petPrefs.putBool("onboarded", true);
+    bubbleText = nullptr;       // hand the bubble back to the normal idle-quip system
+    nextIdleAt = millis() + 6000; // a short pause feels better than an instant quip right after
+}
+
+static void advanceOnboarding() {
+    s_onboardStep++;
+    if (s_onboardStep >= ONBOARD_N) {
+        finishOnboarding();
+        return;
+    }
+    bubbleText  = ONBOARD_LINES[s_onboardStep];
+    bubbleUntil = millis() + ONBOARD_STEP_MS;
+}
+
+static void startOnboardingInternal() {
+    ensurePrefsLoaded();
+    s_onboardActive = true;
+    s_onboardStep   = 0;
+    mood            = Mood::IDLE;
+    bubbleText      = ONBOARD_LINES[0];
+    bubbleUntil     = millis() + ONBOARD_STEP_MS;
+}
+
+void replayIntro() {
+    startOnboardingInternal();
+}
+
+bool onboardingActive() {
+    return s_onboardActive;
+}
+
+bool onboardingTapAdvance(int x, int y) {
+    if (!s_onboardActive) return false;
+    if (x < lastBubbleX || x > lastBubbleX + lastBubbleW ||
+        y < lastBubbleY || y > lastBubbleY + lastBubbleH) return false;
+    advanceOnboarding();
+    return true;
+}
+
+// ---- Companion stats ----
+uint32_t petCount()  { ensurePrefsLoaded(); return s_petCount; }
+uint32_t bootCount() { ensurePrefsLoaded(); return s_bootCount; }
+uint32_t bestClearStreakMs() { ensurePrefsLoaded(); return s_bestClearMs; }
+
+uint32_t currentClearStreakMs() {
+    ensurePrefsLoaded();
+    if (!s_haveLastDetection) return 0; // nothing caught yet this boot to measure from
+    return millis() - s_lastDetectionAt;
+}
+
+uint32_t bestSessionCount() { ensurePrefsLoaded(); return s_bestSessionCount; }
+
+DetectionType firstDetectionType() {
+    ensurePrefsLoaded();
+    return (DetectionType)s_firstType;
+}
+
+// ---- Cosmetics ----
+const char* nickname() {
+    ensurePrefsLoaded();
+    return NICKNAMES[s_nickIdx % NICKNAMES_N];
+}
+
+void cycleNickname() {
+    ensurePrefsLoaded();
+    s_nickIdx = (s_nickIdx + 1) % NICKNAMES_N;
+    s_petPrefs.putUChar("nick", s_nickIdx);
+}
+
+const char* shadesColorName() {
+    ensurePrefsLoaded();
+    return SHADE_NAMES[s_shadeIdx % SHADE_NAMES_N];
+}
+
+void cycleShadesColor() {
+    ensurePrefsLoaded();
+    uint8_t unlocked = unlockedShadeCount();
+    s_shadeIdx = (s_shadeIdx + 1) % unlocked;
+    s_petPrefs.putUChar("shadeIdx", s_shadeIdx);
 }
 
 // Squachy's base design is ~68px tall (crest to shadow) at scale 1.0.
@@ -357,10 +784,27 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
 
     using namespace Theme;
 
-    // Once every so often (see tick()'s idle branch), his fur shimmers
-    // through the vaporwave palette for a few seconds instead of the
-    // usual brown — a rare, purely-cosmetic flourish.
+    // Permanent growth-stage re-tint first (see currentStage()), then
+    // the rare temporary shimmer (see tick()'s idle branch) overrides
+    // it for a few seconds when that's active — a Legend-stage device
+    // still gets the full rainbow flourish, it just settles back to
+    // gold afterward instead of plain brown.
     uint16_t furMain = FUR_MAIN, furLight = FUR_LIGHT;
+    switch (currentStage()) {
+        case GrowthStage::TRACKER:
+            furMain  = blend(FUR_MAIN, CYAN, 50);
+            furLight = blend(FUR_LIGHT, CYAN, 50);
+            break;
+        case GrowthStage::VETERAN:
+            furMain  = blend(FUR_MAIN, WHITE, 90);
+            furLight = blend(FUR_LIGHT, WHITE, 90);
+            break;
+        case GrowthStage::LEGEND:
+            furMain  = blend(FUR_MAIN, AMBER, 110);
+            furLight = blend(FUR_LIGHT, VAPOR_YELLOW, 110);
+            break;
+        default: break;
+    }
     if (s_legendary && now < s_legendaryUntil) {
         float ph = (float)(now % 900) / 900.0f;
         furMain  = blend(CYAN, VAPOR_PINK, (uint16_t)(ph * 256.0f));
@@ -370,11 +814,24 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     // Shadow (fixed, doesn't bob)
     t.fillEllipse(cx2, headTopY + S(62), S(18), S(4), blend(BG, FUR_DARK, 70));
 
-    // Legs + big bigfoot feet
-    t.fillRect(cx2 - S(10), hy + S(40), S(8), S(10), furMain);
-    t.fillRect(cx2 + S(2),  hy + S(40), S(8), S(10), furMain);
-    t.fillRoundRect(cx2 - S(13), hy + S(49), S(12), S(6), 2, furLight);
-    t.fillRoundRect(cx2 + S(1),  hy + S(49), S(12), S(6), 2, furLight);
+    // Legs + big bigfoot feet — a simple alternating step lift while
+    // walking (TFT_eSPI has no canvas-style transforms to pivot a real
+    // leg swing on, so this just varies each leg's vertical offset in
+    // opposition, which reads fine at this size). Static otherwise.
+    if (m == Mood::WALK) {
+        float legPhase = (float)(now % 400) / 400.0f * 6.2831853f;
+        int legL = (int)(sinf(legPhase) * S(3));
+        int legR = (int)(sinf(legPhase + 3.14159265f) * S(3));
+        t.fillRect(cx2 - S(10), hy + S(40) + legL, S(8), S(10) - legL, furMain);
+        t.fillRect(cx2 + S(2),  hy + S(40) + legR, S(8), S(10) - legR, furMain);
+        t.fillRoundRect(cx2 - S(13), hy + S(49) + legL, S(12), S(6), 2, furLight);
+        t.fillRoundRect(cx2 + S(1),  hy + S(49) + legR, S(12), S(6), 2, furLight);
+    } else {
+        t.fillRect(cx2 - S(10), hy + S(40), S(8), S(10), furMain);
+        t.fillRect(cx2 + S(2),  hy + S(40), S(8), S(10), furMain);
+        t.fillRoundRect(cx2 - S(13), hy + S(49), S(12), S(6), 2, furLight);
+        t.fillRoundRect(cx2 + S(1),  hy + S(49), S(12), S(6), 2, furLight);
+    }
 
     // Body — broad, stocky torso instead of a slim rounded rect.
     t.fillRoundRect(cx2 - S(15), hy + S(23), S(30), S(18), S(5), furMain);
@@ -429,6 +886,14 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     t.fillTriangle(cx2 - S(13), hy + S(3), cx2 - S(9), hy - S(4), cx2 - S(5), hy + S(3), furLight);
     t.fillTriangle(cx2 + S(5),  hy + S(3), cx2 + S(9), hy - S(4), cx2 + S(13),hy + S(3), furLight);
 
+    // A tiny top hat, unlocked once he reaches Legend stage — perched
+    // just above the crest peak (hy - S(14)).
+    if (currentStage() == GrowthStage::LEGEND) {
+        t.fillRoundRect(cx2 - S(9), hy - S(22), S(18), S(3), 1, BLACK);
+        t.fillRect(cx2 - S(5), hy - S(30), S(10), S(9), BLACK);
+        t.fillRect(cx2 - S(5), hy - S(24), S(10), S(2), VAPOR_PINK);
+    }
+
     // Ears — small and tucked close, like a real Sasquach rather than
     // a cartoon animal's.
     t.fillCircle(cx2 - S(15), hy + S(13), S(3), furMain);
@@ -482,8 +947,12 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         t.setCursor(zx, zy);
         t.print("Z");
     } else {
+        // Lens tint is a player-chosen cosmetic (Settings > SHADES
+        // COLOR) rather than always cyan — see cycleShadesColor().
+        static const uint16_t SHADE_TINTS[4] = { CYAN, VAPOR_PINK, GREEN, VAPOR_PURPLE };
+        uint16_t shadeTint = SHADE_TINTS[s_shadeIdx % 4];
         bool blink = ((now / 2200) % 40) < 3;
-        uint16_t lens = blink ? BLACK : blend(BG, CYAN, 60);
+        uint16_t lens = blink ? BLACK : blend(BG, shadeTint, 60);
         t.fillRoundRect(cx2 - S(12), hy + S(6), S(10), S(7), 2, BLACK);
         t.fillRoundRect(cx2 + S(2),  hy + S(6), S(10), S(7), 2, BLACK);
         t.fillRect(cx2 - S(2), hy + S(8), S(4), S(2), BLACK);
@@ -560,7 +1029,7 @@ static void drawHeartFx(TFT_eSPI& t, int cx, int headTopY, uint32_t now) {
 // he stands out in front of it. Whichever theme is active supplies the
 // colors (same runtime Theme:: variables everything else reads), so
 // the light show re-tints with the palette instead of a fixed rainbow.
-static void drawPartyFx(TFT_eSPI& t, uint32_t now, int topY, int availHeight) {
+static void drawPartyFx(TFT_eSPI& t, uint32_t now, int topY, int availHeight, bool advance) {
     using namespace Theme;
     int w = t.width();
     static const uint16_t stops[6] = { RED, AMBER, GREEN, CYAN, VAPOR_PURPLE, PINK };
@@ -570,21 +1039,54 @@ static void drawPartyFx(TFT_eSPI& t, uint32_t now, int topY, int availHeight) {
         uint16_t col = blend(stops[i0], stops[i1], (uint16_t)((huePos - (int)huePos) * 255));
         t.drawFastHLine(0, yy, w, blend(BG, col, 110));
     }
+    // Position update gated: called once per band per banded-render
+    // board, and advancing it on every call would fall confetti at N
+    // times real speed instead of drawing the same frame's positions
+    // N times.
+    if (advance) {
+        for (uint8_t i = 0; i < CONFETTI_N; i++) {
+            s_cfy[i] += s_cfvy[i];
+            if (s_cfy[i] > topY + availHeight) s_cfy[i] = (float)topY;
+        }
+    }
     for (uint8_t i = 0; i < CONFETTI_N; i++) {
-        s_cfy[i] += s_cfvy[i];
-        if (s_cfy[i] > topY + availHeight) s_cfy[i] = (float)topY;
         t.fillRect((int)s_cfx[i], (int)s_cfy[i], 3, 3, stops[s_cfcol[i]]);
     }
 }
 
-void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now) {
+void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now, bool advance) {
+    // Everything in this block mutates mood/timers/particle state —
+    // gated to run once per logical frame (see the header comment on
+    // tick()) regardless of how many physical bands call this. The
+    // actual drawing further down runs every call unconditionally so
+    // each band still gets painted.
+    if (advance) {
+    // First-boot walkthrough: advance on its own if nobody's tapped the
+    // bubble (onboardingTapAdvance handles the tap-driven case). Checked
+    // independently of mood, and ahead of the idle-quip block below,
+    // which it also suppresses entirely while active — his voice is
+    // reserved for the script, not random chatter, until it's done.
+    if (s_onboardActive && now >= bubbleUntil) {
+        advanceOnboarding();
+    }
+
+    // Activity heat decays back to 0 on its own regardless of whether
+    // an idle quip actually fires this tick — see s_activityHeat and
+    // the line-pool bias below.
+    if (s_activityHeat > 0.0f && now - s_lastHeatDecayAt > 2000) {
+        s_activityHeat -= 4.0f;
+        if (s_activityHeat < 0.0f) s_activityHeat = 0.0f;
+        s_lastHeatDecayAt = now;
+    }
+
     // Expire a triggered mood back to idle
     if (mood != Mood::IDLE && now > moodUntil) mood = Mood::IDLE;
     if (s_legendary && now >= s_legendaryUntil) s_legendary = false;
 
     // Random idle fun: bounce/wave + a quip, only when nothing else
-    // triggered a reaction recently.
-    if (mood == Mood::IDLE && now >= nextIdleAt) {
+    // triggered a reaction recently, and never while the walkthrough
+    // above is running.
+    if (!s_onboardActive && mood == Mood::IDLE && now >= nextIdleAt) {
         uint32_t idleFor = now - lastInteraction;
         bool longIdle  = idleFor > 90000;
         bool verySleepy = idleFor > SLEEPY_AFTER_MS;
@@ -612,8 +1114,31 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now) {
                 s_cfcol[i] = (uint8_t)random(0, 6);
             }
             nextIdleAt = now + 12000 + random(0, 18000);
+        } else if (random(0, 6) == 0) {
+            // A little wander away from center and back — see the
+            // bodyCx computation below and the leg-cycle in drawBody().
+            say(pick(WALK_LINES, 4), MIN_BUBBLE_MS);
+            mood = Mood::WALK;
+            moodUntil = now + WALK_DURATION_MS;
+            s_walkStart = now;
+            s_walkDir = random(0, 2) ? 1 : -1;
+            nextIdleAt = now + WALK_DURATION_MS + 12000 + random(0, 18000);
         } else {
-            if (longIdle && random(0, 3) == 0) {
+            // Recent real activity (or a long stretch of none) biases
+            // which pool this pulls from, so idle chatter reads as
+            // connected to what's actually been happening instead of
+            // generic filler regardless. Falls through to the original
+            // bored/encourage/idle mix the rest of the time.
+            bool haveHistory = s_cachedLifetimeTotal > 0;
+            if (s_activityHeat >= 50.0f && random(0, 2) == 0) {
+                say(pick(ALERT_MOOD_LINES, 4), MIN_BUBBLE_MS);
+            } else if (s_activityHeat < 15.0f && longIdle && random(0, 2) == 0) {
+                say(pick(RELAXED_MOOD_LINES, 4), MIN_BUBBLE_MS);
+            } else if (haveHistory && random(0, 6) == 0) {
+                say(buildStatLine(), MIN_BUBBLE_MS);
+            } else if (random(0, 6) == 0) {
+                say(pickBackgroundLine(), MIN_BUBBLE_MS);
+            } else if (longIdle && random(0, 3) == 0) {
                 say(pick(BORED_LINES, 4), MIN_BUBBLE_MS);
             } else if (random(0, 4) == 0) {
                 say(pick(ENCOURAGE_LINES, 8), MIN_BUBBLE_MS);
@@ -625,12 +1150,17 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now) {
             nextIdleAt = now + 12000 + random(0, 18000);
         }
     }
+    } // if (advance)
 
     // Maximize Squachy's size to whatever vertical room the caller says
     // is free (title bar to status line), after reserving a row for the
     // speech bubble. Clamped to keep his proportions from getting
-    // blocky-huge or unreadably tiny on extreme screen sizes.
-    const int bubbleRowH = 16;
+    // blocky-huge or unreadably tiny on extreme screen sizes. The
+    // walkthrough's bubble is much taller than the usual one-liner, so
+    // it reserves more of that room and he renders correspondingly
+    // smaller for the duration — reading the explanation matters more
+    // than his size right then.
+    const int bubbleRowH = s_onboardActive ? ONBOARD_BUBBLE_H : 16;
     int charAvail = availHeight - bubbleRowH;
     if (charAvail < 40) charAvail = 40;
     float scale = (float)charAvail / (float)BASE_HEIGHT;
@@ -638,6 +1168,28 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now) {
     if (scale > 2.6f) scale = 2.6f;
 
     int headTopY = topY + bubbleRowH;
+
+    // A little wander away from center during Mood::WALK. bodyCx (not
+    // cx) drives everything about where he's actually drawn; the
+    // bubble further down stays at the original cx regardless — a
+    // speech bubble chasing him around a small low-res screen would
+    // hurt legibility more than the movement adds charm.
+    int bodyCx = cx;
+    if (mood == Mood::WALK) {
+        float walkT = (float)(now - s_walkStart) / (float)WALK_DURATION_MS;
+        if (walkT > 1.0f) walkT = 1.0f;
+        // Same half-width margin hitTest() assumes for his footprint,
+        // so the wander range never pushes him somewhere he'd clip off
+        // the edge or stand past his own hit box.
+        int halfW = (int)(24 * scale);
+        float maxRange = (float)(t.width() / 2 - halfW - 4);
+        if (maxRange < 0) maxRange = 0;
+        float range = 40.0f * scale;
+        if (range > maxRange) range = maxRange;
+        // Sine hump: 0 at both ends of the walk, peak at the midpoint —
+        // he's back at center exactly as the mood naturally expires.
+        bodyCx = cx + (int)(sinf(walkT * 3.14159265f) * range * s_walkDir);
+    }
 
     // Idle bob runs noticeably quicker than a resting breathing rate —
     // he should read as lively even when nothing's happening. Bob
@@ -651,7 +1203,7 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now) {
 
     // Party mode draws first — a full wash across his region — so his
     // body and the hearts below land on top of it, not under it.
-    if (s_legendary) drawPartyFx(t, now, topY, availHeight);
+    if (s_legendary) drawPartyFx(t, now, topY, availHeight, advance);
 
     // No erase-then-redraw here: ui_clear.cpp's background draw call
     // (matrix rain / starfield / toasters / lava lamp) runs immediately
@@ -664,28 +1216,38 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now) {
     // through instead of a box. (Party mode is the one exception —
     // when it's active the wash above already repaints this whole
     // region every frame, same guarantee, just with extra flair.)
-    drawBody(t, cx, hy, headTopY, now, mood, scale);
-    if (now < s_petFxUntil) drawHeartFx(t, cx, headTopY, now);
+    drawBody(t, bodyCx, hy, headTopY, now, mood, scale);
+    if (now < s_petFxUntil) drawHeartFx(t, bodyCx, headTopY, now);
 
     // Remember where/how big he actually was this frame — hitTest()
     // (tap-to-pet) checks against this, not a fixed region, since he
-    // moves and rescales with the screen.
-    s_lastCx = cx;
+    // moves and rescales with the screen (and, now, wanders during
+    // Mood::WALK).
+    s_lastCx = bodyCx;
     s_lastHeadTopY = headTopY;
     s_lastScale = scale;
 
-    // The bubble does need clearing (its width changes with the text),
-    // but only its own footprint — erase the previous frame's exact
-    // rectangle, not a fixed-size strip across the whole row. Covers
-    // both "bubble went away" and "bubble changed to a shorter one".
+    // The bubble does need clearing (its width/height changes with the
+    // text, and with which of the two draw functions drew it), but only
+    // its own footprint — erase the previous frame's exact rectangle,
+    // not a fixed-size strip across the whole row. Covers "bubble went
+    // away", "bubble changed to a shorter one", and the walkthrough's
+    // last frame handing back off to the compact one-liner bubble.
     bool showBubble = bubbleText && now < bubbleUntil;
     if (hadBubble) {
-        t.fillRect(lastBubbleX, topY, lastBubbleW, 14, Theme::BG);
+        t.fillRect(lastBubbleX, lastBubbleY, lastBubbleW, lastBubbleH, Theme::BG);
     }
     if (showBubble) {
-        drawBubble(t, cx, topY, bubbleText);
+        if (s_onboardActive) drawOnboardBubble(t, cx, topY, bubbleText, s_onboardStep, ONBOARD_N);
+        else                 drawBubble(t, cx, topY, bubbleText);
     }
-    hadBubble = showBubble;
+    // Gated: hadBubble tracks "did we draw a bubble last FRAME" for the
+    // erase above. drawBubble()/drawOnboardBubble() compute identical
+    // bounds from the same (cx, topY, bubbleText) on every band call so
+    // redrawing is harmless, but flipping hadBubble on band 0 would
+    // make band 1's erase-check see this frame's state instead of the
+    // real previous frame's.
+    if (advance) hadBubble = showBubble;
 }
 
 } // namespace Squachy
