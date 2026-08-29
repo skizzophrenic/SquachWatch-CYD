@@ -1,11 +1,12 @@
-name: Build release and deploy web flasher
+name: Build and release firmware
 
-# Push a tag like v1.2.0 to: build the firmware, attach the three
-# PlatformIO artifacts (bootloader/partitions/firmware) to a new
-# GitHub Release for that tag, then merge them into one flashable
-# image and deploy web-flasher/ (pointing at that image) to GitHub
-# Pages. The Pages copy is just an auto-synced mirror — the Release
-# stays the human-facing source of truth for the individual .bin files.
+# Push a tag like v1.2.0 to: build the firmware, create a GitHub
+# Release for that tag with the three raw PlatformIO artifacts
+# attached (bootloader/partitions/firmware — the human-facing source
+# of truth), then also merge them into one flashable image and attach
+# that plus a version-stamped manifest.json. The web flasher itself
+# lives on talkingsasquach.com, not GitHub Pages — pull these two
+# release assets over to that site's repo whenever you cut a release.
 on:
   push:
     tags:
@@ -14,15 +15,9 @@ on:
 
 permissions:
   contents: write   # create the GitHub Release
-  pages: write       # deploy to GitHub Pages
-  id-token: write    # required by actions/deploy-pages
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
 
 jobs:
-  build-release-deploy:
+  build-and-release:
     runs-on: ubuntu-latest
     steps:
       - name: Check out
@@ -46,22 +41,11 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub Release with build artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "${{ steps.ver.outputs.tag }}" \
-            --title "SquachWatch-CYD ${{ steps.ver.outputs.tag }}" \
-            --generate-notes \
-            .pio/build/cyd/bootloader.bin \
-            .pio/build/cyd/partitions.bin \
-            .pio/build/cyd/firmware.bin
-
       - name: Merge into one flashable image
         run: |
           pip install esptool
           python -m esptool --chip esp32 merge_bin \
-            -o web-flasher/firmware-merged.bin \
+            -o firmware-merged.bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
             0x1000  .pio/build/cyd/bootloader.bin \
             0x8000  .pio/build/cyd/partitions.bin \
@@ -76,15 +60,17 @@ jobs:
           m["version"] = "${{ steps.ver.outputs.version }}"
           json.dump(m, open(p, "w"), indent=2)
           PY
+          cp web-flasher/manifest.json manifest.json
 
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload flasher site
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: web-flasher
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - name: Create GitHub Release with build artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.ver.outputs.tag }}" \
+            --title "SquachWatch-CYD ${{ steps.ver.outputs.tag }}" \
+            --generate-notes \
+            .pio/build/cyd/bootloader.bin \
+            .pio/build/cyd/partitions.bin \
+            .pio/build/cyd/firmware.bin \
+            firmware-merged.bin \
+            manifest.json
