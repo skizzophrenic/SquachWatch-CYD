@@ -50,10 +50,11 @@ struct Detection {
 };
 
 enum class AppState : uint8_t {
-    BOOT  = 0,
-    CLEAR = 1,
-    ALERT = 2,
-    LOG   = 3
+    BOOT     = 0,
+    CLEAR    = 1,
+    ALERT    = 2,
+    LOG      = 3,
+    SETTINGS = 4
 };
 
 enum class ButtonId : uint8_t {

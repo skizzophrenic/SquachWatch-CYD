@@ -52,14 +52,23 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now) {
     // Pulsing border (6 px, PINK <-> VAPOR_PINK)
     Theme::drawPulsingBorder(t, now, Theme::VAPOR_PINK, Theme::PINK, 6);
 
-    // !! DETECTION !! (blink at 200ms on / 200ms off)
-    if (((now / 200) % 2) == 0) {
+    // !! DETECTION !! (blink at 200ms on / 200ms off) — Bangers comic-
+    // impact font, the bigger of the two baked-in sizes (same one the
+    // boot splash uses). ~166px wide at this size, comfortably under
+    // the narrowest (240px) screen width, so unlike the target-label
+    // line below this one never needs a fallback/shrink path. The
+    // region is cleared every frame (not just re-drawn when "on")
+    // since the sparse glyph renderer only paints ink pixels, not a
+    // full opaque cell the way t.print() does — without an explicit
+    // clear the "off" half of the blink would never actually go away.
+    {
         const char* title = "!! DETECTION !!";
-        fitTextSize(t, title, w - 8, 4);
-        t.setTextColor(Theme::PINK, Theme::BG);
-        int tw = t.textWidth(title);
-        t.setCursor((w - tw) / 2, 10);
-        t.print(title);
+        int tw = Theme::bangersTextWidth(title, Theme::BangersSize::LG);
+        int tx = (w - tw) / 2;
+        t.fillRect(tx - 2, 4, tw + 4, 38, Theme::BG);
+        if (((now / 200) % 2) == 0) {
+            Theme::drawBangersText(t, tx, 6, title, Theme::PINK, Theme::BangersSize::LG);
+        }
     }
 
     // Target type (giant, but shrinks to fit the longer labels like

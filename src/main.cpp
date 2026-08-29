@@ -14,8 +14,12 @@
 #include "ui_clear.h"
 #include "ui_alert.h"
 #include "ui_log.h"
+#include "ui_settings.h"
 #include "squachy.h"
 #include "cap_touch.h"
+#include "touch_cal.h"
+#include "settings.h"
+#include "signatures.h"
 
 // Two CYD board variants are supported from this one firmware:
 //   - jczn_2432s028r (original): resistive XPT2046 touch on its own
@@ -39,6 +43,15 @@
 #define CAP_SDA    33
 #define CAP_SCL    32
 #define CAP_RST    25
+// Backlight brightness (Settings menu): both boards' backlight pins are
+// driven at boot regardless of which one is actually wired (see the
+// digitalWrite(HIGH) comment in setup() — same reasoning applies here),
+// each on its own LEDC channel so ledcWrite can dim whichever one is
+// real without needing to know which board this is.
+#define BL_PIN_ORIG 21
+#define BL_PIN_CAP  27
+#define BL_CH_ORIG  0
+#define BL_CH_CAP   1
 
 // ---- Globals ----
 TFT_eSPI            tft = TFT_eSPI();
@@ -60,10 +73,10 @@ uint32_t            lastTouch = 0;
 DetectionType       lastAlertType = DetectionType::UNKNOWN;
 const uint16_t      TOUCH_DEBOUNCE_MS = 200;
 // The ALERT screen carries real information (type, confidence, MAC,
-// RSSI) — tapping it away is the expected dismiss, but nobody should
-// feel rushed reading it, so the automatic fallback is generous rather
-// than a quick blink-and-you-missed-it 5 seconds.
-const uint32_t      ALERT_AUTO_DISMISS_MS = 60000;
+// RSSI) — tapping it away is the expected dismiss, but the automatic
+// fallback still needs to actually clear itself in a reasonable time
+// if nobody's there to tap it.
+const uint32_t      ALERT_AUTO_DISMISS_MS = 10000;
 // TFT_eSPI rotation: all four orientations are supported (0/2 portrait,
 // 1/3 landscape), cycled in order by the rotate button in the title bar.
 uint8_t             screenRotation = 1;
@@ -76,13 +89,17 @@ static const uint32_t TRANSITION_MS = 220;
 // ---- Touch helpers ----
 struct TouchPoint { bool valid; int x; int y; };
 
-// CST816/CST820 native coordinate range measured against this exact
-// JC2432W328C unit's 4 corners in landscape (rotation 1) — the chip's
-// usable range falls short of the theoretical 0-239/0-319 panel
-// resolution (bezel/active-area margin), so these are the real
-// measured extremes, not assumed ones.
-static const uint16_t CAP_NX_MIN = 32,  CAP_NX_MAX = 166;
-static const uint16_t CAP_NY_MIN = 10,  CAP_NY_MAX = 308;
+// CST816/CST820 native coordinate range — factory defaults measured
+// against one specific JC2432W328C unit's 4 corners in landscape
+// (rotation 1). Not const: overwritten at boot if a saved calibration
+// exists (see loadOrDefaultCal()/TouchCal), and by the long-press
+// calibration flow (see checkCalibrationTrigger()).
+static uint16_t CAP_NX_MIN = 32,  CAP_NX_MAX = 166;
+static uint16_t CAP_NY_MIN = 10,  CAP_NY_MAX = 308;
+// Resistive XPT2046 raw ADC range — same idea, factory default was a
+// flat 200-3800 for both axes; not const for the same reason.
+static uint16_t RAW_X_MIN = 200, RAW_X_MAX = 3800;
+static uint16_t RAW_Y_MIN = 200, RAW_Y_MAX = 3800;
 
 static TouchPoint pollTouch() {
     TouchPoint tp = { false, 0, 0 };
@@ -117,15 +134,57 @@ static TouchPoint pollTouch() {
     if (touch.touched()) {
         TS_Point p = touch.getPoint();
         if (!landscape) {
-            tp.x = flipped ? map(p.x, 200, 3800, w, 0) : map(p.x, 200, 3800, 0, w);
-            tp.y = flipped ? map(p.y, 200, 3800, h, 0) : map(p.y, 200, 3800, 0, h);
+            tp.x = flipped ? map(p.x, RAW_X_MIN, RAW_X_MAX, w, 0) : map(p.x, RAW_X_MIN, RAW_X_MAX, 0, w);
+            tp.y = flipped ? map(p.y, RAW_Y_MIN, RAW_Y_MAX, h, 0) : map(p.y, RAW_Y_MIN, RAW_Y_MAX, 0, h);
         } else {
-            tp.x = flipped ? map(p.y, 200, 3800, w, 0) : map(p.y, 200, 3800, 0, w);
-            tp.y = flipped ? map(p.x, 200, 3800, 0, h) : map(p.x, 200, 3800, h, 0);
+            tp.x = flipped ? map(p.y, RAW_Y_MIN, RAW_Y_MAX, w, 0) : map(p.y, RAW_Y_MIN, RAW_Y_MAX, 0, w);
+            tp.y = flipped ? map(p.x, RAW_X_MIN, RAW_X_MAX, 0, h) : map(p.x, RAW_X_MIN, RAW_X_MAX, h, 0);
         }
         tp.valid = (tp.x >= 0 && tp.x < w && tp.y >= 0 && tp.y < h);
     }
     return tp;
+}
+
+// ---- Calibration ----
+static bool rawReadCap(int16_t& a, int16_t& b) {
+    uint16_t nx, ny;
+    if (!CapTouch::read(nx, ny)) return false;
+    a = (int16_t)nx;
+    b = (int16_t)ny;
+    return true;
+}
+
+static bool rawReadResistive(int16_t& a, int16_t& b) {
+    if (!touch.tirqTouched() || !touch.touched()) return false;
+    TS_Point p = touch.getPoint();
+    a = (int16_t)p.x;
+    b = (int16_t)p.y;
+    return true;
+}
+
+// See touch_cal.h: aTop/aBottom/bLeft/bRight are generic (whatever the
+// RawReader's two raw axes are, sampled at the top/bottom row and
+// left/right column respectively) — map them onto whichever named
+// constants pollTouch() actually uses, matching the same top/bottom/
+// left/right relationship already derived for each touch type above.
+static void applyBrightness() {
+    uint8_t duty = Settings::brightness();
+    ledcWrite(BL_CH_ORIG, duty);
+    ledcWrite(BL_CH_CAP,  duty);
+}
+
+static void applyCal(const TouchCal::Cal& cal) {
+    if (usingCapTouch) {
+        CAP_NX_MAX = (uint16_t)cal.aTop;
+        CAP_NX_MIN = (uint16_t)cal.aBottom;
+        CAP_NY_MIN = (uint16_t)cal.bLeft;
+        CAP_NY_MAX = (uint16_t)cal.bRight;
+    } else {
+        RAW_X_MAX = (uint16_t)cal.aTop;
+        RAW_X_MIN = (uint16_t)cal.aBottom;
+        RAW_Y_MIN = (uint16_t)cal.bLeft;
+        RAW_Y_MAX = (uint16_t)cal.bRight;
+    }
 }
 
 // ---- State transitions ----
@@ -156,6 +215,12 @@ static void enterLog() {
     uiLogInit(frame);
 }
 
+static void enterSettings() {
+    state = AppState::SETTINGS;
+    transitionStart = millis();
+    uiSettingsInit(frame);
+}
+
 // ---- Arduino setup / loop ----
 void setup() {
     Serial.begin(115200);
@@ -178,7 +243,24 @@ void setup() {
     // ST7796U and will lock up an ST7789 panel; do not re-add it unless
     // we confirm the panel is actually ST7796.
     tft.setRotation(screenRotation);
+
+    // Load persisted settings before the first real pixel is drawn, so
+    // boot itself already reflects the saved theme/invert choice
+    // instead of flashing the defaults for a moment first.
+    Settings::load();
+    tft.invertDisplay(Settings::inverted());
     tft.fillScreen(Theme::BG);
+
+    // Hand the digitalWrite(HIGH) backlight pins above off to LEDC PWM
+    // so the settings-menu brightness slider can dim them — same
+    // "drive both boards' pin, only one is really wired" reasoning as
+    // the digitalWrite call, just with a duty cycle instead of a flat
+    // HIGH.
+    ledcSetup(BL_CH_ORIG, 5000, 8);
+    ledcAttachPin(BL_PIN_ORIG, BL_CH_ORIG);
+    ledcSetup(BL_CH_CAP, 5000, 8);
+    ledcAttachPin(BL_PIN_CAP, BL_CH_CAP);
+    applyBrightness();
 
     // 8-bit (palette) mode: 320x240 needs ~75KB instead of ~150KB at
     // 16-bit — the full 16-bit buffer didn't fit in the available
@@ -208,6 +290,53 @@ void setup() {
         touch.setRotation(0);
     }
 
+    // Recovery escape hatch: hold touch ANYWHERE for ~1s right here to
+    // wipe a saved calibration back to defaults. A bad calibration can
+    // make touch too inaccurate to reliably re-tap a "recalibrate"
+    // button, so this needs no precision at all — just a hold anywhere
+    // during the window right after boot.
+    tft.fillScreen(Theme::BG);
+    tft.setTextColor(Theme::AMBER, Theme::BG);
+    tft.setTextSize(1);
+    tft.setCursor(4, 4);
+    tft.print("Hold anywhere now to reset touch calibration...");
+    {
+        uint32_t holdStart = 0;
+        uint32_t windowStart = millis();
+        while (millis() - windowStart < 1200) {
+            int16_t a, b;
+            bool down = usingCapTouch ? rawReadCap(a, b) : rawReadResistive(a, b);
+            if (down) {
+                if (holdStart == 0) holdStart = millis();
+                else if (millis() - holdStart > 800) {
+                    TouchCal::reset();
+                    tft.fillScreen(Theme::BG);
+                    tft.setTextColor(Theme::AMBER, Theme::BG);
+                    tft.setTextSize(2);
+                    const char* msg = "CALIBRATION RESET";
+                    tft.setCursor((tft.width() - tft.textWidth(msg)) / 2, tft.height() / 2 - 8);
+                    tft.print(msg);
+                    delay(1200);
+                    break;
+                }
+            } else {
+                holdStart = 0;
+            }
+            delay(10);
+        }
+    }
+    tft.fillScreen(Theme::BG);
+
+    // Apply a saved touch calibration if one exists (long-press the
+    // title bar on the CLEAR/LOG screen to (re)calibrate — see
+    // checkCalibrationTrigger()); otherwise keep the compiled-in
+    // defaults above.
+    TouchCal::Cal savedCal;
+    if (TouchCal::load(savedCal)) {
+        applyCal(savedCal);
+        Serial.println("Loaded saved touch calibration.");
+    }
+
     // Seed the PRNG so the matrix rain starts in a fresh-looking state
     // on every boot. Analog read on a floating pin is plenty.
     randomSeed(analogRead(34));
@@ -223,8 +352,10 @@ void loop() {
     engine.loop();
 
     // Rotate button lives in the title bar's top-right corner, shown on
-    // the CLEAR and LOG screens only.
-    if (tp.valid && (state == AppState::CLEAR || state == AppState::LOG) &&
+    // the CLEAR, LOG and SETTINGS screens (drawTitleBar always draws
+    // it — gating the hit-test to these three keeps it inert wherever
+    // there's no title bar drawn at all, i.e. BOOT/ALERT).
+    if (tp.valid && (state == AppState::CLEAR || state == AppState::LOG || state == AppState::SETTINGS) &&
         Theme::rotateButtonHit(tp.x, tp.y, tft.width()) &&
         (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
         lastTouch = now;
@@ -240,6 +371,38 @@ void loop() {
         transitionStart = now;
     }
 
+    // Settings button lives in the title bar's top-left corner, shown
+    // on the same three screens as the rotate button. Tapping it while
+    // already on the SETTINGS screen backs out to CLEAR instead of
+    // re-entering itself — same toggle-off feel as the LOG button.
+    if (tp.valid && (state == AppState::CLEAR || state == AppState::LOG || state == AppState::SETTINGS) &&
+        Theme::settingsButtonHit(tp.x, tp.y) &&
+        (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+        lastTouch = now;
+        if (state == AppState::SETTINGS) enterClear();
+        else enterSettings();
+    }
+
+    // Long-press the middle of the title bar (between the settings and
+    // rotate icons) on CLEAR/LOG to (re)calibrate touch — held, not
+    // tapped, so normal use (including tapping either icon) can't
+    // trigger it by accident.
+    static uint32_t calHoldStart = 0;
+    bool overTitleBar = tp.valid && tp.x >= 50 && tp.x < tft.width() - 50 && tp.y < 20;
+    if ((state == AppState::CLEAR || state == AppState::LOG) && overTitleBar) {
+        if (calHoldStart == 0) calHoldStart = now;
+        else if (now - calHoldStart > 1500) {
+            calHoldStart = 0;
+            lastTouch = now;
+            TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
+            TouchCal::Cal newCal = TouchCal::runInteractive(frame, reader, Theme::BG, Theme::WHITE, Theme::CYAN);
+            applyCal(newCal);
+            enterClear();
+        }
+    } else {
+        calHoldStart = 0;
+    }
+
     switch (state) {
         case AppState::BOOT: {
             uiBootTick(frame, now);
@@ -250,13 +413,24 @@ void loop() {
         }
         case AppState::CLEAR: {
             uiClearTick(frame, now, engine);
-            // Check for new detection
+            // Check for new detection — gated by the settings-menu
+            // confidence filter (LOW_CONF/default = no filtering, every
+            // match still interrupts with the ALERT screen).
             const Detection* latest = engine.latest();
-            if (latest && (now - latest->firstSeen) < 200) {
+            if (latest && (now - latest->firstSeen) < 200 &&
+                confidenceFor(latest->type) >= Settings::minConfidence()) {
                 enterAlert(*latest);
             }
-            // Buttons
-            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+            // Tap Squachy directly to pet him — a reaction quip/heart
+            // flourish, and (since that's basically him showing off)
+            // the background cycles to something new too. Checked
+            // before the button bar since his region is nowhere near
+            // it, but this keeps the two exclusive either way.
+            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS && Squachy::hitTest(tp.x, tp.y)) {
+                lastTouch = now;
+                Squachy::trigger(Squachy::Event::PETTED);
+                Settings::cycleBackground();
+            } else if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 ButtonId b = Theme::hitTestButtonBar(tp.x, tp.y, tft.width(), tft.height());
                 lastTouch = now;
                 if (b == ButtonId::LOG)  { Squachy::trigger(Squachy::Event::LOG_OPENED); enterLog(); }
@@ -300,6 +474,37 @@ void loop() {
                 }
             } else {
                 lastY = -1;
+            }
+            break;
+        }
+        case AppState::SETTINGS: {
+            uiSettingsTick(frame, now, engine);
+            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                lastTouch = now;
+                SettingsRow row = uiSettingsHitTest(tp.x, tp.y, tft.width(), tft.height());
+                switch (row) {
+                    case SettingsRow::THEME:      Settings::cyclePalette(); break;
+                    case SettingsRow::BACKGROUND: Settings::cycleBackground(); break;
+                    case SettingsRow::INVERT:
+                        Settings::toggleInvert();
+                        tft.invertDisplay(Settings::inverted());
+                        break;
+                    case SettingsRow::BRIGHTNESS:
+                        Settings::adjustBrightness(tp.x < tft.width() / 2 ? -16 : 16);
+                        applyBrightness();
+                        break;
+                    case SettingsRow::CONFIDENCE: Settings::cycleMinConfidence(); break;
+                    case SettingsRow::CALIBRATE: {
+                        TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
+                        TouchCal::Cal newCal = TouchCal::runInteractive(frame, reader, Theme::BG, Theme::WHITE, Theme::CYAN);
+                        applyCal(newCal);
+                        enterSettings();
+                        break;
+                    }
+                    case SettingsRow::RESET_STATS: engine.resetLifetime(); break;
+                    case SettingsRow::BACK:        enterClear(); break;
+                    default: break;
+                }
             }
             break;
         }

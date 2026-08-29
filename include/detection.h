@@ -18,6 +18,11 @@ public:
     // live _typeCounts above which decay when a detection goes stale.
     uint32_t lifetimeTotal() const { return _lifetimeTotal; }
 
+    // Settings-menu "reset stats" action: zeroes the persisted lifetime
+    // total and the live per-type counters. Does not touch the log
+    // itself — that's clearLog()'s job.
+    void resetLifetime();
+
     // Called from the promiscuous WiFi Rx callback (IRAM_ATTR context).
     // Posts a 6-byte MAC + RSSI for later processing in loop(). ssid is
     // optional (nullptr/empty for probe requests and data frames, which
@@ -36,6 +41,15 @@ public:
 
     // SD log helper accessor.
     SdLog& sd() { return _sd; }
+
+    // Rough per-channel activity level for the spectrum-waterfall
+    // background (0..100, quiet..very active) — not a real dBm
+    // reading, just how strong/recent the loudest frame seen on that
+    // channel during the last hop cycle was, decaying over time.
+    // channel is 1..13; anything else returns 0.
+    uint8_t channelActivity(uint8_t channel) const {
+        return (channel >= 1 && channel <= 13) ? _channelActivity[channel] : 0;
+    }
 
 private:
     static const uint8_t  LOG_CAP       = 32;
@@ -77,8 +91,16 @@ private:
     uint8_t     _wifiChannel = 1;
     uint32_t    _lastHopMs   = 0;
 
+    // Index 1..13; 0 is unused. Fed from every captured mgmt/data
+    // frame in processWiFiQ() (not just ones that match a known
+    // signature) so it reflects real ambient channel activity, then
+    // decayed over time in loop().
+    uint8_t     _channelActivity[14] = {0};
+    uint32_t    _channelLastMs[14]   = {0};
+
     void pushLog(const Detection& d);
     void processWiFiQ();
     void expireStale();
     void hopChannel();
+    void decayChannelActivity();
 };

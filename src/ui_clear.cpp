@@ -2,6 +2,7 @@
 #include "ui_clear.h"
 #include "theme.h"
 #include "squachy.h"
+#include "settings.h"
 #include <Arduino.h>
 
 void uiClearInit(TFT_eSPI& t) {
@@ -46,7 +47,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
 
     Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, t.height());
     const int lineH          = 14;
-    const int countersTop    = bar.y - 3 * lineH - 6;
+    const int countersTop    = bar.y - 2 * lineH - 6;
     const int countersBottom = bar.y - 4;
 
     // Status line sits directly against the counter lines (no gap) —
@@ -55,11 +56,33 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     const int titleBottom  = 16;
     const int statusH      = 16;
     const int statusTop    = countersTop - statusH;
-    const int rainEnd      = statusTop - 2;
+    // The animation used to stop at the status line, leaving the
+    // status text and both counter rows sitting on flat black below
+    // Squachy. It now runs all the way down to just above the button
+    // bar — Squachy's own drawing region (titleBottom..statusTop)
+    // is unaffected, this only extends what's behind everything below
+    // him.
+    const int rainEnd      = countersBottom;
 
-    // Background matrix rain, from below the title bar down to just
-    // above the status line.
-    Theme::drawMatrixRain(t, now, titleBottom, rainEnd);
+    // Background animation, from below the title bar down to just
+    // above the button bar — style picked from the settings menu.
+    switch (Settings::background()) {
+        case Settings::Background::STARFIELD: Theme::drawStarfield(t, now, titleBottom, rainEnd); break;
+        case Settings::Background::TOASTERS:   Theme::drawFlyingToasters(t, now, titleBottom, rainEnd); break;
+        case Settings::Background::LAVALAMP:   Theme::drawLavaLamp(t, now, titleBottom, rainEnd); break;
+        case Settings::Background::CRYPTID:    Theme::drawCryptidCam(t, now, titleBottom, rainEnd); break;
+        case Settings::Background::RADAR:      Theme::drawRadarSweep(t, now, titleBottom, rainEnd); break;
+        case Settings::Background::RAIN:       Theme::drawRainGlass(t, now, titleBottom, rainEnd); break;
+        case Settings::Background::AQUARIUM:   Theme::drawAquarium(t, now, titleBottom, rainEnd); break;
+        case Settings::Background::TERMINAL:   Theme::drawTerminalLog(t, now, titleBottom, rainEnd); break;
+        case Settings::Background::FIREFLIES:  Theme::drawFireflies(t, now, titleBottom, rainEnd); break;
+        case Settings::Background::AURORA:     Theme::drawAurora(t, now, titleBottom, rainEnd); break;
+        case Settings::Background::FIRE:       Theme::drawFire(t, now, titleBottom, rainEnd); break;
+        case Settings::Background::SNOWFALL:   Theme::drawSnowfall(t, now, titleBottom, rainEnd); break;
+        case Settings::Background::SPECTRUM:   Theme::drawSpectrumWaterfall(t, now, titleBottom, rainEnd, eng); break;
+        case Settings::Background::TUNNEL:     Theme::drawWireframeTunnel(t, now, titleBottom, rainEnd); break;
+        default:                               Theme::drawMatrixRain(t, now, titleBottom, rainEnd); break;
+    }
 
     // Squachy: main character, reacts to events, cracks jokes when idle.
     // He gets everything between the title bar and the status line —
@@ -90,38 +113,40 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
         t.setCursor((w - cw) / 2, countersTop - t.fontHeight(2));
         t.print(clear);
     } else {
-        t.setTextSize(1);
+        // Same size as "ALL CLEAR" — text sizing only comes in whole
+        // multiples, so matching them means picking one; this still
+        // fits comfortably even in the narrowest (240px portrait)
+        // rotation.
+        t.setTextSize(2);
         t.setTextColor(Theme::PINK, Theme::BG);
         const char* seen = "DETECTIONS LOGGED";
         int sw = t.textWidth(seen);
-        t.setCursor((w - sw) / 2, countersTop - t.fontHeight(1));
+        t.setCursor((w - sw) / 2, countersTop - t.fontHeight(2));
         t.print(seen);
     }
 
-    // Counter lines above the buttons — a fixed, centered three-line
-    // split (FLOCK/AXON/META/SKIM/RAV, then AIR/DRONE/ALPR/CAM, then
-    // the two Find My Device Network-style trackers). Whole label:count
-    // tokens only, so nothing ever breaks mid-word.
+    // Counter lines above the buttons — a fixed, centered two-line
+    // split across all 11 detection types. Whole label:count tokens
+    // only, so nothing ever breaks mid-word. No flat clear here
+    // anymore — the background animation now fully repaints this
+    // whole row every frame (rainEnd extends down to countersBottom),
+    // the same "let the background do the erasing" pattern already
+    // relied on for Squachy and the status line above.
     t.setTextSize(1);
     t.setTextColor(Theme::CYAN, Theme::BG);
     t.setTextWrap(false);
-    t.fillRect(0, countersTop, w, countersBottom - countersTop, Theme::BG);
 
     static const DetectionType LINE1[] = {
         DetectionType::FLOCK, DetectionType::AXON, DetectionType::META,
-        DetectionType::SKIMMER, DetectionType::RAVEN
+        DetectionType::SKIMMER, DetectionType::RAVEN, DetectionType::AIRTAG
     };
     static const DetectionType LINE2[] = {
-        DetectionType::AIRTAG, DetectionType::DRONE, DetectionType::ALPR,
-        DetectionType::CAMERA
-    };
-    static const DetectionType LINE3[] = {
+        DetectionType::DRONE, DetectionType::ALPR, DetectionType::CAMERA,
         DetectionType::SAMSUNG_TAG, DetectionType::GOOGLE_TAG
     };
 
-    drawCounterLine(t, w, countersTop,              eng, LINE1, 5);
-    drawCounterLine(t, w, countersTop + lineH,       eng, LINE2, 4);
-    drawCounterLine(t, w, countersTop + 2 * lineH,   eng, LINE3, 2);
+    drawCounterLine(t, w, countersTop,              eng, LINE1, 6);
+    drawCounterLine(t, w, countersTop + lineH,       eng, LINE2, 5);
 
     // Soft buttons
     Theme::drawButtonBar(t, ButtonId::NONE);

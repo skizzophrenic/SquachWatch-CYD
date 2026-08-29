@@ -128,6 +128,12 @@ static BleScanCallbacks g_bleScanCallbacks;
 
 // -------- DetectionEngine --------
 
+void DetectionEngine::resetLifetime() {
+    _lifetimeTotal = 0;
+    _prefs.putUInt("total", 0);
+    for (uint8_t i = 0; i < (uint8_t)DetectionType::COUNT; i++) _typeCounts[i] = 0;
+}
+
 bool DetectionEngine::init() {
     if (g_engine) return true;
     g_engine = this;
@@ -221,7 +227,18 @@ void DetectionEngine::loop() {
     hopChannel();
     processWiFiQ();
     expireStale();
+    decayChannelActivity();
     _sd.tick();
+}
+
+void DetectionEngine::decayChannelActivity() {
+    uint32_t now = millis();
+    for (uint8_t ch = 1; ch <= 13; ch++) {
+        if (_channelActivity[ch] > 0 && now - _channelLastMs[ch] > 200) {
+            _channelActivity[ch] = (_channelActivity[ch] > 4) ? _channelActivity[ch] - 4 : 0;
+            _channelLastMs[ch] = now;
+        }
+    }
 }
 
 void DetectionEngine::hopChannel() {
@@ -270,10 +287,28 @@ void DetectionEngine::postBle(Detection d) {
         uint8_t slot = (_logHead + LOG_CAP - 1 - i) % LOG_CAP;
         if (memcmp(_log[slot].mac, d.mac, 6) == 0 &&
             _log[slot].type == d.type) {
+            // Real bug, not a no-op: this used to be
+            // `_typeCounts[...] = _typeCounts[...]`, which does
+            // nothing. If the device had already gone stale (see
+            // expireStale — active=false, counter decremented) and
+            // is now seen again, it landed right here on every repeat
+            // sighting: hits/rssi/lastSeen updated, but active never
+            // flipped back on and the counter never re-incremented —
+            // so a device that comes and goes (exactly what an AirTag
+            // does) would only ever get counted once, on its very
+            // first sighting, and then silently stop being detected
+            // for good.
+            bool reactivating = !_log[slot].active;
             _log[slot].hits++;
             _log[slot].rssi = d.rssi;
             _log[slot].lastSeen = millis();
-            _typeCounts[(uint8_t)d.type] = _typeCounts[(uint8_t)d.type];
+            if (reactivating) {
+                _log[slot].active = true;
+                _log[slot].firstSeen = millis();   // fresh sighting for alert purposes
+                _typeCounts[(uint8_t)d.type]++;
+                _latest = &_log[slot];
+                _latestChangeMs = millis();
+            }
             return;
         }
     }
@@ -294,6 +329,17 @@ void DetectionEngine::processWiFiQ() {
             _wifiQTail = (_wifiQTail + 1) % WIFI_Q_CAP;
             interrupts();
         }
+        // Every captured frame feeds the spectrum-waterfall's channel
+        // activity level, whether or not it ends up matching anything
+        // below — this is meant to reflect real ambient RF traffic,
+        // not just known-vendor hits.
+        if (e.channel >= 1 && e.channel <= 13) {
+            int level = ((int)e.rssi + 90) * 100 / 60;
+            if (level < 0) level = 0;
+            if (level > 100) level = 100;
+            if ((uint8_t)level > _channelActivity[e.channel]) _channelActivity[e.channel] = (uint8_t)level;
+            _channelLastMs[e.channel] = millis();
+        }
         // Check OUI first (per DESIGN.md §6.2 precedence); fall back to
         // the SSID prefix (e.g. an Axon/Flock unit in pairing mode,
         // broadcasting from a WiFi module OUI we don't otherwise know)
@@ -305,16 +351,27 @@ void DetectionEngine::processWiFiQ() {
             matchedBySsid = (t != DetectionType::UNKNOWN);
         }
         if (t == DetectionType::UNKNOWN) continue;
-        // Try to dedupe / merge
+        // Try to dedupe / merge. Same reactivation fix as postBle()'s
+        // merge branch — a device that went stale and comes back needs
+        // active flipped back on and the counter bumped again, or it
+        // silently stops being counted after its first sighting.
         bool merged = false;
         for (uint8_t i = 0; i < _logCount; i++) {
             uint8_t slot = (_logHead + LOG_CAP - 1 - i) % LOG_CAP;
             if (memcmp(_log[slot].mac, e.mac, 6) == 0 &&
                 _log[slot].type == t) {
+                bool reactivating = !_log[slot].active;
                 _log[slot].hits++;
                 _log[slot].rssi = e.rssi;
                 _log[slot].lastSeen = millis();
                 _log[slot].channel = e.channel;
+                if (reactivating) {
+                    _log[slot].active = true;
+                    _log[slot].firstSeen = millis();
+                    _typeCounts[(uint8_t)t]++;
+                    _latest = &_log[slot];
+                    _latestChangeMs = millis();
+                }
                 merged = true;
                 break;
             }

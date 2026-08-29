@@ -3,10 +3,11 @@
 #include "theme.h"
 #include "signatures.h"
 #include <Arduino.h>
+#include <Preferences.h>
 
 namespace Squachy {
 
-enum class Mood : uint8_t { IDLE, WAVE, SHOCKED, BOUNCE };
+enum class Mood : uint8_t { IDLE, WAVE, SHOCKED, BOUNCE, SLEEPY };
 
 // Which reaction pose a SHOCKED mood strikes — varies by what triggered
 // it so a detection actually reads differently depending on the type,
@@ -42,11 +43,11 @@ static const char* IDLE_LINES[] = {
     "Snacks fuel good opsec. Pack extra.",
     "This screen's my new hideout.",
     "Bigfoot sightings up 40% lately.",
-    "Lockpicking: problem solving, but metal.",
+    "Locks keep out the polite. I'm not polite.",
     "The best hack teaches someone.",
     "I contain multitudes and RF signals.",
     "Every good cryptid needs a hobby.",
-    "Scanning is my cardio.",
+    "This counts as cardio. Fight me.",
     "Cryptid by night, operator by day.",
     "Nobody suspects the Sasquach.",
 };
@@ -90,6 +91,38 @@ static const char* ROTATE_LINES[] = {
     "I get dizzy but I never complain.",
 };
 
+// Tap-to-pet reactions — a minority get the milestone treatment below
+// instead (see PET_MILESTONES).
+static const char* PET_LINES[] = {
+    "Ooh, right there.",
+    "Personal space? Never heard of it.",
+    "Petting a cryptid. Bold move.",
+    "This is why they never get good photos of me.",
+    "Okay, ONE more. Don't tell the others.",
+    "You'd pet Bigfoot too. Don't lie.",
+    "Cryptid, not a house pet. But okay.",
+    "Ten out of ten, would be spotted again.",
+};
+
+// A yawn/nap moment for when nothing's happened in a long while — a
+// visual state, not just another line bank (see the SLEEPY mood in
+// drawBody).
+static const char* SLEEPY_LINES[] = {
+    "*yawn* ...still here.",
+    "Cryptid power-nap. Don't tell anyone.",
+    "Resting my eyes. Not my watch.",
+    "Zzz... wake me if something's actually out there.",
+};
+
+// A few over-the-top lines for the rare full "party mode" flourish
+// (see s_legendary below) — bigger occasion than the plain shimmer.
+static const char* PARTY_LINES[] = {
+    "PARTY MODE. You're welcome.",
+    "Whoa. Did you just see that?",
+    "This is a disco now. No refunds.",
+    "Cryptid rave. Don't tell anyone.",
+};
+
 struct DetLines { const char* a; const char* b; };
 // Indexed by DetectionType (UNKNOWN..CAMERA), matches state.h ordering.
 static const DetLines DET_LINES[] = {
@@ -113,6 +146,11 @@ static const uint8_t DET_LINES_N = sizeof(DET_LINES) / sizeof(DET_LINES[0]);
 static const uint32_t MILESTONES[] = { 10, 25, 50, 100, 250, 500, 1000, 2500, 5000 };
 static const uint8_t  MILESTONES_N = sizeof(MILESTONES) / sizeof(MILESTONES[0]);
 
+// Same idea for lifetime pet count — a much lower bar than detections,
+// since petting is its own little game rather than the main point.
+static const uint32_t PET_MILESTONES[] = { 1, 10, 25, 50, 100, 250, 500 };
+static const uint8_t  PET_MILESTONES_N = sizeof(PET_MILESTONES) / sizeof(PET_MILESTONES[0]);
+
 // ---- Runtime state ----
 static Mood          mood            = Mood::IDLE;
 static uint32_t      moodUntil       = 0;
@@ -127,9 +165,41 @@ static char          s_milestoneBuf[48];
 static char          s_detBuf[56];
 
 // A very rare idle flourish — his fur shimmers through the vaporwave
-// palette for a few seconds. Purely cosmetic, no gameplay meaning.
+// palette for a few seconds, plus (see tick()/drawPartyFx) a full
+// rainbow wash and confetti across his whole region. Purely cosmetic,
+// no gameplay meaning.
 static bool     s_legendary      = false;
 static uint32_t s_legendaryUntil = 0;
+
+// Tap-to-pet: a lifetime count persisted across reboots (its own NVS
+// namespace, loaded lazily on first trigger() call rather than a
+// dedicated init() — there wasn't one before and every event already
+// funnels through trigger()), plus a little floating-heart flourish
+// while the "petted" reaction is showing.
+static Preferences s_petPrefs;
+static bool        s_petPrefsLoaded = false;
+static uint32_t    s_petCount       = 0;
+static uint32_t    s_petFxStart     = 0;
+static uint32_t    s_petFxUntil     = 0;
+
+// Confetti for the rare "party mode" flourish (see s_legendary) —
+// seeded once when it triggers, then just falls and recycles for the
+// duration of the effect.
+static const uint8_t CONFETTI_N = 12;
+static float   s_cfx[CONFETTI_N], s_cfy[CONFETTI_N], s_cfvy[CONFETTI_N];
+static uint8_t s_cfcol[CONFETTI_N];
+
+// Where he last actually drew himself — updated at the end of every
+// tick()/drawWaving() call, read by hitTest() so a tap only counts if
+// it lands where he's currently standing (he moves/scales with the
+// screen, this isn't a fixed region).
+static int   s_lastCx = -10000, s_lastHeadTopY = 0;
+static float s_lastScale = 1.0f;
+
+// After this long with no interaction at all (not even idle quips
+// count — this tracks real engagement), he dozes off instead of
+// standing around wide awake forever.
+static const uint32_t SLEEPY_AFTER_MS = 180000;
 
 static const char* pick(const char* const* arr, int n) {
     return arr[random(0, n)];
@@ -201,10 +271,48 @@ void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal) {
             say(pick(ROTATE_LINES, 3), MIN_BUBBLE_MS);
             break;
         case Event::BOOTED:
+            if (!s_petPrefsLoaded) {
+                s_petPrefs.begin("squachy", false);
+                s_petCount = s_petPrefs.getUInt("pets", 0);
+                s_petPrefsLoaded = true;
+            }
             say(pick(BOOT_LINES, 2), MIN_BUBBLE_MS);
             break;
+        case Event::PETTED: {
+            mood = Mood::BOUNCE;
+            moodUntil = now + 1200;
+            s_petFxStart = now;
+            s_petFxUntil = now + 1900;
+            s_petCount++;
+            s_petPrefs.putUInt("pets", s_petCount);
+
+            uint32_t hit = 0;
+            for (uint8_t i = 0; i < PET_MILESTONES_N; i++) {
+                if (s_petCount == PET_MILESTONES[i]) hit = PET_MILESTONES[i];
+            }
+            if (hit > 0) {
+                snprintf(s_milestoneBuf, sizeof(s_milestoneBuf),
+                         "Pet #%lu! We're basically friends now.", (unsigned long)hit);
+                say(s_milestoneBuf, 5500);
+            } else {
+                say(pick(PET_LINES, 8), MIN_BUBBLE_MS);
+            }
+            break;
+        }
     }
     nextIdleAt = now + 15000 + random(0, 15000);
+}
+
+bool hitTest(int x, int y) {
+    // Generous fixed bounding box (not a pixel-perfect silhouette
+    // test) sized off his last known position/scale — good enough for
+    // a fingertip, and matches how forgiving every other tap target in
+    // this UI already is.
+    if (s_lastCx < -5000) return false;
+    int halfW = (int)(24 * s_lastScale);
+    int top   = s_lastHeadTopY - (int)(20 * s_lastScale);
+    int bot   = s_lastHeadTopY + (int)(62 * s_lastScale);
+    return x >= s_lastCx - halfW && x <= s_lastCx + halfW && y >= top && y <= bot;
 }
 
 // ---- Drawing ----
@@ -358,6 +466,21 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         } else if (pose == ReactPose::DISGUST) {
             t.drawWideLine(cx2 + S(11), hy + S(26), cx2, hy + S(17), S(7), furLight);
         }
+    } else if (m == Mood::SLEEPY) {
+        // Closed, content eyes — soft downward arcs instead of shades —
+        // plus a little "o" mouth and a drifting Z to sell the nap.
+        t.drawLine(cx2 - S(9), hy + S(9), cx2 - S(2), hy + S(11), furLight);
+        t.drawLine(cx2 + S(2), hy + S(11), cx2 + S(9), hy + S(9), furLight);
+        t.fillCircle(cx2, hy + S(18), S(2), BLACK);
+
+        float zPhase = (float)(now % 1600) / 1600.0f;
+        int zx = cx2 + S(15) + (int)(zPhase * S(6));
+        int zy = hy + S(1) - (int)(zPhase * S(14));
+        uint16_t zCol = blend(BG, CYAN, (uint16_t)(220 * (1.0f - zPhase)));
+        t.setTextSize(scale > 1.4f ? 2 : 1);
+        t.setTextColor(zCol, BG);
+        t.setCursor(zx, zy);
+        t.print("Z");
     } else {
         bool blink = ((now / 2200) % 40) < 3;
         uint16_t lens = blink ? BLACK : blend(BG, CYAN, 60);
@@ -391,35 +514,104 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     }
 }
 
-// Tight bounding box (unscaled, relative to hy) for whatever drawBody()
-// actually paints in a given mood — used to clear only his real
-// footprint between frames instead of a generic worst-case box. Arms
-// are the only part that changes the horizontal extent by mood; the
-// vertical extent (hair tuft peak to feet) is the same for all of them.
-static void bodyBounds(Mood m, int& xMin, int& xMax, int& yMin, int& yMax) {
-    yMin = -18; yMax = 58; // -18 covers the sagittal crest peak
-    switch (m) {
-        case Mood::WAVE:    xMin = -21; xMax = 32; break;
-        case Mood::SHOCKED: xMin = -30; xMax = 30; break;
-        default:            xMin = -21; xMax = 21; break; // long resting arms are the widest feature
+void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const char* line) {
+    // Same idle bob as tick()'s WAVE mood, just without the quip/mood
+    // state machine — a self-contained cameo for the boot splash.
+    float bobAmt = 6.0f * scale;
+    float bob = sinf((float)(now % 900) / 900.0f * 6.2831853f) * bobAmt;
+    int headTopY = baseY - (int)(58.0f * scale);
+    int hy = headTopY + (int)bob;
+    drawBody(t, cx, hy, headTopY, now, Mood::WAVE, scale);
+    // Fixed above his (pre-bob) head, same as tick()'s bubble row — it
+    // shouldn't bounce along with him. Pulled up further than tick()'s
+    // gap (18px) specifically so it sits right under the "TALKING
+    // SASQUACH" subtitle above, in the extra room this bigger boot-
+    // splash scale leaves between his head and the subtitle.
+    if (line) drawBubble(t, cx, headTopY - 34, line);
+}
+
+// Small filled heart, used by the tap-to-pet flourish.
+static void drawHeart(TFT_eSPI& t, int x, int y, int r, uint16_t col) {
+    t.fillCircle(x - r / 2, y, r / 2, col);
+    t.fillCircle(x + r / 2, y, r / 2, col);
+    t.fillTriangle(x - r, y, x + r, y, x, y + r, col);
+}
+
+// A few hearts drift up from his head and fade, staggered so they
+// don't all rise in lockstep.
+static void drawHeartFx(TFT_eSPI& t, int cx, int headTopY, uint32_t now) {
+    static const uint8_t  NH = 5;
+    static const int8_t   offsets[NH] = { -14, -7, 0, 7, 14 };
+    static const uint16_t phaseMs[NH] = { 0, 150, 300, 450, 600 };
+    for (uint8_t i = 0; i < NH; i++) {
+        if (now < s_petFxStart + phaseMs[i]) continue;
+        uint32_t elapsed = now - s_petFxStart - phaseMs[i];
+        if (elapsed > 1200) continue;
+        float p = (float)elapsed / 1200.0f;
+        int hx = cx + offsets[i];
+        int hy2 = headTopY - (int)(p * 34.0f) - 4;
+        uint16_t col = Theme::blend(Theme::BG, Theme::PINK, (uint16_t)(255 * (1.0f - p)));
+        drawHeart(t, hx, hy2, 3, col);
+    }
+}
+
+// The rare "party mode" flourish: a rainbow strobe wash across his
+// whole allotted region plus falling confetti, drawn before he is so
+// he stands out in front of it. Whichever theme is active supplies the
+// colors (same runtime Theme:: variables everything else reads), so
+// the light show re-tints with the palette instead of a fixed rainbow.
+static void drawPartyFx(TFT_eSPI& t, uint32_t now, int topY, int availHeight) {
+    using namespace Theme;
+    int w = t.width();
+    static const uint16_t stops[6] = { RED, AMBER, GREEN, CYAN, VAPOR_PURPLE, PINK };
+    for (int yy = topY; yy < topY + availHeight; yy += 4) {
+        float huePos = fmodf((float)now / 260.0f + (float)(yy - topY) * 0.05f, 6.0f);
+        int i0 = (int)huePos % 6, i1 = (i0 + 1) % 6;
+        uint16_t col = blend(stops[i0], stops[i1], (uint16_t)((huePos - (int)huePos) * 255));
+        t.drawFastHLine(0, yy, w, blend(BG, col, 110));
+    }
+    for (uint8_t i = 0; i < CONFETTI_N; i++) {
+        s_cfy[i] += s_cfvy[i];
+        if (s_cfy[i] > topY + availHeight) s_cfy[i] = (float)topY;
+        t.fillRect((int)s_cfx[i], (int)s_cfy[i], 3, 3, stops[s_cfcol[i]]);
     }
 }
 
 void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now) {
     // Expire a triggered mood back to idle
     if (mood != Mood::IDLE && now > moodUntil) mood = Mood::IDLE;
+    if (s_legendary && now >= s_legendaryUntil) s_legendary = false;
 
     // Random idle fun: bounce/wave + a quip, only when nothing else
     // triggered a reaction recently.
     if (mood == Mood::IDLE && now >= nextIdleAt) {
-        bool longIdle = (now - lastInteraction) > 90000;
-        if (random(0, 250) == 0) {
-            // Rare shimmering flourish — see drawBody's fur-color swap.
-            say("Whoa. Did you just see that?", 5000);
+        uint32_t idleFor = now - lastInteraction;
+        bool longIdle  = idleFor > 90000;
+        bool verySleepy = idleFor > SLEEPY_AFTER_MS;
+        if (verySleepy) {
+            // A nap, not just another quip — persists for a while and
+            // re-enters itself below rather than popping in and out
+            // every idle cycle.
+            say(pick(SLEEPY_LINES, 4), 6000);
+            mood = Mood::SLEEPY;
+            moodUntil = now + 8000;
+            nextIdleAt = now + 8000;
+        } else if (random(0, 250) == 0) {
+            // Rare shimmering flourish — see drawBody's fur-color swap
+            // — escalated into a full rainbow-wash-and-confetti moment.
+            say(pick(PARTY_LINES, 4), 5000);
             mood = Mood::BOUNCE;
             moodUntil = now + 2000;
             s_legendary = true;
             s_legendaryUntil = now + 5000;
+            int w = t.width();
+            for (uint8_t i = 0; i < CONFETTI_N; i++) {
+                s_cfx[i]   = (float)random(0, w);
+                s_cfy[i]   = (float)(topY + random(0, availHeight));
+                s_cfvy[i]  = 0.8f + (float)random(0, 100) / 100.0f * 1.4f;
+                s_cfcol[i] = (uint8_t)random(0, 6);
+            }
+            nextIdleAt = now + 12000 + random(0, 18000);
         } else {
             if (longIdle && random(0, 3) == 0) {
                 say(pick(BORED_LINES, 4), MIN_BUBBLE_MS);
@@ -430,8 +622,8 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now) {
             }
             mood = random(0, 2) ? Mood::WAVE : Mood::BOUNCE;
             moodUntil = now + 1200;
+            nextIdleAt = now + 12000 + random(0, 18000);
         }
-        nextIdleAt = now + 12000 + random(0, 18000);
     }
 
     // Maximize Squachy's size to whatever vertical room the caller says
@@ -450,37 +642,37 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now) {
     // Idle bob runs noticeably quicker than a resting breathing rate —
     // he should read as lively even when nothing's happening. Bob
     // amplitude scales with him so it stays proportional when he's big.
-    float bobAmt   = ((mood == Mood::BOUNCE) ? 9.0f : 3.0f) * scale;
-    float bobSpeed = (mood == Mood::BOUNCE) ? 220.0f : 1100.0f;
+    float bobAmt   = (mood == Mood::BOUNCE) ? 9.0f : (mood == Mood::SLEEPY ? 1.5f : 3.0f);
+    bobAmt *= scale;
+    float bobSpeed = (mood == Mood::BOUNCE) ? 220.0f : (mood == Mood::SLEEPY ? 2200.0f : 1100.0f);
     float bob = sinf((float)(now % (uint32_t)bobSpeed) / bobSpeed * 6.2831853f) * bobAmt;
     if (mood == Mood::BOUNCE) bob = -fabsf(bob); // hop upward only
     int hy = headTopY + (int)bob;
 
-    // He's drawn directly over the matrix rain with fully opaque shapes
-    // (no background box) so the rain shows through around him — but
-    // that means his own previous-frame pixels only get cleaned up
-    // where this frame's shapes happen to land on top of them. Bob
-    // motion shifts him a few px between frames, so without an explicit
-    // clear, the sliver each bob step doesn't re-cover is left behind
-    // as a smear. Erase exactly his last-frame footprint (not a fixed
-    // box sized for his whole motion range) right before redrawing —
-    // that's just a thin trailing edge, not a static black rectangle.
-    static int lastHy = -30000;
-    static float lastScale = 1.0f;
-    static Mood lastMood = Mood::IDLE;
-    if (lastHy != -30000) {
-        int xMin, xMax, yMin, yMax;
-        bodyBounds(lastMood, xMin, xMax, yMin, yMax);
-        int bx = cx + (int)(xMin * lastScale);
-        int bw = (int)((xMax - xMin) * lastScale);
-        int by = lastHy + (int)(yMin * lastScale);
-        int bh = (int)((yMax - yMin) * lastScale);
-        t.fillRect(bx, by, bw, bh, Theme::BG);
-    }
+    // Party mode draws first — a full wash across his region — so his
+    // body and the hearts below land on top of it, not under it.
+    if (s_legendary) drawPartyFx(t, now, topY, availHeight);
+
+    // No erase-then-redraw here: ui_clear.cpp's background draw call
+    // (matrix rain / starfield / toasters / lava lamp) runs immediately
+    // before this every frame and already fully repaints this entire
+    // region, including wherever he stood last frame. Erasing his
+    // footprint to flat BG on top of that would just punch a static
+    // black hole in the animation right behind him — drawing his
+    // opaque shapes straight onto the fresh background is enough, and
+    // the negative space around his silhouette shows the animation
+    // through instead of a box. (Party mode is the one exception —
+    // when it's active the wash above already repaints this whole
+    // region every frame, same guarantee, just with extra flair.)
     drawBody(t, cx, hy, headTopY, now, mood, scale);
-    lastHy = hy;
-    lastScale = scale;
-    lastMood = mood;
+    if (now < s_petFxUntil) drawHeartFx(t, cx, headTopY, now);
+
+    // Remember where/how big he actually was this frame — hitTest()
+    // (tap-to-pet) checks against this, not a fixed region, since he
+    // moves and rescales with the screen.
+    s_lastCx = cx;
+    s_lastHeadTopY = headTopY;
+    s_lastScale = scale;
 
     // The bubble does need clearing (its width changes with the text),
     // but only its own footprint — erase the previous frame's exact
