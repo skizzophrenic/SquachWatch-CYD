@@ -299,6 +299,53 @@
   }
   .identify-result.err{ color:var(--pink); }
 
+  /* ---- Detection-type legend ---- */
+  .legend-section{
+    margin:32px 0 8px;
+  }
+  .legend-title{
+    font-family:'VT323', monospace;
+    font-size:1.3rem;
+    letter-spacing:0.1em;
+    color:var(--vapor-yellow);
+    text-align:center;
+    margin:0 0 16px;
+    font-weight:normal;
+  }
+  .legend-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(230px, 1fr));
+    gap:10px;
+  }
+  .legend-item{
+    display:flex;
+    align-items:flex-start;
+    gap:10px;
+    background:rgba(180,0,255,0.06);
+    border:1px solid rgba(180,0,255,0.2);
+    border-radius:8px;
+    padding:10px 12px;
+  }
+  .legend-dot{
+    flex-shrink:0;
+    width:12px; height:12px;
+    border-radius:50%;
+    margin-top:3px;
+    box-shadow:0 0 8px currentColor;
+  }
+  .legend-name{
+    font-family:'VT323', monospace;
+    font-size:1rem;
+    letter-spacing:0.05em;
+    color:#fff;
+  }
+  .legend-desc{
+    display:block;
+    font-size:0.78rem;
+    color:#a89bc4;
+    margin-top:2px;
+  }
+
   .about{
     margin-top:36px;
     text-align:center;
@@ -411,6 +458,56 @@
     <div class="identify-row">
       <button id="identifyBtn" class="identify-btn">[ IDENTIFY MY BOARD ]</button>
       <div class="identify-result" id="identifyResult"></div>
+    </div>
+  </div>
+
+  <div class="legend-section">
+    <h2 class="legend-title">&gt;&gt; WHAT IT DETECTS &lt;&lt;</h2>
+    <div class="legend-grid">
+      <div class="legend-item">
+        <span class="legend-dot" style="background:#ff2d78;color:#ff2d78"></span>
+        <div><span class="legend-name">FLOCK CAM</span><span class="legend-desc">Flock Safety license-plate camera</span></div>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot" style="background:#ff2d78;color:#ff2d78"></span>
+        <div><span class="legend-name">AXON</span><span class="legend-desc">Axon body camera or other LE gear</span></div>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot" style="background:#ff2d78;color:#ff2d78"></span>
+        <div><span class="legend-name">META GLASSES</span><span class="legend-desc">Ray-Ban Meta smart glasses — can record</span></div>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot" style="background:#fffb96;color:#fffb96"></span>
+        <div><span class="legend-name">SKIMMER</span><span class="legend-desc">Bluetooth card skimmer</span></div>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot" style="background:#ffa600;color:#ffa600"></span>
+        <div><span class="legend-name">RAVEN</span><span class="legend-desc">ShotSpotter/Raven gunshot detector</span></div>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot" style="background:#ffa600;color:#ffa600"></span>
+        <div><span class="legend-name">ALPR</span><span class="legend-desc">Automated license-plate reader</span></div>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot" style="background:#b967ff;color:#b967ff"></span>
+        <div><span class="legend-name">AIRTAG</span><span class="legend-desc">Apple AirTag or other FindMy tracker</span></div>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot" style="background:#b967ff;color:#b967ff"></span>
+        <div><span class="legend-name">DRONE</span><span class="legend-desc">Drone broadcasting Remote ID</span></div>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot" style="background:#b967ff;color:#b967ff"></span>
+        <div><span class="legend-name">SAMSUNG TAG</span><span class="legend-desc">Samsung Galaxy SmartTag</span></div>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot" style="background:#b967ff;color:#b967ff"></span>
+        <div><span class="legend-name">GOOGLE TAG</span><span class="legend-desc">Google Find My Device tracker</span></div>
+      </div>
+      <div class="legend-item">
+        <span class="legend-dot" style="background:#00fff5;color:#00fff5"></span>
+        <div><span class="legend-name">CAMERA</span><span class="legend-desc">Generic WiFi/BLE-connected camera</span></div>
+      </div>
     </div>
   </div>
 
