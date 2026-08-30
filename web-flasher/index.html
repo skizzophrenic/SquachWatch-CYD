@@ -772,7 +772,7 @@
     clearTimeout(say._t);
     say._t = setTimeout(function () {
       bubble.classList.remove('show');
-    }, ms || 3600);
+    }, ms || 7200);
   }
 
   function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
@@ -823,7 +823,7 @@
     document.body.appendChild(overlay);
     function dismiss() {
       overlay.remove();
-      say('yeah, that was me. hi.', 3000);
+      say('yeah, that was me. hi.', 6000);
     }
     overlay.addEventListener('click', dismiss);
     setTimeout(dismiss, 5000);
@@ -935,12 +935,12 @@
       }
 
       waveTimer = 30;
-      say(pick(PET_LINES), 3000);
+      say(pick(PET_LINES), 6000);
       return;
     }
     phase = 'fling';
     spinVel = velX * 0.15;
-    say(pick(FLING_LINES), 2200);
+    say(pick(FLING_LINES), 4400);
   }
 
   sprite.addEventListener('mousedown', startDrag);
@@ -970,7 +970,7 @@
   function runRandomBehavior() {
     if (phase !== 'auto') { scheduleIdle(); return; }
     var b = pick(BEHAVIOR_WEIGHTS);
-    if (b === 'chatter') { say(pick(IDLE_LINES), 3600); scheduleIdle(); return; }
+    if (b === 'chatter') { say(pick(IDLE_LINES), 7200); scheduleIdle(); return; }
     moving = false;
     if (b === 'dance') return doDance();
     if (b === 'joke') return doJoke();
@@ -980,59 +980,59 @@
 
   function doDance() {
     mode = 'dance';
-    say(pick(DANCE_LINES), 3200);
-    setTimeout(resumeWalking, 3400);
+    say(pick(DANCE_LINES), 6400);
+    setTimeout(resumeWalking, 6800);
   }
 
   function doJoke() {
     mode = 'idle';
     var j = pick(JOKES);
-    say(j[0], 2200);
+    say(j[0], 4400);
     setTimeout(function () {
-      say(j[1], 2600);
-      setTimeout(resumeWalking, 2700);
-    }, 2200);
+      say(j[1], 5200);
+      setTimeout(resumeWalking, 5400);
+    }, 4400);
   }
 
   function doSleep() {
     mode = 'sleep';
-    say(pick(SLEEP_LINES), 4200);
+    say(pick(SLEEP_LINES), 8400);
     setTimeout(function () {
       mode = 'idle';
-      say(pick(WAKE_LINES), 2200);
-      setTimeout(resumeWalking, 2300);
-    }, 4200);
+      say(pick(WAKE_LINES), 4400);
+      setTimeout(resumeWalking, 4600);
+    }, 8400);
   }
 
   function doDismantle() {
     mode = 'idle';
-    say('hey uh — hold on a sec', 1800);
+    say('hey uh — hold on a sec', 3600);
 
     setTimeout(function () {
-      say('I think there’s a loose bolt back here', 2200);
+      say('I think there’s a loose bolt back here', 4400);
       bolt.style.transition = 'none';
       moveBoltTo(card);
       bolt.classList.add('show');
       void bolt.offsetWidth; // force reflow so the fly-out actually animates
       bolt.style.transition = '';
       moveBoltTo(sprite);
-    }, 1800);
+    }, 3600);
 
     setTimeout(function () {
       card.classList.add('dd-wiggle');
-      say('found it. this is fine, this is normal', 2200);
-    }, 4000);
+      say('found it. this is fine, this is normal', 4400);
+    }, 8000);
 
     setTimeout(function () {
       card.classList.remove('dd-wiggle');
       moveBoltTo(card);
-      say(pick(DISMANTLE_CLOSERS), 2600);
-    }, 6200);
+      say(pick(DISMANTLE_CLOSERS), 5200);
+    }, 12400);
 
     setTimeout(function () {
       bolt.classList.remove('show');
       resumeWalking();
-    }, 8800);
+    }, 17600);
   }
 
   // Walk through the how-to lines once on load, then hand off to the
@@ -1040,9 +1040,9 @@
   var step = 0;
   function nextHowTo() {
     if (step < HOW_TO.length) {
-      say(HOW_TO[step], 3400);
+      say(HOW_TO[step], 6800);
       step++;
-      setTimeout(nextHowTo, 3800);
+      setTimeout(nextHowTo, 7600);
     } else {
       scheduleIdle();
     }
@@ -1078,8 +1078,8 @@
           if (phase === 'auto') {
             mode = 'dance';
             moving = false;
-            say(pick(VICTORY_LINES), 4000);
-            setTimeout(resumeWalking, 4200);
+            say(pick(VICTORY_LINES), 8000);
+            setTimeout(resumeWalking, 8400);
           }
         }
       });
@@ -1131,7 +1131,7 @@
       var chipDesc = await esploader.main();
       var mac = await esploader.chip.readMac(esploader);
       identifyResult.textContent = 'IDENTIFIED: ' + chipDesc + '  ·  MAC ' + mac;
-      say('That’s a ' + chipDesc + '. I know a fellow cryptid when I see one.', 3800);
+      say('That’s a ' + chipDesc + '. I know a fellow cryptid when I see one.', 7600);
       await transport.setRTS(true);
       await new Promise(function (r) { setTimeout(r, 100); });
       await esploader.after();
