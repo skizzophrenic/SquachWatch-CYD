@@ -16,7 +16,9 @@ enum class DetectionType : uint8_t {
     CAMERA  = 9,   // Generic camera (existing OUI list)
     SAMSUNG_TAG = 10,  // Samsung Galaxy SmartTag / SmartTag+
     GOOGLE_TAG  = 11,  // Google Find My Device network tracker (Chipolo/Pebblebee/Moto Tag)
-    COUNT   = 12
+    TILE    = 12,  // Tile BLE tracker (was previously bucketed under AIRTAG)
+    RING    = 13,  // Ring doorbell/camera (was previously bucketed under CAMERA)
+    COUNT   = 14
 };
 
 inline const char* detectionTypeName(DetectionType t) {
@@ -32,6 +34,8 @@ inline const char* detectionTypeName(DetectionType t) {
         case DetectionType::CAMERA:      return "CAMERA";
         case DetectionType::SAMSUNG_TAG: return "SAMSUNG_TAG";
         case DetectionType::GOOGLE_TAG:  return "GOOGLE_TAG";
+        case DetectionType::TILE:        return "TILE";
+        case DetectionType::RING:        return "RING";
         default:                         return "UNKNOWN";
     }
 }

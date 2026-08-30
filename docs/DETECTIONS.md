@@ -228,6 +228,41 @@ higher false-positive risk than the Samsung match above.
 
 ---
 
+## Tile trackers — `TILE` — **High confidence**
+
+**Why it works:** Tile devices advertise under two 16-bit Bluetooth
+service UUIDs, `0xFEED` and `0xFEEC`, both officially assigned to
+Tile, Inc. by the Bluetooth SIG. This match previously existed in the
+codebase but was bucketed under `AIRTAG` (both being "tracker class"
+devices) rather than getting its own type — it's split out here.
+
+**Source:** Bluetooth SIG's public 16-bit UUID assignment registry
+(`0xFEED` and `0xFEEC` → Tile, Inc.).
+
+**Confidence in v1.0:** **High** — SIG-assigned UUIDs specific to this
+product line, same tier as the Samsung SmartTag match above.
+
+---
+
+## Ring doorbells / cameras — `RING` — **High confidence**
+
+**Why it works:** Ring (Amazon) devices are matched by their
+registered WiFi MAC OUI block — 15 prefixes total, covering Ring
+LLC's full public MA-L registration. Two of these prefixes previously
+existed in the codebase but were bucketed under the generic `CAMERA`
+type; the remaining 13 are Ring LLC's complete registered block,
+added here so Ring gets its own dedicated type instead of being
+indistinguishable from any other camera.
+
+**Source:** Public IEEE MA-L registry, cross-checked via two
+independent lookups (netify.ai and maclookup.app) that agree on the
+same 13 prefixes for "Ring LLC" (registered 2019-03-01).
+
+**Confidence in v1.0:** **High** — same evidentiary basis (real MA-L
+registry OUI matches) as the generic `CAMERA` type.
+
+---
+
 ## License / attribution
 
 | Source | License | Used for |
@@ -241,7 +276,9 @@ higher false-positive risk than the Samsung match above.
 | Google Gemini | (compilation assistance) | SSID prefixes, SPP UUID, Sierra Wireless OUI |
 | arXiv:2210.14702 (academic paper) | public | Samsung SmartTag UUID |
 | Google Find My Device Network spec | public | Google tracker service UUID |
-| maclookup.app (IEEE MA-L registry) | public data | Verkada / Avigilon / Axis OUIs |
+| maclookup.app (IEEE MA-L registry) | public data | Verkada / Avigilon / Axis / Ring OUIs |
+| netify.ai (IEEE MA-L registry) | public data | Ring OUI cross-check |
+| Bluetooth SIG assigned numbers registry | public | Tile service UUIDs |
 
 We use signature *data* (OUIs, UUIDs, names) as facts; we don't
 copy GPL code into this project.

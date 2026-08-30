@@ -20,13 +20,15 @@ static ReactPose reactPoseFor(DetectionType t) {
         case DetectionType::AXON:    return ReactPose::HANDS_UP;    // "don't shoot" — it's law enforcement gear
         case DetectionType::FLOCK:
         case DetectionType::ALPR:
-        case DetectionType::CAMERA:  return ReactPose::COVER_FACE;  // something's taking his picture
+        case DetectionType::CAMERA:
+        case DetectionType::RING:    return ReactPose::COVER_FACE;  // something's taking his picture
         case DetectionType::META:    return ReactPose::POINT_SHADES;// smart glasses — he points at his own shades
         case DetectionType::SKIMMER: return ReactPose::DISGUST;     // a skimmer is just gross
         case DetectionType::DRONE:   return ReactPose::LOOK_UP;     // eyes in the sky
         case DetectionType::AIRTAG:
         case DetectionType::SAMSUNG_TAG:
-        case DetectionType::GOOGLE_TAG: return ReactPose::LOOK_AROUND; // something's tracking him
+        case DetectionType::GOOGLE_TAG:
+        case DetectionType::TILE:    return ReactPose::LOOK_AROUND; // something's tracking him
         default:                     return ReactPose::STARTLED;   // UNKNOWN, RAVEN
     }
 }
@@ -185,7 +187,7 @@ static const char* PARTY_LINES[] = {
 };
 
 struct DetLines { const char* a; const char* b; };
-// Indexed by DetectionType (UNKNOWN..CAMERA), matches state.h ordering.
+// Indexed by DetectionType (UNKNOWN..RING), matches state.h ordering.
 static const DetLines DET_LINES[] = {
     { "Something's out there.",              "Unknown signal. Stay sharp." },      // UNKNOWN
     { "Flock spotted. Big Brother waves.",   "ALPR camera. You're cataloged." },   // FLOCK
@@ -199,6 +201,8 @@ static const DetLines DET_LINES[] = {
     { "Camera detected. Smile, legend.",     "Someone's watching. Look good." },   // CAMERA
     { "Samsung tag pinged. Somebody's tagged.","Galaxy SmartTag nearby. Hm." },     // SAMSUNG_TAG
     { "Google's tracking network says hi.",  "Find My Device? Found by me." },     // GOOGLE_TAG
+    { "Tile detected. Hope it's a friend.",  "Something tiny is tracking something." }, // TILE
+    { "Ring cam spotted. Smile for Amazon.", "Someone's doorbell is judging you." },    // RING
 };
 static const uint8_t DET_LINES_N = sizeof(DET_LINES) / sizeof(DET_LINES[0]);
 

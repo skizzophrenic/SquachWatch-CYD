@@ -82,6 +82,7 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
                     static const uint16_t kKnown16[] = {
                         0x1101,  // SPP — skimmer
                         0xFEED,  // Tile tracker
+                        0xFEEC,  // Tile tracker (second SIG-assigned UUID)
                         0xFD5F,  // Ray-Ban Meta glasses
                         0x3100, 0x3200, 0x3300, 0x3400, 0x3500,  // Raven
                         0xFFFA,  // OpenDroneID
@@ -118,6 +119,8 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             strncpy(det.vendor, "Samsung", sizeof(det.vendor) - 1);
         } else if (det.type == DetectionType::GOOGLE_TAG) {
             strncpy(det.vendor, "Google", sizeof(det.vendor) - 1);
+        } else if (det.type == DetectionType::TILE) {
+            strncpy(det.vendor, "Tile", sizeof(det.vendor) - 1);
         } else {
             strncpy(det.vendor, "BLE", sizeof(det.vendor) - 1);
         }

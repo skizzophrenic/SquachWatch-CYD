@@ -59,8 +59,6 @@ const OuiEntry kOuiTable[] = {
     {{0xD0, 0x3F, 0x27}, "Wyze",         DetectionType::CAMERA},
     {{0x7C, 0x78, 0xB2}, "Wyze",         DetectionType::CAMERA},
     {{0xB8, 0xD7, 0xAF}, "Wyze-Mod",     DetectionType::CAMERA},
-    {{0xFC, 0x65, 0xDE}, "Ring",         DetectionType::CAMERA},
-    {{0x68, 0x37, 0xE9}, "Ring",         DetectionType::CAMERA},
     {{0x34, 0xD2, 0x70}, "Amazon",       DetectionType::CAMERA},
     {{0xF0, 0x27, 0x2D}, "Hikvision",    DetectionType::CAMERA},
     {{0xC0, 0x56, 0xE3}, "Hikvision",    DetectionType::CAMERA},
@@ -70,6 +68,27 @@ const OuiEntry kOuiTable[] = {
     {{0xBC, 0xDD, 0xC2}, "Arlo",         DetectionType::CAMERA},
     {{0x4C, 0x69, 0x05}, "Blink",        DetectionType::CAMERA},
     {{0xA4, 0xC1, 0x38}, "Tuya",         DetectionType::CAMERA},
+
+    // ---- Ring (own type, not generic CAMERA) ----
+    // FC:65:DE and 68:37:E9 were already here under CAMERA; the rest
+    // are Ring LLC's full registered MA-L block. Source: IEEE MA-L
+    // registry, cross-checked via netify.ai and maclookup.app (both
+    // list the same 13 prefixes for "Ring LLC", registered 2019-03-01).
+    {{0xFC, 0x65, 0xDE}, "Ring",         DetectionType::RING},
+    {{0x68, 0x37, 0xE9}, "Ring",         DetectionType::RING},
+    {{0xAC, 0x9F, 0xC3}, "Ring",         DetectionType::RING},
+    {{0x18, 0x7F, 0x88}, "Ring",         DetectionType::RING},
+    {{0x34, 0x3E, 0xA4}, "Ring",         DetectionType::RING},
+    {{0x54, 0xE0, 0x19}, "Ring",         DetectionType::RING},
+    {{0x5C, 0x47, 0x5E}, "Ring",         DetectionType::RING},
+    {{0x64, 0x9A, 0x63}, "Ring",         DetectionType::RING},
+    {{0x90, 0x48, 0x6C}, "Ring",         DetectionType::RING},
+    {{0x9C, 0x76, 0x13}, "Ring",         DetectionType::RING},
+    {{0xCC, 0x3B, 0xFB}, "Ring",         DetectionType::RING},
+    {{0xC4, 0xDB, 0xAD}, "Ring",         DetectionType::RING},
+    {{0x24, 0x2B, 0xD6}, "Ring",         DetectionType::RING},
+    {{0x00, 0xB4, 0x63}, "Ring",         DetectionType::RING},
+    {{0x50, 0xE4, 0x67}, "Ring",         DetectionType::RING},
 
     // ---- Commercial / institutional camera vendors ----
     // Source: public IEEE MA-L registry (maclookup.app), cross-checked
@@ -86,7 +105,8 @@ const uint16_t kOuiCount = sizeof(kOuiTable) / sizeof(kOuiTable[0]);
 // UUID from the advertised service data.
 const UuidEntry kUuidTable[] = {
     {0x1101, "Skim-SPP",   DetectionType::SKIMMER},   // Classic SPP
-    {0xFEED, "Tile",       DetectionType::AIRTAG},    // Tile (tracker class)
+    {0xFEED, "Tile",       DetectionType::TILE},      // Tile, Inc. — Bluetooth SIG assigned
+    {0xFEEC, "Tile",       DetectionType::TILE},      // Tile, Inc. — second SIG-assigned UUID
     {0xFD5F, "Meta",       DetectionType::META},      // Ray-Ban Meta glasses
     {0x3100, "Raven",      DetectionType::RAVEN},     // Raven gunshot detector
     {0x3200, "Raven",      DetectionType::RAVEN},
@@ -219,7 +239,10 @@ Confidence confidenceFor(DetectionType t) {
     // Samsung's own dedicated SIG-assigned UUID, not shared with
     // anything else. GOOGLE_TAG is Medium: 0xFEAA is the general
     // "Eddystone" service UUID, also used by unrelated retail/asset
-    // beacons, not exclusively Find My Device Network trackers.
+    // beacons, not exclusively Find My Device Network trackers. TILE
+    // is High: 0xFEED/0xFEEC are both Bluetooth SIG-assigned exclusively
+    // to Tile, Inc. RING is High: real MA-L registry OUI matches, same
+    // evidentiary basis as CAMERA.
     switch (t) {
         case DetectionType::FLOCK:
         case DetectionType::AXON:
@@ -227,6 +250,8 @@ Confidence confidenceFor(DetectionType t) {
         case DetectionType::SKIMMER:
         case DetectionType::CAMERA:
         case DetectionType::SAMSUNG_TAG:
+        case DetectionType::TILE:
+        case DetectionType::RING:
             return Confidence::HIGH_CONF;
         case DetectionType::RAVEN:
         case DetectionType::AIRTAG:

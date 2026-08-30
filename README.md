@@ -24,7 +24,11 @@ the glitchy SquachWatch wordmark.
 | `AIRTAG` | Apple AirTag / FindMy trackers | Manufacturer ID `0x004C` + subtype `0x12`/`0x1E` |
 | `DRONE` | OpenDroneID-compliant drones | BLE service UUID `0xFFFA` |
 | `ALPR` | Motorola / Vigilant ALPR | WiFi OUI `00:0E:58` |
-| `CAMERA` | Generic / covert IP cameras | WiFi OUI list (Wyze, Ring, Hikvision, Reolink, Arlo, Blink, Tuya, etc.) |
+| `CAMERA` | Generic / covert IP cameras | WiFi OUI list (Wyze, Hikvision, Reolink, Arlo, Blink, Tuya, Verkada, Avigilon, Axis, etc.) |
+| `SAMSUNG_TAG` | Samsung Galaxy SmartTag / SmartTag+ | BLE service UUID `0xFD5A` |
+| `GOOGLE_TAG` | Google Find My Device Network trackers (Chipolo, Pebblebee, Moto Tag) | BLE service UUID `0xFEAA` |
+| `TILE` | Tile BLE trackers | BLE service UUID `0xFEED` / `0xFEEC` |
+| `RING` | Ring doorbells / cameras | WiFi OUI (15 prefixes, Ring LLC's full registered block) |
 
 ## Hardware
 

@@ -25,13 +25,20 @@ static const char* counterLabel(DetectionType t) {
         case DetectionType::CAMERA:      return "CAM";
         case DetectionType::SAMSUNG_TAG: return "STAG";
         case DetectionType::GOOGLE_TAG:  return "GTAG";
+        case DetectionType::TILE:        return "TILE";
+        case DetectionType::RING:        return "RING";
         default:                         return "?";
     }
 }
 
 static void drawCounterLine(TFT_eSPI& t, int w, int y, const DetectionEngine& eng,
                             const DetectionType* types, uint8_t n) {
-    char buf[56] = "";
+    // 80, not 56: worst case is 7 entries x up to "XXXXX:999  " (11
+    // chars) = 77 -- the old 56-byte buffer was already marginal for
+    // 6 entries at high counts and would silently truncate (snprintf
+    // is bounds-safe, just visually cuts off) once TILE/RING pushed a
+    // line to 7.
+    char buf[80] = "";
     int off = 0;
     for (uint8_t i = 0; i < n; i++) {
         off += snprintf(buf + off, sizeof(buf) - off, "%s:%u  ",
@@ -193,15 +200,16 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
 
     static const DetectionType LINE1[] = {
         DetectionType::FLOCK, DetectionType::AXON, DetectionType::META,
-        DetectionType::SKIMMER, DetectionType::RAVEN, DetectionType::AIRTAG
+        DetectionType::SKIMMER, DetectionType::RAVEN, DetectionType::AIRTAG,
+        DetectionType::TILE
     };
     static const DetectionType LINE2[] = {
         DetectionType::DRONE, DetectionType::ALPR, DetectionType::CAMERA,
-        DetectionType::SAMSUNG_TAG, DetectionType::GOOGLE_TAG
+        DetectionType::SAMSUNG_TAG, DetectionType::GOOGLE_TAG, DetectionType::RING
     };
 
-    drawCounterLine(t, w, countersTop,              eng, LINE1, 6);
-    drawCounterLine(t, w, countersTop + lineH,       eng, LINE2, 5);
+    drawCounterLine(t, w, countersTop,              eng, LINE1, 7);
+    drawCounterLine(t, w, countersTop + lineH,       eng, LINE2, 6);
 
     // Soft buttons
     Theme::drawButtonBar(t, ButtonId::NONE);

@@ -59,8 +59,10 @@ uint16_t colorFor(DetectionType t) {
         case DetectionType::DRONE:
         case DetectionType::SAMSUNG_TAG:
         case DetectionType::GOOGLE_TAG:
+        case DetectionType::TILE:
             return VAPOR_PURPLE;
         case DetectionType::CAMERA:
+        case DetectionType::RING:
             return CYAN;
         default:
             return GREEN;
@@ -251,7 +253,8 @@ void drawAlertFx(TFT_eSPI& t, DetectionType type, uint32_t now, int w, int h) {
             break;
         }
         case DetectionType::SAMSUNG_TAG:
-        case DetectionType::GOOGLE_TAG: {
+        case DetectionType::GOOGLE_TAG:
+        case DetectionType::TILE: {
             // Generic keyring tracker tag (not either company's real
             // logo) — same location-ping language as AirTag above, so
             // the tracker family reads as a family, minus the fruit.
@@ -263,7 +266,8 @@ void drawAlertFx(TFT_eSPI& t, DetectionType type, uint32_t now, int w, int h) {
         case DetectionType::FLOCK:
         case DetectionType::AXON:
         case DetectionType::ALPR:
-        case DetectionType::CAMERA: {
+        case DetectionType::CAMERA:
+        case DetectionType::RING: {
             // Camera body + lens, a blinking REC dot, and a real
             // shutter flash every couple seconds.
             uint16_t tint = colorFor(type);
