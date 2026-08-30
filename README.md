@@ -8,6 +8,9 @@ of Flock Safety cameras, Axon body cameras, recording glasses, card
 skimmers, AirTags, drones, and more. It runs standalone on a bare CYD board
 — no PC, no extras, just plug it into USB.
 
+**[Flash a board in your browser →](https://skizzophrenic.github.io/SquachWatch-CYD/)**
+No build tools required — see [Build](#build) below if you'd rather build from source.
+
 The UI is a vaporwave-themed take on the **SquachWare** aesthetic: matrix
 digital rain, Squachy the mascot, full-screen dramatic ALERT overlays, and
 the glitchy SquachWatch wordmark.
@@ -113,7 +116,7 @@ SquachWatch-CYD/
 
 ## License
 
-**MIT.** See [LICENSE](LICENSE).
+**Common Public License 1.0 (CPL-1.0).** See [LICENSE](LICENSE).
 
 ## Credits
 
