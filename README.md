@@ -133,6 +133,9 @@ SquachWatch-CYD/
   [talkingsasquach.com](https://talkingsasquach.com) and the
   [SquachWare-CFW](https://github.com/skizzophrenic/SquachWare-CFW)
   project.
+- Vibes: also skizzophrenic, who vibecoded most of this at unreasonable
+  hours with an AI doing the typing. Yes, the same guy credited above
+  for "research." Make of that what you will.
 
 ## Status
 
