@@ -73,9 +73,9 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now) {
         const char* title = "!! DETECTION !!";
         int tw = Theme::bangersTextWidth(title, Theme::BangersSize::LG);
         int tx = (w - tw) / 2;
-        t.fillRect(tx - 2, 4, tw + 4, 38, Theme::BG);
+        t.fillRect(tx - 2, 6, tw + 4, 38, Theme::BG);
         if (((now / 200) % 2) == 0) {
-            Theme::drawBangersText(t, tx, 6, title, Theme::PINK, Theme::BangersSize::LG);
+            Theme::drawBangersText(t, tx, 8, title, Theme::PINK, Theme::BangersSize::LG);
         }
     }
 

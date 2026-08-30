@@ -1710,10 +1710,16 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     }
 
     // Propagate upward with random decay and a little horizontal drift
-    // — the classic Doom-fire trick.
+    // — the classic Doom-fire trick. Decay range (was 0-3, now 0-2) is
+    // the actual height control: lower average decay means more rows
+    // of upward travel before a column's heat hits zero, so flames
+    // reach further up the band. Left the seed intensity (48, just
+    // below) alone -- the color-tier math below it (v<9/22/36 bands,
+    // "f = v - 36" at the top) is calibrated against that exact max;
+    // raising it would let f overflow uint8_t in the brightest tier.
     for (int y = 0; y < fh - 1; y++) {
         for (int x = 0; x < fw; x++) {
-            int decay = random(0, 4);
+            int decay = random(0, 3);
             int nx = x + random(-1, 2);
             if (nx < 0) nx = 0;
             if (nx >= fw) nx = fw - 1;
@@ -1743,6 +1749,82 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
                 col = t.color565(255, (uint8_t)(200 + f * 4), (uint8_t)(f * 18));
             }
             t.fillRect(x * CW, yStart + y * CW, CW, CW, col);
+        }
+    }
+
+    // Spooky night sky showing through wherever the fire isn't — stars
+    // only draw where the heat grid says that cell is genuinely dark
+    // (below 9, the same smoke-fringe threshold the color tiers above
+    // use), so they never appear to shine through visible flame or
+    // smoke. Same twinkle mechanic as drawSunsetSky's stars.
+    static const uint8_t NSTARS = 12;
+    static uint8_t skyX[NSTARS], skyY[NSTARS], skyPh[NSTARS];
+    static bool    skyInited = false;
+    if (!skyInited) {
+        for (uint8_t i = 0; i < NSTARS; i++) {
+            skyX[i]  = (uint8_t)random(2, w > 2 ? w - 2 : w);
+            skyY[i]  = (uint8_t)(yStart + random(0, bandH * 2 / 3));
+            skyPh[i] = (uint8_t)random(0, 256);
+        }
+        skyInited = true;
+    }
+    for (uint8_t i = 0; i < NSTARS; i++) {
+        int gx = skyX[i] / CW, gy = (skyY[i] - yStart) / CW;
+        if (gx < 0 || gx >= fw || gy < 0 || gy >= fh) continue;
+        if (heat[gy * MAXFW + gx] >= 9) continue;  // occluded by flame/smoke
+        uint32_t tw = (now / 10 + (uint32_t)skyPh[i] * 22) % 300;
+        if (tw > 220) continue;
+        uint8_t bri = (tw < 100) ? 200 : (uint8_t)(200 - (tw - 100) * 2);
+        t.drawPixel(skyX[i], skyY[i], t.color565((uint8_t)(bri * 0.85f), (uint8_t)(bri * 0.9f), bri));
+    }
+
+    // A pale, slightly sickly moon in a top corner — a crescent via one
+    // full circle then a BG-colored circle biting a chunk out of it,
+    // the same trick used elsewhere in this file for shapes without a
+    // smooth-arc primitive to reach for. Only checks the heat at its
+    // own center cell (not its whole footprint) before drawing, which
+    // is enough given it sits high in the band where flames rarely
+    // reach — occasionally getting clipped by a tall flame tongue if
+    // one does get up there is a fine, minor cosmetic edge case.
+    {
+        int mx = w - 22, my = yStart + 16, mr = 9;
+        int mgx = mx / CW, mgy = (my - yStart) / CW;
+        bool clearSky = !(mgx >= 0 && mgx < fw && mgy >= 0 && mgy < fh) || heat[mgy * MAXFW + mgx] < 9;
+        if (clearSky) {
+            t.fillCircle(mx, my, mr, t.color565(210, 235, 200));
+            t.fillCircle(mx + 5, my - 3, mr - 1, BG);
+        }
+    }
+
+    // A gnarled dead tree off to one side, like it's standing right at
+    // the edge of the firelight — drawn last among the sky-layer
+    // elements so it silhouettes over any stars behind it. One
+    // occlusion check at its base (not per-branch) rather than a full
+    // footprint check: if the fire's right up against its trunk this
+    // frame, the whole tree skips drawing that frame instead of
+    // rendering a half-erased, glitchy-looking partial tree — reads as
+    // a tall flame tongue briefly eclipsing it, which fits the scene.
+    {
+        int tx = w / 5;
+        int groundY = yEnd - 2;
+        int trunkTopY = yStart + bandH * 3 / 10;
+        int tgx = tx / CW, tgy = (groundY - 4 - yStart) / CW;
+        bool clearTree = !(tgx >= 0 && tgx < fw && tgy >= 0 && tgy < fh) || heat[tgy * MAXFW + tgx] < 14;
+        if (clearTree && trunkTopY < groundY - 8) {
+            uint16_t bark = t.color565(15, 8, 5);
+            t.fillRect(tx - 4, trunkTopY, 8, groundY - trunkTopY, bark);
+            t.fillRect(tx - 5, groundY - 10, 10, 10, bark);
+            // A couple of gnarled main limbs, each forking into a
+            // smaller twig near the tip — the classic bare-winter-tree
+            // silhouette shape.
+            t.drawLine(tx - 2, trunkTopY + 6, tx - 16, trunkTopY - 10, bark);
+            t.drawLine(tx - 16, trunkTopY - 10, tx - 22, trunkTopY - 18, bark);
+            t.drawLine(tx - 16, trunkTopY - 10, tx - 12, trunkTopY - 20, bark);
+            t.drawLine(tx + 2, trunkTopY + 4, tx + 14, trunkTopY - 8, bark);
+            t.drawLine(tx + 14, trunkTopY - 8, tx + 20, trunkTopY - 16, bark);
+            t.drawLine(tx + 14, trunkTopY - 8, tx + 10, trunkTopY - 18, bark);
+            t.drawLine(tx, trunkTopY, tx - 3, trunkTopY - 16, bark);
+            t.drawLine(tx - 3, trunkTopY - 16, tx - 8, trunkTopY - 24, bark);
         }
     }
 
@@ -1853,10 +1935,10 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
 
         int groundY = yEnd - 2;
         int sx = (int)manX;
-        int r1 = 9, r2 = 7, r3 = 5;
+        int r1 = 13, r2 = 10, r3 = 7;  // was 9,7,5 -- ~1.4x
         int y1 = groundY - r1;
-        int y2 = y1 - r1 - r2 + 3;
-        int y3 = y2 - r2 - r3 + 3;
+        int y2 = y1 - r1 - r2 + 4;
+        int y3 = y2 - r2 - r3 + 4;
         uint16_t body = blend(BG, WHITE, (uint16_t)(255 * alpha));
         t.fillCircle(sx, y1, r1, body);
         t.fillCircle(sx, y2, r2, body);
@@ -1864,21 +1946,21 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
 
         if (alpha > 0.5f) {
             uint16_t detail = blend(BG, BLACK, (uint16_t)(255 * alpha));
-            t.drawPixel(sx - 2, y3 - 1, detail);
-            t.drawPixel(sx + 2, y3 - 1, detail);
-            t.drawPixel(sx, y2 - 2, detail);
+            t.drawPixel(sx - 3, y3 - 1, detail);
+            t.drawPixel(sx + 3, y3 - 1, detail);
+            t.drawPixel(sx, y2 - 3, detail);
             t.drawPixel(sx, y2,     detail);
-            t.drawPixel(sx, y2 + 2, detail);
+            t.drawPixel(sx, y2 + 3, detail);
             uint16_t carrot = blend(BG, t.color565(235, 130, 30), (uint16_t)(255 * alpha));
-            t.fillTriangle(sx, y3, sx + 6, y3 + 1, sx, y3 + 2, carrot);
+            t.fillTriangle(sx, y3, sx + 8, y3 + 1, sx, y3 + 3, carrot);
             uint16_t stick = blend(BG, t.color565(100, 65, 30), (uint16_t)(255 * alpha));
-            t.drawLine(sx - r2 - 1, y2, sx - r2 - 8, y2 - 6, stick);
-            t.drawLine(sx + r2 + 1, y2, sx + r2 + 8, y2 - 6, stick);
+            t.drawLine(sx - r2 - 1, y2, sx - r2 - 11, y2 - 8, stick);
+            t.drawLine(sx + r2 + 1, y2, sx + r2 + 11, y2 - 8, stick);
             uint16_t hat = blend(BG, BLACK, (uint16_t)(255 * alpha));
-            t.fillRect(sx - 6, y3 - r3 - 2, 12, 2, hat);
-            t.fillRect(sx - 4, y3 - r3 - 10, 8, 9, hat);
+            t.fillRect(sx - 8, y3 - r3 - 3, 17, 3, hat);
+            t.fillRect(sx - 6, y3 - r3 - 14, 11, 13, hat);
             uint16_t scarf = blend(BG, RED, (uint16_t)(255 * alpha));
-            t.fillRect(sx - 5, y2 - r2, 10, 3, scarf);
+            t.fillRect(sx - 7, y2 - r2, 14, 4, scarf);
         }
 
         if (age > MAN_DUR_MS) {
