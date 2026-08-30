@@ -80,10 +80,17 @@ TFT_eSPI            tft = TFT_eSPI();
 // double buffer entirely and draws straight to the panel via `canvas`
 // below, accepting the erase/redraw flicker the buffer normally hides.
 TFT_eSprite         frame = TFT_eSprite(&tft);
+// A pointer, not a reference: confirmed on real hardware that
+// re-createSprite()'ing `frame` after a rotation can fail even with
+// generous total free heap (NimBLE/WiFi churn fragments it -- see the
+// rotate handler in loop()). When that happens we permanently fail
+// over to drawing straight into `tft` for the rest of the session,
+// same tradeoff cyd35 already accepts by default -- which needs
+// `canvas` to be reseatable at runtime, not bound once at startup.
 #if defined(CYD35)
-    TFT_eSPI&        canvas = tft;
+    TFT_eSPI*        canvas = &tft;
 #else
-    TFT_eSPI&        canvas = frame;
+    TFT_eSPI*        canvas = &frame;
 #endif
 XPT2046_Touchscreen touch(TOUCH_CS, TOUCH_IRQ);
 // cyd35's touch bus IS the display's bus, shared via CS rather than a
@@ -96,6 +103,11 @@ SPIClass         touchSPI(HSPI);
 // Set once in setup() by probing for the capacitive controller —
 // decides which branch pollTouch() takes for the rest of the run.
 bool                usingCapTouch = false;
+// Set false if a post-boot frame.createSprite() ever fails (rotate —
+// see loop()). cyd35's CLEAR screen checks this to fall back from its
+// banded render to direct-to-tft; the other board's `canvas` pointer
+// gets reseated to &tft directly at the point of failure instead.
+bool                frameBufferOk = true;
 DetectionEngine     engine;
 AppState            state     = AppState::BOOT;
 uint32_t            bootStart = 0;
@@ -231,13 +243,13 @@ static void enterBoot() {
     state = AppState::BOOT;
     bootStart = millis();
     transitionStart = bootStart;
-    uiBootInit(canvas);
+    uiBootInit(*canvas);
 }
 
 static void enterClear() {
     state = AppState::CLEAR;
     transitionStart = millis();
-    uiClearInit(canvas);
+    uiClearInit(*canvas);
 }
 
 static void enterAlert(const Detection& d) {
@@ -246,25 +258,25 @@ static void enterAlert(const Detection& d) {
     transitionStart = alertStart;
     lastAlertType = d.type;
     lastAlertHits = d.hits;
-    uiAlertInit(canvas, d);
+    uiAlertInit(*canvas, d);
 }
 
 static void enterLog() {
     state = AppState::LOG;
     transitionStart = millis();
-    uiLogInit(canvas);
+    uiLogInit(*canvas);
 }
 
 static void enterSettings() {
     state = AppState::SETTINGS;
     transitionStart = millis();
-    uiSettingsInit(canvas);
+    uiSettingsInit(*canvas);
 }
 
 static void enterDiary() {
     state = AppState::DIARY;
     transitionStart = millis();
-    uiDiaryInit(canvas);
+    uiDiaryInit(*canvas);
 }
 
 // ---- Arduino setup / loop ----
@@ -336,7 +348,7 @@ void setup() {
     // Theme::drawMatrixRain() gates state mutation to the first band
     // only, so calling them twice per logical frame doesn't double
     // animation speed.
-    canvas.setTextSize(1);
+    canvas->setTextSize(1);
     frame.setColorDepth(8);
     if (!frame.createSprite(tft.width(), tft.height() / 2)) {
         Serial.println("ERROR: cyd35 half-height frame buffer allocation failed");
@@ -471,15 +483,44 @@ void loop() {
         // width()/height() from setRotation() above and needs nothing
         // here; frame (cyd35's CLEAR-screen half-height band buffer, or
         // the other board's full-screen one) does.
+        //
+        // Confirmed on real hardware (2.8" board): this can fail even
+        // with plenty of TOTAL free heap -- e.g. 121KB free but the
+        // largest contiguous block only 73.7KB against a 76.8KB need --
+        // because WiFi/BLE buffers fragment the heap during normal
+        // operation, and it's not just transient noise: 8 retries with
+        // delays between them (giving background tasks a chance to free
+        // something) all failed identically in testing. Rather than
+        // leave `frame` with no buffer at all (silent freeze -- the
+        // rest of the firmware kept running fine, confirmed via a
+        // heartbeat print during bring-up, but nothing ever reached the
+        // panel again) or force a disruptive ESP.restart() every time
+        // this happens, permanently fail over to unbuffered rendering
+        // for the rest of this session -- the exact tradeoff cyd35
+        // already accepts by default. The rotation itself still applies
+        // fine either way; only the double-buffering is lost.
+        frame.deleteSprite();
+        frame.setColorDepth(8);
+        bool spriteOk = false;
 #if defined(CYD35)
-        frame.deleteSprite();
-        frame.setColorDepth(8);
-        frame.createSprite(tft.width(), tft.height() / 2);
+        for (uint8_t attempt = 0; attempt < 3 && !spriteOk; attempt++) {
+            if (attempt) delay(30);
+            spriteOk = frame.createSprite(tft.width(), tft.height() / 2);
+        }
 #else
-        frame.deleteSprite();
-        frame.setColorDepth(8);
-        frame.createSprite(tft.width(), tft.height());
+        for (uint8_t attempt = 0; attempt < 3 && !spriteOk; attempt++) {
+            if (attempt) delay(30);
+            spriteOk = frame.createSprite(tft.width(), tft.height());
+        }
 #endif
+        if (!spriteOk) {
+            Serial.printf("[rotate] frame buffer alloc failed (heap=%u largest=%u) -- falling back to unbuffered rendering\n",
+                          ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+            frameBufferOk = false;
+#if !defined(CYD35)
+            canvas = &tft;
+#endif
+        }
         transitionStart = now;
     }
 
@@ -507,7 +548,7 @@ void loop() {
             calHoldStart = 0;
             lastTouch = now;
             TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
-            TouchCal::Cal newCal = TouchCal::runInteractive(canvas, reader, Theme::BG, Theme::WHITE, Theme::CYAN);
+            TouchCal::Cal newCal = TouchCal::runInteractive(*canvas, reader, Theme::BG, Theme::WHITE, Theme::CYAN);
             applyCal(newCal);
             enterClear();
         }
@@ -517,7 +558,7 @@ void loop() {
 
     switch (state) {
         case AppState::BOOT: {
-            uiBootTick(canvas, now);
+            uiBootTick(*canvas, now);
             if (uiBootDone(bootStart)) {
                 enterClear();
             }
@@ -525,21 +566,28 @@ void loop() {
         }
         case AppState::CLEAR: {
 #if defined(CYD35)
-            // Two passes through the half-height `frame` sprite instead
-            // of one direct-to-tft pass -- see the setup() comment by
-            // its creation. advance=true only on the first pass so
-            // Squachy/matrix-rain state advances once per logical frame
-            // even though this draws twice.
-            int halfH = tft.height() / 2;
-            frame.setViewport(0, 0, tft.width(), tft.height(), true);
-            uiClearTick(frame, now, engine, true);
-            frame.pushSprite(0, 0);
-            frame.setViewport(0, -halfH, tft.width(), tft.height(), true);
-            uiClearTick(frame, now, engine, false);
-            frame.pushSprite(0, halfH);
-            frame.resetViewport();
+            if (frameBufferOk) {
+                // Two passes through the half-height `frame` sprite
+                // instead of one direct-to-tft pass -- see the setup()
+                // comment by its creation. advance=true only on the
+                // first pass so Squachy/matrix-rain state advances once
+                // per logical frame even though this draws twice.
+                int halfH = tft.height() / 2;
+                frame.setViewport(0, 0, tft.width(), tft.height(), true);
+                uiClearTick(frame, now, engine, true);
+                frame.pushSprite(0, 0);
+                frame.setViewport(0, -halfH, tft.width(), tft.height(), true);
+                uiClearTick(frame, now, engine, false);
+                frame.pushSprite(0, halfH);
+                frame.resetViewport();
+            } else {
+                // Fallback if a post-boot rotate ever failed to
+                // reallocate `frame` (see loop()) -- same direct-to-tft
+                // path this board already uses for every other screen.
+                uiClearTick(tft, now, engine);
+            }
 #else
-            uiClearTick(canvas, now, engine);
+            uiClearTick(*canvas, now, engine);
 #endif
             // Check for new detection — gated by the settings-menu
             // confidence filter (LOW_CONF/default = no filtering, every
@@ -586,7 +634,7 @@ void loop() {
             break;
         }
         case AppState::ALERT: {
-            uiAlertTick(canvas, now);
+            uiAlertTick(*canvas, now);
             if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 lastTouch = now;
                 Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits);
@@ -598,7 +646,7 @@ void loop() {
             break;
         }
         case AppState::LOG: {
-            uiLogTick(canvas, now, engine, 0);
+            uiLogTick(*canvas, now, engine, 0);
             if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 ButtonId b = Theme::hitTestButtonBar(tp.x, tp.y, tft.width(), tft.height());
                 lastTouch = now;
@@ -624,7 +672,7 @@ void loop() {
             break;
         }
         case AppState::SETTINGS: {
-            uiSettingsTick(canvas, now, engine);
+            uiSettingsTick(*canvas, now, engine);
             if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 lastTouch = now;
                 SettingsRow row = uiSettingsHitTest(tp.x, tp.y, tft.width(), tft.height());
@@ -643,7 +691,7 @@ void loop() {
                     case SettingsRow::CONFIDENCE: Settings::cycleMinConfidence(); break;
                     case SettingsRow::CALIBRATE: {
                         TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
-                        TouchCal::Cal newCal = TouchCal::runInteractive(canvas, reader, Theme::BG, Theme::WHITE, Theme::CYAN);
+                        TouchCal::Cal newCal = TouchCal::runInteractive(*canvas, reader, Theme::BG, Theme::WHITE, Theme::CYAN);
                         applyCal(newCal);
                         enterSettings();
                         break;
@@ -663,7 +711,7 @@ void loop() {
             break;
         }
         case AppState::DIARY: {
-            uiDiaryTick(canvas, now, engine);
+            uiDiaryTick(*canvas, now, engine);
             // Simple read-only info panel — any tap takes you back,
             // no button bar or scroll needed.
             if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
@@ -681,9 +729,17 @@ void loop() {
     // with no sprite buffer -- pixel readback (MISO) is a known-flaky
     // path on cheap SPI panels, not worth the risk for a 220ms cosmetic
     // transition effect.
-    if (now - transitionStart < TRANSITION_MS) {
-        Theme::drawTransitionGlitch(frame, now - transitionStart, TRANSITION_MS);
+    //
+    // frameBufferOk guards both: if a rotate ever failed to reallocate
+    // `frame` (see the rotate handler above), canvas already points
+    // straight at tft and every draw this frame already landed on the
+    // real screen -- pushing `frame` here would just paint stale data
+    // from the sprite we stopped using back over the top of it.
+    if (frameBufferOk) {
+        if (now - transitionStart < TRANSITION_MS) {
+            Theme::drawTransitionGlitch(frame, now - transitionStart, TRANSITION_MS);
+        }
+        frame.pushSprite(0, 0);
     }
-    frame.pushSprite(0, 0);
 #endif
 }
