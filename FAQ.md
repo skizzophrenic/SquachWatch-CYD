@@ -8,7 +8,7 @@ Just want to flash a board and go? **[Open the web flasher](https://skizzophreni
 
 ## What even is this?
 
-SquachWatch-CYD sniffs the 2.4 GHz airwaves — WiFi and Bluetooth — for the specific fingerprints of surveillance gear: Flock Safety license-plate cameras, Axon body cams, Ray-Ban Meta glasses, card skimmers, AirTags and their friends, gunshot detectors, drones, ALPR units, and generic covert cameras. Eleven detection types total. If it broadcasts a recognizable signature, this thing has a decent shot at flagging it.
+SquachWatch-CYD sniffs the 2.4 GHz airwaves — WiFi and Bluetooth — for the specific fingerprints of surveillance gear: Flock Safety license-plate cameras, Axon body cams, Ray-Ban Meta glasses, card skimmers, AirTags/Tile/Samsung/Google trackers, Ring doorbells, gunshot detectors, drones, ALPR units, and generic covert cameras. Thirteen detection types total. If it broadcasts a recognizable signature, this thing has a decent shot at flagging it.
 
 It's not magic. It's not X-ray vision. It's a $15 board doing pattern-matching on radio noise, wearing a mascot costume. But it's real pattern-matching on real, documented signatures — not vibes.
 
