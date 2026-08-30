@@ -1165,7 +1165,7 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now, bool adv
     if (charAvail < 40) charAvail = 40;
     float scale = (float)charAvail / (float)BASE_HEIGHT;
     if (scale < 1.0f) scale = 1.0f;
-    if (scale > 2.6f) scale = 2.6f;
+    if (scale > 3.0f) scale = 3.0f;
 
     int headTopY = topY + bubbleRowH;
 

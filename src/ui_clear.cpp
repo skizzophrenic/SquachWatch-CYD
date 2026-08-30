@@ -50,18 +50,17 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     const int countersTop    = bar.y - 2 * lineH - 6;
     const int countersBottom = bar.y - 4;
 
-    // Status line sits directly against the counter lines (no gap) —
-    // reserve its max height (the 2x "ALL CLEAR" variant) so Squachy's
-    // size stays stable regardless of which status text is showing.
+    // statusH: height of the ALL CLEAR / DETECTIONS LOGGED text row,
+    // sized to fit the Bangers MD font's glyph box (ascent 27 +
+    // descent 6, same font as the ALERT screen's "!! DETECTION !!").
+    // Squachy's own region now runs past this (see his tick() call
+    // below) so his feet land on top of it instead of stopping above.
     const int titleBottom  = 16;
-    const int statusH      = 16;
-    const int statusTop    = countersTop - statusH;
-    // The animation used to stop at the status line, leaving the
-    // status text and both counter rows sitting on flat black below
-    // Squachy. It now runs all the way down to just above the button
-    // bar — Squachy's own drawing region (titleBottom..statusTop)
-    // is unaffected, this only extends what's behind everything below
-    // him.
+    const int statusH      = 34;
+    // The animation runs all the way down to just above the button
+    // bar, covering Squachy's region, the text row, and the counters —
+    // everything below the title bar erases and repaints together
+    // every frame.
     const int rainEnd      = countersBottom;
 
     // Background animation, from below the title bar down to just
@@ -85,12 +84,16 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     }
 
     // Squachy: main character, reacts to events, cracks jokes when idle.
-    // He gets everything between the title bar and the status line —
-    // as big as the current screen size allows. A big bounce can push
-    // his dirty-rect clear a few px above titleBottom into the title
-    // bar's row, so the title bar is drawn AFTER him — it fully
-    // repaints its own row every frame, so it always ends up on top
-    // and never shows any bleed-over from his clear box.
+    // His available region runs all the way to countersTop (not
+    // statusTop) — past where the ALL CLEAR text sits — so he scales up
+    // further and his feet land on top of its upper portion. The text
+    // itself draws AFTER him (below) so it stays fully legible on top
+    // of his body wherever they overlap, instead of being covered. A
+    // big bounce can push his dirty-rect clear a few px above
+    // titleBottom into the title bar's row, so the title bar is drawn
+    // after him too — it fully repaints its own row every frame, so it
+    // always ends up on top and never shows any bleed-over from his
+    // clear box.
     //
     // "Boring mode" skips this call entirely — his internal state
     // (mood/quip timers, the stats Squachy::trigger() tracks for the
@@ -101,39 +104,55 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // just leaves it as animated negative space — no layout changes
     // needed anywhere else on this screen.
     if (!Settings::boringMode()) {
-        Squachy::tick(t, w / 2, titleBottom, statusTop - titleBottom, now, advance);
+        Squachy::tick(t, w / 2, titleBottom, countersTop - titleBottom, now, advance);
     }
 
     // Title bar at the top
     Theme::drawTitleBar(t, ">> SQUACHWATCH <<  SCANNING");
 
-    // ALL CLEAR (only flash if there are NO active detections)
+    // ALL CLEAR (only flash if there are NO active detections). Same
+    // Bangers headline font as the ALERT screen's "!! DETECTION !!" —
+    // sits right above the counter lines, bottom-aligned to
+    // countersTop (see statusH above). Drawn AFTER Squachy so it stays
+    // readable on top of him rather than getting covered by his feet.
     bool anyActive = false;
     for (uint8_t i = 0; i < (uint8_t)DetectionType::COUNT; i++) {
         if (eng.countByType((DetectionType)i) > 0) { anyActive = true; break; }
     }
-    // Kept small and bottom-aligned to the counters — Squachy is the
-    // main character now, this is just a status line touching his feet.
-    if (!anyActive) {
-        float pulse = 0.55f + 0.45f * sinf((float)(now % 2000) / 2000.0f * 6.2831853f);
-        uint16_t col = (uint16_t)Theme::blend(Theme::GREEN, Theme::CYAN, (uint16_t)(pulse * 200.0f));
-        t.setTextSize(2);
-        t.setTextColor(col, Theme::BG);
-        const char* clear = "ALL CLEAR";
-        int cw = t.textWidth(clear);
-        t.setCursor((w - cw) / 2, countersTop - t.fontHeight(2));
-        t.print(clear);
-    } else {
-        // Same size as "ALL CLEAR" — text sizing only comes in whole
-        // multiples, so matching them means picking one; this still
-        // fits comfortably even in the narrowest (240px portrait)
-        // rotation.
-        t.setTextSize(2);
-        t.setTextColor(Theme::PINK, Theme::BG);
-        const char* seen = "DETECTIONS LOGGED";
-        int sw = t.textWidth(seen);
-        t.setCursor((w - sw) / 2, countersTop - t.fontHeight(2));
-        t.print(seen);
+    {
+        uint16_t col;
+        const char* msg;
+        if (!anyActive) {
+            // Full rainbow cycle instead of a two-color pulse — same
+            // hue-wash technique as Squachy's party-mode confetti wash.
+            static const uint16_t RAINBOW[6] = {
+                Theme::RED, Theme::AMBER, Theme::GREEN,
+                Theme::CYAN, Theme::VAPOR_PURPLE, Theme::PINK
+            };
+            float huePos = fmodf((float)now / 900.0f, 6.0f);
+            int i0 = (int)huePos % 6, i1 = (i0 + 1) % 6;
+            col = Theme::blend(RAINBOW[i0], RAINBOW[i1], (uint16_t)((huePos - (int)huePos) * 255));
+            msg = "ALL CLEAR";
+        } else {
+            col = Theme::PINK;
+            msg = "DETECTIONS LOGGED";
+        }
+        int tw = Theme::bangersTextWidth(msg, Theme::BangersSize::MD);
+        int ty = countersTop - statusH;
+        if (tw <= w - 8) {
+            Theme::drawBangersText(t, (w - tw) / 2, ty, msg, col, Theme::BangersSize::MD);
+        } else {
+            // "DETECTIONS LOGGED" is long enough to overflow the
+            // narrowest (240px portrait) rotation at this font's fixed
+            // size — Bangers has no smaller step to fall back to like
+            // the built-in font does, so drop to that instead rather
+            // than clip.
+            t.setTextSize(2);
+            t.setTextColor(col, Theme::BG);
+            int sw = t.textWidth(msg);
+            t.setCursor((w - sw) / 2, countersTop - t.fontHeight(2));
+            t.print(msg);
+        }
     }
 
     // Counter lines above the buttons — a fixed, centered two-line
