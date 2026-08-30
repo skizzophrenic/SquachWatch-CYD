@@ -137,10 +137,29 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
             col = Theme::PINK;
             msg = "DETECTIONS LOGGED";
         }
+        // 2px black outline: draw the same text at every offset in a
+        // 5x5 grid around the real position (minus the center) in
+        // black first, then the real color on top. A full grid, not
+        // just a ring at radius 2, so there's no gap between the 1px
+        // and 2px shells. The Bangers glyph renderer only paints ink
+        // pixels (not a full opaque cell), so the offset passes land
+        // as a clean outline rather than clobbering each other.
+        static const int8_t OUTLINE_OFS[24][2] = {
+            {-2,-2},{-1,-2},{0,-2},{1,-2},{2,-2},
+            {-2,-1},{-1,-1},{0,-1},{1,-1},{2,-1},
+            {-2, 0},{-1, 0},        {1, 0},{2, 0},
+            {-2, 1},{-1, 1},{0, 1},{1, 1},{2, 1},
+            {-2, 2},{-1, 2},{0, 2},{1, 2},{2, 2},
+        };
         int tw = Theme::bangersTextWidth(msg, Theme::BangersSize::MD);
         int ty = countersTop - statusH;
         if (tw <= w - 8) {
-            Theme::drawBangersText(t, (w - tw) / 2, ty, msg, col, Theme::BangersSize::MD);
+            int tx = (w - tw) / 2;
+            for (uint8_t i = 0; i < 24; i++) {
+                Theme::drawBangersText(t, tx + OUTLINE_OFS[i][0], ty + OUTLINE_OFS[i][1],
+                                        msg, Theme::BLACK, Theme::BangersSize::MD);
+            }
+            Theme::drawBangersText(t, tx, ty, msg, col, Theme::BangersSize::MD);
         } else {
             // "DETECTIONS LOGGED" is long enough to overflow the
             // narrowest (240px portrait) rotation at this font's fixed
@@ -148,9 +167,15 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
             // the built-in font does, so drop to that instead rather
             // than clip.
             t.setTextSize(2);
-            t.setTextColor(col, Theme::BG);
             int sw = t.textWidth(msg);
-            t.setCursor((w - sw) / 2, countersTop - t.fontHeight(2));
+            int sx = (w - sw) / 2, sy = countersTop - t.fontHeight(2);
+            t.setTextColor(Theme::BLACK, Theme::BG);
+            for (uint8_t i = 0; i < 24; i++) {
+                t.setCursor(sx + OUTLINE_OFS[i][0], sy + OUTLINE_OFS[i][1]);
+                t.print(msg);
+            }
+            t.setTextColor(col, Theme::BG);
+            t.setCursor(sx, sy);
             t.print(msg);
         }
     }

@@ -44,7 +44,7 @@ void uiBootTick(TFT_eSPI& t, uint32_t now) {
     // 3s). Text below is drawn with a transparent background so the
     // scene shows through around every glyph instead of solid boxes.
     Theme::drawSunsetSky(t, now, 0, yHoriz);
-    Theme::drawSunsetSun(t, w / 2, yHoriz - 25, 30, 0, yHoriz);
+    Theme::drawSunsetSun(t, w / 2, yHoriz - 25, 53, 0, yHoriz);  // 30 * 1.75
     Theme::drawSeagulls(t, now, 0, yHoriz);
     Theme::drawRetroFloor(t, now, yHoriz, h);
 
