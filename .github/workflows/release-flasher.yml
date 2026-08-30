@@ -79,9 +79,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          NOTES_FILE=".github/release-notes/${{ steps.ver.outputs.tag }}.md"
+          if [ -f "$NOTES_FILE" ]; then
+            NOTES_ARGS=(--notes-file "$NOTES_FILE")
+          else
+            NOTES_ARGS=(--generate-notes)
+          fi
           gh release create "${{ steps.ver.outputs.tag }}" \
             --title "SquachWatch-CYD ${{ steps.ver.outputs.tag }}" \
-            --generate-notes \
+            "${NOTES_ARGS[@]}" \
             .pio/build/cyd/bootloader.bin \
             .pio/build/cyd/partitions.bin \
             .pio/build/cyd/firmware.bin \
