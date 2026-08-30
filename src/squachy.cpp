@@ -219,10 +219,13 @@ static uint32_t      moodUntil       = 0;
 // A little wander away from center and back — see tick()'s idle-quip
 // scheduler and the bodyCx computation further down. s_walkStart
 // anchors a 0..1 progress ratio through WALK_DURATION_MS; the actual
-// offset is a sine hump over that (0 at both ends, peak at the
-// midpoint) so he always ends up back at center exactly as the mood
-// naturally expires, with no separate "walk back" step needed.
-static const uint32_t WALK_DURATION_MS = 5000;
+// offset is a full sine cycle over that (0 at both ends, out to one
+// full screen edge, back through center, out to the other edge, back
+// to 0) so he always ends up back at center exactly as the mood
+// naturally expires, with no separate "walk back" step needed. Longer
+// than the old short wander since he's covering real edge-to-edge
+// distance now, not a token few dozen pixels.
+static const uint32_t WALK_DURATION_MS = 9000;
 static uint32_t       s_walkStart = 0;
 static int8_t         s_walkDir   = 1;
 static const char*   bubbleText      = nullptr;
@@ -299,8 +302,21 @@ static float s_lastScale = 1.0f;
 
 // After this long with no interaction at all (not even idle quips
 // count — this tracks real engagement), he dozes off instead of
-// standing around wide awake forever.
-static const uint32_t SLEEPY_AFTER_MS = 180000;
+// standing around wide awake forever. Long enough that the regular
+// idle fun (quips, bounces, walks, the rare party moment) gets plenty
+// of room to happen first — napping is the last resort, not the
+// default state.
+static const uint32_t SLEEPY_AFTER_MS = 600000;
+// A nap runs for at most this long in one stretch, then he's back at
+// it -- without this cap the sleepy check re-triggers every idle cycle
+// forever (idleFor only ever grows while nothing happens), so he'd
+// just nap indefinitely until someone interacts. s_napStart marks when
+// the CURRENT stretch began (0 = not napping); once it's been running
+// too long, s_napCooldownUntil holds off the next nap for a while so
+// he doesn't immediately fall right back asleep.
+static const uint32_t NAP_DURATION_MS = 60000;
+static uint32_t       s_napStart = 0;
+static uint32_t       s_napCooldownUntil = 0;
 
 static const char* pick(const char* const* arr, int n) {
     return arr[random(0, n)];
@@ -1089,14 +1105,29 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now, bool adv
     if (!s_onboardActive && mood == Mood::IDLE && now >= nextIdleAt) {
         uint32_t idleFor = now - lastInteraction;
         bool longIdle  = idleFor > 90000;
-        bool verySleepy = idleFor > SLEEPY_AFTER_MS;
+        // idleFor only ever grows while nothing happens, so without the
+        // cooldown+cap this would stay true (and keep re-triggering the
+        // nap below) forever once tripped -- see NAP_DURATION_MS.
+        bool verySleepy = idleFor > SLEEPY_AFTER_MS && now >= s_napCooldownUntil
+                          && (s_napStart == 0 || now - s_napStart < NAP_DURATION_MS);
         if (verySleepy) {
             // A nap, not just another quip — persists for a while and
             // re-enters itself below rather than popping in and out
-            // every idle cycle.
+            // every idle cycle, but only up to NAP_DURATION_MS total.
+            if (s_napStart == 0) s_napStart = now;
             say(pick(SLEEPY_LINES, 4), 6000);
             mood = Mood::SLEEPY;
             moodUntil = now + 8000;
+            nextIdleAt = now + 8000;
+        } else if (s_napStart != 0) {
+            // Just woke up from a capped nap -- back at it, and held
+            // off from immediately napping again for a while even
+            // though idleFor is still well past SLEEPY_AFTER_MS.
+            s_napStart = 0;
+            s_napCooldownUntil = now + SLEEPY_AFTER_MS;
+            say(pick(BORED_LINES, 4), MIN_BUBBLE_MS);
+            mood = random(0, 2) ? Mood::WAVE : Mood::BOUNCE;
+            moodUntil = now + 1200;
             nextIdleAt = now + 8000;
         } else if (random(0, 250) == 0) {
             // Rare shimmering flourish — see drawBody's fur-color swap
@@ -1179,16 +1210,18 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now, bool adv
         float walkT = (float)(now - s_walkStart) / (float)WALK_DURATION_MS;
         if (walkT > 1.0f) walkT = 1.0f;
         // Same half-width margin hitTest() assumes for his footprint,
-        // so the wander range never pushes him somewhere he'd clip off
-        // the edge or stand past his own hit box.
+        // so the range never pushes him somewhere he'd clip off the
+        // edge or stand past his own hit box -- this is the actual
+        // screen edge, not a token wander distance.
         int halfW = (int)(24 * scale);
         float maxRange = (float)(t.width() / 2 - halfW - 4);
         if (maxRange < 0) maxRange = 0;
-        float range = 40.0f * scale;
-        if (range > maxRange) range = maxRange;
-        // Sine hump: 0 at both ends of the walk, peak at the midpoint —
-        // he's back at center exactly as the mood naturally expires.
-        bodyCx = cx + (int)(sinf(walkT * 3.14159265f) * range * s_walkDir);
+        // Full sine cycle instead of a half-cycle hump: 0 at the start,
+        // out to one full edge, back through center, out to the other
+        // full edge, then back to 0 -- an actual edge-to-edge patrol
+        // that still starts and ends exactly at center, so there's no
+        // teleport when WALK expires back to idle.
+        bodyCx = cx + (int)(sinf(walkT * 6.2831853f) * maxRange * s_walkDir);
     }
 
     // Idle bob runs noticeably quicker than a resting breathing rate —
