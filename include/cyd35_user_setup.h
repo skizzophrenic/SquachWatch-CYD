@@ -4,16 +4,18 @@
 // Resistance Touch"). Pinout cross-referenced against esp3d.io's
 // sunton-35-3248 hardware page, and several of these pins already match
 // known-good constants elsewhere in this codebase for the OTHER board
-// variants (SCK/MOSI/MISO/DC/CS identical to the 2.8" board; BL=27 and
-// touch CS=33/IRQ=36 already exist as BL_PIN_CAP/TOUCH_CS/TOUCH_IRQ in
-// main.cpp) — one real fresh unknown here is the driver chip itself.
+// variants (SCK/MOSI/MISO/DC/CS identical to the 2.8" board; BL=27
+// already exists as BL_PIN_CAP in main.cpp) — one real fresh unknown
+// here is the driver chip itself.
 //
-// UNVERIFIED ON REAL HARDWARE: inversion/RGB order below are TFT_eSPI's
-// usual ST7796 defaults, not confirmed against this specific panel yet.
-// If first boot shows inverted or wrong-hued colors, that's the first
-// thing to flip (see TFT_INVERSION_ON / TFT_RGB_ORDER below) — same
-// troubleshooting posture as the ST7789-vs-ILI9341 note in
-// cyd_user_setup.h.
+// UNCONFIRMED ON REAL HARDWARE (post color-inversion-bug-fix): the
+// TFT_INVERSION_ON/TFT_RGB_ORDER combo below is a first guess, not a
+// verified one -- see main.cpp's PANEL_NEEDS_INVERSION comment for why
+// this header's TFT_INVERSION_ON/OFF define alone is dead code for
+// choosing polarity (a real bug found on AWOK: tft.invertDisplay() at
+// runtime overwrites it unconditionally). If colors still look wrong,
+// PANEL_NEEDS_INVERSION in main.cpp is the one to flip, not this file
+// -- TFT_RGB_ORDER below is still live and worth trying too.
 #pragma once
 
 #define USER_SETUP_INFO    "SquachWatch-CYD / 3.5 inch / ST7796"
@@ -35,8 +37,15 @@
 #define TFT_BL    27
 
 // Touch (XPT2046, resistive) shares this SPI bus rather than getting its
-// own dedicated peripheral — see the CYD35-specific touch init in
-// main.cpp. CS=33/IRQ=36 only, no separate SCK/MOSI/MISO needed here.
+// own dedicated peripheral. Driven entirely through TFT_eSPI's own
+// calibrateTouch()/setTouch()/getTouch() path (see the CYD35-specific
+// touch init in main.cpp) rather than the standalone XPT2046_Touchscreen
+// library -- an independent SPIClass fighting TFT_eSPI for the same
+// physical bus is what produced garbage reads and a free-running IRQ
+// when that was tried. TFT_eSPI drives its own CS once TOUCH_CS is
+// defined here, same as AWOK; no separate SCK/MOSI/MISO or IRQ pin
+// needed for this path.
+#define TOUCH_CS  33
 
 // Backlight
 #define TFT_BACKLIGHT_ON   1
@@ -46,6 +55,7 @@
 // SPI frequencies
 #define SPI_FREQUENCY         40000000
 #define SPI_READ_FREQUENCY    20000000
+#define SPI_TOUCH_FREQUENCY    2500000
 
 // Fonts
 #define LOAD_GLCD
@@ -56,11 +66,12 @@
 #define LOAD_FONT8
 #define SMOOTH_FONT
 
-// Confirmed on real hardware: still looked "inverted" at BOTH
-// TFT_INVERSION_OFF and TFT_INVERSION_ON (verified via
-// main.cpp's tft.invertDisplay() runtime call, which sends an
-// absolute INVON/INVOFF command regardless of this define -- see its
-// comment). That rules out inversion as the actual problem; trying
-// TFT_RGB_ORDER (red/blue channel swap) next.
+// This define alone does nothing at runtime -- main.cpp's
+// tft.invertDisplay() call always overwrites it (see
+// PANEL_NEEDS_INVERSION there, the actual control point). Left at
+// TFT_INVERSION_ON only because TFT_eSPI expects one of the two to be
+// defined; the earlier "tried both, no effect" testing that produced
+// this file's original TFT_RGB_ORDER guess was unknowingly toggling
+// this dead define instead of the real one.
 #define TFT_INVERSION_ON
 #define TFT_RGB_ORDER TFT_BGR

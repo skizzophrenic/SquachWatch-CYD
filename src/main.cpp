@@ -39,17 +39,26 @@
 // GPIO25/32/33 trio (SPI vs I2C), so probing for the I2C chip at boot
 // tells us which board this is — see setup().
 //   - ESP32-3248S035R (3.5", built separately as env:cyd35): resistive
-//     XPT2046 again, but CS=33/IRQ=36 share the *display's* SPI bus
-//     (SCK/MOSI/MISO = 14/13/12) instead of getting a dedicated
-//     peripheral — this board has no capacitive-touch chip at all, so
-//     the I2C probe below is skipped entirely rather than just failing.
+//     XPT2046 again, CS=33 sharing the *display's* SPI bus (SCK/MOSI/
+//     MISO = 14/13/12) instead of getting a dedicated peripheral —
+//     this board has no capacitive-touch chip at all, so the I2C probe
+//     below is skipped entirely rather than just failing. Driven by a
+//     small raw-SPI reader (cyd35RawTouch()) over tft.getSPIinstance()
+//     -- the exact same peripheral TFT_eSPI itself uses for the
+//     display, not a second competing one, and not TFT_eSPI's own
+//     touch functions either (those looked completely dead in the real
+//     app on real hardware; see cyd35RawTouch()'s comment for the root
+//     cause). Reuses the original board's single-blob TouchCal system
+//     and landscape/flipped raw-axis map() logic (see pollTouch()) --
+//     one calibration covers every rotation, same as that board.
 //   - AWOK 2.4" (Marauder V6.1, built separately as env:awok): resistive
 //     XPT2046 sharing the display's VSPI bus like cyd35, but driven
 //     entirely through TFT_eSPI's own calibrateTouch/setTouch/getTouch
 //     path rather than the XPT2046_Touchscreen library — see the AWOK
 //     branches in setup()/pollTouch(). The constructor still gets
 //     built below regardless of board (it costs nothing unused), but
-//     AWOK never calls touch.begin() or touchSPI.begin() on it.
+//     neither AWOK nor cyd35 ever calls touch.begin() or
+//     touchSPI.begin() on it.
 #if defined(CYD35)
     #define TOUCH_SCK  TFT_SCLK
     #define TOUCH_MOSI TFT_MOSI
@@ -90,6 +99,38 @@
 #define BL_CH_ORIG  0
 #define BL_CH_CAP   1
 #define BL_CH_AWOK  2
+
+// invertDisplay() sets an ABSOLUTE panel state -- it doesn't toggle
+// relative to whatever TFT_INVERSION_ON/OFF a board's user-setup header
+// set at compile time, it just overwrites it. That header define is
+// therefore dead code for actually choosing a board's polarity -- a
+// real bug found on real hardware (AWOK), several rounds of flipping
+// the header setting with zero visible effect, before finding this is
+// the actual control point. Settings::inverted() is a cosmetic
+// per-user theme toggle, unrelated to a given panel's actual required
+// polarity, so every invertDisplay() call XORs the two: this constant
+// is the panel's own baseline, and the user's cosmetic toggle flips
+// relative to it. File-scope (not local to setup()) so the Settings >
+// INVERT row handler in loop() can use the same XOR instead of
+// clobbering this baseline with an absolute call.
+#if defined(CYD35)
+// UNCONFIRMED on real hardware post-fix: the original port's "true"
+// guess predates discovering the override bug above, so whatever
+// testing produced that value was toggling a header define that does
+// nothing -- not a real confirmation. Trying false first, same as
+// AWOK's ILI9341 (this panel's ST7796 may differ; adjust from live
+// observation).
+constexpr bool PANEL_NEEDS_INVERSION = false;
+#elif defined(AWOK)
+// Confirmed on real hardware: true visibly changed something (proving
+// this, not the dead awok_user_setup.h define, is the actual control
+// point) but looked inverted/wrong. false is the ILI9341's normal
+// (non-inverted) polarity, matching the original CYD board this panel
+// shares a driver with.
+constexpr bool PANEL_NEEDS_INVERSION = false;
+#else
+constexpr bool PANEL_NEEDS_INVERSION = false;
+#endif
 
 // TFT_eSprite::createSprite() no-ops (returns the existing buffer
 // untouched) if the sprite is already created, so the only way to
@@ -315,6 +356,83 @@ static void awokEnsureCal() {
 }
 #endif  // AWOK
 
+#if defined(CYD35)
+// ---- cyd35: raw XPT2046 reads over the display's own SPI instance ----
+// TFT_eSPI's own native touch path (calibrateTouch/setTouch/getTouch)
+// looked completely dead in the real app on two separate physical
+// units -- confirmed via a standalone bit-banged probe that CS=33
+// itself is correct (clean baseline, real varying pressure on tap) --
+// so the wiring was never the problem. Root cause: TFT_eSPI's ESP32
+// touch code switches the SPI peripheral's low-level user register
+// between write-only mode (display pushes) and read mode (touch, needs
+// MISO capture) via a direct register poke (SET_BUS_READ_MODE in
+// TFT_eSPI_ESP32.h). Once this board does ANY display write -- even
+// just the boot splash -- that switch stops taking effect for
+// subsequent touch reads, which then return a constant/stale value
+// forever regardless of real touch state. Never an issue for AWOK: its
+// screens are sprite-buffered (RAM writes only, one pushSprite() burst
+// per frame), plenty of quiet bus time between physical SPI writes;
+// cyd35 draws most screens straight to the panel.
+//
+// Fix: bypass TFT_eSPI's touch code entirely. tft.getSPIinstance()
+// hands back the exact same SPIClass TFT_eSPI itself already uses for
+// the display (same VSPI peripheral, no second competing instance --
+// that competing-instance problem is what killed the original
+// standalone-XPT2046_Touchscreen-library attempt), and Arduino's own
+// SPIClass::transfer()/transfer16() already do proper full-duplex
+// (write+read) transfers without needing that fragile register dance.
+// Manual CS toggling + the plain XPT2046 command bytes, same sequence
+// TFT_eSPI's own (broken, for us) internals use internally.
+//
+// This also means cyd35 can reuse the exact same single-blob
+// TouchCal/applyCal() system and RAW_X/Y_MIN/MAX + landscape/flipped
+// map() logic the original 2.8" board already relies on (see
+// pollTouch()'s bottom branch and rawReadResistive()) -- one
+// calibration, good for every rotation, same as that board, instead of
+// the four-blob-per-rotation cache TFT_eSPI's own calibration format
+// would have needed.
+static bool cyd35RawTouch(uint16_t& rx, uint16_t& ry, uint16_t& rz) {
+    SPIClass& spi = tft.getSPIinstance();
+    spi.beginTransaction(SPISettings(2500000, MSBFIRST, SPI_MODE0));
+    digitalWrite(TOUCH_CS, LOW);
+
+    int16_t tz = 0xFFF;
+    spi.transfer(0xb0);
+    tz += spi.transfer16(0xc0) >> 3;
+    tz -= spi.transfer16(0x00) >> 3;
+    if (tz == 4095) tz = 0;
+    rz = (uint16_t)tz;
+
+    uint16_t tmp;
+    spi.transfer(0xd0);
+    spi.transfer(0);
+    spi.transfer(0xd0);
+    spi.transfer(0);
+    spi.transfer(0xd0);
+    spi.transfer(0);
+    spi.transfer(0xd0);
+    tmp = spi.transfer(0);
+    tmp <<= 5;
+    tmp |= 0x1f & (spi.transfer(0x90) >> 3);
+    rx = tmp;
+
+    spi.transfer(0);
+    spi.transfer(0x90);
+    spi.transfer(0);
+    spi.transfer(0x90);
+    spi.transfer(0);
+    spi.transfer(0x90);
+    tmp = spi.transfer(0);
+    tmp <<= 5;
+    tmp |= 0x1f & (spi.transfer(0) >> 3);
+    ry = tmp;
+
+    digitalWrite(TOUCH_CS, HIGH);
+    spi.endTransaction();
+    return true;
+}
+#endif  // CYD35
+
 static TouchPoint pollTouch() {
     TouchPoint tp = { false, 0, 0 };
     int w = tft.width(), h = tft.height();
@@ -343,9 +461,24 @@ static TouchPoint pollTouch() {
     }
 
 #if defined(CYD35)
-    // Touch is disabled on this board for now (see the setup() comment
-    // by TOUCH_CS/TOUCH_IRQ) -- `touch` was never begin()'d, so don't
-    // call into it at all.
+    // Raw XPT2046 read over the display's own SPI instance -- see
+    // cyd35RawTouch()'s comment for why this bypasses TFT_eSPI's own
+    // touch code. Same landscape/flipped raw-axis mapping and
+    // RAW_X/Y_MIN/MAX calibration the original board's path (bottom of
+    // this function) uses -- one calibration works for every rotation.
+    {
+        uint16_t rx, ry, rz;
+        if (!cyd35RawTouch(rx, ry, rz)) return tp;
+        if (rz <= 175) return tp;
+        if (!landscape) {
+            tp.x = flipped ? map(rx, RAW_X_MIN, RAW_X_MAX, w, 0) : map(rx, RAW_X_MIN, RAW_X_MAX, 0, w);
+            tp.y = flipped ? map(ry, RAW_Y_MIN, RAW_Y_MAX, h, 0) : map(ry, RAW_Y_MIN, RAW_Y_MAX, 0, h);
+        } else {
+            tp.x = flipped ? map(ry, RAW_Y_MIN, RAW_Y_MAX, w, 0) : map(ry, RAW_Y_MIN, RAW_Y_MAX, 0, w);
+            tp.y = flipped ? map(rx, RAW_X_MIN, RAW_X_MAX, 0, h) : map(rx, RAW_X_MIN, RAW_X_MAX, h, 0);
+        }
+        tp.valid = (tp.x >= 0 && tp.x < w && tp.y >= 0 && tp.y < h);
+    }
     return tp;
 #elif defined(AWOK)
     // TFT_eSPI-native touch path. getTouch() returns already-
@@ -392,7 +525,19 @@ static bool rawReadCap(int16_t& a, int16_t& b) {
 }
 
 static bool rawReadResistive(int16_t& a, int16_t& b) {
-#if defined(AWOK)
+#if defined(CYD35)
+    // See cyd35RawTouch()'s comment -- TFT_eSPI's own raw-touch
+    // accessors are what's actually broken on this board, so this
+    // can't share AWOK's branch below. Used both by the boot-time
+    // "hold to reset calibration" window and by the normal interactive
+    // calibration flow (TouchCal::runInteractive(), same as the
+    // original board -- cyd35 has no calibration flow of its own).
+    uint16_t rx, ry, rz;
+    if (!cyd35RawTouch(rx, ry, rz) || rz <= 175) return false;
+    a = (int16_t)rx;
+    b = (int16_t)ry;
+    return true;
+#elif defined(AWOK)
     // AWOK's `touch` (XPT2046_Touchscreen) object is never begin()'d —
     // see the AWOK branch in setup() — so this goes through TFT_eSPI's
     // own raw-touch accessors instead. Only used by the boot-time
@@ -494,6 +639,14 @@ void setup() {
     delay(200);
     Serial.println();
     Serial.println("SquachWatch-CYD v1.0  --  TALKING SASQUACH");
+#if defined(CYD35)
+    // One-time diagnostic: is PSRAM actually present on this unit? The
+    // "no PSRAM" conclusion driving the no-full-framebuffer tradeoff
+    // (see `frame`'s declaration up top) was from an earlier pass --
+    // worth confirming directly before deciding whether a PSRAM-backed
+    // full double buffer is even on the table.
+    Serial.printf("PSRAM found: %s (%u bytes)\n", psramFound() ? "yes" : "no", (unsigned)ESP.getPsramSize());
+#endif
 
     // Backlight: the original board uses GPIO21 for this, the
     // JC2432W328C uses GPIO27 (confirmed by sweeping candidate pins on
@@ -530,32 +683,9 @@ void setup() {
     // there's nothing dead-looking left in the title bar.
     Theme::setRotateIconVisible(false);
 #endif
-    // invertDisplay() sets an ABSOLUTE panel state -- it doesn't toggle
-    // relative to whatever TFT_INVERSION_ON/OFF set at compile time, it
-    // just overwrites it. This means awok_user_setup.h's own
-    // TFT_INVERSION_ON/OFF #define is dead code for actually choosing
-    // AWOK's polarity -- it silently fell into the same bucket as the
-    // original CYD board below (a real bug found on real hardware,
-    // several rounds of flipping that header setting with zero visible
-    // effect, before finding the actual control point was here).
-    // Settings::inverted() is a cosmetic per-user theme toggle
-    // (originally for the other board), unrelated to a given panel's
-    // actual required polarity, so XOR the two: cyd35's ST7796 needs
-    // INVON to render correctly (confirmed on real hardware), the
-    // original board needs INVOFF, and either way the user's cosmetic
-    // toggle still flips it relative to that baseline.
-#if defined(CYD35)
-    constexpr bool PANEL_NEEDS_INVERSION = true;
-#elif defined(AWOK)
-    // Confirmed on real hardware: true visibly changed something
-    // (proving this, not the dead awok_user_setup.h define, is the
-    // actual control point) but looked inverted/wrong. false is the
-    // ILI9341's normal (non-inverted) polarity, matching the original
-    // CYD board this panel shares a driver with.
-    constexpr bool PANEL_NEEDS_INVERSION = false;
-#else
-    constexpr bool PANEL_NEEDS_INVERSION = false;
-#endif
+    // See PANEL_NEEDS_INVERSION's definition up top for why this XORs
+    // against a per-board baseline instead of calling invertDisplay()
+    // with Settings::inverted() directly.
     tft.invertDisplay(PANEL_NEEDS_INVERSION != Settings::inverted());
     tft.fillScreen(Theme::BG);
 
@@ -609,18 +739,19 @@ void setup() {
 #endif
 
 #if defined(CYD35)
-    // TEMPORARILY DISABLED: touch.begin()'d against CS=33/IRQ=36 on the
-    // display's shared SPI bus produced constant garbage reads (SPI
-    // transfers all reading back 0xFFFF -- nothing answering) AND the
-    // IRQ line fires continuously even with isrWake forced false right
-    // after begin(), which rules out a library quirk and points at
-    // TOUCH_CS/TOUCH_IRQ just being the wrong pins for this specific
-    // board's touch controller. Left uninitialized on purpose so the
-    // display can be evaluated on its own, without a free-running IRQ
-    // hammering the shared SPI bus. See TOUCH_CS/TOUCH_IRQ up top once
-    // the real pins are confirmed.
+    // The standalone XPT2046_Touchscreen library (own SPIClass, own
+    // IRQ pin) produced constant garbage reads and a free-running IRQ
+    // here -- not a wrong-pin problem, a second SPI master fighting
+    // TFT_eSPI for the same physical bus. Same wiring shape as AWOK
+    // (touch shares the display's own SPI bus, no dedicated
+    // peripheral), so this uses the same fix: drive touch entirely
+    // through TFT_eSPI's own calibrateTouch()/setTouch()/getTouch()
+    // path instead, which shares the bus properly. No I2C cap-touch
+    // chip on this board either, so no probe -- no touch.begin(), no
+    // touchSPI. All subsequent touch reads go through pollTouch()'s
+    // CYD35 branch (tft.getTouch()).
     usingCapTouch = false;
-    Serial.println("cyd35 build -- touch DISABLED pending real CS/IRQ pin confirmation.");
+    Serial.println("cyd35 build -- XPT2046 on shared VSPI bus via TFT_eSPI.");
 #elif defined(AWOK)
     // AWOK's XPT2046 sits on the display's own shared VSPI bus (TOUCH_CS=21,
     // already armed by TFT_eSPI itself once awok_user_setup.h's #define
@@ -656,10 +787,6 @@ void setup() {
     // make touch too inaccurate to reliably re-tap a "recalibrate"
     // button, so this needs no precision at all — just a hold anywhere
     // during the window right after boot.
-#if !defined(CYD35)
-    // Skipped on cyd35: touch isn't begin()'d there right now (see the
-    // TOUCH_CS/TOUCH_IRQ comment above), so rawReadResistive() would be
-    // reading from an uninitialized driver.
     tft.fillScreen(Theme::BG);
     tft.setTextColor(Theme::AMBER, Theme::BG);
     tft.setTextSize(1);
@@ -683,6 +810,11 @@ void setup() {
                     // gesture a no-op here.
                     awokResetTouchCal();
 #endif
+                    // cyd35 needs nothing extra here: it shares the
+                    // same "touchcal" namespace/single-blob format the
+                    // original board uses (see cyd35RawTouch()'s
+                    // comment), so the TouchCal::reset() call above
+                    // already covers it.
                     tft.fillScreen(Theme::BG);
                     tft.setTextColor(Theme::AMBER, Theme::BG);
                     tft.setTextSize(2);
@@ -698,7 +830,6 @@ void setup() {
             delay(10);
         }
     }
-#endif
     tft.fillScreen(Theme::BG);
 
 #if defined(AWOK)
@@ -714,7 +845,10 @@ void setup() {
     // Apply a saved touch calibration if one exists (long-press the
     // title bar on the CLEAR/LOG screen to (re)calibrate — see
     // checkCalibrationTrigger()); otherwise keep the compiled-in
-    // defaults above.
+    // defaults above. cyd35 shares this same path (and the same
+    // "touchcal" namespace/single-blob format) as the original board
+    // -- see cyd35RawTouch()'s comment for why one calibration is
+    // enough for every rotation on this board too.
     TouchCal::Cal savedCal;
     if (TouchCal::load(savedCal)) {
         applyCal(savedCal);
@@ -761,6 +895,10 @@ void loop() {
         Squachy::trigger(Squachy::Event::ROTATED);
         screenRotation = (screenRotation + 1) % 4;
         tft.setRotation(screenRotation);
+        // No cyd35-specific calibration re-arm needed here: it shares
+        // the original board's single-blob-covers-every-rotation
+        // scheme (see cyd35RawTouch()'s comment), so nothing to do
+        // beyond the setRotation() call above.
         // Landscape and portrait need differently-*shaped* buffers, but
         // not differently-*sized* ones -- a rectangular panel has the
         // same total pixel count either way (320x240 and 240x320 are
@@ -832,6 +970,9 @@ void loop() {
 #if defined(AWOK)
             awokRunCalibration();
 #else
+            // cyd35 shares this path with the original board -- see
+            // rawReadResistive()'s CYD35 branch and cyd35RawTouch()'s
+            // comment.
             TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
             TouchCal::Cal newCal = TouchCal::runInteractive(*canvas, reader, Theme::BG, Theme::WHITE, Theme::CYAN);
             applyCal(newCal);
@@ -928,31 +1069,38 @@ void loop() {
             constexpr int32_t  SQ_MOVE_PX = 12;
             constexpr int32_t  SQ_MOVE_PX_SQ = SQ_MOVE_PX * SQ_MOVE_PX;
 
+            // Decide up front whether a brand-new touch lands on Squachy
+            // -- this only updates gesture-tracking state, it doesn't by
+            // itself claim the touch, so a miss still falls through to
+            // the button-bar branch below instead of being swallowed.
+            // (A touch that DOES land on him, or continues an already-
+            // active gesture, still takes priority over the button bar
+            // in the branch below -- Squachy is drawn well clear of the
+            // button row, so the two never really compete in practice.)
+            if (touchJustDown) {
+                sqActive = !boring && Squachy::hitTest(tp.x, tp.y);
+                sqHeld = false;
+                sqPetting = false;
+                sqStartMs = now;
+                sqStartX = tp.x;
+                sqStartY = tp.y;
+            }
+
             if (!boring && Squachy::onboardingActive() && tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
                 Squachy::onboardingTapAdvance(tp.x, tp.y)) {
                 lastTouch = now;
             } else if (touchJustDown && inEdgeZone) {
                 if (tp.x < edgeZoneW) Settings::cyclePrevBackground();
                 else                  Settings::cycleBackground();
-            } else if (!boring && tp.valid) {
-                if (touchJustDown) {
-                    sqActive = Squachy::hitTest(tp.x, tp.y);
-                    sqHeld = false;
-                    sqPetting = false;
-                    sqStartMs = now;
-                    sqStartX = tp.x;
-                    sqStartY = tp.y;
-                }
-                if (sqActive) {
-                    int32_t dx = tp.x - sqStartX;
-                    int32_t dy = tp.y - sqStartY;
-                    if ((dx * dx + dy * dy) > SQ_MOVE_PX_SQ) sqPetting = true;
-                    if (sqPetting) {
-                        Squachy::trigger(Squachy::Event::PETTING);
-                    } else if (!sqHeld && (now - sqStartMs) >= SQ_HOLD_MS) {
-                        sqHeld = true;
-                        Squachy::trigger(Squachy::Event::HELD);
-                    }
+            } else if (!boring && tp.valid && sqActive) {
+                int32_t dx = tp.x - sqStartX;
+                int32_t dy = tp.y - sqStartY;
+                if ((dx * dx + dy * dy) > SQ_MOVE_PX_SQ) sqPetting = true;
+                if (sqPetting) {
+                    Squachy::trigger(Squachy::Event::PETTING);
+                } else if (!sqHeld && (now - sqStartMs) >= SQ_HOLD_MS) {
+                    sqHeld = true;
+                    Squachy::trigger(Squachy::Event::HELD);
                 }
             } else if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 lastTouch = now;
@@ -1030,7 +1178,9 @@ void loop() {
                     case SettingsRow::BACKGROUND: Settings::cycleBackground(); break;
                     case SettingsRow::INVERT:
                         Settings::toggleInvert();
-                        tft.invertDisplay(Settings::inverted());
+                        // XOR against the panel's own baseline, not an
+                        // absolute call -- see PANEL_NEEDS_INVERSION.
+                        tft.invertDisplay(PANEL_NEEDS_INVERSION != Settings::inverted());
                         break;
                     case SettingsRow::BORING_MODE: Settings::toggleBoringMode(); break;
                     case SettingsRow::BRIGHTNESS:
@@ -1042,6 +1192,9 @@ void loop() {
 #if defined(AWOK)
                         awokRunCalibration();
 #else
+                        // cyd35 shares this path with the original
+                        // board -- see rawReadResistive()'s CYD35
+                        // branch and cyd35RawTouch()'s comment.
                         TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
                         TouchCal::Cal newCal = TouchCal::runInteractive(*canvas, reader, Theme::BG, Theme::WHITE, Theme::CYAN);
                         applyCal(newCal);
