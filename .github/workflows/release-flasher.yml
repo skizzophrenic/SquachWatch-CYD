@@ -72,6 +72,18 @@ jobs:
             0x1000  .pio/build/awok/bootloader.bin \
             0x8000  .pio/build/awok/partitions.bin \
             0x10000 .pio/build/awok/firmware.bin
+          # GitHub release assets need unique filenames within a release
+          # -- both boards' raw PlatformIO artifacts share the same
+          # basenames (bootloader.bin/partitions.bin/firmware.bin), which
+          # made the very first two-board release fail partway through
+          # uploading (second partitions.bin collided with the first).
+          # Board-prefixed copies here are what actually get uploaded.
+          cp .pio/build/cyd/bootloader.bin  cyd-bootloader.bin
+          cp .pio/build/cyd/partitions.bin  cyd-partitions.bin
+          cp .pio/build/cyd/firmware.bin    cyd-firmware.bin
+          cp .pio/build/awok/bootloader.bin awok-bootloader.bin
+          cp .pio/build/awok/partitions.bin awok-partitions.bin
+          cp .pio/build/awok/firmware.bin   awok-firmware.bin
 
       - name: Stamp manifest versions
         run: |
@@ -98,12 +110,12 @@ jobs:
           gh release create "${{ steps.ver.outputs.tag }}" \
             --title "SquachWatch-CYD ${{ steps.ver.outputs.tag }}" \
             "${NOTES_ARGS[@]}" \
-            .pio/build/cyd/bootloader.bin \
-            .pio/build/cyd/partitions.bin \
-            .pio/build/cyd/firmware.bin \
-            .pio/build/awok/bootloader.bin \
-            .pio/build/awok/partitions.bin \
-            .pio/build/awok/firmware.bin \
+            cyd-bootloader.bin \
+            cyd-partitions.bin \
+            cyd-firmware.bin \
+            awok-bootloader.bin \
+            awok-partitions.bin \
+            awok-firmware.bin \
             firmware-cyd-merged.bin \
             firmware-awok-merged.bin \
             manifest-cyd.json \
