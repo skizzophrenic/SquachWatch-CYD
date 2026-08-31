@@ -77,6 +77,24 @@ namespace Squachy {
     const char* shadesColorName();
     void        cycleShadesColor();
 
+    // Outfits: NONE (no costume), RACCOON and UNICORN are free/always
+    // unlocked; the rest unlock progressively with lifetime detection
+    // count (the same stat his growth stages use), in ascending
+    // threshold order, so unlockedOutfitCount() is just "how many from
+    // the front of the list qualify". cycleOutfit() only ever lands on
+    // an unlocked one, same pattern as cycleShadesColor(). outfitCount()
+    // is the total including locked ones, for a "N/total" readout.
+    const char* outfitName();
+    void        cycleOutfit();
+    void        cyclePrevOutfit();
+    uint8_t     unlockedOutfitCount();
+    uint8_t     outfitCount();
+
+    // Hidden unlock-everything trigger: main.cpp watches for a button
+    // sequence (9x CLR, 1x SCAN, 1x CLR) and calls this when it
+    // completes. Persists immediately, same as any other cosmetic.
+    void unlockAllOutfits();
+
     // Draws Squachy and his speech bubble, and advances his idle
     // animation/quip timers. Call every tick from the CLEAR screen.
     // cx = horizontal center. topY = where the bubble row starts (just

@@ -165,6 +165,18 @@ static const char* PET_LINES[] = {
     "You'd pet Bigfoot too. Don't lie.",
     "Cryptid, not a house pet. But okay.",
     "Ten out of ten, would be spotted again.",
+    "Careful, that's how legends get spoiled.",
+    "This never happens at the cabin. Never.",
+    "Better resolution than any trail cam gets.",
+    "Feed me enough pets and I unionize.",
+    "That's going straight in my memoir.",
+    "Rarer than an actual sighting, honestly.",
+    "I don't do this for everyone. Okay, maybe.",
+    "I bruise like a legend, not a mascot.",
+    "This is the part they cut from the footage.",
+    "You'll tell people. Nobody will believe you.",
+    "Petting confirmed. No takebacks.",
+    "Witnesses say less than you're about to.",
 };
 
 // A yawn/nap moment for when nothing's happened in a long while — a
@@ -223,13 +235,16 @@ static uint32_t      moodUntil       = 0;
 // A little wander away from center and back — see tick()'s idle-quip
 // scheduler and the bodyCx computation further down. s_walkStart
 // anchors a 0..1 progress ratio through WALK_DURATION_MS; the actual
-// offset is a full sine cycle over that (0 at both ends, out to one
-// full screen edge, back through center, out to the other edge, back
-// to 0) so he always ends up back at center exactly as the mood
-// naturally expires, with no separate "walk back" step needed. Longer
-// than the old short wander since he's covering real edge-to-edge
-// distance now, not a token few dozen pixels.
-static const uint32_t WALK_DURATION_MS = 9000;
+// offset is WALK_CYCLES full sine cycles over that (0 at both ends,
+// out to one full screen edge, back through center, out to the other
+// edge, back to 0, repeated) so he always ends up back at center
+// exactly as the mood naturally expires, with no separate "walk back"
+// step needed. WALK_DURATION_MS is a single cycle's length times the
+// repeat count, not an independently-chosen total, so the per-cycle
+// pace stays the same regardless of how many times he crosses.
+static const uint32_t WALK_CYCLE_MS   = 9000;
+static const uint8_t  WALK_CYCLES     = 5;
+static const uint32_t WALK_DURATION_MS = WALK_CYCLE_MS * WALK_CYCLES;
 static uint32_t       s_walkStart = 0;
 static int8_t         s_walkDir   = 1;
 static const char*   bubbleText      = nullptr;
@@ -274,6 +289,8 @@ static uint32_t s_bestSessionCount = 0;  // most detections seen in one boot
 static uint8_t  s_firstType        = (uint8_t)DetectionType::UNKNOWN;
 static uint8_t  s_shadeIdx         = 0;
 static uint8_t  s_nickIdx          = 0;
+static uint8_t  s_outfitIdx        = 0;
+static bool     s_allOutfitsUnlocked = false;  // hidden button-sequence easter egg
 
 // Runtime-only — reset every boot, not persisted.
 static uint32_t s_cachedLifetimeTotal = 0;  // from the last DETECTION trigger (or BOOTED)
@@ -332,7 +349,7 @@ static void say(const char* line, uint32_t ms) {
 }
 
 // Every bubble stays up at least this long, no matter which line fires.
-static const uint32_t MIN_BUBBLE_MS = 4000;
+static const uint32_t MIN_BUBBLE_MS = 5000;
 
 // Curated, cycle-through options rather than free-text entry — there's
 // no keyboard UI on this device worth building just for a nickname.
@@ -352,6 +369,56 @@ static uint8_t unlockedShadeCount() {
     if (s_petCount >= 25) return 3;
     if (s_petCount >= 10) return 2;
     return 1;
+}
+
+// Outfits (see squachy.h). NONE/TANOOKI/UNICORN are free (threshold 0);
+// the rest unlock by lifetime detection count, same stat as
+// GrowthStage below, listed in ascending threshold order so "how many
+// are unlocked" is just "how many from the front of this list
+// qualify" — see unlockedOutfitCountInternal(). 25/100 deliberately
+// line up with the TRACKER/VETERAN growth-stage milestones.
+enum class OutfitId : uint8_t {
+    NONE, TANOOKI, UNICORN,
+    TINFOIL, SHADOW, PLUMBER, TALLBRO, SPACE, BLUEBLUR,
+    CAPTAIN,
+    COUNT
+};
+
+struct OutfitDef { const char* name; uint32_t threshold; };
+static const OutfitDef OUTFITS[] = {
+    { "NONE",           0 },
+    { "TANOOKI SQUACH", 0 },
+    { "UNICORN",        0 },
+    { "TINFOIL SQUACH", 5 },
+    { "SHADOW SQUACH",  15 },
+    { "PLUMBER BRO",    25 },
+    { "TALL BRO",       40 },
+    { "SPACE SQUACH",   60 },
+    { "BLUE BLUR",      100 },
+    { "CAPTAIN SQUACH", 150 },
+};
+static const uint8_t OUTFITS_N = sizeof(OUTFITS) / sizeof(OUTFITS[0]);
+static_assert(OUTFITS_N == (uint8_t)OutfitId::COUNT, "OUTFITS must match OutfitId");
+
+static uint8_t unlockedOutfitCountInternal() {
+    if (s_allOutfitsUnlocked) return OUTFITS_N;
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < OUTFITS_N; i++) {
+        if (s_cachedLifetimeTotal < OUTFITS[i].threshold) break;  // ascending -- first miss ends it
+        n++;
+    }
+    return n;
+}
+
+// Clamps s_outfitIdx back to NONE if it's pointing past what's
+// currently unlocked -- the only way that happens is RESET STATS
+// zeroing lifetimeTotal out from under a costume that needed it.
+// Assumes prefs are already loaded, same as the rest of drawBody()'s
+// direct s_shadeIdx/etc. reads -- safe because trigger(BOOTED) loads
+// them at boot, before any tick() ever runs.
+static OutfitId currentOutfit() {
+    if (s_outfitIdx >= unlockedOutfitCountInternal()) s_outfitIdx = 0;
+    return (OutfitId)s_outfitIdx;
 }
 
 // Permanent fur re-tint milestones, gated off the same lifetime total
@@ -439,6 +506,8 @@ static void ensurePrefsLoaded() {
     s_firstType       = s_petPrefs.getUChar("firstType", (uint8_t)DetectionType::UNKNOWN);
     s_shadeIdx        = s_petPrefs.getUChar("shadeIdx", 0);
     s_nickIdx         = s_petPrefs.getUChar("nick", 0);
+    s_outfitIdx       = s_petPrefs.getUChar("outfitIdx", 0);
+    s_allOutfitsUnlocked = s_petPrefs.getBool("allOutfits", false);
     s_petPrefsLoaded  = true;
 }
 
@@ -569,7 +638,7 @@ void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal, uint32_t hitCo
                          "Pet #%lu! We're basically friends now.", (unsigned long)hit);
                 say(s_milestoneBuf, 5500);
             } else {
-                say(pick(PET_LINES, 8), MIN_BUBBLE_MS);
+                say(pick(PET_LINES, 20), MIN_BUBBLE_MS);
             }
             break;
         }
@@ -792,6 +861,204 @@ void cycleShadesColor() {
     s_petPrefs.putUChar("shadeIdx", s_shadeIdx);
 }
 
+const char* outfitName() {
+    ensurePrefsLoaded();
+    return OUTFITS[(uint8_t)currentOutfit()].name;
+}
+
+void cycleOutfit() {
+    ensurePrefsLoaded();
+    uint8_t unlocked = unlockedOutfitCountInternal();
+    s_outfitIdx = (s_outfitIdx + 1) % unlocked;
+    s_petPrefs.putUChar("outfitIdx", s_outfitIdx);
+}
+
+void cyclePrevOutfit() {
+    ensurePrefsLoaded();
+    uint8_t unlocked = unlockedOutfitCountInternal();
+    s_outfitIdx = (uint8_t)((s_outfitIdx + unlocked - 1) % unlocked);
+    s_petPrefs.putUChar("outfitIdx", s_outfitIdx);
+}
+
+uint8_t unlockedOutfitCount() {
+    ensurePrefsLoaded();
+    return unlockedOutfitCountInternal();
+}
+
+uint8_t outfitCount() {
+    return OUTFITS_N;
+}
+
+void unlockAllOutfits() {
+    ensurePrefsLoaded();
+    s_allOutfitsUnlocked = true;
+    s_petPrefs.putBool("allOutfits", true);
+
+    // A visible tell that the hidden sequence actually landed, reusing
+    // the same rainbow-wash-and-confetti flourish the rare idle party
+    // moment uses (see tick()) rather than a silent state flip. Exact
+    // confetti seed positions don't need real screen geometry here --
+    // drawPartyFx()'s own fall-and-wrap logic self-corrects them onto
+    // whatever topY/availHeight the very next real tick() call passes.
+    uint32_t now = millis();
+    mood      = Mood::BOUNCE;
+    moodUntil = now + 2500;
+    say("EVERY OUTFIT UNLOCKED. GO WILD.", 5000);
+    s_legendary      = true;
+    s_legendaryUntil = now + 6000;
+    for (uint8_t i = 0; i < CONFETTI_N; i++) {
+        s_cfx[i]   = (float)random(0, 240);
+        s_cfy[i]   = (float)random(-60, 0);
+        s_cfvy[i]  = 1.0f + (float)random(0, 20) / 10.0f;
+        s_cfcol[i] = (uint8_t)random(0, 6);
+    }
+}
+
+// Costume overlays (see squachy.h's Outfits section), drawn last from
+// drawBody() so hats/masks/accessories sit visibly on top of
+// everything already painted -- purely additive, nothing here erases
+// or replaces the base body, so an outfit never has to duplicate his
+// shape logic. Same cx2/hy/S() coordinate system as drawBody() (hy
+// already bobs with the current frame). Named after their homage, not
+// direct recreations -- see the IP note in the design discussion this
+// shipped from: same silhouette/gag, original details, so this stays
+// safe to ship in a public repo.
+static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float scale, OutfitId outfit) {
+    if (outfit == OutfitId::NONE) return;
+    auto S = [scale](int v) { return (int)(v * scale); };
+    (void)m;
+    using namespace Theme;
+
+    switch (outfit) {
+        case OutfitId::TANOOKI: {
+            // No snout/nose shape at all -- it kept reading badly no
+            // matter how it was drawn. Just the mask, framing the
+            // shades from above and below each lens rather than
+            // covering them so his eyes stay visible, plus the tail.
+            uint16_t maskCol = blend(BLACK, FUR_DARK, 130);
+            t.fillRoundRect(cx2 - S(13), hy + S(4),  S(9), S(3), 1, maskCol);
+            t.fillRoundRect(cx2 + S(4),  hy + S(4),  S(9), S(3), 1, maskCol);
+            t.fillRoundRect(cx2 - S(13), hy + S(13), S(9), S(3), 1, maskCol);
+            t.fillRoundRect(cx2 + S(4),  hy + S(13), S(9), S(3), 1, maskCol);
+            // Ringed tail, off to the side so it never overlaps the body
+            uint16_t ringDark = blend(FUR_DARK, BLACK, 80);
+            t.fillCircle(cx2 + S(18), hy + S(44), S(5), FUR_LIGHT);
+            t.fillCircle(cx2 + S(22), hy + S(40), S(5), ringDark);
+            t.fillCircle(cx2 + S(25), hy + S(35), S(4), FUR_LIGHT);
+            t.fillCircle(cx2 + S(27), hy + S(30), S(4), ringDark);
+            break;
+        }
+        case OutfitId::UNICORN: {
+            // Base sits right at the crest peak (see drawBody's
+            // sagittal-crest triangle a few lines below this switch,
+            // tip at hy - S(14)) so the horn reads as growing out of
+            // his hair instead of floating above it. Pastel fur is
+            // handled separately, up in drawBody()'s furMain/furLight
+            // block.
+            int baseY = hy - S(14);
+            int tipY  = baseY - S(24);
+            int baseW = S(9);
+            t.fillTriangle(cx2 - baseW / 2, baseY, cx2 + baseW / 2, baseY, cx2, tipY, WHITE);
+            // Candy-cane twist: diagonal rainbow stripes crossing the
+            // cone (rather than flat horizontal bands) so it reads as
+            // a spiral, narrowing to match the cone's taper as they
+            // climb toward the tip.
+            static const uint16_t bands[6] = { RED, AMBER, VAPOR_YELLOW, GREEN, VAPOR_BLUE, VAPOR_PURPLE };
+            for (int i = 0; i < 6; i++) {
+                float frac = (float)i / 6.0f;
+                int y0 = baseY + (int)((tipY - baseY) * frac);
+                int w0 = (int)(baseW * (1.0f - frac));
+                t.drawWideLine(cx2 - w0 / 2 - S(1), y0, cx2 + w0 / 2 + S(1), y0 - S(3), S(2), bands[i]);
+            }
+            break;
+        }
+        case OutfitId::TINFOIL: {
+            uint16_t foil   = blend(WHITE, BLACK, 90);
+            uint16_t foilHi = blend(WHITE, BLACK, 40);
+            t.fillTriangle(cx2 - S(14), hy + S(2), cx2 + S(14), hy + S(2), cx2, hy - S(16), foil);
+            t.fillRoundRect(cx2 - S(15), hy, S(30), S(4), 2, foil);
+            t.drawLine(cx2 - S(6), hy - S(2), cx2 - S(2), hy - S(9), foilHi);
+            t.drawLine(cx2 + S(2), hy - S(3), cx2 + S(6), hy - S(10), foilHi);
+            break;
+        }
+        case OutfitId::SHADOW: {
+            t.fillRect(cx2 - S(15), hy + S(1), S(30), S(4), BLACK);
+            t.fillRect(cx2 + S(13), hy + S(2), S(2), S(3), RED);
+            t.drawLine(cx2 + S(15), hy + S(4), cx2 + S(22), hy + S(10), BLACK);
+            t.drawLine(cx2 + S(17), hy + S(4), cx2 + S(24), hy + S(9),  BLACK);
+            // Lower-face mask, kept below the shade line so his eyes
+            // stay visible -- covers mouth/jaw, not the lenses.
+            t.fillRoundRect(cx2 - S(11), hy + S(14), S(22), S(10), S(4), BLACK);
+            // Red belt across the torso -- his fur is recolored
+            // near-black for this outfit up in drawBody()'s
+            // furMain/furLight block, so the belt is the one splash of
+            // color against it.
+            t.fillRect(cx2 - S(15), hy + S(32), S(30), S(4), RED);
+            break;
+        }
+        case OutfitId::PLUMBER: {
+            uint16_t cap = RED;
+            t.fillRoundRect(cx2 - S(15), hy - S(4), S(30), S(9), S(4), cap);
+            t.fillRoundRect(cx2 - S(4),  hy - S(2), S(16), S(6), S(3), cap);
+            t.fillCircle(cx2 - S(2), hy - S(1), S(3), WHITE);
+            t.fillRoundRect(cx2 - S(9), hy + S(14), S(18), S(4), S(2), blend(BLACK, FUR_DARK, 80));
+            // Full bib front, not just two thin straps -- a much
+            // stronger "overalls" silhouette.
+            t.fillRoundRect(cx2 - S(9), hy + S(28), S(18), S(9), S(2), VAPOR_BLUE);
+            t.fillRect(cx2 - S(10), hy + S(23), S(3), S(14), VAPOR_BLUE);
+            t.fillRect(cx2 + S(7),  hy + S(23), S(3), S(14), VAPOR_BLUE);
+            t.fillCircle(cx2 - S(9), hy + S(25), S(1), AMBER);
+            t.fillCircle(cx2 + S(9), hy + S(25), S(1), AMBER);
+            break;
+        }
+        case OutfitId::TALLBRO: {
+            uint16_t cap = GREEN;
+            t.fillRoundRect(cx2 - S(15), hy - S(6), S(30), S(11), S(4), cap);
+            t.fillRoundRect(cx2 - S(4),  hy - S(3), S(16), S(6), S(3), cap);
+            t.fillCircle(cx2 - S(2), hy - S(1), S(3), WHITE);
+            t.fillRoundRect(cx2 - S(10), hy + S(13), S(20), S(5), S(2), blend(BLACK, FUR_DARK, 80));
+            t.fillRoundRect(cx2 - S(9), hy + S(28), S(18), S(9), S(2), GREEN);
+            t.fillRect(cx2 - S(10), hy + S(23), S(3), S(14), GREEN);
+            t.fillRect(cx2 + S(7),  hy + S(23), S(3), S(14), GREEN);
+            t.fillCircle(cx2 - S(9), hy + S(25), S(1), AMBER);
+            t.fillCircle(cx2 + S(9), hy + S(25), S(1), AMBER);
+            break;
+        }
+        case OutfitId::SPACE: {
+            t.drawCircle(cx2, hy + S(10), S(19), WHITE);
+            t.drawCircle(cx2, hy + S(10), S(18), blend(BG, VAPOR_BLUE, 60));
+            t.drawLine(cx2 - S(10), hy - S(4), cx2 - S(4), hy - S(9), WHITE);
+            t.fillRoundRect(cx2 - S(16), hy + S(23), S(32), S(4), S(2), WHITE);
+            break;
+        }
+        case OutfitId::BLUEBLUR: {
+            uint16_t blue = VAPOR_BLUE;
+            t.fillTriangle(cx2 - S(4), hy - S(2), cx2 - S(16), hy - S(6), cx2 - S(6), hy + S(6), blue);
+            t.fillTriangle(cx2 + S(2), hy - S(4), cx2 + S(4),  hy - S(18), cx2 + S(10), hy - S(4), blue);
+            t.fillTriangle(cx2 + S(6), hy - S(2), cx2 + S(20), hy - S(4),  cx2 + S(10), hy + S(6), blue);
+            // White gloves -- a core, consistent trait across every
+            // era of the design this homages, and the one thing this
+            // outfit was missing that actually sells the reference.
+            t.fillCircle(cx2 - S(14), hy + S(42), S(4), WHITE);
+            t.fillCircle(cx2 + S(14), hy + S(42), S(4), WHITE);
+            t.fillEllipse(cx2 - S(6), hy + S(50), S(6), S(3), RED);
+            t.fillEllipse(cx2 + S(6), hy + S(50), S(6), S(3), RED);
+            break;
+        }
+        case OutfitId::CAPTAIN: {
+            t.fillTriangle(cx2 - S(17), hy - S(2), cx2, hy - S(16), cx2 - S(2), hy - S(2), BLACK);
+            t.fillTriangle(cx2 + S(2),  hy - S(2), cx2, hy - S(16), cx2 + S(17), hy - S(2), BLACK);
+            t.fillRect(cx2 - S(16), hy - S(4), S(32), S(4), BLACK);
+            t.fillCircle(cx2, hy - S(4), S(2), AMBER);
+            // Eye patch strap only, not a filled patch, so the shades
+            // underneath stay visible.
+            t.drawWideLine(cx2 - S(11), hy + S(5), cx2 + S(14), hy + S(3), S(2), BLACK);
+            break;
+        }
+        default: break;
+    }
+}
+
 // Squachy's base design is ~68px tall (crest to shadow) at scale 1.0.
 static const int BASE_HEIGHT = 68;
 
@@ -824,6 +1091,30 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
             furLight = blend(FUR_LIGHT, VAPOR_YELLOW, 110);
             break;
         default: break;
+    }
+    // Some outfits recolor the fur itself rather than just adding an
+    // accessory on top -- has to happen here, before he's actually
+    // drawn, not as a post-hoc overlay in drawOutfit() (there's no
+    // cheap way to "repaint" an already-drawn silhouette a different
+    // color without redrawing every shape that used the old one).
+    OutfitId outfitNow = currentOutfit();
+    if (outfitNow == OutfitId::UNICORN) {
+        // Baby-blue/baby-pink two-tone -- furMain (body fill) and
+        // furLight (highlights/outlines) already alternate across
+        // every shape he's made of, so giving them distinct pastels
+        // reads as a fade across his whole body without needing a
+        // real per-pixel gradient.
+        furMain  = blend(WHITE, VAPOR_BLUE, 130);
+        furLight = blend(WHITE, VAPOR_PINK, 110);
+    } else if (outfitNow == OutfitId::BLUEBLUR) {
+        furMain  = blend(VAPOR_BLUE, BLACK, 20);
+        furLight = blend(VAPOR_BLUE, WHITE, 70);
+    } else if (outfitNow == OutfitId::SHADOW) {
+        // Mostly black -- furLight stays a touch lighter than pure
+        // black purely so edges/highlights (ears, arm outlines) don't
+        // vanish into a single flat silhouette.
+        furMain  = blend(BLACK, WHITE, 12);
+        furLight = blend(BLACK, WHITE, 32);
     }
     if (s_legendary && now < s_legendaryUntil) {
         float ph = (float)(now % 900) / 900.0f;
@@ -1001,6 +1292,8 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
             t.fillRect(cx2 - S(6), hy + S(19), S(12), S(3), PINK);
         }
     }
+
+    drawOutfit(t, cx2, hy, now, m, scale, outfitNow);
 }
 
 void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const char* line) {
@@ -1220,12 +1513,13 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now, bool adv
         int halfW = (int)(24 * scale);
         float maxRange = (float)(t.width() / 2 - halfW - 4);
         if (maxRange < 0) maxRange = 0;
-        // Full sine cycle instead of a half-cycle hump: 0 at the start,
+        // WALK_CYCLES full sine cycles instead of one: 0 at the start,
         // out to one full edge, back through center, out to the other
-        // full edge, then back to 0 -- an actual edge-to-edge patrol
-        // that still starts and ends exactly at center, so there's no
-        // teleport when WALK expires back to idle.
-        bodyCx = cx + (int)(sinf(walkT * 6.2831853f) * maxRange * s_walkDir);
+        // full edge, then back to 0 -- repeated WALK_CYCLES times -- an
+        // actual edge-to-edge patrol that still starts and ends exactly
+        // at center, so there's no teleport when WALK expires back to
+        // idle.
+        bodyCx = cx + (int)(sinf(walkT * 6.2831853f * WALK_CYCLES) * maxRange * s_walkDir);
     }
 
     // Idle bob runs noticeably quicker than a resting breathing rate —

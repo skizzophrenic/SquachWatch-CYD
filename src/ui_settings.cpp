@@ -15,14 +15,14 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::THEME, SettingsRow::BACKGROUND, SettingsRow::BRIGHTNESS,
     SettingsRow::INVERT, SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE,
     SettingsRow::CALIBRATE, SettingsRow::REPLAY_INTRO, SettingsRow::NICKNAME,
-    SettingsRow::SHADES_COLOR, SettingsRow::VIEW_DIARY, SettingsRow::RESET_STATS,
-    SettingsRow::BACK,
+    SettingsRow::SHADES_COLOR, SettingsRow::OUTFIT, SettingsRow::VIEW_DIARY,
+    SettingsRow::RESET_STATS, SettingsRow::BACK,
 };
 static const uint8_t ALL_ROWS_N = sizeof(ALL_ROWS) / sizeof(ALL_ROWS[0]);
 
 static bool isSquachyOnlyRow(SettingsRow r) {
     return r == SettingsRow::REPLAY_INTRO || r == SettingsRow::NICKNAME ||
-           r == SettingsRow::SHADES_COLOR;
+           r == SettingsRow::SHADES_COLOR || r == SettingsRow::OUTFIT;
 }
 
 // Builds the actual visible list for the current mode into out[] (must
@@ -108,6 +108,12 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             break;
         case SettingsRow::SHADES_COLOR:
             label = "SHADES COLOR"; value = Squachy::shadesColorName();
+            break;
+        case SettingsRow::OUTFIT:
+            label = "OUTFIT";
+            snprintf(valBuf, valBufN, "%s (%u/%u)", Squachy::outfitName(),
+                     (unsigned)Squachy::unlockedOutfitCount(), (unsigned)Squachy::outfitCount());
+            value = valBuf;
             break;
         case SettingsRow::VIEW_DIARY:
             label = "SQUACHY'S DIARY";

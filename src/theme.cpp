@@ -90,11 +90,13 @@ uint16_t titlebarColor(int x, int w) {
 }
 
 // Rotate button drawn in the top-right corner of the title bar: a
-// vertical divider flanked by two triangles pointing away from each
-// other (a "flip" glyph), in the same cyan/magenta pair as the fade.
-// The tap target (ROTATE_HIT_*) is bigger than the visual icon and
-// extends below the title bar into the content area — a finger needs
-// a much bigger target than a stylus would.
+// circular arrow (a ~300 degree ring, cyan into magenta, with an
+// arrowhead at the open end) instead of the previous "flip" glyph
+// (vertical divider + two triangles) — reads as an actual rotate/
+// refresh icon at a glance instead of an abstract shape. The tap
+// target (ROTATE_HIT_*) is bigger than the visual icon and extends
+// below the title bar into the content area — a finger needs a much
+// bigger target than a stylus would.
 static const int ROTATE_ICON_W = 22;
 static const int ROTATE_HIT_W  = 44;
 static const int ROTATE_HIT_H  = 40;
@@ -104,9 +106,19 @@ static void drawRotateIcon(TFT_eSPI& t, int w, int barH) {
     t.fillRect(x0, 0, ROTATE_ICON_W, barH, BG);
     int cx = x0 + ROTATE_ICON_W / 2;
     int cy = barH / 2;
-    t.drawFastVLine(cx, 2, barH - 4, WHITE);
-    t.fillTriangle(cx - 4, cy, cx - 9, cy - 3, cx - 9, cy + 3, VAPOR_PINK);
-    t.fillTriangle(cx + 4, cy, cx + 9, cy - 3, cx + 9, cy + 3, CYAN);
+    int r  = 5;
+    // Ring sweeps clockwise from 30 to 330 degrees (drawArc's 0 is 12
+    // o'clock), leaving a 60 degree gap centered at the top for the
+    // arrowhead to sit in.
+    t.drawArc(cx, cy, r, r - 2, 30, 180, CYAN, BG, true);
+    t.drawArc(cx, cy, r, r - 2, 180, 330, VAPOR_PINK, BG, true);
+    // Arrowhead at the ring's clockwise end (330 degrees), pointing
+    // further clockwise (i.e. back up towards the gap) to read as
+    // motion, not just a stray triangle.
+    t.fillTriangle(cx + 1, cy - r,
+                    cx - 4, cy - 3,
+                    cx - 2, cy - 1,
+                    VAPOR_PINK);
 }
 
 bool rotateButtonHit(int x, int y, int w) {
@@ -141,8 +153,10 @@ void drawTitleBar(TFT_eSPI& t, const char* title) {
     t.drawFastHLine(0, 14, w, PURPLE);
     t.setTextSize(1);
     // Transparent background so the fade shows through between glyphs
-    // instead of a mismatched solid-color block behind the text.
-    t.setTextColor(WHITE);
+    // instead of a mismatched solid-color block behind the text. Black
+    // ink reads more like a print/stamp against the bright cyan/
+    // magenta gradient than white did.
+    t.setTextColor(BLACK);
     int tw = t.textWidth(title);
     t.setCursor((w - tw) / 2, 4);
     t.print(title);
@@ -876,7 +890,7 @@ void drawLavaLamp(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
 // gets its own shape, gait, and where it fits, its own behavior,
 // rather than one generic biped recolored N ways.
 void drawCryptidCam(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
-    // 0 = Bigfoot/Sasquatch, 1 = Mothman, 2 = Dogman, 3 = Chupacabra,
+    // 0 = Bigfoot/Sasquach, 1 = Mothman, 2 = Dogman, 3 = Chupacabra,
     // 4 = "Long Horse"-style long-legs cryptid, 5 = Slenderman,
     // 6 = anomalous statue entity (the "moves only when unobserved"
     // trope popularized by SCP Foundation creepypasta).
@@ -1075,7 +1089,7 @@ void drawCryptidCam(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
                 break;
             }
             default: {
-                // Bigfoot/Sasquatch: tall biped, scissoring legs/arms,
+                // Bigfoot/Sasquach: tall biped, scissoring legs/arms,
                 // white-green glowing eyes.
                 int headY = groundY - hgt, shoulderY = groundY - (hgt * 3) / 4, hipY = groundY - hgt / 5;
                 float legPhase = (float)now / 140.0f * wk.speed + wk.phase;
@@ -1108,131 +1122,6 @@ void drawCryptidCam(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     t.setTextColor(NV_BRIGHT, NV_BG);
     t.setCursor(cut + 4, yStart + 3);
     t.print(((now / 500) % 2 == 0) ? "REC ." : "REC  ");
-}
-
-void drawRadarSweep(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
-    static const uint8_t N = 6;
-    static float blipAngle[N], blipDist[N];
-    static bool  inited = false;
-
-    int w = t.width();
-    int bandH = yEnd - yStart;
-    if (bandH < 30) return;
-    int cx = w / 2, cy = yStart + bandH / 2;
-    // Elliptical, not circular — rx/ry stretch independently to reach
-    // every edge of the band regardless of aspect ratio, instead of an
-    // inscribed circle that leaves empty margins on the wider axis.
-    int rx = w / 2 - 2, ry = bandH / 2 - 2;
-    if (rx < 10 || ry < 10) return;
-
-    if (!inited) {
-        for (uint8_t i = 0; i < N; i++) {
-            blipAngle[i] = (float)random(0, 6283) / 1000.0f;
-            blipDist[i]  = (float)random(20, 100) / 100.0f;
-        }
-        inited = true;
-    }
-
-    t.fillRect(0, yStart, w, bandH, BG);
-    for (int k = 4; k >= 1; k--) t.drawEllipse(cx, cy, rx * k / 4, ry * k / 4, VAPOR_PURPLE);
-    t.drawFastHLine(cx - rx, cy, rx * 2, VAPOR_PURPLE);
-    t.drawFastVLine(cx, cy - ry, ry * 2, VAPOR_PURPLE);
-
-    float sweep = (float)(now % 4000) / 4000.0f * 6.2831853f;
-
-    // Fading trail wedge behind the bright sweep line.
-    for (int k = 10; k >= 1; k--) {
-        float a = sweep - k * 0.05f;
-        int tx = cx + (int)(cosf(a) * rx), ty = cy + (int)(sinf(a) * ry);
-        uint16_t col = blend(BG, CYAN, (uint16_t)(220 * (1.0f - (float)k / 10.0f)));
-        t.drawLine(cx, cy, tx, ty, col);
-    }
-    int sx = cx + (int)(cosf(sweep) * rx), sy = cy + (int)(sinf(sweep) * ry);
-    t.drawLine(cx, cy, sx, sy, CYAN);
-
-    // Blips flash bright green as the sweep passes over their angle.
-    for (uint8_t i = 0; i < N; i++) {
-        float bx = cx + cosf(blipAngle[i]) * blipDist[i] * rx;
-        float by = cy + sinf(blipAngle[i]) * blipDist[i] * ry;
-        float diff = fabsf(fmodf(sweep - blipAngle[i] + 3.14159f, 6.2831853f) - 3.14159f);
-        uint16_t col = (diff < 0.3f) ? GREEN : blend(BG, GREEN, 80);
-        t.fillCircle((int)bx, (int)by, 2, col);
-    }
-
-    // Rare unidentified contact: closes in fast from the edge of the
-    // scope to the center, flashing red, with a warning label — a much
-    // more alarming beat than the calm stationary green blips.
-    static bool     uncActive = false;
-    static uint32_t uncNextAt = 0;
-    static float    uncAngle, uncDist;
-    static bool     uncInited = false;
-    if (!uncInited) { uncNextAt = now + (uint32_t)random(9000, 20000); uncInited = true; }
-    if (!uncActive && now >= uncNextAt) {
-        uncActive = true;
-        uncAngle  = (float)random(0, 6283) / 1000.0f;
-        uncDist   = 1.05f;
-    }
-    if (uncActive) {
-        uncDist -= 0.012f;
-        float ux = cx + cosf(uncAngle) * uncDist * rx;
-        float uy = cy + sinf(uncAngle) * uncDist * ry;
-        bool blink = ((now / 150) % 2) == 0;
-        uint16_t uc = blink ? RED : blend(BG, RED, 140);
-        t.fillCircle((int)ux, (int)uy, 3, uc);
-        t.drawCircle((int)ux, (int)uy, 5, uc);
-        if (blink) {
-            t.setTextSize(1);
-            t.setTextColor(RED, BG);
-            const char* warn = "UNKNOWN CONTACT";
-            t.setCursor(cx - t.textWidth(warn) / 2, yStart + 2);
-            t.print(warn);
-        }
-        if (uncDist <= 0.05f) {
-            uncActive = false;
-            uncNextAt = now + (uint32_t)random(12000, 26000);
-        }
-    }
-}
-
-void drawRainGlass(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
-    static const uint8_t N = 30;
-    static float    rx[N], ry[N], rspeed[N], rlen[N];
-    static bool     inited = false;
-    static uint32_t nextFlash = 0;
-
-    int w = t.width();
-    int bandH = yEnd - yStart;
-    if (bandH < 20) return;
-
-    if (!inited) {
-        for (uint8_t i = 0; i < N; i++) {
-            rx[i]     = (float)random(0, w);
-            ry[i]     = (float)random(yStart, yEnd);
-            rspeed[i] = 2.0f + (float)random(0, 100) / 100.0f * 3.0f;
-            rlen[i]   = (float)(6 + random(0, 10));
-        }
-        inited = true;
-        nextFlash = now + random(3000, 9000);
-    }
-
-    bool flash = false;
-    if (now > nextFlash) {
-        if (now - nextFlash < 90) flash = true;
-        else nextFlash = now + random(4000, 12000);
-    }
-    t.fillRect(0, yStart, w, bandH, flash ? blend(BG, WHITE, 90) : BG);
-
-    for (uint8_t i = 0; i < N; i++) {
-        ry[i] += rspeed[i];
-        rx[i] -= rspeed[i] * 0.3f;
-        if (ry[i] > yEnd || rx[i] < 0) {
-            ry[i] = (float)yStart - rlen[i];
-            rx[i] = (float)random(0, w);
-        }
-        int x0 = (int)rx[i], y0 = (int)ry[i];
-        int x1 = x0 + (int)(rlen[i] * 0.3f), y1 = y0 - (int)rlen[i];
-        t.drawLine(x0, y0, x1, y1, flash ? WHITE : VAPOR_BLUE);
-    }
 }
 
 void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
@@ -1480,6 +1369,38 @@ void drawTerminalLog(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     termRender(t, cols[0], 4, yStart, visLines);
     termRender(t, cols[1], w / 2 + 4, yStart, visLines);
     t.drawFastVLine(w / 2, yStart, bandH, blend(BG, GREEN, 60));
+
+    // Rare dramatic beat: a full-width banner line flashes across both
+    // columns for under a second, breaking the indifferent scroll with
+    // an "something just happened" moment instead of an endless,
+    // personality-free log.
+    static bool     flashOn = false;
+    static uint32_t flashStart = 0, flashNextAt = 0;
+    static uint8_t  flashLine = 0;
+    static bool     flashInited = false;
+    static const char* const FLASH_LINES[] = {
+        "ACCESS GRANTED", "INTRUSION DETECTED", "CONNECTION ESTABLISHED",
+        "ROOT SHELL OPEN", "TRACE COMPLETE",
+    };
+    if (!flashInited) { flashNextAt = now + (uint32_t)random(6000, 14000); flashInited = true; }
+    if (!flashOn && now >= flashNextAt) {
+        flashOn = true;
+        flashStart = now;
+        flashLine = (uint8_t)random(0, 5);
+    }
+    if (flashOn) {
+        if (now - flashStart < 900) {
+            uint16_t col = ((now / 120) % 2) ? GREEN : blend(BG, GREEN, 150);
+            t.fillRect(0, yStart + bandH / 2 - 6, w, 12, BG);
+            t.setTextColor(col, BG);
+            int mw = t.textWidth(FLASH_LINES[flashLine]);
+            t.setCursor((w - mw) / 2, yStart + bandH / 2 - 4);
+            t.print(FLASH_LINES[flashLine]);
+        } else {
+            flashOn = false;
+            flashNextAt = now + (uint32_t)random(9000, 20000);
+        }
+    }
 }
 
 void drawFireflies(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
@@ -1555,100 +1476,6 @@ void drawFireflies(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             t.drawLine(px - 3, py, px + 3, py, WHITE);
             t.drawLine(px, py - 3, px, py + 3, WHITE);
             t.drawCircle(px, py, 2, col);
-        }
-    }
-}
-
-void drawAurora(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
-    int w = t.width();
-    int bandH = yEnd - yStart;
-    if (bandH < 20) return;
-    t.fillRect(0, yStart, w, bandH, BG);
-
-    // A star or two twinkling through the curtains.
-    static const uint8_t NS = 8;
-    static uint16_t starX[NS]; static uint8_t starY[NS], starPh[NS];
-    static bool starsInited = false;
-    if (!starsInited) {
-        for (uint8_t i = 0; i < NS; i++) {
-            starX[i]  = (uint16_t)random(0, w);
-            starY[i]  = (uint8_t)random(0, bandH / 3);
-            starPh[i] = (uint8_t)random(0, 255);
-        }
-        starsInited = true;
-    }
-    for (uint8_t i = 0; i < NS; i++) {
-        uint32_t tw = (now / 10 + (uint32_t)starPh[i] * 30) % 400;
-        if (tw > 260) continue;
-        uint8_t bri = (tw < 120) ? 220 : (uint8_t)(220 - (tw - 120) * 2);
-        t.drawPixel(starX[i], yStart + starY[i], t.color565(bri, bri, bri));
-    }
-
-    // Five curtains "hanging" from the top of the band, each its own
-    // depth/speed/color layer (rendered back-to-front, deepest/dimmest
-    // first) so they read as independent sheets of light drifting past
-    // each other rather than one shape repeating. Every column fades
-    // from near-invisible at the top through a soft peak partway down
-    // to BG again at the bottom — a translucent veil rather than a
-    // solid-edged band, which is what actually reads as "aurora" and
-    // not "colored bar chart."
-    static const uint8_t LAYERS = 5;
-    static const uint16_t colA[LAYERS]   = { GREEN,   VAPOR_PURPLE, CYAN,        PINK,         VAPOR_BLUE };
-    static const uint16_t colB[LAYERS]   = { CYAN,    VAPOR_PINK,   VAPOR_BLUE,  VAPOR_PURPLE, GREEN };
-    static const float    speedMul[LAYERS] = { 1.0f, 1.7f, 0.55f, 2.1f, 0.8f };
-    static const float    depthFrac[LAYERS] = { 0.55f, 0.75f, 0.45f, 0.9f, 0.65f };
-    static const uint8_t  maxAlpha[LAYERS]  = { 170, 120, 150, 100, 135 };
-
-    for (uint8_t L = 0; L < LAYERS; L++) {
-        float speed  = 0.00028f * speedMul[L];
-        float freq   = 0.012f + L * 0.004f;
-        float amp    = bandH * 0.12f;
-        int   h      = (int)(bandH * depthFrac[L]);
-        static const uint8_t STEPS = 10;
-        int   stepH  = h / STEPS; if (stepH < 1) stepH = 1;
-        for (int x = 0; x < w; x += 2) {
-            float wobble = sinf(x * freq + now * speed + L * 1.7f) * amp;
-            int topY = yStart + (int)wobble - (int)(bandH * 0.08f);
-            if (topY < yStart) topY = yStart;
-            float hueMix = (sinf(x * 0.015f + now * 0.00018f + L) + 1.0f) * 0.5f;
-            uint16_t layerCol = blend(colA[L], colB[L], (uint16_t)(hueMix * 256));
-            for (uint8_t s = 0; s < STEPS; s++) {
-                int py = topY + s * stepH;
-                if (py < yStart || py >= yEnd) continue;
-                float frac = (float)s / STEPS;
-                // Bell-shaped ramp: dim at the top, peak a bit past the
-                // middle, fading out again toward the bottom.
-                float bell = sinf(frac * 3.14159f);
-                bell = bell * bell;
-                uint16_t col = blend(BG, layerCol, (uint16_t)(maxAlpha[L] * bell));
-                t.drawFastVLine(x, py, stepH + 1, col);
-            }
-        }
-    }
-
-    // Rare shooting star, streaking through the curtains on top of
-    // everything else.
-    static bool     shootActive = false;
-    static uint32_t shootNextAt = 0;
-    static float    shootX, shootY;
-    static bool     shootInited = false;
-    if (!shootInited) { shootNextAt = now + (uint32_t)random(8000, 18000); shootInited = true; }
-    if (!shootActive && now >= shootNextAt) {
-        shootActive = true;
-        shootX = (float)random(0, w / 3);
-        shootY = (float)(yStart + random(0, bandH / 3));
-    }
-    if (shootActive) {
-        for (int k = 5; k >= 1; k--) {
-            int tx = (int)(shootX - k * 2.5f), ty = (int)(shootY + k * 1.3f);
-            t.drawPixel(tx, ty, blend(BG, WHITE, (uint16_t)(190 * (1.0f - (float)k / 5.0f))));
-        }
-        t.drawPixel((int)shootX, (int)shootY, WHITE);
-        shootX += 3.0f;
-        shootY += 1.6f;
-        if (shootX > w + 10 || shootY > yEnd + 10) {
-            shootActive = false;
-            shootNextAt = now + (uint32_t)random(10000, 22000);
         }
     }
 }

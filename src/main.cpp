@@ -16,6 +16,7 @@
 #include "ui_log.h"
 #include "ui_settings.h"
 #include "ui_diary.h"
+#include "ui_outfit.h"
 #include "squachy.h"
 #include "cap_touch.h"
 #include "touch_cal.h"
@@ -65,6 +66,36 @@
 #define BL_CH_ORIG  0
 #define BL_CH_CAP   1
 
+// TFT_eSprite::createSprite() no-ops (returns the existing buffer
+// untouched) if the sprite is already created, so the only way to
+// reuse an already-allocated buffer at a new width/height is to poke
+// its own bookkeeping fields directly -- createSprite() itself does
+// nothing more than this plus the calloc. Both are protected in
+// TFT_eSPI/TFT_eSprite, reachable from a subclass. This only produces
+// a *valid* buffer when the new w*h matches what was actually
+// allocated -- true here because every rotation of a rectangular
+// panel needs the same total pixel count (320x240 and 240x320 are
+// both 76800 pixels), so one boot-time allocation covers every
+// orientation forever and rotate never needs to free/realloc again.
+class ResizableSprite : public TFT_eSprite {
+public:
+    explicit ResizableSprite(TFT_eSPI* tft) : TFT_eSprite(tft) {}
+    void resizeInPlace(int16_t w, int16_t h) {
+        if (!_created) return;
+        _iwidth = _dwidth = _bitwidth = w;
+        _iheight = _dheight = h;
+        cursor_x = 0;
+        cursor_y = 0;
+        _sx = 0;
+        _sy = 0;
+        _sw = w;
+        _sh = h;
+        rotation = 0;
+        setViewport(0, 0, _dwidth, _dheight);
+        setPivot(_iwidth / 2, _iheight / 2);
+    }
+};
+
 // ---- Globals ----
 TFT_eSPI            tft = TFT_eSPI();
 // All screens draw into this off-screen buffer, pushed to the physical
@@ -79,7 +110,7 @@ TFT_eSPI            tft = TFT_eSPI();
 // banded/partial-height rewrite of every draw call, cyd35 skips the
 // double buffer entirely and draws straight to the panel via `canvas`
 // below, accepting the erase/redraw flicker the buffer normally hides.
-TFT_eSprite         frame = TFT_eSprite(&tft);
+ResizableSprite     frame = ResizableSprite(&tft);
 // A pointer, not a reference: confirmed on real hardware that
 // re-createSprite()'ing `frame` after a rotation can fail even with
 // generous total free heap (NimBLE/WiFi churn fragments it -- see the
@@ -116,6 +147,34 @@ uint32_t            lastTouch = 0;
 DetectionType       lastAlertType = DetectionType::UNKNOWN;
 uint32_t            lastAlertHits = 1; // times this exact MAC+type has ever matched — see Squachy's "seen before" reaction
 const uint16_t      TOUCH_DEBOUNCE_MS = 200;
+
+// Hidden "unlock every Squachy outfit" gesture: CLR x9, then SCAN x1,
+// then CLR x1 (11 taps) on the button bar, tracked globally since CLR/
+// SCAN both appear on the CLEAR and LOG screens. Any tap that breaks
+// the sequence resets progress, except when the breaking tap happens
+// to be a fresh CLR -- that still counts as step 1 of a new attempt
+// instead of forcing a full restart on the very next correct tap.
+static const ButtonId EASTER_EGG_SEQUENCE[] = {
+    ButtonId::CLR, ButtonId::CLR, ButtonId::CLR, ButtonId::CLR, ButtonId::CLR,
+    ButtonId::CLR, ButtonId::CLR, ButtonId::CLR, ButtonId::CLR,
+    ButtonId::SCAN,
+    ButtonId::CLR,
+};
+static const uint8_t EASTER_EGG_LEN = sizeof(EASTER_EGG_SEQUENCE) / sizeof(EASTER_EGG_SEQUENCE[0]);
+static uint8_t       s_easterEggProgress = 0;
+
+static void trackOutfitEasterEgg(ButtonId b) {
+    if (b == ButtonId::NONE) return;
+    if (b == EASTER_EGG_SEQUENCE[s_easterEggProgress]) {
+        s_easterEggProgress++;
+        if (s_easterEggProgress >= EASTER_EGG_LEN) {
+            s_easterEggProgress = 0;
+            Squachy::unlockAllOutfits();
+        }
+    } else {
+        s_easterEggProgress = (b == EASTER_EGG_SEQUENCE[0]) ? 1 : 0;
+    }
+}
 // The ALERT screen carries real information (type, confidence, MAC,
 // RSSI) — tapping it away is the expected dismiss, but the automatic
 // fallback still needs to actually clear itself in a reasonable time
@@ -277,6 +336,12 @@ static void enterDiary() {
     state = AppState::DIARY;
     transitionStart = millis();
     uiDiaryInit(*canvas);
+}
+
+static void enterOutfit() {
+    state = AppState::OUTFIT;
+    transitionStart = millis();
+    uiOutfitInit(*canvas);
 }
 
 // ---- Arduino setup / loop ----
@@ -466,56 +531,47 @@ void loop() {
     engine.loop();
 
     // Rotate button lives in the title bar's top-right corner, shown on
-    // the CLEAR, LOG and SETTINGS screens (drawTitleBar always draws
-    // it — gating the hit-test to these three keeps it inert wherever
+    // the CLEAR, LOG, SETTINGS and OUTFIT screens (drawTitleBar always
+    // draws it — gating the hit-test to these keeps it inert wherever
     // there's no title bar drawn at all, i.e. BOOT/ALERT).
-    if (tp.valid && (state == AppState::CLEAR || state == AppState::LOG || state == AppState::SETTINGS) &&
+    if (tp.valid && (state == AppState::CLEAR || state == AppState::LOG ||
+                      state == AppState::SETTINGS || state == AppState::OUTFIT) &&
         Theme::rotateButtonHit(tp.x, tp.y, tft.width()) &&
         (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
         lastTouch = now;
         Squachy::trigger(Squachy::Event::ROTATED);
         screenRotation = (screenRotation + 1) % 4;
         tft.setRotation(screenRotation);
-        // Landscape and portrait need differently-shaped buffers —
-        // recreate at the new dimensions rather than trying to reuse
-        // the old (now wrong-shaped) one. canvas (most cyd35 screens)
-        // draws straight to tft, which already reports its new rotated
-        // width()/height() from setRotation() above and needs nothing
-        // here; frame (cyd35's CLEAR-screen half-height band buffer, or
-        // the other board's full-screen one) does.
+        // Landscape and portrait need differently-*shaped* buffers, but
+        // not differently-*sized* ones -- a rectangular panel has the
+        // same total pixel count either way (320x240 and 240x320 are
+        // both 76800 px), so the buffer allocated once at boot already
+        // fits every orientation. resizeInPlace() (see ResizableSprite
+        // above) just re-points the sprite's own width/height/stride
+        // bookkeeping at the new shape; it never frees or reallocates.
         //
-        // Confirmed on real hardware (2.8" board): this can fail even
-        // with plenty of TOTAL free heap -- e.g. 121KB free but the
-        // largest contiguous block only 73.7KB against a 76.8KB need --
-        // because WiFi/BLE buffers fragment the heap during normal
-        // operation, and it's not just transient noise: 8 retries with
-        // delays between them (giving background tasks a chance to free
-        // something) all failed identically in testing. Rather than
-        // leave `frame` with no buffer at all (silent freeze -- the
-        // rest of the firmware kept running fine, confirmed via a
-        // heartbeat print during bring-up, but nothing ever reached the
-        // panel again) or force a disruptive ESP.restart() every time
-        // this happens, permanently fail over to unbuffered rendering
-        // for the rest of this session -- the exact tradeoff cyd35
-        // already accepts by default. The rotation itself still applies
-        // fine either way; only the double-buffering is lost.
-        frame.deleteSprite();
-        frame.setColorDepth(8);
-        bool spriteOk = false;
+        // This replaces an earlier delete+recreate-every-rotate
+        // approach that looked safe (retried 3x with delays between
+        // attempts) but confirmed-failed on real hardware despite 123KB
+        // of TOTAL free heap -- the largest contiguous block was only
+        // 73.7KB against a 76.8KB need, pure fragmentation from
+        // WiFi/BLE churn, not a shortage retries could out-wait (delay()
+        // doesn't make the ESP32 heap allocator compact anything). Since
+        // resizeInPlace() never frees the buffer, that failure mode is
+        // now structurally impossible after the first successful boot
+        // allocation -- there's no more free/realloc cycle left to lose
+        // the fragmentation gamble against.
+        if (frame.created()) {
 #if defined(CYD35)
-        for (uint8_t attempt = 0; attempt < 3 && !spriteOk; attempt++) {
-            if (attempt) delay(30);
-            spriteOk = frame.createSprite(tft.width(), tft.height() / 2);
-        }
+            frame.resizeInPlace(tft.width(), tft.height() / 2);
 #else
-        for (uint8_t attempt = 0; attempt < 3 && !spriteOk; attempt++) {
-            if (attempt) delay(30);
-            spriteOk = frame.createSprite(tft.width(), tft.height());
-        }
+            frame.resizeInPlace(tft.width(), tft.height());
 #endif
-        if (!spriteOk) {
-            Serial.printf("[rotate] frame buffer alloc failed (heap=%u largest=%u) -- falling back to unbuffered rendering\n",
-                          ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+        } else if (frameBufferOk) {
+            // Never got its one-time boot-time allocation in the first
+            // place (see setup()) -- same permanent fallback a failed
+            // rotate used to trigger, since there's no buffer to resize.
+            Serial.println("[rotate] frame buffer was never allocated -- falling back to unbuffered rendering");
             frameBufferOk = false;
 #if !defined(CYD35)
             canvas = &tft;
@@ -525,14 +581,20 @@ void loop() {
     }
 
     // Settings button lives in the title bar's top-left corner, shown
-    // on the same three screens as the rotate button. Tapping it while
+    // on the same screens as the rotate button. Tapping it while
     // already on the SETTINGS screen backs out to CLEAR instead of
-    // re-entering itself — same toggle-off feel as the LOG button.
-    if (tp.valid && (state == AppState::CLEAR || state == AppState::LOG || state == AppState::SETTINGS) &&
+    // re-entering itself — same toggle-off feel as the LOG button. From
+    // OUTFIT (only reachable from SETTINGS' OUTFIT row) it backs out to
+    // SETTINGS instead of CLEAR, matching where it was entered from —
+    // this is the only way back out of that screen, since its own taps
+    // are all claimed by the arrows.
+    if (tp.valid && (state == AppState::CLEAR || state == AppState::LOG ||
+                      state == AppState::SETTINGS || state == AppState::OUTFIT) &&
         Theme::settingsButtonHit(tp.x, tp.y) &&
         (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
         lastTouch = now;
-        if (state == AppState::SETTINGS) enterClear();
+        if (state == AppState::OUTFIT) enterSettings();
+        else if (state == AppState::SETTINGS) enterClear();
         else enterSettings();
     }
 
@@ -620,6 +682,7 @@ void loop() {
             } else if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 ButtonId b = Theme::hitTestButtonBar(tp.x, tp.y, tft.width(), tft.height());
                 lastTouch = now;
+                trackOutfitEasterEgg(b);
                 if (b == ButtonId::LOG)  { Squachy::trigger(Squachy::Event::LOG_OPENED); enterLog(); }
                 else if (b == ButtonId::CLR) { engine.clearLog(); Squachy::trigger(Squachy::Event::LOG_CLEARED); enterClear(); }
                 // SCAN is a no-op in CLEAR (we're already there)
@@ -650,6 +713,7 @@ void loop() {
             if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 ButtonId b = Theme::hitTestButtonBar(tp.x, tp.y, tft.width(), tft.height());
                 lastTouch = now;
+                trackOutfitEasterEgg(b);
                 if (b == ButtonId::SCAN) { enterClear(); }
                 if (b == ButtonId::CLR)  { engine.clearLog(); enterClear(); }
                 if (b == ButtonId::LOG)  { enterClear(); }   // toggle off
@@ -702,6 +766,7 @@ void loop() {
                         break;
                     case SettingsRow::NICKNAME:     Squachy::cycleNickname(); break;
                     case SettingsRow::SHADES_COLOR: Squachy::cycleShadesColor(); break;
+                    case SettingsRow::OUTFIT:       enterOutfit(); break;
                     case SettingsRow::VIEW_DIARY:   enterDiary(); break;
                     case SettingsRow::RESET_STATS: engine.resetLifetime(); break;
                     case SettingsRow::BACK:        enterClear(); break;
@@ -717,6 +782,24 @@ void loop() {
             if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 lastTouch = now;
                 enterClear();
+            }
+            break;
+        }
+        case AppState::OUTFIT: {
+            uiOutfitTick(*canvas, now);
+            // Arrow taps cycle the equipped outfit (already persisted
+            // live, no separate "confirm" step needed); a tap anywhere
+            // else jumps straight back to the main screen, same "tap to
+            // dismiss" feel as the Diary screen — the settings icon
+            // (handled by the global back-navigation check above, which
+            // runs before this switch and already changes `state`
+            // itself when it fires) remains the way back to SETTINGS
+            // specifically.
+            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                lastTouch = now;
+                if (!uiOutfitTapArrow(tp.x, tp.y, tft.width(), tft.height())) {
+                    enterClear();
+                }
             }
             break;
         }

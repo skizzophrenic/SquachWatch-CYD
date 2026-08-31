@@ -158,15 +158,6 @@ namespace Theme {
     // silhouette walkers with glowing eyes pacing across the band.
     void drawCryptidCam(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);
 
-    // Radar sweep: range rings, a continuously-rotating sweep with a
-    // fading trail wedge, and a few stationary blips that flash bright
-    // as the sweep passes over them.
-    void drawRadarSweep(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);
-
-    // Rain streaking down a pane of glass, with an occasional brief
-    // lightning-flash brightness pulse across the whole band.
-    void drawRainGlass(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);
-
     // A handful of simple fish silhouettes drifting side to side at
     // different depths, with slow rising bubbles.
     void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);
@@ -190,10 +181,6 @@ namespace Theme {
     // Demoscene-style rotating wireframe tunnel: perspective hexagon
     // rings receding toward a pulsing vanishing point.
     void drawWireframeTunnel(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);
-
-    // Aurora: a few wavy vertical "curtains" of color drifting sideways
-    // at different speeds/depths.
-    void drawAurora(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);
 
     // Classic Doom-style ASCII fire: a coarse heat grid seeded at the
     // bottom, propagated upward with random decay/drift, rendered

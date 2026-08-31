@@ -15,6 +15,7 @@ enum class SettingsRow : uint8_t {
     REPLAY_INTRO,
     NICKNAME,
     SHADES_COLOR,
+    OUTFIT,
     VIEW_DIARY,
     RESET_STATS,
     BACK,

@@ -77,12 +77,9 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         case Settings::Background::TOASTERS:   Theme::drawFlyingToasters(t, now, titleBottom, rainEnd); break;
         case Settings::Background::LAVALAMP:   Theme::drawLavaLamp(t, now, titleBottom, rainEnd); break;
         case Settings::Background::CRYPTID:    Theme::drawCryptidCam(t, now, titleBottom, rainEnd); break;
-        case Settings::Background::RADAR:      Theme::drawRadarSweep(t, now, titleBottom, rainEnd); break;
-        case Settings::Background::RAIN:       Theme::drawRainGlass(t, now, titleBottom, rainEnd); break;
         case Settings::Background::AQUARIUM:   Theme::drawAquarium(t, now, titleBottom, rainEnd); break;
         case Settings::Background::TERMINAL:   Theme::drawTerminalLog(t, now, titleBottom, rainEnd); break;
         case Settings::Background::FIREFLIES:  Theme::drawFireflies(t, now, titleBottom, rainEnd); break;
-        case Settings::Background::AURORA:     Theme::drawAurora(t, now, titleBottom, rainEnd); break;
         case Settings::Background::FIRE:       Theme::drawFire(t, now, titleBottom, rainEnd); break;
         case Settings::Background::SNOWFALL:   Theme::drawSnowfall(t, now, titleBottom, rainEnd); break;
         case Settings::Background::SPECTRUM:   Theme::drawSpectrumWaterfall(t, now, titleBottom, rainEnd, eng); break;

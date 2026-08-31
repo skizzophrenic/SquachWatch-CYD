@@ -1,6 +1,6 @@
 # FAQ
 
-Hey. It's me, the Sasquatch. Yes, I know how to use GitHub. No, I don't know why that surprises people every time.
+Hey. It's me, the Sasquach. Yes, I know how to use GitHub. No, I don't know why that surprises people every time.
 
 This is the FAQ for SquachWatch-CYD — the thing that turns a $15 screen into a pocket-sized "is someone watching me" detector. Here's how it all works, explained the way I'd explain it to you if you cornered me at a gas station at 2am, which, statistically, is likely.
 
@@ -39,7 +39,7 @@ Passively listening to radio broadcasts that devices are already sending into th
 
 That said — I'm a hairy cryptid mascot, not a lawyer. Know your local laws, use your brain, don't do anything stupid.
 
-## What's with the walking, talking Sasquatch on the screen?
+## What's with the walking, talking Sasquach on the screen?
 
 That's Squachy. He's the whole point, honestly — the detection is the *why*, Squachy is the *fun*. He reacts to what the device sees, cracks jokes when nothing's happening, remembers how many times you've petted him, unlocks cosmetics the longer you use the device, and occasionally does something unhinged with confetti if the mood strikes. He grows through stages as your lifetime detection count climbs. Tap him. He likes that. Don't overthink it, he's a good guy.
 
