@@ -46,8 +46,8 @@ from your browser:
 
 **[https://skizzophrenic.github.io/SquachWatch-CYD/](https://skizzophrenic.github.io/SquachWatch-CYD/)**
 
-Works in Chrome, Edge, or Brave on desktop. Plug in, click Connect &
-Install, done.
+Works in Chrome, Edge, or Brave on desktop. Pick your board (2.8" CYD
+or AWOK 2.4"), plug in, click Connect & Install, done.
 
 ## Build
 
@@ -139,6 +139,9 @@ SquachWatch-CYD/
 - Axon / skimmer / SSID prefix data: compiled with assistance from
   Gemini (Google), expanded against public sources.
 - AirTag manufacturer-data format: public Apple FindMy spec.
+- AWOK 2.4" board port (ESP32-Marauder V6.1 hardware): **bkbroiler**,
+  who did the actual pin-mapping and shared-bus touch-calibration work
+  that made this board possible.
 - The SquachWare vaporwave aesthetic and `TALKING SASQUACH` brand
   belong to **skizzophrenic / Talking Sasquach** — see
   [talkingsasquach.com](https://talkingsasquach.com) and the

@@ -1,16 +1,19 @@
 name: Build and release firmware
 
-# Push a tag like v1.2.0 to: build the firmware, create a GitHub
-# Release for that tag with the three raw PlatformIO artifacts
-# attached (bootloader/partitions/firmware — the human-facing source
-# of truth), then also merge them into one flashable image and attach
-# that plus a version-stamped manifest.json. The repo is public now, so
-# the web flasher itself is deployed straight to this repo's own
-# GitHub Pages site (github.io/SquachWatch-CYD) as part of this same
-# run — firmware-merged.bin and manifest.json are copied alongside
-# index.html there so the browser fetches them same-origin (GitHub
-# release assets don't send CORS headers, so the flasher page can't
-# fetch them directly from the Releases tab).
+# Push a tag like v1.2.0 to: build firmware for both release-ready
+# boards (cyd, awok -- cyd35 stays excluded, see the build step below),
+# create a GitHub Release for that tag with each board's three raw
+# PlatformIO artifacts attached (bootloader/partitions/firmware — the
+# human-facing source of truth), then also merge each into one
+# flashable image and attach those plus per-board version-stamped
+# manifests. The repo is public now, so the web flasher itself is
+# deployed straight to this repo's own GitHub Pages site
+# (github.io/SquachWatch-CYD) as part of this same run — both merged
+# binaries and both manifests are copied alongside index.html there so
+# the browser fetches them same-origin (GitHub release assets don't
+# send CORS headers, so the flasher page can't fetch them directly
+# from the Releases tab). index.html's board picker swaps which
+# manifest the install button targets.
 on:
   push:
     tags:
@@ -41,11 +44,11 @@ jobs:
         run: pip install --upgrade platformio
 
       - name: Build firmware
-        # cyd35 (3.5" board port) is a second environment in
+        # cyd35 (3.5" board port) is a third environment in
         # platformio.ini now but isn't public-release-ready yet (known
-        # display/touch issues) -- scope the release build to the 2.8"
-        # board only until that changes.
-        run: pio run -e cyd
+        # display/touch issues) -- cyd and awok are both release-ready
+        # and get built/published together below.
+        run: pio run -e cyd -e awok
 
       - name: Determine version
         id: ver
@@ -54,26 +57,33 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
-      - name: Merge into one flashable image
+      - name: Merge into one flashable image (per board)
         run: |
           pip install esptool
           python -m esptool --chip esp32 merge_bin \
-            -o firmware-merged.bin \
+            -o firmware-cyd-merged.bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
             0x1000  .pio/build/cyd/bootloader.bin \
             0x8000  .pio/build/cyd/partitions.bin \
             0x10000 .pio/build/cyd/firmware.bin
+          python -m esptool --chip esp32 merge_bin \
+            -o firmware-awok-merged.bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            0x1000  .pio/build/awok/bootloader.bin \
+            0x8000  .pio/build/awok/partitions.bin \
+            0x10000 .pio/build/awok/firmware.bin
 
-      - name: Stamp manifest version
+      - name: Stamp manifest versions
         run: |
           python - <<'PY'
           import json
-          p = "web-flasher/manifest.json"
-          m = json.load(open(p))
-          m["version"] = "${{ steps.ver.outputs.version }}"
-          json.dump(m, open(p, "w"), indent=2)
+          for p in ("web-flasher/manifest-cyd.json", "web-flasher/manifest-awok.json"):
+              m = json.load(open(p))
+              m["version"] = "${{ steps.ver.outputs.version }}"
+              json.dump(m, open(p, "w"), indent=2)
           PY
-          cp web-flasher/manifest.json manifest.json
+          cp web-flasher/manifest-cyd.json manifest-cyd.json
+          cp web-flasher/manifest-awok.json manifest-awok.json
 
       - name: Create GitHub Release with build artifacts
         env:
@@ -91,15 +101,22 @@ jobs:
             .pio/build/cyd/bootloader.bin \
             .pio/build/cyd/partitions.bin \
             .pio/build/cyd/firmware.bin \
-            firmware-merged.bin \
-            manifest.json
+            .pio/build/awok/bootloader.bin \
+            .pio/build/awok/partitions.bin \
+            .pio/build/awok/firmware.bin \
+            firmware-cyd-merged.bin \
+            firmware-awok-merged.bin \
+            manifest-cyd.json \
+            manifest-awok.json
 
       - name: Assemble Pages site
         run: |
           mkdir -p _site
           cp web-flasher/index.html _site/index.html
-          cp web-flasher/manifest.json _site/manifest.json
-          cp firmware-merged.bin _site/firmware-merged.bin
+          cp web-flasher/manifest-cyd.json _site/manifest-cyd.json
+          cp web-flasher/manifest-awok.json _site/manifest-awok.json
+          cp firmware-cyd-merged.bin _site/firmware-cyd-merged.bin
+          cp firmware-awok-merged.bin _site/firmware-awok-merged.bin
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

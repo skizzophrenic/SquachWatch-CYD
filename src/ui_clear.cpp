@@ -31,6 +31,30 @@ static const char* counterLabel(DetectionType t) {
     }
 }
 
+// All 13 types in one place, chunked into rows of at most
+// MAX_PER_ROW at draw time (see uiClearTick()) instead of two
+// hand-split arrays -- the old 7-and-6 split ran wide enough on a
+// narrow 240px portrait screen that FLOCK (first on the line) got
+// clipped off the left edge entirely. A hard per-row cap fixes that
+// on both boards, not just AWOK's narrower panel.
+static const DetectionType ALL_COUNTER_TYPES[] = {
+    DetectionType::FLOCK,   DetectionType::AXON,       DetectionType::META,   DetectionType::SKIMMER,
+    DetectionType::RAVEN,   DetectionType::AIRTAG,     DetectionType::DRONE,  DetectionType::ALPR,
+    DetectionType::CAMERA,  DetectionType::SAMSUNG_TAG, DetectionType::GOOGLE_TAG,
+    DetectionType::TILE,    DetectionType::RING,
+};
+static const uint8_t ALL_COUNTER_TYPES_N = sizeof(ALL_COUNTER_TYPES) / sizeof(ALL_COUNTER_TYPES[0]);
+// Portrait (narrow) caps at 4 per row -- see the comment above. Landscape
+// has plenty of width for the original 7-and-6 two-row split (that's
+// exactly what this produces: 13 types / 2 rows), so row count is
+// picked dynamically off the live orientation in uiClearTick() rather
+// than fixed at compile time -- it changes every time the screen
+// rotates, not just once per board.
+static const uint8_t MAX_PER_ROW_PORTRAIT   = 4;
+static const uint8_t COUNTER_ROWS_LANDSCAPE = 2;
+static const uint8_t COUNTER_ROWS_PORTRAIT  =
+    (ALL_COUNTER_TYPES_N + MAX_PER_ROW_PORTRAIT - 1) / MAX_PER_ROW_PORTRAIT;  // ceil
+
 static void drawCounterLine(TFT_eSPI& t, int w, int y, const DetectionEngine& eng,
                             const DetectionType* types, uint8_t n) {
     // 80, not 56: worst case is 7 entries x up to "XXXXX:999  " (11
@@ -51,10 +75,16 @@ static void drawCounterLine(TFT_eSPI& t, int w, int y, const DetectionEngine& en
 
 void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance) {
     int w = t.width();
+    int h = t.height();
+    // Recomputed every tick, not cached per-board: rotating the screen
+    // changes w/h live, and the counter layout should follow it rather
+    // than staying stuck at whatever orientation was active at boot.
+    bool landscape = w > h;
+    const uint8_t counterRows = landscape ? COUNTER_ROWS_LANDSCAPE : COUNTER_ROWS_PORTRAIT;
 
-    Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, t.height());
+    Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
     const int lineH          = 14;
-    const int countersTop    = bar.y - 2 * lineH - 6;
+    const int countersTop    = bar.y - counterRows * lineH - 6;
     const int countersBottom = bar.y - 4;
 
     // statusH: height of the ALL CLEAR / DETECTIONS LOGGED text row,
@@ -183,29 +213,32 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         }
     }
 
-    // Counter lines above the buttons — a fixed, centered two-line
-    // split across all 11 detection types. Whole label:count tokens
-    // only, so nothing ever breaks mid-word. No flat clear here
-    // anymore — the background animation now fully repaints this
-    // whole row every frame (rainEnd extends down to countersBottom),
-    // the same "let the background do the erasing" pattern already
-    // relied on for Squachy and the status line above.
+    // Counter lines above the buttons — all 13 detection types, split
+    // across counterRows (2 in landscape, capped at 4/row in portrait
+    // -- see the constants above) so a row never runs wide enough to
+    // clip off a narrow portrait screen, while landscape still gets
+    // the more compact two-row layout it has room for. Whole
+    // label:count tokens only, so nothing ever breaks mid-word. No
+    // flat clear here anymore — the background animation now fully
+    // repaints this whole row every frame (rainEnd extends down to
+    // countersBottom), the same "let the background do the erasing"
+    // pattern already relied on for Squachy and the status line above.
     t.setTextSize(1);
     t.setTextColor(Theme::CYAN, Theme::BG);
     t.setTextWrap(false);
 
-    static const DetectionType LINE1[] = {
-        DetectionType::FLOCK, DetectionType::AXON, DetectionType::META,
-        DetectionType::SKIMMER, DetectionType::RAVEN, DetectionType::AIRTAG,
-        DetectionType::TILE
-    };
-    static const DetectionType LINE2[] = {
-        DetectionType::DRONE, DetectionType::ALPR, DetectionType::CAMERA,
-        DetectionType::SAMSUNG_TAG, DetectionType::GOOGLE_TAG, DetectionType::RING
-    };
-
-    drawCounterLine(t, w, countersTop,              eng, LINE1, 7);
-    drawCounterLine(t, w, countersTop + lineH,       eng, LINE2, 6);
+    // Evenly balanced, not greedily packed (e.g. 4/4/4/1 in portrait)
+    // -- a lone last row with a single item looked worse than several
+    // similarly-sized rows does, and this still never exceeds the
+    // per-orientation cap on any row.
+    uint8_t base      = ALL_COUNTER_TYPES_N / counterRows;
+    uint8_t remainder = ALL_COUNTER_TYPES_N % counterRows;
+    uint8_t start = 0;
+    for (uint8_t row = 0; row < counterRows; row++) {
+        uint8_t n = base + (row < remainder ? 1 : 0);
+        drawCounterLine(t, w, countersTop + row * lineH, eng, ALL_COUNTER_TYPES + start, n);
+        start += n;
+    }
 
     // Soft buttons
     Theme::drawButtonBar(t, ButtonId::NONE);

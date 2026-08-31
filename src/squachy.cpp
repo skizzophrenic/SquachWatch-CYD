@@ -672,42 +672,14 @@ bool hitTest(int x, int y) {
 static int  lastBubbleX = 0, lastBubbleY = 0, lastBubbleW = 0, lastBubbleH = 0;
 static bool hadBubble   = false;
 
-static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text) {
-    t.setTextSize(1);
-    t.setTextWrap(false);
-    int tw = t.textWidth(text);
-    int bw = tw + 10;
-    int bh = 14;
-    int bx = cx - bw / 2;
-    // Keep the whole bubble on-screen even for an unusually long line
-    // (e.g. a detection quip with a confidence suffix on a narrow
-    // portrait screen) instead of letting it run off either edge.
-    int screenW = t.width();
-    if (bx + bw > screenW - 2) bx = screenW - 2 - bw;
-    if (bx < 2) bx = 2;
-    t.fillRoundRect(bx, topY, bw, bh, 3, Theme::BG);
-    t.drawRoundRect(bx, topY, bw, bh, 3, Theme::VAPOR_PINK);
-    t.setTextColor(Theme::WHITE, Theme::BG);
-    t.setCursor(bx + 5, topY + 3);
-    t.print(text);
-    lastBubbleX = bx;
-    lastBubbleY = topY;
-    lastBubbleW = bw;
-    lastBubbleH = bh;
-}
-
-// Multi-line variant for the first-boot walkthrough — the compact
-// one-liner bubble above has no word-wrap and would just run off the
-// edge of the screen for anything longer than a short quip. Fixed
-// height regardless of how many lines the text actually wraps to
-// (1-3), so tick()'s layout math doesn't need to know per-step.
-static const uint8_t ONBOARD_MAX_LINES = 3;
-static const int     ONBOARD_BUBBLE_H  = 52;
-
 // Greedy word-wrap using the currently-set font's real measured
 // widths (not an assumed char width), so it stays correct even if the
 // font ever changes. No dynamic allocation — fixed small buffers,
-// which is fine for the short strings this only ever runs on.
+// which is fine for the short strings this only ever runs on. Shared
+// by both drawBubble() (below) and drawOnboardBubble() (further down)
+// — the everyday bubble only needs this for the occasional line too
+// long for one row on a narrow portrait screen; the onboarding bubble
+// always wraps since its lines are written long on purpose.
 static uint8_t wrapText(TFT_eSPI& t, const char* text, int maxW,
                         char lines[][40], uint8_t maxLines) {
     char buf[160];
@@ -733,6 +705,77 @@ static uint8_t wrapText(TFT_eSPI& t, const char* text, int maxW,
     if (lineBuf[0] && n < maxLines) { strncpy(lines[n], lineBuf, 39); lines[n][39] = 0; n++; }
     return n;
 }
+
+// Everyday speech bubble stays single-line and text-hugging (its
+// original compact look) whenever the line actually fits — most
+// idle/pet-reaction lines do. Only when a line is too wide for a
+// narrow portrait screen does it grow into a fixed-width, centered
+// multi-line box instead of letting the single-line version run off
+// (or past) both screen edges, which is what happened before this.
+static const uint8_t BUBBLE_MAX_LINES = 2;
+
+static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text) {
+    t.setTextSize(1);
+    t.setTextWrap(false);
+    int screenW = t.width();
+    int maxW = screenW - 16;   // widest a wrapped bubble is allowed to get
+    int tw = t.textWidth(text);
+
+    if (tw <= maxW - 10) {
+        // Fits on one line -- the original compact box.
+        int bw = tw + 10;
+        int bh = 14;
+        int bx = cx - bw / 2;
+        if (bx + bw > screenW - 2) bx = screenW - 2 - bw;
+        if (bx < 2) bx = 2;
+        t.fillRoundRect(bx, topY, bw, bh, 3, Theme::BG);
+        t.drawRoundRect(bx, topY, bw, bh, 3, Theme::VAPOR_PINK);
+        t.setTextColor(Theme::WHITE, Theme::BG);
+        t.setCursor(bx + 5, topY + 3);
+        t.print(text);
+        lastBubbleX = bx;
+        lastBubbleY = topY;
+        lastBubbleW = bw;
+        lastBubbleH = bh;
+        return;
+    }
+
+    // Doesn't fit on one line -- wrap it and grow the box to a fixed
+    // width, each line centered within it.
+    int bw = maxW;
+    int bx = cx - bw / 2;
+    if (bx < 2) bx = 2;
+    if (bx + bw > screenW - 2) bx = screenW - 2 - bw;
+
+    char lines[BUBBLE_MAX_LINES][40];
+    uint8_t n = wrapText(t, text, bw - 10, lines, BUBBLE_MAX_LINES);
+
+    const int lineH = 11;
+    int bh = 6 + (int)n * lineH + 3;
+
+    t.fillRoundRect(bx, topY, bw, bh, 3, Theme::BG);
+    t.drawRoundRect(bx, topY, bw, bh, 3, Theme::VAPOR_PINK);
+    t.setTextColor(Theme::WHITE, Theme::BG);
+    for (uint8_t i = 0; i < n; i++) {
+        int lw = t.textWidth(lines[i]);
+        t.setCursor(bx + (bw - lw) / 2, topY + 3 + i * lineH);
+        t.print(lines[i]);
+    }
+    lastBubbleX = bx;
+    lastBubbleY = topY;
+    lastBubbleW = bw;
+    lastBubbleH = bh;
+}
+
+// Multi-line variant for the first-boot walkthrough — the compact
+// one-liner bubble above has no word-wrap and would just run off the
+// edge of the screen for anything longer than a short quip. Fixed
+// height regardless of how many lines the text actually wraps to
+// (1-3), so tick()'s layout math doesn't need to know per-step.
+static const uint8_t ONBOARD_MAX_LINES = 3;
+static const int     ONBOARD_BUBBLE_H  = 52;
+
+// wrapText() itself now lives above drawBubble() — shared by both.
 
 static void drawOnboardBubble(TFT_eSPI& t, int cx, int topY, const char* text,
                               uint8_t step, uint8_t total) {

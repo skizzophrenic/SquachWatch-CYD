@@ -3,12 +3,24 @@
 #include <SD.h>
 #include <stdio.h>
 
-// CYD SD card CS — see docs/PINOUT.md
-#define SD_CS_PIN 5
+// CYD SD card CS — see docs/PINOUT.md. AWOK: CS=14 on the on-board
+// slot, sharing the DISPLAY'S VSPI bus (18/23/19). GPIO5 on this board
+// is TFT_RST — reusing the CYD's CS=5 would fight the display.
+#if defined(AWOK)
+    #define SD_CS_PIN 14
+#else
+    #define SD_CS_PIN 5
+#endif
 
 bool SdLog::begin() {
     if (_ready) return true;
+    // TFT_eSPI has already initialized VSPI by the time this runs on
+    // AWOK (shared bus with the display), so SPI.begin() here would
+    // just re-init a bus that's already up -- skip it and hand
+    // SD.begin() the CS pin directly.
+#if !defined(AWOK)
     SPI.begin(18, 19, 23, SD_CS_PIN);  // SCK, MISO, MOSI, CS
+#endif
     if (!SD.begin(SD_CS_PIN)) {
         _ready = false;
         return false;

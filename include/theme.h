@@ -69,8 +69,16 @@ namespace Theme {
     // Draws the gradient titlebar across the full width, with a 1-px
     // purple bottom border, centered white text, the settings (hamburger)
     // button in the top-left corner, and the rotate button in the
-    // top-right corner.
+    // top-right corner (unless hidden, see setRotateIconVisible()).
     void drawTitleBar(TFT_eSPI& t, const char* title);
+
+    // Hides (or restores) the rotate icon drawTitleBar() would
+    // otherwise always draw -- AWOK calls this once at boot with
+    // false, since that board has no rotate button at all (see
+    // main.cpp's rotate handler in loop(), which isn't even compiled
+    // in on that board). Defaults to true (icon shown) for every other
+    // board, unchanged from before this existed.
+    void setRotateIconVisible(bool visible);
 
     // Hit test for the rotate button drawn by drawTitleBar (top-right
     // corner of the title bar). The tap target is deliberately bigger

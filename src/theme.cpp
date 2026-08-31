@@ -145,6 +145,12 @@ bool settingsButtonHit(int x, int y) {
     return x >= 0 && x < SETTINGS_HIT_W && y >= 0 && y < SETTINGS_HIT_H;
 }
 
+static bool s_rotateIconVisible = true;
+
+void setRotateIconVisible(bool visible) {
+    s_rotateIconVisible = visible;
+}
+
 void drawTitleBar(TFT_eSPI& t, const char* title) {
     int w = t.width();
     for (int x = 0; x < w; x++) {
@@ -161,7 +167,7 @@ void drawTitleBar(TFT_eSPI& t, const char* title) {
     t.setCursor((w - tw) / 2, 4);
     t.print(title);
     drawSettingsIcon(t, 14);
-    drawRotateIcon(t, w, 14);
+    if (s_rotateIconVisible) drawRotateIcon(t, w, 14);
 }
 
 void drawButton(TFT_eSPI& t, int x, int y, int w, int h,

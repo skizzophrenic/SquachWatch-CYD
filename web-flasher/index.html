@@ -207,6 +207,32 @@
     text-align:center;
   }
 
+  .board-picker{
+    display:flex;
+    gap:8px;
+    margin-bottom:16px;
+  }
+  .board-btn{
+    flex:1;
+    font-family:'VT323', monospace;
+    font-size:1.05rem;
+    letter-spacing:0.05em;
+    padding:10px 6px;
+    background:transparent;
+    color:var(--vapor-blue);
+    border:1px solid var(--purple);
+    border-radius:8px;
+    cursor:pointer;
+    transition:background 0.15s, color 0.15s, box-shadow 0.15s, border-color 0.15s;
+  }
+  .board-btn:hover{ border-color:var(--vapor-pink); }
+  .board-btn.active{
+    background:linear-gradient(90deg, var(--purple), var(--vapor-pink));
+    color:#fff;
+    box-shadow:0 0 14px rgba(180,0,255,0.5);
+    border-color:transparent;
+  }
+
   .install-btn{
     display:block;
     width:100%;
@@ -436,7 +462,12 @@
   <div class="card">
     <h2>FLASH YOUR DETECTOR</h2>
 
-    <esp-web-install-button manifest="./manifest.json">
+    <div class="board-picker" id="boardPicker" role="group" aria-label="Board select">
+      <button type="button" class="board-btn active" data-manifest="./manifest-cyd.json">2.8&quot; CYD</button>
+      <button type="button" class="board-btn" data-manifest="./manifest-awok.json">AWOK 2.4&quot;</button>
+    </div>
+
+    <esp-web-install-button id="installBtn" manifest="./manifest-cyd.json">
       <button slot="activate" class="install-btn">[ CONNECT &amp; INSTALL ]</button>
       <span slot="unsupported" class="unsupported">
         Your browser can't do this. Web Serial only works in Chrome, Edge,
@@ -1108,6 +1139,25 @@
     });
     bodyObserver.observe(document.body, { childList: true });
   } catch (e) {}
+
+  // ---- Board picker -----------------------------------------------------
+  // Swaps which manifest the install button targets -- esp-web-tools'
+  // <esp-web-install-button> reactively re-reads its manifest attribute
+  // on change (its own documented board-picker pattern), so this is
+  // just a plain attribute swap, no re-render plumbing needed.
+  (function () {
+    var picker = document.getElementById('boardPicker');
+    var installBtn = document.getElementById('installBtn');
+    if (!picker || !installBtn) return;
+    var buttons = picker.querySelectorAll('.board-btn');
+    buttons.forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        buttons.forEach(function (b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        installBtn.setAttribute('manifest', btn.dataset.manifest);
+      });
+    });
+  })();
 
   // ---- Identify board -------------------------------------------------
   // Uses esptool-js directly — the same library esp-web-tools itself

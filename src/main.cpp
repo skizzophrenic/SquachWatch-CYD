@@ -7,6 +7,7 @@
 #include <Wire.h>
 #include <TFT_eSPI.h>
 #include <XPT2046_Touchscreen.h>
+#include <Preferences.h>  // AWOK's own per-rotation touch-cal storage; see the AWOK block below pollTouch()'s globals
 #include "state.h"
 #include "theme.h"
 #include "detection.h"
@@ -42,7 +43,21 @@
 //     (SCK/MOSI/MISO = 14/13/12) instead of getting a dedicated
 //     peripheral — this board has no capacitive-touch chip at all, so
 //     the I2C probe below is skipped entirely rather than just failing.
+//   - AWOK 2.4" (Marauder V6.1, built separately as env:awok): resistive
+//     XPT2046 sharing the display's VSPI bus like cyd35, but driven
+//     entirely through TFT_eSPI's own calibrateTouch/setTouch/getTouch
+//     path rather than the XPT2046_Touchscreen library — see the AWOK
+//     branches in setup()/pollTouch(). The constructor still gets
+//     built below regardless of board (it costs nothing unused), but
+//     AWOK never calls touch.begin() or touchSPI.begin() on it.
 #if defined(CYD35)
+    #define TOUCH_SCK  TFT_SCLK
+    #define TOUCH_MOSI TFT_MOSI
+    #define TOUCH_MISO TFT_MISO
+#elif defined(AWOK)
+    // No dedicated touch bus on AWOK — TFT_eSPI drives touch on the
+    // display's own VSPI. Values below are placeholders so the compile
+    // still works; the AWOK branches skip touchSPI.begin() entirely.
     #define TOUCH_SCK  TFT_SCLK
     #define TOUCH_MOSI TFT_MOSI
     #define TOUCH_MISO TFT_MISO
@@ -51,20 +66,30 @@
     #define TOUCH_MOSI 32
     #define TOUCH_MISO 39
 #endif
+// AWOK's user setup already #defines TOUCH_CS=21 (pulled in via the
+// -include in platformio.ini) — awok_user_setup.h's TFT_eSPI touch
+// path needs that value armed, so this can't unconditionally redefine
+// it to 33 the way the other two boards share.
+#ifndef TOUCH_CS
 #define TOUCH_CS   33
+#endif
 #define TOUCH_IRQ  36
 #define CAP_SDA    33
 #define CAP_SCL    32
 #define CAP_RST    25
-// Backlight brightness (Settings menu): both boards' backlight pins are
-// driven at boot regardless of which one is actually wired (see the
-// digitalWrite(HIGH) comment in setup() — same reasoning applies here),
-// each on its own LEDC channel so ledcWrite can dim whichever one is
-// real without needing to know which board this is.
+// Backlight brightness (Settings menu): all three boards' backlight
+// pins are driven at boot regardless of which one is actually wired
+// (see the digitalWrite(HIGH) comment in setup() — same reasoning
+// applies here), each on its own LEDC channel so ledcWrite can dim
+// whichever one is real without needing to know which board this is.
+// AWOK's BL sits on GPIO32; the other boards' pins (21, 27) are simply
+// unused GPIOs on AWOK, so driving all three is harmless.
 #define BL_PIN_ORIG 21
 #define BL_PIN_CAP  27
+#define BL_PIN_AWOK 32
 #define BL_CH_ORIG  0
 #define BL_CH_CAP   1
+#define BL_CH_AWOK  2
 
 // TFT_eSprite::createSprite() no-ops (returns the existing buffer
 // untouched) if the sprite is already created, so the only way to
@@ -181,8 +206,15 @@ static void trackOutfitEasterEgg(ButtonId b) {
 // if nobody's there to tap it.
 const uint32_t      ALERT_AUTO_DISMISS_MS = 10000;
 // TFT_eSPI rotation: all four orientations are supported (0/2 portrait,
-// 1/3 landscape), cycled in order by the rotate button in the title bar.
+// 1/3 landscape), cycled in order by the rotate button in the title
+// bar -- except AWOK, which has no rotate button (see loop()) and
+// stays fixed at its case's one physical orientation, confirmed on
+// real hardware to be portrait/rotation 0.
+#if defined(AWOK)
+uint8_t             screenRotation = 0;
+#else
 uint8_t             screenRotation = 1;
+#endif
 // Timestamp of the last screen/rotation change — drives a brief CRT
 // tear/glitch overlay on the new frame so transitions have some punch
 // instead of just snapping straight to the next screen.
@@ -203,6 +235,84 @@ static uint16_t CAP_NY_MIN = 10,  CAP_NY_MAX = 308;
 // flat 200-3800 for both axes; not const for the same reason.
 static uint16_t RAW_X_MIN = 200, RAW_X_MAX = 3800;
 static uint16_t RAW_Y_MIN = 200, RAW_Y_MAX = 3800;
+
+#if defined(AWOK)
+// ---- AWOK: TFT_eSPI-native touch calibration ----
+// AWOK's XPT2046 sits on the display's own shared VSPI bus, so it goes
+// through TFT_eSPI's own calibrateTouch()/setTouch()/getTouch() path
+// instead of the raw-ADC + map() approach the other two boards use --
+// AWOK's XPT2046's raw axes don't align the same way the CYD's do, so
+// the CYD's rotation math doesn't carry over here.
+//
+// This board has no rotate button at all (confirmed on real hardware:
+// the case only holds the panel in one orientation, portrait, so
+// rotation was pure unused complexity) -- screenRotation is fixed at
+// AWOK_ROTATION for the life of the program, never changed by a tap,
+// so there's only ever one calibration to keep, not one per rotation
+// the way an earlier version of this did.
+static uint16_t awokTouchCal[5];
+static bool     awokTouchCalibrated = false;
+
+static const char* AWOK_TOUCH_NS  = "awoktouch";
+static const char* AWOK_TOUCH_KEY = "cal5";
+
+static bool awokLoadTouchCal() {
+    Preferences p;
+    p.begin(AWOK_TOUCH_NS, true);
+    bool has = p.isKey(AWOK_TOUCH_KEY);
+    if (has) {
+        p.getBytes(AWOK_TOUCH_KEY, awokTouchCal, sizeof(awokTouchCal));
+        awokTouchCalibrated = true;
+    }
+    p.end();
+    return has;
+}
+
+static void awokSaveTouchCal() {
+    Preferences p;
+    p.begin(AWOK_TOUCH_NS, false);
+    p.putBytes(AWOK_TOUCH_KEY, awokTouchCal, sizeof(awokTouchCal));
+    p.end();
+}
+
+// The recovery path for a bad calibration — mirrors TouchCal::reset()
+// for the other boards' NVS namespace, but this board's blob lives in
+// a separate one ("awoktouch") that TouchCal::reset() never touches,
+// so it needs its own clear here or the boot-time "hold to reset"
+// gesture would be a silent no-op on this board.
+static void awokResetTouchCal() {
+    Preferences p;
+    p.begin(AWOK_TOUCH_NS, false);
+    p.clear();
+    p.end();
+    awokTouchCalibrated = false;
+}
+
+// Runs TFT_eSPI's own interactive 4-corner calibration and persists
+// the result — called from the same two places the other boards call
+// TouchCal::runInteractive() (the title-bar long-press and Settings >
+// CALIBRATE TOUCH), plus automatically on first boot if nothing's
+// saved yet (see awokEnsureCal() below).
+static void awokRunCalibration() {
+    tft.fillScreen(Theme::BG);
+    tft.calibrateTouch(awokTouchCal, Theme::VAPOR_PINK, Theme::BG, 15);
+    tft.setTouch(awokTouchCal);
+    awokTouchCalibrated = true;
+    awokSaveTouchCal();
+}
+
+// Called once at boot: re-arms the saved calibration if one exists, or
+// runs the interactive calibration once if this is a fresh board.
+static void awokEnsureCal() {
+    if (awokLoadTouchCal()) {
+        tft.setTouch(awokTouchCal);
+        Serial.println("Loaded AWOK touch cal from NVS.");
+        return;
+    }
+    Serial.println("AWOK: no saved cal, running interactive calibration.");
+    awokRunCalibration();
+}
+#endif  // AWOK
 
 static TouchPoint pollTouch() {
     TouchPoint tp = { false, 0, 0 };
@@ -236,6 +346,22 @@ static TouchPoint pollTouch() {
     // by TOUCH_CS/TOUCH_IRQ) -- `touch` was never begin()'d, so don't
     // call into it at all.
     return tp;
+#elif defined(AWOK)
+    // TFT_eSPI-native touch path. getTouch() returns already-
+    // calibrated, already-rotated screen coordinates directly -- no
+    // map()/raw-ADC axis math needed, unlike the other two boards.
+    // Nothing to read until calibration has run once (see
+    // awokEnsureCal(), called from setup() -- there's no rotate
+    // button on this board, so this only ever needs to happen once).
+    if (!awokTouchCalibrated) return tp;
+    {
+        uint16_t sx, sy;
+        if (!tft.getTouch(&sx, &sy)) return tp;
+        tp.x = (int)sx;
+        tp.y = (int)sy;
+        tp.valid = (tp.x >= 0 && tp.x < w && tp.y >= 0 && tp.y < h);
+    }
+    return tp;
 #endif
 
     // Resistive XPT2046 path (original jczn_2432s028r board) —
@@ -265,11 +391,27 @@ static bool rawReadCap(int16_t& a, int16_t& b) {
 }
 
 static bool rawReadResistive(int16_t& a, int16_t& b) {
+#if defined(AWOK)
+    // AWOK's `touch` (XPT2046_Touchscreen) object is never begin()'d —
+    // see the AWOK branch in setup() — so this goes through TFT_eSPI's
+    // own raw-touch accessors instead. Only used by the boot-time
+    // "hold to reset calibration" window; AWOK's own calibration flow
+    // (awokRunCalibration()) doesn't route through this at all.
+    // getTouchRaw() alone always returns true in TFT_eSPI 2.5.43, so
+    // the actual "is a finger down" gate is the pressure threshold.
+    if (tft.getTouchRawZ() < 350) return false;
+    uint16_t rx, ry;
+    tft.getTouchRaw(&rx, &ry);
+    a = (int16_t)rx;
+    b = (int16_t)ry;
+    return true;
+#else
     if (!touch.tirqTouched() || !touch.touched()) return false;
     TS_Point p = touch.getPoint();
     a = (int16_t)p.x;
     b = (int16_t)p.y;
     return true;
+#endif
 }
 
 // See touch_cal.h: aTop/aBottom/bLeft/bRight are generic (whatever the
@@ -281,6 +423,7 @@ static void applyBrightness() {
     uint8_t duty = Settings::brightness();
     ledcWrite(BL_CH_ORIG, duty);
     ledcWrite(BL_CH_CAP,  duty);
+    ledcWrite(BL_CH_AWOK, duty);
 }
 
 static void applyCal(const TouchCal::Cal& cal) {
@@ -357,8 +500,17 @@ void setup() {
     // each is simply an unused GPIO on the "other" board — and means
     // the screen lights up before we've even figured out which board
     // this is.
+    //
+    // GPIO21 exception on AWOK: it's TOUCH_CS there, not a spare. A
+    // brief digitalWrite HIGH pre-init just holds CS deasserted and
+    // would be harmless on its own, but the LEDC attach further down
+    // would fight TFT_eSPI's control of the pin, so pin 21 is skipped
+    // off entirely on AWOK for consistency with that.
+#if !defined(AWOK)
     pinMode(21, OUTPUT); digitalWrite(21, HIGH);
+#endif
     pinMode(27, OUTPUT); digitalWrite(27, HIGH);
+    pinMode(32, OUTPUT); digitalWrite(32, HIGH);  // AWOK's real BL pin; unused GPIO on the other two boards
 
     tft.init();
     // Landscape (320 wide × 240 tall) — the CYD's natural orientation
@@ -371,16 +523,35 @@ void setup() {
     // boot itself already reflects the saved theme/invert choice
     // instead of flashing the defaults for a moment first.
     Settings::load();
+#if defined(AWOK)
+    // No rotate button on this board (see the rotate handler in
+    // loop(), not even compiled in on AWOK) -- hide the icon too so
+    // there's nothing dead-looking left in the title bar.
+    Theme::setRotateIconVisible(false);
+#endif
     // invertDisplay() sets an ABSOLUTE panel state -- it doesn't toggle
     // relative to whatever TFT_INVERSION_ON/OFF set at compile time, it
-    // just overwrites it. Settings::inverted() is a cosmetic per-user
-    // theme toggle (originally for the other board), unrelated to a
-    // given panel's actual required polarity, so XOR the two: cyd35's
-    // ST7796 needs INVON to render correctly (confirmed on real
-    // hardware), the original board needs INVOFF, and either way the
-    // user's cosmetic toggle still flips it relative to that baseline.
+    // just overwrites it. This means awok_user_setup.h's own
+    // TFT_INVERSION_ON/OFF #define is dead code for actually choosing
+    // AWOK's polarity -- it silently fell into the same bucket as the
+    // original CYD board below (a real bug found on real hardware,
+    // several rounds of flipping that header setting with zero visible
+    // effect, before finding the actual control point was here).
+    // Settings::inverted() is a cosmetic per-user theme toggle
+    // (originally for the other board), unrelated to a given panel's
+    // actual required polarity, so XOR the two: cyd35's ST7796 needs
+    // INVON to render correctly (confirmed on real hardware), the
+    // original board needs INVOFF, and either way the user's cosmetic
+    // toggle still flips it relative to that baseline.
 #if defined(CYD35)
     constexpr bool PANEL_NEEDS_INVERSION = true;
+#elif defined(AWOK)
+    // Confirmed on real hardware: true visibly changed something
+    // (proving this, not the dead awok_user_setup.h define, is the
+    // actual control point) but looked inverted/wrong. false is the
+    // ILI9341's normal (non-inverted) polarity, matching the original
+    // CYD board this panel shares a driver with.
+    constexpr bool PANEL_NEEDS_INVERSION = false;
 #else
     constexpr bool PANEL_NEEDS_INVERSION = false;
 #endif
@@ -391,11 +562,17 @@ void setup() {
     // so the settings-menu brightness slider can dim them — same
     // "drive both boards' pin, only one is really wired" reasoning as
     // the digitalWrite call, just with a duty cycle instead of a flat
-    // HIGH.
+    // HIGH. BL_CH_ORIG/GPIO21 is skipped on AWOK because it's TOUCH_CS
+    // there (same reasoning as the digitalWrite skip above) — attaching
+    // LEDC to it would fight TFT_eSPI's control of the pin.
+#if !defined(AWOK)
     ledcSetup(BL_CH_ORIG, 5000, 8);
     ledcAttachPin(BL_PIN_ORIG, BL_CH_ORIG);
+#endif
     ledcSetup(BL_CH_CAP, 5000, 8);
     ledcAttachPin(BL_PIN_CAP, BL_CH_CAP);
+    ledcSetup(BL_CH_AWOK, 5000, 8);
+    ledcAttachPin(BL_PIN_AWOK, BL_CH_AWOK);
     applyBrightness();
 
 #if defined(CYD35)
@@ -443,6 +620,15 @@ void setup() {
     // the real pins are confirmed.
     usingCapTouch = false;
     Serial.println("cyd35 build -- touch DISABLED pending real CS/IRQ pin confirmation.");
+#elif defined(AWOK)
+    // AWOK's XPT2046 sits on the display's own shared VSPI bus (TOUCH_CS=21,
+    // already armed by TFT_eSPI itself once awok_user_setup.h's #define
+    // is in scope) and is driven entirely through TFT_eSPI's own touch
+    // path -- no I2C cap-touch probe (this board has no cap-touch chip
+    // at all), no touch.begin(), no touchSPI. All subsequent touch
+    // reads go through pollTouch()'s AWOK branch (tft.getTouch()).
+    usingCapTouch = false;
+    Serial.println("AWOK build -- XPT2046 on shared VSPI bus via TFT_eSPI.");
 #else
     // Touch: probe for the capacitive controller first (I2C 0x15 on
     // SDA=33/SCL=32, reset on GPIO25 — the JC2432W328C). If it doesn't
@@ -488,6 +674,14 @@ void setup() {
                 if (holdStart == 0) holdStart = millis();
                 else if (millis() - holdStart > 800) {
                     TouchCal::reset();
+#if defined(AWOK)
+                    // TouchCal::reset() only clears the "touchcal"
+                    // namespace the other boards use -- AWOK's blob
+                    // lives in a separate one and would otherwise
+                    // silently reload on the next boot, making this
+                    // gesture a no-op here.
+                    awokResetTouchCal();
+#endif
                     tft.fillScreen(Theme::BG);
                     tft.setTextColor(Theme::AMBER, Theme::BG);
                     tft.setTextSize(2);
@@ -506,6 +700,16 @@ void setup() {
 #endif
     tft.fillScreen(Theme::BG);
 
+#if defined(AWOK)
+    // The compiled-in defaults for the CYD 2.8" board's XPT2046
+    // (RAW_X_MIN=200..RAW_X_MAX=3800) don't match the shared-bus
+    // XPT2046 on this board, so an uncalibrated first boot leaves
+    // ghost taps landing all over the screen. Force the 4-corner
+    // interactive cal right here on first boot if nothing's saved yet
+    // (awokEnsureCal() does that automatically when awokLoadTouchCal()
+    // finds nothing saved).
+    awokEnsureCal();
+#else
     // Apply a saved touch calibration if one exists (long-press the
     // title bar on the CLEAR/LOG screen to (re)calibrate — see
     // checkCalibrationTrigger()); otherwise keep the compiled-in
@@ -515,6 +719,7 @@ void setup() {
         applyCal(savedCal);
         Serial.println("Loaded saved touch calibration.");
     }
+#endif
 
     // Seed the PRNG so the matrix rain starts in a fresh-looking state
     // on every boot. Analog read on a floating pin is plenty.
@@ -532,8 +737,14 @@ void loop() {
 
     // Rotate button lives in the title bar's top-right corner, shown on
     // the CLEAR, LOG, SETTINGS and OUTFIT screens (drawTitleBar always
-    // draws it — gating the hit-test to these keeps it inert wherever
-    // there's no title bar drawn at all, i.e. BOOT/ALERT).
+    // draws it on the two boards that have one — gating the hit-test
+    // to these keeps it inert wherever there's no title bar drawn at
+    // all, i.e. BOOT/ALERT). Not built at all on AWOK: confirmed on
+    // real hardware that board's case only holds the panel in one
+    // orientation (portrait), so rotation was pure unused complexity
+    // there — see Theme::setRotateIconVisible(false) in setup(), which
+    // also hides the icon itself, not just this handler.
+#if !defined(AWOK)
     if (tp.valid && (state == AppState::CLEAR || state == AppState::LOG ||
                       state == AppState::SETTINGS || state == AppState::OUTFIT) &&
         Theme::rotateButtonHit(tp.x, tp.y, tft.width()) &&
@@ -579,6 +790,7 @@ void loop() {
         }
         transitionStart = now;
     }
+#endif  // !AWOK
 
     // Settings button lives in the title bar's top-left corner, shown
     // on the same screens as the rotate button. Tapping it while
@@ -609,9 +821,13 @@ void loop() {
         else if (now - calHoldStart > 1500) {
             calHoldStart = 0;
             lastTouch = now;
+#if defined(AWOK)
+            awokRunCalibration();
+#else
             TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
             TouchCal::Cal newCal = TouchCal::runInteractive(*canvas, reader, Theme::BG, Theme::WHITE, Theme::CYAN);
             applyCal(newCal);
+#endif
             enterClear();
         }
     } else {
@@ -754,9 +970,13 @@ void loop() {
                         break;
                     case SettingsRow::CONFIDENCE: Settings::cycleMinConfidence(); break;
                     case SettingsRow::CALIBRATE: {
+#if defined(AWOK)
+                        awokRunCalibration();
+#else
                         TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
                         TouchCal::Cal newCal = TouchCal::runInteractive(*canvas, reader, Theme::BG, Theme::WHITE, Theme::CYAN);
                         applyCal(newCal);
+#endif
                         enterSettings();
                         break;
                     }
