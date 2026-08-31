@@ -61,6 +61,11 @@ void cycleBackground() {
     s_prefs.putUChar("bg", (uint8_t)s_background);
 }
 
+void cyclePrevBackground() {
+    s_background = (Background)(((uint8_t)s_background + BACKGROUND_COUNT - 1) % BACKGROUND_COUNT);
+    s_prefs.putUChar("bg", (uint8_t)s_background);
+}
+
 bool inverted() { return s_inverted; }
 
 void toggleInvert() {

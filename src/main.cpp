@@ -169,6 +169,7 @@ AppState            state     = AppState::BOOT;
 uint32_t            bootStart = 0;
 uint32_t            alertStart= 0;
 uint32_t            lastTouch = 0;
+bool                prevTouchValid = false; // last frame's tp.valid, for true press/release edge detection (see loop())
 DetectionType       lastAlertType = DetectionType::UNKNOWN;
 uint32_t            lastAlertHits = 1; // times this exact MAC+type has ever matched — see Squachy's "seen before" reaction
 const uint16_t      TOUCH_DEBOUNCE_MS = 200;
@@ -733,6 +734,13 @@ void setup() {
 void loop() {
     uint32_t now = millis();
     TouchPoint tp = pollTouch();
+    // True only on the exact frame a touch begins/ends -- unlike
+    // TOUCH_DEBOUNCE_MS below (a cooldown timer that still re-fires on a
+    // long-held finger once the cooldown elapses), these compare this
+    // frame's tp.valid against last frame's, so they each fire exactly
+    // once per physical press no matter how long it's held.
+    bool touchJustDown = tp.valid && !prevTouchValid;
+    bool touchJustUp    = !tp.valid && prevTouchValid;
     engine.loop();
 
     // Rotate button lives in the title bar's top-right corner, shown on
@@ -888,27 +896,88 @@ void loop() {
             // was turned on — a tap on empty background shouldn't pet
             // a mascot that isn't there.
             bool boring = Settings::boringMode();
+            ButtonId barBtn = tp.valid ? Theme::hitTestButtonBar(tp.x, tp.y, tft.width(), tft.height()) : ButtonId::NONE;
+
+            // Left/right 10% slivers of the screen (excluding the button
+            // bar row itself, so its own leftmost/rightmost buttons still
+            // win there) cycle the background one step. Edge-triggered on
+            // touchJustDown rather than the TOUCH_DEBOUNCE_MS cooldown
+            // below, so a held finger fires exactly once no matter how
+            // long it stays down. This frees up tapping Squachy himself
+            // for the gesture classifier instead of also nudging the
+            // background, so he can be poked without changing the scene.
+            const int edgeZoneW = tft.width() / 10;
+            bool inEdgeZone = tp.valid && barBtn == ButtonId::NONE &&
+                               (tp.x < edgeZoneW || tp.x >= tft.width() - edgeZoneW);
+
+            // Squachy gesture state, tracked across frames from the
+            // moment a touch lands on him until it releases. A quick tap
+            // (released before SQ_HOLD_MS with negligible movement) reads
+            // as PETTED -- the only one of the three that counts toward
+            // the persisted pet-count/milestones. A stationary press held
+            // past SQ_HOLD_MS reads as HELD. Movement past SQ_MOVE_PX
+            // reads as PETTING (a drag/stroke) and keeps firing, throttled
+            // internally by squachy.cpp, for as long as the stroke
+            // continues.
+            static bool     sqActive = false;
+            static bool     sqHeld = false;
+            static bool     sqPetting = false;
+            static uint32_t sqStartMs = 0;
+            static int      sqStartX = 0, sqStartY = 0;
+            constexpr uint32_t SQ_HOLD_MS = 600;
+            constexpr int32_t  SQ_MOVE_PX = 12;
+            constexpr int32_t  SQ_MOVE_PX_SQ = SQ_MOVE_PX * SQ_MOVE_PX;
+
             if (!boring && Squachy::onboardingActive() && tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
                 Squachy::onboardingTapAdvance(tp.x, tp.y)) {
                 lastTouch = now;
-            } else if (!boring && tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS && Squachy::hitTest(tp.x, tp.y)) {
-                lastTouch = now;
-                Squachy::trigger(Squachy::Event::PETTED);
-                Settings::cycleBackground();
+            } else if (touchJustDown && inEdgeZone) {
+                if (tp.x < edgeZoneW) Settings::cyclePrevBackground();
+                else                  Settings::cycleBackground();
+            } else if (!boring && tp.valid) {
+                if (touchJustDown) {
+                    sqActive = Squachy::hitTest(tp.x, tp.y);
+                    sqHeld = false;
+                    sqPetting = false;
+                    sqStartMs = now;
+                    sqStartX = tp.x;
+                    sqStartY = tp.y;
+                }
+                if (sqActive) {
+                    int32_t dx = tp.x - sqStartX;
+                    int32_t dy = tp.y - sqStartY;
+                    if ((dx * dx + dy * dy) > SQ_MOVE_PX_SQ) sqPetting = true;
+                    if (sqPetting) {
+                        Squachy::trigger(Squachy::Event::PETTING);
+                    } else if (!sqHeld && (now - sqStartMs) >= SQ_HOLD_MS) {
+                        sqHeld = true;
+                        Squachy::trigger(Squachy::Event::HELD);
+                    }
+                }
             } else if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
-                ButtonId b = Theme::hitTestButtonBar(tp.x, tp.y, tft.width(), tft.height());
                 lastTouch = now;
-                trackOutfitEasterEgg(b);
-                if (b == ButtonId::LOG)  { Squachy::trigger(Squachy::Event::LOG_OPENED); enterLog(); }
-                else if (b == ButtonId::CLR) { engine.clearLog(); Squachy::trigger(Squachy::Event::LOG_CLEARED); enterClear(); }
+                trackOutfitEasterEgg(barBtn);
+                if (barBtn == ButtonId::LOG)  { Squachy::trigger(Squachy::Event::LOG_OPENED); enterLog(); }
+                else if (barBtn == ButtonId::CLR) { engine.clearLog(); Squachy::trigger(Squachy::Event::LOG_CLEARED); enterClear(); }
                 // SCAN is a no-op in CLEAR (we're already there)
                 else if (boring && tp.y >= 20) {
                     // No Squachy to tap for this in boring mode — any tap
                     // on the main content area (below the title bar, not
-                    // a real button) cycles the background instead, so
-                    // it's still reachable without him.
+                    // a real button, and not already claimed by an edge
+                    // zone above) cycles the background instead, so it's
+                    // still reachable without him.
                     Settings::cycleBackground();
                 }
+            }
+
+            // Finalize the Squachy gesture on the exact frame the touch
+            // releases, wherever the finger happens to end up (it can
+            // slide off him mid-stroke and still release cleanly).
+            if (touchJustUp && sqActive) {
+                if (!sqPetting && !sqHeld) {
+                    Squachy::trigger(Squachy::Event::PETTED);
+                }
+                sqActive = false;
             }
             break;
         }
@@ -1045,4 +1114,6 @@ void loop() {
         frame.pushSprite(0, 0);
     }
 #endif
+
+    prevTouchValid = tp.valid;
 }

@@ -28,6 +28,7 @@ namespace Settings {
 
     Background background();
     void       cycleBackground();    // advances+wraps, persists
+    void       cyclePrevBackground(); // same, but backward
 
     bool       inverted();
     void       toggleInvert();       // persists only — caller applies tft.invertDisplay()

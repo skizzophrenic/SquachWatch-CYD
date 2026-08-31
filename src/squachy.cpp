@@ -133,8 +133,13 @@ static const char* const ONBOARD_LINES[] = {
     "No magic. Just WiFi and Bluetooth, matching known hardware as it passes by.",
     "ALL CLEAR means nothing's around. It flips to a big flashing ALERT the second something matches.",
     "Down there: SCAN rescans, LOG shows history, CLR wipes it.",
-    "Up top: the left icon opens Settings, the right one rotates the screen.",
-    "That's everything. Tap me anytime, and stay squachy.",
+#if defined(AWOK)
+    "Up top left: Settings. The far left/right edges of the screen swap backgrounds, one swap per tap.",
+#else
+    "Up top: left icon is Settings, right one rotates. Far left/right edges of the screen swap backgrounds.",
+#endif
+    "Tap me for a pet, hold me for a beat longer, or stroke me for the good stuff.",
+    "That's everything. Stay squachy.",
 };
 static const uint8_t  ONBOARD_N        = sizeof(ONBOARD_LINES) / sizeof(ONBOARD_LINES[0]);
 static const uint32_t ONBOARD_STEP_MS  = 11000; // auto-advances if nobody taps
@@ -178,6 +183,29 @@ static const char* PET_LINES[] = {
     "You'll tell people. Nobody will believe you.",
     "Petting confirmed. No takebacks.",
     "Witnesses say less than you're about to.",
+};
+
+// A stationary press-and-hold reads as more deliberate than a quick
+// tap -- a beat longer, a bit more sincere, still self-aware about it.
+static const char* HELD_LINES[] = {
+    "Okay, that's actually nice.",
+    "Don't stop. I mean it.",
+    "This is a whole moment right now.",
+    "Five more seconds. I'm counting.",
+    "You found my good side.",
+    "I could stay like this.",
+};
+
+// An actual dragging/stroking touch is the most affectionate of the
+// three gestures -- leans further into "genuinely enjoying this" than
+// PET_LINES or HELD_LINES do.
+static const char* PETTING_LINES[] = {
+    "Okay yeah. This is the good stuff.",
+    "I'm not saying I purr. I'm not saying I don't.",
+    "This is exactly what I needed today.",
+    "Cryptid melting. Send help. Don't actually.",
+    "You've unlocked my trust. Briefly.",
+    "This is going in the highlight reel.",
 };
 
 // A yawn/nap moment for when nothing's happened in a long while — a
@@ -644,6 +672,26 @@ void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal, uint32_t hitCo
                 say(s_milestoneBuf, 5500);
             } else {
                 say(pick(PET_LINES, 20), MIN_BUBBLE_MS);
+            }
+            break;
+        }
+        case Event::HELD: {
+            mood = Mood::BOUNCE;
+            moodUntil = now + 1500;
+            s_petFxStart = now;
+            s_petFxUntil = now + 2600;
+            say(pick(HELD_LINES, 6), MIN_BUBBLE_MS);
+            break;
+        }
+        case Event::PETTING: {
+            mood = Mood::BOUNCE;
+            moodUntil = now + 900;
+            s_petFxStart = now;
+            s_petFxUntil = now + 1400;
+            static uint32_t lastLineAt = 0;
+            if (now - lastLineAt > 2000) {
+                lastLineAt = now;
+                say(pick(PETTING_LINES, 6), MIN_BUBBLE_MS);
             }
             break;
         }

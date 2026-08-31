@@ -13,7 +13,11 @@ namespace Squachy {
         LOG_CLEARED,
         ROTATED,
         BOOTED,
-        PETTED,       // the user tapped him directly — see hitTest()
+        PETTED,       // a quick tap on him — see hitTest()
+        HELD,         // a stationary press-and-hold on him past a threshold
+        PETTING,      // a dragging/stroking touch on him -- fires repeatedly
+                      // (throttled) for as long as the stroke continues, not
+                      // once per gesture like PETTED/HELD
     };
 
     // Call once from an event site (main.cpp) to make Squachy react.

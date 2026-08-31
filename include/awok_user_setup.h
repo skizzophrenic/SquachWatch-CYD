@@ -44,10 +44,17 @@
 #define PWM_FREQ           5000
 #define PWM_MAX_DUTY       255
 
-// SPI frequencies — values from the Marauder V6.1 stock repo. If the
-// display goes black under WiFi/BLE load, drop SPI_FREQUENCY to
-// 20 MHz — not a crash, just APB scaling corrupting the SPI divider.
-#define SPI_FREQUENCY         27000000
+// SPI frequencies — 27 MHz here was inherited from the Marauder V6.1
+// stock repo's own config, tuned for that project's update patterns,
+// not this one's (a full-screen sprite blit over SPI every frame, so
+// display clock speed directly drives animation smoothness). Both CYD
+// boards run their display at 40 MHz, including cyd35 which shares its
+// touch bus with the display the same way this board does -- trying
+// that here too. If the display goes black under WiFi/BLE load (a
+// real, documented ESP32 phenomenon: dynamic APB clock scaling can
+// perturb the SPI clock divider), drop back toward 27 MHz or the
+// stock repo's fallback of 20 MHz.
+#define SPI_FREQUENCY         40000000
 #define SPI_READ_FREQUENCY    20000000
 #define SPI_TOUCH_FREQUENCY    2500000
 
