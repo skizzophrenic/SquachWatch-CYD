@@ -23,18 +23,6 @@ static const char* targetLabel(DetectionType t) {
     }
 }
 
-// Picks the largest text size (up to maxSize) that fits within maxW,
-// so the giant alert strings never overflow into a mid-word wrap on
-// the narrower 240px portrait width (some, like "CARD SKIMMER", even
-// overflow 320px landscape at size 4).
-static int fitTextSize(TFT_eSPI& t, const char* s, int maxW, int maxSize) {
-    for (int sz = maxSize; sz >= 1; sz--) {
-        t.setTextSize(sz);
-        if (t.textWidth(s) <= maxW) return sz;
-    }
-    return 1;
-}
-
 static Detection s_last;
 static bool s_touched = false;
 
@@ -79,14 +67,17 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now) {
         }
     }
 
-    // Target type (giant, but shrinks to fit the longer labels like
-    // "CARD SKIMMER" on narrower screens)
-    const char* tgt = targetLabel(s_last.type);
-    fitTextSize(t, tgt, w - 8, 4);
-    t.setTextColor(Theme::VAPOR_PINK, Theme::BG);
-    int t2 = t.textWidth(tgt);
-    t.setCursor((w - t2) / 2, 60);
-    t.print(tgt);
+    // Target type — same Bangers LG face as "!! DETECTION !!" above,
+    // so the two headline lines on this screen read as one voice
+    // instead of one comic-impact line over one library-default line.
+    // Widest label ("CARD SKIMMER") is ~173px at this size, still well
+    // under the narrowest (240px) screen width, so no shrink fallback
+    // needed here either.
+    {
+        const char* tgt = targetLabel(s_last.type);
+        int tw2 = Theme::bangersTextWidth(tgt, Theme::BangersSize::LG);
+        Theme::drawBangersText(t, (w - tw2) / 2, 50, tgt, Theme::VAPOR_PINK, Theme::BangersSize::LG);
+    }
 
     // How sure we actually are — see docs/DETECTIONS.md. This is the
     // whole point of showing it here: a Medium/Low reading should look

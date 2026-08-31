@@ -59,7 +59,12 @@ void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int scroll
         return;
     }
 
-    int rowH = 22;
+    // Rows got taller to make room for the type label's Font4 (26px,
+    // same smooth built-in font as the ALERT screen's target-type line
+    // — see ui_alert.cpp) instead of the plain default font at size 2
+    // (16px). Fewer rows fit per screen now, but it's the same
+    // "detection" typography everywhere it shows up.
+    int rowH = 40;
     int y = bodyTop;
     int idx = g_scroll;
     int max = (bodyH / rowH);
@@ -71,10 +76,11 @@ void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int scroll
         t.drawFastHLine(0, y + rowH - 1, w, Theme::PURPLE);
 
         // Type label (colored)
-        t.setTextSize(2);
+        t.setTextFont(4);
         t.setTextColor(Theme::colorFor(d->type), Theme::BG);
-        t.setCursor(4, y + 3);
+        t.setCursor(4, y + 2);
         t.print(detectionTypeName(d->type));
+        t.setTextFont(1);
 
         // MAC + RSSI line
         t.setTextSize(1);
@@ -83,19 +89,19 @@ void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int scroll
         snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
                  d->mac[0], d->mac[1], d->mac[2],
                  d->mac[3], d->mac[4], d->mac[5]);
-        t.setCursor(4, y + 14);
+        t.setCursor(4, y + 30);
         t.print(mac);
 
         // RSSI — MAC above runs "XX:XX:XX:XX:XX:XX" (17 chars, 102px
         // at this font size) starting from x=4, so this column can't
         // start before ~110 without drawing on top of it.
         t.setTextColor(Theme::CYAN, Theme::BG);
-        t.setCursor(112, y + 14);
+        t.setCursor(112, y + 30);
         t.printf("%ddBm", d->rssi);
 
         // Hits
         t.setTextColor(Theme::VAPOR_PURPLE, Theme::BG);
-        t.setCursor(164, y + 14);
+        t.setCursor(164, y + 30);
         t.printf("x%u", d->hits);
 
         // Timestamp (right edge)
@@ -105,7 +111,7 @@ void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int scroll
         snprintf(ts, sizeof(ts), "%02lu:%02lu", (unsigned long)(sec / 60), (unsigned long)(sec % 60));
         int tw = t.textWidth(ts);
         t.setTextColor(Theme::VAPOR_PINK, Theme::BG);
-        t.setCursor(w - tw - 4, y + 3);
+        t.setCursor(w - tw - 4, y + 4);
         t.print(ts);
 
         y += rowH;
