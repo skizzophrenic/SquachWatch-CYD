@@ -302,10 +302,18 @@ void DetectionEngine::postBle(Detection d) {
             // first sighting, and then silently stop being detected
             // for good.
             bool reactivating = !_log[slot].active;
-            _log[slot].hits++;
+            // hits counts distinct sightings (comes-and-goes, gated by
+            // expireStale's active flag), not raw advertisement
+            // packets -- a BLE beacon like an AirTag advertises every
+            // 1-2s, so incrementing on every packet made this climb
+            // into the thousands within an hour of it just sitting
+            // nearby instead of meaning anything. rssi/lastSeen still
+            // update on every packet regardless, since those drive
+            // "is it still actually here" freshness, not the count.
             _log[slot].rssi = d.rssi;
             _log[slot].lastSeen = millis();
             if (reactivating) {
+                _log[slot].hits++;
                 _log[slot].active = true;
                 _log[slot].firstSeen = millis();   // fresh sighting for alert purposes
                 _typeCounts[(uint8_t)d.type]++;

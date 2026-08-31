@@ -132,7 +132,8 @@ static const char* const ONBOARD_LINES[] = {
     "SquachWatch listens for surveillance nearby -- cameras, plate readers, trackers like AirTags.",
     "No magic. Just WiFi and Bluetooth, matching known hardware as it passes by.",
     "ALL CLEAR means nothing's around. It flips to a big flashing ALERT the second something matches.",
-    "Down there: SCAN rescans, LOG shows history, CLR wipes it. That's the whole interface.",
+    "Down there: SCAN rescans, LOG shows history, CLR wipes it.",
+    "Up top: the left icon opens Settings, the right one rotates the screen.",
     "That's everything. Tap me anytime, and stay squachy.",
 };
 static const uint8_t  ONBOARD_N        = sizeof(ONBOARD_LINES) / sizeof(ONBOARD_LINES[0]);
@@ -466,30 +467,34 @@ static const char* buildStatLine() {
 }
 
 // A comment on whichever background is currently active — indexed
-// directly by Settings::Background, so it always tracks BACKGROUND_COUNT
-// without a switch to keep in sync. Folded into idle chatter alongside
-// buildStatLine() (see tick()).
-static const char* const BG_LINES[15][3] = {
+// directly by Settings::Background. The static_assert is the actual
+// "kept in sync" mechanism -- this used to just be a comment saying
+// so, and silently went stale (still had rows for three backgrounds
+// that were removed from the enum) without anything catching it,
+// which meant every background after the removed ones was reading
+// the wrong row's lines for a while. Folded into idle chatter
+// alongside buildStatLine() (see tick()).
+static const char* const BG_LINES[][3] = {
     /* MATRIX    */ { "Matrix rain again. Very hacker of me.", "Green code, brown fur. Bold combo.", "I could read this if I tried. I won't." },
     /* STARFIELD */ { "Starfield's up. Feeling cosmic.", "Somewhere out there, a bigger cryptid.", "Space is just the woods, but darker." },
     /* TOASTERS  */ { "Flying toasters. A classic.", "Nobody needs that much toast airborne.", "After Dark energy today." },
     /* LAVALAMP  */ { "Lava lamp's mesmerizing. Don't judge me.", "Slow blobs. Relatable pace.", "This is basically my whole personality." },
-    /* CRYPTID   */ { "Cryptid cam's on. My people.", "Mothman says hi. Probably.", "We don't do interviews. We do vibes." },
-    /* RADAR     */ { "Radar sweep. Very serious equipment vibes.", "Sweeping for threats. And snacks.", "Beep boop. That's radar for 'all good.'" },
-    /* RAIN      */ { "Rain on the glass. Cozy scan today.", "Perfect weather for staying hidden.", "Rain washes away footprints. Mine especially." },
     /* AQUARIUM  */ { "Aquarium mode. Very zen.", "Fish don't do opsec. Rookies.", "I'd get a tank but I'm camera-shy." },
     /* TERMINAL  */ { "Terminal log background. Very my speed.", "Green text, brown fur, good times.", "Looks official. It's mostly vibes though." },
     /* FIREFLIES */ { "Fireflies out tonight. Nice.", "Little lights, big ambiance.", "They're not surveillance. I checked." },
-    /* AURORA    */ { "Aurora's gorgeous today.", "Nature's own light show. No permit required.", "Even the sky's got better lighting than most cameras." },
     /* FIRE      */ { "Fire background. Cozy, not concerning.", "Warm vibes, zero smoke alarms.", "Nothing's actually burning. Probably." },
     /* SNOWFALL  */ { "Snowing again. Big feet, better traction.", "Perfect weather for leaving mysterious tracks.", "Cold out. I'm built for this." },
     /* SPECTRUM  */ { "RF spectrum's live. That's the real stuff.", "This is actual signal data. Neat, right?", "Watching the airwaves. Very on-brand." },
     /* TUNNEL    */ { "Wireframe tunnel. Very retro-future.", "Feels like we're going somewhere. We're not.", "80s sci-fi vibes today." },
 };
+static_assert(sizeof(BG_LINES) / sizeof(BG_LINES[0]) == Settings::BACKGROUND_COUNT,
+              "BG_LINES must have exactly one row per Settings::Background value -- "
+              "a row count mismatch here means some background is silently reading "
+              "another one's lines (see the incident this assert was added after).");
 
 static const char* pickBackgroundLine() {
     uint8_t idx = (uint8_t)Settings::background();
-    if (idx >= 15) idx = 0;
+    if (idx >= Settings::BACKGROUND_COUNT) idx = 0;
     return BG_LINES[idx][random(0, 3)];
 }
 
@@ -949,13 +954,13 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
             break;
         }
         case OutfitId::UNICORN: {
-            // Base sits right at the crest peak (see drawBody's
-            // sagittal-crest triangle a few lines below this switch,
-            // tip at hy - S(14)) so the horn reads as growing out of
-            // his hair instead of floating above it. Pastel fur is
-            // handled separately, up in drawBody()'s furMain/furLight
-            // block.
-            int baseY = hy - S(14);
+            // Base sits right at hy -- the top edge of the head shape
+            // itself (see drawBody's head fillRoundRect a few lines
+            // below this switch) -- not up at the crest peak (hy -
+            // S(14)), which put the whole horn floating well above his
+            // actual face. Pastel fur is handled separately, up in
+            // drawBody()'s furMain/furLight block.
+            int baseY = hy;
             int tipY  = baseY - S(24);
             int baseW = S(9);
             t.fillTriangle(cx2 - baseW / 2, baseY, cx2 + baseW / 2, baseY, cx2, tipY, WHITE);

@@ -19,7 +19,6 @@ const char* backgroundName(Background b) {
         case Background::STARFIELD: return "STARFIELD";
         case Background::TOASTERS:  return "FLYING TOASTERS";
         case Background::LAVALAMP:  return "LAVA LAMP";
-        case Background::CRYPTID:   return "CRYPTID CAM";
         case Background::AQUARIUM:  return "AQUARIUM";
         case Background::TERMINAL:  return "TERMINAL LOG";
         case Background::FIREFLIES: return "FIREFLIES";

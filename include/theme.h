@@ -153,11 +153,6 @@ namespace Theme {
     // near neighbors to approximate a blob merge.
     void drawLavaLamp(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);
 
-    // Night-vision cryptid cam: green monochrome wash, grain/scanline
-    // texture, a corner-cut "goggle tunnel" vignette, and a few Bigfoot-
-    // silhouette walkers with glowing eyes pacing across the band.
-    void drawCryptidCam(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);
-
     // A handful of simple fish silhouettes drifting side to side at
     // different depths, with slow rising bubbles.
     void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);
