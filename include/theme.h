@@ -105,7 +105,15 @@ namespace Theme {
         int x[3], w[3];
     };
     ButtonBarGeom computeButtonBar(int screenW, int screenH);
-    void drawButtonBar(TFT_eSPI& t, ButtonId highlighted);
+
+    // MAIN is the normal [SCAN][LOG][CLR] bar. SCAN_PICKER relabels the
+    // exact same three slots as [BLE][WIFI][BACK] -- CLEAR's SCAN
+    // button opens this in place rather than switching screens, so the
+    // slot positions (and hitTestButtonBar's ButtonId::SCAN/LOG/CLR
+    // return values) stay identical; only the caller's interpretation
+    // of a hit changes based on which mode it asked to draw.
+    enum class ButtonBarMode { MAIN, SCAN_PICKER };
+    void drawButtonBar(TFT_eSPI& t, ButtonId highlighted, ButtonBarMode mode = ButtonBarMode::MAIN);
     ButtonId hitTestButtonBar(int x, int y, int screenW, int screenH);
 
     // 1-pixel horizontal scanline (used on the boot screen).

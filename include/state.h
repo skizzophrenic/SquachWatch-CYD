@@ -60,7 +60,8 @@ enum class AppState : uint8_t {
     LOG      = 3,
     SETTINGS = 4,
     DIARY    = 5,
-    OUTFIT   = 6
+    OUTFIT   = 6,
+    RAWSCAN  = 7   // manual BLE/WiFi scanner, reached via CLEAR's SCAN picker
 };
 
 enum class ButtonId : uint8_t {

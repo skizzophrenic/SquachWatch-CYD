@@ -15,6 +15,7 @@
 #include "ui_clear.h"
 #include "ui_alert.h"
 #include "ui_log.h"
+#include "ui_rawscan.h"
 #include "ui_settings.h"
 #include "ui_diary.h"
 #include "ui_outfit.h"
@@ -618,9 +619,16 @@ static void enterBoot() {
 #endif
 }
 
+// True while CLEAR's SCAN button has swapped the bottom bar to the
+// [BLE][WIFI][BACK] picker (see the CLEAR case's touch handling in
+// loop()). Reset on every enterClear() so returning here from
+// anywhere else never leaves a stale picker showing.
+static bool s_scanPickerOpen = false;
+
 static void enterClear() {
     state = AppState::CLEAR;
     transitionStart = millis();
+    s_scanPickerOpen = false;
     uiClearInit(*canvas);
 #if defined(CYD35)
     clearSharedFrameBuffer();
@@ -643,6 +651,17 @@ static void enterLog() {
     state = AppState::LOG;
     transitionStart = millis();
     uiLogInit(*canvas);
+}
+
+static bool s_rawScanIsBle = true;
+
+static void enterRawScan(bool isBle) {
+    state = AppState::RAWSCAN;
+    transitionStart = millis();
+    s_rawScanIsBle = isBle;
+    if (isBle) engine.startRawBleScan();
+    else       engine.startRawWifiScan();
+    uiRawScanInit(*canvas, isBle);
 }
 
 static void enterSettings() {
@@ -1056,20 +1075,20 @@ void loop() {
                 // per logical frame even though this draws twice.
                 int halfH = tft.height() / 2;
                 frame.setViewport(0, 0, tft.width(), tft.height(), true);
-                uiClearTick(frame, now, engine, true);
+                uiClearTick(frame, now, engine, true, s_scanPickerOpen);
                 frame.pushSprite(0, 0);
                 frame.setViewport(0, -halfH, tft.width(), tft.height(), true);
-                uiClearTick(frame, now, engine, false);
+                uiClearTick(frame, now, engine, false, s_scanPickerOpen);
                 frame.pushSprite(0, halfH);
                 frame.resetViewport();
             } else {
                 // Fallback if a post-boot rotate ever failed to
                 // reallocate `frame` (see loop()) -- same direct-to-tft
                 // path this board already uses for every other screen.
-                uiClearTick(tft, now, engine);
+                uiClearTick(tft, now, engine, true, s_scanPickerOpen);
             }
 #else
-            uiClearTick(*canvas, now, engine);
+            uiClearTick(*canvas, now, engine, true, s_scanPickerOpen);
 #endif
             // Check for new detection — gated by the settings-menu
             // confidence filter (LOW_CONF/default = no filtering, every
@@ -1160,9 +1179,17 @@ void loop() {
             } else if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 lastTouch = now;
                 trackOutfitEasterEgg(barBtn);
-                if (barBtn == ButtonId::LOG)  { Squachy::trigger(Squachy::Event::LOG_OPENED); enterLog(); }
+                if (s_scanPickerOpen) {
+                    // The bar's slots are relabeled [BLE][WIFI][BACK]
+                    // right now (see the scanMenu arg on uiClearTick()
+                    // above) -- same ButtonId::SCAN/LOG/CLR positions,
+                    // different meaning while this is open.
+                    if (barBtn == ButtonId::SCAN)      { s_scanPickerOpen = false; enterRawScan(true); }
+                    else if (barBtn == ButtonId::LOG)  { s_scanPickerOpen = false; enterRawScan(false); }
+                    else if (barBtn == ButtonId::CLR)  { s_scanPickerOpen = false; }
+                } else if (barBtn == ButtonId::LOG)  { Squachy::trigger(Squachy::Event::LOG_OPENED); enterLog(); }
                 else if (barBtn == ButtonId::CLR) { engine.clearLog(); Squachy::trigger(Squachy::Event::LOG_CLEARED); enterClear(); }
-                // SCAN is a no-op in CLEAR (we're already there)
+                else if (barBtn == ButtonId::SCAN) { s_scanPickerOpen = true; }
                 else if (boring && tp.y >= 20) {
                     // No Squachy to tap for this in boring mode — any tap
                     // on the main content area (below the title bar, not
@@ -1233,6 +1260,32 @@ void loop() {
                     int dy = tp.y - lastY;
                     if (abs(dy) > 10) {
                         uiLogScroll(dy > 0 ? 1 : -1);
+                        lastY = tp.y;
+                    }
+                } else {
+                    lastY = tp.y;
+                }
+            } else {
+                lastY = -1;
+            }
+            break;
+        }
+        case AppState::RAWSCAN: {
+            bool done = s_rawScanIsBle ? engine.rawBleScanDone() : engine.rawWifiScanDone();
+            uiRawScanTick(*canvas, now, engine, s_rawScanIsBle, done);
+            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
+                uiRawScanHitBack(tp.x, tp.y, tft.width(), tft.height())) {
+                lastTouch = now;
+                engine.stopRawScan();
+                enterClear();
+            }
+            // Swipe to scroll, same as LOG.
+            static int lastY = -1;
+            if (tp.valid) {
+                if (lastY >= 0) {
+                    int dy = tp.y - lastY;
+                    if (abs(dy) > 10) {
+                        uiRawScanScroll(dy > 0 ? 1 : -1);
                         lastY = tp.y;
                     }
                 } else {

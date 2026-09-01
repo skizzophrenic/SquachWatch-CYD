@@ -9,4 +9,9 @@ void uiClearInit(TFT_eSPI& t);
 // mutation for boards that render in multiple physical bands per
 // logical frame. Defaults to true (unchanged behavior for single-pass
 // boards).
-void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance = true);
+// scanMenu: true while the SCAN button's BLE/WIFI picker is open --
+// swaps the bottom bar to Theme::ButtonBarMode::SCAN_PICKER. Nothing
+// else on this screen changes; the caller (main.cpp) is what actually
+// interprets a tap on the relabeled slots differently.
+void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
+                  bool advance = true, bool scanMenu = false);

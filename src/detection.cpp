@@ -15,6 +15,20 @@
 // -------- global engine instance (referenced by callbacks) --------
 static DetectionEngine* g_engine = nullptr;
 
+// -------- manual raw scanner state (see startRawBleScan/startRawWifiScan) --------
+// NONE = normal continuous signature-matched scanning (the default).
+// Only one of these is ever active at a time -- see stopRawScan().
+enum class RawScanMode : uint8_t { NONE, BLE, WIFI };
+static RawScanMode g_rawMode        = RawScanMode::NONE;
+static uint32_t    g_rawBleStartMs  = 0;
+// How long a raw BLE sweep stays open before the UI is told it's
+// "done" -- a deliberately longer, focused dwell than the continuous
+// scan ever gives any one moment, which is the actual "more thorough"
+// part; devices keep updating in _rawBle past this point too (nothing
+// stops capturing), it's purely a UI cue for when to stop showing
+// "SCANNING..." and reveal the list.
+static const uint32_t RAW_BLE_SCAN_MS = 8000;
+
 // -------- helpers --------
 
 static void formatMac(char* dst, size_t dstSize, const uint8_t* mac) {
@@ -44,6 +58,18 @@ static void copyMac(char* dst12, const uint8_t* mac6) {
 class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
     void onResult(NimBLEAdvertisedDevice* adv) override {
         if (!g_engine) return;
+        if (g_rawMode == RawScanMode::WIFI) return;   // radio's dedicated to the WiFi sweep right now
+        if (g_rawMode == RawScanMode::BLE) {
+            RawBleResult r;
+            memset(&r, 0, sizeof(r));
+            const uint8_t* mac = adv->getAddress().getNative();
+            memcpy(r.mac, mac, 6);
+            r.rssi = adv->getRSSI();
+            const char* name = adv->getName().c_str();
+            if (name && name[0]) strncpy(r.name, name, sizeof(r.name) - 1);
+            g_engine->postRawBle(r);
+            return;
+        }
         Detection det;
         memset(&det, 0, sizeof(det));
         const uint8_t* mac = adv->getAddress().getNative();
@@ -227,6 +253,15 @@ bool DetectionEngine::init() {
 }
 
 void DetectionEngine::loop() {
+    if (g_rawMode != RawScanMode::NONE) {
+        // A raw scan owns the radio right now -- channel hopping here
+        // would fight WiFi.scanNetworks()'s own hopping during a WIFI
+        // sweep, and the WiFi promiscuous queue is empty anyway (it's
+        // disabled for the duration of either raw mode, see
+        // startRawBleScan/startRawWifiScan).
+        _sd.tick();
+        return;
+    }
     hopChannel();
     processWiFiQ();
     expireStale();
@@ -328,6 +363,100 @@ void DetectionEngine::postBle(Detection d) {
 
 void DetectionEngine::postBtClassic(Detection d) {
     pushLog(d);
+}
+
+void DetectionEngine::postRawBle(RawBleResult r) {
+    // Looked up by MAC and updated in place -- this is "everything
+    // currently visible", not a chronological log, so a device seen
+    // again just refreshes its existing row instead of duplicating it.
+    for (uint8_t i = 0; i < _rawBleCount; i++) {
+        if (memcmp(_rawBle[i].mac, r.mac, 6) == 0) {
+            _rawBle[i].rssi = r.rssi;
+            if (r.name[0]) strncpy(_rawBle[i].name, r.name, sizeof(_rawBle[i].name) - 1);
+            return;
+        }
+    }
+    if (_rawBleCount < RAW_BLE_CAP) {
+        _rawBle[_rawBleCount++] = r;
+    }
+    // else: full -- ignore further new devices until the next
+    // startRawBleScan() resets the list. RAW_BLE_CAP entries is plenty
+    // for a single focused sweep and keeps this bounded regardless of
+    // how many devices happen to be nearby.
+}
+
+void DetectionEngine::startRawBleScan() {
+    if (g_rawMode == RawScanMode::WIFI) WiFi.scanDelete();
+    _rawBleCount = 0;
+    // The continuous NimBLE scan (started once, forever, in init())
+    // keeps running -- onResult() just routes into postRawBle() above
+    // instead of the signature matcher while g_rawMode == BLE. WiFi's
+    // promiscuous capture is switched off so the radio is focused on
+    // BLE for the duration, per the "pause the continuous scan and
+    // focus on what we're scanning for" design.
+    esp_wifi_set_promiscuous(false);
+    g_rawMode = RawScanMode::BLE;
+    g_rawBleStartMs = millis();
+}
+
+bool DetectionEngine::rawBleScanDone() const {
+    return g_rawMode == RawScanMode::BLE && (millis() - g_rawBleStartMs) >= RAW_BLE_SCAN_MS;
+}
+
+const RawBleResult* DetectionEngine::rawBleAt(uint8_t idx) const {
+    if (idx >= _rawBleCount) return nullptr;
+    return &_rawBle[idx];
+}
+
+void DetectionEngine::startRawWifiScan() {
+    // Gate the BLE callback off first (it'd otherwise still be live
+    // during the scan) before touching the radio.
+    g_rawMode = RawScanMode::WIFI;
+    esp_wifi_set_promiscuous(false);
+    WiFi.scanNetworks(true /* async */);
+}
+
+bool DetectionEngine::rawWifiScanDone() const {
+    return g_rawMode == RawScanMode::WIFI && WiFi.scanComplete() >= 0;
+}
+
+uint8_t DetectionEngine::rawWifiCount() const {
+    if (!rawWifiScanDone()) return 0;
+    int n = WiFi.scanComplete();
+    return n > 0 ? (uint8_t)n : 0;
+}
+
+const char* DetectionEngine::rawWifiSsid(uint8_t idx) const {
+    // WiFi.SSID() returns a temporary String -- copy into a static
+    // buffer rather than returning a pointer into it (same pattern as
+    // macFmt() below).
+    static char buf[33];
+    buf[0] = 0;
+    if (idx < rawWifiCount()) {
+        String s = WiFi.SSID(idx);
+        strncpy(buf, s.c_str(), sizeof(buf) - 1);
+        buf[sizeof(buf) - 1] = 0;
+        if (buf[0] == 0) strncpy(buf, "(hidden)", sizeof(buf) - 1);
+    }
+    return buf;
+}
+
+int8_t DetectionEngine::rawWifiRssi(uint8_t idx) const {
+    return idx < rawWifiCount() ? (int8_t)WiFi.RSSI(idx) : 0;
+}
+
+uint8_t DetectionEngine::rawWifiChannel(uint8_t idx) const {
+    return idx < rawWifiCount() ? (uint8_t)WiFi.channel(idx) : 0;
+}
+
+bool DetectionEngine::rawWifiOpen(uint8_t idx) const {
+    return idx < rawWifiCount() && WiFi.encryptionType(idx) == WIFI_AUTH_OPEN;
+}
+
+void DetectionEngine::stopRawScan() {
+    if (g_rawMode == RawScanMode::WIFI) WiFi.scanDelete();
+    g_rawMode = RawScanMode::NONE;
+    esp_wifi_set_promiscuous(true);
 }
 
 void DetectionEngine::processWiFiQ() {

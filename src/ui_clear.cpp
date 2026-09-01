@@ -73,7 +73,7 @@ static void drawCounterLine(TFT_eSPI& t, int w, int y, const DetectionEngine& en
     t.print(buf);
 }
 
-void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance) {
+void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance, bool scanMenu) {
     int w = t.width();
     int h = t.height();
     // Recomputed every tick, not cached per-board: rotating the screen
@@ -249,5 +249,6 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // of the whole remaining strip first guarantees it's always clean
     // background before the buttons draw on top, regardless of cause.
     t.fillRect(0, countersBottom, w, h - countersBottom, Theme::BG);
-    Theme::drawButtonBar(t, ButtonId::NONE);
+    Theme::drawButtonBar(t, ButtonId::NONE,
+                         scanMenu ? Theme::ButtonBarMode::SCAN_PICKER : Theme::ButtonBarMode::MAIN);
 }

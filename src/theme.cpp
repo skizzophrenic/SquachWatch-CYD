@@ -201,8 +201,14 @@ ButtonBarGeom computeButtonBar(int screenW, int screenH) {
     return g;
 }
 
-void drawButtonBar(TFT_eSPI& t, ButtonId highlighted) {
+void drawButtonBar(TFT_eSPI& t, ButtonId highlighted, ButtonBarMode mode) {
     ButtonBarGeom g = computeButtonBar(t.width(), t.height());
+    if (mode == ButtonBarMode::SCAN_PICKER) {
+        drawButton(t, g.x[0], g.y, g.w[0], g.h, "[ BLE ]",  highlighted == ButtonId::SCAN);
+        drawButton(t, g.x[1], g.y, g.w[1], g.h, "[ WIFI ]", highlighted == ButtonId::LOG);
+        drawButton(t, g.x[2], g.y, g.w[2], g.h, "[ BACK ]", highlighted == ButtonId::CLR);
+        return;
+    }
     drawButton(t, g.x[0], g.y, g.w[0], g.h, "[ SCAN ]", highlighted == ButtonId::SCAN);
     drawButton(t, g.x[1], g.y, g.w[1], g.h, "[ LOG ]",  highlighted == ButtonId::LOG);
     drawButton(t, g.x[2], g.y, g.w[2], g.h, "[ CLR ]",  highlighted == ButtonId::CLR);
