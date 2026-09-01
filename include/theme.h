@@ -156,11 +156,6 @@ namespace Theme {
     // around when they exit.
     void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);
 
-    // Lava lamp: a few soft warm blobs drift vertically with a gentle
-    // sideways wobble inside a dark "glass tube", brightening as they
-    // near neighbors to approximate a blob merge.
-    void drawLavaLamp(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);
-
     // A handful of simple fish silhouettes drifting side to side at
     // different depths, with slow rising bubbles.
     void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);

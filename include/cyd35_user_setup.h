@@ -52,8 +52,11 @@
 #define PWM_FREQ           5000
 #define PWM_MAX_DUTY       255
 
-// SPI frequencies
-#define SPI_FREQUENCY         40000000
+// SPI frequencies -- 40MHz write was a cautious first guess; a friend's
+// independently-verified working config for this exact panel (QDtech
+// E32R35T / Sunton 3248S035R) runs the write clock at 55MHz, so trying
+// that here for the "everything feels slow" complaint.
+#define SPI_FREQUENCY         55000000
 #define SPI_READ_FREQUENCY    20000000
 #define SPI_TOUCH_FREQUENCY    2500000
 

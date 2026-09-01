@@ -506,7 +506,6 @@ static const char* const BG_LINES[][3] = {
     /* MATRIX    */ { "Matrix rain again. Very hacker of me.", "Green code, brown fur. Bold combo.", "I could read this if I tried. I won't." },
     /* STARFIELD */ { "Starfield's up. Feeling cosmic.", "Somewhere out there, a bigger cryptid.", "Space is just the woods, but darker." },
     /* TOASTERS  */ { "Flying toasters. A classic.", "Nobody needs that much toast airborne.", "After Dark energy today." },
-    /* LAVALAMP  */ { "Lava lamp's mesmerizing. Don't judge me.", "Slow blobs. Relatable pace.", "This is basically my whole personality." },
     /* AQUARIUM  */ { "Aquarium mode. Very zen.", "Fish don't do opsec. Rookies.", "I'd get a tank but I'm camera-shy." },
     /* TERMINAL  */ { "Terminal log background. Very my speed.", "Green text, brown fur, good times.", "Looks official. It's mostly vibes though." },
     /* FIREFLIES */ { "Fireflies out tonight. Nice.", "Little lights, big ambiance.", "They're not surveillance. I checked." },

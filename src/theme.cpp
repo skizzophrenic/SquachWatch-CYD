@@ -383,8 +383,10 @@ void drawMatrixRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advanc
     // (the default GLCD font can't render the old UTF-8 katakana bytes
     // correctly) drawn from a dense symbol/letter/digit set. Column
     // count adapts to the current width so it works in portrait
-    // (240px) as well as landscape (320px) without overflowing.
-    static const int  MAX_COLS = 64;
+    // (240px) through cyd35's 480px landscape without overflowing --
+    // MAX_COLS used to cap out at 320px/SPACING (64), which silently
+    // left the right third of cyd35's wider screen bare.
+    static const int  MAX_COLS = 96;
     static const int  SPACING  = 5;
     static const char GLYPHS[] =
         "01" "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -766,126 +768,6 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     }
 }
 
-// RGB565 -> 8-bit-per-channel, so the metaball blend math below can do
-// plain weighted averages. Standard 5/6/5 -> 8/8/8 expansion.
-static void rgb565to888(uint16_t c, uint8_t& r, uint8_t& g, uint8_t& b) {
-    r = (uint8_t)(((c >> 11) & 0x1F) * 255 / 31);
-    g = (uint8_t)(((c >> 5)  & 0x3F) * 255 / 63);
-    b = (uint8_t)((c         & 0x1F) * 255 / 31);
-}
-
-// Real metaball field, same technique as the "Lava Lamp" desktop app at
-// talkingsasquach.com (canvas + per-pixel field sum, r^2/d^2 falloff,
-// merge where the field crosses a threshold) — coarsened to a small
-// grid instead of per-pixel and rendered as filled blocks so it's
-// cheap enough for this MCU. Blob colors are read from the live Theme
-// palette (PURPLE/CYAN/PINK/VAPOR_*) each call, so switching the color
-// theme re-tints the lamp too.
-void drawLavaLamp(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
-    struct Blob { float x, y, vx, vy, r, pulse, px, py, sp, wb, rise; };
-    static const uint8_t N = 9;
-    static Blob    blobs[N];
-    static bool    inited = false;
-    static uint32_t lastMs = 0;
-
-    int w = t.width();
-    int bandH = yEnd - yStart;
-    if (bandH < 20) return;
-
-    if (!inited) {
-        for (uint8_t i = 0; i < N; i++) {
-            Blob& b = blobs[i];
-            b.x    = w / 2.0f + ((float)random(-100, 100) / 100.0f) * w * 0.3f;
-            b.y    = yStart + bandH / 2.0f + ((float)random(-100, 100) / 100.0f) * bandH * 0.3f;
-            b.r    = bandH * 0.10f + (float)random(0, 100) / 100.0f * bandH * 0.08f;
-            b.vx   = (float)random(-50, 50) / 100.0f;
-            b.vy   = (float)random(-50, 50) / 100.0f;
-            b.px   = (float)random(0, 6283) / 1000.0f;
-            b.py   = (float)random(0, 6283) / 1000.0f;
-            b.sp   = 0.012f + (float)random(0, 100) / 100.0f * 0.016f;
-            b.wb   = 0.014f + (float)random(0, 100) / 100.0f * 0.018f;
-            b.rise = (random(0, 2) ? 1.0f : -1.0f) * (0.04f + (float)random(0, 100) / 100.0f * 0.06f);
-            b.pulse = b.r;
-        }
-        inited = true;
-        lastMs = now;
-    }
-    float dt = (float)(now - lastMs) / 16.0f;   // ~1.0 at 60fps
-    if (dt <= 0.0f || dt > 4.0f) dt = 1.0f;
-    lastMs = now;
-
-    // Blob color palette — decomposed once per call, not once per grid
-    // cell, since it never changes mid-frame.
-    uint8_t cr[N], cg[N], cb[N];
-    static const uint16_t colSrc[6] = { PURPLE, CYAN, PINK, VAPOR_PURPLE, VAPOR_BLUE, VAPOR_PINK };
-    for (uint8_t i = 0; i < N; i++) rgb565to888(colSrc[i % 6], cr[i], cg[i], cb[i]);
-
-    for (uint8_t i = 0; i < N; i++) {
-        Blob& b = blobs[i];
-        b.px += b.sp * dt; b.py += b.sp * 1.3f * dt;
-        b.vx += sinf(b.px) * b.wb * dt;
-        b.vy += (cosf(b.py) * b.wb + b.rise * 0.04f) * dt;
-        b.vx *= 0.978f; b.vy *= 0.978f;
-        b.x  += b.vx * dt; b.y += b.vy * dt;
-        if (b.x < b.r)          { b.x = b.r;          b.vx =  fabsf(b.vx) * 0.6f; }
-        if (b.x > w - b.r)      { b.x = w - b.r;      b.vx = -fabsf(b.vx) * 0.6f; }
-        if (b.y < yStart + b.r) { b.y = yStart + b.r; b.vy =  fabsf(b.vy) * 0.5f; b.rise =  fabsf(b.rise); }
-        if (b.y > yEnd - b.r)   { b.y = yEnd - b.r;   b.vy = -fabsf(b.vy) * 0.5f; b.rise = -fabsf(b.rise); }
-        b.pulse = b.r * (1.0f + sinf(b.px * 1.8f) * 0.1f);
-    }
-
-    static const int   GRID      = 4;
-    static const float THRESHOLD = 0.8f;   // lower = blobs merge more readily ("more lava")
-    for (int gy = 0; gy * GRID < bandH; gy++) {
-        int wy = yStart + gy * GRID + GRID / 2;
-        for (int gx = 0; gx * GRID < w; gx++) {
-            int wx = gx * GRID + GRID / 2;
-            float sum = 0, wr = 0, wg = 0, wb2 = 0;
-            for (uint8_t i = 0; i < N; i++) {
-                float dx = wx - blobs[i].x, dy = wy - blobs[i].y;
-                float d2 = dx * dx + dy * dy;
-                if (d2 < 1.0f) d2 = 1.0f;
-                float contrib = (blobs[i].pulse * blobs[i].pulse) / d2;
-                sum += contrib;
-                wr  += cr[i] * contrib; wg += cg[i] * contrib; wb2 += cb[i] * contrib;
-            }
-            int bw = GRID, bh = GRID;
-            if (gx * GRID + GRID > w)     bw = w - gx * GRID;
-            if (gy * GRID + GRID > bandH) bh = bandH - gy * GRID;
-            if (sum < THRESHOLD) {
-                t.fillRect(gx * GRID, yStart + gy * GRID, bw, bh, BG);
-                continue;
-            }
-            float over = (sum - THRESHOLD) * 3.0f;
-            if (over > 1.0f) over = 1.0f;
-            float brf = 0.55f + over * 0.45f;
-            float rr = wr / sum * brf, gg = wg / sum * brf, bb2 = wb2 / sum * brf;
-            if (rr  > 255.0f) rr  = 255.0f;
-            if (gg  > 255.0f) gg  = 255.0f;
-            if (bb2 > 255.0f) bb2 = 255.0f;
-            t.fillRect(gx * GRID, yStart + gy * GRID, bw, bh,
-                       t.color565((uint8_t)rr, (uint8_t)gg, (uint8_t)bb2));
-        }
-    }
-
-    // Specular highlight per blob — same offset-radial-gradient trick
-    // as the reference JS lamp, approximated as a flat lightened disc
-    // (no true alpha blending here). This is what actually reads as
-    // "surface tension" / wet glossy lava rather than flat colored
-    // blobs.
-    for (uint8_t i = 0; i < N; i++) {
-        Blob& b = blobs[i];
-        int hx = (int)(b.x - b.pulse * 0.28f);
-        int hy = (int)(b.y - b.pulse * 0.28f);
-        int hr = (int)(b.pulse * 0.32f);
-        if (hr < 1) hr = 1;
-        uint16_t hcol = t.color565((uint8_t)((cr[i] + 255) / 2),
-                                   (uint8_t)((cg[i] + 255) / 2),
-                                   (uint8_t)((cb[i] + 255) / 2));
-        t.fillCircle(hx, hy, hr, hcol);
-    }
-}
-
 void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // species: 0 = minnow, 1 = angelfish, 2 = puffer, 3 = jellyfish
     // (its own drift-and-pulse motion instead of side-to-side swimming).
@@ -1244,7 +1126,10 @@ void drawFireflies(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
 
 void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     static const int CW = 4;
-    static const int MAXFW = 110, MAXFH = 80;
+    // MAXFW used to cap at 110 cells (440px) -- just short of cyd35's
+    // 480px landscape width, leaving a bare strip on the right. 120
+    // cells (480px) covers it.
+    static const int MAXFW = 120, MAXFH = 80;
     static uint8_t   heat[MAXFW * MAXFH];
     static float     acc[MAXFW];
     static bool      inited = false;

@@ -105,7 +105,6 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     switch (Settings::background()) {
         case Settings::Background::STARFIELD: Theme::drawStarfield(t, now, titleBottom, rainEnd); break;
         case Settings::Background::TOASTERS:   Theme::drawFlyingToasters(t, now, titleBottom, rainEnd); break;
-        case Settings::Background::LAVALAMP:   Theme::drawLavaLamp(t, now, titleBottom, rainEnd); break;
         case Settings::Background::AQUARIUM:   Theme::drawAquarium(t, now, titleBottom, rainEnd); break;
         case Settings::Background::TERMINAL:   Theme::drawTerminalLog(t, now, titleBottom, rainEnd); break;
         case Settings::Background::FIREFLIES:  Theme::drawFireflies(t, now, titleBottom, rainEnd); break;
@@ -240,6 +239,15 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         start += n;
     }
 
-    // Soft buttons
+    // Soft buttons. The background animation's own repaint stops at
+    // countersBottom (see rainEnd above) and each button only fills
+    // its own rect, so the row's margins/gaps around and between the
+    // three buttons were never actually touched by anything -- on
+    // cyd35 specifically (two-pass half-height rendering, see its
+    // CLEAR case in main.cpp) that let content from elsewhere in the
+    // shared sprite buffer show through there. An explicit flat clear
+    // of the whole remaining strip first guarantees it's always clean
+    // background before the buttons draw on top, regardless of cause.
+    t.fillRect(0, countersBottom, w, h - countersBottom, Theme::BG);
     Theme::drawButtonBar(t, ButtonId::NONE);
 }

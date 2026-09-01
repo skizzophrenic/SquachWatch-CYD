@@ -42,15 +42,15 @@
 //     XPT2046 again, CS=33 sharing the *display's* SPI bus (SCK/MOSI/
 //     MISO = 14/13/12) instead of getting a dedicated peripheral —
 //     this board has no capacitive-touch chip at all, so the I2C probe
-//     below is skipped entirely rather than just failing. Driven by a
-//     small raw-SPI reader (cyd35RawTouch()) over tft.getSPIinstance()
-//     -- the exact same peripheral TFT_eSPI itself uses for the
-//     display, not a second competing one, and not TFT_eSPI's own
-//     touch functions either (those looked completely dead in the real
-//     app on real hardware; see cyd35RawTouch()'s comment for the root
-//     cause). Reuses the original board's single-blob TouchCal system
-//     and landscape/flipped raw-axis map() logic (see pollTouch()) --
-//     one calibration covers every rotation, same as that board.
+//     below is skipped entirely rather than just failing. Driven
+//     through TFT_eSPI's own calibrateTouch/setTouch/getTouch path,
+//     same as AWOK below, not the standalone XPT2046_Touchscreen
+//     library — a separate SPIClass on the same physical bus as
+//     TFT_eSPI produced constant garbage reads and a free-running IRQ
+//     when that was tried. Unlike AWOK this board keeps its rotate
+//     button, so it keeps a 4-slot (one per rotation) calibration
+//     cache instead of AWOK's single blob — see the CYD35 branches in
+//     setup()/pollTouch() and cyd35EnsureCal()'s comment.
 //   - AWOK 2.4" (Marauder V6.1, built separately as env:awok): resistive
 //     XPT2046 sharing the display's VSPI bus like cyd35, but driven
 //     entirely through TFT_eSPI's own calibrateTouch/setTouch/getTouch
@@ -357,79 +357,95 @@ static void awokEnsureCal() {
 #endif  // AWOK
 
 #if defined(CYD35)
-// ---- cyd35: raw XPT2046 reads over the display's own SPI instance ----
-// TFT_eSPI's own native touch path (calibrateTouch/setTouch/getTouch)
-// looked completely dead in the real app on two separate physical
-// units -- confirmed via a standalone bit-banged probe that CS=33
-// itself is correct (clean baseline, real varying pressure on tap) --
-// so the wiring was never the problem. Root cause: TFT_eSPI's ESP32
-// touch code switches the SPI peripheral's low-level user register
-// between write-only mode (display pushes) and read mode (touch, needs
-// MISO capture) via a direct register poke (SET_BUS_READ_MODE in
-// TFT_eSPI_ESP32.h). Once this board does ANY display write -- even
-// just the boot splash -- that switch stops taking effect for
-// subsequent touch reads, which then return a constant/stale value
-// forever regardless of real touch state. Never an issue for AWOK: its
-// screens are sprite-buffered (RAM writes only, one pushSprite() burst
-// per frame), plenty of quiet bus time between physical SPI writes;
-// cyd35 draws most screens straight to the panel.
+// ---- cyd35: TFT_eSPI-native touch calibration, per rotation ----
+// A prior pass here used a hand-rolled raw-SPI reader (bypassing
+// TFT_eSPI's own touch code entirely) after the native path looked
+// completely dead in the real app. Root-cause turned out to be
+// unrelated to the touch code at all: sd_log.cpp's SD.begin() was
+// silently re-attaching the shared VSPI bus to the wrong GPIO pins
+// (see its comment) -- once that was fixed, the native path was never
+// re-tested. An independently-verified working config for this exact
+// panel (a friend's QDtech E32R35T port) confirms TFT_eSPI's native
+// calibrateTouch()/setTouch()/getTouch() is in fact the right approach
+// here, same as AWOK -- so back to that, now that the real bug is
+// fixed underneath it.
 //
-// Fix: bypass TFT_eSPI's touch code entirely. tft.getSPIinstance()
-// hands back the exact same SPIClass TFT_eSPI itself already uses for
-// the display (same VSPI peripheral, no second competing instance --
-// that competing-instance problem is what killed the original
-// standalone-XPT2046_Touchscreen-library attempt), and Arduino's own
-// SPIClass::transfer()/transfer16() already do proper full-duplex
-// (write+read) transfers without needing that fragile register dance.
-// Manual CS toggling + the plain XPT2046 command bytes, same sequence
-// TFT_eSPI's own (broken, for us) internals use internally.
-//
-// This also means cyd35 can reuse the exact same single-blob
-// TouchCal/applyCal() system and RAW_X/Y_MIN/MAX + landscape/flipped
-// map() logic the original 2.8" board already relies on (see
-// pollTouch()'s bottom branch and rawReadResistive()) -- one
-// calibration, good for every rotation, same as that board, instead of
-// the four-blob-per-rotation cache TFT_eSPI's own calibration format
-// would have needed.
-static bool cyd35RawTouch(uint16_t& rx, uint16_t& ry, uint16_t& rz) {
-    SPIClass& spi = tft.getSPIinstance();
-    spi.beginTransaction(SPISettings(2500000, MSBFIRST, SPI_MODE0));
-    digitalWrite(TOUCH_CS, LOW);
+// Unlike AWOK, this board keeps its rotate button, and TFT_eSPI's
+// calibration blob is baked relative to whichever rotation was active
+// when calibrateTouch() ran (the raw axis-swap/invert decision is
+// fixed at calibration time, only the current width/height scale
+// afterward), so one blob does not carry over correctly to a different
+// rotation. Four independent blobs, one per rotation, calibrated on
+// first use of each.
+static uint16_t cyd35TouchCal[4][5];
+static bool     cyd35TouchCalibrated[4] = { false, false, false, false };
 
-    int16_t tz = 0xFFF;
-    spi.transfer(0xb0);
-    tz += spi.transfer16(0xc0) >> 3;
-    tz -= spi.transfer16(0x00) >> 3;
-    if (tz == 4095) tz = 0;
-    rz = (uint16_t)tz;
+static const char* CYD35_TOUCH_NS = "cyd35touch";
 
-    uint16_t tmp;
-    spi.transfer(0xd0);
-    spi.transfer(0);
-    spi.transfer(0xd0);
-    spi.transfer(0);
-    spi.transfer(0xd0);
-    spi.transfer(0);
-    spi.transfer(0xd0);
-    tmp = spi.transfer(0);
-    tmp <<= 5;
-    tmp |= 0x1f & (spi.transfer(0x90) >> 3);
-    rx = tmp;
+static bool cyd35LoadTouchCal(uint8_t rot) {
+    Preferences p;
+    p.begin(CYD35_TOUCH_NS, true);
+    char key[8];
+    snprintf(key, sizeof(key), "cal5_%u", rot);
+    bool has = p.isKey(key);
+    if (has) {
+        p.getBytes(key, cyd35TouchCal[rot], sizeof(cyd35TouchCal[rot]));
+        cyd35TouchCalibrated[rot] = true;
+    }
+    p.end();
+    return has;
+}
 
-    spi.transfer(0);
-    spi.transfer(0x90);
-    spi.transfer(0);
-    spi.transfer(0x90);
-    spi.transfer(0);
-    spi.transfer(0x90);
-    tmp = spi.transfer(0);
-    tmp <<= 5;
-    tmp |= 0x1f & (spi.transfer(0) >> 3);
-    ry = tmp;
+static void cyd35SaveTouchCal(uint8_t rot) {
+    Preferences p;
+    p.begin(CYD35_TOUCH_NS, false);
+    char key[8];
+    snprintf(key, sizeof(key), "cal5_%u", rot);
+    p.putBytes(key, cyd35TouchCal[rot], sizeof(cyd35TouchCal[rot]));
+    p.end();
+}
 
-    digitalWrite(TOUCH_CS, HIGH);
-    spi.endTransaction();
-    return true;
+// The recovery path for a bad calibration -- same reasoning as
+// awokResetTouchCal(): this board's blobs live in their own NVS
+// namespace that TouchCal::reset() never touches.
+static void cyd35ResetTouchCal() {
+    Preferences p;
+    p.begin(CYD35_TOUCH_NS, false);
+    p.clear();
+    p.end();
+    for (uint8_t i = 0; i < 4; i++) cyd35TouchCalibrated[i] = false;
+}
+
+// Runs TFT_eSPI's own interactive 4-corner calibration for whichever
+// rotation is currently active and persists it under that rotation's
+// own key -- called from the title-bar long-press, Settings >
+// CALIBRATE TOUCH, and automatically the first time a given rotation
+// is used (see cyd35EnsureCal()).
+static void cyd35RunCalibration() {
+    uint8_t rot = screenRotation;
+    tft.fillScreen(Theme::BG);
+    tft.calibrateTouch(cyd35TouchCal[rot], Theme::VAPOR_PINK, Theme::BG, 15);
+    tft.setTouch(cyd35TouchCal[rot]);
+    cyd35TouchCalibrated[rot] = true;
+    cyd35SaveTouchCal(rot);
+}
+
+// Called at boot and every time the rotate button changes
+// screenRotation: re-arms that rotation's saved calibration if one
+// exists, or runs the interactive calibration once if this is the
+// first time this particular rotation has ever been used.
+static void cyd35EnsureCal(uint8_t rot) {
+    if (cyd35TouchCalibrated[rot]) {
+        tft.setTouch(cyd35TouchCal[rot]);
+        return;
+    }
+    if (cyd35LoadTouchCal(rot)) {
+        tft.setTouch(cyd35TouchCal[rot]);
+        Serial.printf("Loaded cyd35 touch cal for rotation %u from NVS.\n", rot);
+        return;
+    }
+    Serial.printf("cyd35: no saved cal for rotation %u, running interactive calibration.\n", rot);
+    cyd35RunCalibration();
 }
 #endif  // CYD35
 
@@ -461,22 +477,16 @@ static TouchPoint pollTouch() {
     }
 
 #if defined(CYD35)
-    // Raw XPT2046 read over the display's own SPI instance -- see
-    // cyd35RawTouch()'s comment for why this bypasses TFT_eSPI's own
-    // touch code. Same landscape/flipped raw-axis mapping and
-    // RAW_X/Y_MIN/MAX calibration the original board's path (bottom of
-    // this function) uses -- one calibration works for every rotation.
+    // TFT_eSPI-native touch path, same shape as AWOK's below -- see
+    // cyd35EnsureCal()'s comment for why this needs the per-rotation
+    // cache instead of one shared blob. Nothing to read until the
+    // current rotation's calibration has run at least once.
+    if (!cyd35TouchCalibrated[screenRotation]) return tp;
     {
-        uint16_t rx, ry, rz;
-        if (!cyd35RawTouch(rx, ry, rz)) return tp;
-        if (rz <= 175) return tp;
-        if (!landscape) {
-            tp.x = flipped ? map(rx, RAW_X_MIN, RAW_X_MAX, w, 0) : map(rx, RAW_X_MIN, RAW_X_MAX, 0, w);
-            tp.y = flipped ? map(ry, RAW_Y_MIN, RAW_Y_MAX, h, 0) : map(ry, RAW_Y_MIN, RAW_Y_MAX, 0, h);
-        } else {
-            tp.x = flipped ? map(ry, RAW_Y_MIN, RAW_Y_MAX, w, 0) : map(ry, RAW_Y_MIN, RAW_Y_MAX, 0, w);
-            tp.y = flipped ? map(rx, RAW_X_MIN, RAW_X_MAX, 0, h) : map(rx, RAW_X_MIN, RAW_X_MAX, h, 0);
-        }
+        uint16_t sx, sy;
+        if (!tft.getTouch(&sx, &sy)) return tp;
+        tp.x = (int)sx;
+        tp.y = (int)sy;
         tp.valid = (tp.x >= 0 && tp.x < w && tp.y >= 0 && tp.y < h);
     }
     return tp;
@@ -525,24 +535,14 @@ static bool rawReadCap(int16_t& a, int16_t& b) {
 }
 
 static bool rawReadResistive(int16_t& a, int16_t& b) {
-#if defined(CYD35)
-    // See cyd35RawTouch()'s comment -- TFT_eSPI's own raw-touch
-    // accessors are what's actually broken on this board, so this
-    // can't share AWOK's branch below. Used both by the boot-time
-    // "hold to reset calibration" window and by the normal interactive
-    // calibration flow (TouchCal::runInteractive(), same as the
-    // original board -- cyd35 has no calibration flow of its own).
-    uint16_t rx, ry, rz;
-    if (!cyd35RawTouch(rx, ry, rz) || rz <= 175) return false;
-    a = (int16_t)rx;
-    b = (int16_t)ry;
-    return true;
-#elif defined(AWOK)
-    // AWOK's `touch` (XPT2046_Touchscreen) object is never begin()'d —
-    // see the AWOK branch in setup() — so this goes through TFT_eSPI's
+#if defined(AWOK) || defined(CYD35)
+    // Neither board's `touch` (XPT2046_Touchscreen) object is ever
+    // begin()'d — both drive touch natively through TFT_eSPI instead
+    // (see their setup() branches) — so this goes through TFT_eSPI's
     // own raw-touch accessors instead. Only used by the boot-time
-    // "hold to reset calibration" window; AWOK's own calibration flow
-    // (awokRunCalibration()) doesn't route through this at all.
+    // "hold to reset calibration" window; each board's own calibration
+    // flow (awokRunCalibration()/cyd35RunCalibration()) doesn't route
+    // through this at all.
     // getTouchRaw() alone always returns true in TFT_eSPI 2.5.43, so
     // the actual "is a finger down" gate is the pressure threshold.
     if (tft.getTouchRawZ() < 350) return false;
@@ -587,17 +587,44 @@ static void applyCal(const TouchCal::Cal& cal) {
 }
 
 // ---- State transitions ----
+#if defined(CYD35)
+// BOOT/CLEAR/ALERT all share the one half-height `frame` sprite for
+// their two-pass rendering (see each state's case in loop()), but each
+// screen's own xxxInit() clears *canvas -- the real display for this
+// board, not `frame` itself -- so it never actually touches the
+// buffer the two-pass rendering reads from. Harmless back when only
+// CLEAR ever used `frame` (its own content was always self-consistent
+// frame to frame), but once BOOT/ALERT started reusing that same
+// buffer, switching screens could leave one screen's leftover pixels
+// sitting in whatever region the next screen's own drawing never
+// touches (confirmed on real hardware: CLEAR's background animation
+// stops short of the button bar row's gaps, so BOOT's last frame was
+// showing through there as colored noise after switching to CLEAR).
+// One full clear of the real physical buffer on entry to any of these
+// three screens is enough -- nothing after that leaves stray pixels
+// behind on its own.
+static void clearSharedFrameBuffer() {
+    if (frameBufferOk) frame.fillRect(0, 0, frame.width(), frame.height(), Theme::BG);
+}
+#endif
+
 static void enterBoot() {
     state = AppState::BOOT;
     bootStart = millis();
     transitionStart = bootStart;
     uiBootInit(*canvas);
+#if defined(CYD35)
+    clearSharedFrameBuffer();
+#endif
 }
 
 static void enterClear() {
     state = AppState::CLEAR;
     transitionStart = millis();
     uiClearInit(*canvas);
+#if defined(CYD35)
+    clearSharedFrameBuffer();
+#endif
 }
 
 static void enterAlert(const Detection& d) {
@@ -607,6 +634,9 @@ static void enterAlert(const Detection& d) {
     lastAlertType = d.type;
     lastAlertHits = d.hits;
     uiAlertInit(*canvas, d);
+#if defined(CYD35)
+    clearSharedFrameBuffer();
+#endif
 }
 
 static void enterLog() {
@@ -809,12 +839,11 @@ void setup() {
                     // silently reload on the next boot, making this
                     // gesture a no-op here.
                     awokResetTouchCal();
+#elif defined(CYD35)
+                    // Same reasoning as AWOK above -- cyd35's four
+                    // per-rotation blobs live in their own namespace.
+                    cyd35ResetTouchCal();
 #endif
-                    // cyd35 needs nothing extra here: it shares the
-                    // same "touchcal" namespace/single-blob format the
-                    // original board uses (see cyd35RawTouch()'s
-                    // comment), so the TouchCal::reset() call above
-                    // already covers it.
                     tft.fillScreen(Theme::BG);
                     tft.setTextColor(Theme::AMBER, Theme::BG);
                     tft.setTextSize(2);
@@ -841,14 +870,16 @@ void setup() {
     // (awokEnsureCal() does that automatically when awokLoadTouchCal()
     // finds nothing saved).
     awokEnsureCal();
+#elif defined(CYD35)
+    // Same reasoning as AWOK above, but keyed to the current rotation
+    // -- see cyd35EnsureCal()'s comment for why one blob per rotation
+    // is needed here where AWOK only ever needs one.
+    cyd35EnsureCal(screenRotation);
 #else
     // Apply a saved touch calibration if one exists (long-press the
     // title bar on the CLEAR/LOG screen to (re)calibrate — see
     // checkCalibrationTrigger()); otherwise keep the compiled-in
-    // defaults above. cyd35 shares this same path (and the same
-    // "touchcal" namespace/single-blob format) as the original board
-    // -- see cyd35RawTouch()'s comment for why one calibration is
-    // enough for every rotation on this board too.
+    // defaults above.
     TouchCal::Cal savedCal;
     if (TouchCal::load(savedCal)) {
         applyCal(savedCal);
@@ -895,10 +926,13 @@ void loop() {
         Squachy::trigger(Squachy::Event::ROTATED);
         screenRotation = (screenRotation + 1) % 4;
         tft.setRotation(screenRotation);
-        // No cyd35-specific calibration re-arm needed here: it shares
-        // the original board's single-blob-covers-every-rotation
-        // scheme (see cyd35RawTouch()'s comment), so nothing to do
-        // beyond the setRotation() call above.
+#if defined(CYD35)
+        // Arms this rotation's own calibration blob (running the
+        // interactive calibration on the spot if this rotation has
+        // never been used before) -- see cyd35EnsureCal()'s comment
+        // for why one blob per rotation is needed on this board.
+        cyd35EnsureCal(screenRotation);
+#endif
         // Landscape and portrait need differently-*shaped* buffers, but
         // not differently-*sized* ones -- a rectangular panel has the
         // same total pixel count either way (320x240 and 240x320 are
@@ -969,10 +1003,9 @@ void loop() {
             lastTouch = now;
 #if defined(AWOK)
             awokRunCalibration();
+#elif defined(CYD35)
+            cyd35RunCalibration();
 #else
-            // cyd35 shares this path with the original board -- see
-            // rawReadResistive()'s CYD35 branch and cyd35RawTouch()'s
-            // comment.
             TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
             TouchCal::Cal newCal = TouchCal::runInteractive(*canvas, reader, Theme::BG, Theme::WHITE, Theme::CYAN);
             applyCal(newCal);
@@ -985,7 +1018,29 @@ void loop() {
 
     switch (state) {
         case AppState::BOOT: {
+#if defined(CYD35)
+            if (frameBufferOk) {
+                // Same two-pass half-height `frame` trick CLEAR uses --
+                // reuses that same already-allocated sprite (see its
+                // setup() comment) rather than needing a second
+                // allocation, since BOOT/CLEAR/ALERT are never on
+                // screen at the same time. uiBootTick() has no internal
+                // per-call state to double-advance, so no advance flag
+                // needed here unlike uiClearTick().
+                int halfH = tft.height() / 2;
+                frame.setViewport(0, 0, tft.width(), tft.height(), true);
+                uiBootTick(frame, now);
+                frame.pushSprite(0, 0);
+                frame.setViewport(0, -halfH, tft.width(), tft.height(), true);
+                uiBootTick(frame, now);
+                frame.pushSprite(0, halfH);
+                frame.resetViewport();
+            } else {
+                uiBootTick(tft, now);
+            }
+#else
             uiBootTick(*canvas, now);
+#endif
             if (uiBootDone(bootStart)) {
                 enterClear();
             }
@@ -1130,7 +1185,27 @@ void loop() {
             break;
         }
         case AppState::ALERT: {
+#if defined(CYD35)
+            if (frameBufferOk) {
+                // Same two-pass half-height `frame` trick CLEAR/BOOT
+                // use, reusing that same already-allocated sprite.
+                // uiAlertTick() (and everything it calls) is a pure
+                // function of `now`/the alert's own fixed detection
+                // data, so calling it twice with the same `now` is safe.
+                int halfH = tft.height() / 2;
+                frame.setViewport(0, 0, tft.width(), tft.height(), true);
+                uiAlertTick(frame, now);
+                frame.pushSprite(0, 0);
+                frame.setViewport(0, -halfH, tft.width(), tft.height(), true);
+                uiAlertTick(frame, now);
+                frame.pushSprite(0, halfH);
+                frame.resetViewport();
+            } else {
+                uiAlertTick(tft, now);
+            }
+#else
             uiAlertTick(*canvas, now);
+#endif
             if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 lastTouch = now;
                 Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits);
@@ -1191,10 +1266,9 @@ void loop() {
                     case SettingsRow::CALIBRATE: {
 #if defined(AWOK)
                         awokRunCalibration();
+#elif defined(CYD35)
+                        cyd35RunCalibration();
 #else
-                        // cyd35 shares this path with the original
-                        // board -- see rawReadResistive()'s CYD35
-                        // branch and cyd35RawTouch()'s comment.
                         TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
                         TouchCal::Cal newCal = TouchCal::runInteractive(*canvas, reader, Theme::BG, Theme::WHITE, Theme::CYAN);
                         applyCal(newCal);
