@@ -21,10 +21,24 @@ namespace TouchCal {
     // own touch poll, just reduced to the two raw axis values.
     typedef bool (*RawReader)(int16_t& a, int16_t& b);
 
+    // minSpread (load/runInteractive below): the minimum acceptable
+    // |a1-a2| / |b1-b2| raw-unit spread for a calibration to count as
+    // valid. This has to come from the caller rather than being a
+    // fixed constant in here -- capacitive and resistive touch have
+    // very different legitimate raw ranges (capacitive: often only a
+    // few hundred units end to end; resistive: up to a 12-bit ADC's
+    // 4095), so one universal threshold can only ever be tuned for the
+    // smaller of the two. Confirmed on real hardware: a resistive
+    // calibration with a spread of ~180-190 (nowhere near a real
+    // full-range calibration) still passed a threshold loose enough
+    // not to break capacitive -- pass a much stricter value for
+    // resistive (main.cpp keeps board-appropriate constants for this).
+
     // Loads a previously-saved calibration into `out`. Returns false
-    // (leaving `out` untouched) if none has been saved yet -- caller
-    // should keep its compiled-in defaults in that case.
-    bool load(Cal& out);
+    // (leaving `out` untouched) if none has been saved, or if what's
+    // saved doesn't pass the spread check -- caller should keep its
+    // compiled-in defaults in that case.
+    bool load(Cal& out, int16_t minSpread);
 
     // Saves a calibration so it survives reboots.
     void save(const Cal& cal);
@@ -39,11 +53,15 @@ namespace TouchCal {
 
     // Runs the interactive 4-corner calibration flow: draws a
     // crosshair near each screen corner in turn, waits for a tap-and-
-    // hold on each (averaging a few samples for stability), computes
-    // the resulting Cal, saves it, and returns it. Blocking -- this
-    // has the user's full attention by definition, so a simple
-    // synchronous loop is simpler than threading it through the
-    // caller's normal state machine.
-    Cal runInteractive(TFT_eSPI& t, RawReader readRaw,
-                       uint16_t bg, uint16_t fg, uint16_t accent);
+    // hold on each (averaging a few samples for stability), and
+    // computes the resulting Cal. Blocking -- this has the user's full
+    // attention by definition, so a simple synchronous loop is simpler
+    // than threading it through the caller's normal state machine.
+    // Returns false (leaving `out` untouched, and saving nothing) if
+    // the result doesn't pass the spread check -- caller should keep
+    // whatever calibration it already had rather than apply or persist
+    // known-bad data; the user can just long-press to try again.
+    bool runInteractive(TFT_eSPI& t, RawReader readRaw,
+                        uint16_t bg, uint16_t fg, uint16_t accent,
+                        Cal& out, int16_t minSpread);
 }

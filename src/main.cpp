@@ -258,6 +258,41 @@ static uint16_t CAP_NY_MIN = 10,  CAP_NY_MAX = 308;
 static uint16_t RAW_X_MIN = 200, RAW_X_MAX = 3800;
 static uint16_t RAW_Y_MIN = 200, RAW_Y_MAX = 3800;
 
+// Minimum acceptable raw-unit spread for a calibration axis to count
+// as valid -- see TouchCal::load()/runInteractive()'s header comment
+// for the full reasoning. Capacitive touch's whole legitimate range is
+// naturally small (factory default X span is just 134 units,
+// CAP_NX_MIN/MAX above), so it needs a much looser floor than
+// resistive, whose real range should span most of a 12-bit ADC (up to
+// 4095). Confirmed on real hardware: a resistive calibration with a
+// spread of ~180-190 -- comfortably clearing a capacitive-safe
+// threshold -- was still nowhere near a real full-range calibration
+// and left touch unusable.
+static const int16_t CAP_TOUCH_MIN_SPREAD = 50;
+static const int16_t RESISTIVE_MIN_SPREAD = 800;
+
+// TFT_eSPI::setTouch()'s own calibration format: parameters[0..3] are
+// raw x0/x1/y0/y1 ADC readings, parameters[4] is a bitflag byte where
+// only bits 0-2 (rotate/invert_x/invert_y) are ever meaningful -- see
+// Touch.cpp. Used by both AWOK and cyd35's load functions below (each
+// only ever compiles its own board's block, hence this living outside
+// either #if) to reject obviously-corrupted stored bytes instead of
+// silently trusting them -- an interrupted NVS write is the confirmed
+// real-world cause, not a hypothetical. Same reasoning as
+// TouchCal::plausible() (touch_cal.cpp) for the other calibration
+// path's key-based (not raw-blob) storage.
+static bool touchCalPlausible(const uint16_t* p) {
+    if (p[4] > 7) return false;
+    // AWOK and cyd35 are both resistive XPT2046 (no capacitive variant
+    // on either), so this always uses the stricter resistive floor --
+    // see RESISTIVE_MIN_SPREAD's comment above.
+    auto ok = [](uint16_t a, uint16_t b) {
+        return a >= 1 && b >= 1 && a <= 4095 && b <= 4095 &&
+               (a > b ? a - b : b - a) >= RESISTIVE_MIN_SPREAD;
+    };
+    return ok(p[0], p[1]) && ok(p[2], p[3]);
+}
+
 #if defined(AWOK)
 // ---- AWOK: TFT_eSPI-native touch calibration ----
 // AWOK's XPT2046 sits on the display's own shared VSPI bus, so it goes
@@ -284,7 +319,8 @@ static bool awokLoadTouchCal() {
     bool has = p.isKey(AWOK_TOUCH_KEY);
     if (has) {
         p.getBytes(AWOK_TOUCH_KEY, awokTouchCal, sizeof(awokTouchCal));
-        awokTouchCalibrated = true;
+        has = touchCalPlausible(awokTouchCal);
+        awokTouchCalibrated = has;
     }
     p.end();
     return has;
@@ -370,7 +406,8 @@ static bool cyd35LoadTouchCal(uint8_t rot) {
     bool has = p.isKey(key);
     if (has) {
         p.getBytes(key, cyd35TouchCal[rot], sizeof(cyd35TouchCal[rot]));
-        cyd35TouchCalibrated[rot] = true;
+        has = touchCalPlausible(cyd35TouchCal[rot]);
+        cyd35TouchCalibrated[rot] = has;
     }
     p.end();
     return has;
@@ -452,7 +489,25 @@ static TouchPoint pollTouch() {
             tp.x = flipped ? map(ny, CAP_NY_MIN, CAP_NY_MAX, w, 0) : map(ny, CAP_NY_MIN, CAP_NY_MAX, 0, w);
             tp.y = flipped ? map(nx, CAP_NX_MIN, CAP_NX_MAX, 0, h) : map(nx, CAP_NX_MIN, CAP_NX_MAX, h, 0);
         }
-        tp.valid = (tp.x >= 0 && tp.x < w && tp.y >= 0 && tp.y < h);
+        // Clamp into bounds instead of invalidating -- map() linearly
+        // extrapolates, it doesn't clip, so a touch landing just past a
+        // calibrated edge (completely normal: fingers don't land
+        // exactly on the pixel a calibration corner sampled) used to
+        // read as "no touch at all" here rather than "slightly
+        // imprecise at the edge". That distinction matters a lot in
+        // practice -- confirmed on real hardware that even a
+        // technically-valid calibration (correct spread, in-range
+        // values) could leave EVERY touch just outside bounds and the
+        // whole screen unresponsive, since a rejected touch and no
+        // touch look identical downstream. A hard sanity cap (2x the
+        // screen dimension either direction) still rejects genuinely
+        // wild readings/noise rather than clamping literally anything.
+        bool sane = tp.x > -w && tp.x < 2 * w && tp.y > -h && tp.y < 2 * h;
+        if (sane) {
+            if (tp.x < 0) tp.x = 0; else if (tp.x >= w) tp.x = w - 1;
+            if (tp.y < 0) tp.y = 0; else if (tp.y >= h) tp.y = h - 1;
+        }
+        tp.valid = sane;
         return tp;
     }
 
@@ -467,7 +522,25 @@ static TouchPoint pollTouch() {
         if (!tft.getTouch(&sx, &sy)) return tp;
         tp.x = (int)sx;
         tp.y = (int)sy;
-        tp.valid = (tp.x >= 0 && tp.x < w && tp.y >= 0 && tp.y < h);
+        // Clamp into bounds instead of invalidating -- map() linearly
+        // extrapolates, it doesn't clip, so a touch landing just past a
+        // calibrated edge (completely normal: fingers don't land
+        // exactly on the pixel a calibration corner sampled) used to
+        // read as "no touch at all" here rather than "slightly
+        // imprecise at the edge". That distinction matters a lot in
+        // practice -- confirmed on real hardware that even a
+        // technically-valid calibration (correct spread, in-range
+        // values) could leave EVERY touch just outside bounds and the
+        // whole screen unresponsive, since a rejected touch and no
+        // touch look identical downstream. A hard sanity cap (2x the
+        // screen dimension either direction) still rejects genuinely
+        // wild readings/noise rather than clamping literally anything.
+        bool sane = tp.x > -w && tp.x < 2 * w && tp.y > -h && tp.y < 2 * h;
+        if (sane) {
+            if (tp.x < 0) tp.x = 0; else if (tp.x >= w) tp.x = w - 1;
+            if (tp.y < 0) tp.y = 0; else if (tp.y >= h) tp.y = h - 1;
+        }
+        tp.valid = sane;
     }
     return tp;
 #elif defined(AWOK)
@@ -483,7 +556,25 @@ static TouchPoint pollTouch() {
         if (!tft.getTouch(&sx, &sy)) return tp;
         tp.x = (int)sx;
         tp.y = (int)sy;
-        tp.valid = (tp.x >= 0 && tp.x < w && tp.y >= 0 && tp.y < h);
+        // Clamp into bounds instead of invalidating -- map() linearly
+        // extrapolates, it doesn't clip, so a touch landing just past a
+        // calibrated edge (completely normal: fingers don't land
+        // exactly on the pixel a calibration corner sampled) used to
+        // read as "no touch at all" here rather than "slightly
+        // imprecise at the edge". That distinction matters a lot in
+        // practice -- confirmed on real hardware that even a
+        // technically-valid calibration (correct spread, in-range
+        // values) could leave EVERY touch just outside bounds and the
+        // whole screen unresponsive, since a rejected touch and no
+        // touch look identical downstream. A hard sanity cap (2x the
+        // screen dimension either direction) still rejects genuinely
+        // wild readings/noise rather than clamping literally anything.
+        bool sane = tp.x > -w && tp.x < 2 * w && tp.y > -h && tp.y < 2 * h;
+        if (sane) {
+            if (tp.x < 0) tp.x = 0; else if (tp.x >= w) tp.x = w - 1;
+            if (tp.y < 0) tp.y = 0; else if (tp.y >= h) tp.y = h - 1;
+        }
+        tp.valid = sane;
     }
     return tp;
 #endif
@@ -500,7 +591,25 @@ static TouchPoint pollTouch() {
             tp.x = flipped ? map(p.y, RAW_Y_MIN, RAW_Y_MAX, w, 0) : map(p.y, RAW_Y_MIN, RAW_Y_MAX, 0, w);
             tp.y = flipped ? map(p.x, RAW_X_MIN, RAW_X_MAX, 0, h) : map(p.x, RAW_X_MIN, RAW_X_MAX, h, 0);
         }
-        tp.valid = (tp.x >= 0 && tp.x < w && tp.y >= 0 && tp.y < h);
+        // Clamp into bounds instead of invalidating -- map() linearly
+        // extrapolates, it doesn't clip, so a touch landing just past a
+        // calibrated edge (completely normal: fingers don't land
+        // exactly on the pixel a calibration corner sampled) used to
+        // read as "no touch at all" here rather than "slightly
+        // imprecise at the edge". That distinction matters a lot in
+        // practice -- confirmed on real hardware that even a
+        // technically-valid calibration (correct spread, in-range
+        // values) could leave EVERY touch just outside bounds and the
+        // whole screen unresponsive, since a rejected touch and no
+        // touch look identical downstream. A hard sanity cap (2x the
+        // screen dimension either direction) still rejects genuinely
+        // wild readings/noise rather than clamping literally anything.
+        bool sane = tp.x > -w && tp.x < 2 * w && tp.y > -h && tp.y < 2 * h;
+        if (sane) {
+            if (tp.x < 0) tp.x = 0; else if (tp.x >= w) tp.x = w - 1;
+            if (tp.y < 0) tp.y = 0; else if (tp.y >= h) tp.y = h - 1;
+        }
+        tp.valid = sane;
     }
     return tp;
 }
@@ -898,7 +1007,7 @@ void setup() {
     // checkCalibrationTrigger()); otherwise keep the compiled-in
     // defaults above.
     TouchCal::Cal savedCal;
-    if (TouchCal::load(savedCal)) {
+    if (TouchCal::load(savedCal, usingCapTouch ? CAP_TOUCH_MIN_SPREAD : RESISTIVE_MIN_SPREAD)) {
         applyCal(savedCal);
         Serial.println("Loaded saved touch calibration.");
     }
@@ -1033,8 +1142,22 @@ void loop() {
             cyd35RunCalibration();
 #else
             TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
-            TouchCal::Cal newCal = TouchCal::runInteractive(*canvas, reader, Theme::BG, Theme::WHITE, Theme::CYAN);
-            applyCal(newCal);
+            TouchCal::Cal newCal;
+            // tft directly, not *canvas -- canvas points at `frame` (an
+            // offscreen sprite) on this board, and nothing in
+            // TouchCal::runInteractive() ever calls pushSprite() to
+            // actually display what it draws. It was rendering the
+            // entire calibration UI into invisible memory -- confirmed
+            // as the real cause of "the calibration screen never shows
+            // up", not a touch hardware fault. runInteractive() draws
+            // occasional targeted crosshairs, not a per-frame animation
+            // loop, so there's no flicker concern drawing straight to
+            // the real display here the way there would be for CLEAR's
+            // continuous redraws.
+            if (TouchCal::runInteractive(tft, reader, Theme::BG, Theme::WHITE, Theme::CYAN, newCal,
+                                         usingCapTouch ? CAP_TOUCH_MIN_SPREAD : RESISTIVE_MIN_SPREAD)) {
+                applyCal(newCal);
+            }
 #endif
             enterClear();
         }
@@ -1486,8 +1609,14 @@ void loop() {
                         cyd35RunCalibration();
 #else
                         TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
-                        TouchCal::Cal newCal = TouchCal::runInteractive(*canvas, reader, Theme::BG, Theme::WHITE, Theme::CYAN);
-                        applyCal(newCal);
+                        TouchCal::Cal newCal;
+                        // tft directly, not *canvas -- see the other
+                        // call site's comment (title-bar long-press
+                        // trigger above) for why.
+                        if (TouchCal::runInteractive(tft, reader, Theme::BG, Theme::WHITE, Theme::CYAN, newCal,
+                                                     usingCapTouch ? CAP_TOUCH_MIN_SPREAD : RESISTIVE_MIN_SPREAD)) {
+                            applyCal(newCal);
+                        }
 #endif
                         enterSettings();
                         break;
