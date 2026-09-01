@@ -43,6 +43,15 @@ public:
     void IRAM_ATTR postWiFi(const uint8_t* mac, int8_t rssi, uint8_t channel,
                             const char* ssid = nullptr);
 
+    // Called from the promiscuous WiFi Rx callback (IRAM_ATTR context)
+    // when a deauthentication management frame is seen. A single
+    // frame is completely normal WiFi traffic (a phone disconnecting,
+    // an AP restarting) -- it's a BURST that indicates an actual
+    // attack, which processDeauthQ() (run from loop()) is what
+    // actually decides, via a rolling window + cooldown rather than
+    // firing per frame.
+    void IRAM_ATTR postDeauth(const uint8_t* mac, int8_t rssi, uint8_t channel);
+
     // Called from the BLE scan callback when a hit is found.
     void postBle(Detection d);
 
@@ -79,8 +88,41 @@ public:
     int8_t   rawWifiRssi(uint8_t idx) const;
     uint8_t  rawWifiChannel(uint8_t idx) const;
     bool     rawWifiOpen(uint8_t idx) const;            // true = no encryption
+    const uint8_t* rawWifiBssid(uint8_t idx) const;     // nullptr if idx is out of range -- for watchWifi()
 
     void     stopRawScan();
+
+    // ---- Watched target ("stalker tracker") --------------------------
+    // Session-only (not persisted to NVS -- resets on reboot). One
+    // target at a time; setting a new one replaces whatever was being
+    // watched before. Set from the raw-scan results screen (long-press
+    // a row). Checked against every BLE advertisement / WiFi frame
+    // already being parsed for the continuous scan, regardless of
+    // whether it matches a known vendor signature -- watching fires
+    // even for a completely generic/unknown device, since that's the
+    // whole point. Note: BLE addresses on many modern devices (AirTags,
+    // iPhones) rotate periodically specifically to defeat this kind of
+    // tracking-by-MAC, so this isn't foolproof for a determined target
+    // -- it still catches most consumer gear, which doesn't rotate.
+    enum class WatchKind : uint8_t { NONE, BLE, WIFI };
+    void watchBle(const uint8_t* mac, const char* name);
+    void watchWifi(const uint8_t* bssid, const char* ssid);
+    void clearWatch();
+    WatchKind watchKind() const { return _watchKind; }
+    const char* watchLabel() const { return _watchLabel; }
+
+    // True exactly once per hit (consumed on read) -- main.cpp polls
+    // this once per CLEAR-loop tick to trigger the dedicated
+    // watch-alert screen. Cooldown-gated (see WATCH_COOLDOWN_MS) so a
+    // target that just sits nearby doesn't re-fire every single
+    // advertisement/frame.
+    bool watchHitPending();
+
+    // Called from the BLE scan callback (every advertisement, any
+    // mode) -- public for the same reason postBle()/postRawBle() are:
+    // the callback lives in a separate class, not a DetectionEngine
+    // member.
+    void checkWatchBle(const uint8_t* mac);
 
     // SD log helper accessor.
     SdLog& sd() { return _sd; }
@@ -120,6 +162,36 @@ private:
     volatile uint8_t    _wifiQHead = 0;
     volatile uint8_t    _wifiQTail = 0;
 
+    // Deauth mailbox (filled in IRAM, drained in loop) -- see
+    // postDeauth()/processDeauthQ(). Separate from _wifiQ above since
+    // this feeds a rolling burst-window counter, not the OUI/SSID
+    // signature matcher.
+    static const uint8_t  DEAUTH_Q_CAP       = 8;
+    static const uint8_t  DEAUTH_THRESHOLD   = 6;      // frames within...
+    static const uint32_t DEAUTH_WINDOW_MS   = 3000;   // ...this window...
+    static const uint32_t DEAUTH_COOLDOWN_MS = 15000;  // ...then this long before re-firing.
+    struct DeauthQEntry {
+        uint8_t mac[6];
+        int8_t  rssi;
+        uint8_t channel;
+    };
+    volatile DeauthQEntry _deauthQ[DEAUTH_Q_CAP];
+    volatile uint8_t      _deauthQHead = 0;
+    volatile uint8_t      _deauthQTail = 0;
+    uint8_t  _deauthWinCount   = 0;
+    uint32_t _deauthWinStart   = 0;
+    uint32_t _deauthLastFireMs = 0;
+
+    // Watched target -- see the public watchBle()/watchWifi() section
+    // above.
+    static const uint32_t WATCH_COOLDOWN_MS = 30000;
+    WatchKind _watchKind = WatchKind::NONE;
+    uint8_t   _watchMac[6] = {0};
+    char      _watchLabel[24] = "";
+    uint32_t  _watchLastHitMs = 0;
+    bool      _watchHitFlag   = false;
+    void checkWatchWifi(const uint8_t* mac);   // called from processWiFiQ()
+
     // Detection log
     Detection  _log[LOG_CAP];
     uint8_t    _logCount = 0;            // number of valid entries (<= LOG_CAP)
@@ -151,6 +223,7 @@ private:
 
     void pushLog(const Detection& d);
     void processWiFiQ();
+    void processDeauthQ();
     void expireStale();
     void hopChannel();
     void decayChannelActivity();

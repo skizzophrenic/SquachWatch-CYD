@@ -16,6 +16,7 @@
 #include "ui_alert.h"
 #include "ui_log.h"
 #include "ui_rawscan.h"
+#include "ui_watchalert.h"
 #include "ui_settings.h"
 #include "ui_diary.h"
 #include "ui_outfit.h"
@@ -210,39 +211,17 @@ DetectionEngine     engine;
 AppState            state     = AppState::BOOT;
 uint32_t            bootStart = 0;
 uint32_t            alertStart= 0;
+uint32_t            watchAlertStart = 0;
 uint32_t            lastTouch = 0;
 bool                prevTouchValid = false; // last frame's tp.valid, for true press/release edge detection (see loop())
 DetectionType       lastAlertType = DetectionType::UNKNOWN;
 uint32_t            lastAlertHits = 1; // times this exact MAC+type has ever matched — see Squachy's "seen before" reaction
 const uint16_t      TOUCH_DEBOUNCE_MS = 200;
 
-// Hidden "unlock every Squachy outfit" gesture: CLR x9, then SCAN x1,
-// then CLR x1 (11 taps) on the button bar, tracked globally since CLR/
-// SCAN both appear on the CLEAR and LOG screens. Any tap that breaks
-// the sequence resets progress, except when the breaking tap happens
-// to be a fresh CLR -- that still counts as step 1 of a new attempt
-// instead of forcing a full restart on the very next correct tap.
-static const ButtonId EASTER_EGG_SEQUENCE[] = {
-    ButtonId::CLR, ButtonId::CLR, ButtonId::CLR, ButtonId::CLR, ButtonId::CLR,
-    ButtonId::CLR, ButtonId::CLR, ButtonId::CLR, ButtonId::CLR,
-    ButtonId::SCAN,
-    ButtonId::CLR,
-};
-static const uint8_t EASTER_EGG_LEN = sizeof(EASTER_EGG_SEQUENCE) / sizeof(EASTER_EGG_SEQUENCE[0]);
-static uint8_t       s_easterEggProgress = 0;
-
-static void trackOutfitEasterEgg(ButtonId b) {
-    if (b == ButtonId::NONE) return;
-    if (b == EASTER_EGG_SEQUENCE[s_easterEggProgress]) {
-        s_easterEggProgress++;
-        if (s_easterEggProgress >= EASTER_EGG_LEN) {
-            s_easterEggProgress = 0;
-            Squachy::unlockAllOutfits();
-        }
-    } else {
-        s_easterEggProgress = (b == EASTER_EGG_SEQUENCE[0]) ? 1 : 0;
-    }
-}
+// Hidden "unlock every Squachy outfit" gesture: hold CLR for
+// CLR_UNLOCK_HOLD_MS on the CLEAR screen (see the CLEAR case's touch
+// handling in loop()) -- replaces a fragile 11-tap sequence (CLR x9,
+// SCAN x1, CLR x1) that broke once SCAN stopped being a no-op there.
 // The ALERT screen carries real information (type, confidence, MAC,
 // RSSI) — tapping it away is the expected dismiss, but the automatic
 // fallback still needs to actually clear itself in a reasonable time
@@ -647,18 +626,37 @@ static void enterAlert(const Detection& d) {
 #endif
 }
 
+static void enterWatchAlert() {
+    state = AppState::WATCH_ALERT;
+    watchAlertStart = millis();
+    transitionStart = watchAlertStart;
+    uiWatchAlertInit(*canvas);
+#if defined(CYD35)
+    clearSharedFrameBuffer();
+#endif
+}
+
 static void enterLog() {
     state = AppState::LOG;
     transitionStart = millis();
     uiLogInit(*canvas);
 }
 
-static bool s_rawScanIsBle = true;
+static bool    s_rawScanIsBle = true;
+// Long-press-to-watch confirmation -- see the RAWSCAN case in loop().
+// Owned here rather than in ui_rawscan.cpp so main.cpp can decide what
+// OK actually does (call DetectionEngine::watchBle/watchWifi) without
+// that module needing to know about DetectionEngine's watch API at
+// all, just how to draw/hit-test the panel it's given.
+static bool    s_confirmPending = false;
+static uint8_t s_confirmMac[6];
+static char    s_confirmLabel[24];
 
 static void enterRawScan(bool isBle) {
     state = AppState::RAWSCAN;
     transitionStart = millis();
     s_rawScanIsBle = isBle;
+    s_confirmPending = false;
     if (isBle) engine.startRawBleScan();
     else       engine.startRawWifiScan();
     uiRawScanInit(*canvas, isBle);
@@ -938,7 +936,8 @@ void loop() {
     // also hides the icon itself, not just this handler.
 #if !defined(AWOK)
     if (tp.valid && (state == AppState::CLEAR || state == AppState::LOG ||
-                      state == AppState::SETTINGS || state == AppState::OUTFIT) &&
+                      state == AppState::SETTINGS || state == AppState::OUTFIT ||
+                      state == AppState::RAWSCAN) &&
         Theme::rotateButtonHit(tp.x, tp.y, tft.width()) &&
         (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
         lastTouch = now;
@@ -1000,13 +999,21 @@ void loop() {
     // this is the only way back out of that screen, since its own taps
     // are all claimed by the arrows.
     if (tp.valid && (state == AppState::CLEAR || state == AppState::LOG ||
-                      state == AppState::SETTINGS || state == AppState::OUTFIT) &&
+                      state == AppState::SETTINGS || state == AppState::OUTFIT ||
+                      state == AppState::RAWSCAN) &&
         Theme::settingsButtonHit(tp.x, tp.y) &&
         (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
         lastTouch = now;
         if (state == AppState::OUTFIT) enterSettings();
         else if (state == AppState::SETTINGS) enterClear();
-        else enterSettings();
+        else {
+            // Leaving RAWSCAN via the settings icon, same as BACK does
+            // -- otherwise the raw scan (and the continuous detection
+            // scan it's pausing) would just sit there indefinitely
+            // while the user is off in Settings.
+            if (state == AppState::RAWSCAN) engine.stopRawScan();
+            enterSettings();
+        }
     }
 
     // Long-press the middle of the title bar (between the settings and
@@ -1093,10 +1100,32 @@ void loop() {
             // Check for new detection — gated by the settings-menu
             // confidence filter (LOW_CONF/default = no filtering, every
             // match still interrupts with the ALERT screen).
-            const Detection* latest = engine.latest();
-            if (latest && (now - latest->firstSeen) < 200 &&
-                confidenceFor(latest->type) >= Settings::minConfidence()) {
-                enterAlert(*latest);
+            // A watched target coming back takes priority over a
+            // routine signature-match alert -- it's not filtered by
+            // the confidence setting either, since it isn't a
+            // signature guess at all, it's the exact thing the user
+            // explicitly asked to be told about.
+            //
+            // Neither one interrupts the first-boot walkthrough: a real
+            // detection popping the full-screen ALERT (or watch-alert)
+            // mid-explanation would cut Squachy off before he's done
+            // introducing everything. The detection itself still gets
+            // logged/counted as normal either way (that already
+            // happened before this check runs) -- this only decides
+            // whether it pops up over the tutorial. watchHitPending()
+            // is deliberately NOT called in that branch since it's
+            // consumed on read; leaving it untouched means it stays
+            // pending and still fires for real once onboarding ends.
+            if (Squachy::onboardingActive()) {
+                // deliberately no-op
+            } else if (engine.watchHitPending()) {
+                enterWatchAlert();
+            } else {
+                const Detection* latest = engine.latest();
+                if (latest && (now - latest->firstSeen) < 200 &&
+                    confidenceFor(latest->type) >= Settings::minConfidence()) {
+                    enterAlert(*latest);
+                }
             }
             // First-boot walkthrough: tapping its bubble advances (or
             // ends) it. Checked before everything else below so it eats
@@ -1143,6 +1172,19 @@ void loop() {
             constexpr int32_t  SQ_MOVE_PX = 12;
             constexpr int32_t  SQ_MOVE_PX_SQ = SQ_MOVE_PX * SQ_MOVE_PX;
 
+            // Hidden outfit-unlock gesture: hold CLR (not tap it) for
+            // CLR_UNLOCK_HOLD_MS. Same tracked-across-frames shape as
+            // Squachy's own HELD/PETTED just below -- a touch that
+            // starts on CLR is armed for that touch's whole lifetime,
+            // so it can't also fire the normal "clear log" tap action
+            // once the hold succeeds; released early, it still clears
+            // the log exactly like a normal tap always has (see
+            // touchJustUp below).
+            static bool     clrHoldActive = false;
+            static bool     clrHoldFired  = false;
+            static uint32_t clrHoldStart  = 0;
+            constexpr uint32_t CLR_UNLOCK_HOLD_MS = 4000;
+
             // Decide up front whether a brand-new touch lands on Squachy
             // -- this only updates gesture-tracking state, it doesn't by
             // itself claim the touch, so a miss still falls through to
@@ -1158,6 +1200,9 @@ void loop() {
                 sqStartMs = now;
                 sqStartX = tp.x;
                 sqStartY = tp.y;
+                clrHoldActive = !s_scanPickerOpen && barBtn == ButtonId::CLR;
+                clrHoldFired  = false;
+                clrHoldStart  = now;
             }
 
             if (!boring && Squachy::onboardingActive() && tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
@@ -1176,9 +1221,13 @@ void loop() {
                     sqHeld = true;
                     Squachy::trigger(Squachy::Event::HELD);
                 }
+            } else if (tp.valid && clrHoldActive) {
+                if (!clrHoldFired && (now - clrHoldStart) >= CLR_UNLOCK_HOLD_MS) {
+                    clrHoldFired = true;
+                    Squachy::unlockAllOutfits();
+                }
             } else if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 lastTouch = now;
-                trackOutfitEasterEgg(barBtn);
                 if (s_scanPickerOpen) {
                     // The bar's slots are relabeled [BLE][WIFI][BACK]
                     // right now (see the scanMenu arg on uiClearTick()
@@ -1188,7 +1237,6 @@ void loop() {
                     else if (barBtn == ButtonId::LOG)  { s_scanPickerOpen = false; enterRawScan(false); }
                     else if (barBtn == ButtonId::CLR)  { s_scanPickerOpen = false; }
                 } else if (barBtn == ButtonId::LOG)  { Squachy::trigger(Squachy::Event::LOG_OPENED); enterLog(); }
-                else if (barBtn == ButtonId::CLR) { engine.clearLog(); Squachy::trigger(Squachy::Event::LOG_CLEARED); enterClear(); }
                 else if (barBtn == ButtonId::SCAN) { s_scanPickerOpen = true; }
                 else if (boring && tp.y >= 20) {
                     // No Squachy to tap for this in boring mode — any tap
@@ -1208,6 +1256,16 @@ void loop() {
                     Squachy::trigger(Squachy::Event::PETTED);
                 }
                 sqActive = false;
+            }
+            // CLR released before the hold threshold -- a normal tap,
+            // same "clear log" action it's always done.
+            if (touchJustUp && clrHoldActive) {
+                if (!clrHoldFired) {
+                    engine.clearLog();
+                    Squachy::trigger(Squachy::Event::LOG_CLEARED);
+                    enterClear();
+                }
+                clrHoldActive = false;
             }
             break;
         }
@@ -1243,12 +1301,41 @@ void loop() {
             }
             break;
         }
+        case AppState::WATCH_ALERT: {
+#if defined(CYD35)
+            if (frameBufferOk) {
+                // Same two-pass half-height `frame` trick CLEAR/BOOT/
+                // ALERT use -- unlike plain uiAlertTick(), this one
+                // does draw Squachy, so advance has to gate his state
+                // mutation to exactly one of the two passes, same as
+                // uiClearTick()/uiBootTick().
+                int halfH = tft.height() / 2;
+                frame.setViewport(0, 0, tft.width(), tft.height(), true);
+                uiWatchAlertTick(frame, now, engine, true);
+                frame.pushSprite(0, 0);
+                frame.setViewport(0, -halfH, tft.width(), tft.height(), true);
+                uiWatchAlertTick(frame, now, engine, false);
+                frame.pushSprite(0, halfH);
+                frame.resetViewport();
+            } else {
+                uiWatchAlertTick(tft, now, engine, true);
+            }
+#else
+            uiWatchAlertTick(*canvas, now, engine, true);
+#endif
+            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                lastTouch = now;
+                enterClear();
+            } else if ((now - watchAlertStart) > ALERT_AUTO_DISMISS_MS) {
+                enterClear();
+            }
+            break;
+        }
         case AppState::LOG: {
             uiLogTick(*canvas, now, engine, 0);
             if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 ButtonId b = Theme::hitTestButtonBar(tp.x, tp.y, tft.width(), tft.height());
                 lastTouch = now;
-                trackOutfitEasterEgg(b);
                 if (b == ButtonId::SCAN) { enterClear(); }
                 if (b == ButtonId::CLR)  { engine.clearLog(); enterClear(); }
                 if (b == ButtonId::LOG)  { enterClear(); }   // toggle off
@@ -1259,7 +1346,7 @@ void loop() {
                 if (lastY >= 0) {
                     int dy = tp.y - lastY;
                     if (abs(dy) > 10) {
-                        uiLogScroll(dy > 0 ? 1 : -1);
+                        uiLogScroll(dy > 0 ? -1 : 1);
                         lastY = tp.y;
                     }
                 } else {
@@ -1272,12 +1359,88 @@ void loop() {
         }
         case AppState::RAWSCAN: {
             bool done = s_rawScanIsBle ? engine.rawBleScanDone() : engine.rawWifiScanDone();
-            uiRawScanTick(*canvas, now, engine, s_rawScanIsBle, done);
-            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
-                uiRawScanHitBack(tp.x, tp.y, tft.width(), tft.height())) {
-                lastTouch = now;
-                engine.stopRawScan();
-                enterClear();
+            uiRawScanTick(*canvas, now, engine, s_rawScanIsBle, done, s_confirmPending, s_confirmLabel);
+
+            // The confirm panel is modal: while it's up, a tap only
+            // ever means OK or CANCEL on it, nothing else on this
+            // screen (BACK/SWITCH, another long-press, scrolling) is
+            // reachable underneath it.
+            if (s_confirmPending) {
+                if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                    RawScanConfirmTap ctap = uiRawScanHitConfirm(tp.x, tp.y, tft.width(), tft.height());
+                    if (ctap == RawScanConfirmTap::OK) {
+                        lastTouch = now;
+                        s_confirmPending = false;
+                        if (s_rawScanIsBle) engine.watchBle(s_confirmMac, s_confirmLabel);
+                        else                engine.watchWifi(s_confirmMac, s_confirmLabel);
+                        engine.stopRawScan();
+                        enterClear();
+                    } else if (ctap == RawScanConfirmTap::CANCEL) {
+                        lastTouch = now;
+                        s_confirmPending = false;
+                    }
+                }
+                break;
+            }
+
+            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                RawScanTap tap = uiRawScanHitTest(tp.x, tp.y, tft.width(), tft.height());
+                if (tap == RawScanTap::BACK) {
+                    lastTouch = now;
+                    engine.stopRawScan();
+                    enterClear();
+                } else if (tap == RawScanTap::SWITCH) {
+                    lastTouch = now;
+                    enterRawScan(!s_rawScanIsBle);
+                }
+            }
+            // Long-press a result row (once the scan's actually done)
+            // to bring up the watch-confirm panel above -- disambiguated
+            // from the drag-to-scroll gesture below by requiring the
+            // touch to stay roughly still past a hold threshold, same
+            // pattern CLEAR uses for petting Squachy (HELD).
+            static bool     rowHoldFired  = false;
+            static uint32_t rowHoldStart  = 0;
+            static int      rowHoldX = 0, rowHoldY = 0;
+            constexpr uint32_t ROW_HOLD_MS      = 500;
+            constexpr int32_t  ROW_MOVE_PX_SQ   = 12 * 12;
+            if (touchJustDown) {
+                rowHoldFired = false;
+                rowHoldStart = now;
+                rowHoldX = tp.x;
+                rowHoldY = tp.y;
+            }
+            if (done && tp.valid && !rowHoldFired) {
+                int32_t hdx = tp.x - rowHoldX, hdy = tp.y - rowHoldY;
+                if ((hdx * hdx + hdy * hdy) <= ROW_MOVE_PX_SQ && (now - rowHoldStart) >= ROW_HOLD_MS) {
+                    int row = uiRawScanRowAt(*canvas, tp.x, tp.y, tft.width(), tft.height());
+                    uint8_t count = s_rawScanIsBle ? engine.rawBleCount() : engine.rawWifiCount();
+                    if (row >= 0 && row < (int)count) {
+                        rowHoldFired = true;
+                        bool haveTarget = false;
+                        if (s_rawScanIsBle) {
+                            const RawBleResult* r = engine.rawBleAt((uint8_t)row);
+                            if (r) {
+                                memcpy(s_confirmMac, r->mac, 6);
+                                strncpy(s_confirmLabel, r->name[0] ? r->name : "Unnamed device",
+                                        sizeof(s_confirmLabel) - 1);
+                                haveTarget = true;
+                            }
+                        } else {
+                            const uint8_t* bssid = engine.rawWifiBssid((uint8_t)row);
+                            if (bssid) {
+                                memcpy(s_confirmMac, bssid, 6);
+                                const char* ssid = engine.rawWifiSsid((uint8_t)row);
+                                strncpy(s_confirmLabel, ssid[0] ? ssid : "(hidden)", sizeof(s_confirmLabel) - 1);
+                                haveTarget = true;
+                            }
+                        }
+                        if (haveTarget) {
+                            s_confirmLabel[sizeof(s_confirmLabel) - 1] = 0;
+                            s_confirmPending = true;
+                        }
+                    }
+                }
             }
             // Swipe to scroll, same as LOG.
             static int lastY = -1;
@@ -1285,7 +1448,7 @@ void loop() {
                 if (lastY >= 0) {
                     int dy = tp.y - lastY;
                     if (abs(dy) > 10) {
-                        uiRawScanScroll(dy > 0 ? 1 : -1);
+                        uiRawScanScroll(dy > 0 ? -1 : 1);
                         lastY = tp.y;
                     }
                 } else {

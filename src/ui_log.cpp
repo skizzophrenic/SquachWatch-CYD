@@ -59,7 +59,24 @@ void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int scroll
         return;
     }
 
-    int rowH = 22;
+    // Row height derived from the actual rendered text heights, not a
+    // guessed constant -- the size-2 type label is 16px tall, but the
+    // MAC/RSSI/hits line below it used to start at a fixed y+14,
+    // running the two lines into each other (confirmed on real
+    // hardware: the label's bottom smeared into the MAC line above
+    // it).
+    // fontHeight() with NO argument -- fontHeight(int) takes a font
+    // INDEX (2 means "built-in font #2", not "current font at size
+    // 2"), which was silently querying an unrelated font's metrics
+    // instead of the GLCD font actually being drawn here.
+    t.setTextSize(2);
+    int nameH = t.fontHeight();
+    t.setTextSize(1);
+    int detailH = t.fontHeight();
+    const int topPad = 1;
+    int detailY = topPad + nameH;
+    int rowH = topPad + nameH + detailH + 2;
+
     int y = bodyTop;
     int idx = g_scroll;
     int max = (bodyH / rowH);
@@ -73,7 +90,7 @@ void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int scroll
         // Type label (colored)
         t.setTextSize(2);
         t.setTextColor(Theme::colorFor(d->type), Theme::BG);
-        t.setCursor(4, y + 3);
+        t.setCursor(4, y + topPad);
         t.print(detectionTypeName(d->type));
 
         // MAC + RSSI line
@@ -83,19 +100,19 @@ void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int scroll
         snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
                  d->mac[0], d->mac[1], d->mac[2],
                  d->mac[3], d->mac[4], d->mac[5]);
-        t.setCursor(4, y + 14);
+        t.setCursor(4, y + detailY);
         t.print(mac);
 
         // RSSI — MAC above runs "XX:XX:XX:XX:XX:XX" (17 chars, 102px
         // at this font size) starting from x=4, so this column can't
         // start before ~110 without drawing on top of it.
         t.setTextColor(Theme::CYAN, Theme::BG);
-        t.setCursor(112, y + 14);
+        t.setCursor(112, y + detailY);
         t.printf("%ddBm", d->rssi);
 
         // Hits
         t.setTextColor(Theme::VAPOR_PURPLE, Theme::BG);
-        t.setCursor(164, y + 14);
+        t.setCursor(164, y + detailY);
         t.printf("x%u", d->hits);
 
         // Timestamp (right edge)
@@ -105,7 +122,7 @@ void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int scroll
         snprintf(ts, sizeof(ts), "%02lu:%02lu", (unsigned long)(sec / 60), (unsigned long)(sec % 60));
         int tw = t.textWidth(ts);
         t.setTextColor(Theme::VAPOR_PINK, Theme::BG);
-        t.setCursor(w - tw - 4, y + 3);
+        t.setCursor(w - tw - 4, y + topPad);
         t.print(ts);
 
         y += rowH;

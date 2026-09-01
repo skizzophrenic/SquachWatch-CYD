@@ -2,25 +2,42 @@
 #include "ui_rawscan.h"
 #include "theme.h"
 #include "squachy.h"
+#include "settings.h"
 #include <Arduino.h>
 
 static int g_scroll = 0;
 
-// Single centered back button in place of the normal three-slot bar --
-// reuses computeButtonBar()'s y/h so it lines up with every other
-// screen's bar row, just one wide button instead of three.
-static void backButtonRect(int screenW, int screenH, int& x, int& y, int& w, int& h) {
+// Shared by rowLayout() and uiRawScanTick() so the two can never
+// drift apart -- see rowLayout()'s own comment.
+static const int RS_TITLE_BOTTOM = 16;
+static const int RS_SQ_H         = 70;
+
+// Two buttons in place of the normal three-slot bar: BACK (left) and
+// the opposite scan mode (right) -- reuses computeButtonBar()'s y/h so
+// the row lines up with every other screen's bar, just two wide
+// buttons instead of three narrower ones.
+static void bottomButtonRects(int screenW, int screenH,
+                               int& backX, int& backY, int& backW, int& backH,
+                               int& altX, int& altY, int& altW, int& altH) {
     Theme::ButtonBarGeom g = Theme::computeButtonBar(screenW, screenH);
-    w = 120;
-    h = g.h;
-    x = (screenW - w) / 2;
-    y = g.y;
+    const int margin = 8, gap = 8;
+    int bw = (screenW - 2 * margin - gap) / 2;
+    backX = margin;              backY = g.y; backW = bw; backH = g.h;
+    altX  = backX + bw + gap;    altY  = g.y; altW  = bw; altH  = g.h;
 }
 
+// Tracked across ticks so uiRawScanTick can fire Squachy's reactions
+// on the actual moment they happen (a new BLE device appearing, the
+// scan finishing) instead of every single frame.
+static uint8_t g_lastBleCount = 0;
+static bool    g_reportedDone = false;
+
 void uiRawScanInit(TFT_eSPI& t, bool isBle) {
-    (void)isBle;
     g_scroll = 0;
+    g_lastBleCount = 0;
+    g_reportedDone = false;
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
+    Squachy::scanReaction(Squachy::ScanMoment::STARTED);
 }
 
 void uiRawScanScroll(int delta) {
@@ -28,33 +45,172 @@ void uiRawScanScroll(int delta) {
     if (g_scroll < 0) g_scroll = 0;
 }
 
-bool uiRawScanHitBack(int x, int y, int screenW, int screenH) {
-    int bx, by, bw, bh;
-    backButtonRect(screenW, screenH, bx, by, bw, bh);
-    return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
+RawScanTap uiRawScanHitTest(int x, int y, int screenW, int screenH) {
+    int bx, by, bw, bh, ax, ay, aw, ah;
+    bottomButtonRects(screenW, screenH, bx, by, bw, bh, ax, ay, aw, ah);
+    if (x >= bx && x <= bx + bw && y >= by && y <= by + bh) return RawScanTap::BACK;
+    if (x >= ax && x <= ax + aw && y >= ay && y <= ay + ah) return RawScanTap::SWITCH;
+    return RawScanTap::NONE;
 }
 
-void uiRawScanTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool isBle, bool done) {
+static void drawBottomBar(TFT_eSPI& t, int w, int h, bool isBle) {
+    int bx, by, bw, bh, ax, ay, aw, ah;
+    bottomButtonRects(w, h, bx, by, bw, bh, ax, ay, aw, ah);
+    Theme::drawButton(t, bx, by, bw, bh, "[ BACK ]", false);
+    Theme::drawButton(t, ax, ay, aw, ah, isBle ? "[ WIFI ]" : "[ BLE ]", false);
+}
+
+// Confirm panel geometry, shared by its drawing (in uiRawScanTick())
+// and uiRawScanHitConfirm() below.
+static void confirmRects(int screenW, int screenH,
+                          int& px, int& py, int& pw, int& ph,
+                          int& okX, int& okY, int& okW, int& okH,
+                          int& cnX, int& cnY, int& cnW, int& cnH) {
+    pw = screenW - 40;
+    if (pw > 240) pw = 240;
+    ph = 90;
+    px = (screenW - pw) / 2;
+    py = (screenH - ph) / 2;
+    const int margin = 10, gap = 10, btnH = 26;
+    int btnW = (pw - 2 * margin - gap) / 2;
+    okY = cnY = py + ph - btnH - margin;
+    okH = cnH = btnH;
+    okX = px + margin;          okW = btnW;
+    cnX = okX + btnW + gap;     cnW = btnW;
+}
+
+RawScanConfirmTap uiRawScanHitConfirm(int x, int y, int screenW, int screenH) {
+    int px, py, pw, ph, okX, okY, okW, okH, cnX, cnY, cnW, cnH;
+    confirmRects(screenW, screenH, px, py, pw, ph, okX, okY, okW, okH, cnX, cnY, cnW, cnH);
+    if (x >= okX && x <= okX + okW && y >= okY && y <= okY + okH) return RawScanConfirmTap::OK;
+    if (x >= cnX && x <= cnX + cnW && y >= cnY && y <= cnY + cnH) return RawScanConfirmTap::CANCEL;
+    return RawScanConfirmTap::NONE;
+}
+
+// Drawn last, on top of whatever else this tick already drew (the
+// scanning state, the empty state, or the results list) -- called
+// right before every return point in uiRawScanTick() rather than
+// restructuring those into a single shared tail.
+static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label) {
+    int px, py, pw, ph, okX, okY, okW, okH, cnX, cnY, cnW, cnH;
+    confirmRects(w, h, px, py, pw, ph, okX, okY, okW, okH, cnX, cnY, cnW, cnH);
+    t.fillRoundRect(px, py, pw, ph, 6, Theme::BG);
+    t.drawRoundRect(px, py, pw, ph, 6, Theme::PURPLE);
+
+    t.setTextSize(1);
+    t.setTextWrap(false);
+    t.setTextColor(Theme::CYAN, Theme::BG);
+    const char* q = "WATCH THIS TARGET?";
+    int qw = t.textWidth(q);
+    t.setCursor(px + (pw - qw) / 2, py + 8);
+    t.print(q);
+
+    t.setTextColor(Theme::WHITE, Theme::BG);
+    int lw = t.textWidth(label);
+    int maxLw = pw - 16;
+    int lx = px + (pw - (lw < maxLw ? lw : maxLw)) / 2;
+    t.setCursor(lx, py + 24);
+    t.print(label);
+
+    Theme::drawButton(t, okX, okY, okW, okH, "[ OK ]", false);
+    Theme::drawButton(t, cnX, cnY, cnW, cnH, "[ CANCEL ]", false);
+}
+
+// Shared by uiRawScanTick() (drawing) and uiRawScanRowAt() (hit
+// testing) so the two can never drift apart -- rowH depends on live
+// font metrics (see the fontHeight() comment below), which is why
+// this needs a real TFT_eSPI& rather than being a compile-time
+// constant.
+static void rowLayout(TFT_eSPI& t, int w, int h, int& bodyTop, int& bodyBottom, int& rowH) {
+    Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
+    bodyTop    = RS_TITLE_BOTTOM + RS_SQ_H;
+    bodyBottom = bar.y - 4;
+
+    // fontHeight() with NO argument -- fontHeight(int) takes a font
+    // INDEX (2 means "built-in font #2", not "current font at size
+    // 2"), which silently queries an unrelated font's metrics instead
+    // of the GLCD font actually drawn here. The no-arg overload
+    // correctly reads back whatever font+size is currently active.
+    t.setTextSize(2);
+    int nameH = t.fontHeight();
+    t.setTextSize(1);
+    int detailH = t.fontHeight();
+    rowH = 1 /* topPad */ + nameH + detailH + 2;
+}
+
+// Row index (0 = topmost visible, adjusted for current scroll) a tap
+// at (x,y) falls within, or -1 if it's outside the list entirely (the
+// Squachy strip, the button bar, or past the last row). Used to
+// disambiguate a long-press-to-watch gesture from the drag-to-scroll
+// one -- see main.cpp's RAWSCAN case.
+int uiRawScanRowAt(TFT_eSPI& t, int x, int y, int screenW, int screenH) {
+    int bodyTop, bodyBottom, rowH;
+    rowLayout(t, screenW, screenH, bodyTop, bodyBottom, rowH);
+    if (y < bodyTop || y >= bodyBottom) return -1;
+    return g_scroll + (y - bodyTop) / rowH;
+}
+
+void uiRawScanTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool isBle, bool done,
+                    bool confirmPending, const char* confirmLabel) {
     int w = t.width();
     int h = t.height();
 
-    Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
-    const int titleBottom = 16;
-    // Squachy gets a small strip of his own below the title bar --
-    // "mini" version of his CLEAR-screen self, same tick() call, just
-    // a lot less room to run around in.
-    const int sqTop    = titleBottom;
-    const int sqH       = 46;
-    const int bodyTop    = sqTop + sqH;
-    const int bodyBottom = bar.y - 4;
-    const int bodyH      = bodyBottom - bodyTop;
+    // Squachy gets a small strip of his own below the title bar -- a
+    // mini version of his CLEAR-screen self (minScale below his usual
+    // scale-1.0 floor, see squachy.h), at 80% of his normal size. sqH
+    // is sized so that scale comfortably lands at ~0.8 on its own
+    // (charAvail = sqH - his 16px bubble row =~ BASE_HEIGHT * 0.8);
+    // minScale is there as a floor, not the thing forcing this size.
+    const int sqTop = RS_TITLE_BOTTOM;
+    const int sqH    = RS_SQ_H;
+    int bodyTop, bodyBottom, rowH;
+    rowLayout(t, w, h, bodyTop, bodyBottom, rowH);
+    const int bodyH = bodyBottom - bodyTop;
 
     char title[32];
     snprintf(title, sizeof(title), ">> %s SCAN <<", isBle ? "BLE" : "WIFI");
     Theme::drawTitleBar(t, title);
 
-    t.fillRect(0, sqTop, w, sqH, Theme::BG);
-    Squachy::tick(t, w / 2, sqTop, sqH, now, true);
+    // Fire Squachy's reactions on the actual moment they happen, not
+    // every frame: a new BLE device appearing (WiFi's count only ever
+    // jumps once, all at once, when the sweep finishes, so this is
+    // BLE-only), and the scan finishing (latched via g_reportedDone so
+    // it only fires once per scan, whichever mode).
+    if (isBle && !done) {
+        uint8_t n = eng.rawBleCount();
+        if (n > g_lastBleCount) Squachy::scanReaction(Squachy::ScanMoment::HIT);
+        g_lastBleCount = n;
+    }
+    if (done && !g_reportedDone) {
+        g_reportedDone = true;
+        uint8_t n = isBle ? eng.rawBleCount() : eng.rawWifiCount();
+        Squachy::scanReaction(n > 0 ? Squachy::ScanMoment::DONE_FOUND : Squachy::ScanMoment::DONE_EMPTY, n);
+    }
+
+    // Whatever background style is picked in Settings, drawn at its
+    // normal full-screen scale (yEnd = h, same room CLEAR gives it) --
+    // not compressed to fit sqH, which would look cramped. setViewport
+    // clips the actual visible output down to just this strip; the
+    // effect itself never knows it's only getting a sliver of screen.
+    // Same TFT_eSPI clipping this project already relies on elsewhere
+    // (cyd35's two-pass renderer, the party-mode wash) -- no offscreen
+    // buffer, none of the pushImage/sprite risk that was a problem for
+    // a *real* full-resolution render earlier this project.
+    t.setViewport(0, sqTop, w, sqH, true);
+    switch (Settings::background()) {
+        case Settings::Background::STARFIELD: Theme::drawStarfield(t, now, 0, h); break;
+        case Settings::Background::TOASTERS:   Theme::drawFlyingToasters(t, now, 0, h); break;
+        case Settings::Background::AQUARIUM:   Theme::drawAquarium(t, now, 0, h); break;
+        case Settings::Background::TERMINAL:   Theme::drawTerminalLog(t, now, 0, h); break;
+        case Settings::Background::FIREFLIES:  Theme::drawFireflies(t, now, 0, h); break;
+        case Settings::Background::FIRE:       Theme::drawFire(t, now, 0, h); break;
+        case Settings::Background::SNOWFALL:   Theme::drawSnowfall(t, now, 0, h); break;
+        case Settings::Background::SPECTRUM:   Theme::drawSpectrumWaterfall(t, now, 0, h, eng); break;
+        case Settings::Background::TUNNEL:     Theme::drawWireframeTunnel(t, now, 0, h); break;
+        default:                               Theme::drawMatrixRain(t, now, 0, h, true); break;
+    }
+    Squachy::tick(t, w / 2, 0, sqH, now, true, 0.8f, !done);
+    t.resetViewport();
 
     t.fillRect(0, bodyTop, w, bodyH, Theme::BG);
 
@@ -78,9 +234,8 @@ void uiRawScanTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool i
             t.print(sub);
         }
 
-        int bx, by, bw, bh;
-        backButtonRect(w, h, bx, by, bw, bh);
-        Theme::drawButton(t, bx, by, bw, bh, "[ BACK ]", false);
+        drawBottomBar(t, w, h, isBle);
+        if (confirmPending) drawConfirmPanel(t, w, h, confirmLabel);
         return;
     }
 
@@ -94,13 +249,21 @@ void uiRawScanTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool i
         t.setCursor((w - mw) / 2, bodyTop + bodyH / 3);
         t.print(msg);
 
-        int bx, by, bw, bh;
-        backButtonRect(w, h, bx, by, bw, bh);
-        Theme::drawButton(t, bx, by, bw, bh, "[ BACK ]", false);
+        drawBottomBar(t, w, h, isBle);
+        if (confirmPending) drawConfirmPanel(t, w, h, confirmLabel);
         return;
     }
 
-    int rowH = 22;
+    const int topPad = 1;
+    t.setTextSize(2);
+    int detailY = topPad + t.fontHeight();
+    // Off, not the TFT_eSPI default (on) -- a long SSID or BLE device
+    // name otherwise wraps onto a second line at this width, which
+    // pushes into (or reads as extra space before) the detail line
+    // below it. Long names just run off the right edge instead, same
+    // as everywhere else in this file already relies on clipping.
+    t.setTextWrap(false);
+
     int y = bodyTop;
     int idx = g_scroll;
     int max = (bodyH / rowH);
@@ -113,7 +276,7 @@ void uiRawScanTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool i
             if (!r) break;
             t.setTextSize(2);
             t.setTextColor(Theme::CYAN, Theme::BG);
-            t.setCursor(4, y + 3);
+            t.setCursor(4, y + topPad);
             t.print(r->name[0] ? r->name : "(unnamed)");
 
             t.setTextSize(1);
@@ -121,19 +284,19 @@ void uiRawScanTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool i
             char mac[24];
             snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
                      r->mac[0], r->mac[1], r->mac[2], r->mac[3], r->mac[4], r->mac[5]);
-            t.setCursor(4, y + 14);
+            t.setCursor(4, y + detailY);
             t.print(mac);
 
             t.setTextColor(Theme::VAPOR_PURPLE, Theme::BG);
             char rssi[12];
             snprintf(rssi, sizeof(rssi), "%ddBm", r->rssi);
             int rw = t.textWidth(rssi);
-            t.setCursor(w - rw - 4, y + 3);
+            t.setCursor(w - rw - 4, y + topPad);
             t.print(rssi);
         } else {
             t.setTextSize(2);
             t.setTextColor(Theme::CYAN, Theme::BG);
-            t.setCursor(4, y + 3);
+            t.setCursor(4, y + topPad);
             t.print(eng.rawWifiSsid(idx));
 
             t.setTextSize(1);
@@ -141,21 +304,20 @@ void uiRawScanTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool i
             char line[24];
             snprintf(line, sizeof(line), "CH%u  %s", (unsigned)eng.rawWifiChannel(idx),
                      eng.rawWifiOpen(idx) ? "OPEN" : "LOCKED");
-            t.setCursor(4, y + 14);
+            t.setCursor(4, y + detailY);
             t.print(line);
 
             t.setTextColor(Theme::VAPOR_PURPLE, Theme::BG);
             char rssi[12];
             snprintf(rssi, sizeof(rssi), "%ddBm", eng.rawWifiRssi(idx));
             int rw = t.textWidth(rssi);
-            t.setCursor(w - rw - 4, y + 3);
+            t.setCursor(w - rw - 4, y + topPad);
             t.print(rssi);
         }
 
         y += rowH;
     }
 
-    int bx, by, bw, bh;
-    backButtonRect(w, h, bx, by, bw, bh);
-    Theme::drawButton(t, bx, by, bw, bh, "[ BACK ]", false);
+    drawBottomBar(t, w, h, isBle);
+    if (confirmPending) drawConfirmPanel(t, w, h, confirmLabel);
 }

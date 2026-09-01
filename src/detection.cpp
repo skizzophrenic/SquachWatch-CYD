@@ -58,11 +58,15 @@ static void copyMac(char* dst12, const uint8_t* mac6) {
 class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
     void onResult(NimBLEAdvertisedDevice* adv) override {
         if (!g_engine) return;
+        const uint8_t* mac = adv->getAddress().getNative();
+        // Checked regardless of raw-scan mode -- a watched target
+        // still fires even if it's not a known signature and even
+        // while the raw-scan screen happens to be open.
+        g_engine->checkWatchBle(mac);
         if (g_rawMode == RawScanMode::WIFI) return;   // radio's dedicated to the WiFi sweep right now
         if (g_rawMode == RawScanMode::BLE) {
             RawBleResult r;
             memset(&r, 0, sizeof(r));
-            const uint8_t* mac = adv->getAddress().getNative();
             memcpy(r.mac, mac, 6);
             r.rssi = adv->getRSSI();
             const char* name = adv->getName().c_str();
@@ -72,7 +76,6 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
         }
         Detection det;
         memset(&det, 0, sizeof(det));
-        const uint8_t* mac = adv->getAddress().getNative();
         memcpy(det.mac, mac, 6);
         det.rssi   = adv->getRSSI();
         det.channel= 0;
@@ -224,6 +227,14 @@ bool DetectionEngine::init() {
                 }
             }
             g_engine->postWiFi(frame + 16, pkt->rx_ctrl.rssi, pkt->rx_ctrl.channel, ssid);
+        } else if (type == 0 && subtype == 12) {
+            // Deauthentication: addr2 (transmitter -- the attacker, or
+            // a spoofed AP address) at the same offset probe requests
+            // use above. A single frame here is completely normal
+            // WiFi traffic (a phone disconnecting, an AP restarting);
+            // postDeauth()/processDeauthQ() is what actually decides
+            // whether a BURST of them is happening.
+            g_engine->postDeauth(frame + 10, pkt->rx_ctrl.rssi, pkt->rx_ctrl.channel);
         }
     });
 
@@ -264,6 +275,7 @@ void DetectionEngine::loop() {
     }
     hopChannel();
     processWiFiQ();
+    processDeauthQ();
     expireStale();
     decayChannelActivity();
     _sd.tick();
@@ -317,6 +329,60 @@ void IRAM_ATTR DetectionEngine::postWiFi(const uint8_t* mac, int8_t rssi, uint8_
         e.ssid[0] = 0;
     }
     _wifiQHead = next;
+}
+
+void IRAM_ATTR DetectionEngine::postDeauth(const uint8_t* mac, int8_t rssi, uint8_t channel) {
+    if (!mac) return;
+    uint8_t next = (_deauthQHead + 1) % DEAUTH_Q_CAP;
+    if (next == _deauthQTail) return;           // queue full, drop
+    DeauthQEntry& e = (DeauthQEntry&)_deauthQ[_deauthQHead];
+    memcpy((void*)e.mac, mac, 6);
+    e.rssi    = rssi;
+    e.channel = channel;
+    _deauthQHead = next;
+}
+
+void DetectionEngine::processDeauthQ() {
+    while (_deauthQTail != _deauthQHead) {
+        DeauthQEntry e;
+        {
+            noInterrupts();
+            e = (const DeauthQEntry&)_deauthQ[_deauthQTail];
+            _deauthQTail = (_deauthQTail + 1) % DEAUTH_Q_CAP;
+            interrupts();
+        }
+
+        uint32_t now = millis();
+        // Rolling window: resets after a gap longer than the window
+        // itself rather than a fixed calendar-aligned interval, so an
+        // isolated frame (normal traffic) never counts toward a burst
+        // that happened long before or after it.
+        if (now - _deauthWinStart > DEAUTH_WINDOW_MS) {
+            _deauthWinStart = now;
+            _deauthWinCount = 0;
+        }
+        _deauthWinCount++;
+
+        if (_deauthWinCount >= DEAUTH_THRESHOLD && (now - _deauthLastFireMs) > DEAUTH_COOLDOWN_MS) {
+            _deauthLastFireMs = now;
+            Detection d;
+            memset(&d, 0, sizeof(d));
+            memcpy(d.mac, e.mac, 6);
+            d.rssi    = e.rssi;
+            d.channel = e.channel;
+            d.type    = DetectionType::DEAUTH;
+            strncpy(d.vendor, "Deauth", sizeof(d.vendor) - 1);
+            d.firstSeen = d.lastSeen = now;
+            // hits doubles as "how many frames triggered this" here,
+            // rather than a repeat-sighting count like every other
+            // type uses it for -- there's no single persistent device
+            // identity behind a flood the way there is for a tracker
+            // or camera.
+            d.hits   = _deauthWinCount;
+            d.active = true;
+            pushLog(d);
+        }
+    }
 }
 
 void DetectionEngine::postBle(Detection d) {
@@ -453,10 +519,64 @@ bool DetectionEngine::rawWifiOpen(uint8_t idx) const {
     return idx < rawWifiCount() && WiFi.encryptionType(idx) == WIFI_AUTH_OPEN;
 }
 
+const uint8_t* DetectionEngine::rawWifiBssid(uint8_t idx) const {
+    if (!rawWifiScanDone() || idx >= rawWifiCount()) return nullptr;
+    return WiFi.BSSID(idx);
+}
+
 void DetectionEngine::stopRawScan() {
     if (g_rawMode == RawScanMode::WIFI) WiFi.scanDelete();
     g_rawMode = RawScanMode::NONE;
     esp_wifi_set_promiscuous(true);
+}
+
+void DetectionEngine::watchBle(const uint8_t* mac, const char* name) {
+    _watchKind = WatchKind::BLE;
+    memcpy(_watchMac, mac, 6);
+    strncpy(_watchLabel, (name && name[0]) ? name : "Unnamed device", sizeof(_watchLabel) - 1);
+    _watchLabel[sizeof(_watchLabel) - 1] = 0;
+    _watchLastHitMs = 0;
+    _watchHitFlag   = false;
+}
+
+void DetectionEngine::watchWifi(const uint8_t* bssid, const char* ssid) {
+    _watchKind = WatchKind::WIFI;
+    memcpy(_watchMac, bssid, 6);
+    strncpy(_watchLabel, (ssid && ssid[0]) ? ssid : "(hidden)", sizeof(_watchLabel) - 1);
+    _watchLabel[sizeof(_watchLabel) - 1] = 0;
+    _watchLastHitMs = 0;
+    _watchHitFlag   = false;
+}
+
+void DetectionEngine::clearWatch() {
+    _watchKind    = WatchKind::NONE;
+    _watchHitFlag = false;
+}
+
+bool DetectionEngine::watchHitPending() {
+    if (_watchHitFlag) {
+        _watchHitFlag = false;
+        return true;
+    }
+    return false;
+}
+
+void DetectionEngine::checkWatchBle(const uint8_t* mac) {
+    if (_watchKind != WatchKind::BLE) return;
+    if (memcmp(mac, _watchMac, 6) != 0) return;
+    uint32_t now = millis();
+    if (now - _watchLastHitMs < WATCH_COOLDOWN_MS) return;
+    _watchLastHitMs = now;
+    _watchHitFlag   = true;
+}
+
+void DetectionEngine::checkWatchWifi(const uint8_t* mac) {
+    if (_watchKind != WatchKind::WIFI) return;
+    if (memcmp(mac, _watchMac, 6) != 0) return;
+    uint32_t now = millis();
+    if (now - _watchLastHitMs < WATCH_COOLDOWN_MS) return;
+    _watchLastHitMs = now;
+    _watchHitFlag   = true;
 }
 
 void DetectionEngine::processWiFiQ() {
@@ -469,6 +589,11 @@ void DetectionEngine::processWiFiQ() {
             _wifiQTail = (_wifiQTail + 1) % WIFI_Q_CAP;
             interrupts();
         }
+        // Checked for every dequeued frame, regardless of what (if
+        // anything) it ends up matching below -- a watched AP's own
+        // MAC shows up here as addr2 (probe/data) or addr3/BSSID
+        // (beacon), same offsets postWiFi() was already called with.
+        checkWatchWifi(e.mac);
         // Every captured frame feeds the spectrum-waterfall's channel
         // activity level, whether or not it ends up matching anything
         // below — this is meant to reflect real ambient RF traffic,

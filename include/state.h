@@ -18,7 +18,8 @@ enum class DetectionType : uint8_t {
     GOOGLE_TAG  = 11,  // Google Find My Device network tracker (Chipolo/Pebblebee/Moto Tag)
     TILE    = 12,  // Tile BLE tracker (was previously bucketed under AIRTAG)
     RING    = 13,  // Ring doorbell/camera (was previously bucketed under CAMERA)
-    COUNT   = 14
+    DEAUTH  = 14,  // WiFi deauth/disassoc flood -- rate-detected, not a signature match (see DetectionEngine)
+    COUNT   = 15
 };
 
 inline const char* detectionTypeName(DetectionType t) {
@@ -36,6 +37,7 @@ inline const char* detectionTypeName(DetectionType t) {
         case DetectionType::GOOGLE_TAG:  return "GOOGLE_TAG";
         case DetectionType::TILE:        return "TILE";
         case DetectionType::RING:        return "RING";
+        case DetectionType::DEAUTH:      return "DEAUTH";
         default:                         return "UNKNOWN";
     }
 }
@@ -61,7 +63,8 @@ enum class AppState : uint8_t {
     SETTINGS = 4,
     DIARY    = 5,
     OUTFIT   = 6,
-    RAWSCAN  = 7   // manual BLE/WiFi scanner, reached via CLEAR's SCAN picker
+    RAWSCAN     = 7,  // manual BLE/WiFi scanner, reached via CLEAR's SCAN picker
+    WATCH_ALERT = 8   // a watched target (see DetectionEngine::watchBle/watchWifi) came back in range
 };
 
 enum class ButtonId : uint8_t {

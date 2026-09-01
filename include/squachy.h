@@ -114,7 +114,27 @@ namespace Squachy {
     // changes, idle-quip rolls, walk/confetti updates, the bubble's
     // erase-tracking) only happens when advance is true; the actual
     // pixel drawing runs every call so each band still gets painted.
-    void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now, bool advance = true);
+    // minScale: normally he never renders below scale 1.0 (keeps his
+    // proportions legible) -- a call site with a genuinely tiny box
+    // (e.g. the raw-scan screen's mini cameo) can lower this floor.
+    // Leave it at the default everywhere else; it changes nothing
+    // about the CLEAR screen's normal sizing.
+    // scanningFx: draws a small radiating "ping" beside his head every
+    // call while true -- purely a function of `now`, no state of its
+    // own, so the caller can flip it on/off between ticks freely (see
+    // ui_rawscan.cpp).
+    void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
+              bool advance = true, float minScale = 1.0f, bool scanningFx = false);
+
+    // Themed one-liner reactions for the raw-scan screen (see
+    // ui_rawscan.cpp), pulled from their own flavor pool instead of
+    // the normal idle-chatter rotation -- call once per actual moment,
+    // not every tick. count is the number of results so far/at finish
+    // (ignored for STARTED); DONE_FOUND with a high count also
+    // triggers his rare party-confetti flourish, the same one
+    // milestone detections and the outfit-unlock easter egg use.
+    enum class ScanMoment { STARTED, HIT, DONE_EMPTY, DONE_FOUND };
+    void scanReaction(ScanMoment moment, uint8_t count = 0);
 
     // A lightweight cameo draw for screens that just want him standing
     // and waving (the boot splash) without the full idle/quip state

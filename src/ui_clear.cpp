@@ -18,7 +18,12 @@ static const char* counterLabel(DetectionType t) {
         case DetectionType::AXON:        return "AXON";
         case DetectionType::META:        return "META";
         case DetectionType::SKIMMER:     return "SKIM";
-        case DetectionType::AIRTAG:      return "AIR";
+        // AIRTAG doubles as the combined "TRACKER" bucket here -- see
+        // counterCount() below. GOOGLE_TAG/TILE keep their own labels
+        // everywhere else (LOG screen, colors, vendor names); this is
+        // just the compact main-screen row folding all three
+        // BLE-tracker types into one column to save space.
+        case DetectionType::AIRTAG:      return "TRACKER";
         case DetectionType::DRONE:       return "DRONE";
         case DetectionType::RAVEN:       return "RAV";
         case DetectionType::ALPR:        return "ALPR";
@@ -27,21 +32,37 @@ static const char* counterLabel(DetectionType t) {
         case DetectionType::GOOGLE_TAG:  return "GTAG";
         case DetectionType::TILE:        return "TILE";
         case DetectionType::RING:        return "RING";
+        case DetectionType::DEAUTH:      return "DEAUTH";
         default:                         return "?";
     }
 }
 
-// All 13 types in one place, chunked into rows of at most
-// MAX_PER_ROW at draw time (see uiClearTick()) instead of two
-// hand-split arrays -- the old 7-and-6 split ran wide enough on a
-// narrow 240px portrait screen that FLOCK (first on the line) got
-// clipped off the left edge entirely. A hard per-row cap fixes that
-// on both boards, not just AWOK's narrower panel.
+// GOOGLE_TAG and TILE's counts fold into AIRTAG's here (see
+// counterLabel's "TRACKER" case above) -- they're still tracked and
+// displayed as their own distinct types everywhere else (LOG screen,
+// colors, vendor labels), just combined into one number/column on
+// this compact row to free up space, especially under the 4-per-row
+// portrait cap.
+static uint16_t counterCount(const DetectionEngine& eng, DetectionType t) {
+    uint16_t n = eng.countByType(t);
+    if (t == DetectionType::AIRTAG) {
+        n += eng.countByType(DetectionType::GOOGLE_TAG) + eng.countByType(DetectionType::TILE);
+    }
+    return n;
+}
+
+// All types in one place, chunked into rows of at most MAX_PER_ROW at
+// draw time (see uiClearTick()) instead of two hand-split arrays --
+// the old 7-and-6 split ran wide enough on a narrow 240px portrait
+// screen that FLOCK (first on the line) got clipped off the left edge
+// entirely. A hard per-row cap fixes that on both boards, not just
+// AWOK's narrower panel. GOOGLE_TAG/TILE are deliberately absent --
+// AIRTAG stands in for all three as "TRACKER" (see counterLabel/
+// counterCount above).
 static const DetectionType ALL_COUNTER_TYPES[] = {
     DetectionType::FLOCK,   DetectionType::AXON,       DetectionType::META,   DetectionType::SKIMMER,
     DetectionType::RAVEN,   DetectionType::AIRTAG,     DetectionType::DRONE,  DetectionType::ALPR,
-    DetectionType::CAMERA,  DetectionType::SAMSUNG_TAG, DetectionType::GOOGLE_TAG,
-    DetectionType::TILE,    DetectionType::RING,
+    DetectionType::CAMERA,  DetectionType::SAMSUNG_TAG, DetectionType::RING,  DetectionType::DEAUTH,
 };
 static const uint8_t ALL_COUNTER_TYPES_N = sizeof(ALL_COUNTER_TYPES) / sizeof(ALL_COUNTER_TYPES[0]);
 // Portrait (narrow) caps at 4 per row -- see the comment above. Landscape
@@ -66,7 +87,7 @@ static void drawCounterLine(TFT_eSPI& t, int w, int y, const DetectionEngine& en
     int off = 0;
     for (uint8_t i = 0; i < n; i++) {
         off += snprintf(buf + off, sizeof(buf) - off, "%s:%u  ",
-                        counterLabel(types[i]), eng.countByType(types[i]));
+                        counterLabel(types[i]), counterCount(eng, types[i]));
     }
     int tw = t.textWidth(buf);
     t.setCursor((w - tw) / 2, y);

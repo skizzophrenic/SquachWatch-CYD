@@ -258,6 +258,11 @@ Confidence confidenceFor(DetectionType t) {
         case DetectionType::DRONE:
         case DetectionType::ALPR:
         case DetectionType::GOOGLE_TAG:
+        // Rate-thresholded (see DetectionEngine's deauth-flood
+        // tracking), not a single-frame guess -- a real burst pattern,
+        // but the threshold/window are still heuristic, so Medium
+        // rather than High.
+        case DetectionType::DEAUTH:
             return Confidence::MED_CONF;
         default:
             return Confidence::LOW_CONF;

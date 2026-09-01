@@ -907,9 +907,8 @@ bool onboardingActive() {
 }
 
 bool onboardingTapAdvance(int x, int y) {
+    (void)x; (void)y;   // any tap advances now, not just one landing on the bubble
     if (!s_onboardActive) return false;
-    if (x < lastBubbleX || x > lastBubbleX + lastBubbleW ||
-        y < lastBubbleY || y > lastBubbleY + lastBubbleH) return false;
     advanceOnboarding();
     return true;
 }
@@ -1006,6 +1005,84 @@ void unlockAllOutfits() {
         s_cfy[i]   = (float)random(-60, 0);
         s_cfvy[i]  = 1.0f + (float)random(0, 20) / 10.0f;
         s_cfcol[i] = (uint8_t)random(0, 6);
+    }
+}
+
+// Flavor pools for scanReaction() -- separate from the normal idle-
+// chatter rotation (DET_LINES etc.) since these are tied to a specific
+// screen's specific moments, not rolled at random during idle time.
+// STARTED isn't a pool at all, deliberately -- it's the one place a
+// new user learns the long-press-to-watch gesture exists, so it says
+// the same fixed instructional line every single time rather than
+// rolling flavor text that might never mention it.
+static const char* const SCAN_STARTED_LINE = "Tap & hold a result to set a target.";
+static const char* const SCAN_HIT_LINES[] = {
+    "Ooh, found one!",
+    "Got a hit.",
+    "There's another.",
+};
+static const char* const SCAN_EMPTY_LINES[] = {
+    "...nothing? Huh.",
+    "Quiet out there today.",
+    "Not a peep.",
+};
+static const char* const SCAN_FOUND_LINES[] = {
+    "That's a lot of signals.",
+    "Busy neighborhood!",
+    "Scan's done. Take a look.",
+};
+
+// STARTED's hint bubble gets a grace window nothing else is allowed to
+// interrupt -- BLE can turn up a device within the first second, and a
+// HIT quip immediately overwriting the hint before it's even readable
+// defeats the whole point of it existing.
+static uint32_t s_scanHintUntil = 0;
+static const uint32_t SCAN_HINT_GRACE_MS = 3000;
+
+void scanReaction(ScanMoment moment, uint8_t count) {
+    uint32_t now = millis();
+    switch (moment) {
+        case ScanMoment::STARTED:
+            // No mood override here -- his normal idle cycling keeps
+            // running underneath the scanning-fx ping, only the bubble
+            // changes. Longer than his other bubbles get (5500 vs
+            // 2200-4500), and MIN_BUBBLE_MS still applies underneath --
+            // this is the one line that actually needs to be read.
+            say(SCAN_STARTED_LINE, 5500);
+            s_scanHintUntil = now + SCAN_HINT_GRACE_MS;
+            break;
+        case ScanMoment::HIT:
+            mood = Mood::SHOCKED;
+            moodUntil = now + 800;
+            // Mood still reacts (visual feedback that something was
+            // found); only the bubble text is held back so it can't
+            // cut the hint off early.
+            if (now >= s_scanHintUntil) say(pick(SCAN_HIT_LINES, 3), 2200);
+            break;
+        case ScanMoment::DONE_EMPTY:
+            mood = Mood::SLEEPY;
+            moodUntil = now + 2000;
+            if (now >= s_scanHintUntil) say(pick(SCAN_EMPTY_LINES, 3), 4000);
+            break;
+        case ScanMoment::DONE_FOUND:
+            mood = Mood::BOUNCE;
+            moodUntil = now + 2000;
+            if (now >= s_scanHintUntil) say(pick(SCAN_FOUND_LINES, 3), 4500);
+            // "A lot" flourish -- same rare party-confetti mechanism
+            // milestone detections and the outfit-unlock easter egg
+            // use (see unlockAllOutfits() above), not a separate
+            // effect of its own.
+            if (count >= 5) {
+                s_legendary      = true;
+                s_legendaryUntil = now + 4000;
+                for (uint8_t i = 0; i < CONFETTI_N; i++) {
+                    s_cfx[i]   = (float)random(0, 240);
+                    s_cfy[i]   = (float)random(-60, 0);
+                    s_cfvy[i]  = 1.0f + (float)random(0, 20) / 10.0f;
+                    s_cfcol[i] = (uint8_t)random(0, 6);
+                }
+            }
+            break;
     }
 }
 
@@ -1293,8 +1370,11 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     t.fillTriangle(cx2 + S(5),  hy + S(3), cx2 + S(9), hy - S(4), cx2 + S(13),hy + S(3), furLight);
 
     // A tiny top hat, unlocked once he reaches Legend stage — perched
-    // just above the crest peak (hy - S(14)).
-    if (currentStage() == GrowthStage::LEGEND) {
+    // just above the crest peak (hy - S(14)). Skipped for the Unicorn
+    // outfit specifically: its horn already occupies that exact spot,
+    // and the two stacked together read as clutter rather than two
+    // readable accessories.
+    if (currentStage() == GrowthStage::LEGEND && currentOutfit() != OutfitId::UNICORN) {
         t.fillRoundRect(cx2 - S(9), hy - S(22), S(18), S(3), 1, BLACK);
         t.fillRect(cx2 - S(5), hy - S(30), S(10), S(9), BLACK);
         t.fillRect(cx2 - S(5), hy - S(24), S(10), S(2), VAPOR_PINK);
@@ -1432,6 +1512,21 @@ static void drawHeartFx(TFT_eSPI& t, int cx, int headTopY, uint32_t now) {
     }
 }
 
+// Small radiating "ping" rings beside his head while a raw scan is
+// running (see ui_rawscan.cpp's scanningFx) -- purely a function of
+// `now`, no persistent state of its own, so the caller can turn it on
+// and off between ticks with nothing to reset.
+static void drawScanFx(TFT_eSPI& t, int cx, int headTopY, uint32_t now, float scale) {
+    int px = cx + (int)(26 * scale);
+    int py = headTopY + (int)(6 * scale);
+    for (uint8_t i = 0; i < 3; i++) {
+        float phase = (float)((now + i * 500) % 1500) / 1500.0f;
+        int r = (int)(2 + phase * 16 * scale);
+        uint16_t col = Theme::blend(Theme::CYAN, Theme::BG, (uint16_t)(phase * 220.0f));
+        t.drawCircle(px, py, r, col);
+    }
+}
+
 // The rare "party mode" flourish: a rainbow strobe wash across his
 // whole allotted region plus falling confetti, drawn before he is so
 // he stands out in front of it. Whichever theme is active supplies the
@@ -1462,7 +1557,8 @@ static void drawPartyFx(TFT_eSPI& t, uint32_t now, int topY, int availHeight, bo
     }
 }
 
-void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now, bool advance) {
+void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
+          bool advance, float minScale, bool scanningFx) {
     // Everything in this block mutates mood/timers/particle state —
     // gated to run once per logical frame (see the header comment on
     // tick()) regardless of how many physical bands call this. The
@@ -1584,10 +1680,21 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now, bool adv
     // smaller for the duration — reading the explanation matters more
     // than his size right then.
     const int bubbleRowH = s_onboardActive ? ONBOARD_BUBBLE_H : 16;
+    // The floor below normally keeps him from going below scale 1.0 --
+    // minScale lets a specific call site (the mini-scan-screen cameo)
+    // opt into a smaller floor without changing anyone else's default.
+    // Deriving charAvail's own floor from minScale (rather than a flat
+    // 40) keeps this a no-op for every existing caller: at minScale's
+    // default of 1.0 that floor becomes BASE_HEIGHT itself, which the
+    // scale clamp just below was already forcing the same end result
+    // through regardless (any charAvail under BASE_HEIGHT still landed
+    // on scale 1.0), so nothing about today's on-screen sizes changes.
+    int charAvailFloor = (int)(BASE_HEIGHT * minScale);
+    if (charAvailFloor < 8) charAvailFloor = 8;   // keep the division sane at extreme minScale
     int charAvail = availHeight - bubbleRowH;
-    if (charAvail < 40) charAvail = 40;
+    if (charAvail < charAvailFloor) charAvail = charAvailFloor;
     float scale = (float)charAvail / (float)BASE_HEIGHT;
-    if (scale < 1.0f) scale = 1.0f;
+    if (scale < minScale) scale = minScale;
     if (scale > 3.0f) scale = 3.0f;
 
     int headTopY = topY + bubbleRowH;
@@ -1644,6 +1751,7 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now, bool adv
     // region every frame, same guarantee, just with extra flair.)
     drawBody(t, bodyCx, hy, headTopY, now, mood, scale);
     if (now < s_petFxUntil) drawHeartFx(t, bodyCx, headTopY, now);
+    if (scanningFx) drawScanFx(t, bodyCx, headTopY, now, scale);
 
     // Remember where/how big he actually was this frame — hitTest()
     // (tap-to-pet) checks against this, not a fixed region, since he

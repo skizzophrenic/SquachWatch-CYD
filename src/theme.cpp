@@ -64,6 +64,8 @@ uint16_t colorFor(DetectionType t) {
         case DetectionType::CAMERA:
         case DetectionType::RING:
             return CYAN;
+        case DetectionType::DEAUTH:
+            return RED;
         default:
             return GREEN;
     }
