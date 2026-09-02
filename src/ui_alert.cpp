@@ -87,7 +87,12 @@ void uiAlertInit(TFT_eSPI& t, const Detection& d) {
     s_touched = false;
     s_alertStart = millis();
     s_glitchStep = 0;
-    s_camCx = (random(0, 2) == 0) ? MARGIN_CX : (t.width() - MARGIN_CX);
+    // Deliberately NOT re-rolling s_camCx here -- back-to-back
+    // detections (or an alert auto-dismissing at 10s and immediately
+    // re-triggering because the same thing is still in range) used to
+    // each reset which margin he's on, adding an extra jump on top of
+    // the in-alert glitch-beat ones. Leaving it alone means a fresh
+    // alert just continues from wherever he already was.
     Squachy::alertReaction(d.type);
     // fillScreen() relies on TFT_eSPI's base-class width/height, which
     // TFT_eSprite::createSprite() never updates — it leaves stale
