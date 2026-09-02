@@ -848,9 +848,17 @@ static void enterOutfit() {
     uiOutfitInit(*canvas);
 }
 
+// Runtime UART speed -- set per-board in platformio.ini (-DSERIAL_BAUD=...)
+// for hardware confirmed to hold a faster rate cleanly; boards without
+// an explicit override fall back to this conservative default rather
+// than inheriting cyd's verified-fast rate on unverified hardware.
+#ifndef SERIAL_BAUD
+#define SERIAL_BAUD 921600
+#endif
+
 // ---- Arduino setup / loop ----
 void setup() {
-    Serial.begin(115200);
+    Serial.begin(SERIAL_BAUD);
     delay(200);
     Serial.println();
     Serial.println("SquachWatch-CYD v1.0  --  TALKING SASQUACH");

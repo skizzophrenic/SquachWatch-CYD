@@ -1,0 +1,14 @@
+{
+  "name": "SquachWatch-CYD (2.8\" CYD, ILI9341)",
+  "version": "0.0.0",
+  "funding_url": "https://talkingsasquach.com",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        { "path": "firmware-cyd-ili9341-merged.bin", "offset": 0 }
+      ]
+    }
+  ]
+}

@@ -1,19 +1,20 @@
 name: Build and release firmware
 
-# Push a tag like v1.2.0 to: build firmware for both release-ready
-# boards (cyd, awok -- cyd35 stays excluded, see the build step below),
-# create a GitHub Release for that tag with each board's three raw
-# PlatformIO artifacts attached (bootloader/partitions/firmware — the
-# human-facing source of truth), then also merge each into one
-# flashable image and attach those plus per-board version-stamped
-# manifests. The repo is public now, so the web flasher itself is
-# deployed straight to this repo's own GitHub Pages site
-# (github.io/SquachWatch-CYD) as part of this same run — both merged
-# binaries and both manifests are copied alongside index.html there so
-# the browser fetches them same-origin (GitHub release assets don't
-# send CORS headers, so the flasher page can't fetch them directly
-# from the Releases tab). index.html's board picker swaps which
-# manifest the install button targets.
+# Push a tag like v1.2.0 to: build firmware for the three release-ready
+# environments (cyd, cyd-ili9341, awok -- cyd35 stays excluded, see the
+# build step below; cyd/cyd-ili9341 are the same physical 2.8" board,
+# just the two display drivers it might have shipped with), create a
+# GitHub Release for that tag with each one's three raw PlatformIO
+# artifacts attached (bootloader/partitions/firmware — the human-facing
+# source of truth), then also merge each into one flashable image and
+# attach those plus per-board version-stamped manifests. The repo is
+# public now, so the web flasher itself is deployed straight to this
+# repo's own GitHub Pages site (github.io/SquachWatch-CYD) as part of
+# this same run — all three merged binaries and manifests are copied
+# alongside index.html there so the browser fetches them same-origin
+# (GitHub release assets don't send CORS headers, so the flasher page
+# can't fetch them directly from the Releases tab). index.html's board
+# picker swaps which manifest the install button targets.
 on:
   push:
     tags:
@@ -44,11 +45,11 @@ jobs:
         run: pip install --upgrade platformio
 
       - name: Build firmware
-        # cyd35 (3.5" board port) is a third environment in
+        # cyd35 (3.5" board port) is also an environment in
         # platformio.ini now but isn't public-release-ready yet (known
-        # display/touch issues) -- cyd and awok are both release-ready
-        # and get built/published together below.
-        run: pio run -e cyd -e awok
+        # display/touch issues) -- the other three are and get
+        # built/published together below.
+        run: pio run -e cyd -e cyd-ili9341 -e awok
 
       - name: Determine version
         id: ver
@@ -67,13 +68,19 @@ jobs:
             0x8000  .pio/build/cyd/partitions.bin \
             0x10000 .pio/build/cyd/firmware.bin
           python -m esptool --chip esp32 merge_bin \
+            -o firmware-cyd-ili9341-merged.bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            0x1000  .pio/build/cyd-ili9341/bootloader.bin \
+            0x8000  .pio/build/cyd-ili9341/partitions.bin \
+            0x10000 .pio/build/cyd-ili9341/firmware.bin
+          python -m esptool --chip esp32 merge_bin \
             -o firmware-awok-merged.bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
             0x1000  .pio/build/awok/bootloader.bin \
             0x8000  .pio/build/awok/partitions.bin \
             0x10000 .pio/build/awok/firmware.bin
           # GitHub release assets need unique filenames within a release
-          # -- both boards' raw PlatformIO artifacts share the same
+          # -- every board's raw PlatformIO artifacts share the same
           # basenames (bootloader.bin/partitions.bin/firmware.bin), which
           # made the very first two-board release fail partway through
           # uploading (second partitions.bin collided with the first).
@@ -81,6 +88,9 @@ jobs:
           cp .pio/build/cyd/bootloader.bin  cyd-bootloader.bin
           cp .pio/build/cyd/partitions.bin  cyd-partitions.bin
           cp .pio/build/cyd/firmware.bin    cyd-firmware.bin
+          cp .pio/build/cyd-ili9341/bootloader.bin  cyd-ili9341-bootloader.bin
+          cp .pio/build/cyd-ili9341/partitions.bin  cyd-ili9341-partitions.bin
+          cp .pio/build/cyd-ili9341/firmware.bin    cyd-ili9341-firmware.bin
           cp .pio/build/awok/bootloader.bin awok-bootloader.bin
           cp .pio/build/awok/partitions.bin awok-partitions.bin
           cp .pio/build/awok/firmware.bin   awok-firmware.bin
@@ -89,12 +99,13 @@ jobs:
         run: |
           python - <<'PY'
           import json
-          for p in ("web-flasher/manifest-cyd.json", "web-flasher/manifest-awok.json"):
+          for p in ("web-flasher/manifest-cyd.json", "web-flasher/manifest-cyd-ili9341.json", "web-flasher/manifest-awok.json"):
               m = json.load(open(p))
               m["version"] = "${{ steps.ver.outputs.version }}"
               json.dump(m, open(p, "w"), indent=2)
           PY
           cp web-flasher/manifest-cyd.json manifest-cyd.json
+          cp web-flasher/manifest-cyd-ili9341.json manifest-cyd-ili9341.json
           cp web-flasher/manifest-awok.json manifest-awok.json
 
       - name: Create GitHub Release with build artifacts
@@ -113,12 +124,17 @@ jobs:
             cyd-bootloader.bin \
             cyd-partitions.bin \
             cyd-firmware.bin \
+            cyd-ili9341-bootloader.bin \
+            cyd-ili9341-partitions.bin \
+            cyd-ili9341-firmware.bin \
             awok-bootloader.bin \
             awok-partitions.bin \
             awok-firmware.bin \
             firmware-cyd-merged.bin \
+            firmware-cyd-ili9341-merged.bin \
             firmware-awok-merged.bin \
             manifest-cyd.json \
+            manifest-cyd-ili9341.json \
             manifest-awok.json
 
       - name: Assemble Pages site
@@ -126,8 +142,10 @@ jobs:
           mkdir -p _site
           cp web-flasher/index.html _site/index.html
           cp web-flasher/manifest-cyd.json _site/manifest-cyd.json
+          cp web-flasher/manifest-cyd-ili9341.json _site/manifest-cyd-ili9341.json
           cp web-flasher/manifest-awok.json _site/manifest-awok.json
           cp firmware-cyd-merged.bin _site/firmware-cyd-merged.bin
+          cp firmware-cyd-ili9341-merged.bin _site/firmware-cyd-ili9341-merged.bin
           cp firmware-awok-merged.bin _site/firmware-awok-merged.bin
 
       - name: Upload Pages artifact

@@ -207,30 +207,43 @@
     text-align:center;
   }
 
-  .board-picker{
-    display:flex;
-    gap:8px;
-    margin-bottom:16px;
-  }
-  .board-btn{
-    flex:1;
+  .board-picker-label{
+    display:block;
     font-family:'VT323', monospace;
-    font-size:1.05rem;
+    font-size:0.95rem;
     letter-spacing:0.05em;
-    padding:10px 6px;
-    background:transparent;
     color:var(--vapor-blue);
+    margin-bottom:6px;
+  }
+  .board-select{
+    display:block;
+    width:100%;
+    font-family:'VT323', monospace;
+    font-size:1.15rem;
+    letter-spacing:0.03em;
+    padding:10px 10px;
+    margin-bottom:8px;
+    background:var(--bg);
+    color:#fff;
     border:1px solid var(--purple);
     border-radius:8px;
     cursor:pointer;
-    transition:background 0.15s, color 0.15s, box-shadow 0.15s, border-color 0.15s;
+    transition:border-color 0.15s, box-shadow 0.15s;
   }
-  .board-btn:hover{ border-color:var(--vapor-pink); }
-  .board-btn.active{
-    background:linear-gradient(90deg, var(--purple), var(--vapor-pink));
-    color:#fff;
-    box-shadow:0 0 14px rgba(180,0,255,0.5);
-    border-color:transparent;
+  .board-select:hover, .board-select:focus{
+    border-color:var(--vapor-pink);
+    box-shadow:0 0 14px rgba(180,0,255,0.4);
+    outline:none;
+  }
+  .white-screen-note{
+    margin:0 0 16px;
+    font-size:0.82rem;
+    color:var(--vapor-yellow);
+    background:rgba(255,251,150,0.06);
+    border:1px dashed var(--vapor-yellow);
+    border-radius:6px;
+    padding:8px 10px;
+    line-height:1.4;
   }
 
   .install-btn{
@@ -462,10 +475,17 @@
   <div class="card">
     <h2>FLASH YOUR DETECTOR</h2>
 
-    <div class="board-picker" id="boardPicker" role="group" aria-label="Board select">
-      <button type="button" class="board-btn active" data-manifest="./manifest-cyd.json">2.8&quot; CYD</button>
-      <button type="button" class="board-btn" data-manifest="./manifest-awok.json">AWOK 2.4&quot;</button>
-    </div>
+    <label class="board-picker-label" for="boardSelect">Select your board:</label>
+    <select class="board-select" id="boardSelect" aria-label="Board select">
+      <option value="./manifest-cyd.json" data-cyd28="1" selected>2.8&quot; CYD &mdash; ST7789 (default)</option>
+      <option value="./manifest-cyd-ili9341.json" data-cyd28="1">2.8&quot; CYD &mdash; ILI9341 (older)</option>
+      <option value="./manifest-awok.json">AWOK 2.4&quot;</option>
+    </select>
+    <p class="white-screen-note" id="whiteScreenNote">
+      The 2.8&quot; CYD ships with one of two different display drivers depending on manufacturing
+      batch, and there's no way to tell which from the outside. If you flash one and get a
+      <strong>solid white screen</strong>, that's not broken — just flash the other 2.8&quot; option above instead.
+    </p>
 
     <esp-web-install-button id="installBtn" manifest="./manifest-cyd.json">
       <button slot="activate" class="install-btn">[ CONNECT &amp; INSTALL ]</button>
@@ -1144,19 +1164,30 @@
   // Swaps which manifest the install button targets -- esp-web-tools'
   // <esp-web-install-button> reactively re-reads its manifest attribute
   // on change (its own documented board-picker pattern), so this is
-  // just a plain attribute swap, no re-render plumbing needed.
+  // just a plain attribute swap, no re-render plumbing needed. Also
+  // toggles the white-screen note (see index.html's markup) and has
+  // Squachy say the same thing out loud -- but only on an actual user
+  // change, not the initial page load, so it doesn't cut into his
+  // scripted how-to intro (see nextHowTo() below).
   (function () {
-    var picker = document.getElementById('boardPicker');
+    var select = document.getElementById('boardSelect');
     var installBtn = document.getElementById('installBtn');
-    if (!picker || !installBtn) return;
-    var buttons = picker.querySelectorAll('.board-btn');
-    buttons.forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        buttons.forEach(function (b) { b.classList.remove('active'); });
-        btn.classList.add('active');
-        installBtn.setAttribute('manifest', btn.dataset.manifest);
-      });
-    });
+    var note = document.getElementById('whiteScreenNote');
+    if (!select || !installBtn) return;
+
+    var WHITE_SCREEN_LINE =
+      "White screen after flashing? Your CYD's probably got the other display driver — try the other 2.8\" option in that dropdown.";
+
+    function applySelection(announce) {
+      var opt = select.options[select.selectedIndex];
+      installBtn.setAttribute('manifest', opt.value);
+      var isCyd28 = opt.dataset.cyd28 === '1';
+      if (note) note.hidden = !isCyd28;
+      if (announce && isCyd28) say(WHITE_SCREEN_LINE, 8000);
+    }
+
+    select.addEventListener('change', function () { applySelection(true); });
+    applySelection(false);
   })();
 
   // ---- Identify board -------------------------------------------------
