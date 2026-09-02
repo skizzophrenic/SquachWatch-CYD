@@ -8,7 +8,7 @@
 
 namespace Squachy {
 
-enum class Mood : uint8_t { IDLE, WAVE, SHOCKED, BOUNCE, SLEEPY, WALK };
+enum class Mood : uint8_t { IDLE, WAVE, SHOCKED, BOUNCE, SLEEPY, WALK, DANCE };
 
 // Which reaction pose a SHOCKED mood strikes — varies by what triggered
 // it so a detection actually reads differently depending on the type,
@@ -97,6 +97,13 @@ static const char* WALK_LINES[] = {
     "Patrol time.",
     "Gotta walk the perimeter.",
     "Somebody's gotta pace around here.",
+};
+
+static const char* const DANCE_LINES[] = {
+    "Nobody's watching. Well, you are.",
+    "This is my best move.",
+    "Got moves. Don't judge.",
+    "Dance break. You're welcome.",
 };
 
 // "Seen you before" reactions — see trigger()'s DETECTION case. Keyed
@@ -1032,12 +1039,78 @@ static const char* const SCAN_FOUND_LINES[] = {
     "Scan's done. Take a look.",
 };
 
+// Flavor pools for huntReaction() -- see HuntMoment in squachy.h.
+// STARTED isn't a pool, same reasoning as SCAN_STARTED_LINE above: the
+// one place someone learns there's no compass, just a strength meter
+// you sweep by hand.
+static const char* const HUNT_STARTED_LINE =
+    "No compass. Turn your body -- weaker means it's behind you.";
+static const char* const HUNT_FIRST_SIGNAL_LINES[] = {
+    "Oh, there it is!",
+    "Got a read. Start walking.",
+    "Signal's up. Let's go.",
+};
+static const char* const HUNT_WARMER_LINES[] = {
+    "Warmer!",
+    "Yeah, that's the way.",
+    "Ooh, getting closer.",
+    "Keep going, you've got this.",
+};
+static const char* const HUNT_COLDER_LINES[] = {
+    "Colder. Try the other way?",
+    "Nope. Wrong direction, champ.",
+    "You're walking away from it.",
+    "Turn around, I believe in you.",
+};
+static const char* const HUNT_HOT_LINES[] = {
+    "You're basically standing on it.",
+    "This close and still hunting? Bold.",
+    "Look down. It might BE down.",
+};
+static const char* const HUNT_STALLED_LINES[] = {
+    "Still at it? Respect. Or stubbornness.",
+    "We've been here a while, chief.",
+    "Maybe try a lap around the block?",
+};
+
+// Flavor pool for watchAlertReaction() -- fires once when a watched
+// target reappears. No teaching line here (see squachy.h) since
+// getting to this screen already means WATCH was explained upstream.
+static const char* const WATCH_ALERT_LINES[] = {
+    "Called it.",
+    "Told you it'd show back up.",
+    "Yep. That's the one you're watching.",
+    "Back again, huh? Persistent little thing.",
+};
+
+// Flavor pool for alertReaction() -- deliberately separate from
+// DET_LINES (the deferred, matter-of-fact "target identified" lines
+// trigger(Event::DETECTION, ...) picks from once ALERT is dismissed)
+// so the same detection doesn't say the same thing twice. This pool
+// is pure panic, re-rolled every time his reaction re-fires alongside
+// ALERT's own escalating glitch schedule.
+static const char* const ALERT_FREAKOUT_LINES[] = {
+    "WHOA WHOA WHOA.",
+    "IT'S RIGHT THERE.",
+    "OKAY OKAY OKAY.",
+    "NOPE NOPE NOPE.",
+    "DID YOU SEE THAT.",
+    "THIS IS FINE. THIS IS FINE.",
+};
+
 // STARTED's hint bubble gets a grace window nothing else is allowed to
 // interrupt -- BLE can turn up a device within the first second, and a
 // HIT quip immediately overwriting the hint before it's even readable
 // defeats the whole point of it existing.
 static uint32_t s_scanHintUntil = 0;
 static const uint32_t SCAN_HINT_GRACE_MS = 3000;
+
+// Same protection for HUNT MODE's STARTED line -- a trend can compute
+// within a couple seconds of entering (as soon as 2 RSSI samples come
+// in), which would otherwise overwrite the "no compass" hint before
+// anyone's had a chance to read it.
+static uint32_t s_huntHintUntil = 0;
+static const uint32_t HUNT_HINT_GRACE_MS = 5000;
 
 void scanReaction(ScanMoment moment, uint8_t count) {
     uint32_t now = millis();
@@ -1084,6 +1157,78 @@ void scanReaction(ScanMoment moment, uint8_t count) {
             }
             break;
     }
+}
+
+void huntReaction(HuntMoment moment) {
+    uint32_t now = millis();
+    switch (moment) {
+        case HuntMoment::STARTED:
+            // Longer than his other HUNT bubbles (5500 vs 2200-3500),
+            // same reasoning as SCAN_STARTED_LINE -- this is the one
+            // line that actually needs to be read.
+            say(HUNT_STARTED_LINE, 5500);
+            s_huntHintUntil = now + HUNT_HINT_GRACE_MS;
+            break;
+        case HuntMoment::FIRST_SIGNAL:
+            // STARTLED (reactPoseFor()'s default) -- a plain "oh, it's
+            // there" startle, same pose an UNKNOWN-type detection gets.
+            s_reactType = DetectionType::UNKNOWN;
+            mood = Mood::SHOCKED;
+            moodUntil = now + 700;
+            if (now >= s_huntHintUntil) say(pick(HUNT_FIRST_SIGNAL_LINES, 3), 2200);
+            break;
+        case HuntMoment::WARMER:
+            mood = Mood::BOUNCE;
+            moodUntil = now + 800;
+            if (now >= s_huntHintUntil) say(pick(HUNT_WARMER_LINES, 4), 2200);
+            break;
+        case HuntMoment::COLDER:
+            // Borrows LOOK_AROUND (normally a tracker's "something's
+            // following me" pose) reinterpreted as "searching for the
+            // right direction" -- reads better than a droopy SLEEPY for
+            // an actively-wrong-way cue, and costs no new pose code.
+            s_reactType = DetectionType::AIRTAG;
+            mood = Mood::SHOCKED;
+            moodUntil = now + 900;
+            if (now >= s_huntHintUntil) say(pick(HUNT_COLDER_LINES, 4), 2200);
+            break;
+        case HuntMoment::HOT:
+            // BOUNCE, not SHOCKED -- matches the same "found something
+            // great" convention scanReaction()'s big-haul DONE_FOUND
+            // uses, rather than an alarmed startle.
+            mood = Mood::BOUNCE;
+            moodUntil = now + 1500;
+            if (now >= s_huntHintUntil) say(pick(HUNT_HOT_LINES, 3), 3500);
+            // Same rare party-confetti flourish milestone detections
+            // and a big scan haul use -- a successful hunt earns it.
+            s_legendary      = true;
+            s_legendaryUntil = now + 4000;
+            for (uint8_t i = 0; i < CONFETTI_N; i++) {
+                s_cfx[i]   = (float)random(0, 240);
+                s_cfy[i]   = (float)random(-60, 0);
+                s_cfvy[i]  = 1.0f + (float)random(0, 20) / 10.0f;
+                s_cfcol[i] = (uint8_t)random(0, 6);
+            }
+            break;
+        case HuntMoment::STALLED:
+            mood = Mood::SLEEPY;
+            moodUntil = now + 2000;
+            if (now >= s_huntHintUntil) say(pick(HUNT_STALLED_LINES, 3), 4000);
+            break;
+    }
+}
+
+void watchAlertReaction() {
+    mood = Mood::SHOCKED;
+    moodUntil = millis() + 1200;
+    say(pick(WATCH_ALERT_LINES, 4), 3000);
+}
+
+void alertReaction(DetectionType t) {
+    s_reactType = t;
+    mood = Mood::SHOCKED;
+    moodUntil = millis() + 1200;
+    say(pick(ALERT_FREAKOUT_LINES, 6), 2200);
 }
 
 // Costume overlays (see squachy.h's Outfits section), drawn last from
@@ -1322,7 +1467,12 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     t.fillRect(cx2 + S(10), hy + S(23), S(5), S(18), furLight);
 
     // Arms — long, ape-like, hanging past the waist. Depend on mood; a
-    // SHOCKED reaction further varies pose by what triggered it.
+    // SHOCKED reaction further varies pose by what triggered it. Static
+    // hanging arms used to be the default for every mood except WAVE/
+    // SHOCKED (IDLE, BOUNCE, WALK, SLEEPY, and standing still generally
+    // all drew the exact same frozen pose) -- everything below except
+    // SLEEPY now has some motion of its own so standing still never
+    // reads as a paused animation.
     if (m == Mood::WAVE) {
         float wa = -1.0f + sinf((float)(now % 400) / 400.0f * 6.2831853f) * 0.5f;
         float ex = cx2 + S(13) + cosf(wa) * (18.0f * scale);
@@ -1330,10 +1480,17 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         t.drawWideLine(cx2 + S(11), hy + S(28), ex, ey, S(7), furLight);
         t.fillRoundRect(cx2 - S(18), hy + S(22), S(8), S(22), S(3), furLight);
     } else if (m == Mood::SHOCKED) {
+        // Fast small shake layered onto whichever pose reactPoseFor()
+        // picks, so a flail reads as "can't hold still" instead of a
+        // single frozen frame -- separate from the (slower, bigger)
+        // panicked bodyCx dart above, which only kicks in for a caller
+        // that opted into wanderRangePx.
+        float shakeT = (float)(now % 140) / 140.0f * 6.2831853f;
+        int shake = (int)(sinf(shakeT) * S(2));
         switch (reactPoseFor(s_reactType)) {
             case ReactPose::HANDS_UP:
-                t.drawWideLine(cx2 - S(11), hy + S(26), cx2 - S(14), hy - S(10), S(7), furLight);
-                t.drawWideLine(cx2 + S(11), hy + S(26), cx2 + S(14), hy - S(10), S(7), furLight);
+                t.drawWideLine(cx2 - S(11), hy + S(26), cx2 - S(14) + shake, hy - S(10), S(7), furLight);
+                t.drawWideLine(cx2 + S(11), hy + S(26), cx2 + S(14) + shake, hy - S(10), S(7), furLight);
                 break;
             case ReactPose::COVER_FACE:
                 // The crossing lines land on the face — drawn later,
@@ -1349,13 +1506,44 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
             case ReactPose::LOOK_AROUND:
             case ReactPose::STARTLED:
             default:
-                t.drawWideLine(cx2 - S(11), hy + S(26), cx2 - S(23), hy + S(10), S(7), furLight);
-                t.drawWideLine(cx2 + S(11), hy + S(26), cx2 + S(23), hy + S(10), S(7), furLight);
+                t.drawWideLine(cx2 - S(11), hy + S(26), cx2 - S(23) + shake, hy + S(10), S(7), furLight);
+                t.drawWideLine(cx2 + S(11), hy + S(26), cx2 + S(23) + shake, hy + S(10), S(7), furLight);
                 break;
         }
-    } else {
+    } else if (m == Mood::DANCE) {
+        // An original floss-style move -- both arms swing together to
+        // one side then the other (not mirrored the way WAVE/idle sway
+        // are), crossing in front of the body each pass. Inspired by
+        // the general "arms one way" family of moves (the floss
+        // predates and isn't owned by any single game), not a
+        // recreation of a specific licensed emote.
+        float daT = (float)(now % 500) / 500.0f * 6.2831853f;
+        int armX = (int)(sinf(daT) * S(11));
+        t.fillRoundRect(cx2 - S(18) + armX, hy + S(20), S(8), S(24), S(3), furLight);
+        t.fillRoundRect(cx2 + S(10) + armX, hy + S(20), S(8), S(24), S(3), furLight);
+    } else if (m == Mood::WALK) {
+        // Opposite-arm-opposite-leg swing, same phase the legs above
+        // already use (recomputed here rather than threaded through --
+        // it's a pure function of `now`, so a duplicate one-liner costs
+        // nothing and needs no shared state).
+        float legPhase = (float)(now % 400) / 400.0f * 6.2831853f;
+        int armL = (int)(sinf(legPhase + 3.14159265f) * S(4));
+        int armR = (int)(sinf(legPhase) * S(4));
+        t.fillRoundRect(cx2 - S(18), hy + S(22) + armL, S(8), S(22), S(3), furLight);
+        t.fillRoundRect(cx2 + S(10), hy + S(22) + armR, S(8), S(22), S(3), furLight);
+    } else if (m == Mood::SLEEPY) {
+        // Static/droopy on purpose -- motion here would fight the
+        // "tired" read the rest of this pose is going for.
         t.fillRoundRect(cx2 - S(18), hy + S(22), S(8), S(22), S(3), furLight);
         t.fillRoundRect(cx2 + S(10), hy + S(22), S(8), S(22), S(3), furLight);
+    } else {
+        // IDLE/BOUNCE -- gentle continuous opposing sway so just
+        // standing there never reads as a frozen frame.
+        float armPhase = (float)(now % 1800) / 1800.0f * 6.2831853f;
+        int armSwingL = (int)(sinf(armPhase) * S(3));
+        int armSwingR = (int)(sinf(armPhase + 3.14159265f) * S(3));
+        t.fillRoundRect(cx2 - S(18), hy + S(22) + armSwingL, S(8), S(22), S(3), furLight);
+        t.fillRoundRect(cx2 + S(10), hy + S(22) + armSwingR, S(8), S(22), S(3), furLight);
     }
 
     // Head — broader jaw than before, brow ridge over the eyes.
@@ -1558,7 +1746,7 @@ static void drawPartyFx(TFT_eSPI& t, uint32_t now, int topY, int availHeight, bo
 }
 
 void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
-          bool advance, float minScale, bool scanningFx) {
+          bool advance, float minScale, bool scanningFx, int wanderRangePx) {
     // Everything in this block mutates mood/timers/particle state —
     // gated to run once per logical frame (see the header comment on
     // tick()) regardless of how many physical bands call this. The
@@ -1632,6 +1820,12 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
                 s_cfvy[i]  = 0.8f + (float)random(0, 100) / 100.0f * 1.4f;
                 s_cfcol[i] = (uint8_t)random(0, 6);
             }
+            nextIdleAt = now + 12000 + random(0, 18000);
+        } else if (random(0, 8) == 0) {
+            // A little dance break -- see drawBody()'s DANCE arm case.
+            say(pick(DANCE_LINES, 4), 3200);
+            mood = Mood::DANCE;
+            moodUntil = now + 2400;
             nextIdleAt = now + 12000 + random(0, 18000);
         } else if (random(0, 6) == 0) {
             // A little wander away from center and back — see the
@@ -1722,14 +1916,24 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
         // at center, so there's no teleport when WALK expires back to
         // idle.
         bodyCx = cx + (int)(sinf(walkT * 6.2831853f * WALK_CYCLES) * maxRange * s_walkDir);
+    } else if (mood == Mood::SHOCKED && wanderRangePx >= 0) {
+        // Panicked dart, opted into by a caller via wanderRangePx (see
+        // its comment in squachy.h). Same per-cycle pace as WALK's own
+        // amble (WALK_CYCLE_MS) rather than a separately-tuned speed --
+        // a wider range at the same period just means a slower, calmer
+        // sweep across more ground, not a faster one; the previous
+        // fixed 900ms period read as "impossibly fast" once the range
+        // grew from a small corner dart to nearly the full screen.
+        float jT = (float)(now % WALK_CYCLE_MS) / (float)WALK_CYCLE_MS * 6.2831853f;
+        bodyCx = cx + (int)(sinf(jT) * wanderRangePx);
     }
 
     // Idle bob runs noticeably quicker than a resting breathing rate —
     // he should read as lively even when nothing's happening. Bob
     // amplitude scales with him so it stays proportional when he's big.
-    float bobAmt   = (mood == Mood::BOUNCE) ? 9.0f : (mood == Mood::SLEEPY ? 1.5f : 3.0f);
+    float bobAmt   = (mood == Mood::BOUNCE) ? 9.0f : (mood == Mood::SLEEPY ? 1.5f : (mood == Mood::DANCE ? 6.0f : 3.0f));
     bobAmt *= scale;
-    float bobSpeed = (mood == Mood::BOUNCE) ? 220.0f : (mood == Mood::SLEEPY ? 2200.0f : 1100.0f);
+    float bobSpeed = (mood == Mood::BOUNCE) ? 220.0f : (mood == Mood::SLEEPY ? 2200.0f : (mood == Mood::DANCE ? 300.0f : 1100.0f));
     float bob = sinf((float)(now % (uint32_t)bobSpeed) / bobSpeed * 6.2831853f) * bobAmt;
     if (mood == Mood::BOUNCE) bob = -fabsf(bob); // hop upward only
     int hy = headTopY + (int)bob;

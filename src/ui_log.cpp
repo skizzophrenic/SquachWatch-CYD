@@ -1,6 +1,7 @@
 // SquachWatch-CYD — log screen implementation
 #include "ui_log.h"
 #include "theme.h"
+#include "settings.h"
 #include <Arduino.h>
 
 static int g_scroll = 0;
@@ -114,8 +115,27 @@ void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int scroll
     snprintf(title, sizeof(title), ">> LOG  (%u) <<", (unsigned)eng.logCount());
     Theme::drawTitleBar(t, title);
 
-    // Body
-    t.fillRect(0, bodyTop, w, bodyH, Theme::BG);
+    // Body -- whatever background style CLEAR is showing, drawn at
+    // reduced strength behind the list, same treatment Settings' body
+    // got (see Theme::dimPaletteForOverlay()'s comment). Rows never had
+    // a full-row fillRect of their own to begin with (just a
+    // drawFastHLine separator plus per-field two-arg setTextColor()
+    // calls, which already erase their own glyph cells against
+    // Theme::BG), so this drops in with no further changes needed.
+    Theme::Palette saved = Theme::dimPaletteForOverlay(179);
+    switch (Settings::background()) {
+        case Settings::Background::STARFIELD: Theme::drawStarfield(t, now, bodyTop, bodyBottom); break;
+        case Settings::Background::TOASTERS:   Theme::drawFlyingToasters(t, now, bodyTop, bodyBottom); break;
+        case Settings::Background::AQUARIUM:   Theme::drawAquarium(t, now, bodyTop, bodyBottom); break;
+        case Settings::Background::TERMINAL:   Theme::drawTerminalLog(t, now, bodyTop, bodyBottom); break;
+        case Settings::Background::FIREFLIES:  Theme::drawFireflies(t, now, bodyTop, bodyBottom); break;
+        case Settings::Background::FIRE:       Theme::drawFire(t, now, bodyTop, bodyBottom); break;
+        case Settings::Background::SNOWFALL:   Theme::drawSnowfall(t, now, bodyTop, bodyBottom); break;
+        case Settings::Background::SPECTRUM:   Theme::drawSpectrumWaterfall(t, now, bodyTop, bodyBottom, eng); break;
+        case Settings::Background::TUNNEL:     Theme::drawWireframeTunnel(t, now, bodyTop, bodyBottom); break;
+        default:                               Theme::drawMatrixRain(t, now, bodyTop, bodyBottom, true); break;
+    }
+    Theme::restorePalette(saved);
 
     uint8_t count = eng.logCount();
 

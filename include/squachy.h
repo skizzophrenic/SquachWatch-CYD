@@ -123,8 +123,17 @@ namespace Squachy {
     // call while true -- purely a function of `now`, no state of its
     // own, so the caller can flip it on/off between ticks freely (see
     // ui_rawscan.cpp).
+    // wanderRangePx: -1 (default) leaves Mood::WALK's wander and
+    // Mood::SHOCKED's panicked jitter at their normal behavior (WALK
+    // computes its own range from the full screen width; SHOCKED
+    // doesn't move at all). A caller confined to a small box -- ALERT's
+    // corner cameo, say -- can pass a small positive px bound instead,
+    // which SHOCKED then uses to dart back and forth within that box
+    // instead of standing still while he flails. Doesn't affect WALK's
+    // own full-screen wander; that's unrelated to this screen's ask.
     void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
-              bool advance = true, float minScale = 1.0f, bool scanningFx = false);
+              bool advance = true, float minScale = 1.0f, bool scanningFx = false,
+              int wanderRangePx = -1);
 
     // Themed one-liner reactions for the raw-scan screen (see
     // ui_rawscan.cpp), pulled from their own flavor pool instead of
@@ -135,6 +144,42 @@ namespace Squachy {
     // milestone detections and the outfit-unlock easter egg use.
     enum class ScanMoment { STARTED, HIT, DONE_EMPTY, DONE_FOUND };
     void scanReaction(ScanMoment moment, uint8_t count = 0);
+
+    // Same pattern as scanReaction(), for HUNT MODE's live gauge (see
+    // ui_hunt.cpp) -- call once per actual moment, not every tick.
+    // STARTED fires once on entering the screen with a fixed
+    // instructional line (same reasoning as ScanMoment::STARTED: the
+    // one place someone learns the body-fade technique, so it always
+    // says the same thing rather than rolling flavor text that might
+    // never mention it). FIRST_SIGNAL fires once the very first RSSI
+    // sample for this target comes in. WARMER/COLDER fire only on an
+    // actual trend change, not every tick the trend happens to still
+    // read that way. HOT fires once when the signal crosses into
+    // "basically on top of it" territory. STALLED fires once if a hunt
+    // runs long without ever reaching HOT -- pure flavor, no state of
+    // its own to track beyond "has this fired yet."
+    enum class HuntMoment { STARTED, FIRST_SIGNAL, WARMER, COLDER, HOT, STALLED };
+    void huntReaction(HuntMoment moment);
+
+    // Fires once when the watch-alert screen appears (see
+    // ui_watchalert.cpp) -- the target you set a WATCH on came back
+    // into range. No STARTED-style fixed line here: by the time anyone
+    // sees this screen they've already long-pressed a result and hit
+    // WATCH, so the mechanic itself was already taught upstream (the
+    // raw-scan/LOG screens' own hint lines).
+    void watchAlertReaction();
+
+    // Call on the ALERT screen (see ui_alert.cpp) -- once when it first
+    // appears and again each time its own escalating glitch schedule
+    // steps up, so he stays visibly panicked for as long as the screen
+    // does instead of one brief flash. Deliberately separate from
+    // trigger(Event::DETECTION, ...) -- that call (made once, when
+    // ALERT is dismissed back to CLEAR) owns the real stat bookkeeping
+    // (streaks, milestones, session counts); this one is pure reaction,
+    // safe to call as many times as the caller likes with no side
+    // effects beyond mood/bubble text. t picks the same reactPoseFor()
+    // pose a real detection of that type gets everywhere else.
+    void alertReaction(DetectionType t);
 
     // A lightweight cameo draw for screens that just want him standing
     // and waving (the boot splash) without the full idle/quip state

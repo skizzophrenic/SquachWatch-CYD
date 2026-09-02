@@ -259,4 +259,34 @@ namespace Theme {
     // Total advance width of s at the given size, for centering —
     // same role as TFT_eSPI's textWidth().
     int bangersTextWidth(const char* s, BangersSize size);
+
+    // True during the shared random glitch burst drawBangersText()
+    // already rolls every ~5-10s (see its own comment) -- exposed so
+    // other draw code can layer a coordinated effect onto the exact
+    // same burst instead of running its own independent timer.
+    bool glitchActive();
+
+    // Force-starts a burst right now instead of waiting for the
+    // ambient 5-10s roll, and reschedules the next ambient one from
+    // this point -- lets a screen that wants its own more deliberate
+    // cadence (e.g. ALERT firing one immediately, then again at fixed
+    // offsets) drive the exact same shared burst everything else reads
+    // from, rather than needing a second parallel glitch system.
+    // intensity (0..4, clamped) scales how aggressive THIS burst reads
+    // across every glitch-aware draw call -- jitter range, scanline
+    // dropout rate, static speckle density, burst length, and (level 3+)
+    // a full-screen pixel-shift tear layered on top. Ambient
+    // auto-triggered bursts (nobody called this) always run at a fixed
+    // mild level so idle screens stay consistent; only an explicit
+    // caller can ask for something louder.
+    void triggerGlitchBurst(uint8_t intensity = 1);
+
+    // Scatters a light dusting of bright speckle marks across the
+    // given region -- real TV-static snow, not the deterministic
+    // per-bucket jitter drawBangersText() uses, since this has no
+    // multi-pass outline to stay in sync with (it's meant to be called
+    // once per frame, layered on top of whatever's already drawn).
+    // A no-op whenever glitchActive() is false, so it's safe to call
+    // unconditionally every tick.
+    void drawGlitchStatic(TFT_eSPI& t, int x0, int y0, int x1, int y1);
 }

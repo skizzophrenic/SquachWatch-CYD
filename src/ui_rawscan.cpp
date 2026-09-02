@@ -194,32 +194,44 @@ void uiRawScanTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool i
         Squachy::scanReaction(n > 0 ? Squachy::ScanMoment::DONE_FOUND : Squachy::ScanMoment::DONE_EMPTY, n);
     }
 
-    // Whatever background style is picked in Settings, drawn at its
-    // normal full-screen scale (yEnd = h, same room CLEAR gives it) --
-    // not compressed to fit sqH, which would look cramped. setViewport
-    // clips the actual visible output down to just this strip; the
-    // effect itself never knows it's only getting a sliver of screen.
-    // Same TFT_eSPI clipping this project already relies on elsewhere
-    // (cyd35's two-pass renderer, the party-mode wash) -- no offscreen
-    // buffer, none of the pushImage/sprite risk that was a problem for
-    // a *real* full-resolution render earlier this project.
-    t.setViewport(0, sqTop, w, sqH, true);
+    // Whatever background style is picked in Settings, drawn ONCE as a
+    // single continuous pass from just below the title bar all the way
+    // to the bottom of the list (sqTop..bodyBottom) -- Squachy's strip
+    // and the results list used to each get their own separate call
+    // (the strip via a setViewport crop of a *full-screen-scaled*
+    // render, the list via its own bodyTop..bodyBottom-scaled render),
+    // which are two different scalings/phases of the "same" effect and
+    // read as two disconnected backgrounds stacked on top of each
+    // other, with a visible seam and brightness jump where they met.
+    // One call means one continuous scaling, so it reads as one scene
+    // Squachy happens to be standing in front of instead of a patchwork.
+    // Dimmed the same way Settings'/LOG's bodies are (see
+    // Theme::dimPaletteForOverlay()'s comment) -- needed for the list
+    // text below to stay legible, and looks fine behind Squachy too;
+    // none of the states below (scanning/empty/results) draw an opaque
+    // full-row fill of their own, just a drawFastHLine separator and
+    // per-field two-arg setTextColor() calls that already erase their
+    // own glyph cells.
+    Theme::Palette saved = Theme::dimPaletteForOverlay(179);
     switch (Settings::background()) {
-        case Settings::Background::STARFIELD: Theme::drawStarfield(t, now, 0, h); break;
-        case Settings::Background::TOASTERS:   Theme::drawFlyingToasters(t, now, 0, h); break;
-        case Settings::Background::AQUARIUM:   Theme::drawAquarium(t, now, 0, h); break;
-        case Settings::Background::TERMINAL:   Theme::drawTerminalLog(t, now, 0, h); break;
-        case Settings::Background::FIREFLIES:  Theme::drawFireflies(t, now, 0, h); break;
-        case Settings::Background::FIRE:       Theme::drawFire(t, now, 0, h); break;
-        case Settings::Background::SNOWFALL:   Theme::drawSnowfall(t, now, 0, h); break;
-        case Settings::Background::SPECTRUM:   Theme::drawSpectrumWaterfall(t, now, 0, h, eng); break;
-        case Settings::Background::TUNNEL:     Theme::drawWireframeTunnel(t, now, 0, h); break;
-        default:                               Theme::drawMatrixRain(t, now, 0, h, true); break;
+        case Settings::Background::STARFIELD: Theme::drawStarfield(t, now, sqTop, bodyBottom); break;
+        case Settings::Background::TOASTERS:   Theme::drawFlyingToasters(t, now, sqTop, bodyBottom); break;
+        case Settings::Background::AQUARIUM:   Theme::drawAquarium(t, now, sqTop, bodyBottom); break;
+        case Settings::Background::TERMINAL:   Theme::drawTerminalLog(t, now, sqTop, bodyBottom); break;
+        case Settings::Background::FIREFLIES:  Theme::drawFireflies(t, now, sqTop, bodyBottom); break;
+        case Settings::Background::FIRE:       Theme::drawFire(t, now, sqTop, bodyBottom); break;
+        case Settings::Background::SNOWFALL:   Theme::drawSnowfall(t, now, sqTop, bodyBottom); break;
+        case Settings::Background::SPECTRUM:   Theme::drawSpectrumWaterfall(t, now, sqTop, bodyBottom, eng); break;
+        case Settings::Background::TUNNEL:     Theme::drawWireframeTunnel(t, now, sqTop, bodyBottom); break;
+        default:                               Theme::drawMatrixRain(t, now, sqTop, bodyBottom, true); break;
     }
-    Squachy::tick(t, w / 2, 0, sqH, now, true, 0.8f, !done);
-    t.resetViewport();
+    Theme::restorePalette(saved);
 
-    t.fillRect(0, bodyTop, w, bodyH, Theme::BG);
+    // No viewport needed now that the background above already covers
+    // this whole strip directly at its real screen position -- drawn
+    // straight on top of it, same as ui_hunt.cpp/ui_watchalert.cpp's
+    // mini cameos already do.
+    Squachy::tick(t, w / 2, sqTop, sqH, now, true, 0.8f, !done);
 
     if (!done) {
         float pulse = 0.55f + 0.45f * sinf((float)(now % 2000) / 2000.0f * 6.2831853f);

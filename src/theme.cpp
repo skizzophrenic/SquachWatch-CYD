@@ -1876,14 +1876,117 @@ int bangersTextWidth(const char* s, BangersSize size) {
     return w;
 }
 
-void drawBangersText(TFT_eSPI& t, int x, int y, const char* s, uint16_t color, BangersSize size) {
+// Random brief "signal corruption" glitch on Bangers headline text --
+// a whole-text x-jitter plus scattered horizontal scanline dropouts,
+// refreshed every ~40ms during a short burst that fires every 5-10s.
+// Deterministic from `now` (a cheap multiplicative hash, not repeated
+// random() calls) rather than rolling fresh dice per row: several
+// callers redraw the same string many times per frame at tiny offsets
+// to backfill a solid-color outline behind the real fill color (see
+// ui_alert.cpp/ui_watchalert.cpp) -- if each of those passes rolled
+// its own random jitter they'd all land differently and the outline
+// would smear apart from the fill instead of tearing together like
+// one corrupted signal.
+static uint32_t s_glitchNextAt   = 0;
+static uint32_t s_glitchUntil    = 0;
+static uint8_t  s_glitchLevel    = 1;   // 0..4, see triggerGlitchBurst()'s comment
+
+// Per-level tuning -- index is the clamped 0..4 intensity. Deliberately
+// NOT a smooth curve: level 3 is where a full-screen tear (see
+// drawGlitchStatic()) joins in on top of everything else, so levels 3
+// and 4 jump harder than the 0->1->2 ramp does.
+static const uint32_t BURST_MS_BY_LEVEL[]    = { 150, 200, 260, 320, 420 };
+static const int      SPECKLE_N_BY_LEVEL[]   = {  60, 110, 170, 240, 320 };
+static const int      JITTER_MAX_BY_LEVEL[]  = {   1,   2,   3,   4,   5 };
+static const int      DROPOUT_MOD_BY_LEVEL[] = {  10,   6,   4,   3,   2 };  // 1-in-N rows drop
+
+static uint32_t glitchHash(uint32_t x) {
+    x *= 2654435761u;
+    x ^= x >> 15;
+    return x;
+}
+
+// Advances the shared burst timer and reports whether `now` falls
+// inside one. Safe to call more than once for the same `now` (e.g.
+// once from drawGlitchStatic() and again from several drawBangersText()
+// calls within one frame) -- once the first call arms a burst,
+// `now < s_glitchUntil` makes every later call in that same instant
+// see it's already armed instead of re-rolling.
+static bool updateGlitchState(uint32_t now) {
+    if (s_glitchNextAt == 0) s_glitchNextAt = now + (uint32_t)random(5000, 10001);
+    if (now >= s_glitchNextAt && now >= s_glitchUntil) {
+        // Ambient, nobody-asked-for-it bursts always stay mild (level
+        // 1) so idle screens read as consistent flavor, not a ramping
+        // spectacle -- only an explicit triggerGlitchBurst() call asks
+        // for something louder.
+        s_glitchLevel  = 1;
+        s_glitchUntil  = now + BURST_MS_BY_LEVEL[s_glitchLevel];
+        s_glitchNextAt = s_glitchUntil + (uint32_t)random(5000, 10001);
+    }
+    return now < s_glitchUntil;
+}
+
+bool glitchActive() {
+    return updateGlitchState(millis());
+}
+
+void triggerGlitchBurst(uint8_t intensity) {
+    if (intensity > 4) intensity = 4;
+    uint32_t now = millis();
+    s_glitchLevel  = intensity;
+    s_glitchUntil  = now + BURST_MS_BY_LEVEL[intensity];
+    s_glitchNextAt = s_glitchUntil + (uint32_t)random(5000, 10001);
+}
+
+// Real per-frame TV-static snow, not the deterministic per-bucket
+// jitter drawBangersText() uses -- this has no multi-pass outline to
+// stay in sync with, so a fresh random() scatter every call (i.e.
+// every frame it's active) gives the authentic flickering-snow look
+// instead of a held static pattern.
+void drawGlitchStatic(TFT_eSPI& t, int x0, int y0, int x1, int y1) {
+    if (!glitchActive()) return;
+    int rw = x1 - x0, rh = y1 - y0;
+    if (rw <= 0 || rh <= 0) return;
+    static const uint16_t SPECKLE_COLORS[] = {
+        WHITE, CYAN, VAPOR_PINK, VAPOR_PURPLE, VAPOR_BLUE, PURPLE,
+    };
+    int speckleN = SPECKLE_N_BY_LEVEL[s_glitchLevel];
+    for (int i = 0; i < speckleN; i++) {
+        int sx = x0 + random(0, rw);
+        int sy = y0 + random(0, rh);
+        uint16_t col = SPECKLE_COLORS[random(0, 6)];
+        if (random(0, 3) == 0) t.drawFastHLine(sx, sy, 2, col);
+        else                   t.drawPixel(sx, sy, col);
+    }
+    // The big payoff at the top two levels -- a genuine pixel-shifted
+    // screen tear layered on top of the speckle/text glitch already
+    // drawn this frame, reusing the same tear drawTransitionGlitch()
+    // already does for screen-change transitions (fade=1.0 at level 4,
+    // a smaller half-strength tear at level 3) rather than a second
+    // bespoke tear implementation.
+    if (s_glitchLevel >= 3) {
+        drawTransitionGlitch(t, (s_glitchLevel >= 4) ? 0 : 50, 100);
+    }
+}
+
+// One actual render pass -- shared by the real draw and the ghost copy
+// below so both respect the exact same per-row dropout decisions
+// (same bucket/row inputs) and tear together instead of independently.
+static void drawBangersPass(TFT_eSPI& t, const char* s, int x, int y, uint16_t color,
+                             BangersSize size, bool glitching, uint32_t bucket, uint8_t level) {
     int cursorX = x;
+    int dropoutMod = DROPOUT_MOD_BY_LEVEL[level];
     for (const char* p = s; *p; p++) {
         const BangersFont::Glyph* g = bangersFind(*p, size);
         if (!g) continue;
         if (g->bitmap) {
             int rowBytes = (g->w + 7) / 8;
             for (int row = 0; row < g->h; row++) {
+                // Same dropout decision for a given (bucket, row) no
+                // matter which glyph or which pass is drawing it, so a
+                // dropped scanline tears across the whole word at once
+                // instead of a random per-letter speckle.
+                if (glitching && (glitchHash(bucket * 131u + row) % dropoutMod) == 0) continue;
                 const uint8_t* rowPtr = g->bitmap + row * rowBytes;
                 int runStart = -1;
                 for (int col = 0; col <= g->w; col++) {
@@ -1902,6 +2005,32 @@ void drawBangersText(TFT_eSPI& t, int x, int y, const char* s, uint16_t color, B
         }
         cursorX += g->advance;
     }
+}
+
+void drawBangersText(TFT_eSPI& t, int x, int y, const char* s, uint16_t color, BangersSize size) {
+    uint32_t now = millis();
+    bool glitching = updateGlitchState(now);
+    uint8_t level = s_glitchLevel;
+    uint32_t bucket = now / 40;
+    int jitterMax = JITTER_MAX_BY_LEVEL[level];
+    int jitterX = glitching ? (int)(glitchHash(bucket) % (2 * jitterMax + 1)) - jitterMax : 0;
+
+    // Chromatic-split ghost -- a faint offset copy in a contrasting
+    // color, drawn first so the real pass paints over/beside it.
+    // Skipped for BLACK: that's the color the outline trick
+    // (ui_clear.cpp/ui_watchalert.cpp) uses for its 24-pass solid
+    // backing behind the one real colored pass that follows -- ghosting
+    // each of those 24 would be wasted work and visual mud, not fringe.
+    // Offset grows with level too, so the fringe visibly widens along
+    // with everything else instead of staying a fixed 2px at any
+    // intensity.
+    if (glitching && color != BLACK) {
+        uint16_t ghostColor = blend(CYAN, VAPOR_PINK, (uint16_t)(glitchHash(bucket + 7) % 256));
+        int ghostOfs = 2 + level;
+        drawBangersPass(t, s, x + jitterX + ghostOfs, y - 1, ghostColor, size, glitching, bucket, level);
+    }
+
+    drawBangersPass(t, s, x + jitterX, y, color, size, glitching, bucket, level);
 }
 
 }  // namespace Theme

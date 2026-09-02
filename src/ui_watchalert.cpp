@@ -6,6 +6,7 @@
 
 void uiWatchAlertInit(TFT_eSPI& t) {
     t.fillRect(0, 0, t.width(), t.height(), Theme::BLACK);
+    Squachy::watchAlertReaction();
 }
 
 void uiWatchAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance) {

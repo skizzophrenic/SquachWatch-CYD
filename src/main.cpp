@@ -788,6 +788,16 @@ static char    s_confirmLabel[24];
 // from s_rawScanIsBle) -- RAWSCAN's own WATCH/HUNT branches don't
 // touch this, only LOG's do.
 static bool    s_confirmIsBle = true;
+// True once the touch that triggered the long-press has actually been
+// released. The confirm panel appears mid-hold (finger still down at
+// whatever row/result was long-pressed), and without this gate the
+// panel's own tap handling -- which only checks "is a touch down past
+// the debounce window", not "did a NEW touch just start" -- could fire
+// immediately using that still-held position, landing on whichever
+// button happens to sit under it. Reset to false every time a fresh
+// long-press opens the panel; only tap handling that runs after this
+// flips true is ever allowed to register a WATCH/HUNT/CANCEL tap.
+static bool    s_confirmArmed = false;
 
 static void enterLog() {
     state = AppState::LOG;
@@ -1518,7 +1528,12 @@ void loop() {
             // scrolling) is reachable underneath it -- same pattern
             // RAWSCAN's identical panel uses.
             if (s_confirmPending) {
-                if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                if (!s_confirmArmed) {
+                    // Still the same touch that opened the panel --
+                    // ignore it until it's released (see s_confirmArmed's
+                    // comment) so it can't register as an instant tap.
+                    if (!tp.valid) s_confirmArmed = true;
+                } else if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                     LogConfirmTap ctap = uiLogHitConfirm(tp.x, tp.y, tft.width(), tft.height());
                     if (ctap == LogConfirmTap::WATCH) {
                         lastTouch = now;
@@ -1609,6 +1624,7 @@ void loop() {
                         strncpy(s_confirmLabel, lbl, sizeof(s_confirmLabel) - 1);
                         s_confirmLabel[sizeof(s_confirmLabel) - 1] = 0;
                         s_confirmPending = true;
+                        s_confirmArmed   = false;
                     }
                 }
             }
@@ -1623,7 +1639,12 @@ void loop() {
             // this screen (BACK/SWITCH, another long-press, scrolling)
             // is reachable underneath it.
             if (s_confirmPending) {
-                if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                if (!s_confirmArmed) {
+                    // Still the same touch that opened the panel --
+                    // ignore it until it's released (see s_confirmArmed's
+                    // comment) so it can't register as an instant tap.
+                    if (!tp.valid) s_confirmArmed = true;
+                } else if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                     RawScanConfirmTap ctap = uiRawScanHitConfirm(tp.x, tp.y, tft.width(), tft.height());
                     if (ctap == RawScanConfirmTap::WATCH) {
                         lastTouch = now;
@@ -1722,6 +1743,7 @@ void loop() {
                         if (haveTarget) {
                             s_confirmLabel[sizeof(s_confirmLabel) - 1] = 0;
                             s_confirmPending = true;
+                            s_confirmArmed   = false;
                         }
                     }
                 }
