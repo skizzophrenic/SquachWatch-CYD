@@ -44,6 +44,29 @@ void applyPalette(uint8_t idx) {
     AMBER = p.amber; RED = p.red;
 }
 
+Palette dimPaletteForOverlay(uint16_t t) {
+    Palette saved = { "", BG, TASKBAR, PURPLE, CYAN, PINK, VAPOR_PINK,
+                      VAPOR_PURPLE, VAPOR_BLUE, VAPOR_YELLOW, GREEN, AMBER, RED };
+    PURPLE       = blend(PURPLE, BG, t);
+    CYAN         = blend(CYAN, BG, t);
+    PINK         = blend(PINK, BG, t);
+    VAPOR_PINK   = blend(VAPOR_PINK, BG, t);
+    VAPOR_PURPLE = blend(VAPOR_PURPLE, BG, t);
+    VAPOR_BLUE   = blend(VAPOR_BLUE, BG, t);
+    VAPOR_YELLOW = blend(VAPOR_YELLOW, BG, t);
+    GREEN        = blend(GREEN, BG, t);
+    AMBER        = blend(AMBER, BG, t);
+    RED          = blend(RED, BG, t);
+    return saved;
+}
+
+void restorePalette(const Palette& saved) {
+    BG = saved.bg; TASKBAR = saved.taskbar; PURPLE = saved.purple; CYAN = saved.cyan;
+    PINK = saved.pink; VAPOR_PINK = saved.vaporPink; VAPOR_PURPLE = saved.vaporPurple;
+    VAPOR_BLUE = saved.vaporBlue; VAPOR_YELLOW = saved.vaporYellow; GREEN = saved.green;
+    AMBER = saved.amber; RED = saved.red;
+}
+
 uint16_t colorFor(DetectionType t) {
     switch (t) {
         case DetectionType::FLOCK:
@@ -227,6 +250,20 @@ ButtonId hitTestButtonBar(int x, int y, int screenW, int screenH) {
 
 void drawScanline(TFT_eSPI& t, int y, uint16_t color) {
     t.drawFastHLine(0, y, t.width(), color);
+}
+
+void drawScrollbar(TFT_eSPI& t, int x, int y, int h,
+                   int totalItems, int visibleItems, int scrollOffset) {
+    if (totalItems <= visibleItems || visibleItems <= 0) return;
+    t.drawFastVLine(x, y, h, PURPLE);
+    int thumbH = h * visibleItems / totalItems;
+    if (thumbH < 6) thumbH = 6;
+    int maxScroll = totalItems - visibleItems;
+    if (scrollOffset > maxScroll) scrollOffset = maxScroll;
+    if (scrollOffset < 0) scrollOffset = 0;
+    int travel = h - thumbH;
+    int thumbY = y + (maxScroll > 0 ? (travel * scrollOffset / maxScroll) : 0);
+    t.fillRect(x - 1, thumbY, 3, thumbH, CYAN);
 }
 
 // Shared by a few of drawAlertFx's cases below: expanding rings from a

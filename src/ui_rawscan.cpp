@@ -61,10 +61,14 @@ static void drawBottomBar(TFT_eSPI& t, int w, int h, bool isBle) {
 }
 
 // Confirm panel geometry, shared by its drawing (in uiRawScanTick())
-// and uiRawScanHitConfirm() below.
+// and uiRawScanHitConfirm() below. Three buttons in the same row --
+// labels dropped their "[ ]" brackets (unlike Theme::drawButton's
+// other callers) purely to fit "CANCEL" at this width on the
+// narrowest portrait rotation (pw=200 -> btnW~53px).
 static void confirmRects(int screenW, int screenH,
                           int& px, int& py, int& pw, int& ph,
-                          int& okX, int& okY, int& okW, int& okH,
+                          int& wX, int& wY, int& wW, int& wH,
+                          int& huX, int& huY, int& huW, int& huH,
                           int& cnX, int& cnY, int& cnW, int& cnH) {
     pw = screenW - 40;
     if (pw > 240) pw = 240;
@@ -72,17 +76,19 @@ static void confirmRects(int screenW, int screenH,
     px = (screenW - pw) / 2;
     py = (screenH - ph) / 2;
     const int margin = 10, gap = 10, btnH = 26;
-    int btnW = (pw - 2 * margin - gap) / 2;
-    okY = cnY = py + ph - btnH - margin;
-    okH = cnH = btnH;
-    okX = px + margin;          okW = btnW;
-    cnX = okX + btnW + gap;     cnW = btnW;
+    int btnW = (pw - 2 * margin - 2 * gap) / 3;
+    wY = huY = cnY = py + ph - btnH - margin;
+    wH = huH = cnH = btnH;
+    wX  = px + margin;         wW  = btnW;
+    huX = wX + btnW + gap;     huW = btnW;
+    cnX = huX + btnW + gap;    cnW = btnW;
 }
 
 RawScanConfirmTap uiRawScanHitConfirm(int x, int y, int screenW, int screenH) {
-    int px, py, pw, ph, okX, okY, okW, okH, cnX, cnY, cnW, cnH;
-    confirmRects(screenW, screenH, px, py, pw, ph, okX, okY, okW, okH, cnX, cnY, cnW, cnH);
-    if (x >= okX && x <= okX + okW && y >= okY && y <= okY + okH) return RawScanConfirmTap::OK;
+    int px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, cnX, cnY, cnW, cnH;
+    confirmRects(screenW, screenH, px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, cnX, cnY, cnW, cnH);
+    if (x >= wX && x <= wX + wW && y >= wY && y <= wY + wH) return RawScanConfirmTap::WATCH;
+    if (x >= huX && x <= huX + huW && y >= huY && y <= huY + huH) return RawScanConfirmTap::HUNT;
     if (x >= cnX && x <= cnX + cnW && y >= cnY && y <= cnY + cnH) return RawScanConfirmTap::CANCEL;
     return RawScanConfirmTap::NONE;
 }
@@ -92,15 +98,15 @@ RawScanConfirmTap uiRawScanHitConfirm(int x, int y, int screenW, int screenH) {
 // right before every return point in uiRawScanTick() rather than
 // restructuring those into a single shared tail.
 static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label) {
-    int px, py, pw, ph, okX, okY, okW, okH, cnX, cnY, cnW, cnH;
-    confirmRects(w, h, px, py, pw, ph, okX, okY, okW, okH, cnX, cnY, cnW, cnH);
+    int px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, cnX, cnY, cnW, cnH;
+    confirmRects(w, h, px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, cnX, cnY, cnW, cnH);
     t.fillRoundRect(px, py, pw, ph, 6, Theme::BG);
     t.drawRoundRect(px, py, pw, ph, 6, Theme::PURPLE);
 
     t.setTextSize(1);
     t.setTextWrap(false);
     t.setTextColor(Theme::CYAN, Theme::BG);
-    const char* q = "WATCH THIS TARGET?";
+    const char* q = "TRACK THIS TARGET?";
     int qw = t.textWidth(q);
     t.setCursor(px + (pw - qw) / 2, py + 8);
     t.print(q);
@@ -112,8 +118,9 @@ static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label) {
     t.setCursor(lx, py + 24);
     t.print(label);
 
-    Theme::drawButton(t, okX, okY, okW, okH, "[ OK ]", false);
-    Theme::drawButton(t, cnX, cnY, cnW, cnH, "[ CANCEL ]", false);
+    Theme::drawButton(t, wX, wY, wW, wH, "WATCH", false);
+    Theme::drawButton(t, huX, huY, huW, huH, "HUNT", false);
+    Theme::drawButton(t, cnX, cnY, cnW, cnH, "CANCEL", false);
 }
 
 // Shared by uiRawScanTick() (drawing) and uiRawScanRowAt() (hit
@@ -291,7 +298,7 @@ void uiRawScanTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool i
             char rssi[12];
             snprintf(rssi, sizeof(rssi), "%ddBm", r->rssi);
             int rw = t.textWidth(rssi);
-            t.setCursor(w - rw - 4, y + topPad);
+            t.setCursor(w - rw - 14, y + topPad);
             t.print(rssi);
         } else {
             t.setTextSize(2);
@@ -311,12 +318,14 @@ void uiRawScanTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool i
             char rssi[12];
             snprintf(rssi, sizeof(rssi), "%ddBm", eng.rawWifiRssi(idx));
             int rw = t.textWidth(rssi);
-            t.setCursor(w - rw - 4, y + topPad);
+            t.setCursor(w - rw - 14, y + topPad);
             t.print(rssi);
         }
 
         y += rowH;
     }
+
+    Theme::drawScrollbar(t, w - 4, bodyTop, bodyH, count, max, g_scroll);
 
     drawBottomBar(t, w, h, isBle);
     if (confirmPending) drawConfirmPanel(t, w, h, confirmLabel);

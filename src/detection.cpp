@@ -59,10 +59,14 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
     void onResult(NimBLEAdvertisedDevice* adv) override {
         if (!g_engine) return;
         const uint8_t* mac = adv->getAddress().getNative();
-        // Checked regardless of raw-scan mode -- a watched target
-        // still fires even if it's not a known signature and even
-        // while the raw-scan screen happens to be open.
-        g_engine->checkWatchBle(mac);
+        // Checked regardless of raw-scan mode -- a watched/hunted
+        // target still fires even if it's not a known signature and
+        // even while the raw-scan screen happens to be open. The two
+        // are independent slots (see detection.h), so both are always
+        // checked -- either, both, or neither can match a given frame.
+        int8_t rssi = (int8_t)adv->getRSSI();
+        g_engine->checkWatchBle(mac, rssi);
+        g_engine->checkHuntBle(mac, rssi);
         if (g_rawMode == RawScanMode::WIFI) return;   // radio's dedicated to the WiFi sweep right now
         if (g_rawMode == RawScanMode::BLE) {
             RawBleResult r;
@@ -537,6 +541,8 @@ void DetectionEngine::watchBle(const uint8_t* mac, const char* name) {
     _watchLabel[sizeof(_watchLabel) - 1] = 0;
     _watchLastHitMs = 0;
     _watchHitFlag   = false;
+    _watchRssiHead = _watchRssiCount = 0;
+    _watchRssiLastMs = 0;
 }
 
 void DetectionEngine::watchWifi(const uint8_t* bssid, const char* ssid) {
@@ -546,11 +552,14 @@ void DetectionEngine::watchWifi(const uint8_t* bssid, const char* ssid) {
     _watchLabel[sizeof(_watchLabel) - 1] = 0;
     _watchLastHitMs = 0;
     _watchHitFlag   = false;
+    _watchRssiHead = _watchRssiCount = 0;
+    _watchRssiLastMs = 0;
 }
 
 void DetectionEngine::clearWatch() {
     _watchKind    = WatchKind::NONE;
     _watchHitFlag = false;
+    _watchRssiHead = _watchRssiCount = 0;
 }
 
 bool DetectionEngine::watchHitPending() {
@@ -561,22 +570,97 @@ bool DetectionEngine::watchHitPending() {
     return false;
 }
 
-void DetectionEngine::checkWatchBle(const uint8_t* mac) {
+void DetectionEngine::checkWatchBle(const uint8_t* mac, int8_t rssi) {
     if (_watchKind != WatchKind::BLE) return;
     if (memcmp(mac, _watchMac, 6) != 0) return;
+    recordWatchRssi(rssi);
     uint32_t now = millis();
     if (now - _watchLastHitMs < WATCH_COOLDOWN_MS) return;
     _watchLastHitMs = now;
     _watchHitFlag   = true;
 }
 
-void DetectionEngine::checkWatchWifi(const uint8_t* mac) {
+void DetectionEngine::checkWatchWifi(const uint8_t* mac, int8_t rssi) {
     if (_watchKind != WatchKind::WIFI) return;
     if (memcmp(mac, _watchMac, 6) != 0) return;
+    recordWatchRssi(rssi);
     uint32_t now = millis();
     if (now - _watchLastHitMs < WATCH_COOLDOWN_MS) return;
     _watchLastHitMs = now;
     _watchHitFlag   = true;
+}
+
+// Throttled independently of WATCH_COOLDOWN_MS above -- that gate is
+// about not re-popping the full-screen alert every advertisement,
+// this is about building up a dense-enough trend to actually plot.
+void DetectionEngine::recordWatchRssi(int8_t rssi) {
+    uint32_t now = millis();
+    if (now - _watchRssiLastMs < WATCH_RSSI_SAMPLE_MS && _watchRssiCount > 0) return;
+    _watchRssiLastMs = now;
+    _watchRssiHist[_watchRssiHead] = rssi;
+    _watchRssiHead = (_watchRssiHead + 1) % WATCH_RSSI_CAP;
+    if (_watchRssiCount < WATCH_RSSI_CAP) _watchRssiCount++;
+}
+
+int8_t DetectionEngine::watchRssiAt(uint8_t idx) const {
+    if (idx >= _watchRssiCount) return 0;
+    // Oldest-first: when the buffer hasn't wrapped yet, oldest is slot
+    // 0; once it has, oldest is whatever _watchRssiHead is about to
+    // overwrite next.
+    uint8_t start = (_watchRssiCount < WATCH_RSSI_CAP) ? 0 : _watchRssiHead;
+    uint8_t slot = (start + idx) % WATCH_RSSI_CAP;
+    return _watchRssiHist[slot];
+}
+
+void DetectionEngine::huntBle(const uint8_t* mac, const char* name) {
+    _huntKind = WatchKind::BLE;
+    memcpy(_huntMac, mac, 6);
+    strncpy(_huntLabel, (name && name[0]) ? name : "Unnamed device", sizeof(_huntLabel) - 1);
+    _huntLabel[sizeof(_huntLabel) - 1] = 0;
+    _huntRssiHead = _huntRssiCount = 0;
+    _huntRssiLastMs = 0;
+}
+
+void DetectionEngine::huntWifi(const uint8_t* bssid, const char* ssid) {
+    _huntKind = WatchKind::WIFI;
+    memcpy(_huntMac, bssid, 6);
+    strncpy(_huntLabel, (ssid && ssid[0]) ? ssid : "(hidden)", sizeof(_huntLabel) - 1);
+    _huntLabel[sizeof(_huntLabel) - 1] = 0;
+    _huntRssiHead = _huntRssiCount = 0;
+    _huntRssiLastMs = 0;
+}
+
+void DetectionEngine::clearHunt() {
+    _huntKind = WatchKind::NONE;
+    _huntRssiHead = _huntRssiCount = 0;
+}
+
+void DetectionEngine::checkHuntBle(const uint8_t* mac, int8_t rssi) {
+    if (_huntKind != WatchKind::BLE) return;
+    if (memcmp(mac, _huntMac, 6) != 0) return;
+    recordHuntRssi(rssi);
+}
+
+void DetectionEngine::checkHuntWifi(const uint8_t* mac, int8_t rssi) {
+    if (_huntKind != WatchKind::WIFI) return;
+    if (memcmp(mac, _huntMac, 6) != 0) return;
+    recordHuntRssi(rssi);
+}
+
+void DetectionEngine::recordHuntRssi(int8_t rssi) {
+    uint32_t now = millis();
+    if (now - _huntRssiLastMs < WATCH_RSSI_SAMPLE_MS && _huntRssiCount > 0) return;
+    _huntRssiLastMs = now;
+    _huntRssiHist[_huntRssiHead] = rssi;
+    _huntRssiHead = (_huntRssiHead + 1) % WATCH_RSSI_CAP;
+    if (_huntRssiCount < WATCH_RSSI_CAP) _huntRssiCount++;
+}
+
+int8_t DetectionEngine::huntRssiAt(uint8_t idx) const {
+    if (idx >= _huntRssiCount) return 0;
+    uint8_t start = (_huntRssiCount < WATCH_RSSI_CAP) ? 0 : _huntRssiHead;
+    uint8_t slot = (start + idx) % WATCH_RSSI_CAP;
+    return _huntRssiHist[slot];
 }
 
 void DetectionEngine::processWiFiQ() {
@@ -593,7 +677,8 @@ void DetectionEngine::processWiFiQ() {
         // anything) it ends up matching below -- a watched AP's own
         // MAC shows up here as addr2 (probe/data) or addr3/BSSID
         // (beacon), same offsets postWiFi() was already called with.
-        checkWatchWifi(e.mac);
+        checkWatchWifi(e.mac, e.rssi);
+        checkHuntWifi(e.mac, e.rssi);
         // Every captured frame feeds the spectrum-waterfall's channel
         // activity level, whether or not it ends up matching anything
         // below — this is meant to reflect real ambient RF traffic,

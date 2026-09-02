@@ -64,7 +64,11 @@ enum class AppState : uint8_t {
     DIARY    = 5,
     OUTFIT   = 6,
     RAWSCAN     = 7,  // manual BLE/WiFi scanner, reached via CLEAR's SCAN picker
-    WATCH_ALERT = 8   // a watched target (see DetectionEngine::watchBle/watchWifi) came back in range
+    WATCH_ALERT = 8,  // a watched target (see DetectionEngine::watchBle/watchWifi) came back in range
+    DIAGNOSTICS = 9,  // on-device diagnostics screen, reached via Settings
+    HUNT        = 10  // live signal-strength gauge for the watched target,
+                       // reached via raw-scan's long-press confirm panel
+                       // (the "HUNT" choice alongside WATCH/CANCEL)
 };
 
 enum class ButtonId : uint8_t {

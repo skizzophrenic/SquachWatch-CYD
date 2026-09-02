@@ -8,6 +8,8 @@
 #include <TFT_eSPI.h>
 #include <XPT2046_Touchscreen.h>
 #include <Preferences.h>  // AWOK's own per-rotation touch-cal storage; see the AWOK block below pollTouch()'s globals
+#include <esp_heap_caps.h>   // heap_caps_get_largest_free_block() -- diagnostics screen
+#include <esp_system.h>      // esp_reset_reason() -- diagnostics screen
 #include "state.h"
 #include "theme.h"
 #include "detection.h"
@@ -18,6 +20,8 @@
 #include "ui_rawscan.h"
 #include "ui_watchalert.h"
 #include "ui_settings.h"
+#include "ui_diagnostics.h"
+#include "ui_hunt.h"
 #include "ui_diary.h"
 #include "ui_outfit.h"
 #include "squachy.h"
@@ -661,6 +665,12 @@ static void applyBrightness() {
     ledcWrite(BL_CH_AWOK, duty);
 }
 
+// Set once at boot when a saved calibration passes TouchCal::load()'s
+// plausibility check -- surfaced on the diagnostics screen so it's
+// obvious at a glance whether touch is running on a real saved
+// calibration or the compiled-in fallback range.
+static bool s_usingSavedCal = false;
+
 static void applyCal(const TouchCal::Cal& cal) {
     if (usingCapTouch) {
         CAP_NX_MAX = (uint16_t)cal.aTop;
@@ -672,6 +682,24 @@ static void applyCal(const TouchCal::Cal& cal) {
         RAW_X_MIN = (uint16_t)cal.aBottom;
         RAW_Y_MIN = (uint16_t)cal.bLeft;
         RAW_Y_MAX = (uint16_t)cal.bRight;
+    }
+}
+
+// esp_reset_reason() as a short, human-readable string -- the
+// diagnostics screen's answer to "did it actually crash", the exact
+// question a live serial monitor was needed for earlier today.
+static const char* resetReasonName() {
+    switch (esp_reset_reason()) {
+        case ESP_RST_POWERON:   return "power-on";
+        case ESP_RST_SW:        return "software";
+        case ESP_RST_PANIC:     return "PANIC/crash";
+        case ESP_RST_INT_WDT:   return "interrupt watchdog";
+        case ESP_RST_TASK_WDT:  return "task watchdog";
+        case ESP_RST_WDT:       return "other watchdog";
+        case ESP_RST_DEEPSLEEP: return "deep sleep wake";
+        case ESP_RST_BROWNOUT:  return "brownout";
+        case ESP_RST_SDIO:      return "SDIO";
+        default:                return "unknown";
     }
 }
 
@@ -745,21 +773,30 @@ static void enterWatchAlert() {
 #endif
 }
 
+// Long-press-to-watch/hunt confirmation -- see the LOG and RAWSCAN
+// cases in loop(). Owned here rather than in ui_log.cpp/ui_rawscan.cpp
+// so main.cpp can decide what WATCH/HUNT actually do (call
+// DetectionEngine::watchBle/watchWifi/huntBle/huntWifi) without those
+// modules needing to know about DetectionEngine's tracking API at all,
+// just how to draw/hit-test the panel they're given. Shared by both
+// screens since only one can ever be showing at a time.
+static bool    s_confirmPending = false;
+static uint8_t s_confirmMac[6];
+static char    s_confirmLabel[24];
+// LOG's long-press sets this per-row (BLE vs WiFi isn't implied by a
+// "current mode" the way it is for RAWSCAN, which already knows that
+// from s_rawScanIsBle) -- RAWSCAN's own WATCH/HUNT branches don't
+// touch this, only LOG's do.
+static bool    s_confirmIsBle = true;
+
 static void enterLog() {
     state = AppState::LOG;
     transitionStart = millis();
+    s_confirmPending = false;
     uiLogInit(*canvas);
 }
 
 static bool    s_rawScanIsBle = true;
-// Long-press-to-watch confirmation -- see the RAWSCAN case in loop().
-// Owned here rather than in ui_rawscan.cpp so main.cpp can decide what
-// OK actually does (call DetectionEngine::watchBle/watchWifi) without
-// that module needing to know about DetectionEngine's watch API at
-// all, just how to draw/hit-test the panel it's given.
-static bool    s_confirmPending = false;
-static uint8_t s_confirmMac[6];
-static char    s_confirmLabel[24];
 
 static void enterRawScan(bool isBle) {
     state = AppState::RAWSCAN;
@@ -775,6 +812,18 @@ static void enterSettings() {
     state = AppState::SETTINGS;
     transitionStart = millis();
     uiSettingsInit(*canvas);
+}
+
+static void enterDiagnostics() {
+    state = AppState::DIAGNOSTICS;
+    transitionStart = millis();
+    uiDiagnosticsInit(*canvas);
+}
+
+static void enterHunt() {
+    state = AppState::HUNT;
+    transitionStart = millis();
+    uiHuntInit(*canvas);
 }
 
 static void enterDiary() {
@@ -1009,6 +1058,7 @@ void setup() {
     TouchCal::Cal savedCal;
     if (TouchCal::load(savedCal, usingCapTouch ? CAP_TOUCH_MIN_SPREAD : RESISTIVE_MIN_SPREAD)) {
         applyCal(savedCal);
+        s_usingSavedCal = true;
         Serial.println("Loaded saved touch calibration.");
     }
 #endif
@@ -1042,9 +1092,13 @@ void loop() {
     // real hardware that board's case only holds the panel in one
     // orientation (portrait), so rotation was pure unused complexity
     // there — see Theme::setRotateIconVisible(false) in setup(), which
-    // also hides the icon itself, not just this handler.
+    // also hides the icon itself, not just this handler. When
+    // Settings::rotationLocked() is on, the icon still draws (it's a
+    // user-facing OFF switch, not a hardware constraint like AWOK's) but
+    // the tap does nothing — avoids an accidental rotation mid-scan.
 #if !defined(AWOK)
-    if (tp.valid && (state == AppState::CLEAR || state == AppState::LOG ||
+    if (tp.valid && !Settings::rotationLocked() &&
+        (state == AppState::CLEAR || state == AppState::LOG ||
                       state == AppState::SETTINGS || state == AppState::OUTFIT ||
                       state == AppState::RAWSCAN) &&
         Theme::rotateButtonHit(tp.x, tp.y, tft.width()) &&
@@ -1157,6 +1211,7 @@ void loop() {
             if (TouchCal::runInteractive(tft, reader, Theme::BG, Theme::WHITE, Theme::CYAN, newCal,
                                          usingCapTouch ? CAP_TOUCH_MIN_SPREAD : RESISTIVE_MIN_SPREAD)) {
                 applyCal(newCal);
+                s_usingSavedCal = true;
             }
 #endif
             enterClear();
@@ -1455,28 +1510,107 @@ void loop() {
             break;
         }
         case AppState::LOG: {
-            uiLogTick(*canvas, now, engine, 0);
-            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
-                ButtonId b = Theme::hitTestButtonBar(tp.x, tp.y, tft.width(), tft.height());
-                lastTouch = now;
-                if (b == ButtonId::SCAN) { enterClear(); }
-                if (b == ButtonId::CLR)  { engine.clearLog(); enterClear(); }
-                if (b == ButtonId::LOG)  { enterClear(); }   // toggle off
-            }
-            // Swipe to scroll: detect Y delta from prior touch
-            static int lastY = -1;
-            if (tp.valid) {
-                if (lastY >= 0) {
-                    int dy = tp.y - lastY;
-                    if (abs(dy) > 10) {
-                        uiLogScroll(dy > 0 ? -1 : 1);
-                        lastY = tp.y;
+            uiLogTick(*canvas, now, engine, 0, s_confirmPending, s_confirmLabel);
+
+            // The confirm panel is modal: while it's up, a tap only
+            // ever means WATCH, HUNT, or CANCEL on it, nothing else on
+            // this screen (the button bar, another long-press,
+            // scrolling) is reachable underneath it -- same pattern
+            // RAWSCAN's identical panel uses.
+            if (s_confirmPending) {
+                if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                    LogConfirmTap ctap = uiLogHitConfirm(tp.x, tp.y, tft.width(), tft.height());
+                    if (ctap == LogConfirmTap::WATCH) {
+                        lastTouch = now;
+                        s_confirmPending = false;
+                        if (s_confirmIsBle) engine.watchBle(s_confirmMac, s_confirmLabel);
+                        else                engine.watchWifi(s_confirmMac, s_confirmLabel);
+                    } else if (ctap == LogConfirmTap::HUNT) {
+                        lastTouch = now;
+                        s_confirmPending = false;
+                        if (s_confirmIsBle) engine.huntBle(s_confirmMac, s_confirmLabel);
+                        else                engine.huntWifi(s_confirmMac, s_confirmLabel);
+                        enterHunt();
+                    } else if (ctap == LogConfirmTap::CANCEL) {
+                        lastTouch = now;
+                        s_confirmPending = false;
                     }
-                } else {
+                }
+                break;
+            }
+
+            // Tap commits on release, not on press, and only if the
+            // touch never moved past the scroll threshold -- firing on
+            // press meant a swipe that started on a button/row acted on
+            // it instantly, before the drag had any chance to be
+            // recognized as a scroll instead. Same tracked-across-
+            // frames shape as Squachy's own PETTED/HELD gesture and the
+            // CLR-hold costume unlock.
+            static bool gestureActive = false;
+            static bool gestureMoved  = false;
+            static int  gestureStartX = 0, gestureStartY = 0;
+            static int  lastY = -1;
+            if (touchJustDown) {
+                gestureActive = true;
+                gestureMoved  = false;
+                gestureStartX = tp.x;
+                gestureStartY = tp.y;
+                lastY = tp.y;
+            }
+            if (tp.valid && gestureActive) {
+                int dy = tp.y - lastY;
+                if (abs(dy) > 10) {
+                    gestureMoved = true;
+                    uiLogScroll(dy > 0 ? -1 : 1);
                     lastY = tp.y;
                 }
-            } else {
-                lastY = -1;
+            }
+            if (touchJustUp && gestureActive) {
+                if (!gestureMoved) {
+                    lastTouch = now;
+                    ButtonId b = Theme::hitTestButtonBar(gestureStartX, gestureStartY, tft.width(), tft.height());
+                    if (b == ButtonId::SCAN) { enterClear(); }
+                    if (b == ButtonId::CLR)  { engine.clearLog(); enterClear(); }
+                    if (b == ButtonId::LOG)  { enterClear(); }   // toggle off
+                }
+                gestureActive = false;
+            }
+
+            // Long-press a log entry to bring up the same WATCH/HUNT/
+            // CANCEL panel RAWSCAN's results use -- disambiguated from
+            // the drag-to-scroll gesture above the same way RAWSCAN's
+            // is, by requiring the touch to stay roughly still past a
+            // hold threshold (same pattern CLEAR uses for petting
+            // Squachy). BLE vs WiFi is inferred from channel: postBle()
+            // always leaves it 0 (see detection.h), every WiFi-sourced
+            // entry (including DEAUTH) carries the real 1..13 channel
+            // it was captured on.
+            static bool     rowHoldFired = false;
+            static uint32_t rowHoldStart = 0;
+            static int      rowHoldX = 0, rowHoldY = 0;
+            constexpr uint32_t ROW_HOLD_MS    = 500;
+            constexpr int32_t  ROW_MOVE_PX_SQ = 12 * 12;
+            if (touchJustDown) {
+                rowHoldFired = false;
+                rowHoldStart = now;
+                rowHoldX = tp.x;
+                rowHoldY = tp.y;
+            }
+            if (tp.valid && !rowHoldFired) {
+                int32_t hdx = tp.x - rowHoldX, hdy = tp.y - rowHoldY;
+                if ((hdx * hdx + hdy * hdy) <= ROW_MOVE_PX_SQ && (now - rowHoldStart) >= ROW_HOLD_MS) {
+                    int row = uiLogRowAt(*canvas, tp.x, tp.y, tft.width(), tft.height());
+                    const Detection* d = (row >= 0) ? engine.logAt((uint8_t)row) : nullptr;
+                    if (d) {
+                        rowHoldFired = true;
+                        memcpy(s_confirmMac, d->mac, 6);
+                        s_confirmIsBle = (d->channel == 0);
+                        const char* lbl = d->name[0] ? d->name : d->vendor;
+                        strncpy(s_confirmLabel, lbl, sizeof(s_confirmLabel) - 1);
+                        s_confirmLabel[sizeof(s_confirmLabel) - 1] = 0;
+                        s_confirmPending = true;
+                    }
+                }
             }
             break;
         }
@@ -1485,19 +1619,26 @@ void loop() {
             uiRawScanTick(*canvas, now, engine, s_rawScanIsBle, done, s_confirmPending, s_confirmLabel);
 
             // The confirm panel is modal: while it's up, a tap only
-            // ever means OK or CANCEL on it, nothing else on this
-            // screen (BACK/SWITCH, another long-press, scrolling) is
-            // reachable underneath it.
+            // ever means WATCH, HUNT, or CANCEL on it, nothing else on
+            // this screen (BACK/SWITCH, another long-press, scrolling)
+            // is reachable underneath it.
             if (s_confirmPending) {
                 if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                     RawScanConfirmTap ctap = uiRawScanHitConfirm(tp.x, tp.y, tft.width(), tft.height());
-                    if (ctap == RawScanConfirmTap::OK) {
+                    if (ctap == RawScanConfirmTap::WATCH) {
                         lastTouch = now;
                         s_confirmPending = false;
                         if (s_rawScanIsBle) engine.watchBle(s_confirmMac, s_confirmLabel);
                         else                engine.watchWifi(s_confirmMac, s_confirmLabel);
                         engine.stopRawScan();
                         enterClear();
+                    } else if (ctap == RawScanConfirmTap::HUNT) {
+                        lastTouch = now;
+                        s_confirmPending = false;
+                        if (s_rawScanIsBle) engine.huntBle(s_confirmMac, s_confirmLabel);
+                        else                engine.huntWifi(s_confirmMac, s_confirmLabel);
+                        engine.stopRawScan();
+                        enterHunt();
                     } else if (ctap == RawScanConfirmTap::CANCEL) {
                         lastTouch = now;
                         s_confirmPending = false;
@@ -1506,16 +1647,36 @@ void loop() {
                 break;
             }
 
-            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
-                RawScanTap tap = uiRawScanHitTest(tp.x, tp.y, tft.width(), tft.height());
-                if (tap == RawScanTap::BACK) {
-                    lastTouch = now;
-                    engine.stopRawScan();
-                    enterClear();
-                } else if (tap == RawScanTap::SWITCH) {
-                    lastTouch = now;
-                    enterRawScan(!s_rawScanIsBle);
+            // BACK/SWITCH commit on release, not press, and only if the
+            // touch never moved past the scroll threshold -- same
+            // reasoning as LOG's identical fix: firing on press meant a
+            // swipe starting on a button acted on it instantly, before
+            // the drag could be recognized as a scroll. Independent of
+            // (but coexists fine with) the row-hold gesture below --
+            // whichever one actually has a target at the touch's start
+            // position is the only one that ever fires anything.
+            static bool gestureActive = false;
+            static bool gestureMoved  = false;
+            static int  gestureStartX = 0, gestureStartY = 0;
+            if (touchJustDown) {
+                gestureActive = true;
+                gestureMoved  = false;
+                gestureStartX = tp.x;
+                gestureStartY = tp.y;
+            }
+            if (touchJustUp && gestureActive) {
+                if (!gestureMoved) {
+                    RawScanTap tap = uiRawScanHitTest(gestureStartX, gestureStartY, tft.width(), tft.height());
+                    if (tap == RawScanTap::BACK) {
+                        lastTouch = now;
+                        engine.stopRawScan();
+                        enterClear();
+                    } else if (tap == RawScanTap::SWITCH) {
+                        lastTouch = now;
+                        enterRawScan(!s_rawScanIsBle);
+                    }
                 }
+                gestureActive = false;
             }
             // Long-press a result row (once the scan's actually done)
             // to bring up the watch-confirm panel above -- disambiguated
@@ -1565,74 +1726,170 @@ void loop() {
                     }
                 }
             }
-            // Swipe to scroll, same as LOG.
+            // Swipe to scroll, same as LOG -- also marks gestureMoved
+            // so the deferred BACK/SWITCH tap above cancels correctly
+            // when this touch turns out to be a scroll.
             static int lastY = -1;
-            if (tp.valid) {
-                if (lastY >= 0) {
-                    int dy = tp.y - lastY;
-                    if (abs(dy) > 10) {
-                        uiRawScanScroll(dy > 0 ? -1 : 1);
-                        lastY = tp.y;
-                    }
-                } else {
+            if (touchJustDown) lastY = tp.y;
+            if (tp.valid && lastY >= 0) {
+                int dy = tp.y - lastY;
+                if (abs(dy) > 10) {
+                    gestureMoved = true;
+                    uiRawScanScroll(dy > 0 ? -1 : 1);
                     lastY = tp.y;
                 }
-            } else {
+            } else if (!tp.valid) {
                 lastY = -1;
             }
             break;
         }
         case AppState::SETTINGS: {
             uiSettingsTick(*canvas, now, engine);
-            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
-                lastTouch = now;
-                SettingsRow row = uiSettingsHitTest(tp.x, tp.y, tft.width(), tft.height());
-                switch (row) {
-                    case SettingsRow::THEME:      Settings::cyclePalette(); break;
-                    case SettingsRow::BACKGROUND: Settings::cycleBackground(); break;
-                    case SettingsRow::INVERT:
-                        Settings::toggleInvert();
-                        // XOR against the panel's own baseline, not an
-                        // absolute call -- see PANEL_NEEDS_INVERSION.
-                        tft.invertDisplay(PANEL_NEEDS_INVERSION != Settings::inverted());
-                        break;
-                    case SettingsRow::BORING_MODE: Settings::toggleBoringMode(); break;
-                    case SettingsRow::BRIGHTNESS:
-                        Settings::adjustBrightness(tp.x < tft.width() / 2 ? -16 : 16);
-                        applyBrightness();
-                        break;
-                    case SettingsRow::CONFIDENCE: Settings::cycleMinConfidence(); break;
-                    case SettingsRow::CALIBRATE: {
-#if defined(AWOK)
-                        awokRunCalibration();
-#elif defined(CYD35)
-                        cyd35RunCalibration();
-#else
-                        TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
-                        TouchCal::Cal newCal;
-                        // tft directly, not *canvas -- see the other
-                        // call site's comment (title-bar long-press
-                        // trigger above) for why.
-                        if (TouchCal::runInteractive(tft, reader, Theme::BG, Theme::WHITE, Theme::CYAN, newCal,
-                                                     usingCapTouch ? CAP_TOUCH_MIN_SPREAD : RESISTIVE_MIN_SPREAD)) {
-                            applyCal(newCal);
-                        }
-#endif
-                        enterSettings();
-                        break;
-                    }
-                    case SettingsRow::REPLAY_INTRO:
-                        Squachy::replayIntro();
-                        enterClear();
-                        break;
-                    case SettingsRow::NICKNAME:     Squachy::cycleNickname(); break;
-                    case SettingsRow::SHADES_COLOR: Squachy::cycleShadesColor(); break;
-                    case SettingsRow::OUTFIT:       enterOutfit(); break;
-                    case SettingsRow::VIEW_DIARY:   enterDiary(); break;
-                    case SettingsRow::RESET_STATS: engine.resetLifetime(); break;
-                    case SettingsRow::BACK:        enterClear(); break;
-                    default: break;
+            // Row taps commit on release, not on press, and only if
+            // the touch never moved past the scroll threshold -- same
+            // fix as LOG/raw-scan: firing on press meant a swipe that
+            // started on a row acted on it instantly, before the drag
+            // could be recognized as a scroll instead.
+            static bool gestureActive = false;
+            static bool gestureMoved  = false;
+            static int  gestureStartX = 0, gestureStartY = 0;
+            static int  lastY = -1;
+            if (touchJustDown) {
+                gestureActive = true;
+                gestureMoved  = false;
+                gestureStartX = tp.x;
+                gestureStartY = tp.y;
+                lastY = tp.y;
+            }
+            if (tp.valid && gestureActive) {
+                int dy = tp.y - lastY;
+                if (abs(dy) > 10) {
+                    gestureMoved = true;
+                    uiSettingsScroll(dy > 0 ? -1 : 1);
+                    lastY = tp.y;
                 }
+            }
+            if (touchJustUp && gestureActive) {
+                if (!gestureMoved) {
+                    lastTouch = now;
+                    SettingsRow row = uiSettingsHitTest(*canvas, gestureStartX, gestureStartY, tft.width(), tft.height());
+                    switch (row) {
+                        case SettingsRow::THEME:      Settings::cyclePalette(); break;
+                        case SettingsRow::BACKGROUND: Settings::cycleBackground(); break;
+                        case SettingsRow::INVERT:
+                            Settings::toggleInvert();
+                            // XOR against the panel's own baseline, not an
+                            // absolute call -- see PANEL_NEEDS_INVERSION.
+                            tft.invertDisplay(PANEL_NEEDS_INVERSION != Settings::inverted());
+                            break;
+                        case SettingsRow::ROTATION_LOCK: Settings::toggleRotationLock(); break;
+                        case SettingsRow::BORING_MODE: Settings::toggleBoringMode(); break;
+                        case SettingsRow::BRIGHTNESS:
+                            Settings::adjustBrightness(gestureStartX < tft.width() / 2 ? -16 : 16);
+                            applyBrightness();
+                            break;
+                        case SettingsRow::CONFIDENCE: Settings::cycleMinConfidence(); break;
+                        case SettingsRow::CALIBRATE: {
+#if defined(AWOK)
+                            awokRunCalibration();
+#elif defined(CYD35)
+                            cyd35RunCalibration();
+#else
+                            TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
+                            TouchCal::Cal newCal;
+                            // tft directly, not *canvas -- see the other
+                            // call site's comment (title-bar long-press
+                            // trigger above) for why.
+                            if (TouchCal::runInteractive(tft, reader, Theme::BG, Theme::WHITE, Theme::CYAN, newCal,
+                                                         usingCapTouch ? CAP_TOUCH_MIN_SPREAD : RESISTIVE_MIN_SPREAD)) {
+                                applyCal(newCal);
+                                s_usingSavedCal = true;
+                            }
+#endif
+                            enterSettings();
+                            break;
+                        }
+                        case SettingsRow::DIAGNOSTICS:  enterDiagnostics(); break;
+                        case SettingsRow::REPLAY_INTRO:
+                            Squachy::replayIntro();
+                            enterClear();
+                            break;
+                        case SettingsRow::NICKNAME:     Squachy::cycleNickname(); break;
+                        case SettingsRow::SHADES_COLOR: Squachy::cycleShadesColor(); break;
+                        case SettingsRow::OUTFIT:       enterOutfit(); break;
+                        case SettingsRow::VIEW_DIARY:   enterDiary(); break;
+                        case SettingsRow::RESET_STATS: engine.resetLifetime(); break;
+                        case SettingsRow::BACK:        enterClear(); break;
+                        default: break;
+                    }
+                }
+                gestureActive = false;
+            }
+            break;
+        }
+        case AppState::DIAGNOSTICS: {
+            DiagnosticsInfo info;
+#if defined(AWOK)
+            info.hasRaw = false;
+            info.rawTouching = false;
+            info.rawA = info.rawB = 0;
+            info.usingSavedCal = awokTouchCalibrated;
+            info.calA0 = (int16_t)awokTouchCal[0]; info.calA1 = (int16_t)awokTouchCal[1];
+            info.calB0 = (int16_t)awokTouchCal[2]; info.calB1 = (int16_t)awokTouchCal[3];
+            info.boardName = "AWOK";
+            info.usingCapTouch = false;
+#elif defined(CYD35)
+            info.hasRaw = false;
+            info.rawTouching = false;
+            info.rawA = info.rawB = 0;
+            info.usingSavedCal = cyd35TouchCalibrated[screenRotation];
+            info.calA0 = (int16_t)cyd35TouchCal[screenRotation][0];
+            info.calA1 = (int16_t)cyd35TouchCal[screenRotation][1];
+            info.calB0 = (int16_t)cyd35TouchCal[screenRotation][2];
+            info.calB1 = (int16_t)cyd35TouchCal[screenRotation][3];
+            info.boardName = "cyd35";
+            info.usingCapTouch = false;
+#else
+            {
+                int16_t a = 0, b = 0;
+                TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
+                info.hasRaw = true;
+                info.rawTouching = reader(a, b);
+                info.rawA = a;
+                info.rawB = b;
+                info.usingSavedCal = s_usingSavedCal;
+                if (usingCapTouch) {
+                    info.calA0 = CAP_NX_MIN; info.calA1 = CAP_NX_MAX;
+                    info.calB0 = CAP_NY_MIN; info.calB1 = CAP_NY_MAX;
+                } else {
+                    info.calA0 = RAW_X_MIN; info.calA1 = RAW_X_MAX;
+                    info.calB0 = RAW_Y_MIN; info.calB1 = RAW_Y_MAX;
+                }
+            }
+            info.boardName = "cyd";
+            info.usingCapTouch = usingCapTouch;
+#endif
+            info.touchValid = tp.valid;
+            info.mappedX = tp.x;
+            info.mappedY = tp.y;
+            info.freeHeap = ESP.getFreeHeap();
+            info.largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+            info.resetReason = resetReasonName();
+
+            uiDiagnosticsTick(*canvas, now, engine, info);
+            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
+                uiDiagnosticsHitBack(tp.x, tp.y, tft.width(), tft.height())) {
+                lastTouch = now;
+                enterSettings();
+            }
+            break;
+        }
+        case AppState::HUNT: {
+            uiHuntTick(*canvas, now, engine);
+            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
+                uiHuntHitBack(tp.x, tp.y, tft.width(), tft.height())) {
+                lastTouch = now;
+                enterClear();
             }
             break;
         }

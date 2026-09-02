@@ -13,10 +13,10 @@ void uiRawScanInit(TFT_eSPI& t, bool isBle);
 // done: pass DetectionEngine::rawBleScanDone()/rawWifiScanDone() for
 // whichever mode isBle selects -- draws a "SCANNING..." state until
 // then, the results list after.
-// confirmPending/confirmLabel: draws a modal "WATCH THIS TARGET?"
-// panel with OK/CANCEL over everything else instead of the normal
-// list -- see uiRawScanHitConfirm() below. confirmLabel is ignored
-// when confirmPending is false.
+// confirmPending/confirmLabel: draws a modal "TRACK THIS TARGET?"
+// panel with WATCH/HUNT/CANCEL over everything else instead of the
+// normal list -- see uiRawScanHitConfirm() below. confirmLabel is
+// ignored when confirmPending is false.
 void uiRawScanTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
                     bool isBle, bool done, bool confirmPending, const char* confirmLabel);
 void uiRawScanScroll(int delta);      // positive = scroll down (older)
@@ -36,8 +36,12 @@ RawScanTap uiRawScanHitTest(int x, int y, int screenW, int screenH);
 // font metrics.
 int uiRawScanRowAt(TFT_eSPI& t, int x, int y, int screenW, int screenH);
 
-// Hit test for the confirm panel's OK/CANCEL buttons -- only
+// Hit test for the confirm panel's WATCH/HUNT/CANCEL buttons -- only
 // meaningful while uiRawScanTick() is being called with
-// confirmPending true; main.cpp owns that flag, not this module.
-enum class RawScanConfirmTap { NONE, OK, CANCEL };
+// confirmPending true; main.cpp owns that flag, not this module. WATCH
+// sets the target and returns to CLEAR (fires the full-screen
+// WATCH_ALERT later, passively, whenever it's next seen); HUNT sets
+// the same target but goes straight into the live-tracking HUNT screen
+// instead.
+enum class RawScanConfirmTap { NONE, WATCH, HUNT, CANCEL };
 RawScanConfirmTap uiRawScanHitConfirm(int x, int y, int screenW, int screenH);

@@ -78,6 +78,49 @@ void uiWatchAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, boo
     t.setCursor((w - sw2) / 2, ty + 30);
     t.print(eng.watchLabel());
 
+    // Signal-strength trend -- lets you tell "getting closer" from
+    // "just sitting there" instead of only knowing it's in range at
+    // all. Needs at least 2 samples to draw a line; a single fresh
+    // watch (or one that's only fired once) just shows the number.
+    uint8_t rssiN = eng.watchRssiCount();
+    if (rssiN > 0) {
+        char rbuf[24];
+        snprintf(rbuf, sizeof(rbuf), "%d dBm", (int)eng.watchRssiAt(rssiN - 1));
+        int rw = t.textWidth(rbuf);
+        int labelY = ty + 44;
+        t.setCursor((w - rw) / 2, labelY);
+        t.print(rbuf);
+
+        if (rssiN >= 2) {
+            // -100..-30 dBm covers "barely there" to "right next to
+            // it" for both BLE and WiFi -- clamped rather than
+            // auto-scaled so the line's slope means the same thing
+            // graph to graph instead of rescaling per-target.
+            const int RSSI_LO = -100, RSSI_HI = -30;
+            const int graphW = (w - 40 < 140) ? (w - 40) : 140;
+            const int graphH = 24;
+            const int gx = (w - graphW) / 2;
+            const int gy = labelY + 12;
+
+            auto mapY = [&](int8_t rssi) {
+                int v = rssi;
+                if (v < RSSI_LO) v = RSSI_LO;
+                if (v > RSSI_HI) v = RSSI_HI;
+                return gy + graphH - ((v - RSSI_LO) * graphH) / (RSSI_HI - RSSI_LO);
+            };
+
+            int prevX = gx, prevY = mapY(eng.watchRssiAt(0));
+            for (uint8_t i = 1; i < rssiN; i++) {
+                int x = gx + (int)((uint32_t)i * graphW / (rssiN - 1));
+                int y = mapY(eng.watchRssiAt(i));
+                t.drawLine(prevX, prevY, x, y, Theme::WHITE);
+                prevX = x;
+                prevY = y;
+            }
+            t.fillCircle(prevX, prevY, 2, col);
+        }
+    }
+
     const char* tapMsg = "tap to dismiss";
     int tmw = t.textWidth(tapMsg);
     t.setCursor((w - tmw) / 2, h - 20);

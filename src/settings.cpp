@@ -9,6 +9,7 @@ static Preferences s_prefs;
 static uint8_t     s_palette    = 0;
 static Background  s_background = Background::MATRIX;
 static bool        s_inverted   = false;
+static bool        s_rotationLocked = false;
 static uint8_t     s_brightness = 255;
 static Confidence  s_minConf    = Confidence::LOW_CONF;
 static bool        s_boringMode = false;
@@ -36,6 +37,7 @@ void load() {
     s_background = (Background)s_prefs.getUChar("bg", (uint8_t)Background::MATRIX);
     if ((uint8_t)s_background >= BACKGROUND_COUNT) s_background = Background::MATRIX;
     s_inverted   = s_prefs.getBool("inv", false);
+    s_rotationLocked = s_prefs.getBool("rotlock", false);
     s_brightness = s_prefs.getUChar("bri", 255);
     if (s_brightness < 32) s_brightness = 32;
     s_minConf    = (Confidence)s_prefs.getUChar("conf", (uint8_t)Confidence::LOW_CONF);
@@ -70,6 +72,13 @@ bool inverted() { return s_inverted; }
 void toggleInvert() {
     s_inverted = !s_inverted;
     s_prefs.putBool("inv", s_inverted);
+}
+
+bool rotationLocked() { return s_rotationLocked; }
+
+void toggleRotationLock() {
+    s_rotationLocked = !s_rotationLocked;
+    s_prefs.putBool("rotlock", s_rotationLocked);
 }
 
 bool boringMode() { return s_boringMode; }

@@ -111,6 +111,17 @@ public:
     WatchKind watchKind() const { return _watchKind; }
     const char* watchLabel() const { return _watchLabel; }
 
+    // Recent signal-strength history for the current watch target --
+    // sampled independently of the alert cooldown above (every ~2s the
+    // target is actually seen, not just once per 30s alert), so it
+    // fills in fast enough to show a real trend the first time someone
+    // looks at the watch-alert screen. Reset whenever the watched
+    // target changes. idx 0 = oldest, ascending -- a sparkline reads
+    // left-to-right as time moving forward, the opposite convention
+    // from logAt()'s newest-first list.
+    uint8_t watchRssiCount() const { return _watchRssiCount; }
+    int8_t  watchRssiAt(uint8_t idx) const;
+
     // True exactly once per hit (consumed on read) -- main.cpp polls
     // this once per CLEAR-loop tick to trigger the dedicated
     // watch-alert screen. Cooldown-gated (see WATCH_COOLDOWN_MS) so a
@@ -118,11 +129,29 @@ public:
     // advertisement/frame.
     bool watchHitPending();
 
+    // ---- Hunt target (HUNT MODE's live gauge) -------------------------
+    // A second, completely independent slot from the watch target above
+    // -- picking HUNT on a device no longer overwrites whatever's being
+    // passively WATCHed (or vice versa), so you can leave a watch
+    // running in the background and go fox-hunt something else entirely
+    // without losing it. Same session-only lifetime, same one-target-
+    // at-a-time replacement rule, just its own mac/label/RSSI history.
+    // No alert flag/cooldown of its own -- HUNT MODE is a screen you're
+    // actively looking at already, so there's nothing to pop up over.
+    void huntBle(const uint8_t* mac, const char* name);
+    void huntWifi(const uint8_t* bssid, const char* ssid);
+    void clearHunt();
+    WatchKind huntKind() const { return _huntKind; }
+    const char* huntLabel() const { return _huntLabel; }
+    uint8_t huntRssiCount() const { return _huntRssiCount; }
+    int8_t  huntRssiAt(uint8_t idx) const;
+
     // Called from the BLE scan callback (every advertisement, any
     // mode) -- public for the same reason postBle()/postRawBle() are:
     // the callback lives in a separate class, not a DetectionEngine
     // member.
-    void checkWatchBle(const uint8_t* mac);
+    void checkWatchBle(const uint8_t* mac, int8_t rssi);
+    void checkHuntBle(const uint8_t* mac, int8_t rssi);
 
     // SD log helper accessor.
     SdLog& sd() { return _sd; }
@@ -137,7 +166,12 @@ public:
     }
 
 private:
-    static const uint8_t  LOG_CAP       = 32;
+    // Bumped well past the screen's visible rows on purpose -- ui_log.cpp
+    // already renders off logCount()/logAt() dynamically with its own
+    // scrollbar, so a bigger ring buffer is pure history depth for
+    // free, no UI code to touch. ~200 entries costs ~11KB of RAM
+    // against a ~250KB free budget -- a rounding error.
+    static const uint8_t  LOG_CAP       = 200;
     static const uint8_t  WIFI_Q_CAP    = 8;
     static const uint32_t STALE_MS      = 60000;
     static const uint32_t ALERT_GRACE_MS= 200;
@@ -190,7 +224,34 @@ private:
     char      _watchLabel[24] = "";
     uint32_t  _watchLastHitMs = 0;
     bool      _watchHitFlag   = false;
-    void checkWatchWifi(const uint8_t* mac);   // called from processWiFiQ()
+    void checkWatchWifi(const uint8_t* mac, int8_t rssi);   // called from processWiFiQ()
+
+    // Watch RSSI history ring buffer -- see watchRssiCount()/watchRssiAt()
+    // above. 40 samples at the ~2s sample throttle is a bit over a
+    // minute of trend, plenty for "closer or farther" at a glance;
+    // costs 40 bytes of RAM.
+    static const uint8_t  WATCH_RSSI_CAP       = 40;
+    static const uint32_t WATCH_RSSI_SAMPLE_MS = 2000;
+    int8_t   _watchRssiHist[WATCH_RSSI_CAP] = {0};
+    uint8_t  _watchRssiHead  = 0;
+    uint8_t  _watchRssiCount = 0;
+    uint32_t _watchRssiLastMs = 0;
+    void recordWatchRssi(int8_t rssi);
+
+    // Hunt target -- see the public huntBle()/huntWifi() section above.
+    // Deliberately a whole separate mac/label/history from the watch
+    // fields above rather than reusing them, so HUNT and WATCH can
+    // point at two different devices at once. checkHuntWifi() is called
+    // from processWiFiQ() the same way checkWatchWifi() is.
+    WatchKind _huntKind = WatchKind::NONE;
+    uint8_t   _huntMac[6] = {0};
+    char      _huntLabel[24] = "";
+    int8_t    _huntRssiHist[WATCH_RSSI_CAP] = {0};
+    uint8_t   _huntRssiHead  = 0;
+    uint8_t   _huntRssiCount = 0;
+    uint32_t  _huntRssiLastMs = 0;
+    void checkHuntWifi(const uint8_t* mac, int8_t rssi);
+    void recordHuntRssi(int8_t rssi);
 
     // Detection log
     Detection  _log[LOG_CAP];

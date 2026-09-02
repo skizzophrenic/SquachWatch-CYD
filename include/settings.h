@@ -33,6 +33,14 @@ namespace Settings {
     bool       inverted();
     void       toggleInvert();       // persists only — caller applies tft.invertDisplay()
 
+    // Disables the title-bar rotate button (and the ROTATED gesture it
+    // triggers) without touching its icon -- an accidental tap during
+    // BLE/WiFi scanning restarts the frame buffer for the new shape,
+    // which some users would rather just not risk once they've settled
+    // on an orientation.
+    bool       rotationLocked();
+    void       toggleRotationLock();
+
     // "Boring mode" — all detection features stay exactly as they are,
     // this only turns off Squachy's on-screen presence (the CLEAR-
     // screen mascot/animations/speech bubbles and the boot-splash

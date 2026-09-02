@@ -57,6 +57,20 @@ namespace Theme {
     // settings menu changes it.
     void applyPalette(uint8_t idx);
 
+    // Blends every swappable accent color toward BG by `t` (0..256,
+    // same convention as blend() below -- 0 leaves colors alone, 256
+    // replaces them entirely with BG). Used to show one of the
+    // CLEAR-screen background effects at reduced visual strength
+    // behind another screen's own content (Settings, specifically)
+    // without needing true per-pixel alpha blending, which TFT_eSPI
+    // has no cheap way to do. Returns the ORIGINAL colors (reusing the
+    // Palette struct purely as a save-slot, not as a real preset) so a
+    // matching restorePalette() call can put them back -- nesting
+    // isn't supported, don't call this twice without restoring first.
+    // BG/name aren't touched -- blending BG toward BG is a no-op.
+    Palette dimPaletteForOverlay(uint16_t t);
+    void restorePalette(const Palette& saved);
+
     // Threat-tinted color for a detection type
     uint16_t colorFor(DetectionType t);
 
@@ -118,6 +132,19 @@ namespace Theme {
 
     // 1-pixel horizontal scanline (used on the boot screen).
     void drawScanline(TFT_eSPI& t, int y, uint16_t color = VAPOR_PURPLE);
+
+    // Scroll-position indicator for a scrollable list -- a thin track
+    // spanning the content area's full height plus a brighter "thumb"
+    // sized and positioned proportionally to how much is visible vs.
+    // total, so a user can actually tell there's more content below
+    // (previously nothing on-screen ever hinted a list could scroll).
+    // x is the right-hand edge column it's drawn at; reserve ~10px of
+    // width there in the caller's own row layout so this doesn't
+    // overlap right-aligned row content. Draws nothing at all when
+    // totalItems <= visibleItems -- no indicator when everything
+    // already fits on one screen.
+    void drawScrollbar(TFT_eSPI& t, int x, int y, int h,
+                       int totalItems, int visibleItems, int scrollOffset);
 
     // The ALERT screen's ambient background — a small animated scene
     // themed to whatever was actually detected (an apple for AirTag, a

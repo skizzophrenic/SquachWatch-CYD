@@ -18,7 +18,89 @@ void uiLogScroll(int delta) {
     if (g_scroll < 0) g_scroll = 0;
 }
 
-void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int scrollOffset) {
+// Confirm panel geometry/drawing/hit-test -- identical to
+// ui_rawscan.cpp's own copy (see its comment for why this isn't a
+// shared helper instead).
+static void confirmRects(int screenW, int screenH,
+                          int& px, int& py, int& pw, int& ph,
+                          int& wX, int& wY, int& wW, int& wH,
+                          int& huX, int& huY, int& huW, int& huH,
+                          int& cnX, int& cnY, int& cnW, int& cnH) {
+    pw = screenW - 40;
+    if (pw > 240) pw = 240;
+    ph = 90;
+    px = (screenW - pw) / 2;
+    py = (screenH - ph) / 2;
+    const int margin = 10, gap = 10, btnH = 26;
+    int btnW = (pw - 2 * margin - 2 * gap) / 3;
+    wY = huY = cnY = py + ph - btnH - margin;
+    wH = huH = cnH = btnH;
+    wX  = px + margin;         wW  = btnW;
+    huX = wX + btnW + gap;     huW = btnW;
+    cnX = huX + btnW + gap;    cnW = btnW;
+}
+
+LogConfirmTap uiLogHitConfirm(int x, int y, int screenW, int screenH) {
+    int px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, cnX, cnY, cnW, cnH;
+    confirmRects(screenW, screenH, px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, cnX, cnY, cnW, cnH);
+    if (x >= wX && x <= wX + wW && y >= wY && y <= wY + wH) return LogConfirmTap::WATCH;
+    if (x >= huX && x <= huX + huW && y >= huY && y <= huY + huH) return LogConfirmTap::HUNT;
+    if (x >= cnX && x <= cnX + cnW && y >= cnY && y <= cnY + cnH) return LogConfirmTap::CANCEL;
+    return LogConfirmTap::NONE;
+}
+
+static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label) {
+    int px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, cnX, cnY, cnW, cnH;
+    confirmRects(w, h, px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, cnX, cnY, cnW, cnH);
+    t.fillRoundRect(px, py, pw, ph, 6, Theme::BG);
+    t.drawRoundRect(px, py, pw, ph, 6, Theme::PURPLE);
+
+    t.setTextSize(1);
+    t.setTextWrap(false);
+    t.setTextColor(Theme::CYAN, Theme::BG);
+    const char* q = "TRACK THIS TARGET?";
+    int qw = t.textWidth(q);
+    t.setCursor(px + (pw - qw) / 2, py + 8);
+    t.print(q);
+
+    t.setTextColor(Theme::WHITE, Theme::BG);
+    int lw = t.textWidth(label);
+    int maxLw = pw - 16;
+    int lx = px + (pw - (lw < maxLw ? lw : maxLw)) / 2;
+    t.setCursor(lx, py + 24);
+    t.print(label);
+
+    Theme::drawButton(t, wX, wY, wW, wH, "WATCH", false);
+    Theme::drawButton(t, huX, huY, huW, huH, "HUNT", false);
+    Theme::drawButton(t, cnX, cnY, cnW, cnH, "CANCEL", false);
+}
+
+// Row geometry, shared by uiLogTick() (drawing) and uiLogRowAt() (hit
+// testing) so the two can never drift apart -- same reasoning as
+// ui_rawscan.cpp's rowLayout(): rowH depends on live font metrics, not
+// a compile-time constant.
+static void rowLayout(TFT_eSPI& t, int bodyTop, int& detailY, int& rowH) {
+    t.setTextSize(2);
+    int nameH = t.fontHeight();
+    t.setTextSize(1);
+    int detailH = t.fontHeight();
+    const int topPad = 1;
+    detailY = topPad + nameH;
+    rowH = topPad + nameH + detailH + 2;
+    (void)bodyTop;
+}
+
+int uiLogRowAt(TFT_eSPI& t, int x, int y, int screenW, int screenH) {
+    Theme::ButtonBarGeom bar = Theme::computeButtonBar(screenW, screenH);
+    const int bodyTop = 16, bodyBottom = bar.y - 4;
+    if (y < bodyTop || y >= bodyBottom) return -1;
+    int detailY, rowH;
+    rowLayout(t, bodyTop, detailY, rowH);
+    return g_scroll + (y - bodyTop) / rowH;
+}
+
+void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int scrollOffset,
+               bool confirmPending, const char* confirmLabel) {
     int w = t.width();
     int h = t.height();
 
@@ -56,6 +138,7 @@ void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int scroll
         t.print(sub);
 
         Theme::drawButtonBar(t, ButtonId::LOG);
+        if (confirmPending) drawConfirmPanel(t, w, h, confirmLabel);
         return;
     }
 
@@ -122,12 +205,20 @@ void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int scroll
         snprintf(ts, sizeof(ts), "%02lu:%02lu", (unsigned long)(sec / 60), (unsigned long)(sec % 60));
         int tw = t.textWidth(ts);
         t.setTextColor(Theme::VAPOR_PINK, Theme::BG);
-        t.setCursor(w - tw - 4, y + topPad);
+        t.setCursor(w - tw - 14, y + topPad);
         t.print(ts);
 
         y += rowH;
     }
 
+    // Scroll position indicator -- reserved 10px on the right edge
+    // (the timestamp column above already stops short of the true
+    // edge to make room for it) so there's finally a visual hint this
+    // list can hold more than what's on screen.
+    Theme::drawScrollbar(t, w - 4, bodyTop, bodyH, count, max, g_scroll);
+
     // Bottom soft buttons
     Theme::drawButtonBar(t, ButtonId::LOG);
+
+    if (confirmPending) drawConfirmPanel(t, w, h, confirmLabel);
 }
