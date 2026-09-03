@@ -41,7 +41,7 @@ static void drawStat(TFT_eSPI& t, int w, int y, int h, const char* label, const 
 }
 
 void uiDiaryTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
-    int w = t.width(), h = t.height();
+    int w = t.width();
 
     char title[32];
     snprintf(title, sizeof(title), ">> %s'S DIARY <<", Squachy::nickname());

@@ -39,14 +39,15 @@
 #define SPI_FREQUENCY         40000000
 #define SPI_READ_FREQUENCY    20000000
 
-// Fonts
+// Fonts. Only the built-in GLCD font (font 1) is loaded: nothing in
+// this project ever calls setTextFont(), setFreeFont() or loadFont(),
+// and there are no .vlw assets -- every screen uses font 1 via
+// setTextSize(), and the one custom typeface (Bangers, on the ALERT
+// and CLEAR headings) ships as its own glyph tables in
+// include/bangers_font.h rather than through TFT_eSPI at all.
+// LOAD_FONT2/4/6/7/8 and SMOOTH_FONT were ~11KB of glyph data plus the
+// .vlw renderer that nothing could reach.
 #define LOAD_GLCD
-#define LOAD_FONT2
-#define LOAD_FONT4
-#define LOAD_FONT6
-#define LOAD_FONT7
-#define LOAD_FONT8
-#define SMOOTH_FONT
 
 // ILI9341 is normal (non-inverted) polarity, RGB order -- the two
 // lines that actually differ from cyd_user_setup.h's ST7789 config.

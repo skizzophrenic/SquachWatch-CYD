@@ -37,14 +37,6 @@ static void formatMac(char* dst, size_t dstSize, const uint8_t* mac) {
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 }
 
-static void copyMac(char* dst12, const uint8_t* mac6) {
-    snprintf(dst12, 12, "%02X%02X%02X%02X%02X",
-             mac6[0], mac6[1], mac6[2], mac6[3], mac6[4], mac6[5]);
-    // Trailing space, makes vendor field 12 chars wide
-    dst12[10] = ' ';
-    dst12[11] = 0;
-}
-
 // scan->start(0, cb, ...) starts an indefinite scan (0 = "forever" per
 // NimBLEScan::start()'s own implementation) — cb is a *scan-complete*
 // callback, which for a forever-scan never fires under normal
@@ -337,6 +329,21 @@ void DetectionEngine::clearLog() {
 void IRAM_ATTR DetectionEngine::postWiFi(const uint8_t* mac, int8_t rssi, uint8_t channel,
                                          const char* ssid) {
     if (!mac) return;
+    // Group-addressed (broadcast/multicast) destinations can never be a
+    // real device: bit 0 of byte 0 is the I/G bit, and every OUI in
+    // kOuiTable is a globally-administered unicast prefix with it
+    // clear, so these could only ever fall through lookupOui() as
+    // UNKNOWN. Rejected here rather than in processWiFiQ() because the
+    // queue only holds 7 entries and is drained once per rendered
+    // frame -- a slot spent on ff:ff:ff:ff:ff:ff or 01:00:5e:... is a
+    // slot a real beacon can't have.
+    //
+    // This costs the RF-spectrum background's channel-activity level
+    // nothing: the data-frame path that produces these is the same one
+    // that also posts addr2 (the transmitter, always unicast) with an
+    // identical rssi/channel, so every frame still lands in that
+    // running maximum exactly once.
+    if (mac[0] & 0x01) return;
     uint8_t next = (_wifiQHead + 1) % WIFI_Q_CAP;
     if (next == _wifiQTail) return;            // queue full, drop
     WiFiQEntry& e = (WiFiQEntry&)_wifiQ[_wifiQHead];
