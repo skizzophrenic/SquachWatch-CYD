@@ -18,11 +18,11 @@ static int g_scroll = 0;
 // which mode is active.
 static const SettingsRow ALL_ROWS[] = {
     SettingsRow::THEME, SettingsRow::BACKGROUND, SettingsRow::BRIGHTNESS, SettingsRow::INVERT,
-    SettingsRow::ROTATION_LOCK,
+    SettingsRow::RGB_SWAP, SettingsRow::ROTATION_LOCK,
     SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE,
     SettingsRow::NICKNAME, SettingsRow::SHADES_COLOR, SettingsRow::OUTFIT,
     SettingsRow::REPLAY_INTRO, SettingsRow::VIEW_DIARY,
-    SettingsRow::CALIBRATE, SettingsRow::DIAGNOSTICS, SettingsRow::RESET_STATS, SettingsRow::BACK,
+    SettingsRow::CALIBRATE, SettingsRow::CHECK_COLORS, SettingsRow::DIAGNOSTICS, SettingsRow::RESET_STATS, SettingsRow::BACK,
 };
 static const uint8_t ALL_ROWS_N = sizeof(ALL_ROWS) / sizeof(ALL_ROWS[0]);
 
@@ -39,6 +39,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::BACKGROUND:
         case SettingsRow::BRIGHTNESS:
         case SettingsRow::INVERT:
+        case SettingsRow::RGB_SWAP:
         case SettingsRow::ROTATION_LOCK:
             return RowGroupId::APPEARANCE;
         case SettingsRow::BORING_MODE:
@@ -50,7 +51,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::REPLAY_INTRO:
         case SettingsRow::VIEW_DIARY:
             return RowGroupId::SQUACHY;
-        default:  // CALIBRATE, DIAGNOSTICS, RESET_STATS, BACK
+        default:  // CALIBRATE, CHECK_COLORS, DIAGNOSTICS, RESET_STATS, BACK
             return RowGroupId::SYSTEM;
     }
 }
@@ -199,6 +200,9 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
         case SettingsRow::INVERT:
             label = "INVERT COLORS"; value = Settings::inverted() ? "ON" : "OFF";
             break;
+        case SettingsRow::RGB_SWAP:
+            label = "COLOR ORDER"; value = Settings::rgbSwapped() ? "SWAPPED" : "NORMAL";
+            break;
         case SettingsRow::ROTATION_LOCK:
             label = "ROTATION LOCK"; value = Settings::rotationLocked() ? "ON" : "OFF";
             break;
@@ -210,6 +214,9 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             break;
         case SettingsRow::CALIBRATE:
             label = "CALIBRATE TOUCH";
+            break;
+        case SettingsRow::CHECK_COLORS:
+            label = "CHECK COLORS";
             break;
         case SettingsRow::DIAGNOSTICS:
             label = "DIAGNOSTICS";

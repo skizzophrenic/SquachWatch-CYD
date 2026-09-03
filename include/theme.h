@@ -105,9 +105,13 @@ namespace Theme {
     bool settingsButtonHit(int x, int y);
 
     // SquachWare-style soft button: cyan label, 1-px purple border,
-    // BG fill; pressed = filled purple with white label.
+    // BG fill; pressed = filled purple with white label. textSize
+    // defaults to 1 (every existing caller's original look); a screen
+    // with just one standalone button and room to spare (LOG's MORE
+    // INFO panel's GOT IT) can pass 2 for a more prominent label --
+    // caller's responsibility to size w/h generously enough to fit it.
     void drawButton(TFT_eSPI& t, int x, int y, int w, int h,
-                    const char* label, bool pressed);
+                    const char* label, bool pressed, uint8_t textSize = 1);
 
     // Bottom [SCAN][LOG][CLR] button bar, laid out from the current
     // screen width/height so it adapts to any rotation (landscape or
@@ -289,4 +293,36 @@ namespace Theme {
     // A no-op whenever glitchActive() is false, so it's safe to call
     // unconditionally every tick.
     void drawGlitchStatic(TFT_eSPI& t, int x0, int y0, int x1, int y1);
+
+    // Greedy word-wrap using the currently-set font's real measured
+    // widths (not an assumed char width), so it stays correct even if
+    // the font ever changes. No dynamic allocation -- lines[][48] is a
+    // caller-owned fixed buffer, fine for the short-to-medium strings
+    // this runs on (speech bubbles, the onboarding walkthrough, LOG's
+    // MORE INFO panel) -- a line is force-broken the moment it would
+    // fill that buffer, independent of maxW, so a generous maxW on a
+    // wide panel can't silently truncate a line mid-word. Returns how
+    // many of the up-to-maxLines rows it actually filled; text that
+    // doesn't fit even at maxLines is silently truncated rather than
+    // dropped entirely -- the last row just runs long instead of
+    // losing the rest of the sentence.
+    uint8_t wrapText(TFT_eSPI& t, const char* text, int maxW,
+                     char lines[][48], uint8_t maxLines);
+
+    // Modal "MORE INFO" explanation panel -- shared by LOG's confirm
+    // panel and ALERT's own MORE INFO button (the two screens are never
+    // showing it at the same time, so one implementation is enough).
+    // Squachy explains via a lightweight drawWaving() cameo, forced
+    // into his talking-mouth animation and patrolling back and forth
+    // across the panel, rather than standing still -- a one-shot
+    // explanation still reads better with some life in it than a
+    // static pose. typeName is a Bangers-font heading (e.g. "RING") --
+    // pass nullptr to skip it, which the one-time RSSI/confidence
+    // primer page does since it isn't about any one detection type.
+    // w/h are the caller's own screen dimensions (not necessarily
+    // t.width()/height() -- CYD35's two-pass half-height rendering
+    // temporarily changes what those report via setViewport()).
+    void drawInfoPanel(TFT_eSPI& t, int w, int h, uint32_t now,
+                       const char* typeName, const char* text);
+    bool infoPanelHitDismiss(int x, int y, int screenW, int screenH);
 }

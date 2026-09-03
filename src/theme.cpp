@@ -2,6 +2,7 @@
 #include "theme.h"
 #include "detection.h"
 #include "bangers_font.h"
+#include "squachy.h"
 
 namespace Theme {
 
@@ -196,15 +197,15 @@ void drawTitleBar(TFT_eSPI& t, const char* title) {
 }
 
 void drawButton(TFT_eSPI& t, int x, int y, int w, int h,
-                const char* label, bool pressed) {
+                const char* label, bool pressed, uint8_t textSize) {
     uint16_t fill = pressed ? PURPLE : BG;
     uint16_t fg   = pressed ? WHITE  : CYAN;
     t.fillRect(x, y, w, h, fill);
     t.drawRect(x, y, w, h, PURPLE);
-    t.setTextSize(1);
+    t.setTextSize(textSize);
     t.setTextColor(fg, fill);
     int tw = t.textWidth(label);
-    int th = t.fontHeight(1);
+    int th = t.fontHeight();
     t.setCursor(x + (w - tw) / 2, y + (h - th) / 2);
     t.print(label);
 }
@@ -2031,6 +2032,134 @@ void drawBangersText(TFT_eSPI& t, int x, int y, const char* s, uint16_t color, B
     }
 
     drawBangersPass(t, s, x + jitterX, y, color, size, glitching, bucket, level);
+}
+
+// Ported from squachy.cpp verbatim (was a private static there,
+// duplicated for LOG's MORE INFO panel until this promotion) -- see
+// its declaration in theme.h for the full behavior notes.
+//
+// lines[][48], not [40]: confirmed on real hardware that a wide-enough
+// maxW (a caller with real screen width to spare) let a line accumulate
+// several words -- each individually well under maxW in pixels -- past
+// the buffer's own char capacity before the width check ever tripped,
+// silently truncating mid-word ("...Amazon's vid" instead of "video").
+// The strlen() check added below is the actual fix (forces a break the
+// moment the buffer itself would fill, independent of maxW); the wider
+// buffer just means that happens less often in the first place.
+uint8_t wrapText(TFT_eSPI& t, const char* text, int maxW,
+                 char lines[][48], uint8_t maxLines) {
+    // 320, not the original 160 -- fine for every short quip/bubble
+    // this ran on originally, but LOG's MORE INFO panel passes real
+    // paragraph-length explanations (the RSSI/confidence primer alone
+    // is ~290 chars), which strncpy was silently truncating before a
+    // single word ever got wrapped.
+    char buf[320];
+    strncpy(buf, text, sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = 0;
+
+    uint8_t n = 0;
+    char lineBuf[48] = "";
+    char* word = strtok(buf, " ");
+    while (word) {
+        char trial[48];
+        if (lineBuf[0]) snprintf(trial, sizeof(trial), "%s %s", lineBuf, word);
+        else            snprintf(trial, sizeof(trial), "%s", word);
+        bool tooWide = lineBuf[0] &&
+                       (t.textWidth(trial) > maxW || strlen(trial) >= sizeof(lineBuf) - 1);
+        if (tooWide) {
+            if (n >= maxLines - 1) break; // out of lines -- let the rest go rather than drop it silently
+            strncpy(lines[n], lineBuf, sizeof(lines[n]) - 1); lines[n][sizeof(lines[n]) - 1] = 0; n++;
+            strncpy(lineBuf, word, sizeof(lineBuf) - 1); lineBuf[sizeof(lineBuf) - 1] = 0;
+        } else {
+            strncpy(lineBuf, trial, sizeof(lineBuf) - 1); lineBuf[sizeof(lineBuf) - 1] = 0;
+        }
+        word = strtok(nullptr, " ");
+    }
+    if (lineBuf[0] && n < maxLines) {
+        strncpy(lines[n], lineBuf, sizeof(lines[n]) - 1); lines[n][sizeof(lines[n]) - 1] = 0; n++;
+    }
+    return n;
+}
+
+// Info panel geometry -- see theme.h's comment on drawInfoPanel() for
+// what this is/who uses it.
+static const uint8_t INFO_MAX_LINES = 7;
+
+static void infoRects(int screenW, int screenH,
+                       int& px, int& py, int& pw, int& ph,
+                       int& headingY,
+                       int& squachyCx, int& squachyBaseY, float& squachyScale, int& squachyWander,
+                       int& textTop, int& textMaxW,
+                       int& btnX, int& btnY, int& btnW, int& btnH) {
+    // As much of the screen as the panel can reasonably use -- the
+    // description text (size 1, see drawInfoPanel()) still needs real
+    // room, and a small-margin modal reads fine here since it's the
+    // only thing on screen while it's up.
+    pw = screenW - 16;
+    if (pw > 300) pw = 300;
+    ph = screenH - 8;
+    if (ph > 260) ph = 260;
+    px = (screenW - pw) / 2;
+    py = (screenH - ph) / 2;
+
+    headingY = py + 6;
+    squachyCx = px + pw / 2;
+    squachyScale = 0.78f;
+    squachyBaseY = py + 88;
+    squachyWander = pw / 2 - 40;
+    if (squachyWander < 0) squachyWander = 0;
+    textTop = py + 104;
+    textMaxW = pw - 16;
+
+    btnH = 26;
+    btnW = pw - 20;
+    btnX = px + 10;
+    btnY = py + ph - btnH - 8;
+}
+
+bool infoPanelHitDismiss(int x, int y, int screenW, int screenH) {
+    int px, py, pw, ph, headingY, squachyCx, squachyBaseY, squachyWander, textTop, textMaxW, btnX, btnY, btnW, btnH;
+    float squachyScale;
+    infoRects(screenW, screenH, px, py, pw, ph, headingY, squachyCx, squachyBaseY, squachyScale, squachyWander,
+              textTop, textMaxW, btnX, btnY, btnW, btnH);
+    return x >= btnX && x <= btnX + btnW && y >= btnY && y <= btnY + btnH;
+}
+
+void drawInfoPanel(TFT_eSPI& t, int w, int h, uint32_t now,
+                   const char* typeName, const char* text) {
+    int px, py, pw, ph, headingY, squachyCx, squachyBaseY, squachyWander, textTop, textMaxW, btnX, btnY, btnW, btnH;
+    float squachyScale;
+    infoRects(w, h, px, py, pw, ph, headingY, squachyCx, squachyBaseY, squachyScale, squachyWander,
+              textTop, textMaxW, btnX, btnY, btnW, btnH);
+
+    t.fillRoundRect(px, py, pw, ph, 6, BG);
+    t.drawRoundRect(px, py, pw, ph, 6, PURPLE);
+
+    // No heading during the one-time RSSI/confidence primer page --
+    // typeName is null then since that page isn't about any one type.
+    if (typeName) {
+        int tw = bangersTextWidth(typeName, BangersSize::MD);
+        int maxTw = pw - 16;
+        if (tw > maxTw) tw = maxTw; // clipped, not shrunk -- every real type name fits comfortably as-is
+        drawBangersText(t, px + (pw - tw) / 2, headingY, typeName, VAPOR_PINK, BangersSize::MD);
+    }
+
+    Squachy::drawWaving(t, squachyCx, squachyBaseY, now, squachyScale, nullptr, true, squachyWander);
+
+    t.setTextSize(1);
+    t.setTextWrap(false);
+    t.setTextColor(WHITE, BG);
+    char lines[INFO_MAX_LINES][48];
+    uint8_t n = wrapText(t, text, textMaxW, lines, INFO_MAX_LINES);
+    int ly = textTop;
+    for (uint8_t i = 0; i < n; i++) {
+        int lw = t.textWidth(lines[i]);
+        t.setCursor(px + (pw - lw) / 2, ly);
+        t.print(lines[i]);
+        ly += 12;
+    }
+
+    drawButton(t, btnX, btnY, btnW, btnH, "[ GOT IT ]", false, 2);
 }
 
 }  // namespace Theme

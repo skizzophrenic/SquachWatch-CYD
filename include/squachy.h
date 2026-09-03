@@ -169,24 +169,20 @@ namespace Squachy {
     // raw-scan/LOG screens' own hint lines).
     void watchAlertReaction();
 
-    // Call on the ALERT screen (see ui_alert.cpp) -- once when it first
-    // appears and again each time its own escalating glitch schedule
-    // steps up, so he stays visibly panicked for as long as the screen
-    // does instead of one brief flash. Deliberately separate from
-    // trigger(Event::DETECTION, ...) -- that call (made once, when
-    // ALERT is dismissed back to CLEAR) owns the real stat bookkeeping
-    // (streaks, milestones, session counts); this one is pure reaction,
-    // safe to call as many times as the caller likes with no side
-    // effects beyond mood/bubble text. t picks the same reactPoseFor()
-    // pose a real detection of that type gets everywhere else.
-    void alertReaction(DetectionType t);
-
     // A lightweight cameo draw for screens that just want him standing
     // and waving (the boot splash) without the full idle/quip state
     // machine tick() drives. cx = horizontal center, baseY = where his
     // feet line up (e.g. just past the boot screen's horizon), scale
     // sizes him relative to his normal full size (1.0). line, if given,
     // shows in a static speech bubble above his head.
+    // talking: forces the open/close mouth-flap animation regardless of
+    // whether a real speech bubble is up (default false, unchanged
+    // behavior) -- for a caller drawing its own explanation text
+    // separately (LOG's MORE INFO panel) rather than through line.
+    // wanderRangePx: > 0 makes him patrol back and forth up to that many
+    // px either side of cx, forever, at the same pace tick()'s
+    // Mood::WALK uses. Default 0 leaves him standing still at cx,
+    // unchanged behavior for every existing caller.
     void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale = 1.0f,
-                    const char* line = nullptr);
+                    const char* line = nullptr, bool talking = false, int wanderRangePx = 0);
 }

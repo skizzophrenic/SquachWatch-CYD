@@ -33,6 +33,30 @@ namespace Settings {
     bool       inverted();
     void       toggleInvert();       // persists only — caller applies tft.invertDisplay()
 
+    // "Wrong RGB/BGR order" fix for CYD boards whose panel batch
+    // disagrees with the header's TFT_RGB_ORDER guess (colors read
+    // swapped -- red shows as blue, etc.) -- unrelated to inverted()
+    // above, which flips light/dark, not color channels. Persists
+    // only — caller reissues the panel's MADCTL byte (see main.cpp's
+    // applyColorOrder()), same XOR-against-a-compile-time-baseline
+    // convention toggleInvert() already uses.
+    bool       rgbSwapped();
+    void       toggleRgbSwap();
+
+    // Whether the first-boot color-check screen (see ui_colorcheck.h)
+    // has ever been completed -- gates whether it auto-shows right
+    // after the boot splash. Settings' own "CHECK COLORS" row can
+    // re-enter that screen on demand afterward regardless of this.
+    bool       colorChecked();
+    void       markColorChecked();
+
+    // Whether the RSSI/confidence primer (see DetectionInfo::
+    // rssiConfidencePrimer()) has ever been shown -- gates it to
+    // appear exactly once, the first time anyone taps MORE INFO on a
+    // LOG entry, before that entry's own explanation.
+    bool       infoPrimerShown();
+    void       markInfoPrimerShown();
+
     // Disables the title-bar rotate button (and the ROTATED gesture it
     // triggers) without touching its icon -- an accidental tap during
     // BLE/WiFi scanning restarts the frame buffer for the new shape,
@@ -40,6 +64,15 @@ namespace Settings {
     // on an orientation.
     bool       rotationLocked();
     void       toggleRotationLock();
+
+    // Last rotation (0..3, TFT_eSPI's setRotation() values) the rotate
+    // button left the screen on -- so it comes back up the same way
+    // after a power cycle instead of always resetting to the board's
+    // compile-time default. AWOK has no rotate button and never touches
+    // this (see main.cpp's setup()/rotate handler, both guarded
+    // #if !defined(AWOK)).
+    uint8_t    rotation();
+    void       saveRotation(uint8_t r);
 
     // "Boring mode" — all detection features stay exactly as they are,
     // this only turns off Squachy's on-screen presence (the CLEAR-

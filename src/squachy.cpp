@@ -726,40 +726,6 @@ bool hitTest(int x, int y) {
 static int  lastBubbleX = 0, lastBubbleY = 0, lastBubbleW = 0, lastBubbleH = 0;
 static bool hadBubble   = false;
 
-// Greedy word-wrap using the currently-set font's real measured
-// widths (not an assumed char width), so it stays correct even if the
-// font ever changes. No dynamic allocation — fixed small buffers,
-// which is fine for the short strings this only ever runs on. Shared
-// by both drawBubble() (below) and drawOnboardBubble() (further down)
-// — the everyday bubble only needs this for the occasional line too
-// long for one row on a narrow portrait screen; the onboarding bubble
-// always wraps since its lines are written long on purpose.
-static uint8_t wrapText(TFT_eSPI& t, const char* text, int maxW,
-                        char lines[][40], uint8_t maxLines) {
-    char buf[160];
-    strncpy(buf, text, sizeof(buf) - 1);
-    buf[sizeof(buf) - 1] = 0;
-
-    uint8_t n = 0;
-    char lineBuf[40] = "";
-    char* word = strtok(buf, " ");
-    while (word) {
-        char trial[40];
-        if (lineBuf[0]) snprintf(trial, sizeof(trial), "%s %s", lineBuf, word);
-        else            snprintf(trial, sizeof(trial), "%s", word);
-        if (lineBuf[0] && t.textWidth(trial) > maxW) {
-            if (n >= maxLines - 1) break; // out of lines -- let the rest go rather than drop it silently
-            strncpy(lines[n], lineBuf, 39); lines[n][39] = 0; n++;
-            strncpy(lineBuf, word, sizeof(lineBuf) - 1); lineBuf[sizeof(lineBuf) - 1] = 0;
-        } else {
-            strncpy(lineBuf, trial, sizeof(lineBuf) - 1); lineBuf[sizeof(lineBuf) - 1] = 0;
-        }
-        word = strtok(nullptr, " ");
-    }
-    if (lineBuf[0] && n < maxLines) { strncpy(lines[n], lineBuf, 39); lines[n][39] = 0; n++; }
-    return n;
-}
-
 // Everyday speech bubble stays single-line and text-hugging (its
 // original compact look) whenever the line actually fits — most
 // idle/pet-reaction lines do. Only when a line is too wide for a
@@ -801,8 +767,8 @@ static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text) {
     if (bx < 2) bx = 2;
     if (bx + bw > screenW - 2) bx = screenW - 2 - bw;
 
-    char lines[BUBBLE_MAX_LINES][40];
-    uint8_t n = wrapText(t, text, bw - 10, lines, BUBBLE_MAX_LINES);
+    char lines[BUBBLE_MAX_LINES][48];
+    uint8_t n = Theme::wrapText(t, text, bw - 10, lines, BUBBLE_MAX_LINES);
 
     const int lineH = 11;
     int bh = 6 + (int)n * lineH + 3;
@@ -829,7 +795,9 @@ static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text) {
 static const uint8_t ONBOARD_MAX_LINES = 3;
 static const int     ONBOARD_BUBBLE_H  = 52;
 
-// wrapText() itself now lives above drawBubble() — shared by both.
+// Theme::wrapText() is shared by both this and drawBubble() above --
+// promoted out of this file to a public Theme:: utility once LOG's
+// MORE INFO panel needed the exact same word-wrap.
 
 static void drawOnboardBubble(TFT_eSPI& t, int cx, int topY, const char* text,
                               uint8_t step, uint8_t total) {
@@ -842,8 +810,8 @@ static void drawOnboardBubble(TFT_eSPI& t, int cx, int topY, const char* text,
     if (bx < 4) bx = 4;
     if (bx + bw > screenW - 4) bx = screenW - 4 - bw;
 
-    char lines[ONBOARD_MAX_LINES][40];
-    uint8_t n = wrapText(t, text, bw - 12, lines, ONBOARD_MAX_LINES);
+    char lines[ONBOARD_MAX_LINES][48];
+    uint8_t n = Theme::wrapText(t, text, bw - 12, lines, ONBOARD_MAX_LINES);
 
     t.fillRoundRect(bx, topY, bw, ONBOARD_BUBBLE_H, 5, Theme::BG);
     t.drawRoundRect(bx, topY, bw, ONBOARD_BUBBLE_H, 5, Theme::VAPOR_PINK);
@@ -1083,21 +1051,6 @@ static const char* const WATCH_ALERT_LINES[] = {
     "Back again, huh? Persistent little thing.",
 };
 
-// Flavor pool for alertReaction() -- deliberately separate from
-// DET_LINES (the deferred, matter-of-fact "target identified" lines
-// trigger(Event::DETECTION, ...) picks from once ALERT is dismissed)
-// so the same detection doesn't say the same thing twice. This pool
-// is pure panic, re-rolled every time his reaction re-fires alongside
-// ALERT's own escalating glitch schedule.
-static const char* const ALERT_FREAKOUT_LINES[] = {
-    "WHOA WHOA WHOA.",
-    "IT'S RIGHT THERE.",
-    "OKAY OKAY OKAY.",
-    "NOPE NOPE NOPE.",
-    "DID YOU SEE THAT.",
-    "THIS IS FINE. THIS IS FINE.",
-};
-
 // STARTED's hint bubble gets a grace window nothing else is allowed to
 // interrupt -- BLE can turn up a device within the first second, and a
 // HIT quip immediately overwriting the hint before it's even readable
@@ -1222,13 +1175,6 @@ void watchAlertReaction() {
     mood = Mood::SHOCKED;
     moodUntil = millis() + 1200;
     say(pick(WATCH_ALERT_LINES, 4), 3000);
-}
-
-void alertReaction(DetectionType t) {
-    s_reactType = t;
-    mood = Mood::SHOCKED;
-    moodUntil = millis() + 1200;
-    say(pick(ALERT_FREAKOUT_LINES, 6), 2200);
 }
 
 // Costume overlays (see squachy.h's Outfits section), drawn last from
@@ -1382,7 +1328,8 @@ static const int BASE_HEIGHT = 68;
 // Draws Squachy at an already-animated anchor (hy = head-top Y for this
 // exact frame). Bob is computed once in tick() so it can also drive the
 // dirty-rect clear that runs before this is called.
-static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mood m, float scale) {
+static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mood m, float scale,
+                     bool forceTalking = false) {
     auto S = [scale](int v) { return (int)(v * scale); };
     int cx2 = cx;
 
@@ -1517,10 +1464,17 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         // the general "arms one way" family of moves (the floss
         // predates and isn't owned by any single game), not a
         // recreation of a specific licensed emote.
+        //
+        // Anchored at the shoulder via drawWideLine (same trick WAVE's
+        // arm uses below) rather than translating a whole floating
+        // fillRoundRect -- the old rect version moved both endpoints
+        // together, so a wide enough swing carried the entire arm shape
+        // away from the torso with nothing connecting them, reading as
+        // the arm detaching mid-move instead of swinging from it.
         float daT = (float)(now % 500) / 500.0f * 6.2831853f;
         int armX = (int)(sinf(daT) * S(11));
-        t.fillRoundRect(cx2 - S(18) + armX, hy + S(20), S(8), S(24), S(3), furLight);
-        t.fillRoundRect(cx2 + S(10) + armX, hy + S(20), S(8), S(24), S(3), furLight);
+        t.drawWideLine(cx2 - S(14), hy + S(20), cx2 - S(14) + armX, hy + S(44), S(8), furLight);
+        t.drawWideLine(cx2 + S(14), hy + S(20), cx2 + S(14) + armX, hy + S(44), S(8), furLight);
     } else if (m == Mood::WALK) {
         // Opposite-arm-opposite-leg swing, same phase the legs above
         // already use (recomputed here rather than threaded through --
@@ -1644,7 +1598,7 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
 
         // Mouth: resting smile most of the time, or an open/close
         // "talking" flap while a speech bubble is actually up.
-        bool talking = bubbleText && now < bubbleUntil;
+        bool talking = forceTalking || (bubbleText && now < bubbleUntil);
         if (talking && ((now / 160) % 2) == 0) {
             t.fillRoundRect(cx2 - S(8), hy + S(15), S(16), S(9), S(3), BLACK);
             t.fillRect(cx2 - S(6), hy + S(16), S(12), S(2), WHITE);
@@ -1659,19 +1613,33 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     drawOutfit(t, cx2, hy, now, m, scale, outfitNow);
 }
 
-void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const char* line) {
+void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const char* line,
+                bool talking, int wanderRangePx) {
     // Same idle bob as tick()'s WAVE mood, just without the quip/mood
     // state machine — a self-contained cameo for the boot splash.
     float bobAmt = 6.0f * scale;
     float bob = sinf((float)(now % 900) / 900.0f * 6.2831853f) * bobAmt;
     int headTopY = baseY - (int)(58.0f * scale);
     int hy = headTopY + (int)bob;
-    drawBody(t, cx, hy, headTopY, now, Mood::WAVE, scale);
-    // Fixed above his (pre-bob) head, same as tick()'s bubble row — it
-    // shouldn't bounce along with him. Pulled up further than tick()'s
-    // gap (18px) specifically so it sits right under the "TALKING
-    // SASQUACH" subtitle above, in the extra room this bigger boot-
-    // splash scale leaves between his head and the subtitle.
+
+    // Continuous back-and-forth patrol, opted into by a caller that has
+    // real width to spare (LOG's MORE INFO panel) -- reuses WALK_CYCLE_MS
+    // for the same amble pace tick()'s own Mood::WALK uses, but runs
+    // forever off a plain now%period instead of WALK's start/duration
+    // window, since this cameo has no idle-mood scheduler ending it.
+    int bodyCx = cx;
+    if (wanderRangePx > 0) {
+        float wt = (float)(now % WALK_CYCLE_MS) / (float)WALK_CYCLE_MS * 6.2831853f;
+        bodyCx = cx + (int)(sinf(wt) * wanderRangePx);
+    }
+
+    drawBody(t, bodyCx, hy, headTopY, now, Mood::WAVE, scale, talking);
+    // Fixed above his (pre-bob, pre-wander) head, same as tick()'s
+    // bubble row — it shouldn't bounce or chase him around. Pulled up
+    // further than tick()'s gap (18px) specifically so it sits right
+    // under the "TALKING SASQUACH" subtitle above, in the extra room
+    // this bigger boot-splash scale leaves between his head and the
+    // subtitle.
     if (line) drawBubble(t, cx, headTopY - 34, line);
 }
 

@@ -2,7 +2,6 @@
 #include "ui_alert.h"
 #include "theme.h"
 #include "signatures.h"
-#include "squachy.h"
 #include <Arduino.h>
 
 static const char* targetLabel(DetectionType t) {
@@ -39,31 +38,6 @@ static bool s_touched = false;
 static uint32_t s_alertStart = 0;
 static uint8_t  s_glitchStep = 0;
 
-// Which margin the running cameo is anchored to right now -- left or
-// right, clear of every centered element on this screen (title, target
-// label, confidence, vendor, MAC, RSSI, radar, wordmark). The widest of
-// those ("CARD SKIMMER" at Bangers LG) is ~173px, which on the
-// narrowest 240px rotation leaves only x<33 / x>207 actually clear --
-// MARGIN_CX sits well inside that with room for the small dart range
-// tick() adds on top, so he can run freely without ever needing to
-// know where any specific line of text is. Only the SIDE changes on a
-// glitch beat (see the while loop below); his vertical position is a
-// continuous up-down patrol (see patrolTopY()) computed fresh every
-// frame, not another once-per-beat jump -- a single hard jump per beat
-// read as teleporting rather than running, since there was nothing
-// visibly moving in between.
-static const int MARGIN_CX    = 22;
-static const int MARGIN_DART  = 10;
-static int       s_camCx = MARGIN_CX;
-
-static int patrolTopY(uint32_t now) {
-    const uint32_t PATROL_MS = 4000;
-    const int PATROL_LO = 4, PATROL_HI = 154;
-    float t01 = (float)(now % PATROL_MS) / (float)PATROL_MS;
-    float tri = (t01 < 0.5f) ? (t01 * 2.0f) : (2.0f - t01 * 2.0f); // 0->1->0, no snap at the wrap
-    return PATROL_LO + (int)(tri * (float)(PATROL_HI - PATROL_LO));
-}
-
 // step 0 (immediate) -> level 1, step 1 (2.5s) -> level 2, step 2 (4s)
 // -> level 3 (screen tear joins in), step 3 (5s) -> level 4 (loudest),
 // step 4+ (every 1.25s after) stays pinned at 4. Twice the cadence of
@@ -87,20 +61,31 @@ void uiAlertInit(TFT_eSPI& t, const Detection& d) {
     s_touched = false;
     s_alertStart = millis();
     s_glitchStep = 0;
-    // Deliberately NOT re-rolling s_camCx here -- back-to-back
-    // detections (or an alert auto-dismissing at 10s and immediately
-    // re-triggering because the same thing is still in range) used to
-    // each reset which margin he's on, adding an extra jump on top of
-    // the in-alert glitch-beat ones. Leaving it alone means a fresh
-    // alert just continues from wherever he already was.
-    Squachy::alertReaction(d.type);
     // fillScreen() relies on TFT_eSPI's base-class width/height, which
     // TFT_eSprite::createSprite() never updates — it leaves stale
     // remnants of whatever screen was drawn before when t is a sprite.
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
 }
 
-void uiAlertTick(TFT_eSPI& t, uint32_t now) {
+// MORE INFO button, bottom-right corner -- every other element on this
+// screen (title, target label, confidence, vendor, MAC, RSSI, radar,
+// wordmark) stays horizontally centered regardless of rotation, so a
+// corner is the one spot guaranteed clear on all of them.
+static void moreInfoBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, int& bh) {
+    bw = 76;
+    bh = 20;
+    bx = screenW - bw - 4;
+    by = screenH - bh - 4;
+}
+
+bool uiAlertHitMoreInfo(int x, int y, int screenW, int screenH) {
+    int bx, by, bw, bh;
+    moreInfoBtnRect(screenW, screenH, bx, by, bw, bh);
+    return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
+}
+
+void uiAlertTick(TFT_eSPI& t, uint32_t now,
+                 bool infoPending, const char* infoTypeName, const char* infoText) {
     int w = t.width();
     int h = t.height();
 
@@ -112,15 +97,6 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now) {
     // visible difference.
     while (s_glitchStep < 200 && elapsed >= glitchStepOffsetMs(s_glitchStep)) {
         Theme::triggerGlitchBurst(glitchStepLevel(s_glitchStep));
-        // Re-fires his panic in lockstep with each escalation step so
-        // he stays visibly freaked out for as long as the screen does,
-        // instead of settling back to idle a second or two in.
-        Squachy::alertReaction(s_last.type);
-        // Switches which margin he's running along -- his vertical
-        // patrol (see patrolTopY()) keeps flowing continuously through
-        // this, so only the side jumps, on the same beat the screen
-        // tears/glitches anyway.
-        s_camCx = (random(0, 2) == 0) ? MARGIN_CX : (w - MARGIN_CX);
         s_glitchStep++;
     }
 
@@ -215,16 +191,14 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now) {
     // Glitchy wordmark
     Theme::drawGlitchText(t, 220, "SQUACHWATCH", Theme::VAPOR_PINK, now);
 
-    // Small SHOCKED cameo, drawn on top of everything above (title,
-    // target label, confidence, vendor, MAC, RSSI, radar, wordmark) so
-    // he never disappears behind any of it, but confined to the left/
-    // right margins (see s_camCx's comment) so being on top never
-    // means covering anything actually worth reading. Continuously
-    // patrolling up and down (patrolTopY()) plus a small horizontal
-    // dart (wanderRangePx) the whole time he's on screen, not just at
-    // the moment his margin switches, so there's always visible motion
-    // between beats instead of a jump with nothing happening in between.
-    Squachy::tick(t, s_camCx, patrolTopY(now), 56, now, true, 0.4f, false, MARGIN_DART);
+    // MORE INFO -- opens the same explanation panel LOG's long-press
+    // menu does (see uiAlertHitMoreInfo()), so a fresh detection can be
+    // looked up without having to remember to go find it in LOG after.
+    {
+        int bx, by, bw, bh;
+        moreInfoBtnRect(w, h, bx, by, bw, bh);
+        Theme::drawButton(t, bx, by, bw, bh, "MORE INFO", false);
+    }
 
     // TV-static snow over the whole screen during the same random burst
     // the Bangers headline text above already glitches on -- drawn
@@ -232,6 +206,12 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now) {
     // briefly obscuring the readout mid-burst reads as "interference"
     // rather than a bug, which fits an alert about surveillance gear.
     Theme::drawGlitchStatic(t, 0, 0, w, h);
+
+    // Info panel drawn last, opaquely on top of everything above
+    // (including the static) -- same "modal drawn every tick on top of
+    // a screen that keeps rendering underneath" pattern LOG's confirm/
+    // info panels use.
+    if (infoPending) Theme::drawInfoPanel(t, w, h, now, infoTypeName, infoText);
 }
 
 bool uiAlertTouched() {

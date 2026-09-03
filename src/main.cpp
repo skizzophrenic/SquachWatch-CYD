@@ -22,6 +22,8 @@
 #include "ui_settings.h"
 #include "ui_diagnostics.h"
 #include "ui_hunt.h"
+#include "ui_colorcheck.h"
+#include "detection_info.h"
 #include "ui_diary.h"
 #include "ui_outfit.h"
 #include "squachy.h"
@@ -246,6 +248,62 @@ uint8_t             screenRotation = 1;
 // instead of just snapping straight to the next screen.
 uint32_t            transitionStart = 0;
 static const uint32_t TRANSITION_MS = 220;
+
+// RGB/BGR color order (Settings menu): setRotation() bakes the
+// compile-time TFT_RGB_ORDER into the MADCTL byte it writes, same as
+// every rotation -- there's no library API to change just that one bit
+// afterward, so this reissues MADCTL by hand. The 0x36/0x80/0x40/0x20/
+// 0x08 values are the standard MIPI DCS MADCTL command and MY/MX/MV/BGR
+// bits, confirmed identical across this project's own vendored
+// TFT_eSPI driver headers for ST7789, ILI9341, and ST7796 -- not
+// reachable as named macros from here (they live in each driver's own
+// TFT_Drivers/<X>_Defines.h, which main.cpp has no normal include path
+// to), so hardcoded directly rather than re-derived by guesswork.
+static const uint8_t MADCTL_CMD = 0x36;
+static const uint8_t MADCTL_MY  = 0x80;
+static const uint8_t MADCTL_MX  = 0x40;
+static const uint8_t MADCTL_MV  = 0x20;
+static const uint8_t MADCTL_BGR = 0x08;
+
+// Per-rotation MX/MY/MV bits (color-order bit excluded, ORed in
+// separately below) -- copied verbatim from this project's vendored
+// TFT_Drivers/<X>_Rotation.h for whichever driver this board actually
+// uses, not re-derived, so a transcription slip can't quietly rotate
+// or mirror the image on some rotation instead of just its color.
+// ILI9341 and ST7796's tables happen to be identical; ST7789's is its
+// own.
+static uint8_t madctlRotationBits(uint8_t rotation) {
+#if defined(ST7789_DRIVER)
+    static const uint8_t BITS[4] = {
+        0, MADCTL_MX | MADCTL_MV, MADCTL_MX | MADCTL_MY, MADCTL_MV | MADCTL_MY
+    };
+#else  // ILI9341_DRIVER or ST7796_DRIVER -- identical rotation table
+    static const uint8_t BITS[4] = {
+        MADCTL_MX, MADCTL_MV, MADCTL_MY, MADCTL_MX | MADCTL_MY | MADCTL_MV
+    };
+#endif
+    return BITS[rotation % 4];
+}
+
+// Same XOR-against-a-compile-time-baseline convention
+// PANEL_NEEDS_INVERSION/Settings::inverted() already uses, for the same
+// reason: the header's TFT_RGB_ORDER is this panel's own correct
+// default, and Settings::rgbSwapped() is a "no, actually swap it" user
+// override on top for boards whose panel batch disagrees with the
+// header's guess -- not a replacement for it. Call after every
+// setRotation(), since the rotation-dependent bits above have to be
+// reissued alongside it either way.
+static void applyColorOrder() {
+#ifdef TFT_RGB_ORDER
+    bool baselineBgr = (TFT_RGB_ORDER != TFT_RGB);
+#else
+    bool baselineBgr = true;
+#endif
+    bool wantBgr = baselineBgr != Settings::rgbSwapped();
+    uint8_t bits = madctlRotationBits(screenRotation) | (wantBgr ? MADCTL_BGR : 0);
+    tft.writecommand(MADCTL_CMD);
+    tft.writedata(bits);
+}
 
 // ---- Touch helpers ----
 struct TouchPoint { bool valid; int x; int y; };
@@ -725,6 +783,52 @@ static void clearSharedFrameBuffer() {
 }
 #endif
 
+// Long-press-to-watch/hunt confirmation -- see the LOG and RAWSCAN
+// cases in loop(). Owned here rather than in ui_log.cpp/ui_rawscan.cpp
+// so main.cpp can decide what WATCH/HUNT actually do (call
+// DetectionEngine::watchBle/watchWifi/huntBle/huntWifi) without those
+// modules needing to know about DetectionEngine's tracking API at all,
+// just how to draw/hit-test the panel they're given. Shared by both
+// screens since only one can ever be showing at a time.
+static bool    s_confirmPending = false;
+static uint8_t s_confirmMac[6];
+static char    s_confirmLabel[24];
+// LOG's long-press sets this per-row (BLE vs WiFi isn't implied by a
+// "current mode" the way it is for RAWSCAN, which already knows that
+// from s_rawScanIsBle) -- RAWSCAN's own WATCH/HUNT branches don't
+// touch this, only LOG's do.
+static bool    s_confirmIsBle = true;
+// Captured alongside mac/label at row-hold time (LOG) or straight from
+// the current alert (ALERT, see enterAlert()) so MORE INFO knows what
+// to explain without needing the original Detection* to still be valid
+// by the time it's tapped. RAWSCAN's own results aren't necessarily
+// matched to any known type at all, so its panel has no INFO button
+// and never touches this.
+static DetectionType s_confirmType = DetectionType::UNKNOWN;
+
+// The MORE INFO explanation panel -- opened by LOG's confirm panel or
+// ALERT's own MORE INFO button (mutually exclusive with LOG's confirm
+// panel and with everything else on whichever screen is showing it,
+// since only one state is ever active). s_infoShowingPrimer tracks
+// which of the (at most) two pages is up: the one-time RSSI/confidence
+// primer first if it's never been shown (see Settings::infoPrimerShown()),
+// then s_confirmType's own explanation either way.
+static bool          s_infoPending       = false;
+static bool          s_infoShowingPrimer = false;
+// Same "ignore the touch that opened this" gate s_confirmArmed uses,
+// applied to the info panel's own GOT IT button.
+static bool          s_infoArmed         = false;
+// True once the touch that triggered the long-press has actually been
+// released. The confirm panel appears mid-hold (finger still down at
+// whatever row/result was long-pressed), and without this gate the
+// panel's own tap handling -- which only checks "is a touch down past
+// the debounce window", not "did a NEW touch just start" -- could fire
+// immediately using that still-held position, landing on whichever
+// button happens to sit under it. Reset to false every time a fresh
+// long-press opens the panel; only tap handling that runs after this
+// flips true is ever allowed to register a WATCH/HUNT/CANCEL tap.
+static bool    s_confirmArmed = false;
+
 static void enterBoot() {
     state = AppState::BOOT;
     bootStart = millis();
@@ -757,6 +861,7 @@ static void enterAlert(const Detection& d) {
     transitionStart = alertStart;
     lastAlertType = d.type;
     lastAlertHits = d.hits;
+    s_infoPending = false;
     uiAlertInit(*canvas, d);
 #if defined(CYD35)
     clearSharedFrameBuffer();
@@ -773,36 +878,11 @@ static void enterWatchAlert() {
 #endif
 }
 
-// Long-press-to-watch/hunt confirmation -- see the LOG and RAWSCAN
-// cases in loop(). Owned here rather than in ui_log.cpp/ui_rawscan.cpp
-// so main.cpp can decide what WATCH/HUNT actually do (call
-// DetectionEngine::watchBle/watchWifi/huntBle/huntWifi) without those
-// modules needing to know about DetectionEngine's tracking API at all,
-// just how to draw/hit-test the panel they're given. Shared by both
-// screens since only one can ever be showing at a time.
-static bool    s_confirmPending = false;
-static uint8_t s_confirmMac[6];
-static char    s_confirmLabel[24];
-// LOG's long-press sets this per-row (BLE vs WiFi isn't implied by a
-// "current mode" the way it is for RAWSCAN, which already knows that
-// from s_rawScanIsBle) -- RAWSCAN's own WATCH/HUNT branches don't
-// touch this, only LOG's do.
-static bool    s_confirmIsBle = true;
-// True once the touch that triggered the long-press has actually been
-// released. The confirm panel appears mid-hold (finger still down at
-// whatever row/result was long-pressed), and without this gate the
-// panel's own tap handling -- which only checks "is a touch down past
-// the debounce window", not "did a NEW touch just start" -- could fire
-// immediately using that still-held position, landing on whichever
-// button happens to sit under it. Reset to false every time a fresh
-// long-press opens the panel; only tap handling that runs after this
-// flips true is ever allowed to register a WATCH/HUNT/CANCEL tap.
-static bool    s_confirmArmed = false;
-
 static void enterLog() {
     state = AppState::LOG;
     transitionStart = millis();
     s_confirmPending = false;
+    s_infoPending    = false;
     uiLogInit(*canvas);
 }
 
@@ -834,6 +914,20 @@ static void enterHunt() {
     state = AppState::HUNT;
     transitionStart = millis();
     uiHuntInit(*canvas);
+}
+
+// true when reached via the first-boot flow (DONE -> CLEAR, straight
+// into the normal onboarding overlay if this is also a first boot),
+// false when reached later via Settings' "CHECK COLORS" row
+// (DONE -> back to SETTINGS, matching OUTFIT's same back-to-where-you-
+// came-from feel).
+static bool s_colorCheckFromSettings = false;
+
+static void enterColorCheck(bool fromSettings) {
+    state = AppState::COLOR_CHECK;
+    transitionStart = millis();
+    s_colorCheckFromSettings = fromSettings;
+    uiColorCheckInit(*canvas);
 }
 
 static void enterDiary() {
@@ -890,16 +984,24 @@ void setup() {
     pinMode(32, OUTPUT); digitalWrite(32, HIGH);  // AWOK's real BL pin; unused GPIO on the other two boards
 
     tft.init();
+
+    // Load persisted settings before the first real pixel is drawn, so
+    // boot itself already reflects the saved theme/invert choice
+    // instead of flashing the defaults for a moment first. Moved ahead
+    // of tft.setRotation() below so that call can already use the
+    // saved rotation instead of always starting from the board default.
+    Settings::load();
+#if !defined(AWOK)
+    // AWOK has no rotate button and stays fixed at its one physical
+    // orientation (see screenRotation's own comment above) -- only
+    // boards that can actually rotate restore a saved orientation.
+    screenRotation = Settings::rotation();
+#endif
     // Landscape (320 wide × 240 tall) — the CYD's natural orientation
     // with the ST7789 driver. The 0xC2 unlock that was here was for
     // ST7796U and will lock up an ST7789 panel; do not re-add it unless
     // we confirm the panel is actually ST7796.
     tft.setRotation(screenRotation);
-
-    // Load persisted settings before the first real pixel is drawn, so
-    // boot itself already reflects the saved theme/invert choice
-    // instead of flashing the defaults for a moment first.
-    Settings::load();
 #if defined(AWOK)
     // No rotate button on this board (see the rotate handler in
     // loop(), not even compiled in on AWOK) -- hide the icon too so
@@ -910,6 +1012,7 @@ void setup() {
     // against a per-board baseline instead of calling invertDisplay()
     // with Settings::inverted() directly.
     tft.invertDisplay(PANEL_NEEDS_INVERSION != Settings::inverted());
+    applyColorOrder();
     tft.fillScreen(Theme::BG);
 
     // Hand the digitalWrite(HIGH) backlight pins above off to LEDC PWM
@@ -1124,7 +1227,12 @@ void loop() {
         lastTouch = now;
         Squachy::trigger(Squachy::Event::ROTATED);
         screenRotation = (screenRotation + 1) % 4;
+        Settings::saveRotation(screenRotation);
         tft.setRotation(screenRotation);
+        // The MX/MY/MV bits applyColorOrder() writes are rotation-
+        // dependent, so it has to be reissued alongside every
+        // setRotation() call, not just at boot.
+        applyColorOrder();
 #if defined(CYD35)
         // Arms this rotation's own calibration blob (running the
         // interactive calibration on the spot if this rotation has
@@ -1264,7 +1372,12 @@ void loop() {
             uiBootTick(*canvas, now);
 #endif
             if (uiBootDone(bootStart)) {
-                enterClear();
+                // First-ever boot only -- goes straight into the normal
+                // onboarding overlay once this screen's own DONE button
+                // reaches enterClear(), same as it always did before
+                // this existed.
+                if (!Settings::colorChecked()) enterColorCheck(false);
+                else                            enterClear();
             }
             break;
         }
@@ -1466,6 +1579,11 @@ void loop() {
             break;
         }
         case AppState::ALERT: {
+            const char* alertInfoText = s_infoShowingPrimer ? DetectionInfo::rssiConfidencePrimer()
+                                                              : DetectionInfo::explain(s_confirmType);
+            // No heading during the primer page -- it's about RSSI/
+            // confidence in general, not any one detection type.
+            const char* alertInfoTypeName = s_infoShowingPrimer ? nullptr : detectionTypeName(s_confirmType);
 #if defined(CYD35)
             if (frameBufferOk) {
                 // Same two-pass half-height `frame` trick CLEAR/BOOT
@@ -1475,22 +1593,62 @@ void loop() {
                 // data, so calling it twice with the same `now` is safe.
                 int halfH = tft.height() / 2;
                 frame.setViewport(0, 0, tft.width(), tft.height(), true);
-                uiAlertTick(frame, now);
+                uiAlertTick(frame, now, s_infoPending, alertInfoTypeName, alertInfoText);
                 frame.pushSprite(0, 0);
                 frame.setViewport(0, -halfH, tft.width(), tft.height(), true);
-                uiAlertTick(frame, now);
+                uiAlertTick(frame, now, s_infoPending, alertInfoTypeName, alertInfoText);
                 frame.pushSprite(0, halfH);
                 frame.resetViewport();
             } else {
-                uiAlertTick(tft, now);
+                uiAlertTick(tft, now, s_infoPending, alertInfoTypeName, alertInfoText);
             }
 #else
-            uiAlertTick(*canvas, now);
+            uiAlertTick(*canvas, now, s_infoPending, alertInfoTypeName, alertInfoText);
 #endif
+            // Same "ignore the touch that opened this until it releases"
+            // gate LOG's info panel uses, applied here too -- MORE INFO
+            // appears on the exact tap that opened it, so without this
+            // the still-held finger could instantly dismiss it.
+            if (s_infoPending) {
+                if (!s_infoArmed) {
+                    if (!tp.valid) s_infoArmed = true;
+                } else if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
+                           Theme::infoPanelHitDismiss(tp.x, tp.y, tft.width(), tft.height())) {
+                    lastTouch = now;
+                    if (s_infoShowingPrimer) {
+                        // First page done -- move straight to this
+                        // alert's own explanation rather than closing,
+                        // and only mark the primer seen once its page
+                        // has actually been read past.
+                        Settings::markInfoPrimerShown();
+                        s_infoShowingPrimer = false;
+                        s_infoArmed = false;
+                    } else {
+                        s_infoPending = false;
+                        // Restart the auto-dismiss window rather than
+                        // leaving it at whatever real time has already
+                        // passed -- without this, closing the panel
+                        // after a long read would immediately trip the
+                        // (now - alertStart) > ALERT_AUTO_DISMISS_MS
+                        // check below and yank straight back to CLEAR
+                        // the instant the plain alert screen reappears.
+                        alertStart = now;
+                    }
+                }
+                break;
+            }
+
             if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 lastTouch = now;
-                Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits);
-                enterClear();
+                if (uiAlertHitMoreInfo(tp.x, tp.y, tft.width(), tft.height())) {
+                    s_confirmType        = lastAlertType;
+                    s_infoShowingPrimer  = !Settings::infoPrimerShown();
+                    s_infoPending        = true;
+                    s_infoArmed          = false;
+                } else {
+                    Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits);
+                    enterClear();
+                }
             } else if ((now - alertStart) > ALERT_AUTO_DISMISS_MS) {
                 Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits);
                 enterClear();
@@ -1528,13 +1686,45 @@ void loop() {
             break;
         }
         case AppState::LOG: {
-            uiLogTick(*canvas, now, engine, 0, s_confirmPending, s_confirmLabel);
+            const char* infoText = s_infoShowingPrimer ? DetectionInfo::rssiConfidencePrimer()
+                                                        : DetectionInfo::explain(s_confirmType);
+            // No heading during the primer page -- it's about RSSI/
+            // confidence in general, not any one detection type.
+            const char* infoTypeName = s_infoShowingPrimer ? nullptr : detectionTypeName(s_confirmType);
+            uiLogTick(*canvas, now, engine, 0, s_confirmPending, s_confirmLabel,
+                      s_infoPending, infoTypeName, infoText);
+
+            // Same "ignore the touch that opened this until it releases"
+            // gate s_confirmArmed uses on the confirm panel, applied to
+            // the info panel's own GOT IT button -- it appears mid-hold
+            // on the exact same MORE INFO tap that opened it, so without
+            // this the still-held finger could instantly dismiss it.
+            if (s_infoPending) {
+                if (!s_infoArmed) {
+                    if (!tp.valid) s_infoArmed = true;
+                } else if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
+                           Theme::infoPanelHitDismiss(tp.x, tp.y, tft.width(), tft.height())) {
+                    lastTouch = now;
+                    if (s_infoShowingPrimer) {
+                        // First page done -- move straight to this
+                        // target's own explanation rather than closing,
+                        // and only mark the primer seen once its page
+                        // has actually been read past.
+                        Settings::markInfoPrimerShown();
+                        s_infoShowingPrimer = false;
+                        s_infoArmed = false;
+                    } else {
+                        s_infoPending = false;
+                    }
+                }
+                break;
+            }
 
             // The confirm panel is modal: while it's up, a tap only
-            // ever means WATCH, HUNT, or CANCEL on it, nothing else on
-            // this screen (the button bar, another long-press,
+            // ever means WATCH, HUNT, INFO, or CANCEL on it, nothing
+            // else on this screen (the button bar, another long-press,
             // scrolling) is reachable underneath it -- same pattern
-            // RAWSCAN's identical panel uses.
+            // RAWSCAN's identical (minus INFO) panel uses.
             if (s_confirmPending) {
                 if (!s_confirmArmed) {
                     // Still the same touch that opened the panel --
@@ -1554,6 +1744,12 @@ void loop() {
                         if (s_confirmIsBle) engine.huntBle(s_confirmMac, s_confirmLabel);
                         else                engine.huntWifi(s_confirmMac, s_confirmLabel);
                         enterHunt();
+                    } else if (ctap == LogConfirmTap::INFO) {
+                        lastTouch = now;
+                        s_confirmPending = false;
+                        s_infoShowingPrimer = !Settings::infoPrimerShown();
+                        s_infoPending = true;
+                        s_infoArmed   = false;
                     } else if (ctap == LogConfirmTap::CANCEL) {
                         lastTouch = now;
                         s_confirmPending = false;
@@ -1628,6 +1824,7 @@ void loop() {
                         rowHoldFired = true;
                         memcpy(s_confirmMac, d->mac, 6);
                         s_confirmIsBle = (d->channel == 0);
+                        s_confirmType  = d->type;
                         const char* lbl = d->name[0] ? d->name : d->vendor;
                         strncpy(s_confirmLabel, lbl, sizeof(s_confirmLabel) - 1);
                         s_confirmLabel[sizeof(s_confirmLabel) - 1] = 0;
@@ -1812,6 +2009,10 @@ void loop() {
                             // absolute call -- see PANEL_NEEDS_INVERSION.
                             tft.invertDisplay(PANEL_NEEDS_INVERSION != Settings::inverted());
                             break;
+                        case SettingsRow::RGB_SWAP:
+                            Settings::toggleRgbSwap();
+                            applyColorOrder();
+                            break;
                         case SettingsRow::ROTATION_LOCK: Settings::toggleRotationLock(); break;
                         case SettingsRow::BORING_MODE: Settings::toggleBoringMode(); break;
                         case SettingsRow::BRIGHTNESS:
@@ -1839,6 +2040,7 @@ void loop() {
                             enterSettings();
                             break;
                         }
+                        case SettingsRow::CHECK_COLORS: enterColorCheck(true); break;
                         case SettingsRow::DIAGNOSTICS:  enterDiagnostics(); break;
                         case SettingsRow::REPLAY_INTRO:
                             Squachy::replayIntro();
@@ -1920,6 +2122,29 @@ void loop() {
                 uiHuntHitBack(tp.x, tp.y, tft.width(), tft.height())) {
                 lastTouch = now;
                 enterClear();
+            }
+            break;
+        }
+        case AppState::COLOR_CHECK: {
+            uiColorCheckTick(*canvas, now);
+            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                ColorCheckTap ctap = uiColorCheckHitTest(tp.x, tp.y, tft.width(), tft.height());
+                if (ctap == ColorCheckTap::INVERT) {
+                    lastTouch = now;
+                    Settings::toggleInvert();
+                    // XOR against the panel's own baseline, not an
+                    // absolute call -- see PANEL_NEEDS_INVERSION.
+                    tft.invertDisplay(PANEL_NEEDS_INVERSION != Settings::inverted());
+                } else if (ctap == ColorCheckTap::ORDER) {
+                    lastTouch = now;
+                    Settings::toggleRgbSwap();
+                    applyColorOrder();
+                } else if (ctap == ColorCheckTap::DONE) {
+                    lastTouch = now;
+                    Settings::markColorChecked();
+                    if (s_colorCheckFromSettings) enterSettings();
+                    else                           enterClear();
+                }
             }
             break;
         }
