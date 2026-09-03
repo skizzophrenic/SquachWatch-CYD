@@ -1,7 +1,7 @@
 # SquachWatch-CYD PC emulator
 
 Renders the firmware's **real** UI code natively to a PNG, so layout and
-sizing work doesn't need a build → flash → squint-at-the-device cycle.
+sizing work doesn't need a build â†’ flash â†’ squint-at-the-device cycle.
 
 ```
 cd tools/sim
@@ -11,20 +11,32 @@ make
 ```
 
 The screens you see are drawn by the actual `theme.cpp`, `squachy.cpp`
-and `ui_*.cpp` from `src/` — not a reimplementation — so what renders
+and `ui_*.cpp` from `src/` â€” not a reimplementation â€” so what renders
 here is what the device draws, and it can't drift out of sync with the
 firmware.
 
 ## Requirements
 
-`g++` and `make`. No SDL, no zlib, no other libraries — PNGs are written
+`g++` and `make`. No SDL, no zlib, no other libraries â€” PNGs are written
 directly (uncompressed, so files are larger than a real encoder would
 produce, which is irrelevant for debug screenshots).
 
-On Windows, build it inside WSL:
+### Windows
+
+Use the wrapper -- it builds and runs everything inside WSL for you:
 
 ```
-wsl -e bash -lc 'cd /mnt/<drive>/path/to/SquachWatch-Sim && make'
+squachsim clear                          # -> out\clear.png
+squachsim alert out\alert.png --portrait
+squachsim clear out\fire.png --bg 6
+squachsim --list                         # screens and options
+```
+
+Given just a screen name it picks the output path for you. Or drive WSL
+directly if you prefer:
+
+```
+wsl -e bash -lc 'cd /mnt/<drive>/path/to/SquachWatch-Sim && make && ./squachsim clear out/clear.png'
 ```
 
 ## Usage
@@ -48,7 +60,7 @@ colorcheck boot`
 
 ### Why the warm-up frames matter
 
-Matrix rain, the starfield, the aquarium, Squachy's idle animation —
+Matrix rain, the starfield, the aquarium, Squachy's idle animation â€”
 they all build state across frames. A single tick renders a half-empty
 scene that looks nothing like the device. The harness ticks with
 advancing time and captures the last frame; bump `--frames` if a slower
@@ -56,9 +68,9 @@ effect hasn't settled.
 
 ## How it works
 
-The real TFT_eSPI library makes exactly six methods `virtual` —
+The real TFT_eSPI library makes exactly six methods `virtual` â€”
 `drawPixel`, `drawChar`, `readPixel`, `setWindow`, `pushColor` and the
-`begin/end_nin_write` pair — specifically so `TFT_eSprite` can override
+`begin/end_nin_write` pair â€” specifically so `TFT_eSprite` can override
 those and inherit every higher-level shape and text function from the
 base class. `TFT_eSPI.h` here follows the same split: implement the six
 against an in-memory RGB565 buffer, and the shape layer built on top of
@@ -79,9 +91,9 @@ include path, which is the whole mechanism.
 and `src/sd_log.cpp`, which are ~900 lines wired straight into `WiFi.h`,
 `esp_wifi.h`, `NimBLEDevice.h`, `esp_bt.h` and `SD.h`. Stubbing that
 surface faithfully is a large job on its own and none of it affects how
-the UI renders. So the class is the same class from the same header —
+the UI renders. So the class is the same class from the same header â€”
 every `ui_*.cpp` still takes the real `const DetectionEngine&`,
-unchanged — but nothing is scanning. What the screens read back is
+unchanged â€” but nothing is scanning. What the screens read back is
 whatever `seedDetections()` in `main_sim.cpp` put there.
 
 The practical consequence: this shows you a LOG screen full of
@@ -92,7 +104,7 @@ counts as a detection. Signature-matching changes still need hardware.
 doesn't drive them. Modal panels and button states are reachable by
 passing the relevant flags in `main_sim.cpp`'s `tick()` lambda.
 
-**Not pixel-exact � and this matters most where it looks most useful.**
+**Not pixel-exact — and this matters most where it looks most useful.**
 The six virtual primitives are faithful, but the shape layer built on
 them is *this* implementation, not upstream TFT_eSPI's. `drawWideLine`
 is the sharpest example: it draws Squachy's arms, and here it's a
@@ -103,7 +115,7 @@ here) differ too, and sprite colour depth is tracked but everything
 composites as RGB565 regardless of `setColorDepth()`.
 
 Trust this for layout, spacing, wrapping and legibility. Do not trust it
-for pixel-level shape questions � check those on hardware.
+for pixel-level shape questions — check those on hardware.
 
 **Blind to whole classes of real bugs.** No colour order, no panel
 inversion, no touch, no real heap ceiling, no SPI bandwidth. A screen can
