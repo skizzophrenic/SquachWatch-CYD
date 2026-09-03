@@ -26,6 +26,7 @@
 #include "detection_info.h"
 #include "ui_diary.h"
 #include "ui_outfit.h"
+#include "ui_detfilter.h"
 #include "squachy.h"
 #include "cap_touch.h"
 #include "touch_cal.h"
@@ -942,6 +943,12 @@ static void enterOutfit() {
     uiOutfitInit(*canvas);
 }
 
+static void enterDetFilter() {
+    state = AppState::DETECTION_FILTER;
+    transitionStart = millis();
+    uiDetFilterInit(*canvas);
+}
+
 // Runtime UART speed -- set per-board in platformio.ini (-DSERIAL_BAUD=...)
 // for hardware confirmed to hold a faster rate cleanly; boards without
 // an explicit override fall back to this conservative default rather
@@ -1222,7 +1229,7 @@ void loop() {
     if (tp.valid && !Settings::rotationLocked() &&
         (state == AppState::CLEAR || state == AppState::LOG ||
                       state == AppState::SETTINGS || state == AppState::OUTFIT ||
-                      state == AppState::RAWSCAN) &&
+                      state == AppState::RAWSCAN || state == AppState::DETECTION_FILTER) &&
         Theme::rotateButtonHit(tp.x, tp.y, tft.width()) &&
         (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
         lastTouch = now;
@@ -1284,17 +1291,18 @@ void loop() {
     // on the same screens as the rotate button. Tapping it while
     // already on the SETTINGS screen backs out to CLEAR instead of
     // re-entering itself — same toggle-off feel as the LOG button. From
-    // OUTFIT (only reachable from SETTINGS' OUTFIT row) it backs out to
-    // SETTINGS instead of CLEAR, matching where it was entered from —
-    // this is the only way back out of that screen, since its own taps
-    // are all claimed by the arrows.
+    // OUTFIT or DETECTION_FILTER (only reachable from SETTINGS' own
+    // rows) it backs out to SETTINGS instead of CLEAR, matching where
+    // it was entered from — this is the only way back out of either
+    // screen, since OUTFIT's own taps are all claimed by the arrows and
+    // DETECTION_FILTER's are all claimed by row toggles.
     if (tp.valid && (state == AppState::CLEAR || state == AppState::LOG ||
                       state == AppState::SETTINGS || state == AppState::OUTFIT ||
-                      state == AppState::RAWSCAN) &&
+                      state == AppState::RAWSCAN || state == AppState::DETECTION_FILTER) &&
         Theme::settingsButtonHit(tp.x, tp.y) &&
         (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
         lastTouch = now;
-        if (state == AppState::OUTFIT) enterSettings();
+        if (state == AppState::OUTFIT || state == AppState::DETECTION_FILTER) enterSettings();
         else if (state == AppState::SETTINGS) enterClear();
         else {
             // Leaving RAWSCAN via the settings icon, same as BACK does
@@ -2035,6 +2043,7 @@ void loop() {
                             applyBrightness();
                             break;
                         case SettingsRow::CONFIDENCE: Settings::cycleMinConfidence(); break;
+                        case SettingsRow::DETECTION_FILTER: enterDetFilter(); break;
                         case SettingsRow::CALIBRATE: {
 #if defined(AWOK)
                             awokRunCalibration();
@@ -2069,6 +2078,41 @@ void loop() {
                         case SettingsRow::BACK:        enterClear(); break;
                         default: break;
                     }
+                }
+                gestureActive = false;
+            }
+            break;
+        }
+        case AppState::DETECTION_FILTER: {
+            uiDetFilterTick(*canvas, now);
+            // Same drag-to-scroll / tap-on-release-to-toggle gesture
+            // the Settings screen above uses, and for the same reason:
+            // committing on press would make a swipe that starts on a
+            // row toggle it before the drag is recognized as a scroll.
+            static bool gestureActive = false;
+            static bool gestureMoved  = false;
+            static int  gestureStartX = 0, gestureStartY = 0;
+            static int  lastY = -1;
+            if (touchJustDown) {
+                gestureActive = true;
+                gestureMoved  = false;
+                gestureStartX = tp.x;
+                gestureStartY = tp.y;
+                lastY = tp.y;
+            }
+            if (tp.valid && gestureActive) {
+                int dy = tp.y - lastY;
+                if (abs(dy) > 10) {
+                    gestureMoved = true;
+                    uiDetFilterScroll(dy > 0 ? -1 : 1);
+                    lastY = tp.y;
+                }
+            }
+            if (touchJustUp && gestureActive) {
+                if (!gestureMoved) {
+                    lastTouch = now;
+                    DetectionType hit = uiDetFilterHitTest(*canvas, gestureStartX, gestureStartY, tft.width(), tft.height());
+                    if (hit != DetectionType::COUNT) Settings::toggleType(hit);
                 }
                 gestureActive = false;
             }

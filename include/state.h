@@ -69,8 +69,10 @@ enum class AppState : uint8_t {
     HUNT        = 10, // live signal-strength gauge for the watched target,
                        // reached via raw-scan's long-press confirm panel
                        // (the "HUNT" choice alongside WATCH/CANCEL)
-    COLOR_CHECK = 11  // first-boot RED/GREEN/BLUE display sanity check,
+    COLOR_CHECK = 11, // first-boot RED/GREEN/BLUE display sanity check,
                        // also reachable later via Settings' "CHECK COLORS" row
+    DETECTION_FILTER = 12  // per-type detection on/off, reached via
+                            // Settings' "DETECTION FILTER" row
 };
 
 enum class ButtonId : uint8_t {

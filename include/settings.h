@@ -104,4 +104,18 @@ namespace Settings {
     Confidence  minConfidence();
     void        cycleMinConfidence();
     const char* minConfidenceLabel();
+
+    // Per-type detection on/off (Settings > DETECTION FILTER). A
+    // disabled type is dropped at the point it's first classified --
+    // never logged, counted, or alerted on -- not just hidden after
+    // the fact, and it isn't a scan-side filter (the radios can't be
+    // told "ignore AirTags"; every advertisement is still received,
+    // it's just discarded once matched against a disabled type). Off
+    // by default nothing changes: every type starts enabled, so a
+    // fresh install behaves exactly as it always has. UNKNOWN isn't
+    // included -- it's the "matched a signature but not a specific
+    // brand" fallback, not a type someone would want to blanket-mute.
+    bool     typeEnabled(DetectionType t);
+    void     toggleType(DetectionType t);
+    uint8_t  enabledTypeCount();   // for a Settings-row "12/14" summary
 }

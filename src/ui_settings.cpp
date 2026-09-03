@@ -19,7 +19,7 @@ static int g_scroll = 0;
 static const SettingsRow ALL_ROWS[] = {
     SettingsRow::THEME, SettingsRow::BACKGROUND, SettingsRow::BACKGROUND_LOCK, SettingsRow::BRIGHTNESS, SettingsRow::INVERT,
     SettingsRow::RGB_SWAP, SettingsRow::ROTATION_LOCK,
-    SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE,
+    SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE, SettingsRow::DETECTION_FILTER,
     SettingsRow::NICKNAME, SettingsRow::SHADES_COLOR, SettingsRow::OUTFIT,
     SettingsRow::REPLAY_INTRO, SettingsRow::VIEW_DIARY,
     SettingsRow::CALIBRATE, SettingsRow::CHECK_COLORS, SettingsRow::DIAGNOSTICS, SettingsRow::RESET_STATS, SettingsRow::BACK,
@@ -45,6 +45,7 @@ static RowGroupId groupFor(SettingsRow r) {
             return RowGroupId::APPEARANCE;
         case SettingsRow::BORING_MODE:
         case SettingsRow::CONFIDENCE:
+        case SettingsRow::DETECTION_FILTER:
             return RowGroupId::BEHAVIOR;
         case SettingsRow::NICKNAME:
         case SettingsRow::SHADES_COLOR:
@@ -215,6 +216,18 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             break;
         case SettingsRow::CONFIDENCE:
             label = "ALERT FILTER"; value = Settings::minConfidenceLabel();
+            break;
+        case SettingsRow::DETECTION_FILTER:
+            // "DETECTION FILTER" (the row's own screen title, no width
+            // constraint there) overlaps its own "14/14" value in
+            // portrait's 240px width at this row's size-2 text --
+            // confirmed with the emulator before ever touching
+            // hardware. Shortened here only; the destination screen
+            // keeps the full name in its title bar.
+            label = "TYPE FILTER";
+            snprintf(valBuf, valBufN, "%u/%u", (unsigned)Settings::enabledTypeCount(),
+                     (unsigned)DetectionType::COUNT - 1);
+            value = valBuf;
             break;
         case SettingsRow::CALIBRATE:
             label = "CALIBRATE TOUCH";

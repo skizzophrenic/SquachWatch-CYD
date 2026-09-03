@@ -1,6 +1,7 @@
 // SquachWatch-CYD — DetectionEngine implementation
 #include "detection.h"
 #include "signatures.h"
+#include "settings.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
@@ -255,6 +256,22 @@ bool DetectionEngine::init() {
     // of a device, not just the first, so lastSeen/RSSI keep updating
     // (postBle()/expireStale() rely on that for the still-active log).
     scan->setAdvertisedDeviceCallbacks(&g_bleScanCallbacks, true);
+    // Without this, NimBLE keeps its OWN permanent record of every
+    // distinct BLE address it has ever seen since scan start (a
+    // separate, unbounded structure from our own bounded 200-entry
+    // _log) -- one new NimBLEAdvertisedDevice heap allocation per
+    // never-before-seen address, held forever because this scan runs
+    // indefinitely (duration 0) and never fires a scan-complete
+    // callback to clear it. Confirmed on real hardware: a commute
+    // exposes a steady stream of genuinely distinct devices (phones,
+    // headsets, cars, AirTags), and that leak crashed the device after
+    // enough of them. maxResults=0 is documented in NimBLEScan.cpp as
+    // "none (callbacks only)" — it deletes each device immediately
+    // after onResult() returns instead of retaining it, which is
+    // exactly this project's usage (everything comes through the
+    // per-advertisement callback; the retained-results list and the
+    // scan-complete callback below are never read).
+    scan->setMaxResults(0);
     scan->start(0, nullptr, false);
 
     // 4. BT Classic inquiry for skimmer names (best-effort, every 60 s)
@@ -367,7 +384,11 @@ void DetectionEngine::processDeauthQ() {
         }
         _deauthWinCount++;
 
-        if (_deauthWinCount >= DEAUTH_THRESHOLD && (now - _deauthLastFireMs) > DEAUTH_COOLDOWN_MS) {
+        // Window/cooldown bookkeeping above still runs even while
+        // disabled, so re-enabling doesn't instantly fire off a stale
+        // accumulated count -- only the actual recording is gated.
+        if (_deauthWinCount >= DEAUTH_THRESHOLD && (now - _deauthLastFireMs) > DEAUTH_COOLDOWN_MS &&
+            Settings::typeEnabled(DetectionType::DEAUTH)) {
             _deauthLastFireMs = now;
             Detection d;
             memset(&d, 0, sizeof(d));
@@ -390,6 +411,15 @@ void DetectionEngine::processDeauthQ() {
 }
 
 void DetectionEngine::postBle(Detection d) {
+    // Disabled types (Settings > DETECTION FILTER) are dropped here,
+    // before the dedupe/merge below -- that merge branch re-activates
+    // and re-alerts on an already-logged device without ever reaching
+    // pushLog(), so gating pushLog() alone would miss it. An entry
+    // already in the log for a type disabled after the fact isn't
+    // touched or removed; it just stops updating and ages out through
+    // the normal expireStale() path like any other device that goes
+    // out of range.
+    if (!Settings::typeEnabled(d.type)) return;
     // Try to dedupe / merge with existing log entry by MAC
     for (uint8_t i = 0; i < _logCount; i++) {
         uint8_t slot = (_logHead + LOG_CAP - 1 - i) % LOG_CAP;
@@ -432,6 +462,7 @@ void DetectionEngine::postBle(Detection d) {
 }
 
 void DetectionEngine::postBtClassic(Detection d) {
+    if (!Settings::typeEnabled(d.type)) return;
     pushLog(d);
 }
 
@@ -701,6 +732,11 @@ void DetectionEngine::processWiFiQ() {
             matchedBySsid = (t != DetectionType::UNKNOWN);
         }
         if (t == DetectionType::UNKNOWN) continue;
+        // Disabled types (Settings > DETECTION FILTER) dropped here too
+        // -- same reasoning as postBle()'s guard: the dedupe/merge loop
+        // just below can re-activate and re-count an already-logged
+        // device without ever reaching pushLog().
+        if (!Settings::typeEnabled(t)) continue;
         // Try to dedupe / merge. Same reactivation fix as postBle()'s
         // merge branch — a device that went stale and comes back needs
         // active flipped back on and the counter bumped again, or it

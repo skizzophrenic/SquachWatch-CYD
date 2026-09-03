@@ -14,6 +14,7 @@ enum class SettingsRow : uint8_t {
     ROTATION_LOCK,
     BORING_MODE,
     CONFIDENCE,
+    DETECTION_FILTER,
     CALIBRATE,
     CHECK_COLORS,
     DIAGNOSTICS,

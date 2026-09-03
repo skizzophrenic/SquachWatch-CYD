@@ -15,6 +15,11 @@ static bool        s_infoPrimerShown = false;
 static bool        s_rotationLocked = false;
 static uint8_t     s_rotation = 1;
 static bool        s_backgroundLocked = false;
+// Bit N = DetectionType N enabled. UNKNOWN (0) is never included -- see
+// typeEnabled()'s comment. Default has bits 1..(COUNT-1) set (every real
+// type on), computed once at namespace-init time rather than a hand-
+// maintained literal so it can never drift out of sync with COUNT.
+static uint16_t    s_typeMask = 0;
 static uint8_t     s_brightness = 255;
 static Confidence  s_minConf    = Confidence::LOW_CONF;
 static bool        s_boringMode = false;
@@ -54,6 +59,10 @@ void load() {
     s_minConf    = (Confidence)s_prefs.getUChar("conf", (uint8_t)Confidence::LOW_CONF);
     if ((uint8_t)s_minConf > (uint8_t)Confidence::HIGH_CONF) s_minConf = Confidence::LOW_CONF;
     s_boringMode = s_prefs.getBool("boring", false);
+
+    uint16_t allTypesOn = 0;
+    for (uint8_t t = 1; t < (uint8_t)DetectionType::COUNT; t++) allTypesOn |= (uint16_t)(1u << t);
+    s_typeMask = (uint16_t)s_prefs.getUInt("typemask", allTypesOn);
 
     Theme::applyPalette(s_palette);
 }
@@ -160,6 +169,27 @@ const char* minConfidenceLabel() {
         case Confidence::HIGH_CONF: return "HIGH ONLY";
         default:                    return "?";
     }
+}
+
+bool typeEnabled(DetectionType t) {
+    uint8_t idx = (uint8_t)t;
+    if (idx == 0 || idx >= (uint8_t)DetectionType::COUNT) return true;  // UNKNOWN, or out of range -- never gated
+    return (s_typeMask & (uint16_t)(1u << idx)) != 0;
+}
+
+void toggleType(DetectionType t) {
+    uint8_t idx = (uint8_t)t;
+    if (idx == 0 || idx >= (uint8_t)DetectionType::COUNT) return;
+    s_typeMask ^= (uint16_t)(1u << idx);
+    s_prefs.putUInt("typemask", s_typeMask);
+}
+
+uint8_t enabledTypeCount() {
+    uint8_t n = 0;
+    for (uint8_t t = 1; t < (uint8_t)DetectionType::COUNT; t++) {
+        if (s_typeMask & (uint16_t)(1u << t)) n++;
+    }
+    return n;
 }
 
 }
