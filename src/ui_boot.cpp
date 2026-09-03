@@ -4,6 +4,14 @@
 #include "squachy.h"
 #include "settings.h"
 
+// Stamped in by extra_script.py from `git describe` at build time --
+// same macro the Diary screen already reads (see its own guard
+// comment). Falls back to "unknown" so this still compiles standalone
+// (the PC emulator, an IDE's syntax pass) without the build flag.
+#ifndef FIRMWARE_VERSION
+#define FIRMWARE_VERSION "unknown"
+#endif
+
 // A dozen one-liners for Squachy's boot-splash speech bubble — one is
 // picked at random each boot (see uiBootInit) so the splash doesn't
 // say the exact same thing every single time.
@@ -81,10 +89,18 @@ void uiBootTick(TFT_eSPI& t, uint32_t now) {
         Squachy::drawWaving(t, w / 2, yHoriz + 50, now, 1.6f, BOOT_LINES[s_bootLineIdx]);
     }
 
-    // INITIALIZING...
+    // INITIALIZING...  vX.Y.Z -- version tacked onto this line rather
+    // than given its own row. Everything from the subtitle down to
+    // here is already tightly packed around Squachy's cameo (see its
+    // own comment above about the room dropping the old standalone
+    // version line bought him), and this is the one line on the splash
+    // that already reads as status text, not brand/character content,
+    // so it's the natural place for a version stamp without touching
+    // his space.
     t.setTextSize(1);
     t.setTextColor(Theme::CYAN);
-    const char* init = "INITIALIZING...";
+    char init[56];   // room for a full "git describe --dirty" string, not just a bare tag
+    snprintf(init, sizeof(init), "INITIALIZING...  %s", FIRMWARE_VERSION);
     int iw = t.textWidth(init);
     t.setCursor((w - iw) / 2, h - 16);
     t.print(init);

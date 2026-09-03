@@ -198,7 +198,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
             msg = "ALL CLEAR";
         } else {
             col = Theme::PINK;
-            msg = "DETECTIONS LOGGED";
+            msg = "ACTIVE DETECTIONS";
         }
         // 2px black outline: draw the same text at every offset in a
         // 5x5 grid around the real position (minus the center) in
@@ -224,7 +224,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
             }
             Theme::drawBangersText(t, tx, ty, msg, col, Theme::BangersSize::MD);
         } else {
-            // "DETECTIONS LOGGED" is long enough to overflow the
+            // "ACTIVE DETECTIONS" is long enough to overflow the
             // narrowest (240px portrait) rotation at this font's fixed
             // size — Bangers has no smaller step to fall back to like
             // the built-in font does, so drop to that instead rather
