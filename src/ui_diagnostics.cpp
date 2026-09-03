@@ -74,6 +74,23 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
                  info.calA0, info.calA1, info.calB0, info.calB1);
     y += 4;
 
+    // Frame cost. The push is a fixed byte count over SPI, so it moves
+    // only if the bus clock does -- printed separately from the drawing
+    // work so a change to SPI_FREQUENCY shows up here unambiguously
+    // instead of being averaged into one "it feels smoother" number.
+    // fps is derived from the whole frame, not the push alone.
+    {
+        uint32_t fus = info.frameUs ? info.frameUs : 1;
+        y = drawLine(t, y, Theme::AMBER, "PUSH:", "%lu.%lu ms",
+                     (unsigned long)(info.pushUs / 1000),
+                     (unsigned long)((info.pushUs % 1000) / 100));
+        y = drawLine(t, y, Theme::AMBER, "FRAME:", "%lu.%lu ms  (%lu fps)",
+                     (unsigned long)(fus / 1000),
+                     (unsigned long)((fus % 1000) / 100),
+                     (unsigned long)(1000000UL / fus));
+    }
+    y += 4;
+
     y = drawLine(t, y, Theme::GREEN, "LOG:", "%u entries, %lu lifetime",
                  (unsigned)eng.logCount(), (unsigned long)eng.lifetimeTotal());
 

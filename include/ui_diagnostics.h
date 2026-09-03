@@ -32,6 +32,13 @@ struct DiagnosticsInfo {
     bool    usingSavedCal;
     int16_t calA0, calA1, calB0, calB1;
 
+    // Frame timing, exponentially smoothed in main.cpp. pushUs is the
+    // SPI cost of getting the sprite onto the panel; frameUs is the
+    // whole loop() iteration, so frameUs - pushUs is the drawing work.
+    // Both in microseconds.
+    uint32_t    pushUs;
+    uint32_t    frameUs;
+
     // System.
     uint32_t    freeHeap;
     uint32_t    largestBlock;

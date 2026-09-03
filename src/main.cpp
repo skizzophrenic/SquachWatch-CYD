@@ -1200,7 +1200,34 @@ void setup() {
     enterBoot();
 }
 
+// ---- Frame timing ----
+// Wall-clock cost of the two things that actually set the frame rate:
+// pushing the sprite over SPI, and everything else put together. Both
+// are exponentially smoothed (1/8 per frame) because the raw per-frame
+// numbers jitter by several ms and are unreadable on a live screen.
+//
+// The push is the interesting one: it's a fixed 153,600 bytes at
+// 16bpp, so it costs whatever SPI_FREQUENCY says it costs and nothing
+// else in the firmware can move it. At 40MHz that's ~30.7ms, which is
+// most of a frame -- reading the real number here is the only way to
+// tell whether a change to that clock did what the arithmetic claims.
+static uint32_t s_pushUsAvg  = 0;
+static uint32_t s_frameUsAvg = 0;
+static uint32_t s_pushAccumUs = 0;   // summed within a frame: cyd35 pushes twice
+
+static inline void pushFrame(int x, int y) {
+    uint32_t t0 = micros();
+    frame.pushSprite(x, y);
+    s_pushAccumUs += micros() - t0;
+}
+
+static inline uint32_t emaUpdate(uint32_t avg, uint32_t sample) {
+    return avg ? avg + ((int32_t)sample - (int32_t)avg) / 8 : sample;
+}
+
 void loop() {
+    uint32_t frameStartUs = micros();
+    s_pushAccumUs = 0;
     uint32_t now = millis();
 
     TouchPoint tp = pollTouch();
@@ -1369,10 +1396,10 @@ void loop() {
                 int halfH = tft.height() / 2;
                 frame.setViewport(0, 0, tft.width(), tft.height(), true);
                 uiBootTick(frame, now);
-                frame.pushSprite(0, 0);
+                pushFrame(0, 0);
                 frame.setViewport(0, -halfH, tft.width(), tft.height(), true);
                 uiBootTick(frame, now);
-                frame.pushSprite(0, halfH);
+                pushFrame(0, halfH);
                 frame.resetViewport();
             } else {
                 uiBootTick(tft, now);
@@ -1401,10 +1428,10 @@ void loop() {
                 int halfH = tft.height() / 2;
                 frame.setViewport(0, 0, tft.width(), tft.height(), true);
                 uiClearTick(frame, now, engine, true, s_scanPickerOpen);
-                frame.pushSprite(0, 0);
+                pushFrame(0, 0);
                 frame.setViewport(0, -halfH, tft.width(), tft.height(), true);
                 uiClearTick(frame, now, engine, false, s_scanPickerOpen);
-                frame.pushSprite(0, halfH);
+                pushFrame(0, halfH);
                 frame.resetViewport();
             } else {
                 // Fallback if a post-boot rotate ever failed to
@@ -1614,10 +1641,10 @@ void loop() {
                 int halfH = tft.height() / 2;
                 frame.setViewport(0, 0, tft.width(), tft.height(), true);
                 uiAlertTick(frame, now, s_infoPending, alertInfoTypeName, alertInfoText);
-                frame.pushSprite(0, 0);
+                pushFrame(0, 0);
                 frame.setViewport(0, -halfH, tft.width(), tft.height(), true);
                 uiAlertTick(frame, now, s_infoPending, alertInfoTypeName, alertInfoText);
-                frame.pushSprite(0, halfH);
+                pushFrame(0, halfH);
                 frame.resetViewport();
             } else {
                 uiAlertTick(tft, now, s_infoPending, alertInfoTypeName, alertInfoText);
@@ -1688,10 +1715,10 @@ void loop() {
                 int halfH = tft.height() / 2;
                 frame.setViewport(0, 0, tft.width(), tft.height(), true);
                 uiWatchAlertTick(frame, now, engine, true);
-                frame.pushSprite(0, 0);
+                pushFrame(0, 0);
                 frame.setViewport(0, -halfH, tft.width(), tft.height(), true);
                 uiWatchAlertTick(frame, now, engine, false);
-                frame.pushSprite(0, halfH);
+                pushFrame(0, halfH);
                 frame.resetViewport();
             } else {
                 uiWatchAlertTick(tft, now, engine, true);
@@ -2163,6 +2190,8 @@ void loop() {
             info.touchValid = tp.valid;
             info.mappedX = tp.x;
             info.mappedY = tp.y;
+            info.pushUs  = s_pushUsAvg;
+            info.frameUs = s_frameUsAvg;
             info.freeHeap = ESP.getFreeHeap();
             info.largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
             info.resetReason = resetReasonName();
@@ -2254,9 +2283,12 @@ void loop() {
         if (now - transitionStart < TRANSITION_MS) {
             Theme::drawTransitionGlitch(frame, now - transitionStart, TRANSITION_MS);
         }
-        frame.pushSprite(0, 0);
+        pushFrame(0, 0);
     }
 #endif
+
+    s_pushUsAvg  = emaUpdate(s_pushUsAvg, s_pushAccumUs);
+    s_frameUsAvg = emaUpdate(s_frameUsAvg, micros() - frameStartUs);
 
     prevTouchValid = tp.valid;
 }
