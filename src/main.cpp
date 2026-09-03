@@ -1517,7 +1517,7 @@ void loop() {
             if (!boring && Squachy::onboardingActive() && tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
                 Squachy::onboardingTapAdvance(tp.x, tp.y)) {
                 lastTouch = now;
-            } else if (touchJustDown && inEdgeZone) {
+            } else if (touchJustDown && inEdgeZone && !Settings::backgroundLocked()) {
                 if (tp.x < edgeZoneW) Settings::cyclePrevBackground();
                 else                  Settings::cycleBackground();
             } else if (!boring && tp.valid && sqActive) {
@@ -1547,7 +1547,7 @@ void loop() {
                     else if (barBtn == ButtonId::CLR)  { s_scanPickerOpen = false; }
                 } else if (barBtn == ButtonId::LOG)  { Squachy::trigger(Squachy::Event::LOG_OPENED); enterLog(); }
                 else if (barBtn == ButtonId::SCAN) { s_scanPickerOpen = true; }
-                else if (boring && tp.y >= 20) {
+                else if (boring && tp.y >= 20 && !Settings::backgroundLocked()) {
                     // No Squachy to tap for this in boring mode — any tap
                     // on the main content area (below the title bar, not
                     // a real button, and not already claimed by an edge
@@ -2003,6 +2003,7 @@ void loop() {
                     switch (row) {
                         case SettingsRow::THEME:      Settings::cyclePalette(); break;
                         case SettingsRow::BACKGROUND: Settings::cycleBackground(); break;
+                        case SettingsRow::BACKGROUND_LOCK: Settings::toggleBackgroundLocked(); break;
                         case SettingsRow::INVERT:
                             Settings::toggleInvert();
                             // XOR against the panel's own baseline, not an

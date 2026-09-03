@@ -30,6 +30,18 @@ namespace Settings {
     void       cycleBackground();    // advances+wraps, persists
     void       cyclePrevBackground(); // same, but backward
 
+    // Disables the two CLEAR-screen gestures that cycle background
+    // (the left/right edge-zone tap, and boring mode's "tap anywhere"
+    // stand-in for it) without touching the Settings screen's own
+    // BACKGROUND row -- once you've found a favorite, an accidental
+    // edge tap during normal use shouldn't change it, but deliberately
+    // opening Settings and picking a new one always should. Same
+    // "disable the accidental-tap surface, not the deliberate menu
+    // path" reasoning as rotationLocked(), just split across two call
+    // sites instead of rotation's one (see main.cpp's CLEAR case).
+    bool       backgroundLocked();
+    void       toggleBackgroundLocked();
+
     bool       inverted();
     void       toggleInvert();       // persists only — caller applies tft.invertDisplay()
 

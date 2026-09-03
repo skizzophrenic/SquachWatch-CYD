@@ -8,7 +8,7 @@
 
 namespace Squachy {
 
-enum class Mood : uint8_t { IDLE, WAVE, SHOCKED, BOUNCE, SLEEPY, WALK, DANCE };
+enum class Mood : uint8_t { IDLE, WAVE, SHOCKED, BOUNCE, SLEEPY, WALK, DANCE, WINK };
 
 // Which reaction pose a SHOCKED mood strikes — varies by what triggered
 // it so a detection actually reads differently depending on the type,
@@ -1041,6 +1041,15 @@ static const char* const HUNT_STALLED_LINES[] = {
     "Maybe try a lap around the block?",
 };
 
+// Flavor pool for the rare idle Mood::WINK flourish -- a brief
+// fourth-wall break, see its branch in the idle-mood roll below.
+static const char* const WINK_LINES[] = {
+    "Oh -- didn't see you there.",
+    "Yeah, I know you're watching.",
+    "*wink* Just between us.",
+    "Still here. Still watching.",
+};
+
 // Flavor pool for watchAlertReaction() -- fires once when a watched
 // target reappears. No teaching line here (see squachy.h) since
 // getting to this screen already means WATCH was explained upstream.
@@ -1580,20 +1589,34 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         static const uint16_t SHADE_TINTS[4] = { CYAN, VAPOR_PINK, GREEN, VAPOR_PURPLE };
         uint16_t shadeTint = SHADE_TINTS[s_shadeIdx % 4];
         bool blink = ((now / 2200) % 40) < 3;
-        uint16_t lens = blink ? BLACK : blend(BG, shadeTint, 60);
+        // Mood::WINK forces the left lens shut on its own, independent
+        // of the normal both-eyes blink cycle -- a wink is one eye,
+        // not two.
+        bool winking = (m == Mood::WINK);
+        uint16_t openLens = blend(BG, shadeTint, 60);
+        uint16_t lensL = (blink || winking) ? BLACK : openLens;
+        uint16_t lensR = blink ? BLACK : openLens;
         t.fillRoundRect(cx2 - S(12), hy + S(6), S(10), S(7), 2, BLACK);
         t.fillRoundRect(cx2 + S(2),  hy + S(6), S(10), S(7), 2, BLACK);
         t.fillRect(cx2 - S(2), hy + S(8), S(4), S(2), BLACK);
-        t.fillRoundRect(cx2 - S(11), hy + S(7), S(8), S(5), 1, lens);
-        t.fillRoundRect(cx2 + S(3),  hy + S(7), S(8), S(5), 1, lens);
+        t.fillRoundRect(cx2 - S(11), hy + S(7), S(8), S(5), 1, lensL);
+        t.fillRoundRect(cx2 + S(3),  hy + S(7), S(8), S(5), 1, lensR);
 
-        // A glint sweeps across each lens (skipped mid-blink) so the
-        // shades read as reflective glass instead of a flat fill.
-        if (!blink) {
-            float sweep = (float)(now % 2400) / 2400.0f;
-            int gx = (int)(sweep * 6.0f);
-            t.drawFastVLine(cx2 - S(11) + S(1 + gx), hy + S(7), S(4), WHITE);
-            t.drawFastVLine(cx2 + S(3)  + S(1 + gx), hy + S(7), S(4), WHITE);
+        // A glint sweeps across each open lens (skipped while shut) so
+        // the shades read as reflective glass instead of a flat fill.
+        float sweep = (float)(now % 2400) / 2400.0f;
+        int gx = (int)(sweep * 6.0f);
+        if (lensL != BLACK) t.drawFastVLine(cx2 - S(11) + S(1 + gx), hy + S(7), S(4), WHITE);
+        if (lensR != BLACK) t.drawFastVLine(cx2 + S(3)  + S(1 + gx), hy + S(7), S(4), WHITE);
+
+        // A little cartoon "wink sparkle" beside the shut lens --
+        // purely additive on top of the pose above rather than
+        // touching its geometry, so it can never misalign with the
+        // frame.
+        if (winking) {
+            int sx = cx2 - S(16), sy = hy + S(3);
+            t.drawLine(sx - S(2), sy, sx + S(2), sy, WHITE);
+            t.drawLine(sx, sy - S(2), sx, sy + S(2), WHITE);
         }
 
         // Mouth: resting smile most of the time, or an open/close
@@ -1804,6 +1827,13 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
             s_walkStart = now;
             s_walkDir = random(0, 2) ? 1 : -1;
             nextIdleAt = now + WALK_DURATION_MS + 12000 + random(0, 18000);
+        } else if (random(0, 12) == 0) {
+            // A brief fourth-wall wink -- see drawBody()'s Mood::WINK
+            // branch for the actual pose (one shut lens + a sparkle).
+            say(pick(WINK_LINES, 4), MIN_BUBBLE_MS);
+            mood = Mood::WINK;
+            moodUntil = now + 1800;
+            nextIdleAt = now + 12000 + random(0, 18000);
         } else {
             // Recent real activity (or a long stretch of none) biases
             // which pool this pulls from, so idle chatter reads as

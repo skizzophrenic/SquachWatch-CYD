@@ -7,6 +7,7 @@
 enum class SettingsRow : uint8_t {
     THEME = 0,
     BACKGROUND,
+    BACKGROUND_LOCK,
     BRIGHTNESS,
     INVERT,
     RGB_SWAP,

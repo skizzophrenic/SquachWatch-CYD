@@ -14,6 +14,7 @@ static bool        s_colorChecked = false;
 static bool        s_infoPrimerShown = false;
 static bool        s_rotationLocked = false;
 static uint8_t     s_rotation = 1;
+static bool        s_backgroundLocked = false;
 static uint8_t     s_brightness = 255;
 static Confidence  s_minConf    = Confidence::LOW_CONF;
 static bool        s_boringMode = false;
@@ -47,6 +48,7 @@ void load() {
     s_rotationLocked = s_prefs.getBool("rotlock", false);
     s_rotation = s_prefs.getUChar("rot", 1);
     if (s_rotation > 3) s_rotation = 1;
+    s_backgroundLocked = s_prefs.getBool("bglock", false);
     s_brightness = s_prefs.getUChar("bri", 255);
     if (s_brightness < 32) s_brightness = 32;
     s_minConf    = (Confidence)s_prefs.getUChar("conf", (uint8_t)Confidence::LOW_CONF);
@@ -116,6 +118,13 @@ uint8_t rotation() { return s_rotation; }
 void saveRotation(uint8_t r) {
     s_rotation = r;
     s_prefs.putUChar("rot", r);
+}
+
+bool backgroundLocked() { return s_backgroundLocked; }
+
+void toggleBackgroundLocked() {
+    s_backgroundLocked = !s_backgroundLocked;
+    s_prefs.putBool("bglock", s_backgroundLocked);
 }
 
 bool boringMode() { return s_boringMode; }

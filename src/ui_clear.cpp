@@ -3,6 +3,7 @@
 #include "theme.h"
 #include "squachy.h"
 #include "settings.h"
+#include "idle_events.h"
 #include <Arduino.h>
 
 void uiClearInit(TFT_eSPI& t) {
@@ -158,6 +159,15 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // needed anywhere else on this screen.
     if (!Settings::boringMode()) {
         Squachy::tick(t, w / 2, titleBottom, countersTop - titleBottom, now, advance);
+    }
+
+    // Rare decorative flourishes (UFO/sparkle/critter/glitch-line) --
+    // see idle_events.h. Skipped for the same reasons Squachy's own
+    // presence is skipped above (boring mode) or would collide with
+    // the walkthrough's own bubble (onboarding) -- a UFO flying past
+    // mid-lesson would be more distraction than delight.
+    if (!Settings::boringMode() && !Squachy::onboardingActive()) {
+        IdleEvents::tick(t, now, 0, titleBottom, w, countersTop, advance);
     }
 
     // Title bar at the top

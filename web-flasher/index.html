@@ -206,6 +206,14 @@
     margin:0 0 14px;
     text-align:center;
   }
+  .version-note{
+    margin:-6px 0 14px;
+    font-family:'VT323', monospace;
+    font-size:0.95rem;
+    letter-spacing:0.04em;
+    color:var(--vapor-blue);
+    text-align:center;
+  }
 
   .board-picker-label{
     display:block;
@@ -474,6 +482,7 @@
 
   <div class="card">
     <h2>FLASH YOUR DETECTOR</h2>
+    <p class="version-note" id="versionNote">checking latest version&hellip;</p>
 
     <label class="board-picker-label" for="boardSelect">Select your board:</label>
     <select class="board-select" id="boardSelect" aria-label="Board select">
@@ -1173,10 +1182,38 @@
     var select = document.getElementById('boardSelect');
     var installBtn = document.getElementById('installBtn');
     var note = document.getElementById('whiteScreenNote');
+    var versionNote = document.getElementById('versionNote');
     if (!select || !installBtn) return;
 
     var WHITE_SCREEN_LINE =
       "White screen after flashing? Your CYD's probably got the other display driver — try the other 2.8\" option in that dropdown.";
+
+    // The manifest's own "version" field is stamped with the release
+    // tag by .github/workflows/release-flasher.yml at deploy time (the
+    // copy committed to the repo just stays a "0.0.0" placeholder --
+    // only the one actually deployed alongside this page on GitHub
+    // Pages carries the real value), so fetching it here is the only
+    // way this page can show a real version without hardcoding one
+    // that'd silently go stale the next release. Re-fetched on every
+    // board change since each board gets its own manifest file, even
+    // though in practice all three get stamped with the same tag in
+    // one release run.
+    var versionReqSeq = 0;
+    function loadVersion(manifestUrl) {
+      if (!versionNote) return;
+      var seq = ++versionReqSeq;
+      versionNote.textContent = 'checking latest version…';
+      fetch(manifestUrl, { cache: 'no-store' })
+        .then(function (r) { return r.json(); })
+        .then(function (m) {
+          if (seq !== versionReqSeq) return; // a newer request already landed
+          versionNote.textContent = m && m.version ? ('latest firmware: v' + m.version) : '';
+        })
+        .catch(function () {
+          if (seq !== versionReqSeq) return;
+          versionNote.textContent = '';
+        });
+    }
 
     function applySelection(announce) {
       var opt = select.options[select.selectedIndex];
@@ -1184,6 +1221,7 @@
       var isCyd28 = opt.dataset.cyd28 === '1';
       if (note) note.hidden = !isCyd28;
       if (announce && isCyd28) say(WHITE_SCREEN_LINE, 8000);
+      loadVersion(opt.value);
     }
 
     select.addEventListener('change', function () { applySelection(true); });

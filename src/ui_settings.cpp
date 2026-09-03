@@ -17,7 +17,7 @@ static int g_scroll = 0;
 // removed here, so their SettingsRow values stay stable regardless of
 // which mode is active.
 static const SettingsRow ALL_ROWS[] = {
-    SettingsRow::THEME, SettingsRow::BACKGROUND, SettingsRow::BRIGHTNESS, SettingsRow::INVERT,
+    SettingsRow::THEME, SettingsRow::BACKGROUND, SettingsRow::BACKGROUND_LOCK, SettingsRow::BRIGHTNESS, SettingsRow::INVERT,
     SettingsRow::RGB_SWAP, SettingsRow::ROTATION_LOCK,
     SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE,
     SettingsRow::NICKNAME, SettingsRow::SHADES_COLOR, SettingsRow::OUTFIT,
@@ -37,6 +37,7 @@ static RowGroupId groupFor(SettingsRow r) {
     switch (r) {
         case SettingsRow::THEME:
         case SettingsRow::BACKGROUND:
+        case SettingsRow::BACKGROUND_LOCK:
         case SettingsRow::BRIGHTNESS:
         case SettingsRow::INVERT:
         case SettingsRow::RGB_SWAP:
@@ -191,6 +192,9 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             break;
         case SettingsRow::BACKGROUND:
             label = "BACKGROUND"; value = Settings::backgroundName(Settings::background());
+            break;
+        case SettingsRow::BACKGROUND_LOCK:
+            label = "LOCK BACKGROUND"; value = Settings::backgroundLocked() ? "ON" : "OFF";
             break;
         case SettingsRow::BRIGHTNESS:
             label = "BRIGHT -  +";
