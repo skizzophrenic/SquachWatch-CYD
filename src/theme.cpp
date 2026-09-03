@@ -825,8 +825,15 @@ void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     static float bubX[NB], bubY[NB];
     static bool  bInited = false;
     // The rare big shark — mostly parked off-screen, only swims through
-    // once in a while.
+    // once in a while. sharkDir is fixed once at spawn (see the spawn
+    // block below) -- it used to be recomputed every frame from
+    // "which half of the screen is it currently on", which meant it
+    // reversed the instant it crossed the midpoint and got stuck
+    // oscillating around center forever instead of ever reaching an
+    // edge and despawning. Committing to one direction for the whole
+    // pass is what actually lets it cross the tank and leave.
     static float    sharkX, sharkY;
+    static int8_t   sharkDir = 1;
     static bool     sharkActive = false;
     static uint32_t sharkNextAt = 0;
     static bool     sharkInited = false;
@@ -953,23 +960,57 @@ void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         t.drawPixel(fx + f.dir * (s / 2), fy - 1, BLACK);
     }
 
-    // The shark: dormant most of the time, then glides straight across
-    // once in a while — a little payoff for watching the tank.
+    // The shark: dormant most of the time, then commits to one straight
+    // crossing of the tank before disappearing again — a little payoff
+    // for watching the tank, now that it actually reaches the far edge
+    // instead of getting stuck oscillating around center (see sharkDir's
+    // comment above).
     if (!sharkActive && now >= sharkNextAt) {
         sharkActive = true;
-        sharkX = (random(0, 2) ? -30.0f : (float)(w + 30));
-        sharkY = (float)(yStart + random(8, bandH > 16 ? bandH - 8 : bandH));
+        bool fromLeft = random(0, 2) == 0;
+        sharkX   = fromLeft ? -40.0f : (float)(w + 40);
+        sharkDir = fromLeft ? 1 : -1;
+        sharkY   = (float)(yStart + random(8, bandH > 16 ? bandH - 8 : bandH));
     }
     if (sharkActive) {
-        int8_t dir = (sharkX < w / 2) ? 1 : -1;
-        sharkX += dir * 1.6f;
-        int sx = (int)sharkX, sy = (int)sharkY, ss = 12;
-        uint16_t sc = blend(BG, WHITE, 90);
+        sharkX += sharkDir * 1.8f;
+        int8_t dir = sharkDir;
+        // Nearly double the old size (12 -> 20) -- unmistakably the
+        // biggest thing in the tank instead of just another fish shape.
+        int ss = 20;
+        // A slow vertical prowl instead of a dead-flat line, so it
+        // reads as hunting rather than sliding on a rail.
+        float prowl = sinf((float)now / 900.0f) * 4.0f;
+        int sx = (int)sharkX, sy = (int)(sharkY + prowl);
+        // Darker/more solid than the old near-invisible wash
+        // (blend(...,90)) -- still a cold grey, just an actually
+        // visible, deliberate silhouette instead of a faint ghost.
+        uint16_t sc = blend(BG, WHITE, 130);
         t.fillTriangle(sx - dir * ss, sy, sx + dir * ss, sy - ss / 2, sx + dir * ss, sy + ss / 2, sc);
         t.fillTriangle(sx - dir * ss, sy, sx - dir * (ss + ss / 2), sy - ss / 3, sx - dir * (ss + ss / 2), sy + ss / 3, sc);
-        t.fillTriangle(sx, sy - ss / 2, sx - dir * 3, sy - ss, sx + dir * 3, sy - ss / 2, sc);
-        t.drawPixel(sx + dir * (ss / 2), sy - 2, BLACK);
-        if (sx < -40 || sx > w + 40) {
+        t.fillTriangle(sx, sy - ss / 2, sx - dir * 4, sy - ss - 4, sx + dir * 4, sy - ss / 2, sc);
+        // A small red glint instead of a plain black dot -- a touch of
+        // menace on an otherwise flat-grey shape.
+        t.drawPixel(sx + dir * (ss / 2), sy - 2, RED);
+
+        // A close pass "gulps" any regular fish caught right at the
+        // mouth -- not a real removal, just an instant respawn off the
+        // far edge headed the other way, so it reads as startling off
+        // after a near miss rather than anything grim. Jellyfish drift
+        // independently of the swimmers and sit this out.
+        int mouthX = sx + dir * ss, mouthY = sy;
+        for (uint8_t i = 0; i < N; i++) {
+            Fish& f = fish[i];
+            if (f.species == 3) continue;
+            float ddx = f.x - (float)mouthX, ddy = f.y - (float)mouthY;
+            if (ddx * ddx + ddy * ddy < 100.0f) {
+                f.x   = (dir > 0) ? (float)(w + 10) : -10.0f;
+                f.y   = (float)(yStart + random(10, bandH > 20 ? bandH - 10 : bandH));
+                f.dir = (int8_t)-dir;
+            }
+        }
+
+        if (sx < -(ss * 3) || sx > w + ss * 3) {
             sharkActive = false;
             sharkNextAt = now + (uint32_t)random(10000, 25000);
         }

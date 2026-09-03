@@ -72,8 +72,21 @@ void uiAlertInit(TFT_eSPI& t, const Detection& d) {
 // wordmark) stays horizontally centered regardless of rotation, so a
 // corner is the one spot guaranteed clear on all of them.
 static void moreInfoBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, int& bh) {
-    bw = 76;
-    bh = 20;
+    // Stacked "MORE"/"INFO" on two lines (see the draw call below)
+    // instead of one wide "MORE INFO" row -- a size-2 attempt at a
+    // bigger tap target that widened the button instead ate into the
+    // running critter animation's clear margin on the narrowest 240px
+    // landscape rotation. Going taller instead of wider keeps the
+    // footprint narrow enough to actually clear the radar/MAC/wordmark
+    // over there while still being a generously padded, easy target.
+    // Sized off this font's known 12x16px-per-glyph metrics at size 2
+    // (both words are 4 characters, so one width covers both) rather
+    // than a live measurement, since these are fixed literal strings,
+    // not runtime data -- the actual draw call still centers each line
+    // with a live t.textWidth() regardless, so a few px of slop here
+    // just shows up as slightly uneven padding, never a layout break.
+    bw = 70;
+    bh = 48;
     bx = screenW - bw - 4;
     by = screenH - bh - 4;
 }
@@ -194,10 +207,26 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now,
     // MORE INFO -- opens the same explanation panel LOG's long-press
     // menu does (see uiAlertHitMoreInfo()), so a fresh detection can be
     // looked up without having to remember to go find it in LOG after.
+    // "MORE"/"INFO" stacked on two lines (see moreInfoBtnRect()'s
+    // comment) rather than Theme::drawButton()'s usual single-line
+    // label, so this button doesn't need to go wide to stay legible.
     {
         int bx, by, bw, bh;
         moreInfoBtnRect(w, h, bx, by, bw, bh);
-        Theme::drawButton(t, bx, by, bw, bh, "MORE INFO", false);
+        t.fillRect(bx, by, bw, bh, Theme::BG);
+        t.drawRect(bx, by, bw, bh, Theme::PURPLE);
+        t.setTextSize(2);
+        t.setTextColor(Theme::CYAN, Theme::BG);
+        t.setTextWrap(false);
+        int lineH = t.fontHeight();
+        const int lineGap = 3;
+        int ty = by + (bh - (lineH * 2 + lineGap)) / 2;
+        int mw = t.textWidth("MORE");
+        t.setCursor(bx + (bw - mw) / 2, ty);
+        t.print("MORE");
+        int iw = t.textWidth("INFO");
+        t.setCursor(bx + (bw - iw) / 2, ty + lineH + lineGap);
+        t.print("INFO");
     }
 
     // TV-static snow over the whole screen during the same random burst

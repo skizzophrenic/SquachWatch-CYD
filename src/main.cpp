@@ -1517,7 +1517,18 @@ void loop() {
             if (!boring && Squachy::onboardingActive() && tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
                 Squachy::onboardingTapAdvance(tp.x, tp.y)) {
                 lastTouch = now;
-            } else if (touchJustDown && inEdgeZone && !Settings::backgroundLocked()) {
+            } else if (touchJustDown && inEdgeZone && !Settings::backgroundLocked() &&
+                       (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                // The debounce check above matters more here than it
+                // looks -- the title-bar SETTINGS icon lives in this
+                // same left-edge zone, and tapping it to leave Settings
+                // calls enterClear() earlier in this same loop()
+                // iteration, before this switch runs. Without this
+                // guard, the exact touch that just closed Settings fell
+                // straight through into CLEAR's edge-zone gesture on
+                // the very same frame and cycled the background right
+                // as the screen appeared.
+                lastTouch = now;
                 if (tp.x < edgeZoneW) Settings::cyclePrevBackground();
                 else                  Settings::cycleBackground();
             } else if (!boring && tp.valid && sqActive) {
@@ -1624,15 +1635,17 @@ void loop() {
                         s_infoShowingPrimer = false;
                         s_infoArmed = false;
                     } else {
+                        // GOT IT on the actual explanation (not the
+                        // primer) closes the whole alert, straight back
+                        // to CLEAR -- same as tapping anywhere else on
+                        // the alert screen. Previously this just closed
+                        // the info panel back to the plain ALERT screen,
+                        // which read as an extra, redundant tap-to-
+                        // dismiss step once you'd already read the
+                        // explanation.
                         s_infoPending = false;
-                        // Restart the auto-dismiss window rather than
-                        // leaving it at whatever real time has already
-                        // passed -- without this, closing the panel
-                        // after a long read would immediately trip the
-                        // (now - alertStart) > ALERT_AUTO_DISMISS_MS
-                        // check below and yank straight back to CLEAR
-                        // the instant the plain alert screen reappears.
-                        alertStart = now;
+                        Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits);
+                        enterClear();
                     }
                 }
                 break;
