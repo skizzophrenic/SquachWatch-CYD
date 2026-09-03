@@ -1213,10 +1213,19 @@ void drawFireflies(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
 
 void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     static const int CW = 4;
-    // MAXFW used to cap at 110 cells (440px) -- just short of cyd35's
-    // 480px landscape width, leaving a bare strip on the right. 120
-    // cells (480px) covers it.
+    // Grid is sized to the widest panel the build can actually run on.
+    // fw below is w/CW, so the cap only ever binds at the panel's own
+    // width: 480px on cyd35 needs 120 cells, but every shipping board
+    // is a 240x320 panel whose longest side is 320 -- 80 cells. Sizing
+    // all builds for cyd35 left columns 80..119 of the heat grid (3200
+    // bytes) allocated and never once written or read, since fw simply
+    // never reaches them there. MAXFH stays 80 for both: the tallest
+    // band any board renders is 320px, which is the same 80 cells.
+#if defined(CYD35)
     static const int MAXFW = 120, MAXFH = 80;
+#else
+    static const int MAXFW = 80, MAXFH = 80;
+#endif
     static uint8_t   heat[MAXFW * MAXFH];
     static float     acc[MAXFW];
     static bool      inited = false;
