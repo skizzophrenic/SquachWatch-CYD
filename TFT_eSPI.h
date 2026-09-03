@@ -52,6 +52,15 @@ static const int GLCD_W = 5, GLCD_H = 7, GLCD_ADVANCE = 6;
 #define TFT_DARKGREY    0x7BEF
 #define TFT_LIGHTGREY   0xD69A
 
+// Panel colour order, as the board user-setup headers and main.cpp's
+// applyColorOrder() reference them.
+#ifndef TFT_RGB
+#define TFT_RGB 0x00
+#endif
+#ifndef TFT_BGR
+#define TFT_BGR 0x08
+#endif
+
 class TFT_eSPI {
 public:
     explicit TFT_eSPI(int w = 320, int h = 240) : _w(w), _h(h) {
@@ -326,6 +335,7 @@ public:
         _w = w; _h = h;
         _buf.assign((size_t)w * h, 0x0000);
         _created = true;
+        syncGeom();
         return _buf.data();
     }
     void deleteSprite() { _buf.clear(); _created = false; }
@@ -350,7 +360,23 @@ public:
     // shared buffer. Implemented as a simple coordinate offset + clip
     // rather than the real library's datum/rotation interplay, which
     // this project's viewport usage never actually exercises.
+    //
+    // Doubles as the landing point for main.cpp's ResizableSprite::
+    // resizeInPlace(), which rewrites the bookkeeping fields below by
+    // hand and then calls setViewport(0, 0, newW, newH). A full-canvas
+    // viewport on a created sprite is taken as that resize, which is
+    // what makes rotating the screen actually change the sim's frame
+    // dimensions. If resizeInPlace() ever stops ending with this call,
+    // rotation visibly stops resizing here -- a loud failure, not a
+    // silently wrong one.
     void setViewport(int32_t x, int32_t y, int32_t w, int32_t h, bool = true) {
+        if (_created && x == 0 && y == 0 && w > 0 && h > 0 && (w != _w || h != _h)) {
+            _w = w; _h = h;
+            _buf.assign((size_t)w * h, 0x0000);
+            syncGeom();
+            _vpActive = false;
+            return;
+        }
         _vpX = x; _vpY = y; _vpW = w; _vpH = h; _vpActive = true;
     }
     void resetViewport() { _vpActive = false; }
@@ -367,9 +393,26 @@ public:
         return _buf[(size_t)y * _w + x];
     }
 
+protected:
+    // Bookkeeping fields the real TFT_eSprite exposes to subclasses, and
+    // which main.cpp's ResizableSprite writes directly (see its
+    // resizeInPlace()). Mirrored here so that subclass compiles
+    // unmodified; kept in step with _w/_h by syncGeom().
+    bool     _created = false;
+    int32_t  _iwidth = 0, _dwidth = 0, _bitwidth = 0;
+    int32_t  _iheight = 0, _dheight = 0;
+    int32_t  _sx = 0, _sy = 0, _sw = 0, _sh = 0;
+    uint8_t  rotation = 0;
+
+    void syncGeom() {
+        _iwidth = _dwidth = _bitwidth = _w;
+        _iheight = _dheight = _h;
+        _sw = _w; _sh = _h;
+        _sx = _sy = 0;
+    }
+
 private:
     TFT_eSPI* _parent;
-    bool _created = false;
     uint8_t _depth = 16;
     int32_t _vpX = 0, _vpY = 0, _vpW = 0, _vpH = 0;
     bool _vpActive = false;

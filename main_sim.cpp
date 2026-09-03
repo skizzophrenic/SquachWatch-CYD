@@ -34,7 +34,9 @@
 #include "ui_rawscan.h"
 #include "ui_watchalert.h"
 #include "ui_colorcheck.h"
+#include "ui_diagnostics.h"
 #include "ui_boot.h"
+#include "ui_detfilter.h"
 #include "png_writer.h"
 
 // A few plausible log entries so screens have something real to draw --
@@ -85,7 +87,7 @@ static std::vector<uint8_t> toRgb888(const std::vector<uint16_t>& src) {
 static void usage() {
     fprintf(stderr,
         "usage: squachsim <screen> [out.png] [options]\n"
-        "  screens: clear log alert settings diary hunt rawscan watchalert colorcheck diagnostics boot\n"
+        "  screens: clear log alert settings detfilter diary hunt rawscan watchalert colorcheck boot\n"
         "  --portrait        render 240x320 instead of 320x240\n"
         "  --bg N            background style 0..9 (see Settings::Background)\n"
         "  --theme N         palette index\n"
@@ -151,11 +153,37 @@ int main(int argc, char** argv) {
         else if (screen == "log")      uiLogTick(frame, t, engine, 0, false, "", false, nullptr, "");
         else if (screen == "alert")    uiAlertTick(frame, t, false, nullptr, "");
         else if (screen == "settings") uiSettingsTick(frame, t, engine);
+        else if (screen == "detfilter") uiDetFilterTick(frame, t);
         else if (screen == "diary")    uiDiaryTick(frame, t, engine);
         else if (screen == "hunt")     uiHuntTick(frame, t, engine);
         else if (screen == "rawscan")  uiRawScanTick(frame, t, engine, true, true, false, "");
         else if (screen == "watchalert") uiWatchAlertTick(frame, t, engine, true);
         else if (screen == "colorcheck") uiColorCheckTick(frame, t);
+        else if (screen == "diagnostics") {
+            // main.cpp fills this from board-specific globals the sim
+            // has no equivalent for, so these are plausible stand-ins.
+            // The frame timings are the real 40MHz arithmetic: 153,600
+            // bytes at 16bpp is ~30.7ms of SPI, which is what makes
+            // this screen worth rendering here at all -- it's how the
+            // layout gets checked before the numbers mean anything.
+            DiagnosticsInfo info{};
+            info.hasRaw = true;
+            info.rawTouching = false;
+            info.rawA = 1820; info.rawB = 2140;
+            info.touchValid = false;
+            info.mappedX = 0; info.mappedY = 0;
+            info.usingSavedCal = false;
+            info.calA0 = 200; info.calA1 = 3800;
+            info.calB0 = 200; info.calB1 = 3800;
+            info.pushUs = 30700;
+            info.frameUs = 41200;
+            info.freeHeap = 180000;
+            info.largestBlock = 110000;
+            info.resetReason = "POWERON_RESET";
+            info.boardName = "cyd";
+            info.usingCapTouch = false;
+            uiDiagnosticsTick(frame, t, engine, info);
+        }
         else if (screen == "boot")     uiBootTick(frame, t);
         else return false;
         return true;
@@ -165,8 +193,11 @@ int main(int argc, char** argv) {
     if      (screen == "clear")      uiClearInit(frame);
     else if (screen == "log")        uiLogInit(frame);
     else if (screen == "settings")   uiSettingsInit(frame);
+    else if (screen == "detfilter")  uiDetFilterInit(frame);
+    else if (screen == "diary")      uiDiaryInit(frame);
     else if (screen == "rawscan")    uiRawScanInit(frame, true);
     else if (screen == "watchalert") uiWatchAlertInit(frame);
+    else if (screen == "diagnostics") uiDiagnosticsInit(frame);
     else if (screen == "colorcheck") uiColorCheckInit(frame);
     else if (screen == "boot")       uiBootInit(frame);
     else if (screen == "hunt")       { engine.huntBle((const uint8_t*)"\x11\x22\x33\x44\x55\x66", "AirTag"); }

@@ -7,7 +7,7 @@
 # This lives outside the firmware repo on purpose: it compiles that
 # repo's sources but adds nothing to the firmware build.
 #
-#   make            # build ./squachsim
+#   make            # build ./squachsim and ./squachsim-live
 #   make shots      # render one PNG per screen into out/
 #
 # Deliberately excluded from the source list: main.cpp (ESP32 setup/loop
@@ -47,18 +47,51 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/ui_diary.cpp \
             $(SRC)/ui_hunt.cpp \
             $(SRC)/ui_outfit.cpp \
+            $(SRC)/ui_detfilter.cpp \
             $(SRC)/ui_rawscan.cpp \
             $(SRC)/ui_watchalert.cpp
 
 SIM_SRCS := $(SIM_DIR)/main_sim.cpp $(SIM_DIR)/detection_sim.cpp
 
+# The interactive target additionally compiles the firmware's real
+# main.cpp -- its actual setup()/loop(), state machine, gesture handling
+# and touch mapping -- plus the two touch modules main.cpp includes.
+# detection.cpp/sd_log.cpp stay replaced by detection_sim.cpp (radios).
+#
+# -include of the board's user setup supplies the TFT_/pin macros
+# main.cpp expects; that header has no includes of its own, so it's safe
+# to pull in here. No board macro is defined (no CYD35, no AWOK), which
+# selects the same plain XPT2046 path the real cyd board takes.
+LIVE_SRCS := $(SRC)/main.cpp \
+             $(SRC)/cap_touch.cpp \
+             $(SRC)/touch_cal.cpp \
+             $(SIM_DIR)/main_live.cpp \
+             $(SIM_DIR)/detection_sim.cpp
+# -include Arduino.h mirrors what the Arduino build system does for
+# every translation unit: cap_touch.cpp and friends call pinMode/delay
+# without including it themselves and rely on that being implicit.
+LIVE_FLAGS := -include $(SIM_DIR)/Arduino.h -include $(INC)/cyd_user_setup.h
+
 BIN      := squachsim
+LIVE_BIN := squachsim-live
 
-all: $(BIN)
+# Everything is compiled in one shot (no object files), so the only way
+# a header edit can trigger a rebuild is to list the headers as
+# prerequisites. Both the shims here and the firmware's own headers
+# count -- editing include/theme.h and getting a stale binary is exactly
+# the kind of thing that sends you chasing a bug that isn't there.
+HDRS     := $(wildcard $(SIM_DIR)/*.h) $(wildcard $(INC)/*.h)
 
-$(BIN): $(UI_SRCS) $(SIM_SRCS)
+all: $(BIN) $(LIVE_BIN)
+live: $(LIVE_BIN)
+
+$(BIN): $(UI_SRCS) $(SIM_SRCS) $(HDRS)
 	@test -d $(INC) || { echo "SquachWatch-CYD not found at $(SQUACHWATCH) -- set SQUACHWATCH=/path/to/checkout"; exit 1; }
-	$(CXX) $(CXXFLAGS) -o $@ $^ -lm
+	$(CXX) $(CXXFLAGS) -o $@ $(UI_SRCS) $(SIM_SRCS) -lm
+
+$(LIVE_BIN): $(UI_SRCS) $(LIVE_SRCS) $(HDRS)
+	@test -d $(INC) || { echo "SquachWatch-CYD not found at $(SQUACHWATCH) -- set SQUACHWATCH=/path/to/checkout"; exit 1; }
+	$(CXX) $(CXXFLAGS) $(LIVE_FLAGS) -o $@ $(UI_SRCS) $(LIVE_SRCS) -lm
 
 shots: $(BIN)
 	@mkdir -p out
@@ -68,7 +101,7 @@ shots: $(BIN)
 	./$(BIN) settings out/settings.png
 
 clean:
-	rm -f $(BIN)
-	rm -rf out
+	rm -f $(BIN) $(LIVE_BIN)
+	rm -rf out .nvs
 
 .PHONY: all shots clean

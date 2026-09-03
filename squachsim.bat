@@ -35,4 +35,6 @@ if "%~2"=="" if not "%~1"=="" set "ARGS=%~1 out\%~1.png"
 REM Windows path separators mean nothing to the Linux binary.
 set "ARGS=!ARGS:\=/!"
 
-wsl -e bash -lc "cd '%SIMDIR%' && make -s && mkdir -p out && ./squachsim !ARGS!"
+REM Names the target explicitly: a bare `make` also builds the
+REM interactive emulator, which this wrapper never runs.
+wsl -e bash -lc "cd '%SIMDIR%' && make -s squachsim && mkdir -p out && ./squachsim !ARGS!"
