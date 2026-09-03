@@ -90,7 +90,10 @@ static void usage() {
         "  --bg N            background style 0..9 (see Settings::Background)\n"
         "  --theme N         palette index\n"
         "  --frames N        animation warm-up frames before capture (default 90)\n"
-        "  --onboard         let Squachy's first-boot walkthrough run\n");
+        "  --onboard         let Squachy's first-boot walkthrough run\n"
+        "  --sequence N      capture N consecutive frames instead of one\n"
+        "  --raw PATH        write raw RGB888 frames to PATH instead of PNGs --\n"
+        "                    what the GUI consumes, no encode/decode on either side\n");
 }
 
 int main(int argc, char** argv) {
@@ -99,7 +102,8 @@ int main(int argc, char** argv) {
     std::string outPath = (argc > 2 && argv[2][0] != '-') ? argv[2] : "squachsim.png";
 
     bool portrait = false, onboard = false;
-    int bg = -1, themeIdx = -1, frames = 90;
+    int bg = -1, themeIdx = -1, frames = 90, sequence = 1;
+    std::string rawPath;
     for (int i = 2; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--portrait") portrait = true;
@@ -107,7 +111,10 @@ int main(int argc, char** argv) {
         else if (a == "--bg" && i + 1 < argc) bg = atoi(argv[++i]);
         else if (a == "--theme" && i + 1 < argc) themeIdx = atoi(argv[++i]);
         else if (a == "--frames" && i + 1 < argc) frames = atoi(argv[++i]);
+        else if (a == "--sequence" && i + 1 < argc) sequence = atoi(argv[++i]);
+        else if (a == "--raw" && i + 1 < argc) rawPath = argv[++i];
     }
+    if (sequence < 1) sequence = 1;
 
     const int W = portrait ? 240 : 320;
     const int H = portrait ? 320 : 240;
@@ -173,14 +180,53 @@ int main(int argc, char** argv) {
         if (!tick(now + (uint32_t)i * STEP_MS)) { usage(); return 2; }
     }
 
-    frame.pushSprite(0, 0);
-
-    std::vector<uint8_t> rgb = toRgb888(tft.pixelsRGB565());
-    if (!PngWriter::write(outPath.c_str(), W, H, rgb.data())) {
-        fprintf(stderr, "failed to write %s\n", outPath.c_str());
-        return 1;
+    // Capture runs on from where the warm-up left off, so a sequence is
+    // continuous motion rather than N restarts of the same instant. The
+    // warm-up is the expensive part (~2ms/frame) and it's paid once, so
+    // asking for 45 frames costs barely more than asking for one.
+    FILE* rawOut = nullptr;
+    if (!rawPath.empty()) {
+        rawOut = fopen(rawPath.c_str(), "wb");
+        if (!rawOut) { fprintf(stderr, "failed to open %s\n", rawPath.c_str()); return 1; }
     }
-    printf("rendered '%s' -> %s (%dx%d, %d warm-up frames)\n",
-           screen.c_str(), outPath.c_str(), W, H, frames);
+
+    for (int s = 0; s < sequence; s++) {
+        tick(now + (uint32_t)(frames + s) * STEP_MS);
+        frame.pushSprite(0, 0);
+        std::vector<uint8_t> rgb = toRgb888(tft.pixelsRGB565());
+
+        if (rawOut) {
+            fwrite(rgb.data(), 1, rgb.size(), rawOut);
+            continue;
+        }
+        // Multi-frame PNG output gets an index suffix; a single frame
+        // keeps the exact path asked for.
+        std::string path = outPath;
+        if (sequence > 1) {
+            std::string stem = outPath, ext = ".png";
+            size_t dot = outPath.rfind('.');
+            if (dot != std::string::npos) { stem = outPath.substr(0, dot); ext = outPath.substr(dot); }
+            char buf[16];
+            snprintf(buf, sizeof(buf), "_%04d", s);
+            path = stem + buf + ext;
+        }
+        if (!PngWriter::write(path.c_str(), W, H, rgb.data())) {
+            fprintf(stderr, "failed to write %s\n", path.c_str());
+            if (rawOut) fclose(rawOut);
+            return 1;
+        }
+    }
+
+    if (rawOut) {
+        fclose(rawOut);
+        // The GUI reads geometry off this line rather than assuming.
+        printf("raw %dx%d rgb888 frames=%d -> %s\n", W, H, sequence, rawPath.c_str());
+    } else if (sequence > 1) {
+        printf("rendered '%s' -> %d frames (%dx%d, %d warm-up frames)\n",
+               screen.c_str(), sequence, W, H, frames);
+    } else {
+        printf("rendered '%s' -> %s (%dx%d, %d warm-up frames)\n",
+               screen.c_str(), outPath.c_str(), W, H, frames);
+    }
     return 0;
 }

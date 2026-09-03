@@ -39,6 +39,30 @@ directly if you prefer:
 wsl -e bash -lc 'cd /mnt/<drive>/path/to/SquachWatch-Sim && make && ./squachsim clear out/clear.png'
 ```
 
+## GUI
+
+```
+squachgui
+```
+
+Builds, starts a local server and opens the browser. Pick a screen,
+background, theme or orientation from the panel and it re-renders
+immediately; animations play back at the speed the device runs them.
+"Save PNG" grabs the current frame. Ctrl-C in the console window stops
+it. Set `SQUACHSIM_PORT` to move it off 842.
+
+It's a browser GUI rather than a native window for a specific reason:
+Windows 10 has no WSLg, so an SDL window would need an X server or a
+native Windows toolchain installed. A page the Windows browser opens
+needs neither, and gets side-by-side comparison and instant orientation
+toggling for free.
+
+Frames cross the wire as raw RGB888 straight from the emulator's `--raw`
+mode and go into a canvas via `ImageData` -- no PNG encode on one side,
+no decode on the other. The warm-up is the expensive part (~2ms/frame)
+and it's paid once per render, so 45 animation frames cost barely more
+than one.
+
 ## Usage
 
 ```
@@ -55,6 +79,8 @@ colorcheck boot`
 | `--theme N` | palette index |
 | `--frames N` | animation warm-up frames before capture (default 90) |
 | `--onboard` | let Squachy's first-boot walkthrough run |
+| `--sequence N` | capture N consecutive frames instead of one |
+| `--raw PATH` | write raw RGB888 frames instead of PNGs (what the GUI consumes) |
 
 `make shots` renders one PNG per screen into `out/`.
 
