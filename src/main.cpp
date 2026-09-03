@@ -24,7 +24,6 @@
 #include "ui_hunt.h"
 #include "ui_colorcheck.h"
 #include "detection_info.h"
-#include "screencap.h"
 #include "ui_diary.h"
 #include "ui_outfit.h"
 #include "squachy.h"
@@ -1197,19 +1196,6 @@ void setup() {
 void loop() {
     uint32_t now = millis();
 
-    // A screenshot streams straight out of the live `frame` sprite over
-    // many iterations (see screencap.h), so everything that draws into
-    // that buffer has to hold still until it's done -- otherwise the
-    // captured image is stitched together from several different
-    // frames. Costs about a second of frozen UI and paused scanning per
-    // capture, which is the right trade for a deliberate one-shot.
-#if !defined(CYD35)
-    if (ScreenCap::busy()) {
-        ScreenCap::poll(frameBufferOk ? &frame : nullptr, tft.width(), tft.height());
-        return;
-    }
-#endif
-
     TouchPoint tp = pollTouch();
     // True only on the exact frame a touch begins/ends -- unlike
     // TOUCH_DEBOUNCE_MS below (a cooldown timer that still re-fires on a
@@ -2226,12 +2212,6 @@ void loop() {
         }
         frame.pushSprite(0, 0);
     }
-
-    // Answer a pending "SQCAP" screenshot request, if one arrived --
-    // here specifically, immediately after the push, so the buffer it
-    // reads is the frame that was just displayed rather than one caught
-    // half-drawn. A no-op (one Serial.available() check) otherwise.
-    ScreenCap::poll(frameBufferOk ? &frame : nullptr, tft.width(), tft.height());
 #endif
 
     prevTouchValid = tp.valid;
