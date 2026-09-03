@@ -2,12 +2,23 @@
   "name": "SquachWatch-CYD (2.8\" CYD)",
   "version": "0.0.0",
   "funding_url": "https://talkingsasquach.com",
-  "new_install_prompt_erase": true,
+  "new_install_prompt_erase": false,
   "builds": [
     {
       "chipFamily": "ESP32",
       "parts": [
-        { "path": "firmware-cyd-merged.bin", "offset": 0 }
+        {
+          "path": "cyd-bootloader.bin",
+          "offset": 4096
+        },
+        {
+          "path": "cyd-partitions.bin",
+          "offset": 32768
+        },
+        {
+          "path": "cyd-firmware.bin",
+          "offset": 65536
+        }
       ]
     }
   ]

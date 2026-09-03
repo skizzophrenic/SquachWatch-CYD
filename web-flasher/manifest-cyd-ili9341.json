@@ -2,12 +2,23 @@
   "name": "SquachWatch-CYD (2.8\" CYD, ILI9341)",
   "version": "0.0.0",
   "funding_url": "https://talkingsasquach.com",
-  "new_install_prompt_erase": true,
+  "new_install_prompt_erase": false,
   "builds": [
     {
       "chipFamily": "ESP32",
       "parts": [
-        { "path": "firmware-cyd-ili9341-merged.bin", "offset": 0 }
+        {
+          "path": "cyd-ili9341-bootloader.bin",
+          "offset": 4096
+        },
+        {
+          "path": "cyd-ili9341-partitions.bin",
+          "offset": 32768
+        },
+        {
+          "path": "cyd-ili9341-firmware.bin",
+          "offset": 65536
+        }
       ]
     }
   ]

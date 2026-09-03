@@ -138,15 +138,35 @@ jobs:
             manifest-awok.json
 
       - name: Assemble Pages site
+        # The flasher ships each board's three raw regions rather than
+        # the single merged image, and the manifests place them at their
+        # real offsets (0x1000/0x8000/0x10000). That matters: `esptool
+        # merge_bin` pads the gaps between those regions with 0xFF, and
+        # the gap between the partition table and the app is exactly
+        # where NVS lives (0x9000, 20K). Flashing the merged blob at
+        # offset 0 therefore wrote 20KB of 0xFF straight over saved
+        # settings -- confirmed against the shipped v1.4.1 image, where
+        # all 20480 bytes of that range are 0xFF -- so every web-flasher
+        # update silently factory-reset the device. Writing the three
+        # regions separately never touches 0x9000, which is what
+        # `pio run -t upload` has always done.
+        #
+        # The merged images are still built and attached to the release
+        # for manual `esptool write_flash 0x0` use; they just aren't what
+        # the flasher page serves. Note they still wipe NVS by the same
+        # mechanism, which for a deliberate full-image write is the
+        # expected "start clean" behaviour.
         run: |
           mkdir -p _site
           cp web-flasher/index.html _site/index.html
           cp web-flasher/manifest-cyd.json _site/manifest-cyd.json
           cp web-flasher/manifest-cyd-ili9341.json _site/manifest-cyd-ili9341.json
           cp web-flasher/manifest-awok.json _site/manifest-awok.json
-          cp firmware-cyd-merged.bin _site/firmware-cyd-merged.bin
-          cp firmware-cyd-ili9341-merged.bin _site/firmware-cyd-ili9341-merged.bin
-          cp firmware-awok-merged.bin _site/firmware-awok-merged.bin
+          for board in cyd cyd-ili9341 awok; do
+            cp "$board-bootloader.bin" "_site/$board-bootloader.bin"
+            cp "$board-partitions.bin" "_site/$board-partitions.bin"
+            cp "$board-firmware.bin"   "_site/$board-firmware.bin"
+          done
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

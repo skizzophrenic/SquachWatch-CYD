@@ -2,12 +2,23 @@
   "name": "SquachWatch-CYD (AWOK 2.4\")",
   "version": "0.0.0",
   "funding_url": "https://talkingsasquach.com",
-  "new_install_prompt_erase": true,
+  "new_install_prompt_erase": false,
   "builds": [
     {
       "chipFamily": "ESP32",
       "parts": [
-        { "path": "firmware-awok-merged.bin", "offset": 0 }
+        {
+          "path": "awok-bootloader.bin",
+          "offset": 4096
+        },
+        {
+          "path": "awok-partitions.bin",
+          "offset": 32768
+        },
+        {
+          "path": "awok-firmware.bin",
+          "offset": 65536
+        }
       ]
     }
   ]
