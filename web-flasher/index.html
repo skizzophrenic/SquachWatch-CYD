@@ -141,6 +141,14 @@
   .header-text{ flex:1 1 auto; min-width:0; }
   .starburst{
     flex:0 0 132px;
+    /* Pulled in off the right edge. Percentage rather than a fixed inset
+       so it tracks the viewport: the text block is centred by the
+       ::before spacer, and this margin eats into the badge's side of
+       that split, so too large a value here squeezes the wordmark until
+       it collides. That constraint is why the stacking breakpoint below
+       is 1000px rather than 860 -- the wordmark is ~565px at its
+       clamp() ceiling and needs the room. */
+    margin-right:11%;
     width:132px; height:132px;
     position:relative;
     display:grid;
@@ -205,13 +213,14 @@
 
   /* Below this width the wordmark grows into the badge's corner, so it
      stops floating and becomes a normal centered element under it. */
-  @media (max-width:860px){
+  @media (max-width:1000px){
     .header-inner{ flex-direction:column; padding:0 16px; }
     .header-inner::before{ display:none; }
     .starburst{
       margin:16px auto 0;
       transform:rotate(-6deg);
     }
+    .header-text{ flex:0 1 auto; }
     .starburst:hover, .starburst:focus-visible{ transform:rotate(-6deg) scale(1.09); }
     .starburst:active{ transform:rotate(-6deg) scale(0.97); }
     @keyframes sbPulse{

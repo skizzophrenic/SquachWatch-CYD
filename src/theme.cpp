@@ -1857,6 +1857,51 @@ void drawFireflies(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     }
 }
 
+// ---- tappable background bits -----------------------------------------
+// drawFire publishes its moon here every frame it draws one, and
+// backgroundTap() below tests against that. The timestamp matters: a
+// moon position left over from a background that is no longer on screen
+// must not stay tappable, and drawFire is simply not called once the
+// user cycles away.
+static int      s_moonX = -1, s_moonY = -1, s_moonR = 0;
+static uint32_t s_moonAt = 0;
+
+// Ten taps, each within MOON_TAP_WINDOW of the one before, summon the
+// werewolf. The window is what makes it a deliberate act rather than an
+// accumulation: a tap now and a tap five minutes from now should not
+// count toward the same thing.
+static const uint32_t MOON_TAP_WINDOW = 2500;
+static const uint8_t  MOON_TAPS_NEEDED = 10;
+static uint8_t  s_moonTaps  = 0;
+static uint32_t s_moonTapAt = 0;
+static uint32_t s_wolfAt    = 0;      // 0 = no werewolf on stage
+
+// Stage timings, all eased into each other. Nothing here pops: that is
+// the whole lesson of the tree that used to strobe in this same scene.
+static const uint32_t WOLF_EYES = 1300;   // eyes fade up in the dark
+static const uint32_t WOLF_BODY = 1100;   // silhouette resolves around them
+static const uint32_t WOLF_HOLD = 2600;   // it just stands there
+static const uint32_t WOLF_HOWL = 1400;   // head goes back
+static const uint32_t WOLF_GONE = 1500;   // fades back into the dark
+static const uint32_t WOLF_TOTAL = WOLF_EYES + WOLF_BODY + WOLF_HOLD +
+                                   WOLF_HOWL + WOLF_GONE;
+
+bool backgroundTap(int x, int y, uint32_t now) {
+    // Not drawn recently means not on screen.
+    if (s_moonX < 0 || (now - s_moonAt) > 250) return false;
+    const int dx = x - s_moonX, dy = y - s_moonY;
+    const int r  = s_moonR + 7;            // generous: it is a small target
+    if (dx * dx + dy * dy > r * r) return false;
+    if (s_wolfAt) return true;             // already out; eat the tap, do nothing
+    if ((now - s_moonTapAt) > MOON_TAP_WINDOW) s_moonTaps = 0;
+    s_moonTapAt = now;
+    if (++s_moonTaps >= MOON_TAPS_NEEDED) {
+        s_moonTaps = 0;
+        s_wolfAt   = now ? now : 1;        // never 0, that means "none"
+    }
+    return true;
+}
+
 void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     static const int CW = 4;
     // Grid is sized to the widest panel the build can actually run on.
@@ -1902,6 +1947,70 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         srcInited = true;
     }
 
+    // Colour ramp as a table instead of a branch chain plus color565
+    // arithmetic per cell. Heat only spans 0..HEAT_MAX, so the whole
+    // ramp is 49 RGB triples -- 147 bytes -- and the draw loop below
+    // becomes a single indexed load with no arithmetic at all. Stored
+    // packed rather than as components because the dither below works
+    // in heat space, not colour space, so nothing downstream needs the
+    // channels. Rebuilt when the palette changes, since the smoke tier
+    // fades to BG and BG is a runtime theme variable, not a constant.
+    // Same 4x4 ordered pattern ditherRGB uses; >>2 in the draw loop
+    // scales it to roughly -2..+1 heat units, which is a fraction of a
+    // colour step on the ramp.
+    static const int8_t FIRE_BAYER[16] = { -8,  0, -6,  2,
+                                            4, -4,  6, -2,
+                                           -5,  3, -7,  1,
+                                            7, -1,  5, -3 };
+    static const uint8_t HEAT_MAX = 48;
+    static uint16_t fireLUT[HEAT_MAX + 1];
+    static uint16_t lutBG = 0xFFFF;
+    if (lutBG != BG) {
+        const float bgR = (float)((BG >> 8) & 0xF8);
+        const float bgG = (float)((BG >> 3) & 0xFC);
+        const float bgB = (float)((BG << 3) & 0xF8);
+        for (int v = 0; v <= HEAT_MAX; v++) {
+            float r, g, b;
+            if (v < 9) {
+                // Faint drifting smoke fringe instead of a hard cutoff
+                // straight to background — this is what actually reads
+                // as smoke rather than the flame just vanishing.
+                const float k = (float)(v * 28) / 255.0f;
+                r = bgR + (60.0f - bgR) * k;
+                g = bgG + (60.0f - bgG) * k;
+                b = bgB + (75.0f - bgB) * k;
+            } else if (v < 22) {
+                r = 60.0f + (v - 9) * 15.0f; g = 0.0f; b = 0.0f;
+            } else if (v < 36) {
+                r = 255.0f; g = (v - 22) * 18.0f; b = 0.0f;
+            } else {
+                r = 255.0f; g = 200.0f + (v - 36) * 4.0f; b = (v - 36) * 18.0f;
+            }
+            fireLUT[v] = t.color565((uint8_t)(r < 0.0f ? 0.0f : (r > 255.0f ? 255.0f : r)),
+                                    (uint8_t)(g < 0.0f ? 0.0f : (g > 255.0f ? 255.0f : g)),
+                                    (uint8_t)(b < 0.0f ? 0.0f : (b > 255.0f ? 255.0f : b)));
+        }
+        lutBG = BG;
+    }
+
+    // Wind. The propagation step below used to drift each cell by a
+    // symmetric random(-1,2), so the fire had no net lean at any
+    // moment -- which is most of why it read as an effect rather than
+    // a fire. Three sines at different periods give a slow prevailing
+    // direction with gusts riding on it, and no repeat on a period
+    // anyone is going to notice.
+    float windF = sinf((float)now / 4300.0f) * 0.55f
+                + sinf((float)now / 1600.0f + 1.7f) * 0.30f
+                + sinf((float)now /  610.0f + 3.1f) * 0.15f;
+    if (windF >  1.0f) windF =  1.0f;
+    if (windF < -1.0f) windF = -1.0f;
+    // 72 here originally, which was a smear rather than a lean: at that
+    // rate most cells in a row stepped the same way every row, and heat
+    // travelled sideways faster than it rose, breaking the flames into
+    // horizontal streaks. A fifth of cells is enough to read as wind.
+    const int windChance = (int)(fabsf(windF) * 22.0f);
+    const int windDir    = (windF > 0.0f) ? 1 : -1;
+
     // Seed the bottom row from the sum of all independent sources
     // (Gaussian-ish falloff around each), instead of one shared wave —
     // this is what makes each flame flicker on its own schedule.
@@ -1918,61 +2027,73 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             if (g > 0.0f) acc[x] += g * flick;
         }
     }
+    float litSum = 0.0f;
     for (int x = 0; x < fw; x++) {
         float v = acc[x];
         if (v > 1.25f) v = 1.25f;
         uint8_t base = (uint8_t)(48.0f * (v / 1.25f));
         heat[(fh - 1) * MAXFW + x] = (random(0, 6) == 0) ? 0 : base;
+        litSum += (float)base;
     }
 
+    // How hard the fire is burning this frame, 0..1, smoothed so the
+    // scene lighting below flickers rather than strobes. Taken from
+    // the seed row because that is the fuel, and it leads the visible
+    // flame by the few frames heat takes to propagate up.
+    static float litSmooth = 0.0f;
+    float lit = litSum / ((float)fw * 34.0f);
+    if (lit > 1.0f) lit = 1.0f;
+    litSmooth += (lit - litSmooth) * 0.25f;
+
     // Propagate upward with random decay and a little horizontal drift
-    // — the classic Doom-fire trick. Decay range (was 0-3, now 0-2) is
-    // the actual height control: lower average decay means more rows
-    // of upward travel before a column's heat hits zero, so flames
-    // reach further up the band. Left the seed intensity (48, just
-    // below) alone -- the color-tier math below it (v<9/22/36 bands,
-    // "f = v - 36" at the top) is calibrated against that exact max;
-    // raising it would let f overflow uint8_t in the brightest tier.
+    // — the classic Doom-fire trick. Decay range is the actual height
+    // control: lower average decay means more rows of upward travel
+    // before a column's heat hits zero, so flames reach further up the
+    // band. Leave the seed intensity (48, just above) alone -- the
+    // colour ramp is calibrated against that exact max and raising it
+    // would run off the end of the table.
+    //
+    // Decay is heat-dependent, and deliberately only at the bottom of
+    // the range: anything with life left in it keeps the original
+    // random(0,3) and only the already-dying fringe below 10 cools
+    // faster. Two earlier attempts got this wrong in both directions --
+    // slowing the hot core raised flame height everywhere and the fire
+    // climbed the whole band, then speeding up every cool cell thinned
+    // the flames out because most cells are cool most of the time.
+    // Touching only the fringe tightens the haze between tongues and
+    // leaves the flame body exactly as it was.
     for (int y = 0; y < fh - 1; y++) {
         for (int x = 0; x < fw; x++) {
-            int decay = random(0, 3);
-            int nx = x + random(-1, 2);
-            if (nx < 0) nx = 0;
+            int drift = random(-1, 2);
+            if (windChance > 0 && random(0, 100) < windChance) drift += windDir;
+            // Reflect at the edges rather than clamp. Clamping means a
+            // cell at the downwind edge samples nx == itself every row,
+            // so that column stops mixing sideways and becomes a solid
+            // vertical bar that flashes on and off as the wind reverses.
+            // Symmetric drift hid this; a prevailing wind exposes it.
+            // Reflection keeps sampling inward, so the edge mixes like
+            // everywhere else.
+            int nx = x + drift;
+            if (nx < 0)   nx = -nx;
+            if (nx >= fw) nx = 2 * fw - 2 - nx;
+            if (nx < 0)   nx = 0;
             if (nx >= fw) nx = fw - 1;
-            int val = heat[(y + 1) * MAXFW + nx] - decay;
+            int src = heat[(y + 1) * MAXFW + nx];
+            int decay = (src < 10) ? random(0, 4) : random(0, 3);
+            int val = src - decay;
             if (val < 0) val = 0;
             heat[y * MAXFW + x] = (uint8_t)val;
         }
     }
 
-    for (int y = 0; y < fh; y++) {
-        for (int x = 0; x < fw; x++) {
-            uint8_t v = heat[y * MAXFW + x];
-            uint16_t col;
-            if (v == 0) {
-                col = BG;
-            } else if (v < 9) {
-                // Faint drifting smoke fringe instead of a hard cutoff
-                // straight to background — this is what actually reads
-                // as smoke rather than the flame just vanishing.
-                col = blend(BG, t.color565(60, 60, 75), (uint16_t)(v * 28));
-            } else if (v < 22) {
-                col = t.color565((uint8_t)(60 + (v - 9) * 15), 0, 0);
-            } else if (v < 36) {
-                col = t.color565(255, (uint8_t)((v - 22) * 18), 0);
-            } else {
-                uint8_t f = v - 36;
-                col = t.color565(255, (uint8_t)(200 + f * 4), (uint8_t)(f * 18));
-            }
-            t.fillRect(x * CW, yStart + y * CW, CW, CW, col);
-        }
-    }
+    // One clear for the whole band, so everything below can be drawn in
+    // depth order -- sky, then the tree, then the flames over both --
+    // and the fire loop can skip cold cells instead of painting them.
+    t.fillRect(0, yStart, w, bandH, BG);
 
-    // Spooky night sky showing through wherever the fire isn't — stars
-    // only draw where the heat grid says that cell is genuinely dark
-    // (below 9, the same smoke-fringe threshold the color tiers above
-    // use), so they never appear to shine through visible flame or
-    // smoke. Same twinkle mechanic as drawSunsetSky's stars.
+    // Night sky. Drawn before the flames, so a star is hidden by fire
+    // or smoke simply because the fire paints over it later -- no heat
+    // test needed. Same twinkle mechanic as drawSunsetSky.
     static const uint8_t NSTARS = 12;
     static uint8_t skyX[NSTARS], skyY[NSTARS], skyPh[NSTARS];
     static bool    skyInited = false;
@@ -1985,68 +2106,434 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         skyInited = true;
     }
     for (uint8_t i = 0; i < NSTARS; i++) {
-        int gx = skyX[i] / CW, gy = (skyY[i] - yStart) / CW;
-        if (gx < 0 || gx >= fw || gy < 0 || gy >= fh) continue;
-        if (heat[gy * MAXFW + gx] >= 9) continue;  // occluded by flame/smoke
         uint32_t tw = (now / 10 + (uint32_t)skyPh[i] * 22) % 300;
         if (tw > 220) continue;
         uint8_t bri = (tw < 100) ? 200 : (uint8_t)(200 - (tw - 100) * 2);
-        t.drawPixel(skyX[i], skyY[i], t.color565((uint8_t)(bri * 0.85f), (uint8_t)(bri * 0.9f), bri));
+        int gx = skyX[i] / CW, gy = (skyY[i] - yStart) / CW;
+        // Heat haze: a star with fire anywhere in the column below it
+        // wobbles by a pixel or so. Hot air genuinely does this to
+        // anything seen through it, and it costs one column scan.
+        int drawX = skyX[i];
+        if (gx >= 0 && gx < fw && gy >= 0 && gy < fh) {
+            for (int hy = gy + 1; hy < fh; hy++) {
+                if (heat[hy * MAXFW + gx] > 24) {
+                    drawX += (int)(sinf((float)now / 90.0f + (float)i) * 1.6f);
+                    break;
+                }
+            }
+        }
+        if (drawX < 0) drawX = 0;
+        if (drawX >= w) drawX = w - 1;
+        t.drawPixel(drawX, skyY[i], t.color565((uint8_t)(bri * 0.85f), (uint8_t)(bri * 0.9f), bri));
     }
 
     // A pale, slightly sickly moon in a top corner — a crescent via one
-    // full circle then a BG-colored circle biting a chunk out of it,
+    // full circle then a BG-coloured circle biting a chunk out of it,
     // the same trick used elsewhere in this file for shapes without a
-    // smooth-arc primitive to reach for. Only checks the heat at its
-    // own center cell (not its whole footprint) before drawing, which
-    // is enough given it sits high in the band where flames rarely
-    // reach — occasionally getting clipped by a tall flame tongue if
-    // one does get up there is a fine, minor cosmetic edge case.
+    // smooth-arc primitive. Drawn before the flames, so a tall tongue
+    // reaching it occludes it naturally.
     {
-        int mx = w - 22, my = yStart + 16, mr = 9;
-        int mgx = mx / CW, mgy = (my - yStart) / CW;
-        bool clearSky = !(mgx >= 0 && mgx < fw && mgy >= 0 && mgy < fh) || heat[mgy * MAXFW + mgx] < 9;
-        if (clearSky) {
-            t.fillCircle(mx, my, mr, t.color565(210, 235, 200));
-            t.fillCircle(mx + 5, my - 3, mr - 1, BG);
+        // Pulled in from w-22. The right tenth of the screen is the
+        // CLEAR gesture that cycles the background, and at w-22 the
+        // whole moon sat inside it -- so tapping the moon changed the
+        // scene out from under you, which is fatal for an egg that
+        // needs ten taps in a row.
+        const int mx = w - 46, my = yStart + 16, mr = 9;
+        s_moonX = mx; s_moonY = my; s_moonR = mr; s_moonAt = now;
+
+        // The crescent is a full disc with a background disc bitten out
+        // of it. Sliding that bite off the edge is all "full moon"
+        // takes, which makes the tap counter free to display: the moon
+        // waxes as taps land, and is full while the werewolf is out.
+        int bite = 5;
+        if (s_wolfAt) {
+            bite = 40;                                  // full
+        } else if (s_moonTaps) {
+            bite = 5 + (int)(s_moonTaps * 35 / MOON_TAPS_NEEDED);
+        }
+        t.fillCircle(mx, my, mr, t.color565(210, 235, 200));
+        if (bite < 2 * mr + 4) t.fillCircle(mx + bite, my - 3, mr - 1, BG);
+    }
+
+    // Where the owl ended up, so the quip bubble further down can find
+    // it. -1 means the band was too short to draw a tree at all.
+    int owlX = -1, owlY = -1;
+
+    // Spooky tree, standing BEHIND the fire. Being behind is the whole
+    // point: it is drawn before the flames, so they cover it a pixel at
+    // a time. The previous tree was drawn last and faked that with a
+    // heat test that skipped the entire tree on any frame where the fire
+    // reached its base, which at 33fps is a hard on/off strobe -- a
+    // flashing bar rather than a tree.
+    //
+    // Shape-wise it is a stack of horizontal spans whose width shrinks
+    // and whose centre follows a shallow S-curve, rather than one
+    // rectangle. The taper and the lean are most of what separates a
+    // tree from a post.
+    {
+        const int   tx        = w / 6;
+        const int   groundY   = yEnd - 2;
+        const int   trunkTopY = yStart + bandH / 6;
+        const float span      = (float)(groundY - trunkTopY);
+        if (span > 24.0f) {
+            // Flat, unlit bark. Tying this to litSmooth meant the whole
+            // tree pulsed with the fire, which read as the tree itself
+            // flickering rather than as light falling on it -- and it is
+            // what made the trunk obvious enough to look like a bar in
+            // the first place. A silhouette behind the fire wants to sit
+            // still and stay dark.
+            const uint16_t bark = t.color565(68, 47, 30);
+
+            // Trunk. leanAt is reused by the limbs and the owl so they
+            // all attach to the same curve.
+            for (int y = groundY; y >= trunkTopY; y--) {
+                const float f = (float)(groundY - y) / span;
+                int halfW = (int)(5.0f - 3.6f * f);
+                if (halfW < 1) halfW = 1;
+                const int cxT = tx + (int)(sinf(f * 2.4f) * 6.0f - f * 3.0f);
+                t.drawFastHLine(cxT - halfW, y, halfW * 2 + 1, bark);
+            }
+            // Root flare, so it grows out of the ground instead of being
+            // planted in it.
+            t.drawFastHLine(tx - 9, groundY,     19, bark);
+            t.drawFastHLine(tx - 7, groundY - 1, 15, bark);
+
+            // Bare limbs: three segments each, thinning as they go, with
+            // one fork. Alternating sides up the trunk.
+            static const struct { float f; int8_t dir; float len; } LIMB[5] = {
+                { 0.50f, -1, 1.00f }, { 0.63f,  1, 0.88f },
+                { 0.75f, -1, 0.70f }, { 0.85f,  1, 0.60f },
+                { 0.93f, -1, 0.44f }
+            };
+            for (uint8_t i = 0; i < 5; i++) {
+                const float f = LIMB[i].f;
+                const int   d = LIMB[i].dir;
+                const int  by = groundY - (int)(span * f);
+                const int  bx = tx + (int)(sinf(f * 2.4f) * 6.0f - f * 3.0f);
+                const float L = span * 0.30f * LIMB[i].len;
+                const int x1 = bx + (int)(L * 0.55f) * d, y1 = by - (int)(L * 0.34f);
+                const int x2 = x1 + (int)(L * 0.42f) * d, y2 = y1 - (int)(L * 0.50f);
+                const int x3 = x2 + (int)(L * 0.26f) * d, y3 = y2 - (int)(L * 0.20f);
+                t.drawLine(bx, by,     x1, y1, bark);
+                t.drawLine(bx, by + 1, x1, y1 + 1, bark);   // thicken at the trunk
+                t.drawLine(x1, y1, x2, y2, bark);
+                t.drawLine(x2, y2, x3, y3, bark);
+                t.drawLine(x1, y1, x1 + (int)(L * 0.12f) * d, y1 - (int)(L * 0.55f), bark);
+            }
+
+            // Owl, on a LEFT-hand limb and high up the trunk, where the
+            // flames drawn later rarely reach. Its eyes are the only
+            // saturated thing in the upper band, which is what makes it
+            // read at this size. The blink is deliberate and slow --
+            // about 180ms every four seconds -- rather than the
+            // frame-rate flicker the old tree had.
+            {
+                const uint8_t LI = 2;                   // left-pointing limb
+                const float f = LIMB[LI].f;
+                const int  by = groundY - (int)(span * f);
+                const int  bx = tx + (int)(sinf(f * 2.4f) * 6.0f - f * 3.0f);
+                const float L = span * 0.30f * LIMB[LI].len;
+                const int  ox = bx - (int)(L * 0.55f);  // out along it, leftward
+                const int  oy = by - (int)(L * 0.34f) - 9;
+                owlX = ox; owlY = oy;
+
+                const uint16_t owlBody = t.color565(158, 140, 116);
+                const uint16_t owlDark = t.color565(12, 10, 8);
+
+                t.fillRect(ox - 4, oy,     9, 9, owlBody);   // body
+                t.drawFastHLine(ox - 3, oy + 9, 7, owlBody); // tail
+                t.fillRect(ox - 5, oy - 4, 11, 5, owlBody);  // head
+                t.drawLine(ox - 5, oy - 4, ox - 6, oy - 7, owlBody);  // ear tufts
+                t.drawLine(ox + 5, oy - 4, ox + 6, oy - 7, owlBody);
+
+                if ((now % 4000) < 180) {
+                    t.drawFastHLine(ox - 4, oy - 1, 3, owlDark);
+                    t.drawFastHLine(ox + 2, oy - 1, 3, owlDark);
+                } else {
+                    const uint16_t eye = t.color565(255, 196, 44);
+                    t.fillRect(ox - 4, oy - 2, 3, 3, eye);
+                    t.fillRect(ox + 2, oy - 2, 3, 3, eye);
+                    t.drawPixel(ox - 3, oy - 1, owlDark);
+                    t.drawPixel(ox + 3, oy - 1, owlDark);
+                }
+                t.drawPixel(ox, oy,     owlDark);            // beak
+                t.drawPixel(ox, oy + 1, owlDark);
+            }
         }
     }
 
-    // A gnarled dead tree off to one side, like it's standing right at
-    // the edge of the firelight — drawn last among the sky-layer
-    // elements so it silhouettes over any stars behind it. One
-    // occlusion check at its base (not per-branch) rather than a full
-    // footprint check: if the fire's right up against its trunk this
-    // frame, the whole tree skips drawing that frame instead of
-    // rendering a half-erased, glitchy-looking partial tree — reads as
-    // a tall flame tongue briefly eclipsing it, which fits the scene.
+    // ---- werewolf ------------------------------------------------------
+    // Summoned by ten taps on the moon (see backgroundTap above). Drawn
+    // here, between the tree and the flames, so fire crosses in front of
+    // it exactly like the tree -- it is standing back at the treeline,
+    // not in the fire.
+    //
+    // Every stage cross-fades. The eyes arrive first, alone in the dark,
+    // and the body resolves around them a beat later; at this size two
+    // saturated points read long before a silhouette does, which is the
+    // same reason the owl works.
+    if (s_wolfAt) {
+        const uint32_t e = now - s_wolfAt;
+        if (e >= WOLF_TOTAL) {
+            s_wolfAt = 0;
+        } else {
+            float eyeF = 1.0f, bodyF = 1.0f, howl = 0.0f;
+            if (e < WOLF_EYES) {
+                eyeF  = (float)e / (float)WOLF_EYES;
+                bodyF = 0.0f;
+            } else if (e < WOLF_EYES + WOLF_BODY) {
+                bodyF = (float)(e - WOLF_EYES) / (float)WOLF_BODY;
+            } else if (e >= WOLF_EYES + WOLF_BODY + WOLF_HOLD) {
+                const uint32_t h = e - (WOLF_EYES + WOLF_BODY + WOLF_HOLD);
+                howl = (h < WOLF_HOWL) ? (float)h / (float)WOLF_HOWL : 1.0f;
+            }
+            // Common fade-out over the tail of the whole sequence.
+            if (e > WOLF_TOTAL - WOLF_GONE) {
+                const float k = 1.0f - (float)(e - (WOLF_TOTAL - WOLF_GONE)) / (float)WOLF_GONE;
+                eyeF *= k; bodyF *= k;
+            }
+
+            // Moonlit blue-grey rather than brown: brown quantises to
+            // the same RGB332 entry as the tree bark and the two would
+            // read as one object.
+            const uint16_t fur = blend(BG, t.color565(73, 73, 85),
+                                       (uint16_t)(255.0f * bodyF));
+            const uint16_t eye = blend(BG, t.color565(255, 90, 20),
+                                       (uint16_t)(255.0f * eyeF));
+
+            // Standing back up the slope rather than down on the fire's
+            // own ground line. Two things live at the bottom of this
+            // band and both beat a background to the pixel: the counter
+            // rows the CLEAR screen prints over the top, and the densest
+            // part of the fire itself. Placed at the ground line it drew
+            // correctly and was simply never visible -- measured at
+            // y 160..201, entirely underneath FLOCK/DRONE.
+            //
+            // x is off the mascot too. Squachy is centred and about 96px
+            // wide, so at 0.74 the wolf's shoulder ran under his arm.
+            const int gy = yStart + (int)((yEnd - yStart) * 0.66f);
+            const int wx = (int)(w * 0.80f);
+            // Breathing, and a slow rise onto the haunches for the howl.
+            const int breathe = (int)(sinf((float)now / 520.0f) * 1.0f);
+            const int lift    = (int)(howl * 4.0f);
+
+            // BIPEDAL, hunched. Two earlier passes drew this as a
+            // quadruped and both read as a deer or a large dog: at forty
+            // pixels a four-legged silhouette carries almost no species
+            // information, and the ears end up doing all the work, which
+            // they cannot. Standing it up is what makes it unambiguous --
+            // a hunched upright thing with a snout and hanging arms is
+            // one specific monster, and nothing else in the scene shares
+            // that outline.
+            const int bob = breathe;
+            const int hx  = wx - 12;
+            const int hy  = gy - 43 + bob - lift;
+            const int snoutUp = (int)(howl * 7.0f);
+
+            if (bodyF > 0.02f) {
+                // Legs and splayed feet.
+                t.fillRect(wx -  7, gy - 15, 6, 15, fur);
+                t.fillRect(wx +  2, gy - 15, 6, 15, fur);
+                t.fillRect(wx - 11, gy -  3, 10, 3, fur);
+                t.fillRect(wx +  2, gy -  3, 10, 3, fur);
+                // Torso, and a wider hunch across the shoulders.
+                t.fillRect(wx -  8, gy - 31 + bob, 17, 17, fur);
+                t.fillRect(wx - 11, gy - 35 + bob, 22,  6, fur);
+                // Arms hanging long, with claws -- the give-away that it
+                // is standing rather than on all fours.
+                t.fillRect(wx - 15, gy - 33 + bob,  5, 18, fur);
+                t.fillRect(wx + 11, gy - 33 + bob,  5, 18, fur);
+                t.fillRect(wx - 17, gy - 16 + bob,  7,  3, fur);
+                t.fillRect(wx + 11, gy - 16 + bob,  7,  3, fur);
+                // Neck, drawn before the head and sized from lift so it
+                // stretches as the head goes back. Without it the howl
+                // detached the head from the shoulders and left it
+                // floating above the body.
+                t.fillRect(hx + 2, hy + 6, 7, 9 + lift, fur);
+                // Head sunk forward onto the shoulders, long muzzle.
+                t.fillRect(hx, hy, 11, 8, fur);
+                t.fillRect(hx - 6, hy + 3 - snoutUp, 7, 4, fur);
+                // Ears as chunky filled triangles. Thin diagonal lines
+                // here were the single biggest reason the earlier tries
+                // read as antlers.
+                t.fillRect(hx + 1, hy - 3, 3, 3, fur);
+                t.fillRect(hx + 1, hy - 5, 2, 2, fur);
+                t.fillRect(hx + 7, hy - 3, 3, 3, fur);
+                t.fillRect(hx + 8, hy - 5, 2, 2, fur);
+            }
+            // Eyes last so nothing paints over them; they narrow to
+            // slits at the top of the howl.
+            if (howl > 0.55f) {
+                t.drawFastHLine(hx + 1, hy + 3, 3, eye);
+                t.drawFastHLine(hx + 6, hy + 3, 3, eye);
+            } else {
+                t.fillRect(hx + 1, hy + 2, 3, 3, eye);
+                t.fillRect(hx + 6, hy + 2, 3, 3, eye);
+            }
+        }
+    }
+
+    // Draw the flames over the sky and tree above, coalescing runs of
+    // identical colour into one fillRect. Cold cells are SKIPPED
+    // rather than painted with BG, which is what lets anything sit
+    // behind the fire at all: the band is cleared once further up and
+    // the flames paint over whatever was drawn into it. The old loop
+    // painted every cell, so nothing could ever be behind it -- the
+    // tree had to be drawn last and fake occlusion with a per-frame
+    // heat test, which strobed. Draw order does that job correctly
+    // and for free.
+    for (int y = 0; y < fh; y++) {
+        const uint8_t* row = &heat[y * MAXFW];
+        int      runStart = -1;              // -1 == no run open
+        uint16_t runCol   = 0;
+        for (int x = 0; x < fw; x++) {
+            uint8_t v = row[x];
+            if (v > HEAT_MAX) v = HEAT_MAX;
+            if (v == 0) {                    // cold: leave whatever is behind
+                if (runStart >= 0) {
+                    t.fillRect(runStart * CW, yStart + y * CW,
+                               (x - runStart) * CW, CW, runCol);
+                    runStart = -1;
+                }
+                continue;
+            }
+            // Dither along the heat ramp rather than in RGB. The flame
+            // body below heat 36 is pure red, so an RGB dither can only
+            // ever ADD green and blue that do not belong: in RGB332
+            // those are 3- and 2-bit channels, so the offsets crossed
+            // whole levels and turned dark red into olive-brown. Nudging
+            // the heat index keeps every cell on the calibrated ramp,
+            // breaks banding the same, and costs an add rather than
+            // three float clamps and a colour conversion.
+            int vd = (int)v + (FIRE_BAYER[(x & 3) | ((y & 3) << 2)] >> 2);
+            if (vd < 1)        vd = 1;       // never dither a lit cell dark
+            if (vd > HEAT_MAX) vd = HEAT_MAX;
+            uint16_t col = fireLUT[vd];
+            if (runStart < 0) { runStart = x; runCol = col; continue; }
+            if (col != runCol) {
+                t.fillRect(runStart * CW, yStart + y * CW,
+                           (x - runStart) * CW, CW, runCol);
+                runStart = x;
+                runCol   = col;
+            }
+        }
+        if (runStart >= 0) {
+            t.fillRect(runStart * CW, yStart + y * CW,
+                       (fw - runStart) * CW, CW, runCol);
+        }
+    }
+
+    // Owl quips. Drawn AFTER the flames, unlike the owl itself: a
+    // half-occluded glyph reads as a rendering fault rather than as
+    // depth, and text is the one thing in this scene that cannot afford
+    // to look broken. The owl is high enough that flames seldom reach it
+    // anyway, so the bubble rarely sits over fire.
+    //
+    // Timing is deliberately slow. A quip every eight and a half seconds
+    // held for two and a half is a character doing a bit; anything
+    // faster is a flicker, which is exactly the mistake the old tree
+    // made.
+    if (owlX >= 0) {
+        // Same deadpan surveillance-paranoia the rest of the project
+        // speaks in, not owl noises. The joke is that the one thing in
+        // this scene actually watching you is the bird.
+        //
+        // Kept short for a hard layout reason as much as a comic one:
+        // the bubble is drawn by the background, and the mascot is drawn
+        // over the background afterwards, so a wide bubble gets its last
+        // letters clipped by Squachy. See the placement below.
+        static const char* const QUIPS[] = {
+            "who? me?",    "no comment",  "wasn't me",   "i saw that",
+            "seen worse",  "touch grass", "unsubscribe", "still legal",
+            "for now",     "log off",     "big opsec",   "hard nope",
+            "off grid",    "shh"
+        };
+        static const uint8_t NQUIP = sizeof(QUIPS) / sizeof(QUIPS[0]);
+        // While the werewolf is on stage the owl has other priorities.
+        // Reuses the same bubble, just a different list and without
+        // waiting for the 30s slot to come round.
+        static const char* const SCARED[] = { "nope", "brb", "eep", "shh", "bye" };
+        const bool wolfOut = (s_wolfAt != 0);
+        const uint32_t CYCLE = 30000, SHOW = 3400;
+        if (wolfOut || (now % CYCLE) < SHOW) {
+            // Stride of 5 against 14 entries: coprime, so it still visits
+            // every line, just not in list order. Straight sequential
+            // reads as a loop once you have watched it a few times.
+            const char* q = wolfOut
+                ? SCARED[((now - s_wolfAt) / 1400) % (sizeof(SCARED) / sizeof(SCARED[0]))]
+                : QUIPS[((now / CYCLE) * 5 + 2) % NQUIP];
+            t.setTextSize(1);
+            const int bw = t.textWidth(q) + 7;
+            const int bh = 11;
+            // Placement has to dodge the mascot. drawFire is the
+            // BACKGROUND: ui_clear draws Squachy on top of it afterwards,
+            // so anything of ours reaching into the middle third gets
+            // overpainted mid-word. Preferred spot is to the right of the
+            // owl, back toward the centre; when the line is too wide for
+            // that gap the bubble goes ABOVE the owl instead, where it
+            // clears the top of his head, and only then falls back to
+            // clamping against the screen edge.
+            const int squachyLeft = (int)(w * 0.34f);
+            int bx = owlX + 10;
+            int by = owlY - 14;
+            if (bx + bw > squachyLeft) {
+                bx = owlX - bw / 2 + 4;      // centred over the owl
+                by = owlY - 26;
+            }
+            if (bx + bw > w - 2)    bx = w - 2 - bw;
+            if (bx < 1)             bx = 1;
+            if (by < yStart + 1)    by = yStart + 1;
+            const uint16_t paper = t.color565(236, 232, 218);
+            const uint16_t ink   = t.color565(16, 12, 10);
+            t.fillRect(bx, by, bw, bh, paper);
+            t.drawRect(bx, by, bw, bh, ink);
+            // Tail points at the owl, not at the corner of the bubble.
+            // When a wide line pushes the bubble above the owl it ends up
+            // centred over him, and a tail pinned to the left edge then
+            // points at empty branch, which reads as two unrelated
+            // objects rather than one speaking.
+            int tailX = owlX - 1;
+            if (tailX < bx + 2)      tailX = bx + 2;
+            if (tailX > bx + bw - 6) tailX = bx + bw - 6;
+            t.drawFastHLine(tailX, by + bh,     4, paper);
+            t.drawFastHLine(tailX, by + bh + 1, 2, paper);
+            t.drawPixel(tailX - 1, by + bh, ink);
+            t.setTextColor(ink, paper);
+            t.setCursor(bx + 4, by + 2);
+            t.print(q);
+        }
+    }
+
+    // The fuel. Flames used to rise out of the bottom edge from
+    // nothing, which is the sort of thing nobody consciously notices
+    // but which stops the scene reading as a campfire. Drawn after the
+    // heat grid so flames come off the logs rather than through them,
+    // and lit by litSmooth along with the rest of the scene.
     {
-        int tx = w / 5;
-        int groundY = yEnd - 2;
-        int trunkTopY = yStart + bandH * 3 / 10;
-        int tgx = tx / CW, tgy = (groundY - 4 - yStart) / CW;
-        bool clearTree = !(tgx >= 0 && tgx < fw && tgy >= 0 && tgy < fh) || heat[tgy * MAXFW + tgx] < 14;
-        if (clearTree && trunkTopY < groundY - 8) {
-            uint16_t bark = t.color565(15, 8, 5);
-            t.fillRect(tx - 4, trunkTopY, 8, groundY - trunkTopY, bark);
-            t.fillRect(tx - 5, groundY - 10, 10, 10, bark);
-            // A couple of gnarled main limbs, each forking into a
-            // smaller twig near the tip — the classic bare-winter-tree
-            // silhouette shape.
-            t.drawLine(tx - 2, trunkTopY + 6, tx - 16, trunkTopY - 10, bark);
-            t.drawLine(tx - 16, trunkTopY - 10, tx - 22, trunkTopY - 18, bark);
-            t.drawLine(tx - 16, trunkTopY - 10, tx - 12, trunkTopY - 20, bark);
-            t.drawLine(tx + 2, trunkTopY + 4, tx + 14, trunkTopY - 8, bark);
-            t.drawLine(tx + 14, trunkTopY - 8, tx + 20, trunkTopY - 16, bark);
-            t.drawLine(tx + 14, trunkTopY - 8, tx + 10, trunkTopY - 18, bark);
-            t.drawLine(tx, trunkTopY, tx - 3, trunkTopY - 16, bark);
-            t.drawLine(tx - 3, trunkTopY - 16, tx - 8, trunkTopY - 24, bark);
+        uint16_t logCol = t.color565((uint8_t)(30.0f + litSmooth * 62.0f),
+                                     (uint8_t)(16.0f + litSmooth * 26.0f),
+                                     (uint8_t)(10.0f + litSmooth * 10.0f));
+        uint16_t logLit = t.color565((uint8_t)(150.0f + litSmooth * 105.0f),
+                                     (uint8_t)( 40.0f + litSmooth *  90.0f),
+                                     (uint8_t)( 10.0f + litSmooth *  20.0f));
+        int cx = w / 2, gy = yEnd - 6;
+        int halfA = w / 5, halfB = w / 7;
+        if (halfB < 4) halfB = 4;
+        t.fillRect(cx - halfA, gy,     halfA * 2, 5, logCol);
+        t.fillRect(cx - halfB, gy - 4, halfB * 2, 4, logCol);
+        // Glowing gaps between the logs, flickering with the fire.
+        for (int k = -2; k <= 2; k++) {
+            int gxp = cx + k * (halfB / 2);
+            if (((now / 120) + (uint32_t)(k + 2)) % 3) t.drawFastHLine(gxp - 3, gy - 1, 6, logLit);
         }
     }
 
     // Embers: a handful of sparks pop free of the flame and drift
     // upward, cooling from bright yellow through orange to nothing —
-    // sells the "fire" far more than the heat grid alone.
+    // sells the "fire" far more than the heat grid alone. They spawn
+    // at a randomly chosen flame source rather than anywhere across
+    // the width, which is what the old version did: an ember could pop
+    // out of bare ground where there was no flame at all.
     static const uint8_t NE = 8;
     static float    ex[NE], ey[NE], evy[NE];
     static bool     emberInited = false;
@@ -2057,14 +2544,20 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     for (uint8_t i = 0; i < NE; i++) {
         if (ey[i] < (float)yStart) {
             if (random(0, 30) == 0) {
-                ex[i]  = (float)random(0, w);
+                uint8_t si = (uint8_t)random(0, NSRC);
+                ex[i]  = srcX[si] * (float)CW + (float)random(-6, 7);
+                if (ex[i] < 0.0f) ex[i] = 0.0f;
+                if (ex[i] > (float)(w - 1)) ex[i] = (float)(w - 1);
                 ey[i]  = (float)(yEnd - 6);
                 evy[i] = 0.6f + (float)random(0, 100) / 100.0f * 0.8f;
             }
             continue;
         }
         ey[i] -= evy[i];
-        ex[i] += sinf((float)now / 260.0f + i) * 0.4f;
+        // Embers are light enough that the wind moves them noticeably
+        // more than it bends the flame body.
+        ex[i] += windF * 0.85f + sinf((float)now / 260.0f + i) * 0.4f;
+        if (ex[i] < 0.0f || ex[i] > (float)(w - 1)) { ey[i] = (float)(yStart - 1); continue; }
         float lifeFrac = (ey[i] - (float)yStart) / (float)bandH;
         if (lifeFrac < 0.0f) lifeFrac = 0.0f;
         uint16_t emberCol = (lifeFrac > 0.6f)

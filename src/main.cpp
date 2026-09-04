@@ -1571,6 +1571,16 @@ void loop() {
             if (!boring && Squachy::onboardingActive() && tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
                 Squachy::onboardingTapAdvance(tp.x, tp.y)) {
                 lastTouch = now;
+            } else if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
+                       Theme::backgroundTap(tp.x, tp.y, now)) {
+                // Something tappable in the background itself claimed
+                // this touch -- currently only the moon on the FIRE
+                // scene. Checked BEFORE the edge zone below on purpose:
+                // the moon sits high on the right, and while it has been
+                // moved clear of the background-cycling sliver, ordering
+                // it first means the egg cannot be broken by a later
+                // change to either one.
+                lastTouch = now;
             } else if (touchJustDown && inEdgeZone && !Settings::backgroundLocked() &&
                        (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 // The debounce check above matters more here than it

@@ -236,6 +236,19 @@ namespace Theme {
     // through a black -> red -> orange -> yellow -> white palette.
     void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);
 
+    // A tap that landed on the idle background, in screen coordinates.
+    // Backgrounds with something tappable in them consume it and return
+    // true, in which case the caller must NOT also treat the tap as one
+    // of the CLEAR screen gestures. Everything else returns false and
+    // nothing changes.
+    //
+    // Only FIRE uses this today: ten taps on its moon summon a
+    // werewolf. The moon waxes from crescent toward full as the taps
+    // land, which is the only feedback that the count is going up --
+    // without it the egg is unfindable and, worse, unconfirmable when
+    // you are halfway through it.
+    bool backgroundTap(int x, int y, uint32_t now);
+
     // Falling snow with a gentle sideways sway, a few larger bright
     // flakes mixed into a field of smaller dim ones.
     void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);
