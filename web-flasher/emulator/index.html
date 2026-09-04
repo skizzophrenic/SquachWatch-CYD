@@ -108,7 +108,12 @@
       <div class="btns">
         <button id="trigger">Trigger</button>
         <button id="reboot" class="ghost">Reboot</button>
+        <button id="wipe" class="ghost">Factory reset</button>
       </div>
+      <p style="margin:10px 0 0;font-size:12px;color:var(--mute)">
+        Settings persist in this browser. Factory reset clears them and
+        replays first boot &mdash; the colour check and Squachy's walkthrough.
+      </p>
     </div>
 
     <div class="card">
@@ -234,6 +239,20 @@ window.addEventListener('pointerup', () => { if (held) { held = false; queue.pus
 
 $('trigger').onclick = () => queue.push({det:+$('type').value});
 $('reboot').onclick  = () => { queue.length = 0; held = false; setup(); lastW = 0; };
+
+// Settings live in localStorage under one key per NVS namespace (see
+// Preferences.h in the emulator repo). Clearing them and re-running
+// setup() puts the device back to first boot -- the equivalent of
+// deleting the .nvs directory the native emulator uses. Done from JS
+// rather than a new wasm export so it stays a page concern.
+$('wipe').onclick = () => {
+  try {
+    Object.keys(localStorage)
+      .filter(k => k.startsWith('squachsim.nvs.'))
+      .forEach(k => localStorage.removeItem(k));
+  } catch (e) { /* private mode: nothing was persisted to begin with */ }
+  queue.length = 0; held = false; setup(); lastW = 0;
+};
 
 let frames = 0, mark = performance.now();
 function tick() {

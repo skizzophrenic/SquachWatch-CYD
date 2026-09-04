@@ -106,6 +106,123 @@
     margin:6px 0 0;
   }
 
+  /* ---- "Try it now" sunburst ----------------------------------------
+     The emulator link used to live only in the about text at the very
+     bottom, which is past the point most people stop reading. This is
+     the same link as a retro sticker badge in the header.
+
+     Two stacked polygons: the back one is rotated half a point so its
+     spikes show between the front one's, which is what sells it as a
+     sticker rather than a star icon. Both are geometry, not an image --
+     it scales to any DPI and costs nothing to load. */
+  /* Flex row rather than an absolutely-positioned badge: the wordmark
+     is clamp()-sized and its width depends on the viewport AND on
+     whether Orbitron actually loaded, so there is no fixed inset that
+     reliably clears it -- the first attempt at this sat on top of the
+     final letter. Laying them out as siblings means they cannot
+     overlap at any width or in any fallback font. */
+  .header-inner{
+    display:flex;
+    align-items:center;
+    max-width:1280px;
+    margin:0 auto;
+    padding:0 24px;
+  }
+  /* An invisible twin of the badge on the left. Without it, pushing the
+     badge to the right edge shoves the wordmark off-centre by half the
+     badge's width; with it, the text block is centred on the screen and
+     the badge still sits out at the edge. Cheaper than absolute
+     positioning, and it cannot overlap the wordmark at any width or in
+     any fallback font -- which the first version of this did. */
+  .header-inner::before{
+    content:"";
+    flex:0 0 132px;
+  }
+  .header-text{ flex:1 1 auto; min-width:0; }
+  .starburst{
+    flex:0 0 132px;
+    width:132px; height:132px;
+    position:relative;
+    display:grid;
+    place-items:center;
+    text-decoration:none;
+    transform:rotate(-13deg);
+    transition:transform 0.18s ease;
+    filter:drop-shadow(0 0 12px rgba(255,45,120,0.55));
+  }
+  .starburst:hover, .starburst:focus-visible{
+    transform:rotate(-13deg) scale(1.09);
+  }
+  .starburst:focus-visible{ outline:none; }
+  .starburst:focus-visible .sb-front{ stroke:var(--cyan); stroke-width:3; }
+  .starburst:active{ transform:rotate(-13deg) scale(0.97); }
+  .starburst svg{
+    position:absolute; inset:0;
+    width:100%; height:100%;
+  }
+  .sb-back{
+    fill:var(--vapor-purple);
+    transform-origin:60px 60px;
+    animation:sbSpin 24s linear infinite;
+  }
+  .sb-front{ fill:url(#sbGrad); }
+  @keyframes sbSpin{ to{ transform:rotate(360deg); } }
+  /* Sits still, breathes slightly -- enough to catch the eye in
+     peripheral vision without turning into a distraction while someone
+     is trying to read the flashing steps. */
+  @keyframes sbPulse{
+    0%,100%{ transform:rotate(-13deg) scale(1); }
+    50%    { transform:rotate(-13deg) scale(1.045); }
+  }
+  .starburst{ animation:sbPulse 2.6s ease-in-out infinite; }
+  .starburst:hover, .starburst:focus-visible{ animation:none; }
+
+  .sb-text{
+    position:relative;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    line-height:1;
+    color:#2a0016;
+    text-align:center;
+    pointer-events:none;
+  }
+  .sb-text b{
+    font-family:'Orbitron', sans-serif;
+    font-weight:900;
+    font-size:1.02rem;
+    letter-spacing:0.02em;
+  }
+  .sb-text b + b{ margin-top:2px; }
+  .sb-text i{
+    font-family:'VT323', monospace;
+    font-style:normal;
+    font-size:0.72rem;
+    letter-spacing:0;
+    margin-top:3px;
+    color:#5c0033;
+  }
+
+  /* Below this width the wordmark grows into the badge's corner, so it
+     stops floating and becomes a normal centered element under it. */
+  @media (max-width:860px){
+    .header-inner{ flex-direction:column; padding:0 16px; }
+    .header-inner::before{ display:none; }
+    .starburst{
+      margin:16px auto 0;
+      transform:rotate(-6deg);
+    }
+    .starburst:hover, .starburst:focus-visible{ transform:rotate(-6deg) scale(1.09); }
+    .starburst:active{ transform:rotate(-6deg) scale(0.97); }
+    @keyframes sbPulse{
+      0%,100%{ transform:rotate(-6deg) scale(1); }
+      50%    { transform:rotate(-6deg) scale(1.045); }
+    }
+  }
+  @media (prefers-reduced-motion:reduce){
+    .starburst, .sb-back{ animation:none; }
+  }
+
   main{
     max-width:640px;
     margin:0 auto;
@@ -508,8 +625,25 @@
 <div class="horizon"></div>
 
 <header>
-  <h1 class="wordmark">SQUACHWATCH</h1>
-  <p class="tagline">&gt;&gt; WEB FLASHER &lt;&lt;</p>
+  <div class="header-inner">
+    <div class="header-text">
+      <h1 class="wordmark">SQUACHWATCH</h1>
+      <p class="tagline">&gt;&gt; WEB FLASHER &lt;&lt;</p>
+    </div>
+    <a class="starburst" href="./emulator/" aria-label="Try SquachWatch now in your browser, no install needed">
+      <svg viewBox="0 0 120 120" aria-hidden="true" focusable="false">
+        <defs>
+          <linearGradient id="sbGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#fffb96"/>
+            <stop offset="100%" stop-color="#ff71ce"/>
+          </linearGradient>
+        </defs>
+        <polygon class="sb-back"  points="70.2,1.9 75.0,18.7 89.5,8.9 88.3,26.3 105.2,22.1 98.1,38.0 115.4,39.8 103.3,52.4 119.0,60.0 103.3,67.6 115.4,80.2 98.1,82.0 105.2,97.9 88.3,93.7 89.5,111.1 75.0,101.3 70.2,118.1 60.0,104.0 49.8,118.1 45.0,101.3 30.5,111.1 31.7,93.7 14.8,97.9 21.9,82.0 4.6,80.2 16.7,67.6 1.0,60.0 16.7,52.4 4.6,39.8 21.9,38.0 14.8,22.1 31.7,26.3 30.5,8.9 45.0,18.7 49.8,1.9 60.0,16.0"/>
+        <polygon class="sb-front" points="60.0,7.0 67.1,19.6 78.1,10.2 80.5,24.5 94.1,19.4 91.4,33.6 105.9,33.5 98.5,46.0 112.2,50.8 101.0,60.0 112.2,69.2 98.5,74.0 105.9,86.5 91.4,86.4 94.1,100.6 80.5,95.5 78.1,109.8 67.1,100.4 60.0,113.0 52.9,100.4 41.9,109.8 39.5,95.5 25.9,100.6 28.6,86.4 14.1,86.5 21.5,74.0 7.8,69.2 19.0,60.0 7.8,50.8 21.5,46.0 14.1,33.5 28.6,33.6 25.9,19.4 39.5,24.5 41.9,10.2 52.9,19.6"/>
+      </svg>
+      <span class="sb-text"><b>TRY IT</b><b>NOW!</b><i>in your browser</i></span>
+    </a>
+  </div>
 </header>
 
 <main>
