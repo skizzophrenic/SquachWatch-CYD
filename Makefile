@@ -105,7 +105,7 @@ WASM_FLAGS := -std=c++17 -Os -I$(SIM_DIR) -I$(INC) \
               -include $(INC)/cyd_user_setup.h \
               -sALLOW_MEMORY_GROWTH=1 \
               -sMODULARIZE=1 -sEXPORT_NAME=SquachSim \
-              -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,HEAPU8 \
+              -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,HEAPU8,UTF8ToString,stringToUTF8,lengthBytesUTF8 \
               -sENVIRONMENT=web,node \
               --closure 0
 

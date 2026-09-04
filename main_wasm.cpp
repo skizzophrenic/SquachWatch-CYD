@@ -15,6 +15,33 @@
 // is what makes the port small: there are no threads, no sockets and no
 // filesystem to emulate, and the framebuffer was already a plain array.
 #include <emscripten/emscripten.h>
+
+// ---- NVS backing store ------------------------------------------------
+// Defined here rather than in Preferences.h because EM_JS emits symbols
+// into every translation unit that sees it, and that header is included
+// all over the UI sources. Declarations live there; these are the only
+// definitions.
+//
+// The buffer is passed in from C++ and the byte length returned, rather
+// than handing back a malloc'd pointer -- ownership stays on one side of
+// the boundary and nothing depends on _malloc being exported. Returns -1
+// for "no such key", otherwise the length, which may exceed cap (the
+// caller resizes and asks again).
+EM_JS(int, squachsim_nvs_read, (const char* key, char* buf, int cap), {
+    var v = null;
+    try { v = localStorage.getItem(UTF8ToString(key)); } catch (e) { v = null; }
+    if (v === null || v === undefined) return -1;
+    var n = lengthBytesUTF8(v);
+    if (n + 1 <= cap) stringToUTF8(v, buf, cap);
+    return n;
+});
+
+// Quota errors and private-mode refusals are swallowed: failing to
+// persist a setting is not worth taking the emulator down over.
+EM_JS(void, squachsim_nvs_write, (const char* key, const char* val), {
+    try { localStorage.setItem(UTF8ToString(key), UTF8ToString(val)); } catch (e) {}
+});
+
 #include <cstdint>
 #include <cstring>
 #include <vector>
