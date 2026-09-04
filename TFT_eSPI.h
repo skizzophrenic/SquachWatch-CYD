@@ -22,9 +22,16 @@
 // Known gaps (acceptable for a rendering-preview tool, not aiming for
 // hardware-exact parity): drawArc is a simple filled-wedge approximation,
 // not upstream's anti-aliased version; touch/SPI methods are inert
-// stubs (there's no touchscreen to simulate); color depth is tracked on
-// sprites but everything is stored/composited as RGB565 internally
-// regardless of what setColorDepth() was called with.
+// stubs (there's no touchscreen to simulate).
+//
+// Colour depth IS honoured. A sprite created with setColorDepth(8)
+// quantises every write to RGB332 exactly as TFT_eSPI does on the
+// device -- 3 bits of red, 3 of green, and only 2 of blue. That is not
+// a detail: the firmware's frame buffer is 8bpp, so a smooth blue
+// gradient that looks perfect here in 16-bit would land on the panel as
+// four flat bands. Rendering this faithfully is the difference between
+// previewing the device and previewing something prettier than the
+// device, and it cost real work to find that out the slow way.
 #pragma once
 #include <Arduino.h>      // must precede the font table: it defines PROGMEM
 #include <cstdint>
@@ -383,10 +390,29 @@ public:
 
     void setPivot(int16_t, int16_t) {}
 
+    // TFT_eSPI's own 8bpp path: RGB565 in, RGB332 stored, expanded back
+    // on read. Reproduced here so what the emulator shows is what the
+    // panel can actually display.
+    static uint16_t quantise332(uint16_t c) {
+        const uint8_t r = (uint8_t)((c >> 11) & 0x1F);
+        const uint8_t g = (uint8_t)((c >>  5) & 0x3F);
+        const uint8_t b = (uint8_t)( c        & 0x1F);
+        const uint8_t r3 = (uint8_t)(r >> 2);        // 5 -> 3 bits
+        const uint8_t g3 = (uint8_t)(g >> 3);        // 6 -> 3 bits
+        const uint8_t b2 = (uint8_t)(b >> 3);        // 5 -> 2 bits
+        // Expand back the way the driver does, replicating high bits
+        // down so full scale stays full scale.
+        const uint8_t rr = (uint8_t)((r3 << 2) | (r3 >> 1));
+        const uint8_t gg = (uint8_t)((g3 << 3) | g3);   // 3 bits -> 6, high bits replicated down
+        const uint8_t bb = (uint8_t)((b2 << 3) | (b2 << 1) | (b2 >> 1));
+        return (uint16_t)((rr << 11) | ((gg & 0x3F) << 5) | (bb & 0x1F));
+    }
+
     void drawPixel(int32_t x, int32_t y, uint32_t color) override {
         if (_vpActive) { x += _vpX; y += _vpY; if (x < 0 || y < 0 || x >= _vpW + _vpX || y >= _vpH + _vpY) return; }
         if (x < 0 || y < 0 || x >= _w || y >= _h) return;
-        _buf[(size_t)y * _w + x] = (uint16_t)color;
+        _buf[(size_t)y * _w + x] =
+            (_depth == 8) ? quantise332((uint16_t)color) : (uint16_t)color;
     }
     uint16_t readPixel(int32_t x, int32_t y) override {
         if (x < 0 || y < 0 || x >= _w || y >= _h) return 0;

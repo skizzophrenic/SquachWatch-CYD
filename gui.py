@@ -59,7 +59,7 @@ SCREENS = ["clear", "log", "alert", "settings", "diary", "hunt",
 # the index is what --bg takes.
 BACKGROUNDS = ["MATRIX RAIN", "STARFIELD", "FLYING TOASTERS", "AQUARIUM",
                "TERMINAL LOG", "FIREFLIES", "FIRE", "SNOWFALL",
-               "RF SPECTRUM", "WIREFRAME TUNNEL"]
+               "RF SPECTRUM", "WIREFRAME TUNNEL", "SYNTHWAVE"]
 
 # Theme::kPalettes in src/theme.cpp.
 THEMES = ["VAPRW4VE", "CYB3RGR33N", "AMB3RTERM", "BUBBL3GUM", "GH0ST", "BL00D"]
@@ -247,6 +247,35 @@ class LiveDevice:
 DEVICE = LiveDevice()
 
 
+def rebuild():
+    """Recompile both binaries against the current firmware checkout.
+
+    The emulator compiles SquachWatch-CYD's sources directly, so a
+    rebuild here picks up whatever that tree currently says -- which is
+    the point: edit firmware, press the button, see it. Without this the
+    loop was edit, kill the GUI, make, restart the GUI, re-navigate.
+
+    The live process has to be stopped first. It IS the binary make is
+    about to overwrite, and Linux refuses to write a running executable
+    ("Text file busy"), so building over the top of it fails rather than
+    silently producing a stale device.
+    """
+    DEVICE.stop()
+    try:
+        out = subprocess.run(["make"], cwd=HERE, capture_output=True,
+                             text=True, timeout=900)
+    except Exception as e:
+        return False, f"make failed to run: {e}"
+    log = (out.stdout or "") + (out.stderr or "")
+    if out.returncode != 0:
+        # Leave the device down on a failed build -- restarting it would
+        # silently run the previous binary and look like the edit did
+        # nothing.
+        return False, log[-4000:]
+    DEVICE.start()
+    return True, log[-2000:]
+
+
 def live_step(params):
     """Translate a /live/step query into emulator commands."""
     cmds = []
@@ -330,6 +359,7 @@ PAGE = """<!doctype html>
     <div class="state">state <b id="stateOut">--</b></div>
     <div class="row">
       <button id="liveRunBtn">Pause</button>
+      <button id="rebuildBtn">Rebuild</button>
       <button id="rebootBtn" class="ghost">Reboot</button>
       <button id="wipeBtn" class="ghost">Factory reset</button>
       <span class="zoom">zoom
@@ -549,6 +579,46 @@ $('liveRunBtn').onclick = () => {
   liveRunning = !liveRunning;
   $('liveRunBtn').textContent = liveRunning ? 'Pause' : 'Play';
 };
+// Recompiles against the current firmware source and restarts the
+// device. The build takes tens of seconds, so the step loop is parked
+// for the duration -- otherwise every poll during the build fails
+// against a stopped process and paints the canvas red.
+$('rebuildBtn').onclick = async () => {
+  const btn = $('rebuildBtn');
+  const wasRunning = liveRunning;
+  liveRunning = false;
+  btn.disabled = true;
+  btn.textContent = 'Building...';
+  $('liveStatus').className = '';
+  $('liveStatus').textContent = 'rebuilding from source...';
+  try {
+    const res = await fetch('/rebuild', {method: 'POST'});
+    const data = await res.json();
+    if (data.ok) {
+      pending = []; mouseDown = false;
+      $('serial').textContent = '';
+      liveSince = 0;
+      $('liveStatus').textContent = 'rebuilt';
+      liveRunning = true;
+      $('liveRunBtn').textContent = 'Pause';
+    } else {
+      // Compiler output goes in the serial pane: it is the widest
+      // readable area on the page and it is already monospaced.
+      $('serial').textContent = data.log || '(no output)';
+      $('liveStatus').className = 'err';
+      $('liveStatus').textContent = 'build failed -- device left stopped';
+      liveRunning = false;
+      $('liveRunBtn').textContent = 'Play';
+    }
+  } catch (e) {
+    $('liveStatus').className = 'err';
+    $('liveStatus').textContent = 'rebuild error: ' + e.message;
+    liveRunning = wasRunning;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Rebuild';
+  }
+};
 $('rebootBtn').onclick = () => liveReset(false);
 $('wipeBtn').onclick   = () => liveReset(true);
 $('liveZoom').onchange = liveZoom;
@@ -680,6 +750,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/rebuild":
+            ok, log = rebuild()
+            body = json.dumps({"ok": ok, "log": log}).encode()
+            return self._send(200, "application/json", body)
+
         if parsed.path == "/live/reset":
             q = urllib.parse.parse_qs(parsed.query)
             try:

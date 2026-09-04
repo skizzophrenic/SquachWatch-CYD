@@ -104,7 +104,7 @@ int main(int argc, char** argv) {
     std::string outPath = (argc > 2 && argv[2][0] != '-') ? argv[2] : "squachsim.png";
 
     bool portrait = false, onboard = false;
-    int bg = -1, themeIdx = -1, frames = 90, sequence = 1;
+    int bg = -1, themeIdx = -1, frames = 90, sequence = 1, outfitIdx = -1;
     std::string rawPath;
     for (int i = 2; i < argc; i++) {
         std::string a = argv[i];
@@ -112,6 +112,7 @@ int main(int argc, char** argv) {
         else if (a == "--onboard") onboard = true;
         else if (a == "--bg" && i + 1 < argc) bg = atoi(argv[++i]);
         else if (a == "--theme" && i + 1 < argc) themeIdx = atoi(argv[++i]);
+        else if (a == "--outfit" && i + 1 < argc) outfitIdx = atoi(argv[++i]);
         else if (a == "--frames" && i + 1 < argc) frames = atoi(argv[++i]);
         else if (a == "--sequence" && i + 1 < argc) sequence = atoi(argv[++i]);
         else if (a == "--raw" && i + 1 < argc) rawPath = argv[++i];
@@ -126,6 +127,9 @@ int main(int argc, char** argv) {
     tft.setRotation(portrait ? 0 : 1);
 
     TFT_eSprite frame(&tft);
+    // The firmware calls setColorDepth(8) before createSprite; match it
+    // or the preview shows gradients the panel cannot produce.
+    frame.setColorDepth(8);
     frame.createSprite(W, H);
 
     Settings::load();
@@ -133,6 +137,16 @@ int main(int argc, char** argv) {
     // them to the requested index rather than reaching past the API.
     if (themeIdx >= 0) while ((int)Settings::paletteIndex() != themeIdx % (int)Theme::PALETTE_COUNT) Settings::cyclePalette();
     if (bg >= 0) while ((int)Settings::background() != bg % (int)Settings::BACKGROUND_COUNT) Settings::cycleBackground();
+
+    // Outfits are gated behind lifetime-detection thresholds, so unlock
+    // the lot before walking to the one asked for -- same "use the
+    // public mutators rather than reach past the API" approach the
+    // theme/background options above take. A fresh Preferences starts
+    // at index 0 (NONE), so N cycles lands on N.
+    if (outfitIdx >= 0) {
+        Squachy::unlockAllOutfits();
+        for (int k = 0; k < outfitIdx; k++) Squachy::cycleOutfit();
+    }
 
     DetectionEngine engine;
     engine.init();

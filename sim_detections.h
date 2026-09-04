@@ -48,6 +48,10 @@ inline const SimDetectionProfile kSimProfiles[] = {
     { DetectionType::TILE,        {0x02, 0xFE, 0xED}, "Tile",        "Tile Mate",       -81 },
     { DetectionType::RING,        {0xFC, 0x65, 0xDE}, "Ring",        "Ring Doorbell",   -55 },
     { DetectionType::DEAUTH,      {0x02, 0xDE, 0xAD}, "Deauth",      "Deauth Flood",    -47 },
+    // The name field is the impersonated SSID for this type, matching
+    // what processWiFiQ() puts there on a real hit -- which network is
+    // being spoofed is the useful part, not the rogue's own vendor.
+    { DetectionType::EVILTWIN,    {0x02, 0xE7, 0x11}, "EvilTwin",    "HomeNet-5G",      -52 },
 };
 inline const size_t kSimProfileCount = sizeof(kSimProfiles) / sizeof(kSimProfiles[0]);
 
