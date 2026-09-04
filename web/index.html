@@ -144,8 +144,21 @@
 
 </div>
 
+<!-- squachsim.js is Emscripten's MODULARIZE output WITHOUT -sEXPORT_ES6,
+     so it is a classic script that assigns a global (var SquachSim =
+     ...) and ends in a CommonJS/AMD tail. It has no ES exports at all.
+     `import SquachSim from './squachsim.js'` therefore fails at module
+     LINK time -- before a single statement in the block below runs --
+     which is why the page sat on its hardcoded "booting" placeholder
+     with a black canvas rather than showing an error anywhere obvious.
+     Loading it as a classic script first and reading the global is the
+     shape this build actually produces. Bonus: Emscripten locates the
+     .wasm via document.currentScript.src, which only exists for a
+     classic script.
+     If you ever add -sEXPORT_ES6=1 to WASM_FLAGS in the Makefile, this
+     goes back to being an import -- the two have to agree. -->
+<script src="./squachsim.js"></script>
 <script type="module">
-import SquachSim from './squachsim.js';
 
 // DetectionType from include/state.h, minus UNKNOWN and COUNT.
 const TYPES = [

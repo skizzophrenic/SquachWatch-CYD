@@ -91,6 +91,14 @@ WASM_OUT  := $(WASM_DIR)/squachsim.js
 # -Os over -O2: this ships over the wire, and the emulator spends its
 # time waiting on requestAnimationFrame rather than on compute.
 # ALLOW_MEMORY_GROWTH because the frame sprite is allocated at runtime.
+#
+# NOTE: no -sEXPORT_ES6 here, so the output is a CLASSIC script that
+# assigns a global (var SquachSim = ...) and has no ES exports. web/
+# index.html must therefore load it with a plain <script src>, not an
+# `import` -- an import of a file with no exports fails at module link
+# time, so nothing in the page runs and it silently sits on its
+# "booting" placeholder with a black canvas. If you add -sEXPORT_ES6=1,
+# change index.html back to an import in the same commit.
 WASM_FLAGS := -std=c++17 -Os -I$(SIM_DIR) -I$(INC) \
               -Wno-unused-parameter \
               -include $(SIM_DIR)/Arduino.h \
