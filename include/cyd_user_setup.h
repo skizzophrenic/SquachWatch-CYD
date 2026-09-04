@@ -34,8 +34,32 @@
 #define PWM_FREQ           5000
 #define PWM_MAX_DUTY       255
 
-// SPI frequencies
+// SPI frequencies.
+//
+// Guarded rather than hard-defined so a build can override it from the
+// command line: [env:cyd-fast] in platformio.ini passes
+// -DSPI_FREQUENCY=80000000 and everything else about that build is
+// identical to [env:cyd]. That is why there is no duplicate copy of this
+// header for the overclocked variant -- and, usefully, a -D flag change
+// forces a rebuild, where editing this file does not (it arrives via
+// -include, which PlatformIO's dependency scanner cannot see).
+//
+// 80MHz is an overclock, not a spec-compliant setting: the ST7789's
+// rated write cycle is ~16ns, about 62.5MHz. It is widely used on these
+// boards but board-dependent -- trace quality varies unit to unit, and
+// the failure modes (white screen, torn lines, colour corruption) look
+// identical to the wrong-driver problem this board already has a
+// support burden around. The ESP32 SPI divider snaps to 80/40/26.7/20,
+// so there is no intermediate value to retreat to: it is 40 or 80.
+//
+// Measured on real hardware. At 40MHz: push 38ms, frame 44.4ms (22fps).
+// At 80MHz: push 22.6ms, frame 29ms (34fps). Only ~30.7ms of the 40MHz
+// push is the bus itself (153,600 bytes at 16bpp); the remaining ~7.3ms
+// is the 8bpp->RGB565 palette conversion, which is CPU-bound and does
+// not scale with this clock -- which is why 80MHz gives ~1.7x, not 2x.
+#ifndef SPI_FREQUENCY
 #define SPI_FREQUENCY         40000000
+#endif
 #define SPI_READ_FREQUENCY    20000000
 
 // Fonts. Only the built-in GLCD font (font 1) is loaded: nothing in

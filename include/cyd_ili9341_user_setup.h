@@ -36,7 +36,12 @@
 #define PWM_MAX_DUTY       255
 
 // SPI frequencies
+// Guarded so [env:cyd-ili9341-fast] can override it with
+// -DSPI_FREQUENCY=80000000 -- see cyd_user_setup.h for the full note on
+// what that overclock costs and why there is no value between 40 and 80.
+#ifndef SPI_FREQUENCY
 #define SPI_FREQUENCY         40000000
+#endif
 #define SPI_READ_FREQUENCY    20000000
 
 // Fonts. Only the built-in GLCD font (font 1) is loaded: nothing in

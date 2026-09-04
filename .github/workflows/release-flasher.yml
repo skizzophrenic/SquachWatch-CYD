@@ -1,9 +1,13 @@
 name: Build and release firmware
 
-# Push a tag like v1.2.0 to: build firmware for the three release-ready
-# environments (cyd, cyd-ili9341, awok -- cyd35 stays excluded, see the
-# build step below; cyd/cyd-ili9341 are the same physical 2.8" board,
-# just the two display drivers it might have shipped with), create a
+# Push a tag like v1.2.0 to: build firmware for the release-ready
+# environments (cyd, cyd-ili9341, awok, plus the cyd-fast/
+# cyd-ili9341-fast 80MHz display-overclock variants the flasher's
+# "experimental overclock" checkbox targets -- cyd35 stays excluded, see
+# the build step below; cyd/cyd-ili9341 are the same physical 2.8"
+# board, just the two display drivers it might have shipped with; the
+# -fast pair is that same board again at a different display clock, not
+# more boards), create a
 # GitHub Release for that tag with each one's three raw PlatformIO
 # artifacts attached (bootloader/partitions/firmware — the human-facing
 # source of truth), then also merge each into one flashable image and
@@ -46,10 +50,10 @@ jobs:
 
       - name: Build firmware
         # cyd35 (3.5" board port) is also an environment in
-        # platformio.ini now but isn't public-release-ready yet (known
-        # display/touch issues) -- the other three are and get
-        # built/published together below.
-        run: pio run -e cyd -e cyd-ili9341 -e awok
+        # platformio.ini now but isn't public-release-ready yet (it boot
+        # loops on real hardware -- see platformio.ini) -- the rest are
+        # and get built/published together below.
+        run: pio run -e cyd -e cyd-ili9341 -e awok -e cyd-fast -e cyd-ili9341-fast
 
       - name: Determine version
         id: ver
@@ -94,12 +98,25 @@ jobs:
           cp .pio/build/awok/bootloader.bin awok-bootloader.bin
           cp .pio/build/awok/partitions.bin awok-partitions.bin
           cp .pio/build/awok/firmware.bin   awok-firmware.bin
+          # The 80MHz display-overclock variants the flasher's
+          # "experimental overclock" checkbox targets. Identical to
+          # cyd/cyd-ili9341 apart from -DSPI_FREQUENCY. No merged image
+          # for these on purpose: the merged blob is a manual-recovery
+          # artifact, and recovery should land you on the spec-compliant
+          # build rather than the overclocked one.
+          for v in cyd-fast cyd-ili9341-fast; do
+            cp ".pio/build/$v/bootloader.bin" "$v-bootloader.bin"
+            cp ".pio/build/$v/partitions.bin" "$v-partitions.bin"
+            cp ".pio/build/$v/firmware.bin"   "$v-firmware.bin"
+          done
 
       - name: Stamp manifest versions
         run: |
           python - <<'PY'
           import json
-          for p in ("web-flasher/manifest-cyd.json", "web-flasher/manifest-cyd-ili9341.json", "web-flasher/manifest-awok.json"):
+          for p in ("web-flasher/manifest-cyd.json", "web-flasher/manifest-cyd-ili9341.json",
+                    "web-flasher/manifest-awok.json", "web-flasher/manifest-cyd-fast.json",
+                    "web-flasher/manifest-cyd-ili9341-fast.json"):
               m = json.load(open(p))
               m["version"] = "${{ steps.ver.outputs.version }}"
               json.dump(m, open(p, "w"), indent=2)
@@ -107,6 +124,8 @@ jobs:
           cp web-flasher/manifest-cyd.json manifest-cyd.json
           cp web-flasher/manifest-cyd-ili9341.json manifest-cyd-ili9341.json
           cp web-flasher/manifest-awok.json manifest-awok.json
+          cp web-flasher/manifest-cyd-fast.json manifest-cyd-fast.json
+          cp web-flasher/manifest-cyd-ili9341-fast.json manifest-cyd-ili9341-fast.json
 
       - name: Create GitHub Release with build artifacts
         env:
@@ -135,7 +154,15 @@ jobs:
             firmware-awok-merged.bin \
             manifest-cyd.json \
             manifest-cyd-ili9341.json \
-            manifest-awok.json
+            manifest-awok.json \
+            manifest-cyd-fast.json \
+            manifest-cyd-ili9341-fast.json \
+            cyd-fast-bootloader.bin \
+            cyd-fast-partitions.bin \
+            cyd-fast-firmware.bin \
+            cyd-ili9341-fast-bootloader.bin \
+            cyd-ili9341-fast-partitions.bin \
+            cyd-ili9341-fast-firmware.bin
 
       - name: Assemble Pages site
         # The flasher ships each board's three raw regions rather than
@@ -162,7 +189,9 @@ jobs:
           cp web-flasher/manifest-cyd.json _site/manifest-cyd.json
           cp web-flasher/manifest-cyd-ili9341.json _site/manifest-cyd-ili9341.json
           cp web-flasher/manifest-awok.json _site/manifest-awok.json
-          for board in cyd cyd-ili9341 awok; do
+          cp web-flasher/manifest-cyd-fast.json _site/manifest-cyd-fast.json
+          cp web-flasher/manifest-cyd-ili9341-fast.json _site/manifest-cyd-ili9341-fast.json
+          for board in cyd cyd-ili9341 awok cyd-fast cyd-ili9341-fast; do
             cp "$board-bootloader.bin" "_site/$board-bootloader.bin"
             cp "$board-partitions.bin" "_site/$board-partitions.bin"
             cp "$board-firmware.bin"   "_site/$board-firmware.bin"

@@ -254,6 +254,46 @@
     line-height:1.4;
   }
 
+  /* Overclock opt-in. Deliberately styled closer to the white-screen
+     caution note than to a feature toggle -- it is a thing that can
+     make your display stop working, and the label has to carry that
+     without a support thread being the way you find out. */
+  .overclock-row{
+    display:flex;
+    align-items:flex-start;
+    gap:10px;
+    margin:0 0 16px;
+    padding:10px 12px;
+    border:1px dashed rgba(255,45,120,0.5);
+    border-radius:6px;
+    background:rgba(255,45,120,0.05);
+    cursor:pointer;
+    transition:opacity 0.15s;
+  }
+  .overclock-row input{
+    flex-shrink:0;
+    width:16px; height:16px;
+    margin-top:2px;
+    accent-color:var(--pink);
+    cursor:pointer;
+  }
+  .overclock-row.disabled{ opacity:0.4; cursor:default; }
+  .overclock-row.disabled input{ cursor:default; }
+  .oc-title{
+    display:block;
+    font-family:'VT323', monospace;
+    font-size:1.05rem;
+    letter-spacing:0.04em;
+    color:var(--pink);
+  }
+  .oc-desc{
+    display:block;
+    font-size:0.78rem;
+    line-height:1.4;
+    color:#a89bc4;
+    margin-top:2px;
+  }
+
   .install-btn{
     display:block;
     width:100%;
@@ -486,8 +526,8 @@
 
     <label class="board-picker-label" for="boardSelect">Select your board:</label>
     <select class="board-select" id="boardSelect" aria-label="Board select">
-      <option value="./manifest-cyd.json" data-cyd28="1" selected>2.8&quot; CYD &mdash; ST7789 (default)</option>
-      <option value="./manifest-cyd-ili9341.json" data-cyd28="1">2.8&quot; CYD &mdash; ILI9341 (older)</option>
+      <option value="./manifest-cyd.json" data-cyd28="1" data-fast="./manifest-cyd-fast.json" selected>2.8&quot; CYD &mdash; ST7789 (default)</option>
+      <option value="./manifest-cyd-ili9341.json" data-cyd28="1" data-fast="./manifest-cyd-ili9341-fast.json">2.8&quot; CYD &mdash; ILI9341 (older)</option>
       <option value="./manifest-awok.json">AWOK 2.4&quot;</option>
     </select>
     <p class="white-screen-note" id="whiteScreenNote">
@@ -495,6 +535,18 @@
       batch, and there's no way to tell which from the outside. If you flash one and get a
       <strong>solid white screen</strong>, that's not broken — just flash the other 2.8&quot; option above instead.
     </p>
+
+    <label class="overclock-row" id="overclockRow">
+      <input type="checkbox" id="overclockChk">
+      <span>
+        <span class="oc-title">Experimental: 80MHz display overclock</span>
+        <span class="oc-desc" id="overclockDesc">
+          Runs the screen at twice the rated clock &mdash; about 34fps instead of 22, which you
+          will notice everywhere. Not every panel takes it. If the screen stays white or shows
+          torn lines, reflash with this unchecked.
+        </span>
+      </span>
+    </label>
 
     <esp-web-install-button id="installBtn" manifest="./manifest-cyd.json">
       <button slot="activate" class="install-btn">[ CONNECT &amp; INSTALL ]</button>
@@ -1183,6 +1235,9 @@
     var installBtn = document.getElementById('installBtn');
     var note = document.getElementById('whiteScreenNote');
     var versionNote = document.getElementById('versionNote');
+    var ocRow = document.getElementById('overclockRow');
+    var ocChk = document.getElementById('overclockChk');
+    var ocDesc = document.getElementById('overclockDesc');
     if (!select || !installBtn) return;
 
     var WHITE_SCREEN_LINE =
@@ -1215,17 +1270,50 @@
         });
     }
 
+    // The overclock checkbox is not a setting the firmware reads -- it
+    // picks a different build. cyd-fast/cyd-ili9341-fast are the same
+    // sources with -DSPI_FREQUENCY=80000000, published as their own
+    // manifests, so ticking the box swaps which one the install button
+    // targets and unticking it is a reflash rather than a menu the user
+    // has to find on a display that may be the thing that broke.
+    //
+    // Offered for the 2.8" boards only, hence data-fast living on those
+    // two <option>s rather than a flag here: AWOK runs its touchscreen
+    // on the display's SPI bus through TFT_eSPI's own touch path, which
+    // reads SPI_FREQUENCY directly, so overclocking the panel would
+    // also overclock touch. An option with no data-fast disables the
+    // row instead of silently ignoring the tick.
+    var OC_DESC_ON =
+      "Runs the screen at twice the rated clock — about 34fps instead of 22, which you " +
+      "will notice everywhere. Not every panel takes it. If the screen stays white or shows " +
+      "torn lines, reflash with this unchecked.";
+    var OC_DESC_OFF =
+      "Not available for this board — its touchscreen shares the display's SPI bus, so " +
+      "overclocking the panel would overclock touch along with it.";
+    var OVERCLOCK_LINE =
+      "Overclock, huh. If it comes up white or torn, that panel said no — flash again with the box unticked.";
+
     function applySelection(announce) {
       var opt = select.options[select.selectedIndex];
-      installBtn.setAttribute('manifest', opt.value);
+      var fast = opt.dataset.fast;
+      if (ocRow) {
+        ocRow.classList.toggle('disabled', !fast);
+        if (ocChk) ocChk.disabled = !fast;
+        if (ocDesc) ocDesc.textContent = fast ? OC_DESC_ON : OC_DESC_OFF;
+      }
+      var useFast = !!fast && !!(ocChk && ocChk.checked && !ocChk.disabled);
+      var manifest = useFast ? fast : opt.value;
+      installBtn.setAttribute('manifest', manifest);
       var isCyd28 = opt.dataset.cyd28 === '1';
       if (note) note.hidden = !isCyd28;
-      if (announce && isCyd28) say(WHITE_SCREEN_LINE, 8000);
-      loadVersion(opt.value);
+      if (announce === 'board' && isCyd28) say(WHITE_SCREEN_LINE, 8000);
+      if (announce === 'overclock' && useFast) say(OVERCLOCK_LINE, 8000);
+      loadVersion(manifest);
     }
 
-    select.addEventListener('change', function () { applySelection(true); });
-    applySelection(false);
+    select.addEventListener('change', function () { applySelection('board'); });
+    if (ocChk) ocChk.addEventListener('change', function () { applySelection('overclock'); });
+    applySelection(null);
   })();
 
   // ---- Identify board -------------------------------------------------

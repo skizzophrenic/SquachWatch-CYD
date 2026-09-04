@@ -1,0 +1,25 @@
+{
+  "name": "SquachWatch-CYD (2.8\" CYD, 80MHz)",
+  "version": "0.0.0",
+  "funding_url": "https://talkingsasquach.com",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        {
+          "path": "cyd-fast-bootloader.bin",
+          "offset": 4096
+        },
+        {
+          "path": "cyd-fast-partitions.bin",
+          "offset": 32768
+        },
+        {
+          "path": "cyd-fast-firmware.bin",
+          "offset": 65536
+        }
+      ]
+    }
+  ]
+}
