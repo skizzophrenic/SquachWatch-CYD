@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SquachWatch — try it in your browser</title>
+<meta name="description" content="The real SquachWatch-CYD firmware, compiled to WebAssembly. Same code that runs on the device, running in your browser.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root {
+    --ground:#0a0410; --panel:#150a20; --rule:#3b1d55;
+    --ink:#d9cfe8; --ink-loud:#f4ecff; --mute:#8f7aa8;
+    --cyan:#00fff5; --pink:#ff71ce; --purple:#b400ff; --amber:#ffd166;
+    --mono:"IBM Plex Mono",ui-monospace,Consolas,monospace;
+    --display:"Archivo","Helvetica Neue",Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;background:var(--ground);color:var(--ink);
+    font-family:var(--mono);font-size:14px;line-height:1.6;
+    background-image:repeating-linear-gradient(180deg,rgba(255,255,255,.022) 0 1px,transparent 1px 3px);
+  }
+  .wrap{max-width:1000px;margin:0 auto;padding:40px 22px 80px}
+  header{border-bottom:1px solid var(--rule);padding-bottom:22px;margin-bottom:28px}
+  .kicker{color:var(--cyan);letter-spacing:.22em;text-transform:uppercase;font-size:11px;margin:0 0 10px}
+  h1{
+    font-family:var(--display);font-weight:700;font-size:clamp(30px,6vw,48px);
+    line-height:1.02;letter-spacing:-.02em;color:var(--ink-loud);margin:0;
+    text-shadow:2px 2px 0 var(--purple);text-wrap:balance;
+  }
+  .sub{max-width:60ch;margin:14px 0 0;color:var(--ink)}
+  main{display:grid;grid-template-columns:minmax(0,auto) minmax(260px,1fr);gap:26px;align-items:start}
+  @media (max-width:820px){main{grid-template-columns:1fr}}
+
+  .device{
+    background:var(--panel);border:1px solid var(--rule);border-radius:10px;
+    padding:16px;display:flex;flex-direction:column;gap:12px;align-items:center;
+    box-shadow:0 0 0 1px rgba(0,255,245,.06),0 18px 50px rgba(0,0,0,.6);
+  }
+  canvas{
+    image-rendering:pixelated;display:block;background:#000;
+    border:1px solid #2a1440;border-radius:3px;cursor:crosshair;touch-action:none;
+  }
+  .readout{display:flex;gap:16px;align-items:baseline;font-size:12px;color:var(--mute)}
+  .readout b{color:var(--cyan);font-weight:500}
+  .boot{color:var(--mute);font-size:12px;min-height:1.2em}
+
+  .panel{display:flex;flex-direction:column;gap:18px}
+  .card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:16px 18px}
+  .card h2{
+    font-family:var(--display);font-weight:600;font-size:13px;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--pink);margin:0 0 10px
+  }
+  .card p{margin:0 0 10px;font-size:13px;color:var(--ink)}
+  .card p:last-child{margin-bottom:0}
+  label{display:flex;flex-direction:column;gap:5px;font-size:11px;letter-spacing:.1em;
+        text-transform:uppercase;color:var(--mute);margin-bottom:10px}
+  select,button{font:inherit;font-size:13px;border-radius:6px}
+  select{background:#0d0616;color:var(--ink-loud);border:1px solid var(--rule);padding:7px 9px;width:100%}
+  .btns{display:flex;gap:8px;flex-wrap:wrap}
+  button{
+    background:linear-gradient(90deg,var(--purple),var(--pink));color:#fff;border:0;
+    padding:8px 14px;cursor:pointer;letter-spacing:.05em;
+  }
+  button.ghost{background:transparent;border:1px solid rgba(0,255,245,.4);color:var(--cyan)}
+  button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+  kbd{background:#0d0616;border:1px solid var(--rule);border-radius:4px;padding:1px 5px;font-size:12px}
+  ul{margin:0;padding-left:18px;font-size:13px}
+  li{margin-bottom:6px}
+  footer{margin-top:44px;padding-top:16px;border-top:1px solid var(--rule);
+         color:var(--mute);font-size:12px;display:flex;flex-wrap:wrap;gap:8px 22px}
+  a{color:var(--cyan)}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <p class="kicker">SquachWatch-CYD</p>
+  <h1>Try it in your browser</h1>
+  <p class="sub">
+    This is the device's <strong>actual firmware</strong> — the same C++ that ships to the
+    ESP32 — compiled to WebAssembly. Every screen, gesture, debounce and long-press is the
+    real thing. Click the screen to touch it.
+  </p>
+</header>
+
+<main>
+  <div class="device">
+    <canvas id="screen" width="320" height="240"></canvas>
+    <div class="readout">
+      <span>state <b id="state">booting</b></span>
+      <span>fps <b id="fps">—</b></span>
+    </div>
+    <div class="boot" id="boot">loading firmware…</div>
+  </div>
+
+  <div class="panel">
+    <div class="card">
+      <h2>Simulate a detection</h2>
+      <p>There are no radios in a browser, so nothing will ever be found on its own. Send it something:</p>
+      <label>Device type
+        <select id="type"></select>
+      </label>
+      <div class="btns">
+        <button id="trigger">Trigger</button>
+        <button id="reboot" class="ghost">Reboot</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Getting around</h2>
+      <ul>
+        <li>First boot runs a colour check and Squachy's walkthrough — tap through them.</li>
+        <li><kbd>SCAN</kbd> <kbd>LOG</kbd> <kbd>CLR</kbd> along the bottom.</li>
+        <li>The gear in the top-left opens Settings; the icon top-right rotates the screen.</li>
+        <li>Tap Squachy to pet him. Hold <kbd>CLR</kbd> for four seconds to unlock every outfit.</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <h2>What's real and what isn't</h2>
+      <p>
+        Real: the state machine, touch mapping, settings, persistence, and all the rendering.
+        Colours are quantised to the panel's actual 8-bit RGB332, so this looks like the
+        hardware rather than better than it.
+      </p>
+      <p>
+        Not real: the radios. Detections come from the Trigger button, and the shape layer
+        isn't pixel-exact against the display library.
+      </p>
+    </div>
+  </div>
+</main>
+
+<footer>
+  <span>Real firmware, compiled to WebAssembly</span>
+  <span>320×240 · 8bpp RGB332</span>
+  <span><a href="./">Flash it to a real device →</a></span>
+</footer>
+
+</div>
+
+<script type="module">
+import SquachSim from './squachsim.js';
+
+// DetectionType from include/state.h, minus UNKNOWN and COUNT.
+const TYPES = [
+  [1,'Flock Safety camera'],[2,'Axon body camera'],[3,'Ray-Ban Meta glasses'],
+  [4,'Bluetooth skimmer'],[5,'Raven gunshot sensor'],[6,'Apple AirTag'],
+  [7,'Drone (OpenDroneID)'],[8,'Vigilant ALPR'],[9,'IP camera'],
+  [10,'Samsung SmartTag'],[11,'Google Find My Device'],[12,'Tile tracker'],
+  [13,'Ring doorbell'],[14,'WiFi deauth flood'],[15,'Evil twin AP'],
+];
+const STATES = ['BOOT','CLEAR','ALERT','LOG','SETTINGS','DIARY','OUTFIT','RAWSCAN',
+                'WATCH ALERT','DIAGNOSTICS','HUNT','COLOUR CHECK','TYPE FILTER'];
+
+const $ = id => document.getElementById(id);
+const cv = $('screen'), ctx = cv.getContext('2d', { alpha:false });
+TYPES.forEach(([v,n]) => $('type').add(new Option(n, v)));
+$('type').value = 6;                    // AirTag: the one people recognise
+
+const M = await SquachSim();
+const setup  = () => M.ccall('sw_setup', null, [], []);
+const step   = M.cwrap('sw_step','null',['number']);
+const frame  = M.cwrap('sw_frame','number',[]);
+const touch  = M.cwrap('sw_touch','null',['number','number','number']);
+const detect = M.cwrap('sw_detect','number',['number','number']);
+const stateOf= M.cwrap('sw_state','number',[]);
+const wOf    = M.cwrap('sw_width','number',[]);
+const hOf    = M.cwrap('sw_height','number',[]);
+
+setup();
+$('boot').textContent = '';
+
+let img = null, lastW = 0, lastH = 0;
+function blit() {
+  const w = wOf(), h = hOf();
+  if (w !== lastW || h !== lastH) {          // the rotate button changes geometry
+    cv.width = w; cv.height = h;
+    cv.style.width  = (w * 2) + 'px';
+    cv.style.height = (h * 2) + 'px';
+    img = ctx.createImageData(w, h);
+    lastW = w; lastH = h;
+  }
+  const p = frame();
+  img.data.set(M.HEAPU8.subarray(p, p + w * h * 4));
+  ctx.putImageData(img, 0, 0);
+}
+
+// Touch events queue up and are drained one per stepped frame, so a press
+// and its release are never collapsed into a single loop() iteration --
+// the firmware distinguishes touch-just-down from touch-just-up, and a
+// tap that appeared and vanished within one iteration registers as
+// neither.
+const queue = [];
+let held = false;
+function toScreen(e) {
+  const r = cv.getBoundingClientRect();
+  return {
+    x: Math.max(0, Math.min(cv.width  - 1, Math.floor((e.clientX - r.left) * cv.width  / r.width))),
+    y: Math.max(0, Math.min(cv.height - 1, Math.floor((e.clientY - r.top)  * cv.height / r.height))),
+  };
+}
+cv.addEventListener('pointerdown', e => {
+  e.preventDefault(); cv.setPointerCapture(e.pointerId);
+  held = true; const p = toScreen(e); queue.push({d:1, ...p});
+});
+cv.addEventListener('pointermove', e => {
+  if (!held) return;
+  const p = toScreen(e), last = queue[queue.length - 1];
+  // Consecutive moves collapse: a drag emits them far faster than the
+  // queue drains, and the emulated finger would fall behind the pointer.
+  if (last && last.d === 2) { last.x = p.x; last.y = p.y; return; }
+  queue.push({d:2, ...p});
+});
+window.addEventListener('pointerup', () => { if (held) { held = false; queue.push({d:0,x:0,y:0}); } });
+
+$('trigger').onclick = () => queue.push({det:+$('type').value});
+$('reboot').onclick  = () => { queue.length = 0; held = false; setup(); lastW = 0; };
+
+let frames = 0, mark = performance.now();
+function tick() {
+  const ev = queue.shift();
+  if (ev) {
+    if (ev.det !== undefined) detect(ev.det, 0);
+    else { touch(ev.d ? 1 : 0, ev.x, ev.y); step(1); }
+  }
+  step(1);
+  blit();
+
+  const s = stateOf();
+  $('state').textContent = STATES[s] || '?';
+  if (++frames >= 30) {
+    const now = performance.now();
+    $('fps').textContent = Math.round(frames * 1000 / (now - mark));
+    frames = 0; mark = now;
+  }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>

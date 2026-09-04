@@ -167,6 +167,18 @@ jobs:
             cp "$board-partitions.bin" "_site/$board-partitions.bin"
             cp "$board-firmware.bin"   "_site/$board-firmware.bin"
           done
+          # The browser emulator: this firmware compiled to WebAssembly,
+          # so the site can offer "try it" next to "flash it". Built from
+          # the SquachWatch-Sim checkout with emsdk and committed here as
+          # a static artifact, because that repo is not public and CI has
+          # no way to fetch it. That means it does NOT rebuild itself on a
+          # tag -- if the UI changes, rerun `make wasm` over there and
+          # copy the three files in, or this demo quietly drifts behind
+          # the firmware it claims to be.
+          mkdir -p _site/emulator
+          cp web-flasher/emulator/index.html     _site/emulator/index.html
+          cp web-flasher/emulator/squachsim.js   _site/emulator/squachsim.js
+          cp web-flasher/emulator/squachsim.wasm _site/emulator/squachsim.wasm
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
