@@ -137,6 +137,11 @@
         Not real: the radios. Detections come from the Trigger button, and the shape layer
         isn't pixel-exact against the display library.
       </p>
+      <p>
+        The frame rate is capped to 33fps to match what the hardware actually manages once
+        the SPI push to the panel is counted, so animations run at device speed rather than
+        at your monitor's refresh.
+      </p>
     </div>
   </div>
 </main>
@@ -254,8 +259,30 @@ $('wipe').onclick = () => {
   queue.length = 0; held = false; setup(); lastW = 0;
 };
 
+// The device is the reference, not the host. On the CYD the whole
+// loop -- render plus the SPI push to the panel -- lands at ~33fps, so
+// running this as fast as the browser's display refresh allows would
+// show animations moving at a speed the hardware never produces. The
+// backgrounds in particular are paced by frame count, not wall clock,
+// so on a 120Hz laptop they ran nearly four times too fast.
+const DEVICE_FPS = 33;
+const FRAME_MS = 1000 / DEVICE_FPS;
+
 let frames = 0, mark = performance.now();
-function tick() {
+let lastFrame = performance.now();
+
+function tick(now) {
+  requestAnimationFrame(tick);
+
+  // rAF only fires on the host's refresh boundaries, so an exact 33fps
+  // is not on offer -- 60Hz gives 16.7ms steps and 33fps wants 30.3ms.
+  // Carrying the remainder forward (rather than resetting to `now`)
+  // lets an occasional pair of back-to-back frames through, which
+  // averages to 33 instead of quantising down to a flat 30.
+  const dt = now - lastFrame;
+  if (dt < FRAME_MS) return;
+  lastFrame = now - (dt % FRAME_MS);
+
   const ev = queue.shift();
   if (ev) {
     if (ev.det !== undefined) detect(ev.det, 0);
@@ -267,11 +294,10 @@ function tick() {
   const s = stateOf();
   $('state').textContent = STATES[s] || '?';
   if (++frames >= 30) {
-    const now = performance.now();
-    $('fps').textContent = Math.round(frames * 1000 / (now - mark));
-    frames = 0; mark = now;
+    const t = performance.now();
+    $('fps').textContent = Math.round(frames * 1000 / (t - mark));
+    frames = 0; mark = t;
   }
-  requestAnimationFrame(tick);
 }
 requestAnimationFrame(tick);
 </script>
