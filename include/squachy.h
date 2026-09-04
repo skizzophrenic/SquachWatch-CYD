@@ -99,6 +99,12 @@ namespace Squachy {
     // completes. Persists immediately, same as any other cosmetic.
     void unlockAllOutfits();
 
+    // WOLF PELT is the one outfit not earned by a detection count --
+    // main.cpp calls this when the werewolf easter egg on the FIRE
+    // background is summoned. Persists immediately; a no-op once it has
+    // already been earned, so re-summoning does not re-announce it.
+    void unlockWolfPelt();
+
     // Draws Squachy and his speech bubble, and advances his idle
     // animation/quip timers. Call every tick from the CLEAR screen.
     // cx = horizontal center. topY = where the bubble row starts (just

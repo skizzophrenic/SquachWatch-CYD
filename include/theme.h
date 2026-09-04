@@ -249,6 +249,12 @@ namespace Theme {
     // you are halfway through it.
     bool backgroundTap(int x, int y, uint32_t now);
 
+    // True exactly once after the werewolf has been summoned, then
+    // false again -- the same consume-on-read shape as the detection
+    // engine's watchHitPending(). Lets main.cpp hand the unlock to
+    // Squachy without theme.cpp needing to know that outfits exist.
+    bool consumeWerewolfSummon();
+
     // Falling snow with a gentle sideways sway, a few larger bright
     // flakes mixed into a field of smaller dim ones.
     void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);

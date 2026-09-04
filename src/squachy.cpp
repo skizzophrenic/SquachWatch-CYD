@@ -327,6 +327,7 @@ static uint8_t  s_shadeIdx         = 0;
 static uint8_t  s_nickIdx          = 0;
 static uint8_t  s_outfitIdx        = 0;
 static bool     s_allOutfitsUnlocked = false;  // hidden button-sequence easter egg
+static bool     s_wolfPeltUnlocked   = false;  // earned by summoning the werewolf
 
 // Runtime-only — reset every boot, not persisted.
 static uint32_t s_cachedLifetimeTotal = 0;  // from the last DETECTION trigger (or BOOTED)
@@ -417,10 +418,14 @@ enum class OutfitId : uint8_t {
     NONE, TANOOKI, UNICORN,
     TINFOIL, SHADOW, PLUMBER, TALLBRO, SPACE, BLUEBLUR,
     CAPTAIN,
+    WOLFPELT,
     COUNT
 };
 
 struct OutfitDef { const char* name; uint32_t threshold; };
+// Threshold sentinel: this outfit is not unlocked by lifetime count at
+// all, so no reachable total should ever satisfy it.
+static const uint32_t OUTFIT_BY_EVENT = 0xFFFFFFFFu;
 static const OutfitDef OUTFITS[] = {
     { "NONE",           0 },
     { "TANOOKI SQUACH", 0 },
@@ -432,18 +437,41 @@ static const OutfitDef OUTFITS[] = {
     { "SPACE SQUACH",   60 },
     { "BLUE BLUR",      100 },
     { "CAPTAIN SQUACH", 150 },
+    // Not earned by counting anything: OUTFIT_BY_EVENT marks it as
+    // unlocked by something happening instead -- summoning the werewolf
+    // on the FIRE background. See outfitUnlocked().
+    { "WOLF PELT",      OUTFIT_BY_EVENT },
 };
 static const uint8_t OUTFITS_N = sizeof(OUTFITS) / sizeof(OUTFITS[0]);
 static_assert(OUTFITS_N == (uint8_t)OutfitId::COUNT, "OUTFITS must match OutfitId");
 
+// Was a prefix count -- "how many from the front of the list qualify" --
+// which only works while every outfit is gated on the same ascending
+// stat. WOLF PELT is not: it is earned by summoning the werewolf, so it
+// can be unlocked while outfits before it are still locked, and the set
+// stops being a contiguous prefix. Testing each index independently is
+// what makes a hole in the middle representable.
+static bool outfitUnlocked(uint8_t i) {
+    if (s_allOutfitsUnlocked)                     return true;
+    if (OUTFITS[i].threshold == OUTFIT_BY_EVENT)  return s_wolfPeltUnlocked;
+    return s_cachedLifetimeTotal >= OUTFITS[i].threshold;
+}
+
 static uint8_t unlockedOutfitCountInternal() {
-    if (s_allOutfitsUnlocked) return OUTFITS_N;
     uint8_t n = 0;
-    for (uint8_t i = 0; i < OUTFITS_N; i++) {
-        if (s_cachedLifetimeTotal < OUTFITS[i].threshold) break;  // ascending -- first miss ends it
-        n++;
-    }
+    for (uint8_t i = 0; i < OUTFITS_N; i++) if (outfitUnlocked(i)) n++;
     return n;
+}
+
+// Next/previous unlocked entry, wrapping. Modulo on the unlocked COUNT
+// only lands correctly when the unlocked set is a prefix; walking the
+// list works whatever shape it has.
+static uint8_t stepOutfit(uint8_t from, int8_t dir) {
+    for (uint8_t k = 1; k <= OUTFITS_N; k++) {
+        uint8_t cand = (uint8_t)((from + OUTFITS_N + dir * (int)k) % OUTFITS_N);
+        if (outfitUnlocked(cand)) return cand;
+    }
+    return 0;                                   // NONE is always unlocked
 }
 
 // Clamps s_outfitIdx back to NONE if it's pointing past what's
@@ -453,7 +481,7 @@ static uint8_t unlockedOutfitCountInternal() {
 // direct s_shadeIdx/etc. reads -- safe because trigger(BOOTED) loads
 // them at boot, before any tick() ever runs.
 static OutfitId currentOutfit() {
-    if (s_outfitIdx >= unlockedOutfitCountInternal()) s_outfitIdx = 0;
+    if (s_outfitIdx >= OUTFITS_N || !outfitUnlocked(s_outfitIdx)) s_outfitIdx = 0;
     return (OutfitId)s_outfitIdx;
 }
 
@@ -548,6 +576,7 @@ static void ensurePrefsLoaded() {
     s_nickIdx         = s_petPrefs.getUChar("nick", 0);
     s_outfitIdx       = s_petPrefs.getUChar("outfitIdx", 0);
     s_allOutfitsUnlocked = s_petPrefs.getBool("allOutfits", false);
+    s_wolfPeltUnlocked   = s_petPrefs.getBool("wolfPelt", false);
     s_petPrefsLoaded  = true;
 }
 
@@ -938,15 +967,13 @@ const char* outfitName() {
 
 void cycleOutfit() {
     ensurePrefsLoaded();
-    uint8_t unlocked = unlockedOutfitCountInternal();
-    s_outfitIdx = (s_outfitIdx + 1) % unlocked;
+    s_outfitIdx = stepOutfit(s_outfitIdx, +1);
     s_petPrefs.putUChar("outfitIdx", s_outfitIdx);
 }
 
 void cyclePrevOutfit() {
     ensurePrefsLoaded();
-    uint8_t unlocked = unlockedOutfitCountInternal();
-    s_outfitIdx = (uint8_t)((s_outfitIdx + unlocked - 1) % unlocked);
+    s_outfitIdx = stepOutfit(s_outfitIdx, -1);
     s_petPrefs.putUChar("outfitIdx", s_outfitIdx);
 }
 
@@ -957,6 +984,16 @@ uint8_t unlockedOutfitCount() {
 
 uint8_t outfitCount() {
     return OUTFITS_N;
+}
+
+void unlockWolfPelt() {
+    ensurePrefsLoaded();
+    if (s_wolfPeltUnlocked) return;             // already had it; stay quiet
+    s_wolfPeltUnlocked = true;
+    s_petPrefs.putBool("wolfPelt", true);
+    mood      = Mood::SHOCKED;
+    moodUntil = millis() + 2000;
+    say("...it left me its coat.", 3600);
 }
 
 void unlockAllOutfits() {
@@ -1219,6 +1256,75 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
             t.fillCircle(cx2 + S(22), hy + S(40), S(5), ringDark);
             t.fillCircle(cx2 + S(25), hy + S(35), S(4), FUR_LIGHT);
             t.fillCircle(cx2 + S(27), hy + S(30), S(4), ringDark);
+            break;
+        }
+        case OutfitId::WOLFPELT: {
+            // Worn, not become: the skull is pushed back on his head
+            // like a hood, jaw hanging over his brow, pelt down the
+            // shoulders. Everything sits ABOVE hy + S(1), which is where
+            // drawBody puts the shades -- his own face, lenses and grin
+            // stay completely visible underneath, which is the whole
+            // difference between this and a transformation.
+            const uint16_t peltDark = blend(BLACK, WHITE, 58);
+            const uint16_t peltMid  = blend(BLACK, WHITE, 96);
+            const uint16_t peltLit  = blend(BLACK, WHITE, 130);
+
+            // Vertical budget, learned the hard way over three passes.
+            // hy is NOT a fixed distance from the top of the drawing
+            // area: Squachy sits lower when his speech bubble is up and
+            // rides higher when it is not, so the headroom above him
+            // swings by several pixels frame to frame. Anything that
+            // needs more than about S(10) of clearance is fine in some
+            // frames and sliced off in others, which is exactly what
+            // happened to a skull at hy - S(26), then hy - S(18), then
+            // hy - S(11) with ears above it.
+            //
+            // So the ears go OUTWARD rather than upward. They read just
+            // as well splayed off the sides of his head, and they cost
+            // no vertical room at all -- which is the only reason this
+            // renders identically whether or not he is talking.
+            t.fillRoundRect(cx2 - S(14), hy - S(8), S(28), S(7), S(3), peltDark);
+            t.fillRoundRect(cx2 - S(10), hy - S(7), S(20), S(4), S(2), peltMid);
+
+            // Ears: swept up and out from the sides of the hood.
+            t.fillTriangle(cx2 - S(13), hy - S(2), cx2 - S(13), hy -  S(8),
+                           cx2 - S(21), hy - S(9), peltDark);
+            t.fillTriangle(cx2 + S(13), hy - S(2), cx2 + S(13), hy -  S(8),
+                           cx2 + S(21), hy - S(9), peltDark);
+            t.fillTriangle(cx2 - S(14), hy - S(4), cx2 - S(14), hy -  S(7),
+                           cx2 - S(19), hy - S(8), peltLit);
+            t.fillTriangle(cx2 + S(14), hy - S(4), cx2 + S(14), hy -  S(7),
+                           cx2 + S(19), hy - S(8), peltLit);
+
+            // Dead sockets. Deliberately dim: the live red pair belongs
+            // to the werewolf out on the fire, and reusing them here
+            // would imply the pelt is still animate.
+            const uint16_t socket = blend(BLACK, RED, 90);
+            t.fillRect(cx2 - S(7), hy - S(6), S(4), S(2), socket);
+            t.fillRect(cx2 + S(3), hy - S(6), S(4), S(2), socket);
+
+            // Fangs hang off the jaw line and come right down over the
+            // lenses. Stopping them short of his shades was the safe
+            // read but the timid one -- overlapping the eyes is what
+            // makes it look like a head worn as a hood rather than a
+            // hat, and his face still reads underneath because the
+            // teeth are narrow and the gaps carry it.
+            //
+            // Alternating lengths: five identical spikes looked like a
+            // comb, which is the same mistake the shark fin made.
+            t.fillRect(cx2 - S(11), hy - S(2), S(22), S(2), peltLit);
+            for (int i = 0; i < 5; i++) {
+                const int fx  = cx2 - S(9) + S(5) * i;
+                const int len = (i % 2) ? S(5) : S(8);
+                t.fillTriangle(fx, hy, fx + S(3), hy, fx + S(1), hy + len, WHITE);
+            }
+
+            // Pelt hanging down both shoulders, just outside the torso
+            // (drawBody puts that at cx2 +/- S(15), hy + S(23)).
+            t.fillRoundRect(cx2 - S(20), hy + S(21), S(7), S(17), S(3), peltDark);
+            t.fillRoundRect(cx2 + S(13), hy + S(21), S(7), S(17), S(3), peltDark);
+            t.fillRect(cx2 - S(19), hy + S(24), S(3), S(9), peltMid);
+            t.fillRect(cx2 + S(16), hy + S(24), S(3), S(9), peltMid);
             break;
         }
         case OutfitId::UNICORN: {

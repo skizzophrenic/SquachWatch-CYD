@@ -1502,6 +1502,11 @@ void loop() {
             // checking against wherever he last stood before the mode
             // was turned on — a tap on empty background shouldn't pet
             // a mascot that isn't there.
+            // Summoning the werewolf earns the WOLF PELT costume. Read
+            // here rather than inside theme.cpp so the background
+            // renderer stays unaware of the outfit system.
+            if (Theme::consumeWerewolfSummon()) Squachy::unlockWolfPelt();
+
             bool boring = Settings::boringMode();
             ButtonId barBtn = tp.valid ? Theme::hitTestButtonBar(tp.x, tp.y, tft.width(), tft.height()) : ButtonId::NONE;
 

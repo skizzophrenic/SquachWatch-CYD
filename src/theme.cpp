@@ -1875,6 +1875,7 @@ static const uint8_t  MOON_TAPS_NEEDED = 10;
 static uint8_t  s_moonTaps  = 0;
 static uint32_t s_moonTapAt = 0;
 static uint32_t s_wolfAt    = 0;      // 0 = no werewolf on stage
+static bool     s_wolfSummonPending = false;   // consumed by main.cpp
 
 // Stage timings, all eased into each other. Nothing here pops: that is
 // the whole lesson of the tree that used to strobe in this same scene.
@@ -1885,6 +1886,12 @@ static const uint32_t WOLF_HOWL = 1400;   // head goes back
 static const uint32_t WOLF_GONE = 1500;   // fades back into the dark
 static const uint32_t WOLF_TOTAL = WOLF_EYES + WOLF_BODY + WOLF_HOLD +
                                    WOLF_HOWL + WOLF_GONE;
+
+bool consumeWerewolfSummon() {
+    if (!s_wolfSummonPending) return false;
+    s_wolfSummonPending = false;
+    return true;
+}
 
 bool backgroundTap(int x, int y, uint32_t now) {
     // Not drawn recently means not on screen.
@@ -1898,6 +1905,7 @@ bool backgroundTap(int x, int y, uint32_t now) {
     if (++s_moonTaps >= MOON_TAPS_NEEDED) {
         s_moonTaps = 0;
         s_wolfAt   = now ? now : 1;        // never 0, that means "none"
+        s_wolfSummonPending = true;
     }
     return true;
 }
@@ -2158,6 +2166,10 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // Where the owl ended up, so the quip bubble further down can find
     // it. -1 means the band was too short to draw a tree at all.
     int owlX = -1, owlY = -1;
+    // Same idea for the werewolf: its bubble is drawn after the flames,
+    // so the draw pass needs to hand its position forward. -1 means it
+    // is not on stage, or is on stage but not in its speaking beat.
+    int wolfSayX = -1, wolfSayY = -1;
 
     // Spooky tree, standing BEHIND the fire. Being behind is the whole
     // point: it is drawn before the flames, so they cover it a pixel at
@@ -2293,82 +2305,129 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
                 eyeF *= k; bodyF *= k;
             }
 
-            // Moonlit blue-grey rather than brown: brown quantises to
-            // the same RGB332 entry as the tree bark and the two would
-            // read as one object.
-            const uint16_t fur = blend(BG, t.color565(73, 73, 85),
-                                       (uint16_t)(255.0f * bodyF));
-            const uint16_t eye = blend(BG, t.color565(255, 90, 20),
-                                       (uint16_t)(255.0f * eyeF));
-
-            // Standing back up the slope rather than down on the fire's
-            // own ground line. Two things live at the bottom of this
-            // band and both beat a background to the pixel: the counter
-            // rows the CLEAR screen prints over the top, and the densest
-            // part of the fire itself. Placed at the ground line it drew
-            // correctly and was simply never visible -- measured at
-            // y 160..201, entirely underneath FLOCK/DRONE.
+            // Front-facing, two-tone, snarling: modelled on a reference
+            // sprite rather than invented. The side-on silhouette that
+            // preceded this read as a wolf but not as a WEREwolf -- what
+            // sells the difference is facing the viewer with a lit face,
+            // red eyes and a mouthful of teeth, none of which a profile
+            // can show.
             //
-            // x is off the mascot too. Squachy is centred and about 96px
-            // wide, so at 0.74 the wolf's shoulder ran under his arm.
+            // Palette is chosen around RGB332, not despite it. Red has 3
+            // bits (0/36/73/109/146/182/219/255) and blue only 2
+            // (0/85/170/255), so every colour below already sits on a
+            // representable value and none of them drift on quantisation.
+            // The body maroon is deliberately r=109 rather than 73: at 73
+            // it collides with the tree bark and the two silhouettes
+            // merge into one shape when they overlap.
+            const uint16_t body  = blend(BG, t.color565(109,  36,   0), (uint16_t)(255.0f * bodyF));
+            const uint16_t pelt  = blend(BG, t.color565( 73,  73,  85), (uint16_t)(255.0f * bodyF));
+            const uint16_t lit   = blend(BG, t.color565(146, 146, 128), (uint16_t)(255.0f * bodyF));
+            const uint16_t claw  = blend(BG, t.color565(255,   0,   0), (uint16_t)(255.0f * bodyF));
+            const uint16_t maw   = blend(BG, t.color565(146,   0,   0), (uint16_t)(255.0f * bodyF));
+            const uint16_t tooth = blend(BG, t.color565(255, 255, 255), (uint16_t)(255.0f * bodyF));
+            const uint16_t eyeR  = blend(BG, t.color565(255,   0,   0), (uint16_t)(255.0f * eyeF));
+            const uint16_t eyeC  = blend(BG, t.color565(255, 219,   0), (uint16_t)(255.0f * eyeF));
+
+            // Standing back up the slope, not on the fire's own ground
+            // line: the counter rows and the densest flames both live at
+            // the bottom of this band and both beat a background to the
+            // pixel. Placed down there it drew correctly and was never
+            // once visible. x keeps it clear of the mascot, who is drawn
+            // over the background afterwards.
             const int gy = yStart + (int)((yEnd - yStart) * 0.66f);
             const int wx = (int)(w * 0.80f);
-            // Breathing, and a slow rise onto the haunches for the howl.
             const int breathe = (int)(sinf((float)now / 520.0f) * 1.0f);
             const int lift    = (int)(howl * 4.0f);
 
-            // BIPEDAL, hunched. Two earlier passes drew this as a
-            // quadruped and both read as a deer or a large dog: at forty
-            // pixels a four-legged silhouette carries almost no species
-            // information, and the ears end up doing all the work, which
-            // they cannot. Standing it up is what makes it unambiguous --
-            // a hunched upright thing with a snout and hanging arms is
-            // one specific monster, and nothing else in the scene shares
-            // that outline.
+            const int cx  = wx;
             const int bob = breathe;
-            const int hx  = wx - 12;
-            const int hy  = gy - 43 + bob - lift;
-            const int snoutUp = (int)(howl * 7.0f);
+            const int hy  = gy - 48 + bob - lift;      // top of the skull
+
+            // Speaks from the moment the body has fully resolved right
+            // through the howl, so the line is up while it rears back
+            // and throws its head -- the animation is the delivery. Only
+            // the fades are excluded, where the text would still be
+            // perfectly legible while the speaker was not.
+            if (e >= WOLF_EYES + WOLF_BODY &&
+                e <  WOLF_EYES + WOLF_BODY + WOLF_HOLD + WOLF_HOWL) {
+                wolfSayX = cx;
+                wolfSayY = hy - 15;
+            }
 
             if (bodyF > 0.02f) {
-                // Legs and splayed feet.
-                t.fillRect(wx -  7, gy - 15, 6, 15, fur);
-                t.fillRect(wx +  2, gy - 15, 6, 15, fur);
-                t.fillRect(wx - 11, gy -  3, 10, 3, fur);
-                t.fillRect(wx +  2, gy -  3, 10, 3, fur);
-                // Torso, and a wider hunch across the shoulders.
-                t.fillRect(wx -  8, gy - 31 + bob, 17, 17, fur);
-                t.fillRect(wx - 11, gy - 35 + bob, 22,  6, fur);
-                // Arms hanging long, with claws -- the give-away that it
-                // is standing rather than on all fours.
-                t.fillRect(wx - 15, gy - 33 + bob,  5, 18, fur);
-                t.fillRect(wx + 11, gy - 33 + bob,  5, 18, fur);
-                t.fillRect(wx - 17, gy - 16 + bob,  7,  3, fur);
-                t.fillRect(wx + 11, gy - 16 + bob,  7,  3, fur);
-                // Neck, drawn before the head and sized from lift so it
-                // stretches as the head goes back. Without it the howl
-                // detached the head from the shoulders and left it
-                // floating above the body.
-                t.fillRect(hx + 2, hy + 6, 7, 9 + lift, fur);
-                // Head sunk forward onto the shoulders, long muzzle.
-                t.fillRect(hx, hy, 11, 8, fur);
-                t.fillRect(hx - 6, hy + 3 - snoutUp, 7, 4, fur);
-                // Ears as chunky filled triangles. Thin diagonal lines
-                // here were the single biggest reason the earlier tries
-                // read as antlers.
-                t.fillRect(hx + 1, hy - 3, 3, 3, fur);
-                t.fillRect(hx + 1, hy - 5, 2, 2, fur);
-                t.fillRect(hx + 7, hy - 3, 3, 3, fur);
-                t.fillRect(hx + 8, hy - 5, 2, 2, fur);
+                // Legs, planted wide, and heavy dark feet.
+                t.fillRect(cx - 10, gy - 19, 7, 16, body);
+                t.fillRect(cx +  4, gy - 19, 7, 16, body);
+                t.fillRect(cx - 13, gy -  4, 11, 4, pelt);
+                t.fillRect(cx +  3, gy -  4, 11, 4, pelt);
+
+                // Torso with a lighter chest panel -- the two-tone is
+                // most of what stops this reading as one dark blob.
+                t.fillRect(cx - 11, gy - 35 + bob, 23, 17, body);
+                t.fillRect(cx -  5, gy - 34 + bob, 11, 14, pelt);
+
+                // Hunched shoulders, wider than the chest.
+                t.fillRect(cx - 15, gy - 39 + bob, 31,  6, body);
+
+                // Arms hanging long and slightly out, with black hands
+                // and red claws at the tips.
+                t.fillRect(cx - 20, gy - 38 + bob, 6, 21, body);
+                t.fillRect(cx + 15, gy - 38 + bob, 6, 21, body);
+                t.fillRect(cx - 21, gy - 18 + bob, 8,  5, pelt);
+                t.fillRect(cx + 14, gy - 18 + bob, 8,  5, pelt);
+                for (int k = 0; k < 3; k++) {
+                    t.drawFastVLine(cx - 20 + k * 3, gy - 13 + bob, 4, claw);
+                    t.drawFastVLine(cx + 15 + k * 3, gy - 13 + bob, 4, claw);
+                }
+
+                // Neck, sized from lift so the head stays attached when
+                // it goes back for the howl.
+                t.fillRect(cx - 5, hy + 11, 11, 8 + lift, body);
+
+                // Skull, with a lighter muzzle mask over it.
+                t.fillRect(cx - 10, hy, 21, 13, pelt);
+                t.fillRect(cx -  5, hy + 4, 11, 10, lit);
+
+                // Ears taper to a point over three steps and stand well
+                // proud of the crest. The first version had ears and
+                // crest tufts at the same height and even spacing, which
+                // turned the whole skull into a crown.
+                t.fillRect(cx - 11, hy - 4, 4, 4, pelt);
+                t.fillRect(cx - 10, hy - 7, 3, 3, pelt);
+                t.fillRect(cx -  9, hy - 9, 2, 2, pelt);
+                t.fillRect(cx +  8, hy - 4, 4, 4, pelt);
+                t.fillRect(cx +  8, hy - 7, 3, 3, pelt);
+                t.fillRect(cx +  8, hy - 9, 2, 2, pelt);
+                // Ragged crest: short, uneven, and well below the ears.
+                t.fillRect(cx - 5, hy - 2, 2, 2, pelt);
+                t.fillRect(cx - 1, hy - 3, 2, 3, pelt);
+                t.fillRect(cx + 3, hy - 2, 2, 2, pelt);
+
+                // Nose, then the open snarl. The howl drops the jaw
+                // further and the teeth go with it.
+                const int jaw = (int)(howl * 3.0f);
+                t.fillRect(cx - 2, hy + 6, 4, 3, pelt);
+                t.fillRect(cx - 5, hy + 10, 11, 4 + jaw, maw);
+                t.drawFastHLine(cx - 5, hy + 10, 11, tooth);
+                t.drawFastHLine(cx - 5, hy + 13 + jaw, 11, tooth);
             }
-            // Eyes last so nothing paints over them; they narrow to
-            // slits at the top of the howl.
+
+            // Eyes last so nothing paints over them: red, angled inward,
+            // with a hot centre. These arrive before the body does and
+            // are the whole of the first beat.
+            // Angled inward along the top edge, which is the whole of
+            // an angry expression at this size -- a plain rectangle pair
+            // read as goggles.
+            t.fillRect(cx - 8, hy + 5, 6, 3, eyeR);
+            t.fillRect(cx + 3, hy + 5, 6, 3, eyeR);
+            t.fillRect(cx - 5, hy + 4, 3, 1, eyeR);
+            t.fillRect(cx + 3, hy + 4, 3, 1, eyeR);
             if (howl > 0.55f) {
-                t.drawFastHLine(hx + 1, hy + 3, 3, eye);
-                t.drawFastHLine(hx + 6, hy + 3, 3, eye);
+                t.drawFastHLine(cx - 7, hy + 6, 4, eyeC);
+                t.drawFastHLine(cx + 4, hy + 6, 4, eyeC);
             } else {
-                t.fillRect(hx + 1, hy + 2, 3, 3, eye);
-                t.fillRect(hx + 6, hy + 2, 3, 3, eye);
+                t.fillRect(cx - 6, hy + 6, 2, 2, eyeC);
+                t.fillRect(cx + 5, hy + 6, 2, 2, eyeC);
             }
         }
     }
@@ -2421,6 +2480,36 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             t.fillRect(runStart * CW, yStart + y * CW,
                        (fw - runStart) * CW, CW, runCol);
         }
+    }
+
+    // The werewolf has exactly one thing to say. Right-aligned to the
+    // screen rather than centred on the wolf: the line is wide, the wolf
+    // stands at 80% across, and centring it would run the left end back
+    // under the mascot -- who is drawn over this background by ui_clear
+    // and would clip the first few letters off mid-word.
+    if (wolfSayY >= 0) {
+        static const char SKID[] = "Don't Be a SKID!";
+        t.setTextSize(1);
+        const int bw = t.textWidth(SKID) + 7;
+        const int bh = 11;
+        int bx = w - 2 - bw;
+        int by = wolfSayY;
+        if (bx < 1)          bx = 1;
+        if (by < yStart + 1) by = yStart + 1;
+        const uint16_t paper = t.color565(236, 232, 218);
+        const uint16_t ink   = t.color565(16, 12, 10);
+        t.fillRect(bx, by, bw, bh, paper);
+        t.drawRect(bx, by, bw, bh, ink);
+        // Tail under the wolf, not under the corner of the bubble.
+        int tailX = wolfSayX - 3;
+        if (tailX < bx + 2)      tailX = bx + 2;
+        if (tailX > bx + bw - 6) tailX = bx + bw - 6;
+        t.drawFastHLine(tailX, by + bh,     4, paper);
+        t.drawFastHLine(tailX, by + bh + 1, 2, paper);
+        t.drawPixel(tailX - 1, by + bh, ink);
+        t.setTextColor(ink, paper);
+        t.setCursor(bx + 4, by + 2);
+        t.print(SKID);
     }
 
     // Owl quips. Drawn AFTER the flames, unlike the owl itself: a
