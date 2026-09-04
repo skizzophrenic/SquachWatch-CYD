@@ -799,6 +799,14 @@ static char    s_confirmLabel[24];
 // from s_rawScanIsBle) -- RAWSCAN's own WATCH/HUNT branches don't
 // touch this, only LOG's do.
 static bool    s_confirmIsBle = true;
+// The current alert's target, captured in enterAlert(). Kept separate
+// from the s_confirm* trio above on purpose: those belong to LOG's
+// long-press confirm panel, and an alert arriving while that panel is
+// open would otherwise redirect a WATCH/HUNT the user was part-way
+// through choosing at a completely different device.
+static uint8_t s_alertMac[6];
+static char    s_alertLabel[24];
+static bool    s_alertIsBle = true;
 // Captured alongside mac/label at row-hold time (LOG) or straight from
 // the current alert (ALERT, see enterAlert()) so MORE INFO knows what
 // to explain without needing the original Detection* to still be valid
@@ -862,6 +870,16 @@ static void enterAlert(const Detection& d) {
     transitionStart = alertStart;
     lastAlertType = d.type;
     lastAlertHits = d.hits;
+    // Copied rather than kept as a Detection* -- the log is a ring
+    // buffer that keeps being written while the alert is up, so the
+    // entry this came from can be overwritten before HUNT is tapped.
+    memcpy(s_alertMac, d.mac, 6);
+    s_alertIsBle = (d.channel == 0);   // same discriminator LOG's long-press uses
+    {
+        const char* lbl = d.name[0] ? d.name : d.vendor;
+        strncpy(s_alertLabel, lbl, sizeof(s_alertLabel) - 1);
+        s_alertLabel[sizeof(s_alertLabel) - 1] = 0;
+    }
     s_infoPending = false;
     uiAlertInit(*canvas, d);
 #if defined(CYD35)
@@ -1694,6 +1712,18 @@ void loop() {
                     s_infoShowingPrimer  = !Settings::infoPrimerShown();
                     s_infoPending        = true;
                     s_infoArmed          = false;
+                } else if (uiAlertHitHunt(tp.x, tp.y, tft.width(), tft.height())) {
+                    // Same call pair LOG's confirm panel makes. The
+                    // DETECTION trigger fires here too: leaving via HUNT
+                    // is still the user acknowledging this alert, and
+                    // without it a detection chased straight from the
+                    // alert would never register with Squachy at all --
+                    // the only other exits (tap-to-dismiss, and GOT IT
+                    // on the info panel) both fire it.
+                    if (s_alertIsBle) engine.huntBle(s_alertMac, s_alertLabel);
+                    else              engine.huntWifi(s_alertMac, s_alertLabel);
+                    Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits);
+                    enterHunt();
                 } else {
                     Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits);
                     enterClear();

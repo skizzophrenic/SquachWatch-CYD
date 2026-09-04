@@ -46,21 +46,37 @@ void uiBootTick(TFT_eSPI& t, uint32_t now) {
     int h = t.height();
     int yHoriz = (h * 5) / 8;
 
-    // Full vaporwave sunset backdrop — sky, sun, seagulls, floor — redrawn
-    // from scratch every frame (cheap enough at boot-screen size, and
-    // simpler than dirty-rect tracking for a screen that's only up for
-    // 3s). Text below is drawn with a transparent background so the
-    // scene shows through around every glyph instead of solid boxes.
-    Theme::drawSunsetSky(t, now, 0, yHoriz);
-    Theme::drawSunsetSun(t, w / 2, yHoriz - 25, 53, 0, yHoriz);  // 30 * 1.75
+    // The same composed scene the SYNTHWAVE background uses -- sky,
+    // sun, ridgeline, reflective water and rungs -- rather than the
+    // four separate calls this used to make. That version predated the
+    // reflection, so the splash was showing a strictly worse sunset
+    // than the background did; this keeps the two from drifting apart
+    // again. Gulls stay layered on top, since they belong to the splash
+    // and not to the background. Redrawn from scratch every frame
+    // (cheap at boot-screen size, and simpler than dirty-rect tracking
+    // for a screen that is only up for 3s). Text below is drawn with a
+    // transparent background so the scene shows through around every
+    // glyph instead of sitting in solid boxes.
+    Theme::drawSynthwave(t, now, 0, h, 5.0f / 8.0f);   // same waterline this screen always had
     Theme::drawSeagulls(t, now, 0, yHoriz);
-    Theme::drawRetroFloor(t, now, yHoriz, h);
 
     // Big title, Bangers comic-impact font — landscape-only screen
     // (boot always starts at rotation 1) so the width is never tight.
     const char* title = "SQUACHWATCH";
     int tw = Theme::bangersTextWidth(title, Theme::BangersSize::LG);
-    Theme::drawBangersText(t, (w - tw) / 2, 8, title, Theme::VAPOR_PINK, Theme::BangersSize::LG);
+    int tx = (w - tw) / 2;
+    // 3px black outline. The title sits over a bright sunset now, and
+    // pink-on-orange had almost no separation where the sun passed
+    // behind it. Drawn as a dilation -- the same glyphs at every offset
+    // inside a radius-3 disc -- rather than a rectangular halo, so the
+    // stroke follows the letterforms instead of boxing them.
+    for (int dy = -3; dy <= 3; dy++) {
+        for (int dx = -3; dx <= 3; dx++) {
+            if (dx * dx + dy * dy > 9 || (dx == 0 && dy == 0)) continue;
+            Theme::drawBangersText(t, tx + dx, 8 + dy, title, Theme::BLACK, Theme::BangersSize::LG);
+        }
+    }
+    Theme::drawBangersText(t, tx, 8, title, Theme::VAPOR_PINK, Theme::BangersSize::LG);
 
     // gradient line — moved up right under the title (the v1.0 line
     // used to sit here; removed so Squachy below gets that room too).
@@ -70,11 +86,36 @@ void uiBootTick(TFT_eSPI& t, uint32_t now) {
 
     // TALKING SASQUACH subtitle — the brand line under the product
     // name, not just the product name again.
+    //
+    // Black outlined, same as the title above and for the same reason:
+    // it sits over the sunset, and purple against the sun's oranges has
+    // almost no separation where the two overlap.
+    //
+    // One pixel, not the title's three. This is the built-in font at
+    // size 2, so the strokes are already only two pixels wide -- a
+    // heavier outline competes with the letterform instead of just
+    // separating it from the background, and the counters in A, G and Q
+    // start filling in.
+    //
+    // All eight neighbours, so the stroke closes on the diagonals too;
+    // the four-way cross alternative leaves visible gaps at every corner
+    // of a glyph. The single-argument setTextColor leaves the background
+    // transparent, which is what lets the copies build a stroke instead
+    // of each one painting a box over the last.
     t.setTextSize(2);
-    t.setTextColor(Theme::VAPOR_PURPLE);
     const char* sub = "TALKING SASQUACH";
     int sw = t.textWidth(sub);
-    t.setCursor((w - sw) / 2, 54);
+    const int sx = (w - sw) / 2;
+    t.setTextColor(Theme::BLACK);
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            if (dx == 0 && dy == 0) continue;
+            t.setCursor(sx + dx, 54 + dy);
+            t.print(sub);
+        }
+    }
+    t.setTextColor(Theme::VAPOR_PURPLE);
+    t.setCursor(sx, 54);
     t.print(sub);
 
     // Squachy himself, standing on the floor just past the horizon,

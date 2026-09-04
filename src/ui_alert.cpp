@@ -19,6 +19,7 @@ static const char* targetLabel(DetectionType t) {
         case DetectionType::GOOGLE_TAG:  return "GOOGLE TAG";
         case DetectionType::TILE:        return "TILE";
         case DetectionType::RING:        return "RING CAM";
+        case DetectionType::EVILTWIN:    return "EVIL TWIN AP";
         default:                     return "UNKNOWN";
     }
 }
@@ -89,6 +90,25 @@ static void moreInfoBtnRect(int screenW, int screenH, int& bx, int& by, int& bw,
     bh = 48;
     bx = screenW - bw - 4;
     by = screenH - bh - 4;
+}
+
+// HUNT button, bottom-LEFT corner -- the mirror of moreInfoBtnRect()
+// above, and for the same reason: the corners are the only spots
+// guaranteed clear of the centered column of text on every rotation.
+// Same 70x48 footprint so the two read as a matched pair, even though
+// "HUNT" is one short line and doesn't need the height -- matching the
+// neighbour matters more here than shrinking to fit the label.
+static void huntBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, int& bh) {
+    bw = 70;
+    bh = 48;
+    bx = 4;
+    by = screenH - bh - 4;
+}
+
+bool uiAlertHitHunt(int x, int y, int screenW, int screenH) {
+    int bx, by, bw, bh;
+    huntBtnRect(screenW, screenH, bx, by, bw, bh);
+    return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
 }
 
 bool uiAlertHitMoreInfo(int x, int y, int screenW, int screenH) {
@@ -227,6 +247,27 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now,
         int iw = t.textWidth("INFO");
         t.setCursor(bx + (bw - iw) / 2, ty + lineH + lineGap);
         t.print("INFO");
+    }
+
+    // HUNT -- starts tracking this exact device straight from the alert,
+    // the same engine.huntBle()/huntWifi() call LOG's long-press confirm
+    // panel makes. Without it, chasing a device you were just warned
+    // about meant dismissing the alert, opening LOG, finding the row
+    // again and long-pressing it -- by which point a moving target may
+    // already be out of range. Drawn in AMBER rather than the CYAN
+    // MORE INFO uses: this one changes what the device is doing, the
+    // other only opens a text panel.
+    {
+        int bx, by, bw, bh;
+        huntBtnRect(w, h, bx, by, bw, bh);
+        t.fillRect(bx, by, bw, bh, Theme::BG);
+        t.drawRect(bx, by, bw, bh, Theme::PURPLE);
+        t.setTextSize(2);
+        t.setTextColor(Theme::AMBER, Theme::BG);
+        t.setTextWrap(false);
+        int hw = t.textWidth("HUNT");
+        t.setCursor(bx + (bw - hw) / 2, by + (bh - t.fontHeight()) / 2);
+        t.print("HUNT");
     }
 
     // TV-static snow over the whole screen during the same random burst

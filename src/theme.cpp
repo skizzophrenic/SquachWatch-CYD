@@ -1,5 +1,6 @@
 // SquachWatch-CYD — theme implementation
 #include "theme.h"
+#include "caustic_tile.h"
 #include "detection.h"
 #include "bangers_font.h"
 #include "squachy.h"
@@ -89,6 +90,7 @@ uint16_t colorFor(DetectionType t) {
         case DetectionType::RING:
             return CYAN;
         case DetectionType::DEAUTH:
+        case DetectionType::EVILTWIN:
             return RED;
         default:
             return GREEN;
@@ -183,6 +185,14 @@ void drawTitleBar(TFT_eSPI& t, const char* title) {
         t.drawFastVLine(x, 0, 14, titlebarColor(x, w));
     }
     t.drawFastHLine(0, 14, w, PURPLE);
+    // Row 15. The bar itself is rows 0-13 plus the rule on 14, but every
+    // screen in the app starts its body at y=16 -- so row 15 belonged to
+    // nobody and kept whatever the last frame left there, which showed
+    // up as a 1px strip of fragments under the rule. Clearing it here
+    // means the title bar owns the full 16 rows its callers already
+    // assume it does, and fixes the strip on every screen at once
+    // rather than screen by screen.
+    t.drawFastHLine(0, 15, w, BG);
     t.setTextSize(1);
     // Transparent background so the fade shows through between glyphs
     // instead of a mismatched solid-color block behind the text. Black
@@ -814,10 +824,291 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     }
 }
 
+// Ordered dither, so a gradient survives the frame buffer.
+//
+// The sprite is 8bpp RGB332: 3 bits of red, 3 of green, 2 of blue. Blue
+// therefore has FOUR levels for the whole screen, and any smooth blue
+// gradient quantises into flat slabs on the panel -- which is invisible
+// in a 16-bit preview and extremely visible on the device.
+//
+// A 4x4 Bayer offset applied before quantisation makes neighbouring
+// cells land on opposite sides of the boundary, and the eye integrates
+// them back into the gradient. The per-channel step sizes below are the
+// quantisation intervals RGB332 actually has (32/32/64), which is why
+// blue gets twice the nudge: it is twice as coarse.
+static uint16_t ditherRGB(TFT_eSPI& t, float r, float g, float b, uint8_t cell) {
+    static const int8_t BAYER[16] = { -8,  0, -6,  2,
+                                       4, -4,  6, -2,
+                                      -5,  3, -7,  1,
+                                       7, -1,  5, -3 };
+    const int d = BAYER[cell & 15];
+    int rr = (int)r + (d * 32) / 16;
+    int gg = (int)g + (d * 32) / 16;
+    int bb = (int)b + (d * 64) / 16;
+    if (rr < 0) rr = 0; else if (rr > 255) rr = 255;
+    if (gg < 0) gg = 0; else if (gg > 255) gg = 255;
+    if (bb < 0) bb = 0; else if (bb > 255) bb = 255;
+    return t.color565((uint8_t)rr, (uint8_t)gg, (uint8_t)bb);
+}
+
+// Water colour at a given row. The gradient was being open-coded in
+// four places with the same magic numbers; a fish that hazes toward a
+// slightly different blue than the water it is swimming in stops
+// disappearing into the distance, which is the entire point of the
+// haze, so they have to agree exactly.
+static uint16_t aquaWaterAt(TFT_eSPI& t, int y, int yStart, int bandH) {
+    float d = (float)(y - yStart) / (float)bandH;
+    if (d < 0.0f) d = 0.0f;
+    if (d > 1.0f) d = 1.0f;
+    const float lit = 1.0f - d;
+    return t.color565((uint8_t)(4  + lit *  7),
+                      (uint8_t)(30 + lit * 30),
+                      (uint8_t)(44 + lit * 32));
+}
+
+// Body half-height at u (0 = snout, 1 = tail base), per species. Each
+// silhouette has to stay recognisable at eight pixels tall, so these
+// are deliberately exaggerated: the angelfish is taller than is
+// reasonable, the puffer rounder, the minnow thinner.
+static float fishProfile(uint8_t species, float u) {
+    switch (species) {
+        case 1:   // angelfish -- tall, laterally compressed
+            return (u < 0.32f) ? (0.30f + (u / 0.32f) * 0.70f)
+                               : (1.0f - powf((u - 0.32f) / 0.68f, 1.5f) * 0.88f);
+        case 2:   // puffer -- near-spherical
+            return sinf(u * 3.14159f) * 1.00f + 0.06f;
+        default:  // minnow -- slim torpedo
+            return (u < 0.28f) ? (0.28f + (u / 0.28f) * 0.72f)
+                               : (1.0f - powf((u - 0.28f) / 0.72f, 1.35f) * 0.84f);
+    }
+}
+
+// The same slice-and-flex construction the shark uses, scaled down.
+// Head steady, tail sweeping, counter-shaded, with a forked caudal fin.
+//
+// `detailed` is what ties this to the depth haze: fins and an eye on a
+// near fish, bare silhouette on a far one. That is not a shortcut --
+// at four pixels tall the extra strokes turn to mush and read as
+// noise, and dropping them makes distant fish look distant rather than
+// just small.
+static void drawFishAt(TFT_eSPI& t, int cx, int cy, int8_t swim, int s,
+                       uint8_t species, uint16_t col, uint16_t waterC,
+                       uint32_t now, float phase, bool detailed) {
+    if (s < 2) s = 2;
+    const int8_t fore = swim;
+    const int8_t aft  = (int8_t)-swim;
+    const float  L    = (species == 2) ? (float)s * 1.9f
+                      : (species == 1) ? (float)s * 2.1f
+                                       : (float)s * 2.9f;
+    const int    NSL  = (int)L + 1;
+    const float  ph   = (float)now / 150.0f + phase;
+
+    // Counter-shading derived from the fish's own colour, so each keeps
+    // its identity while gaining a lit top and a pale belly.
+    const uint16_t back  = col;
+    const uint16_t belly = blend(col, t.color565(255, 255, 255), 110);
+    const int snoutX = cx + fore * (int)(L * 0.5f);
+
+    auto waveAt = [&](float u) { return sinf(ph - u * 4.2f) * (0.25f + u * u * (float)s * 0.40f); };
+    auto xAt    = [&](float u) { return (float)snoutX + (float)aft * u * L; };
+    auto yAt    = [&](float u) { return (float)cy + waveAt(u); };
+
+    for (int i = 0; i < NSL; i++) {
+        const float u  = (float)i / (float)(NSL - 1);
+        const float hh = fishProfile(species, u) * (float)s;
+        if (hh < 0.5f) continue;
+        const int x = (int)xAt(u), yc = (int)yAt(u), h = (int)hh;
+        t.drawFastVLine(x, yc - h, h, back);
+        t.drawFastVLine(x, yc, h + 1, belly);
+    }
+
+    // Forked caudal fin -- two lobes meeting at the peduncle, which is
+    // what makes the notch without having to erase anything.
+    {
+        const int px = (int)xAt(1.0f), py = (int)yAt(1.0f);
+        const int tx = px + aft * (int)(s * 1.05f + 1);
+        const int lobe = (int)(s * 0.78f) + 1;
+        t.fillTriangle(px, py, tx, py - lobe, px + aft * (int)(s * 0.35f), py - 1, back);
+        t.fillTriangle(px, py, tx, py + lobe, px + aft * (int)(s * 0.35f), py + 1, back);
+    }
+
+    if (!detailed) return;
+
+    // Dorsal fin. The angelfish gets the tall trailing one it is known
+    // for; everything else gets a modest triangle.
+    {
+        const float u  = (species == 1) ? 0.34f : 0.40f;
+        const int   px = (int)xAt(u);
+        const int   py = (int)yAt(u) - (int)(fishProfile(species, u) * s);
+        const int   hgt = (species == 1) ? (int)(s * 1.05f) : (int)(s * 0.55f);
+        t.fillTriangle(px + fore * (int)(s * 0.30f), py,
+                       px + aft  * (int)(s * 0.20f), py - hgt,
+                       px + aft  * (int)(s * 0.45f), py, back);
+    }
+    // Pectoral fin, swept aft and low.
+    {
+        const float u  = 0.34f;
+        const int   px = (int)xAt(u);
+        const int   py = (int)yAt(u) + (int)(fishProfile(species, u) * s * 0.45f);
+        t.fillTriangle(px, py,
+                       px + aft * (int)(s * 0.55f), py + (int)(s * 0.50f),
+                       px + aft * (int)(s * 0.15f), py + 1, belly);
+    }
+    // Puffer keeps its spines.
+    if (species == 2) {
+        for (uint8_t k = 0; k < 6; k++) {
+            const float a = k * 1.047f + (float)now / 400.0f;
+            t.drawPixel(cx + (int)(cosf(a) * (s + 2)), cy + (int)(sinf(a) * (s + 2)), back);
+        }
+    }
+    // Eye. One pale pixel with a dark pupil is enough at this size, and
+    // it is the single detail that makes a shape read as alive.
+    {
+        const float u  = 0.17f;
+        const int   px = (int)xAt(u);
+        const int   py = (int)yAt(u) - (int)(fishProfile(species, u) * s * 0.34f);
+        t.drawPixel(px, py, t.color565(240, 240, 245));
+        t.drawPixel(px + fore, py, BLACK);
+    }
+}
+
+// Half-height of a shark's body at position u along it, 0 at the snout
+// and 1 at the base of the tail. Rises fast from a pointed nose, peaks
+// just behind the pectorals, then tapers to the narrow peduncle the
+// tail hangs off. Three triangles never had this shape; a real shark is
+// mostly a taper, and the taper is what the eye recognises.
+static float sharkProfile(float u) {
+    if (u < 0.30f) return 0.16f + (u / 0.30f) * 0.84f;
+    const float k = (u - 0.30f) / 0.70f;
+    return 1.0f - k * k * 0.88f;
+}
+
+// A shark drawn as a column of vertical slices rather than a fixed
+// outline, which is what lets the body actually flex. Each slice takes
+// its centreline from a wave travelling nose-to-tail with amplitude
+// growing aft (u*u), so the head barely moves and the tail sweeps --
+// which is how a real shark swims, and reads as swimming rather than
+// sliding.
+//
+// Counter-shading does most of the remaining work: dark grey-blue over
+// pale belly, split along the flexing centreline. It is the single most
+// recognisable thing about a shark seen from the side, and here it
+// costs one extra fill per slice.
+//
+// `swim` is the direction of travel. Every offset below is written in
+// terms of `fore` (toward the nose) and `aft` (toward the tail) rather
+// than raw signs, because the first version of this got that backwards
+// -- the body was laid out *downstream* of the snout, so the animal
+// swam tail-first. Naming the two directions makes that class of
+// mistake visible at the call site instead of only on screen.
+static void drawShark(TFT_eSPI& t, int snoutX, int cy, int8_t swim, int ss, uint32_t now) {
+    const int8_t fore = swim;         // toward the nose
+    const int8_t aft  = (int8_t)-swim; // toward the tail
+    const float  L    = (float)ss * 2.1f;   // snout to tail base
+    // One slice per pixel column, not a fixed count: at ss=20 a fixed 26
+    // slices sit 1.7px apart and the body renders as a comb of separate
+    // vertical lines with gaps between them. Deriving the count from the
+    // length keeps it solid at any size.
+    const int   NSL   = (int)L + 1;
+    const float phase = (float)now / 190.0f;
+
+    const uint16_t back  = t.color565(58, 72, 88);         // dorsal
+    const uint16_t belly = t.color565(196, 202, 206);      // ventral
+    const uint16_t edge  = t.color565(34, 42, 54);
+
+    // Centreline and half-height for any u, shared by the body slices
+    // and every fin so the fins stay attached while the body flexes.
+    auto waveAt = [&](float u) {
+        return sinf(phase - u * 4.6f) * (0.4f + u * u * 6.2f);
+    };
+    auto yAt = [&](float u) { return (float)cy + waveAt(u); };
+    // u = 0 at the snout, 1 at the tail base -- so the body extends AFT
+    // of the snout, which is the fix for the backwards swimming.
+    auto xAt = [&](float u) { return (float)snoutX + (float)aft * u * L; };
+
+    // ---- body ------------------------------------------------------
+    for (int i = 0; i < NSL; i++) {
+        const float u  = (float)i / (float)(NSL - 1);
+        const float hh = sharkProfile(u) * (float)ss * 0.40f;
+        if (hh < 0.5f) continue;
+        const int x  = (int)xAt(u);
+        const int yc = (int)yAt(u);
+        const int h  = (int)hh;
+        // Dorsal half dark, ventral half pale, meeting at the flexing
+        // centreline rather than a straight one.
+        t.drawFastVLine(x, yc - h, h, back);
+        t.drawFastVLine(x, yc, h + 1, belly);
+        t.drawPixel(x, yc - h, edge);
+        t.drawPixel(x, yc + h, edge);
+    }
+
+    // ---- caudal fin -------------------------------------------------
+    // Heterocercal: upper lobe clearly longer than the lower. Getting
+    // this asymmetry right is most of what makes a silhouette read as
+    // "shark" instead of "fish".
+    {
+        const int px = (int)xAt(1.0f), py = (int)yAt(1.0f);
+        const int tx = px + aft * (int)(ss * 0.62f);
+        t.fillTriangle(px, py, tx, py - (int)(ss * 0.95f), px + aft * (int)(ss * 0.18f), py - 2, back);
+        t.fillTriangle(px, py, tx, py + (int)(ss * 0.42f), px + aft * (int)(ss * 0.16f), py + 2, back);
+    }
+
+    // ---- dorsal fin -------------------------------------------------
+    // Raked aft, the way a shark's is.
+    {
+        const float u = 0.40f;
+        const int px = (int)xAt(u), py = (int)yAt(u) - (int)(sharkProfile(u) * ss * 0.40f);
+        t.fillTriangle(px + fore * (int)(ss * 0.16f), py,
+                       px + aft  * (int)(ss * 0.10f), py - (int)(ss * 0.62f),
+                       px + aft  * (int)(ss * 0.26f), py, back);
+    }
+    // Second dorsal, small, well aft.
+    {
+        const float u = 0.80f;
+        const int px = (int)xAt(u), py = (int)yAt(u) - (int)(sharkProfile(u) * ss * 0.40f);
+        t.fillTriangle(px + fore * 2, py, px + aft * 1, py - (int)(ss * 0.20f), px + aft * 5, py, back);
+    }
+
+    // ---- pectoral fin ----------------------------------------------
+    // Swept aft and downward, the way a shark holds them level.
+    {
+        const float u = 0.30f;
+        const int px = (int)xAt(u), py = (int)yAt(u) + (int)(sharkProfile(u) * ss * 0.30f);
+        t.fillTriangle(px, py,
+                       px + aft  * (int)(ss * 0.38f), py + (int)(ss * 0.44f),
+                       px + fore * (int)(ss * 0.10f), py + 2, back);
+    }
+
+    // ---- head detail ------------------------------------------------
+    // Five gill slits, then the eye. Small things, but they are where
+    // the eye looks to decide whether a shape is an animal.
+    for (uint8_t g = 0; g < 5; g++) {
+        const float u  = 0.20f + g * 0.028f;
+        const int   px = (int)xAt(u);
+        const int   py = (int)yAt(u);
+        const int   hh = (int)(sharkProfile(u) * ss * 0.40f);
+        t.drawFastVLine(px, py - hh / 2, hh / 2 + 2, edge);
+    }
+    {
+        const float u = 0.13f;
+        const int px = (int)xAt(u), py = (int)yAt(u) - (int)(sharkProfile(u) * ss * 0.17f);
+        t.fillCircle(px, py, 1, t.color565(240, 240, 245));
+        t.drawPixel(px + fore, py, RED);      // the glint, kept
+    }
+    // Mouth: a short underslung line running aft from the snout.
+    {
+        const int x0 = (int)xAt(0.05f), y0 = (int)yAt(0.05f) + 1;
+        const int x1 = (int)xAt(0.20f), y1 = (int)yAt(0.20f) + (int)(sharkProfile(0.20f) * ss * 0.22f);
+        t.drawLine(x0, y0, x1, y1, edge);
+    }
+}
+
 void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // species: 0 = minnow, 1 = angelfish, 2 = puffer, 3 = jellyfish
     // (its own drift-and-pulse motion instead of side-to-side swimming).
-    struct Fish { float x, y, speed, phase; int8_t dir; uint8_t size, species; uint16_t col; };
+    // depth: 0 = right at the glass, 1 = far back. Drives size,
+    // speed, haze and whether the fish gets drawn with fins at all.
+    struct Fish { float x, y, speed, phase, depth; int8_t dir; uint8_t size, species; uint16_t col; };
     static const uint8_t N = 8;
     static Fish  fish[N];
     static bool  fInited = false;
@@ -843,7 +1134,24 @@ void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     if (bandH < 20) return;
 
     if (!fInited) {
-        uint16_t cols[5] = { CYAN, VAPOR_PINK, VAPOR_YELLOW, GREEN, VAPOR_PURPLE };
+        // A single cool family rather than five saturated hues from
+        // opposite sides of the wheel. CYAN/PINK/YELLOW/GREEN/PURPLE
+        // each read as a separate accent competing for attention, which
+        // is exactly wrong for something whose job is to sit behind the
+        // UI. These stay distinguishable from each other while belonging
+        // to the same water -- and muted colours survive RGB332
+        // quantisation far better than saturated ones, which clamp to
+        // the nearest primary and go garish.
+        //
+        // Deliberately fixed values rather than Theme constants: the
+        // tank's water, sand and light are all fixed too, so pulling the
+        // fish from the palette would make them the one element that
+        // jumps hue when the theme changes.
+        uint16_t cols[5] = { t.color565(126, 196, 194),   // pale aqua
+                             t.color565( 92, 148, 178),   // steel blue
+                             t.color565(142, 198, 168),   // seafoam
+                             t.color565( 78, 132, 146),   // dim teal
+                             t.color565(176, 168, 132) }; // muted sand, one warm note
         for (uint8_t i = 0; i < N; i++) {
             fish[i].x       = (float)random(0, w);
             fish[i].y       = (float)(yStart + random(10, bandH > 20 ? bandH - 10 : bandH));
@@ -853,6 +1161,7 @@ void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             fish[i].species = (uint8_t)((i == 0) ? 3 : random(0, 3));  // guarantee at least one jellyfish
             fish[i].size    = (uint8_t)(4 + random(0, 4));
             fish[i].col     = cols[i % 5];
+            fish[i].depth   = (float)random(0, 100) / 100.0f;
         }
         fInited = true;
     }
@@ -865,7 +1174,209 @@ void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     }
     if (!sharkInited) { sharkNextAt = now + (uint32_t)random(6000, 16000); sharkInited = true; }
 
-    t.fillRect(0, yStart, w, bandH, BG);
+    // ---- water column ----------------------------------------------
+    // Two constraints shape everything here, and they pull against each
+    // other.
+    //
+    // First, the frame buffer is 8bpp RGB332: 3 bits of red, 3 of green,
+    // 2 of blue. Its levels are evenly spaced over 0..255, so *dark*
+    // colours get almost no resolution. The previous, darker water
+    // spanned literally two green levels and two blue levels across the
+    // whole tank -- which is why it landed on the panel as flat slabs no
+    // amount of shading could fix. Lifting the ramp is not a style
+    // choice, it is the only way to buy quantisation levels to shade
+    // with.
+    //
+    // Second, UI text sits on top of this, so it cannot go far.
+    //
+    // The compromise: a brighter surface (spanning four green levels
+    // instead of two) plus dithering *vertically only*. A 16-phase
+    // ordered offset per row makes consecutive rows straddle the
+    // quantisation boundary, and the eye integrates them into a smooth
+    // ramp. Dithering horizontally as well was tried and looked worse --
+    // at 4px cells it reads as brick-textured noise rather than
+    // gradient, because with two levels to work with there is nothing
+    // subtle for the pattern to interpolate between.
+    static const uint8_t NRAY = 3;
+    static float   rayX[NRAY], rayW[NRAY], raySpd[NRAY];
+    static bool    rayInited = false;
+    if (!rayInited) {
+        for (uint8_t i = 0; i < NRAY; i++) {
+            rayX[i]   = (float)random(0, w);
+            rayW[i]   = 18.0f + (float)random(0, 22);
+            raySpd[i] = 0.00012f + (float)random(0, 22) / 100000.0f;
+        }
+        rayInited = true;
+    }
+    for (int y = yStart; y < yEnd; y++) {
+        const float d   = (float)(y - yStart) / (float)bandH;   // 0 surface, 1 floor
+        const float lit = 1.0f - d;
+        // A narrow ramp, deliberately. Widening it to buy quantisation
+        // levels backfired: a broad range crosses several RGB332
+        // boundaries, and each crossing is a visible plateau -- at one
+        // point the mid-depth water landed on a green level with blue
+        // quantised to zero and turned into a slab of dark green.
+        //
+        // Spanning roughly a single step instead means there is only one
+        // boundary in the whole tank, and the dither hides that one. The
+        // result is nearly flat, which is the correct answer for
+        // something whose job is to sit behind the UI: this is a
+        // background, not a showpiece gradient.
+        const float baseR =  4.0f + lit *  7.0f;
+        const float baseG = 30.0f + lit * 30.0f;
+        const float baseB = 44.0f + lit * 32.0f;
+        // One phase per row: the gradient is vertical, so this is where
+        // the dither has to act.
+        const uint8_t cell = (uint8_t)(y & 15);
+        t.drawFastHLine(0, y, w, ditherRGB(t, baseR, baseG, baseB, cell));
+
+        // Shafts, as a few nested spans per ray rather than one flat
+        // band -- a single span gave each shaft a hard edge that the
+        // quantisation then made into a visible rectangle.
+        if (d < 0.60f) {
+            const float dd    = (float)(y - yStart);
+            const float fade  = (1.0f - d / 0.60f) * 0.20f;
+            for (uint8_t i = 0; i < NRAY; i++) {
+                const float rc = rayX[i] + sinf((float)now * raySpd[i] + (float)i * 1.7f) * 16.0f + dd * 0.30f;
+                const float rh = rayW[i] + dd * 0.16f;
+                for (uint8_t k = 0; k < 4; k++) {
+                    const float frac = 1.0f - (float)k * 0.25f;     // outer -> inner
+                    const float kk   = fade * (1.0f - frac) * (1.0f - frac) * 3.0f;
+                    if (kk < 0.02f) continue;
+                    const int hw = (int)(rh * frac);
+                    int xs = (int)rc - hw, xe = (int)rc + hw;
+                    if (xs < 0) xs = 0;
+                    if (xe > w) xe = w;
+                    if (xe <= xs) continue;
+                    t.drawFastHLine(xs, y, xe - xs,
+                                    ditherRGB(t, baseR + (180.0f - baseR) * kk,
+                                                 baseG + (240.0f - baseG) * kk,
+                                                 baseB + (255.0f - baseB) * kk, cell));
+                }
+            }
+        }
+
+        // Vignette, as a smooth-ish falloff in five steps rather than
+        // the three hard bands this used to draw.
+        for (uint8_t k = 0; k < 5; k++) {
+            const int   ww = (w * (6 - k)) / 40;
+            if (ww < 1) continue;
+            const float v  = 0.05f + (float)k * 0.065f;
+            const uint16_t vc = ditherRGB(t, baseR * (1.0f - v),
+                                             baseG * (1.0f - v),
+                                             baseB * (1.0f - v), cell);
+            t.drawFastHLine(0, y, ww, vc);
+            t.drawFastHLine(w - ww, y, ww, vc);
+        }
+    }
+
+    // Shared by the waterline and the marine snow below -- both are
+    // lit by the same surface light the shafts come from.
+    // Tinted toward the water rather than near-white. A white shaft on
+    // dark teal is the highest-contrast thing on the screen, which made
+    // the lighting read as an effect laid over the scene instead of
+    // light inside it.
+    const uint16_t rayCol = t.color565(112, 190, 202);
+
+    // Waterline. The surface itself rises and falls across the tank
+    // rather than being ruled flat: two travelling waves at different
+    // rates, so the crest never repeats on a fixed pitch. A dead-level
+    // top edge is what was reading as "a rectangle of blue" instead of
+    // the underside of water.
+    for (int x = 0; x < w; x += 2) {
+        const float surf = sinf((float)x * 0.055f + (float)now / 900.0f) * 1.6f
+                         + sinf((float)x * 0.019f - (float)now / 1500.0f) * 1.1f;
+        const int wy = yStart + 2 + (int)surf;
+        for (uint8_t k = 0; k < 2; k++) {
+            const int yy = wy + k;
+            if (yy < yStart || yy >= yEnd) continue;
+            const float ph  = (float)x * 0.09f + (float)now / (260.0f + k * 90.0f);
+            const uint8_t a = (uint8_t)(26 + 46 * (0.5f + 0.5f * sinf(ph)));
+            t.drawFastHLine(x, yy, 2, blend(t.color565(10, 70, 110), rayCol, a));
+        }
+    }
+
+    // ---- marine snow ------------------------------------------------
+    // Suspended particulate drifting down. Almost invisible individually
+    // and the single strongest "this is a volume of water, not empty
+    // space" cue there is.
+    static const uint8_t NSNOW = 34;
+    static float snowX[NSNOW], snowY[NSNOW], snowPh[NSNOW];
+    static bool  snowInited = false;
+    if (!snowInited) {
+        for (uint8_t i = 0; i < NSNOW; i++) {
+            snowX[i]  = (float)random(0, w);
+            snowY[i]  = (float)(yStart + random(0, bandH));
+            snowPh[i] = (float)random(0, 6283) / 1000.0f;
+        }
+        snowInited = true;
+    }
+    for (uint8_t i = 0; i < NSNOW; i++) {
+        snowY[i] += 0.10f + (float)(i % 3) * 0.05f;
+        if (snowY[i] > (float)yEnd) {
+            snowY[i] = (float)yStart;
+            snowX[i] = (float)random(0, w);
+        }
+        const int px = (int)(snowX[i] + sinf((float)now / 1400.0f + snowPh[i]) * 5.0f);
+        const int py = (int)snowY[i];
+        if (px < 0 || px >= w) continue;
+        const float d = (float)(py - yStart) / (float)bandH;
+        const uint16_t waterC = aquaWaterAt(t, py, yStart, bandH);
+        t.drawPixel(px, py, blend(waterC, rayCol, (uint8_t)(90 + (i % 5) * 26)));
+    }
+
+
+    // ---- seabed with caustics ---------------------------------------
+    // The dancing light net on the floor is the most recognisable
+    // underwater cue there is, and it is the cheapest thing here: the
+    // pattern is a 64x64 tile baked into flash (see caustic_tile.h), so
+    // per pixel this is one array read, not five sinf calls.
+    //
+    // Projection is what makes it read as a floor rather than wallpaper.
+    // Sampling at u = x*z and v = z, with z growing toward the back of
+    // the tank, compresses the pattern with distance exactly the way
+    // perspective does -- cells are broad and open at the front and
+    // squeeze toward the back wall. The two scroll offsets drift at
+    // different rates so the net crawls and shifts instead of sliding
+    // rigidly.
+    const int floorTop = yEnd - bandH / 4;
+    if (floorTop > yStart + 4) {
+        const float su = (float)now / 320.0f;
+        const float sv = (float)now / 260.0f;
+        // Caustics brighten and dim together as the surface above moves.
+        const float breathe = 0.72f + 0.28f * sinf((float)now / 1700.0f);
+        const uint16_t causticCol = t.color565(138, 202, 206);
+        for (int y = floorTop; y < yEnd; y++) {
+            const float near = (float)(y - floorTop) / (float)(yEnd - floorTop); // 0 back, 1 front
+            const float z    = 1.0f / (0.20f + near * 0.80f);
+            // Sand, seen through progressively more water toward the
+            // back -- so the floor fades into the haze rather than
+            // meeting the back wall at a hard line.
+            const float d = (float)(y - yStart) / (float)bandH;
+            const uint16_t waterC = aquaWaterAt(t, y, yStart, bandH);
+            // Grey-green rather than warm tan. Sand against teal water
+            // was the single biggest hue clash in the tank -- two
+            // opposed temperatures meeting at a hard line across the
+            // bottom of the screen.
+            const uint16_t sand = blend(waterC, t.color565(104, 118, 110),
+                                        (uint8_t)(22 + near * 88));
+            t.drawFastHLine(0, y, w, sand);
+
+            const int v = (int)(z * 14.0f + sv) & (CAUSTIC_N - 1);
+            for (int x = 0; x < w; x += 2) {
+                const int u = (int)((float)(x - w / 2) * z * 0.42f + su) & (CAUSTIC_N - 1);
+                const uint8_t c = CAUSTIC_TILE[v * CAUSTIC_N + u];
+                if (c < 30) continue;
+                // Light reaching the floor falls off toward the back.
+                const uint8_t a = (uint8_t)(c * breathe * (0.45f + near * 0.55f) * 0.26f);
+                if (a < 8) continue;
+                t.drawFastHLine(x, y, 2, blend(sand, causticCol, a));
+            }
+        }
+        // Where the floor meets the water, a soft lip rather than a cut.
+        t.drawFastHLine(0, floorTop, w, blend(t.color565(12, 40, 60),
+                                              t.color565(76, 92, 88), 55));
+    }
 
     // Kelp: jointed multi-segment strands, sway amplitude growing
     // toward the tip like real kelp anchored at the base, with little
@@ -876,7 +1387,11 @@ void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         int baseX = 5 + (int)(i * (w - 10) / (float)(NW - 1));
         int segs = 5 + (i % 3);
         int segH = (bandH / 3) / segs; if (segH < 2) segH = 2;
-        uint16_t weedCol = (i % 2 == 0) ? GREEN : blend(GREEN, CYAN, 90);
+        // Muted into the same family as everything else. Full-strength
+        // GREEN was reading as a separate foreground object rather than
+        // planting in the same water.
+        uint16_t weedCol = (i % 2 == 0) ? t.color565(72, 128, 104)
+                                        : t.color565(88, 142, 128);
         float ampGrow = 0.0f;
         int px = baseX, py = weedBaseY;
         for (int s = 0; s < segs; s++) {
@@ -908,56 +1423,178 @@ void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             // tentacles, independent of the side-to-side swimmers.
             f.y += sinf((float)now / 1400.0f + f.phase) * 0.15f;
             f.x += sinf((float)now / 2600.0f + f.phase) * 0.06f;
-            if (f.x < 0) f.x = 0; if (f.x > w) f.x = (float)w;
+            if (f.x < 0) f.x = 0;
+            if (f.x > w) f.x = (float)w;
             if (f.y < yStart + 8) f.y = (float)(yStart + 8);
             if (f.y > yEnd - 8)   f.y = (float)(yEnd - 8);
-            int jx = (int)f.x, jy = (int)f.y, s = f.size;
+            int jx = (int)f.x, jy = (int)f.y;
+            int s = (int)(f.size * (1.0f - f.depth * 0.42f));
+            if (s < 2) s = 2;
+            const uint16_t jw = aquaWaterAt(t, jy, yStart, bandH);
+            const uint16_t jc = blend(jw, f.col, (uint8_t)(200 - f.depth * 130));
             float pulse = 0.7f + 0.3f * sinf((float)now / 500.0f + f.phase);
-            t.fillEllipse(jx, jy, s, (int)(s * 0.6f * pulse), blend(BG, f.col, 160));
+            t.fillEllipse(jx, jy, s, (int)(s * 0.6f * pulse), jc);
             for (uint8_t k = 0; k < 4; k++) {
                 int tx = jx - s + k * (2 * s) / 3;
                 int ty = jy + (int)(s * 0.6f);
                 int wob = (int)(sinf((float)now / 260.0f + k + f.phase) * 3.0f);
-                t.drawLine(tx, ty, tx + wob, ty + s, blend(BG, f.col, 110));
+                t.drawLine(tx, ty, tx + wob, ty + s, blend(jw, f.col, (uint8_t)(130 - f.depth * 90)));
             }
             continue;
         }
 
-        f.x += f.dir * f.speed * fleeMul;
-        if (f.dir > 0 && f.x > w + 10) f.x = -10;
-        if (f.dir < 0 && f.x < -10)    f.x = (float)(w + 10);
+        // Distant fish swim slower as well as smaller and hazier -- an
+        // object further away subtends less angular motion, and matching
+        // all three is what stops a far fish reading as a small near one.
+        const float near = 1.0f - f.depth;
+        f.x += f.dir * f.speed * fleeMul * (0.55f + near * 0.45f);
+        if (f.dir > 0 && f.x > w + 12) f.x = -12;
+        if (f.dir < 0 && f.x < -12)    f.x = (float)(w + 12);
         // Occasionally turn around mid-tank instead of only at the
         // edges — keeps the motion from feeling like a fixed loop.
         if (!sharkActive && random(0, 900) == 0) f.dir = (int8_t)-f.dir;
         float bob = sinf((float)now / 700.0f + f.phase) * 2.0f;
 
-        int fx = (int)f.x, fy = (int)(f.y + bob), s = f.size;
-        // Tail wag: a small alternating offset on the tail tip, giving
-        // a swimming flick instead of a static triangle. Flicks faster
-        // while fleeing.
-        int wag = (int)(sinf((float)now / (sharkActive ? 70.0f : 130.0f) + f.phase) * (s / 2 + 1));
+        const int fx = (int)f.x;
+        const int fy = (int)(f.y + bob);
+        int s = (int)(f.size * (0.55f + near * 0.45f));
+        if (s < 2) s = 2;
 
-        if (f.species == 1) {
-            // Angelfish: taller diamond body + a long dorsal spike.
-            t.fillTriangle(fx + f.dir * s, fy, fx - f.dir * (s / 2), fy - s, fx - f.dir * (s / 2), fy + s, f.col);
-            t.drawLine(fx - f.dir * (s / 4), fy - s, fx - f.dir * (s / 4), fy - s - s / 2, f.col);
-            int tailX = fx - f.dir * (s / 2);
-            t.fillTriangle(tailX, fy, tailX - f.dir * s, fy - s / 2 + wag, tailX - f.dir * s, fy + s / 2 + wag, f.col);
-        } else if (f.species == 2) {
-            // Puffer: round body, tiny tail flick, spikes.
-            t.fillCircle(fx, fy, s, f.col);
-            for (uint8_t k = 0; k < 6; k++) {
-                float a = k * 1.047f + (float)now / 400.0f;
-                t.drawPixel(fx + (int)(cosf(a) * (s + 2)), fy + (int)(sinf(a) * (s + 2)), f.col);
-            }
-            t.fillTriangle(fx - f.dir * s, fy, fx - f.dir * (s + 4), fy - s / 2 + wag, fx - f.dir * (s + 4), fy + s / 2 + wag, f.col);
-        } else {
-            // Minnow: simple tapered body + wagging tail.
-            int tailX = fx - f.dir * s;
-            t.fillTriangle(fx - f.dir * s, fy, fx + f.dir * s, fy - s / 2, fx + f.dir * s, fy + s / 2, f.col);
-            t.fillTriangle(tailX, fy, tailX - f.dir * (s / 2), fy - s / 2 + wag, tailX - f.dir * (s / 2), fy + s / 2 + wag, f.col);
+        // Depth haze: water eats contrast and colour with distance --
+        // red first -- so a far fish should be a dim blue-grey shape
+        // rather than a crisp coloured one. Blending toward the water at
+        // its own row is what makes the tank read as a volume with
+        // things at different distances in it, instead of sprites on a
+        // gradient. It is also the cue that lets the detail drop below
+        // pass unnoticed.
+        const uint16_t waterC = aquaWaterAt(t, fy, yStart, bandH);
+        // Never fully un-hazed: at 255 a near fish is drawn in pure
+        // body colour and pops off the background like a sticker. 225
+        // leaves it clearly the sharpest thing in the tank while still
+        // sharing the water's cast.
+        const uint16_t hazed  = blend(waterC, f.col, (uint8_t)(225.0f - f.depth * 160.0f));
+        drawFishAt(t, fx, fy, f.dir, s, f.species, hazed, waterC,
+                   now, f.phase, f.depth < 0.55f);
+    }
+
+
+    // ---- the shoal --------------------------------------------------
+    // Actual flocking, not a scripted formation: each small fish steers
+    // by the three classic boids rules against whichever neighbours are
+    // within range -- push apart when too close, match the local
+    // heading, drift toward the local centre. Nothing tells the school
+    // where to go; the shape it makes is emergent, which is why it
+    // bends around itself and re-forms after being broken.
+    //
+    // It is also nearly free. Twenty-six fish is 650 neighbour tests a
+    // frame, a few floating-point operations each, against a frame that
+    // spends 22ms of its 29 waiting on SPI.
+    //
+    // The shark is what makes it worth having: the flee term below
+    // scales as 1/d^2, so a pass through the middle blows the school
+    // apart and the cohesion rule pulls it back together afterwards
+    // without anyone scripting the recovery.
+    static const uint8_t NS = 26;
+    static float shX[NS], shY[NS], shVX[NS], shVY[NS];
+    static bool  shInited = false;
+    if (!shInited) {
+        for (uint8_t i = 0; i < NS; i++) {
+            shX[i]  = (float)random(0, w);
+            shY[i]  = (float)(yStart + random(6, bandH > 12 ? bandH - 12 : bandH));
+            shVX[i] = ((float)random(0, 200) - 100.0f) / 120.0f;
+            shVY[i] = ((float)random(0, 200) - 100.0f) / 320.0f;
         }
-        t.drawPixel(fx + f.dir * (s / 2), fy - 1, BLACK);
+        shInited = true;
+    }
+    {
+        const float R2   = 28.0f * 28.0f;   // neighbourhood
+        const float SEP2 =  7.0f *  7.0f;   // personal space
+        const int   shFloor = floorTop - 5;
+        for (uint8_t i = 0; i < NS; i++) {
+            float ccx = 0, ccy = 0, avx = 0, avy = 0, spx = 0, spy = 0;
+            uint8_t n = 0;
+            for (uint8_t j = 0; j < NS; j++) {
+                if (j == i) continue;
+                const float dx = shX[j] - shX[i], dy = shY[j] - shY[i];
+                const float d2 = dx * dx + dy * dy;
+                if (d2 > R2) continue;
+                n++;
+                ccx += shX[j];  ccy += shY[j];
+                avx += shVX[j]; avy += shVY[j];
+                if (d2 < SEP2 && d2 > 0.5f) { spx -= dx / d2; spy -= dy / d2; }
+            }
+            if (n) {
+                ccx /= n; ccy /= n; avx /= n; avy /= n;
+                shVX[i] += (ccx - shX[i]) * 0.0015f + (avx - shVX[i]) * 0.055f + spx * 1.6f;
+                shVY[i] += (ccy - shY[i]) * 0.0015f + (avy - shVY[i]) * 0.055f + spy * 1.6f;
+            }
+            // Stay in the tank.
+            if (shX[i] < 10.0f)            shVX[i] += 0.06f;
+            if (shX[i] > (float)(w - 10))  shVX[i] -= 0.06f;
+            if (shY[i] < (float)(yStart + 8)) shVY[i] += 0.06f;
+            if (shY[i] > (float)shFloor)      shVY[i] -= 0.06f;
+
+            if (sharkActive) {
+                const float dx = shX[i] - sharkX, dy = shY[i] - sharkY;
+                const float d2 = dx * dx + dy * dy;
+                if (d2 < 4200.0f && d2 > 1.0f) {
+                    shVX[i] += dx / d2 * 34.0f;
+                    shVY[i] += dy / d2 * 34.0f;
+                }
+            }
+
+            float sp = sqrtf(shVX[i] * shVX[i] + shVY[i] * shVY[i]);
+            const float cap = sharkActive ? 2.8f : 1.25f;
+            if (sp > cap)                 { shVX[i] *= cap / sp;  shVY[i] *= cap / sp; }
+            else if (sp < 0.30f && sp > 0.001f) { shVX[i] *= 0.30f / sp; shVY[i] *= 0.30f / sp; }
+            shX[i] += shVX[i];
+            shY[i] += shVY[i];
+        }
+        // Drawn small and tinted toward the water they are sitting in,
+        // so the school reads as a cloud at middle distance rather than
+        // 26 individually legible fish in the foreground.
+        //
+        // Shape matters more than detail at this size. These used to be
+        // a solid triangle with a dot behind it, which reads as an
+        // arrowhead -- a dart, not an animal. Two cues fix that, and
+        // neither is "more pixels":
+        //
+        //   - a FORKED tail. The notch is the single strongest "fish"
+        //     signal there is, and it costs nothing: two small triangles
+        //     sharing the peduncle leave the notch between them rather
+        //     than needing anything erased.
+        //   - a TAPERED body. An ellipse has a round front and narrows
+        //     to a waist, where a triangle is widest at the back and
+        //     points the wrong way entirely.
+        //
+        // The tail also wags, out of phase per fish, so a school in
+        // formation still looks like many animals rather than one
+        // rigid flock of copies.
+        for (uint8_t i = 0; i < NS; i++) {
+            const int fx = (int)shX[i], fy = (int)shY[i];
+            if (fx < -6 || fx > w + 6 || fy < yStart || fy >= yEnd) continue;
+            const float dd = (float)(fy - yStart) / (float)bandH;
+            const uint16_t waterC = aquaWaterAt(t, fy, yStart, bandH);
+            const uint16_t c    = blend(waterC, t.color565(205, 232, 214), 205);
+            const uint16_t cDim = blend(waterC, t.color565(205, 232, 214), 140);
+            const int8_t fore = (shVX[i] >= 0.0f) ? 1 : -1;
+            const int8_t aft  = (int8_t)-fore;
+
+            // Body: widest just behind the head, tapering aft.
+            t.fillEllipse(fx, fy, 3, 2, c);
+            t.drawPixel(fx + fore * 3, fy, c);              // snout
+
+            // Forked tail, wagging on its own phase.
+            const int wag = (int)(sinf((float)now / 130.0f + (float)i * 0.9f) * 1.6f);
+            const int px = fx + aft * 2;                    // peduncle
+            const int tx = fx + aft * 5;
+            t.fillTriangle(px, fy, tx, fy - 2 + wag, px + aft, fy - 1, c);
+            t.fillTriangle(px, fy, tx, fy + 2 + wag, px + aft, fy + 1, c);
+
+            // One dark pixel for an eye. At six pixels long it is the
+            // difference between a shape and a creature.
+            t.drawPixel(fx + fore * 2, fy - 1, cDim);
+        }
     }
 
     // The shark: dormant most of the time, then commits to one straight
@@ -982,16 +1619,25 @@ void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         // reads as hunting rather than sliding on a rail.
         float prowl = sinf((float)now / 900.0f) * 4.0f;
         int sx = (int)sharkX, sy = (int)(sharkY + prowl);
-        // Darker/more solid than the old near-invisible wash
-        // (blend(...,90)) -- still a cold grey, just an actually
-        // visible, deliberate silhouette instead of a faint ghost.
-        uint16_t sc = blend(BG, WHITE, 130);
-        t.fillTriangle(sx - dir * ss, sy, sx + dir * ss, sy - ss / 2, sx + dir * ss, sy + ss / 2, sc);
-        t.fillTriangle(sx - dir * ss, sy, sx - dir * (ss + ss / 2), sy - ss / 3, sx - dir * (ss + ss / 2), sy + ss / 3, sc);
-        t.fillTriangle(sx, sy - ss / 2, sx - dir * 4, sy - ss - 4, sx + dir * 4, sy - ss / 2, sc);
-        // A small red glint instead of a plain black dot -- a touch of
-        // menace on an otherwise flat-grey shape.
-        t.drawPixel(sx + dir * (ss / 2), sy - 2, RED);
+        // Cast a shadow on the seabed before drawing the animal, so it
+        // sits under everything. Nothing else in the tank connects the
+        // swimmers to the floor, and this one ellipse is what stops the
+        // shark reading as a sticker on the glass -- it tracks him
+        // horizontally, and softens and spreads the further above the
+        // floor he is, the way a real shadow does.
+        if (floorTop < yEnd - 2) {
+            const float above = (float)(floorTop - sy) / (float)bandH;   // 0 = on the floor
+            const float tight = 1.0f - (above > 0.0f ? (above < 1.0f ? above : 1.0f) : 0.0f);
+            const int   shW   = (int)(ss * (1.5f + (1.0f - tight) * 1.1f));
+            const int   shH   = 2 + (int)(ss * 0.16f * (1.0f - tight));
+            const uint8_t a   = (uint8_t)(28 + tight * 62);
+            t.fillEllipse(sx, floorTop + shH + 1, shW, shH,
+                          blend(t.color565(70, 66, 52), t.color565(4, 10, 18), a));
+        }
+        // Snout LEADS the centre point: the body is laid out aft of
+        // whatever x is passed here, so passing sx - dir*ss put the nose
+        // behind the tail and the animal swam backwards.
+        drawShark(t, sx + dir * ss, sy, dir, ss, now);
 
         // A close pass "gulps" any regular fish caught right at the
         // mouth -- not a real removal, just an instant respawn off the
@@ -1598,6 +2244,17 @@ void drawSpectrumWaterfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
     }
 }
 
+// Vector tube, Tempest-style: bright thin lines on black, a web of
+// rings and lanes, a claw riding the rim and enemies climbing toward
+// you out of the vanishing point.
+//
+// The structural change from the earlier version is that every ring now
+// shares one rotation. Adjacent rings used to twist in opposite
+// directions, which looked good as an abstract drill but meant ring
+// vertices never lined up -- and with nothing to connect, the tube had
+// no lanes, only floating hoops. Aligning them is what turns it into a
+// web you could travel along, which is the whole read of the original
+// game.
 void drawWireframeTunnel(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     int w = t.width();
     int bandH = yEnd - yStart;
@@ -1605,42 +2262,41 @@ void drawWireframeTunnel(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     t.fillRect(0, yStart, w, bandH, BG);
 
     static const uint8_t RINGS = 12;
-    static const uint8_t SIDES = 6;
+    static const uint8_t SIDES = 14;      // rounder than the old hexagon
     float aspect = (float)bandH / (float)w;
 
-    // Wandering center — the tunnel banks and curves instead of
-    // staring straight down a fixed pipe, like actually flying through
-    // something winding rather than a static painted backdrop.
-    float wobT    = (float)now / 2600.0f;
-    float wobAmt  = (float)((w < bandH) ? w : bandH) * 0.10f;
-    int cx = w / 2       + (int)(sinf(wobT) * wobAmt);
+    // Wandering center -- the tube banks and curves instead of staring
+    // straight down a fixed pipe.
+    float wobT   = (float)now / 2600.0f;
+    float wobAmt = (float)((w < bandH) ? w : bandH) * 0.10f;
+    int cx = w / 2              + (int)(sinf(wobT) * wobAmt);
     int cy = yStart + bandH / 2 + (int)(cosf(wobT * 1.3f) * wobAmt * aspect);
     float maxR = sqrtf((float)(w * w + bandH * bandH)) * 0.5f + 12.0f;
 
-    // Speed "breathes" via a slow phase-modulated time warp (surges
-    // and eases instead of one constant scroll rate) — cheap fake for
-    // real acceleration, but reads the same.
+    // Speed breathes via a slow phase-modulated time warp -- surges and
+    // eases rather than one constant scroll rate.
     float warped = (float)now + 3200.0f * sinf((float)now / 5200.0f);
+    float rot    = (float)now / 1800.0f;
 
-    // The whole tunnel's hue slowly rotates through the vaporwave set,
-    // rather than a fixed two-color gradient — the color itself is
-    // part of the motion now, not just ring position.
+    // Radius for any continuous depth, shared by the rings, the lanes,
+    // the claw and the enemies so they all sit on the same tube.
+    auto radiusAt = [&](float d) {
+        float r = maxR * (1.0f / (d * 0.55f + 0.6f)) * 0.42f;
+        return r > maxR ? maxR : r;
+    };
+    auto vertX = [&](float d, float s) { return cx + (int)(cosf(rot + s * (6.2831853f / SIDES)) * radiusAt(d)); };
+    auto vertY = [&](float d, float s) { return cy + (int)(sinf(rot + s * (6.2831853f / SIDES)) * radiusAt(d) * aspect); };
+
+    // Hue rotates slowly through the vaporwave set, so colour is part of
+    // the motion rather than a fixed gradient.
     static const uint16_t hueStops[4] = { CYAN, VAPOR_PURPLE, VAPOR_PINK, VAPOR_BLUE };
     float huePos = fmodf((float)now / 5000.0f, 4.0f);
     int   h0 = (int)huePos % 4, h1 = (h0 + 1) % 4;
     uint16_t tunnelHue = blend(hueStops[h0], hueStops[h1], (uint16_t)((huePos - (int)huePos) * 255));
 
-    float outerRot = (float)now / 1800.0f;
-    for (uint8_t s = 0; s < SIDES; s++) {
-        float a = outerRot + s * (6.2831853f / SIDES);
-        int px = cx + (int)(cosf(a) * maxR);
-        int py = cy + (int)(sinf(a) * maxR * aspect);
-        t.drawLine(cx, cy, px, py, blend(BG, tunnelHue, 55));
-    }
-
-    // A shockwave ring travels down the tunnel every few seconds,
-    // flashing whichever ring it currently overlaps much brighter —
-    // a periodic beat with nothing to actually beat to.
+    // A shockwave travels down the tube every few seconds, flashing
+    // whichever ring it overlaps -- a periodic beat with nothing to
+    // actually beat to.
     static bool     pulseOn = false;
     static uint32_t pulseStart = 0, pulseNextAt = 0;
     static bool     pulseInited = false;
@@ -1649,30 +2305,39 @@ void drawWireframeTunnel(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     float pulseDepth = -10.0f;
     if (pulseOn) {
         float prog = (float)(now - pulseStart) / 700.0f;
-        if (prog >= 1.0f) {
-            pulseOn = false;
-            pulseNextAt = now + (uint32_t)random(2000, 4500);
-        } else {
-            pulseDepth = prog * RINGS;
+        if (prog >= 1.0f) { pulseOn = false; pulseNextAt = now + (uint32_t)random(2000, 4500); }
+        else              { pulseDepth = prog * RINGS; }
+    }
+
+    // Depth of each ring this frame, cycling so the tube flies forward.
+    float depthOf[RINGS];
+    for (uint8_t i = 0; i < RINGS; i++) {
+        float d = fmodf((float)i - warped / 220.0f, (float)RINGS);
+        depthOf[i] = (d < 0.0f) ? d + RINGS : d;
+    }
+
+    // ---- lanes: the tube walls, drawn first so rings sit on top -----
+    // Each lane runs the full depth of the tube. Dimmer than the rings,
+    // the way the original's web reads: the hoops are the bright part,
+    // the connecting lines are structure.
+    for (uint8_t s = 0; s < SIDES; s++) {
+        for (uint8_t i = 0; i + 1 < RINGS; i++) {
+            float dA = (float)i, dB = (float)(i + 1);
+            float fade = 1.0f - dA / RINGS;
+            t.drawLine(vertX(dA, s), vertY(dA, s), vertX(dB, s), vertY(dB, s),
+                       blend(BG, tunnelHue, (uint16_t)(110 * fade)));
         }
     }
 
+    // ---- rings ------------------------------------------------------
     for (int i = RINGS - 1; i >= 0; i--) {
-        // depth cycles 0 (mouth of the tunnel) .. RINGS (vanishing
-        // point) as time advances, wrapping — that's the "flying
-        // forward" motion.
-        float depth = fmodf((float)i - warped / 220.0f, (float)RINGS);
-        if (depth < 0.0f) depth += RINGS;
-        float persp = 1.0f / (depth * 0.55f + 0.6f);
-        float r = maxR * persp * 0.42f;
-        if (r > maxR) r = maxR;
-        // Adjacent rings twist opposite directions — an interleaved
-        // counter-rotating drill look instead of everything spinning
-        // in lockstep.
-        float twist = depth * 0.25f * ((i % 2 == 0) ? 1.0f : -1.0f);
-        float rot   = outerRot + twist;
-        float fade  = 1.0f - depth / RINGS;
-        uint16_t ringCol = blend(BG, tunnelHue, (uint16_t)(230 * fade));
+        float depth = depthOf[i];
+        float r = radiusAt(depth);
+        float fade = 1.0f - depth / RINGS;
+        // Near rings go to full brightness rather than a blend toward
+        // the background -- vector hardware did not do subtle, and the
+        // contrast is most of the look.
+        uint16_t ringCol = blend(BG, tunnelHue, (uint16_t)(60 + 195 * fade));
         bool hit = fabsf(depth - pulseDepth) < 0.6f;
         if (hit) ringCol = blend(ringCol, WHITE, 200);
 
@@ -1683,10 +2348,58 @@ void drawWireframeTunnel(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             py[s] = cy + (int)(sinf(a) * r * aspect);
         }
         for (uint8_t s = 0; s < SIDES; s++) {
-            t.drawLine(px[s], py[s], px[(s + 1) % SIDES], py[(s + 1) % SIDES], ringCol);
-            if (hit) t.drawLine(px[s] + 1, py[s], px[(s + 1) % SIDES] + 1, py[(s + 1) % SIDES], ringCol);
+            uint8_t n = (uint8_t)((s + 1) % SIDES);
+            t.drawLine(px[s], py[s], px[n], py[n], ringCol);
+            if (hit) t.drawLine(px[s], py[s] + 1, px[n], py[n] + 1, ringCol);
         }
     }
+
+    // ---- enemies climbing the lanes ---------------------------------
+    // Small spikes rising out of the vanishing point toward the rim,
+    // each locked to one lane. Respawn deep once they arrive.
+    static const uint8_t NE = 4;
+    static float   enDepth[NE];
+    static uint8_t enLane[NE];
+    static bool    enInited = false;
+    if (!enInited) {
+        for (uint8_t i = 0; i < NE; i++) {
+            enDepth[i] = (float)random(0, RINGS * 100) / 100.0f;
+            enLane[i]  = (uint8_t)random(0, SIDES);
+        }
+        enInited = true;
+    }
+    for (uint8_t i = 0; i < NE; i++) {
+        enDepth[i] -= 0.055f;
+        if (enDepth[i] <= 0.2f) {
+            enDepth[i] = (float)RINGS - 0.5f;
+            enLane[i]  = (uint8_t)random(0, SIDES);
+        }
+        float d = enDepth[i];
+        float fade = 1.0f - d / RINGS;
+        int ex = vertX(d, (float)enLane[i]);
+        int ey = vertY(d, (float)enLane[i]);
+        int sz = 2 + (int)(fade * 5.0f);
+        uint16_t ec = blend(BG, VAPOR_YELLOW, (uint16_t)(80 + 175 * fade));
+        // A flipper: two crossed strokes, which is about all the
+        // original could afford either.
+        t.drawLine(ex - sz, ey - sz, ex + sz, ey + sz, ec);
+        t.drawLine(ex - sz, ey + sz, ex + sz, ey - sz, ec);
+    }
+
+    // ---- the claw ---------------------------------------------------
+    // Rides the outer rim, straddling one lane. Bright, because in the
+    // original it is the one thing you are actually looking at.
+    float clawPos = fmodf((float)now / 900.0f, (float)SIDES);
+    float rOuter  = radiusAt(0.0f);
+    int ax = cx + (int)(cosf(rot + clawPos * (6.2831853f / SIDES)) * rOuter);
+    int ay = cy + (int)(sinf(rot + clawPos * (6.2831853f / SIDES)) * rOuter * aspect);
+    int bx = cx + (int)(cosf(rot + (clawPos + 1.0f) * (6.2831853f / SIDES)) * rOuter);
+    int by = cy + (int)(sinf(rot + (clawPos + 1.0f) * (6.2831853f / SIDES)) * rOuter * aspect);
+    int mx = (ax + bx) / 2, my = (ay + by) / 2;
+    int ix = cx + (int)((mx - cx) * 0.78f), iy = cy + (int)((my - cy) * 0.78f);
+    t.drawLine(ax, ay, ix, iy, VAPOR_YELLOW);
+    t.drawLine(bx, by, ix, iy, VAPOR_YELLOW);
+    t.drawLine(ax, ay, bx, by, blend(BG, VAPOR_YELLOW, 150));
 
     float centerPulse = 0.5f + 0.5f * sinf((float)now / 400.0f);
     t.fillCircle(cx, cy, 2, blend(tunnelHue, WHITE, (uint16_t)(centerPulse * 255)));
@@ -1833,6 +2546,211 @@ void drawRetroFloor(TFT_eSPI& t, uint32_t now, int yHoriz, int yBottom) {
         float tt = fmodf(basePhase + (float)i / 5.0f, 1.0f);
         int y = yHoriz + (int)(tt * tt * (yBottom - yHoriz));
         uint8_t fade = (uint8_t)(255 - tt * 120);
+        t.drawFastHLine(0, y, w, blend(BG, gridCol, fade));
+    }
+}
+
+// Colour of the sun at a normalised radius (0 = core, 1 = rim),
+// matching drawSunsetSun's five concentric bands. Split out so the
+// water reflection below can shade itself the same way without
+// re-drawing circles it would then have to distort.
+static uint16_t sunBandColor(TFT_eSPI& t, float rr) {
+    if (rr > 1.0f) rr = 1.0f;
+    if (rr > 0.88f) return t.color565(255,  50,  80);
+    if (rr > 0.72f) return t.color565(255, 100,  40);
+    if (rr > 0.54f) return t.color565(255, 165,  20);
+    if (rr > 0.36f) return t.color565(255, 215,  70);
+    return                 t.color565(255, 240, 150);
+}
+
+// ---- SYNTHWAVE ------------------------------------------------------
+// The boot splash already composed a sunset sky, a scanline-cut sun,
+// gulls and a neon grid -- and then threw it away after three seconds.
+// This is that scene promoted to a real background (and now used by the
+// splash too), plus the parts that make it read as a *place* rather
+// than a backdrop:
+//
+//   - a reflection in the floor, so the ground is a wet surface rather
+//     than a flat plane.
+//   - the sun's reflection shimmering with its own travelling gaps and
+//     horizontal displacement, so the surface never slides as one
+//     rigid sheet.
+//   - a two-layer parallax ridgeline for depth at the horizon.
+//   - a bloom band where the sun meets the waterline.
+//
+// Deliberately none of this reads pixels back. A true mirror would
+// sample the framebuffer and warp it: ~32,000 readPixel/drawPixel pairs
+// per frame, which on this hardware costs more than the entire rest of
+// the frame does. Instead the reflection is recomputed from the same
+// gradient function and circle equation the sky and sun were drawn
+// from, one span per row -- a few hundred draw calls rather than tens
+// of thousands, and it looks identical because it is the same maths.
+void drawSynthwave(TFT_eSPI& t, uint32_t now, int yTop, int yBottom,
+                   float horizonFrac) {
+    const int w = t.width();
+    const int band = yBottom - yTop;
+    if (band < 48 || w < 32) return;
+
+    if (horizonFrac < 0.15f) horizonFrac = 0.15f;
+    if (horizonFrac > 0.85f) horizonFrac = 0.85f;
+    const int yHoriz = yTop + (int)(band * horizonFrac);
+    const int skyH   = yHoriz - yTop;
+    const int seaH   = yBottom - yHoriz;
+    if (skyH < 8 || seaH < 8) return;
+
+    // ---- sky -------------------------------------------------------
+    for (int y = yTop; y < yHoriz; y++) {
+        t.drawFastHLine(0, y, w, sunsetSkyColorAt(t, y, yTop, yHoriz));
+    }
+
+    // Stars spread across the real panel width rather than a fixed 240
+    // -- the boot splash star field predates this scene being used on a
+    // 320px-wide rotation, and bunches to the left there. Re-seeded if
+    // the band changes shape, i.e. on rotate.
+    static const uint8_t NSTAR = 18;
+    static uint16_t stx[NSTAR];
+    static uint8_t  sty[NSTAR], stph[NSTAR];
+    static bool     starsInited = false;
+    static int      starW = 0, starH = 0;
+    if (!starsInited || starW != w || starH != skyH) {
+        for (uint8_t i = 0; i < NSTAR; i++) {
+            stx[i]  = (uint16_t)random(2, w - 2);
+            sty[i]  = (uint8_t)random(0, skyH * 3 / 4);
+            stph[i] = (uint8_t)random(0, 256);
+        }
+        starsInited = true; starW = w; starH = skyH;
+    }
+    for (uint8_t i = 0; i < NSTAR; i++) {
+        uint32_t tw = (now / 10 + (uint32_t)stph[i] * 22) % 300;
+        if (tw > 220) continue;
+        uint8_t bri = (tw < 100) ? 255 : (uint8_t)(255 - (tw - 100) * 3);
+        t.drawPixel(stx[i], yTop + sty[i], t.color565(bri, bri, (uint8_t)(bri * 0.88f)));
+    }
+
+    // ---- sun -------------------------------------------------------
+    const int sunR  = (skyH * 4) / 5;
+    const int sunCx = w / 2;
+    // Sunk further as it grew: at this radius a third of it above the
+    // horizon put the top edge off the band entirely.
+    const int sunCy = yHoriz - (sunR / 4);
+    drawSunsetSun(t, sunCx, sunCy, sunR, yTop, yHoriz);
+
+    // ---- ridgeline -------------------------------------------------
+    // Two layers, paler and taller behind, darker in front, so the
+    // horizon has depth instead of being a bare line. Fixed profiles
+    // generated once: a ridgeline that reshuffled every frame would
+    // read as noise rather than landscape.
+    static const uint8_t NPEAK = 9;
+    static uint8_t farPk[NPEAK], nearPk[NPEAK];
+    static bool ridgeInited = false;
+    if (!ridgeInited) {
+        for (uint8_t i = 0; i < NPEAK; i++) {
+            farPk[i]  = (uint8_t)random(30, 100);
+            nearPk[i] = (uint8_t)random(14,  58);
+        }
+        ridgeInited = true;
+    }
+    const int farMax  = skyH / 4;
+    const int nearMax = skyH / 6;
+    for (uint8_t layer = 0; layer < 2; layer++) {
+        const uint8_t* pk = layer ? nearPk : farPk;
+        int      maxH = layer ? nearMax : farMax;
+        uint16_t c    = layer ? t.color565(28, 4, 38) : t.color565(60, 12, 68);
+        int step = w / (NPEAK - 1);
+        if (step < 1) step = 1;
+        for (uint8_t i = 0; i + 1 < NPEAK; i++) {
+            int x0 = i * step, x1 = (i + 1) * step;
+            int h0 = (pk[i]     * maxH) / 100;
+            int h1 = (pk[i + 1] * maxH) / 100;
+            for (int x = x0; x <= x1 && x < w; x++) {
+                float f = (x1 > x0) ? (float)(x - x0) / (float)(x1 - x0) : 0.0f;
+                int hh = h0 + (int)((h1 - h0) * f);
+                if (hh > 0) t.drawFastVLine(x, yHoriz - hh, hh, c);
+            }
+        }
+    }
+
+    // ---- horizon bloom ---------------------------------------------
+    for (int dy = -2; dy <= 1; dy++) {
+        int y = yHoriz + dy;
+        if (y < yTop || y >= yBottom) continue;
+        uint8_t a = (dy == -1 || dy == 0) ? 235 : 120;
+        t.drawFastHLine(0, y, w, blend(t.color565(90, 10, 60), t.color565(255, 150, 190), a));
+    }
+
+    // ---- water -----------------------------------------------------
+    // Sky and sun, mirrored and foreshortened, in a single pass per row:
+    // the surface colour first, then the sun's reflection blended over
+    // it where the mirrored row crosses the sun's circle.
+    //
+    // The sky reflection is not displaced horizontally, because it is a
+    // flat horizontal gradient -- sliding it sideways would cost time
+    // and show nothing. What reads as a moving surface is a travelling
+    // *brightness* ripple, one sinf per row. The sun's reflection does
+    // get displaced, because there the shape is visible.
+    const uint16_t waterBase = t.color565(10, 0, 30);
+    for (int y = yHoriz; y < yBottom; y++) {
+        const float d = (float)(y - yHoriz) / (float)seaH;   // 0 horizon, 1 viewer
+        const int srcY = yHoriz - (int)(d * skyH * 0.82f);
+
+        // Two ripple rates so the surface never pulses uniformly.
+        float rip = sinf(d * 34.0f - (float)now / 210.0f)
+                  + 0.5f * sinf(d * 61.0f + (float)now / 130.0f);
+        int dim = (int)(196.0f - d * 118.0f + rip * 17.0f);
+        if (dim < 24)  dim = 24;
+        if (dim > 255) dim = 255;
+        const uint16_t waterC =
+            blend(waterBase, sunsetSkyColorAt(t, srcY, yTop, yHoriz), (uint8_t)dim);
+        t.drawFastHLine(0, y, w, waterC);
+
+        // Sun reflection: same circle equation as the real sun, taken on
+        // the mirrored row.
+        const int delta = srcY - sunCy;
+        if (delta <= -sunR || delta >= sunR) continue;
+        const int half = (int)sqrtf((float)(sunR * sunR - delta * delta));
+        if (half <= 0) continue;
+
+        // Two incommensurate rates, not one. A single sine gives gaps at
+        // a perfectly fixed pitch, which the eye reads as banding --
+        // regular stripes rather than water. Summing a second, unrelated
+        // frequency (and a different time rate) means the pattern never
+        // repeats over the surface. They also open up toward the viewer,
+        // where the water is choppier.
+        const float gapPhase = sinf(d * 62.0f - (float)now / 190.0f)
+                             + 0.55f * sinf(d * 23.0f + (float)now / 310.0f);
+        if (gapPhase > 0.05f - d * 0.40f) continue;
+
+        const float ph  = (float)now / 260.0f;
+        const float wob = sinf(d * 11.0f + ph)        * (2.0f + d * 11.0f)
+                        + sinf(d * 27.0f - ph * 1.7f) * (1.0f + d *  4.5f);
+
+        const float rr = (float)(delta < 0 ? -delta : delta) / (float)sunR;
+        // Blended over the water colour for this row, not over a flat
+        // dark: reflected light sits *in* the surface. Blending the
+        // sun's yellows against near-black was turning them olive.
+        const uint8_t a = (uint8_t)(228 - d * 128);
+        const uint16_t c = blend(waterC, sunBandColor(t, rr), a);
+
+        int x0 = sunCx - half + (int)wob;
+        int xs = x0 < 0 ? 0 : x0;
+        int xe = x0 + half * 2; if (xe > w) xe = w;
+        if (xe > xs) t.drawFastHLine(xs, y, xe - xs, c);
+    }
+
+    // ---- grid ------------------------------------------------------
+    // Rungs only. The converging lines to the vanishing point were
+    // fighting the reflection: they cut across the sun's bands and
+    // reasserted a hard flat plane exactly where the water was doing
+    // the work of looking like a surface. The scrolling rungs alone
+    // still give the floor motion and depth.
+    const uint16_t gridCol = blend(BG, CYAN, 70);
+    const uint32_t period = 1100;
+    float basePhase = (float)(now % period) / (float)period;
+    for (int i = 0; i < 7; i++) {
+        float tt = fmodf(basePhase + (float)i / 7.0f, 1.0f);
+        int y = yHoriz + (int)(tt * tt * seaH);
+        if (y <= yHoriz || y >= yBottom) continue;
+        uint8_t fade = (uint8_t)(70 + tt * 185);   // brighter as it nears the viewer
         t.drawFastHLine(0, y, w, blend(BG, gridCol, fade));
     }
 }

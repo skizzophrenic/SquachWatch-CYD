@@ -19,7 +19,8 @@ enum class DetectionType : uint8_t {
     TILE    = 12,  // Tile BLE tracker (was previously bucketed under AIRTAG)
     RING    = 13,  // Ring doorbell/camera (was previously bucketed under CAMERA)
     DEAUTH  = 14,  // WiFi deauth/disassoc flood -- rate-detected, not a signature match (see DetectionEngine)
-    COUNT   = 15
+    EVILTWIN = 15, // One SSID beaconing from a second BSSID whose OUI differs -- rogue/spoofed AP (see DetectionEngine)
+    COUNT   = 16
 };
 
 inline const char* detectionTypeName(DetectionType t) {
@@ -38,6 +39,7 @@ inline const char* detectionTypeName(DetectionType t) {
         case DetectionType::TILE:        return "TILE";
         case DetectionType::RING:        return "RING";
         case DetectionType::DEAUTH:      return "DEAUTH";
+        case DetectionType::EVILTWIN:    return "EVIL TWIN";
         default:                         return "UNKNOWN";
     }
 }

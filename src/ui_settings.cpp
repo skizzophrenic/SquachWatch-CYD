@@ -154,8 +154,20 @@ static void drawHeader(TFT_eSPI& t, int w, int y, int hgt, RowGroupId g) {
     t.print(groupName(g));
 }
 
+// `compact` drops the row text from size 2 to size 1. Used in portrait,
+// where 240px of width isn't enough for a long label and its value at
+// size 2's 12px-per-glyph: "BACKGROUND" ran straight into "MATRIX
+// RAIN", and "LOCK BACKGROUND" into its "OFF", with the label drawn
+// left-aligned and the value right-aligned into the same pixels. Size 1
+// halves glyph width and gives every current row room to spare.
+//
+// Row *height* deliberately doesn't change with it -- rowH stays keyed
+// to size 2 metrics in computeGeom() so tap targets keep their full
+// height, and so hit-testing (which shares computeGeom) can't drift
+// away from what was drawn.
 static void drawRow(TFT_eSPI& t, int w, int y, int hgt, const char* label,
-                    const char* value, bool danger, uint16_t labelColor) {
+                    const char* value, bool danger, uint16_t labelColor,
+                    bool compact) {
     // No full-row fillRect here anymore -- the dimmed background
     // effect behind this screen (see uiSettingsTick()) already
     // repaints the whole body region every frame, the same "let the
@@ -164,7 +176,7 @@ static void drawRow(TFT_eSPI& t, int w, int y, int hgt, const char* label,
     // opaque BG backing (via the bg color param below) so text stays
     // crisp against a moving backdrop, without needing a full-row
     // fill that would just hide the effect entirely.
-    t.setTextSize(2);
+    t.setTextSize(compact ? 1 : 2);
     t.setTextColor(danger ? Theme::RED : labelColor, Theme::BG);
     t.setCursor(8, y + (hgt - t.fontHeight()) / 2);
     t.print(label);
@@ -294,6 +306,7 @@ void uiSettingsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
         case Settings::Background::SNOWFALL:   Theme::drawSnowfall(t, now, top, bodyBottom); break;
         case Settings::Background::SPECTRUM:   Theme::drawSpectrumWaterfall(t, now, top, bodyBottom, eng); break;
         case Settings::Background::TUNNEL:     Theme::drawWireframeTunnel(t, now, top, bodyBottom); break;
+        case Settings::Background::SYNTHWAVE: Theme::drawSynthwave(t, now, top, bodyBottom); break;
         default:                               Theme::drawMatrixRain(t, now, top, bodyBottom, true); break;
     }
     Theme::restorePalette(saved);
@@ -317,7 +330,8 @@ void uiSettingsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
             const char* value;
             bool danger;
             rowContent(items[idx].row, eng, valBuf, sizeof(valBuf), label, value, danger);
-            drawRow(t, w, y, itemH, label, value, danger, groupColor(items[idx].group));
+            drawRow(t, w, y, itemH, label, value, danger, groupColor(items[idx].group),
+                    h > w);
         }
         y += itemH;
         idx++;

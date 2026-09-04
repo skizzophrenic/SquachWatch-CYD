@@ -12,9 +12,10 @@ namespace Settings {
     enum class Background : uint8_t {
         MATRIX = 0, STARFIELD = 1, TOASTERS = 2,
         AQUARIUM = 3, TERMINAL = 4, FIREFLIES = 5,
-        FIRE = 6, SNOWFALL = 7, SPECTRUM = 8, TUNNEL = 9
+        FIRE = 6, SNOWFALL = 7, SPECTRUM = 8, TUNNEL = 9,
+        SYNTHWAVE = 10
     };
-    static const uint8_t BACKGROUND_COUNT = 10;
+    static const uint8_t BACKGROUND_COUNT = 11;
     const char* backgroundName(Background b);
 
     // Reads all fields from NVS (namespace "settings"), falling back to

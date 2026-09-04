@@ -171,6 +171,17 @@ namespace Theme {
     void drawSunsetSun(TFT_eSPI& t, int cx, int cy, int r, int yTop, int yHoriz);
     void drawSeagulls(TFT_eSPI& t, uint32_t now, int yTop, int yHoriz);
     void drawRetroFloor(TFT_eSPI& t, uint32_t now, int yHoriz, int yBottom);
+    // The boot splash's sunset scene as a full background: sky, sun,
+    // parallax ridgeline, reflective water and the neon grid, composed
+    // into one band-filling effect. See its comment in theme.cpp for
+    // why the reflection is recomputed rather than sampled.
+    // horizonFrac places the waterline within the band. The default
+    // suits a background; the boot splash passes its own so the gulls
+    // and Squachy, which are positioned against that line, stay where
+    // they were.
+    void drawSynthwave(TFT_eSPI& t, uint32_t now, int yTop, int yBottom,
+                       float horizonFrac = 0.44f);
+
 
     // Idle-screen background styles, picked from the settings menu
     // (see Settings::Background). All four share the same signature —
@@ -215,8 +226,9 @@ namespace Theme {
     void drawSpectrumWaterfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
                                const DetectionEngine& eng);
 
-    // Demoscene-style rotating wireframe tunnel: perspective hexagon
-    // rings receding toward a pulsing vanishing point.
+    // Textured corridor receding to a drifting vanishing point. Square
+    // rather than round -- see its comment in theme.cpp for why that
+    // choice is what makes it affordable without lookup tables.
     void drawWireframeTunnel(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);
 
     // Classic Doom-style ASCII fire: a coarse heat grid seeded at the

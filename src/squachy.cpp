@@ -520,6 +520,7 @@ static const char* const BG_LINES[][3] = {
     /* SNOWFALL  */ { "Snowing again. Big feet, better traction.", "Perfect weather for leaving mysterious tracks.", "Cold out. I'm built for this." },
     /* SPECTRUM  */ { "RF spectrum's live. That's the real stuff.", "This is actual signal data. Neat, right?", "Watching the airwaves. Very on-brand." },
     /* TUNNEL    */ { "Wireframe tunnel. Very retro-future.", "Feels like we're going somewhere. We're not.", "80s sci-fi vibes today." },
+    /* SYNTHWAVE */ { "That sunset never actually sets. I checked.", "Grid goes on forever. So does the drive.", "Look at that reflection. Water we even doing." },
 };
 static_assert(sizeof(BG_LINES) / sizeof(BG_LINES[0]) == Settings::BACKGROUND_COUNT,
               "BG_LINES must have exactly one row per Settings::Background value -- "
@@ -1305,8 +1306,15 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
         }
         case OutfitId::BLUEBLUR: {
             uint16_t blue = VAPOR_BLUE;
+            // Two swept-back quills, deliberately -- there used to be a
+            // third between them with its apex at hy - S(18), pointing
+            // straight up. It read as an antenna rather than a quill:
+            // it was the only one not swept back, it sat off the
+            // midline (cx+2..cx+10 rather than centered), and it
+            // overlapped the right quill, which starts at cx+6, leaving
+            // a visible seam where they crossed. The silhouette is the
+            // whole point of the homage, and it's cleaner with two.
             t.fillTriangle(cx2 - S(4), hy - S(2), cx2 - S(16), hy - S(6), cx2 - S(6), hy + S(6), blue);
-            t.fillTriangle(cx2 + S(2), hy - S(4), cx2 + S(4),  hy - S(18), cx2 + S(10), hy - S(4), blue);
             t.fillTriangle(cx2 + S(6), hy - S(2), cx2 + S(20), hy - S(4),  cx2 + S(10), hy + S(6), blue);
             // White gloves -- a core, consistent trait across every
             // era of the design this homages, and the one thing this
@@ -1516,7 +1524,18 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
 
     // Sagittal crest (the pronounced skull peak real bigfoot sightings
     // always mention) plus a couple of smaller shaggy fringe tufts.
-    t.fillTriangle(cx2 - S(6), hy + S(2), cx2, hy - S(14), cx2 + S(6), hy + S(2), furLight);
+    //
+    // The crest is skipped for BLUE BLUR, the same way the top hat just
+    // below is skipped for UNICORN and for the same reason: that outfit
+    // already puts its own quills across this exact spot. In brown fur
+    // the crest reads as hair, but BLUE BLUR recolours him blue, so it
+    // stops reading as a skull peak and starts reading as a third quill
+    // standing straight up between two swept-back ones -- the one shape
+    // in that silhouette that doesn't belong. Every other outfit, and
+    // plain Squachy, still get it.
+    if (currentOutfit() != OutfitId::BLUEBLUR) {
+        t.fillTriangle(cx2 - S(6), hy + S(2), cx2, hy - S(14), cx2 + S(6), hy + S(2), furLight);
+    }
     t.fillTriangle(cx2 - S(13), hy + S(3), cx2 - S(9), hy - S(4), cx2 - S(5), hy + S(3), furLight);
     t.fillTriangle(cx2 + S(5),  hy + S(3), cx2 + S(9), hy - S(4), cx2 + S(13),hy + S(3), furLight);
 

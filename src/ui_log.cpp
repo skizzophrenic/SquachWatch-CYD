@@ -158,6 +158,7 @@ void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int scroll
         case Settings::Background::SNOWFALL:   Theme::drawSnowfall(t, now, bodyTop, bodyBottom); break;
         case Settings::Background::SPECTRUM:   Theme::drawSpectrumWaterfall(t, now, bodyTop, bodyBottom, eng); break;
         case Settings::Background::TUNNEL:     Theme::drawWireframeTunnel(t, now, bodyTop, bodyBottom); break;
+        case Settings::Background::SYNTHWAVE: Theme::drawSynthwave(t, now, bodyTop, bodyBottom); break;
         default:                               Theme::drawMatrixRain(t, now, bodyTop, bodyBottom, true); break;
     }
     Theme::restorePalette(saved);

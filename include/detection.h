@@ -41,7 +41,7 @@ public:
     // itself doesn't match anything (e.g. an Axon/Flock unit in pairing
     // mode, running on a WiFi module OUI we don't otherwise recognize).
     void IRAM_ATTR postWiFi(const uint8_t* mac, int8_t rssi, uint8_t channel,
-                            const char* ssid = nullptr);
+                            const char* ssid = nullptr, bool encrypted = false);
 
     // Called from the promiscuous WiFi Rx callback (IRAM_ATTR context)
     // when a deauthentication management frame is seen. A single
@@ -189,6 +189,7 @@ private:
         int8_t  rssi;
         uint8_t channel;
         char    ssid[33];  // empty string if none (see postWiFi)
+        bool    encrypted; // beacon Privacy bit; meaningless without an ssid
     };
 
     // WiFi mailbox (filled in IRAM, drained in loop)
@@ -209,6 +210,44 @@ private:
         int8_t  rssi;
         uint8_t channel;
     };
+    // ---- Evil-twin / rogue-AP tracking --------------------------
+    // First BSSID seen beaconing each SSID, with the security posture it
+    // advertised. A later beacon for that SSID from different hardware
+    // *and* disagreeing about encryption is flagged EVILTWIN.
+    //
+    // The encryption mismatch is the real test, and it exists because
+    // the obvious one doesn't work. "Same SSID, different BSSID" is not
+    // a rogue -- it is also every mesh network and every dual-band AP,
+    // and confirmed on a real mesh here it fires constantly. Even "same
+    // SSID, different OUI" over-fires, because vendors ship across
+    // several OUI blocks.
+    //
+    // What a mesh never does is disagree with itself about security:
+    // every node on one SSID advertises the same Privacy bit. An evil
+    // twin usually must disagree -- cloning a WPA network without the
+    // key gets an attacker nothing, so the practical attack is an open
+    // twin of an encrypted network, which is exactly what a captive
+    // "evil portal" is.
+    //
+    // The cost, stated plainly: an attacker who advertises matching
+    // encryption walks past this. That attacker also can't complete a
+    // handshake, so it's a much rarer attack than the one this catches.
+    //
+    // Fixed table, oldest-evicted -- an unbounded map of every SSID in
+    // range is exactly the kind of growth that crashed the BLE path.
+    static const uint8_t  AP_CAP = 24;
+    struct ApEntry {
+        char    ssid[33];
+        uint8_t bssid[6];
+        bool    encrypted;
+    };
+    ApEntry  _aps[AP_CAP];
+    uint8_t  _apCount = 0;
+    uint8_t  _apNext  = 0;          // round-robin eviction cursor
+    // Returns true if this beacon looks like an evil twin of an SSID
+    // already on file. Records the SSID on first sighting.
+    bool noteApBeacon(const uint8_t* bssid, const char* ssid, bool encrypted);
+
     volatile DeauthQEntry _deauthQ[DEAUTH_Q_CAP];
     volatile uint8_t      _deauthQHead = 0;
     volatile uint8_t      _deauthQTail = 0;

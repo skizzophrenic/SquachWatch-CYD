@@ -22,3 +22,8 @@ bool uiAlertTouched();   // any touch since uiAlertInit
 // is false, since the info panel itself owns the touch once it's up
 // (see Theme::infoPanelHitDismiss()).
 bool uiAlertHitMoreInfo(int x, int y, int screenW, int screenH);
+
+// Hit test for the HUNT button in the opposite (bottom-left) corner.
+// Same "only meaningful while the info panel is down" caveat as
+// uiAlertHitMoreInfo() above -- once the panel is up it owns the touch.
+bool uiAlertHitHunt(int x, int y, int screenW, int screenH);

@@ -36,6 +36,7 @@ const char* backgroundName(Background b) {
         case Background::SNOWFALL:  return "SNOWFALL";
         case Background::SPECTRUM:  return "RF SPECTRUM";
         case Background::TUNNEL:    return "WIREFRAME TUNNEL";
+        case Background::SYNTHWAVE: return "SYNTHWAVE";
         default:                    return "?";
     }
 }
@@ -63,6 +64,22 @@ void load() {
     uint16_t allTypesOn = 0;
     for (uint8_t t = 1; t < (uint8_t)DetectionType::COUNT; t++) allTypesOn |= (uint16_t)(1u << t);
     s_typeMask = (uint16_t)s_prefs.getUInt("typemask", allTypesOn);
+    // A mask saved by an older build only has bits for the types that
+    // existed then, so every type added since would come back OFF for
+    // anyone who had ever touched the TYPE FILTER screen -- a new
+    // detection silently disabled on upgrade, which is the worst way
+    // for it to fail. "typecount" records how many types the saved mask
+    // was written against; anything above that is a type the user has
+    // never had the chance to express an opinion about, so it defaults
+    // on like it would for a fresh install.
+    uint8_t savedCount = (uint8_t)s_prefs.getUInt("typecount", 0);
+    if (savedCount && savedCount < (uint8_t)DetectionType::COUNT) {
+        for (uint8_t t = savedCount; t < (uint8_t)DetectionType::COUNT; t++) {
+            s_typeMask |= (uint16_t)(1u << t);
+        }
+        s_prefs.putUInt("typemask", s_typeMask);
+        s_prefs.putUInt("typecount", (uint32_t)DetectionType::COUNT);
+    }
 
     Theme::applyPalette(s_palette);
 }
@@ -182,6 +199,9 @@ void toggleType(DetectionType t) {
     if (idx == 0 || idx >= (uint8_t)DetectionType::COUNT) return;
     s_typeMask ^= (uint16_t)(1u << idx);
     s_prefs.putUInt("typemask", s_typeMask);
+    // Stamped alongside the mask so a later firmware can tell which
+    // types this mask was written against -- see load()'s upgrade path.
+    s_prefs.putUInt("typecount", (uint32_t)DetectionType::COUNT);
 }
 
 uint8_t enabledTypeCount() {

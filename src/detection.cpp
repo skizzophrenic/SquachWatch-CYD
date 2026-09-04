@@ -89,7 +89,13 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             if (mfg.size() >= 2) {
                 uint16_t mfgId = (uint8_t)mfg[0] | ((uint8_t)mfg[1] << 8);
                 det.type = lookupMfgId(mfgId);
-                if (det.type == DetectionType::AIRTAG && mfg.size() >= 3) {
+                // No length guard here on purpose: isAirTagSubtype()
+                // rejects anything shorter than 3 bytes itself, so a
+                // truncated Apple advert now fails closed. Gating the
+                // call on mfg.size() >= 3 meant those adverts bypassed
+                // the check and kept the AIRTAG type they got from the
+                // company ID alone -- which is every Apple device.
+                if (det.type == DetectionType::AIRTAG) {
                     if (!isAirTagSubtype((const uint8_t*)mfg.data(), mfg.size())) {
                         det.type = DetectionType::UNKNOWN;
                     }
@@ -223,7 +229,13 @@ bool DetectionEngine::init() {
                     }
                 }
             }
-            g_engine->postWiFi(frame + 16, pkt->rx_ctrl.rssi, pkt->rx_ctrl.channel, ssid);
+            // Capability info is the last 2 bytes of the 12-byte fixed
+            // parameter block following the 24-byte header, so offset
+            // 34. Bit 4 (0x10) is Privacy: set means this BSS requires
+            // encryption. That one bit is what separates a mesh node
+            // from an evil twin -- see noteApBeacon().
+            bool enc = (sigLen > 35) && ((frame[34] & 0x10) != 0);
+            g_engine->postWiFi(frame + 16, pkt->rx_ctrl.rssi, pkt->rx_ctrl.channel, ssid, enc);
         } else if (type == 0 && subtype == 12) {
             // Deauthentication: addr2 (transmitter -- the attacker, or
             // a spoofed AP address) at the same offset probe requests
@@ -327,7 +339,7 @@ void DetectionEngine::clearLog() {
 }
 
 void IRAM_ATTR DetectionEngine::postWiFi(const uint8_t* mac, int8_t rssi, uint8_t channel,
-                                         const char* ssid) {
+                                         const char* ssid, bool encrypted) {
     if (!mac) return;
     // Group-addressed (broadcast/multicast) destinations can never be a
     // real device: bit 0 of byte 0 is the I/G bit, and every OUI in
@@ -356,6 +368,7 @@ void IRAM_ATTR DetectionEngine::postWiFi(const uint8_t* mac, int8_t rssi, uint8_
     } else {
         e.ssid[0] = 0;
     }
+    e.encrypted = encrypted;
     _wifiQHead = next;
 }
 
@@ -701,6 +714,56 @@ int8_t DetectionEngine::huntRssiAt(uint8_t idx) const {
     return _huntRssiHist[slot];
 }
 
+// Same vendor, ignoring the locally-administered bit. Multi-SSID and
+// mesh APs routinely derive per-radio BSSIDs by setting that bit on
+// their base MAC (34:12:98 becomes 36:12:98) -- byte 0 differs by 2 and
+// a plain memcmp calls that a different manufacturer, which is how the
+// first version of this managed to flag an entire mesh network.
+static inline bool sameVendor(const uint8_t* a, const uint8_t* b) {
+    return ((a[0] & ~0x02) == (b[0] & ~0x02)) && a[1] == b[1] && a[2] == b[2];
+}
+
+// See the AP table's comment in detection.h for why the encryption
+// mismatch is the actual test and what it trades away.
+//
+// One inherent limitation worth naming: whichever BSSID is seen first
+// becomes the baseline. If a rogue is already up when you arrive, it
+// gets recorded as legitimate and the real AP is what trips the alert.
+// The pair is still surfaced either way -- the device is telling you
+// two boxes claim one name and disagree about security, which is the
+// finding; it can't tell you which of them is lying.
+bool DetectionEngine::noteApBeacon(const uint8_t* bssid, const char* ssid, bool encrypted) {
+    for (uint8_t i = 0; i < _apCount; i++) {
+        if (strncmp(_aps[i].ssid, ssid, sizeof(_aps[i].ssid) - 1) != 0) continue;
+        // Same SSID, same BSSID -- just this AP beaconing again. Refresh
+        // the posture so a legitimate security change re-baselines
+        // rather than alerting forever after.
+        if (memcmp(_aps[i].bssid, bssid, 6) == 0) {
+            _aps[i].encrypted = encrypted;
+            return false;
+        }
+        // Same hardware vendor -- mesh node, or the other band of the
+        // same box. Never flagged, whatever else it says.
+        if (sameVendor(_aps[i].bssid, bssid)) return false;
+        // Different vendor, but both agree on security. Can't tell a
+        // rogue from a mixed-vendor network here, so stay quiet.
+        if (_aps[i].encrypted == encrypted) return false;
+        // Different vendor AND disagreeing about encryption: one of
+        // these two is not what it claims to be.
+        return true;
+    }
+    // First sighting of this SSID: record it as the baseline. Round-
+    // robin eviction once full, so a busy area can't grow this without
+    // bound.
+    ApEntry& slot = (_apCount < AP_CAP) ? _aps[_apCount++] : _aps[_apNext];
+    if (_apCount >= AP_CAP) _apNext = (uint8_t)((_apNext + 1) % AP_CAP);
+    strncpy(slot.ssid, ssid, sizeof(slot.ssid) - 1);
+    slot.ssid[sizeof(slot.ssid) - 1] = 0;
+    memcpy(slot.bssid, bssid, 6);
+    slot.encrypted = encrypted;
+    return false;
+}
+
 void DetectionEngine::processWiFiQ() {
     while (_wifiQTail != _wifiQHead) {
         WiFiQEntry e;
@@ -728,15 +791,30 @@ void DetectionEngine::processWiFiQ() {
             if ((uint8_t)level > _channelActivity[e.channel]) _channelActivity[e.channel] = (uint8_t)level;
             _channelLastMs[e.channel] = millis();
         }
-        // Check OUI first (per DESIGN.md §6.2 precedence); fall back to
-        // the SSID prefix (e.g. an Axon/Flock unit in pairing mode,
-        // broadcasting from a WiFi module OUI we don't otherwise know)
-        // if the OUI itself didn't match anything.
-        DetectionType t = lookupOui(e.mac);
+        // Evil-twin check runs ahead of the signature lookups and wins
+        // over them. "This SSID is beaconing from a second, different-
+        // vendor BSSID" is a statement about the *network*, not about
+        // whichever radio chip happens to be in this particular box --
+        // and a rogue AP built on commodity hardware would otherwise be
+        // logged as whatever its OUI matched, or dropped as UNKNOWN,
+        // burying the thing actually worth saying. Only beacons carry
+        // an SSID (see the promiscuous callback), so this is naturally
+        // limited to them.
+        DetectionType t = DetectionType::UNKNOWN;
         bool matchedBySsid = false;
-        if (t == DetectionType::UNKNOWN && e.ssid[0]) {
-            t = lookupSsid(e.ssid);
-            matchedBySsid = (t != DetectionType::UNKNOWN);
+        bool evilTwin = e.ssid[0] && noteApBeacon(e.mac, e.ssid, e.encrypted);
+        if (evilTwin) {
+            t = DetectionType::EVILTWIN;
+        } else {
+            // Check OUI first (per DESIGN.md §6.2 precedence); fall back
+            // to the SSID prefix (e.g. an Axon/Flock unit in pairing
+            // mode, broadcasting from a WiFi module OUI we don't
+            // otherwise know) if the OUI itself didn't match anything.
+            t = lookupOui(e.mac);
+            if (t == DetectionType::UNKNOWN && e.ssid[0]) {
+                t = lookupSsid(e.ssid);
+                matchedBySsid = (t != DetectionType::UNKNOWN);
+            }
         }
         if (t == DetectionType::UNKNOWN) continue;
         // Disabled types (Settings > DETECTION FILTER) dropped here too
@@ -777,8 +855,13 @@ void DetectionEngine::processWiFiQ() {
         d.channel = e.channel;
         d.type    = t;
         // Vendor label: from the SSID-prefix table if that's what
-        // matched, otherwise from the OUI table.
-        if (matchedBySsid) {
+        // matched, otherwise from the OUI table. An evil twin gets
+        // neither -- what matters is which network is being
+        // impersonated, so the SSID goes in as the name.
+        if (t == DetectionType::EVILTWIN) {
+            strncpy(d.vendor, "EvilTwin", sizeof(d.vendor) - 1);
+            strncpy(d.name, e.ssid, sizeof(d.name) - 1);
+        } else if (matchedBySsid) {
             const char* name = ssidVendorName(e.ssid);
             if (name) strncpy(d.vendor, name, sizeof(d.vendor) - 1);
         } else {

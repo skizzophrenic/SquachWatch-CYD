@@ -215,17 +215,24 @@ DetectionType lookupMfgId(uint16_t mfgId) {
 }
 
 bool isAirTagSubtype(const uint8_t* mfgPayload, uint8_t len) {
+    // Fails closed on a short payload. The caller used to gate this
+    // whole check behind `mfg.size() >= 3`, which meant any Apple
+    // advertisement too short to carry a subtype byte skipped filtering
+    // entirely and stayed classified as a tag.
     if (!mfgPayload || len < 3) return false;
     uint8_t subtype = mfgPayload[2];
-    // 0x12/0x1E: Find My "offline finding" beacon — only broadcast
-    // once a tag has been separated from its registered owner for a
-    // while. 0x07: "Proximity Pairing" — also what a freshly-powered
-    // or newly-orphaned tag broadcasts before/while it determines it
-    // can't reach an owner, confirmed against a real AirTag whose
-    // registered iPhone no longer exists. Apple's other accessories
-    // (AirPods, etc.) use 0x07 too, so this trades some false-positive
-    // risk for actually catching a tag before it reaches lost-mode.
-    return (subtype == 0x12 || subtype == 0x1E || subtype == 0x07);
+    // Find My / "offline finding" only. 0x12 is the beacon a tag sends
+    // once it has been separated from its registered owner; 0x1E is the
+    // same family.
+    //
+    // 0x07 ("Proximity Pairing") used to be accepted here as well, to
+    // catch a tag before it reached lost-mode. That was the wrong
+    // trade: 0x07 is what AirPods and most other Apple accessories
+    // broadcast constantly, so in practice it reported half of Apple's
+    // product line as a tracker. It is also the wrong threat model --
+    // a tag sitting next to its owner is not following you. Separated
+    // is the whole point, and 0x12 is exactly that state.
+    return (subtype == 0x12 || subtype == 0x1E);
 }
 
 Confidence confidenceFor(DetectionType t) {
@@ -252,6 +259,13 @@ Confidence confidenceFor(DetectionType t) {
         case DetectionType::SAMSUNG_TAG:
         case DetectionType::TILE:
         case DetectionType::RING:
+        // Pattern-based rather than a signature, but a specific and
+        // hard-to-fake one: two BSSIDs claiming one SSID from different
+        // vendors while disagreeing about encryption. A mesh network --
+        // the obvious false positive, and the thing that sank the
+        // earlier vendor-only test -- never disagrees with itself about
+        // security. High.
+        case DetectionType::EVILTWIN:
             return Confidence::HIGH_CONF;
         case DetectionType::RAVEN:
         case DetectionType::AIRTAG:
