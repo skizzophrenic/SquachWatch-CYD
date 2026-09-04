@@ -72,6 +72,35 @@ LIVE_SRCS := $(SRC)/main.cpp \
 # without including it themselves and rely on that being implicit.
 LIVE_FLAGS := -include $(SIM_DIR)/Arduino.h -include $(INC)/cyd_user_setup.h
 
+# ---- WebAssembly ----------------------------------------------------
+# The same sources as squachsim-live, compiled for the browser. The port
+# is small only because every platform dependency already lives behind a
+# shim header here: no threads, no sockets, no filesystem, and the
+# framebuffer was already a plain array. main_wasm.cpp swaps the native
+# harness's stdin/stdout protocol for exported functions.
+#
+# Needs emsdk on PATH:  source ~/emsdk/emsdk_env.sh
+WASM_SRCS := $(UI_SRCS) \
+             $(SRC)/main.cpp \
+             $(SRC)/cap_touch.cpp \
+             $(SRC)/touch_cal.cpp \
+             $(SIM_DIR)/main_wasm.cpp \
+             $(SIM_DIR)/detection_sim.cpp
+WASM_DIR  := web
+WASM_OUT  := $(WASM_DIR)/squachsim.js
+# -Os over -O2: this ships over the wire, and the emulator spends its
+# time waiting on requestAnimationFrame rather than on compute.
+# ALLOW_MEMORY_GROWTH because the frame sprite is allocated at runtime.
+WASM_FLAGS := -std=c++17 -Os -I$(SIM_DIR) -I$(INC) \
+              -Wno-unused-parameter \
+              -include $(SIM_DIR)/Arduino.h \
+              -include $(INC)/cyd_user_setup.h \
+              -sALLOW_MEMORY_GROWTH=1 \
+              -sMODULARIZE=1 -sEXPORT_NAME=SquachSim \
+              -sEXPORTED_RUNTIME_METHODS=ccall,cwrap,HEAPU8 \
+              -sENVIRONMENT=web,node \
+              --closure 0
+
 BIN      := squachsim
 LIVE_BIN := squachsim-live
 
@@ -84,6 +113,12 @@ HDRS     := $(wildcard $(SIM_DIR)/*.h) $(wildcard $(INC)/*.h)
 
 all: $(BIN) $(LIVE_BIN)
 live: $(LIVE_BIN)
+wasm: $(WASM_OUT)
+
+$(WASM_OUT): $(WASM_SRCS) $(HDRS)
+	@command -v em++ >/dev/null || { echo "em++ not found -- run: source ~/emsdk/emsdk_env.sh"; exit 1; }
+	@mkdir -p $(WASM_DIR)
+	em++ $(WASM_FLAGS) -o $@ $(WASM_SRCS)
 
 $(BIN): $(UI_SRCS) $(SIM_SRCS) $(HDRS)
 	@test -d $(INC) || { echo "SquachWatch-CYD not found at $(SQUACHWATCH) -- set SQUACHWATCH=/path/to/checkout"; exit 1; }
@@ -102,6 +137,6 @@ shots: $(BIN)
 
 clean:
 	rm -f $(BIN) $(LIVE_BIN)
-	rm -rf out .nvs
+	rm -rf out .nvs $(WASM_DIR)/squachsim.js $(WASM_DIR)/squachsim.wasm
 
-.PHONY: all shots clean
+.PHONY: all live wasm shots clean
