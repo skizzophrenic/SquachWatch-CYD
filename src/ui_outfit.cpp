@@ -2,6 +2,7 @@
 #include "ui_outfit.h"
 #include "theme.h"
 #include "squachy.h"
+#include "detection.h"
 #include <Arduino.h>
 
 // Footer band height (name + unlock count + arrows), reserved at the
@@ -15,14 +16,21 @@ void uiOutfitInit(TFT_eSPI& t) {
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
 }
 
-void uiOutfitTick(TFT_eSPI& t, uint32_t now) {
+void uiOutfitTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     int w = t.width();
     int h = t.height();
 
     const int titleBottom = 16;
     const int footerTop   = h - FOOTER_H;
 
-    t.fillRect(0, titleBottom, w, h - titleBottom, Theme::BG);
+    // The player's own background, running live behind the preview. The
+    // footer is opaque and drawn after, so the band stops at footerTop --
+    // and the floor is published so anything that stands on the ground
+    // (Mowin' Man) uses that rather than the bottom of the screen.
+    t.fillRect(0, footerTop, w, h - footerTop, Theme::BG);
+    Theme::setBackgroundFloor(footerTop);
+    Theme::drawActiveBackground(t, now, titleBottom, footerTop, eng);
+    Theme::clearBackgroundFloor();
 
     // Live preview -- same call the CLEAR screen makes, just with no
     // background animation and a footer reserved for the name/arrows

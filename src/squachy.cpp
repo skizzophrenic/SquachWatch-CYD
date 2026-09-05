@@ -376,6 +376,13 @@ static uint8_t s_cfcol[CONFETTI_N];
 // it lands where he's currently standing (he moves/scales with the
 // screen, this isn't a fixed region).
 static int   s_lastCx = -10000, s_lastHeadTopY = 0;
+// Top of the region the caller gave us. Costume detail that reaches ABOVE
+// the head needs this: hy is not a fixed distance from the top of the
+// drawing area -- he sits lower with a speech bubble up and rides higher
+// without one -- so anything tall is fine in some frames and sliced off in
+// others. Three passes at the wolf skull were lost to exactly that. With a
+// real limit, tall detail can be clamped instead of guessed at.
+static int   s_topLimit = -10000;
 static float s_lastScale = 1.0f;
 
 // After this long with no interaction at all (not even idle quips
@@ -1451,29 +1458,51 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
             // happened to a skull at hy - S(26), then hy - S(18), then
             // hy - S(11) with ears above it.
             //
-            // So the ears go OUTWARD rather than upward. They read just
-            // as well splayed off the sides of his head, and they cost
-            // no vertical room at all -- which is the only reason this
-            // renders identically whether or not he is talking.
+            // Ears stand UP. That is the pose people expect, but it is
+            // also what cost three earlier passes: hy is not a fixed
+            // distance from the top of the drawing area, so a fixed
+            // height is fine while he is quiet and sliced off the moment
+            // a speech bubble pushes him down.
+            //
+            // s_topLimit is the region top the caller actually gave us,
+            // so the tips are clamped to it rather than hoped for. When
+            // room is tight they shorten instead of being cut, which
+            // reads as ears at a different angle rather than as damage.
             t.fillRoundRect(cx2 - S(14), hy - S(8), S(28), S(7), S(3), peltDark);
             t.fillRoundRect(cx2 - S(10), hy - S(7), S(20), S(4), S(2), peltMid);
 
-            // Ears: swept up and out from the sides of the hood.
-            t.fillTriangle(cx2 - S(13), hy - S(2), cx2 - S(13), hy -  S(8),
-                           cx2 - S(21), hy - S(9), peltDark);
-            t.fillTriangle(cx2 + S(13), hy - S(2), cx2 + S(13), hy -  S(8),
-                           cx2 + S(21), hy - S(9), peltDark);
-            t.fillTriangle(cx2 - S(14), hy - S(4), cx2 - S(14), hy -  S(7),
-                           cx2 - S(19), hy - S(8), peltLit);
-            t.fillTriangle(cx2 + S(14), hy - S(4), cx2 + S(14), hy -  S(7),
-                           cx2 + S(19), hy - S(8), peltLit);
+            int earTip = hy - S(20);
+            if (s_topLimit > -5000 && earTip < s_topLimit + 1) earTip = s_topLimit + 1;
+            if (earTip > hy - S(10)) earTip = hy - S(10);   // never stubbier than the hood
 
-            // Dead sockets. Deliberately dim: the live red pair belongs
-            // to the werewolf out on the fire, and reusing them here
-            // would imply the pelt is still animate.
-            const uint16_t socket = blend(BLACK, RED, 90);
-            t.fillRect(cx2 - S(7), hy - S(6), S(4), S(2), socket);
-            t.fillRect(cx2 + S(3), hy - S(6), S(4), S(2), socket);
+            // Base sits inboard of the hood edge and the tip leans slightly
+            // out, so they read as ears rather than as horns.
+            t.fillTriangle(cx2 - S(13), hy - S(4), cx2 -  S(4), hy - S(7),
+                           cx2 - S(11), earTip, peltDark);
+            t.fillTriangle(cx2 + S(13), hy - S(4), cx2 +  S(4), hy - S(7),
+                           cx2 + S(11), earTip, peltDark);
+            // Inner ear, a touch lighter and shorter.
+            t.fillTriangle(cx2 - S(11), hy - S(5), cx2 -  S(6), hy - S(7),
+                           cx2 - S(10), earTip + S(4), peltLit);
+            t.fillTriangle(cx2 + S(11), hy - S(5), cx2 +  S(6), hy - S(7),
+                           cx2 + S(10), earTip + S(4), peltLit);
+
+            // Sockets, lit. These used to be deliberately dead on the
+            // reasoning that a live pair belongs to the werewolf out on
+            // the fire -- but a trophy skull with the lights still on is
+            // a better costume than a correct one, so they glow.
+            //
+            // The pulse is a slow breath rather than a blink: a hard on/off
+            // at this size reads as a rendering fault, where a ramp reads
+            // as something banked and smouldering.
+            const float ember = 0.62f + 0.38f * sinf((float)now / 620.0f);
+            const uint16_t glowOut = blend(BLACK, RED, (uint16_t)(70.0f + ember * 60.0f));
+            const uint16_t glowIn  = blend(RED, VAPOR_YELLOW, (uint16_t)(ember * 120.0f));
+            // Halo first, then the core on top of it.
+            t.fillRect(cx2 - S(8), hy - S(7), S(6), S(4), glowOut);
+            t.fillRect(cx2 + S(2), hy - S(7), S(6), S(4), glowOut);
+            t.fillRect(cx2 - S(7), hy - S(6), S(4), S(2), glowIn);
+            t.fillRect(cx2 + S(3), hy - S(6), S(4), S(2), glowIn);
 
             // Fangs hang off the jaw line and come right down over the
             // lenses. Stopping them short of his shades was the safe
@@ -1696,16 +1725,19 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     auto keyW = [&](int x0, int y0, int x1, int y1, int w) {
         if (SQUACHY_KEYLINE) t.drawWideLine(x0, y0, x1, y1, w + 2 * kb, keyCol);
     };
-    // Triangles grow by pushing each vertex away from the centroid, which
-    // is close enough to a uniform rim at this size and needs no edge
-    // normals. Used for the crown spikes, which poke above the head's own
-    // keyline and so were the one part of his silhouette left unoutlined.
+    // Crown spikes. They poke above the head's own keyline, so without
+    // this they were the one part of the silhouette left unoutlined.
+    //
+    // Sideways and UPWARD only -- never down. A spike's base sits flush on
+    // the skull, so growing the triangle downward as well would lay a dark
+    // bar across the top of his head where there is no silhouette edge to
+    // trace. Vertices at or below the centroid keep their y exactly.
     auto keyT = [&](int x1, int y1, int x2, int y2, int x3, int y3) {
         if (!SQUACHY_KEYLINE) return;
         const int gx = (x1 + x2 + x3) / 3, gy = (y1 + y2 + y3) / 3;
-        auto o = [&](int v, int c) { return v + (v > c ? kb : (v < c ? -kb : 0)); };
-        t.fillTriangle(o(x1, gx), o(y1, gy), o(x2, gx), o(y2, gy),
-                       o(x3, gx), o(y3, gy), keyCol);
+        auto ox = [&](int v) { return v + (v > gx ? kb : (v < gx ? -kb : 0)); };
+        auto oy = [&](int v) { return v < gy ? v - kb : v; };
+        t.fillTriangle(ox(x1), oy(y1), ox(x2), oy(y2), ox(x3), oy(y3), keyCol);
     };
 
     // ---- silhouette keyline -------------------------------------------
@@ -2016,6 +2048,9 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
 
 void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const char* line,
                 bool talking, int wanderRangePx) {
+    // This cameo is placed by callers that have already reserved room, so
+    // there is no region to clamp against.
+    s_topLimit = -10000;
     // Same idle bob as tick()'s WAVE mood, just without the quip/mood
     // state machine — a self-contained cameo for the boot splash.
     float bobAmt = 6.0f * scale;
@@ -2116,6 +2151,7 @@ static void drawPartyFx(TFT_eSPI& t, uint32_t now, int topY, int availHeight, bo
 
 void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
           bool advance, float minScale, bool scanningFx, int wanderRangePx) {
+    s_topLimit = topY;
     // Everything in this block mutates mood/timers/particle state —
     // gated to run once per logical frame (see the header comment on
     // tick()) regardless of how many physical bands call this. The

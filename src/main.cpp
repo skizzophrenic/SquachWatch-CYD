@@ -2440,7 +2440,7 @@ void loop() {
             break;
         }
         case AppState::OUTFIT: {
-            uiOutfitTick(*canvas, now);
+            uiOutfitTick(*canvas, now, engine);
             // Arrow taps cycle the equipped outfit (already persisted
             // live, no separate "confirm" step needed); a tap anywhere
             // else jumps straight back to the main screen, same "tap to
