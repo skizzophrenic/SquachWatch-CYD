@@ -88,6 +88,15 @@
 
      SCANLINES: horizontal only. PIXEL GRID: both axes, and weaker, because
      every pixel there is touched by two lines rather than one. */
+  /* The overlay itself. Without this the div is an empty zero-height
+     block sitting after the canvas, so the gradients below have no area to
+     paint and nothing shows -- which is exactly what happened when an
+     earlier edit sliced from a comment to the next selector and took this
+     rule with it. */
+  .lcd-grid{
+    position:absolute;inset:0;pointer-events:none;border-radius:3px;
+    opacity:0;transition:opacity .18s ease;
+  }
   .lcd[data-lcd="scan"] .lcd-grid{
     background-image:
       repeating-linear-gradient(to bottom,

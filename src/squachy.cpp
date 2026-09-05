@@ -1696,6 +1696,17 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     auto keyW = [&](int x0, int y0, int x1, int y1, int w) {
         if (SQUACHY_KEYLINE) t.drawWideLine(x0, y0, x1, y1, w + 2 * kb, keyCol);
     };
+    // Triangles grow by pushing each vertex away from the centroid, which
+    // is close enough to a uniform rim at this size and needs no edge
+    // normals. Used for the crown spikes, which poke above the head's own
+    // keyline and so were the one part of his silhouette left unoutlined.
+    auto keyT = [&](int x1, int y1, int x2, int y2, int x3, int y3) {
+        if (!SQUACHY_KEYLINE) return;
+        const int gx = (x1 + x2 + x3) / 3, gy = (y1 + y2 + y3) / 3;
+        auto o = [&](int v, int c) { return v + (v > c ? kb : (v < c ? -kb : 0)); };
+        t.fillTriangle(o(x1, gx), o(y1, gy), o(x2, gx), o(y2, gy),
+                       o(x3, gx), o(y3, gy), keyCol);
+    };
 
     // ---- silhouette keyline -------------------------------------------
     // A dark outline one pixel proud of every major mass. Squachy's own
@@ -1875,10 +1886,13 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     // in that silhouette that doesn't belong. Every other outfit, and
     // plain Squachy, still get it.
     if (currentOutfit() != OutfitId::BLUEBLUR) {
+        keyT(cx2 - S(6), hy + S(2), cx2, hy - S(14), cx2 + S(6), hy + S(2));
         t.fillTriangle(cx2 - S(6), hy + S(2), cx2, hy - S(14), cx2 + S(6), hy + S(2), furLight);
     }
-    t.fillTriangle(cx2 - S(13), hy + S(3), cx2 - S(9), hy - S(4), cx2 - S(5), hy + S(3), furLight);
-    t.fillTriangle(cx2 + S(5),  hy + S(3), cx2 + S(9), hy - S(4), cx2 + S(13),hy + S(3), furLight);
+        keyT(cx2 - S(13), hy + S(3), cx2 - S(9), hy - S(4), cx2 - S(5), hy + S(3));
+        t.fillTriangle(cx2 - S(13), hy + S(3), cx2 - S(9), hy - S(4), cx2 - S(5), hy + S(3), furLight);
+        keyT(cx2 + S(5),  hy + S(3), cx2 + S(9), hy - S(4), cx2 + S(13),hy + S(3));
+        t.fillTriangle(cx2 + S(5),  hy + S(3), cx2 + S(9), hy - S(4), cx2 + S(13),hy + S(3), furLight);
 
     // A tiny top hat, unlocked once he reaches Legend stage — perched
     // just above the crest peak (hy - S(14)). Skipped for the Unicorn
