@@ -40,6 +40,37 @@ jobs:
       - name: Check out
         uses: actions/checkout@v4
 
+      - name: Determine version
+        id: ver
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Require release notes
+        # Fails in seconds, before the ~4 minute firmware build, because a
+        # release with no notes is not a finished release and finding that
+        # out afterwards means the tag is already public.
+        #
+        # This used to fall back to --generate-notes when the file was
+        # missing. That fallback summarises merged pull requests, and this
+        # repo commits straight to master -- so it had nothing to work with
+        # and produced a body containing only a changelog link. v1.5.5 and
+        # v1.5.6 both shipped that way before anyone noticed.
+        run: |
+          NOTES_FILE=".github/release-notes/${{ steps.ver.outputs.tag }}.md"
+          if [ ! -s "$NOTES_FILE" ]; then
+            echo "::error::No release notes for ${{ steps.ver.outputs.tag }}."
+            echo ""
+            echo "Create $NOTES_FILE, commit it, then re-run this workflow"
+            echo "(or delete and re-push the tag)."
+            echo ""
+            echo "Recent notes to copy the house style from:"
+            ls .github/release-notes/ | tail -5
+            exit 1
+          fi
+          echo "Using $NOTES_FILE ($(wc -l < "$NOTES_FILE") lines)"
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -54,13 +85,6 @@ jobs:
         # loops on real hardware -- see platformio.ini) -- the rest are
         # and get built/published together below.
         run: pio run -e cyd -e cyd-ili9341 -e awok -e cyd-fast -e cyd-ili9341-fast
-
-      - name: Determine version
-        id: ver
-        run: |
-          TAG="${GITHUB_REF_NAME}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
 
       - name: Merge into one flashable image (per board)
         run: |
@@ -131,15 +155,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          NOTES_FILE=".github/release-notes/${{ steps.ver.outputs.tag }}.md"
-          if [ -f "$NOTES_FILE" ]; then
-            NOTES_ARGS=(--notes-file "$NOTES_FILE")
-          else
-            NOTES_ARGS=(--generate-notes)
-          fi
+          # Existence was already checked before the build, so there is
+          # no fallback here -- the fallback is what let two releases
+          # ship with an empty body.
           gh release create "${{ steps.ver.outputs.tag }}" \
             --title "SquachWatch-CYD ${{ steps.ver.outputs.tag }}" \
-            "${NOTES_ARGS[@]}" \
+            --notes-file ".github/release-notes/${{ steps.ver.outputs.tag }}.md" \
             cyd-bootloader.bin \
             cyd-partitions.bin \
             cyd-firmware.bin \
