@@ -173,10 +173,18 @@ static BleScanCallbacks g_bleScanCallbacks;
 
 // -------- DetectionEngine --------
 
+void DetectionEngine::saveLifetimeByType() {
+    _prefs.putBytes("typetot", _lifetimeByType, sizeof(_lifetimeByType));
+}
+
 void DetectionEngine::resetLifetime() {
     _lifetimeTotal = 0;
     _prefs.putUInt("total", 0);
-    for (uint8_t i = 0; i < (uint8_t)DetectionType::COUNT; i++) _typeCounts[i] = 0;
+    for (uint8_t i = 0; i < (uint8_t)DetectionType::COUNT; i++) {
+        _typeCounts[i]     = 0;
+        _lifetimeByType[i] = 0;
+    }
+    saveLifetimeByType();
 }
 
 bool DetectionEngine::init() {
@@ -192,6 +200,14 @@ bool DetectionEngine::init() {
     // tracked separately.
     _prefs.begin("squachwatch", false);
     _lifetimeTotal = _prefs.getUInt("total", 0);
+    // A short read means the key predates this field or the type list has
+    // grown since it was written; take what is there and leave the rest at
+    // zero rather than discarding counts someone has spent months earning.
+    {
+        size_t have = _prefs.getBytesLength("typetot");
+        if (have > sizeof(_lifetimeByType)) have = sizeof(_lifetimeByType);
+        if (have >= sizeof(uint32_t)) _prefs.getBytes("typetot", _lifetimeByType, have);
+    }
 
     // 2. WiFi promiscuous mode for OUI/SSID detection
     WiFi.mode(WIFI_STA);
@@ -900,6 +916,10 @@ void DetectionEngine::pushLog(const Detection& d) {
     _typeCounts[(uint8_t)d.type]++;
     _lifetimeTotal++;
     _prefs.putUInt("total", _lifetimeTotal);
+    if ((uint8_t)d.type < (uint8_t)DetectionType::COUNT) {
+        _lifetimeByType[(uint8_t)d.type]++;
+        saveLifetimeByType();
+    }
     _sd.logEvent(d);
 }
 

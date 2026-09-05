@@ -5,7 +5,14 @@
 
 namespace IdleEvents {
 
-enum class Kind : uint8_t { UFO, SPARKLE, CRITTER, GLITCH_LINE, COUNT };
+// GLITCH_LINE used to be here: a Bangers message drawn dead centre of
+// the band for 1.5s every 60-180s. Centre of the band is exactly where
+// Squachy stands and he draws after the background, so it was almost
+// entirely hidden behind him -- you saw a couple of pixels of it poke
+// out past his shoulders and nothing more. Removed rather than moved:
+// the other three idle events all travel across the screen, which is
+// what makes them read as events at all.
+enum class Kind : uint8_t { UFO, SPARKLE, CRITTER, COUNT };
 
 static uint32_t s_nextAt = 0;
 static bool     s_active = false;
@@ -17,7 +24,6 @@ static uint32_t durationFor(Kind k) {
         case Kind::UFO:         return 2400;
         case Kind::SPARKLE:     return 1300;
         case Kind::CRITTER:     return 2000;
-        case Kind::GLITCH_LINE: return 1500;
         default:                return 1500;
     }
 }
@@ -121,33 +127,6 @@ static void drawCritter(TFT_eSPI& t, uint32_t elapsed, uint32_t dur, int x0, int
 
 // Glitch one-liner -- its own separate joke pool from Squachy's normal
 // idle chatter, rendered like a corrupted transmission.
-static const char* const GLITCH_LINES[] = {
-    "SIGNAL LOST",
-    "NICE CATCH",
-    "STAY FROSTY",
-    "EYES UP",
-    "TRUST NO ONE",
-    "GRAINY FEED",
-    "STATIC HEARD",
-};
-static const uint8_t GLITCH_LINES_N = sizeof(GLITCH_LINES) / sizeof(GLITCH_LINES[0]);
-static uint8_t s_glitchIdx = 0;
-
-static void rollGlitchLine() {
-    s_glitchIdx = (uint8_t)random(0, GLITCH_LINES_N);
-}
-
-static void drawGlitchLine(TFT_eSPI& t, int x0, int y0, int x1, int y1) {
-    using namespace Theme;
-    int w = x1 - x0;
-    int cy = (y0 + y1) / 2;
-    const char* msg = GLITCH_LINES[s_glitchIdx];
-    int tw = bangersTextWidth(msg, BangersSize::MD);
-    int maxTw = w - 16;
-    if (tw > maxTw) tw = maxTw; // clipped, not shrunk -- every line here fits comfortably as-is
-    drawBangersText(t, x0 + (w - tw) / 2, cy - 11, msg, VAPOR_PINK, BangersSize::MD);
-}
-
 void tick(TFT_eSPI& t, uint32_t now, int x0, int y0, int x1, int y1, bool advance) {
     if (advance) {
         if (s_active) {
@@ -167,10 +146,6 @@ void tick(TFT_eSPI& t, uint32_t now, int x0, int y0, int x1, int y1, bool advanc
                 case Kind::UFO:         rollUfo(y0, y1); break;
                 case Kind::SPARKLE:     rollSparkle(x0, y0, x1, y1); break;
                 case Kind::CRITTER:     rollCritter(y0, y1); break;
-                case Kind::GLITCH_LINE:
-                    rollGlitchLine();
-                    Theme::triggerGlitchBurst(1);
-                    break;
                 default: break;
             }
         }
@@ -182,7 +157,6 @@ void tick(TFT_eSPI& t, uint32_t now, int x0, int y0, int x1, int y1, bool advanc
         case Kind::UFO:         drawUfo(t, elapsed, durationFor(s_kind), x0, x1); break;
         case Kind::SPARKLE:     drawSparkle(t, elapsed); break;
         case Kind::CRITTER:     drawCritter(t, elapsed, durationFor(s_kind), x0, x1); break;
-        case Kind::GLITCH_LINE: drawGlitchLine(t, x0, y0, x1, y1); break;
         default: break;
     }
 }

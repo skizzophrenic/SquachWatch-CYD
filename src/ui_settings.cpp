@@ -2,6 +2,7 @@
 #include "ui_settings.h"
 #include "theme.h"
 #include "settings.h"
+#include "ignore_list.h"
 #include "squachy.h"
 #include <Arduino.h>
 
@@ -20,6 +21,7 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::THEME, SettingsRow::BACKGROUND, SettingsRow::BACKGROUND_LOCK, SettingsRow::BRIGHTNESS, SettingsRow::INVERT,
     SettingsRow::RGB_SWAP, SettingsRow::ROTATION_LOCK,
     SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE, SettingsRow::DETECTION_FILTER,
+    SettingsRow::IGNORED_DEVICES,
     SettingsRow::NICKNAME, SettingsRow::SHADES_COLOR, SettingsRow::OUTFIT,
     SettingsRow::REPLAY_INTRO, SettingsRow::VIEW_DIARY,
     SettingsRow::CALIBRATE, SettingsRow::CHECK_COLORS, SettingsRow::DIAGNOSTICS, SettingsRow::RESET_STATS, SettingsRow::BACK,
@@ -46,6 +48,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::BORING_MODE:
         case SettingsRow::CONFIDENCE:
         case SettingsRow::DETECTION_FILTER:
+        case SettingsRow::IGNORED_DEVICES:
             return RowGroupId::BEHAVIOR;
         case SettingsRow::NICKNAME:
         case SettingsRow::SHADES_COLOR:
@@ -241,6 +244,15 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
                      (unsigned)DetectionType::COUNT - 1);
             value = valBuf;
             break;
+        case SettingsRow::IGNORED_DEVICES:
+            // "IGNORED DEVICES" is the destination screen's title; the row
+            // itself is shortened for the same reason TYPE FILTER above is
+            // -- the full name collides with its own value on the 240px
+            // portrait rotation at this row's size-2 text.
+            label = "IGNORED";
+            snprintf(valBuf, valBufN, "%u", (unsigned)IgnoreList::count());
+            value = valBuf;
+            break;
         case SettingsRow::CALIBRATE:
             label = "CALIBRATE TOUCH";
             break;
@@ -307,7 +319,7 @@ void uiSettingsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
         case Settings::Background::SPECTRUM:   Theme::drawSpectrumWaterfall(t, now, top, bodyBottom, eng); break;
         case Settings::Background::TUNNEL:     Theme::drawWireframeTunnel(t, now, top, bodyBottom); break;
         case Settings::Background::SYNTHWAVE: Theme::drawSynthwave(t, now, top, bodyBottom); break;
-        default:                               Theme::drawMatrixRain(t, now, top, bodyBottom, true); break;
+        default:                               Theme::drawDigitalRain(t, now, top, bodyBottom, true); break;
     }
     Theme::restorePalette(saved);
 

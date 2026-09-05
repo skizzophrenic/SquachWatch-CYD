@@ -71,7 +71,7 @@ void uiDetFilterTick(TFT_eSPI& t, uint32_t now) {
         case Settings::Background::SNOWFALL:   Theme::drawSnowfall(t, now, top, bodyBottom); break;
         case Settings::Background::TUNNEL:     Theme::drawWireframeTunnel(t, now, top, bodyBottom); break;
         case Settings::Background::SYNTHWAVE: Theme::drawSynthwave(t, now, top, bodyBottom); break;
-        default:                               Theme::drawMatrixRain(t, now, top, bodyBottom, true); break;
+        default:                               Theme::drawDigitalRain(t, now, top, bodyBottom, true); break;
     }
     Theme::restorePalette(saved);
 

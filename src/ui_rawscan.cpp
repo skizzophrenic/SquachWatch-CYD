@@ -235,7 +235,7 @@ void uiRawScanTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool i
         case Settings::Background::SPECTRUM:   Theme::drawSpectrumWaterfall(t, now, sqTop, bodyBottom, eng); break;
         case Settings::Background::TUNNEL:     Theme::drawWireframeTunnel(t, now, sqTop, bodyBottom); break;
         case Settings::Background::SYNTHWAVE: Theme::drawSynthwave(t, now, sqTop, bodyBottom); break;
-        default:                               Theme::drawMatrixRain(t, now, sqTop, bodyBottom, true); break;
+        default:                               Theme::drawDigitalRain(t, now, sqTop, bodyBottom, true); break;
     }
     Theme::restorePalette(saved);
 

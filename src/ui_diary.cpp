@@ -48,7 +48,9 @@ void uiDiaryTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     Theme::drawTitleBar(t, title);
 
     const int top  = 16;
-    const int rowH = 24;
+    // 22 rather than 24: nine rows plus the hint is 226px, which fits a
+    // 240px panel. At 24 the ninth row pushed the hint off the bottom.
+    const int rowH = 22;
     char buf[24];
 
     snprintf(buf, sizeof(buf), "%lu", (unsigned long)eng.lifetimeTotal());
@@ -73,7 +75,27 @@ void uiDiaryTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     drawStat(t, w, top + 6 * rowH, rowH, "FIRST EVER CATCH",
              ft == DetectionType::UNKNOWN ? "none yet" : detectionTypeName(ft));
 
-    drawStat(t, w, top + 7 * rowH, rowH, "FIRMWARE", FIRMWARE_VERSION);
+    // Whichever type you have logged most, ever. The per-type lifetime
+    // counters behind this persist independently of the live counts, which
+    // decay as detections go stale -- so this answers "what do I actually
+    // keep running into", which a session counter never could.
+    {
+        DetectionType best = DetectionType::UNKNOWN;
+        uint32_t bestN = 0;
+        for (uint8_t i = 1; i < (uint8_t)DetectionType::COUNT; i++) {
+            const uint32_t n = eng.lifetimeTypeCount((DetectionType)i);
+            if (n > bestN) { bestN = n; best = (DetectionType)i; }
+        }
+        if (bestN == 0) {
+            drawStat(t, w, top + 7 * rowH, rowH, "MOST CAUGHT", "none yet");
+        } else {
+            snprintf(buf, sizeof(buf), "%s %lu", detectionTypeName(best),
+                     (unsigned long)bestN);
+            drawStat(t, w, top + 7 * rowH, rowH, "MOST CAUGHT", buf);
+        }
+    }
+
+    drawStat(t, w, top + 8 * rowH, rowH, "FIRMWARE", FIRMWARE_VERSION);
 
     // Hint, pulsing gently so it doesn't just look like inert label text.
     float pulse = 0.4f + 0.3f * sinf((float)(now % 1600) / 1600.0f * 6.2831853f);
@@ -82,6 +104,6 @@ void uiDiaryTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     t.setTextColor(col, Theme::BG);
     const char* hint = "tap anywhere to go back";
     int hw = t.textWidth(hint);
-    t.setCursor((w - hw) / 2, top + 8 * rowH + 12);
+    t.setCursor((w - hw) / 2, top + 9 * rowH + 8);
     t.print(hint);
 }

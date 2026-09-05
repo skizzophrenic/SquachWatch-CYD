@@ -15,6 +15,7 @@ enum class SettingsRow : uint8_t {
     BORING_MODE,
     CONFIDENCE,
     DETECTION_FILTER,
+    IGNORED_DEVICES,
     CALIBRATE,
     CHECK_COLORS,
     DIAGNOSTICS,

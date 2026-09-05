@@ -7,7 +7,7 @@ namespace Settings {
 
 static Preferences s_prefs;
 static uint8_t     s_palette    = 0;
-static Background  s_background = Background::MATRIX;
+static Background  s_background = Background::DIGITAL;
 static bool        s_inverted   = false;
 static bool        s_rgbSwapped = false;
 static bool        s_colorChecked = false;
@@ -26,7 +26,7 @@ static bool        s_boringMode = false;
 
 const char* backgroundName(Background b) {
     switch (b) {
-        case Background::MATRIX:    return "MATRIX RAIN";
+        case Background::DIGITAL:    return "DIGITAL RAIN";
         case Background::STARFIELD: return "STARFIELD";
         case Background::TOASTERS:  return "FLYING TOASTERS";
         case Background::AQUARIUM:  return "AQUARIUM";
@@ -51,7 +51,7 @@ void load() {
     // else the moment onboarding ends. Only affects installs with no
     // saved value; anyone who has ever picked a background keeps theirs.
     s_background = (Background)s_prefs.getUChar("bg", (uint8_t)Background::SYNTHWAVE);
-    if ((uint8_t)s_background >= BACKGROUND_COUNT) s_background = Background::MATRIX;
+    if ((uint8_t)s_background >= BACKGROUND_COUNT) s_background = Background::DIGITAL;
     s_inverted   = s_prefs.getBool("inv", false);
     s_rgbSwapped = s_prefs.getBool("rgbswap", false);
     s_colorChecked = s_prefs.getBool("colorchk", false);

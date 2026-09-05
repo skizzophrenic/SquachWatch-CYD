@@ -28,6 +28,15 @@ public:
     // live _typeCounts above which decay when a detection goes stale.
     uint32_t lifetimeTotal() const { return _lifetimeTotal; }
 
+    // Lifetime count PER TYPE, surviving reboots -- the live _typeCounts
+    // decay as detections go stale, so they cannot answer "how many Flock
+    // cameras have I ever logged". This is the number a long-haul reward
+    // would be built on. Returns 0 for an out-of-range type.
+    uint32_t lifetimeTypeCount(DetectionType t) const {
+        return ((uint8_t)t < (uint8_t)DetectionType::COUNT)
+               ? _lifetimeByType[(uint8_t)t] : 0u;
+    }
+
     // Settings-menu "reset stats" action: zeroes the persisted lifetime
     // total and the live per-type counters. Does not touch the log
     // itself — that's clearLog()'s job.
@@ -306,6 +315,12 @@ private:
     SdLog       _sd;
     Preferences _prefs;
     uint32_t    _lifetimeTotal = 0;
+    // Persisted as ONE blob rather than a key per type. NVS allocates in
+    // 32-byte entries, so 14 separate uint32 keys would burn 14 entries
+    // where the whole array fits in three, and it means one write per
+    // detection instead of one per type.
+    uint32_t    _lifetimeByType[(uint8_t)DetectionType::COUNT] = {0};
+    void        saveLifetimeByType();
 
     // Promiscuous mode only ever receives on whatever channel the
     // radio is currently tuned to — without actively hopping, the

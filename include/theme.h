@@ -189,13 +189,13 @@ namespace Theme {
     // draw into the band between yStart/yEnd, self-seed static state
     // on first call, and are safe to call every frame.
 
-    // 20-column Matrix digital rain tick. Columns fall at independent
+    // 20-column digital rain tick. Columns fall at independent
     // speeds, heads cycle pink/cyan/green, trails fade to BG.
     // advance: gates state mutation (column position/speed, the rare
     // glitch-message trigger) to once per logical frame -- see the
     // matching comment on Squachy::tick(). Boards that render in a
     // single pass never need to touch this (defaults to true).
-    void drawMatrixRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advance = true);
+    void drawDigitalRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advance = true);
 
     // Classic "flying through space" starfield: points radiate outward
     // from the band's center, accelerating and brightening as they
@@ -254,8 +254,8 @@ namespace Theme {
     // backdrop; ALERT now wants the same one behind it, and a second
     // copy of an 11-case switch is a second place to forget a new
     // background. `eng` is only read by SPECTRUM (it needs live RSSI);
-    // `advance` is MATRIX's once-per-logical-frame guard -- see
-    // drawMatrixRain().
+    // `advance` is DIGITAL's once-per-logical-frame guard -- see
+    // drawDigitalRain().
     void drawActiveBackground(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
                               const DetectionEngine& eng, bool advance = true);
 
@@ -283,6 +283,16 @@ namespace Theme {
     // TOASTERS background. Same consume-once contract as the werewolf
     // summon above; main.cpp turns it into an outfit unlock.
     bool consumeToasterCatch();
+
+    // The flock's wing, exposed so the CHROME WING outfit can wear the
+    // exact same shape rather than an approximation of it: a curved lobe
+    // with a blunt tip and feather divisions drawn back onto the mass.
+    // Mirror a wing by passing (180 - angDeg) with a negated curl.
+    // `shade` fills the lower half; it defaults to the flock's own grey.
+    void drawWing(TFT_eSPI& t, float sx, float sy, float len, float angDeg,
+                  float flap, float width, uint8_t ndiv,
+                  uint16_t body, uint16_t edge, float curl, float lift,
+                  uint16_t shade = 0xD6DB);
 
     // Falling snow with a gentle sideways sway, a few larger bright
     // flakes mixed into a field of smaller dim ones.

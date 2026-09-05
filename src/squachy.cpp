@@ -616,7 +616,7 @@ static const char* buildStatLine() {
 // the wrong row's lines for a while. Folded into idle chatter
 // alongside buildStatLine() (see tick()).
 static const char* const BG_LINES[][3] = {
-    /* MATRIX    */ { "Matrix rain again. Very hacker of me.", "Green code, brown fur. Bold combo.", "I could read this if I tried. I won't." },
+    /* DIGITAL   */ { "Digital rain again. Very hacker of me.", "Falling code, brown fur. Bold combo.", "I could read this if I tried. I won't." },
     /* STARFIELD */ { "Starfield's up. Feeling cosmic.", "Somewhere out there, a bigger cryptid.", "Space is just the woods, but darker." },
     /* TOASTERS  */ { "Flying toasters. A classic.", "Nobody needs that much toast airborne.", "After Dark energy today." },
     /* AQUARIUM  */ { "Aquarium mode. Very zen.", "Fish don't do opsec. Rookies.", "I'd get a tank but I'm camera-shy." },
@@ -833,7 +833,7 @@ bool hitTest(int x, int y) {
 // Tracks the previous frame's bubble footprint (whichever of the two
 // draw functions below drew it) so we can erase exactly that
 // rectangle when the bubble changes or goes away — the rest of the
-// row stays untouched, so matrix rain shows through whenever Squachy
+// row stays untouched, so digital rain shows through whenever Squachy
 // isn't actively saying something.
 static int  lastBubbleX = 0, lastBubbleY = 0, lastBubbleW = 0, lastBubbleH = 0;
 static bool hadBubble   = false;
@@ -1382,34 +1382,43 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
             break;
         }
         case OutfitId::CHROMEWING: {
-            // Chrome toaster wings, worn. Same two-tone the flock uses --
-            // white leading edge, cool grey trailing half -- so it reads as
-            // the same material rather than as generic angel wings. Drawn
-            // from the shoulders outward and swept back, with a slow beat
-            // that runs whether or not he is moving.
+            // BROAD: the flock's own wing routine, not an imitation of it.
+            // Same curved lobe, blunt tip, two-tone shading and feather
+            // divisions the toasters wear, just wider in the chord because
+            // a narrow wing thins out to nothing at CLEAR-screen scale.
+            //
+            // The pair is made by mirroring: angle becomes (180 - a) and
+            // the curl is negated. drawWing() picks its shaded edge by
+            // which one is lower on screen, so both wings get the shadow
+            // underneath instead of one of them looking flipped.
             const uint16_t wh  = TFT_WHITE;
             const uint16_t wh2 = t.color565(214, 214, 228);
             const uint16_t wh3 = t.color565(150, 150, 172);
-            const float beat = sinf((float)now / 620.0f);
-            const int sy = hy + S(20);
-            for (int8_t side = -1; side <= 1; side += 2) {
-                const int sx = cx2 + side * S(13);
-                const int tipX = sx + side * S(20);
-                const int tipY = sy - S(15) - (int)(beat * (float)S(5));
-                const int midX = sx + side * S(14);
-                const int midY = sy - S(2) - (int)(beat * (float)S(2));
-                t.fillTriangle(sx, sy - S(4), tipX, tipY, midX, midY, wh);
-                t.fillTriangle(sx, sy + S(2), midX, midY,
-                               sx + side * S(9), sy + S(9), wh2);
-                t.drawLine(sx, sy - S(4), tipX, tipY, wh3);
-                t.drawLine(tipX, tipY, midX, midY, wh3);
-                t.drawLine(midX, midY, sx + side * S(9), sy + S(9), wh3);
-                // Two feather divisions, same trick as the flock's wings.
-                t.drawLine(sx + side * S(4), sy - S(2),
-                           sx + side * S(15), sy - S(8), wh3);
-                t.drawLine(sx + side * S(4), sy + S(1),
-                           sx + side * S(13), sy + S(2), wh3);
+            // Wings rest, then break into a short burst of three beats
+            // every few seconds, decaying so the last one is smallest.
+            // Constant gentle motion reads as a hover; a bird at rest that
+            // occasionally beats reads as a bird.
+            //
+            // Both wings take the SAME beat value. They are mirrored, so
+            // the lift is added to opposite base angles -- which is what
+            // makes one sign move them together rather than apart.
+            static uint32_t flapAt = 0, flapNext = 0;
+            if (now >= flapNext) {
+                flapAt   = now;
+                flapNext = now + 3200u + (uint32_t)random(0, 4200);
             }
+            const uint32_t fAge = now - flapAt;
+            float beat = 0.0f;
+            if (fAge < 900u) {
+                const float fp = (float)fAge / 900.0f;
+                beat = sinf(fp * 3.0f * 6.2831853f) * (1.0f - fp);
+            }
+            const float sy   = (float)(hy + S(20));
+            const float len  = (float)S(25);
+            Theme::drawWing(t, (float)(cx2 - S(13)), sy, len,
+                            218.0f, -beat, 0.50f, 3, wh, wh3, -0.55f, 26.0f, wh2);
+            Theme::drawWing(t, (float)(cx2 + S(13)), sy, len,
+                            -38.0f, beat, 0.50f, 3, wh, wh3, 0.55f, 26.0f, wh2);
             break;
         }
         case OutfitId::WOLFPELT: {
@@ -2242,7 +2251,7 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     if (s_legendary) drawPartyFx(t, now, topY, availHeight, advance);
 
     // No erase-then-redraw here: ui_clear.cpp's background draw call
-    // (matrix rain / starfield / toasters / lava lamp) runs immediately
+    // (digital rain / starfield / toasters / lava lamp) runs immediately
     // before this every frame and already fully repaints this entire
     // region, including wherever he stood last frame. Erasing his
     // footprint to flat BG on top of that would just punch a static

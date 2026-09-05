@@ -27,6 +27,7 @@
 #include "ui_diary.h"
 #include "ui_outfit.h"
 #include "ui_outfit_unlock.h"
+#include "ui_ignorelist.h"
 #include "ignore_list.h"
 #include "ignore_list.h"
 #include "ui_detfilter.h"
@@ -989,6 +990,12 @@ static void enterOutfit() {
     uiOutfitInit(*canvas);
 }
 
+static void enterIgnoreList() {
+    state = AppState::IGNORE_LIST;
+    transitionStart = millis();
+    uiIgnoreListInit(*canvas);
+}
+
 static void enterDetFilter() {
     state = AppState::DETECTION_FILTER;
     transitionStart = millis();
@@ -1097,7 +1104,7 @@ void setup() {
     // sprite (~76KB at 8-bit, comfortably fits) and renders in two
     // bands via setViewport() -- see the AppState::CLEAR case in
     // loop(). `advance` on uiClearTick()/Squachy::tick()/
-    // Theme::drawMatrixRain() gates state mutation to the first band
+    // Theme::drawDigitalRain() gates state mutation to the first band
     // only, so calling them twice per logical frame doesn't double
     // animation speed.
     canvas->setTextSize(1);
@@ -1237,7 +1244,7 @@ void setup() {
     }
 #endif
 
-    // Seed the PRNG so the matrix rain starts in a fresh-looking state
+    // Seed the PRNG so the digital rain starts in a fresh-looking state
     // on every boot. Analog read on a floating pin is plenty.
     randomSeed(analogRead(34));
 
@@ -1302,7 +1309,8 @@ void loop() {
     if (tp.valid && !Settings::rotationLocked() &&
         (state == AppState::CLEAR || state == AppState::LOG ||
                       state == AppState::SETTINGS || state == AppState::OUTFIT ||
-                      state == AppState::RAWSCAN || state == AppState::DETECTION_FILTER) &&
+                      state == AppState::RAWSCAN || state == AppState::DETECTION_FILTER ||
+                      state == AppState::IGNORE_LIST) &&
         Theme::rotateButtonHit(tp.x, tp.y, tft.width()) &&
         (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
         lastTouch = now;
@@ -1371,11 +1379,13 @@ void loop() {
     // DETECTION_FILTER's are all claimed by row toggles.
     if (tp.valid && (state == AppState::CLEAR || state == AppState::LOG ||
                       state == AppState::SETTINGS || state == AppState::OUTFIT ||
-                      state == AppState::RAWSCAN || state == AppState::DETECTION_FILTER) &&
+                      state == AppState::RAWSCAN || state == AppState::DETECTION_FILTER ||
+                      state == AppState::IGNORE_LIST) &&
         Theme::settingsButtonHit(tp.x, tp.y) &&
         (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
         lastTouch = now;
-        if (state == AppState::OUTFIT || state == AppState::DETECTION_FILTER) enterSettings();
+        if (state == AppState::OUTFIT || state == AppState::DETECTION_FILTER ||
+            state == AppState::IGNORE_LIST) enterSettings();
         else if (state == AppState::SETTINGS) enterClear();
         else {
             // Leaving RAWSCAN via the settings icon, same as BACK does
@@ -1473,7 +1483,7 @@ void loop() {
                 // Two passes through the half-height `frame` sprite
                 // instead of one direct-to-tft pass -- see the setup()
                 // comment by its creation. advance=true only on the
-                // first pass so Squachy/matrix-rain state advances once
+                // first pass so Squachy/digital-rain state advances once
                 // per logical frame even though this draws twice.
                 int halfH = tft.height() / 2;
                 frame.setViewport(0, 0, tft.width(), tft.height(), true);
@@ -2211,6 +2221,7 @@ void loop() {
                             break;
                         case SettingsRow::CONFIDENCE: Settings::cycleMinConfidence(); break;
                         case SettingsRow::DETECTION_FILTER: enterDetFilter(); break;
+                        case SettingsRow::IGNORED_DEVICES:  enterIgnoreList(); break;
                         case SettingsRow::CALIBRATE: {
 #if defined(AWOK)
                             awokRunCalibration();
@@ -2247,6 +2258,48 @@ void loop() {
                     }
                 }
                 gestureActive = false;
+            }
+            break;
+        }
+        case AppState::IGNORE_LIST: {
+            uiIgnoreListTick(*canvas, now);
+            // Same drag-to-scroll / act-on-release gesture the detection
+            // filter uses: committing on press would make a swipe that
+            // starts on a REMOVE button fire it before the drag is
+            // recognised as a scroll.
+            static bool ilActive = false, ilMoved = false;
+            static int  ilStartX = 0, ilStartY = 0, ilLastY = -1;
+            if (touchJustDown) {
+                ilActive = true; ilMoved = false;
+                ilStartX = tp.x; ilStartY = tp.y; ilLastY = tp.y;
+            }
+            if (tp.valid && ilActive) {
+                int dy = tp.y - ilLastY;
+                if (abs(dy) > 10) {
+                    ilMoved = true;
+                    uiIgnoreListScroll(dy > 0 ? -1 : 1);
+                    ilLastY = tp.y;
+                }
+            }
+            if (touchJustUp && ilActive) {
+                if (!ilMoved) {
+                    uint8_t hit = uiIgnoreListHitRemove(*canvas, ilStartX, ilStartY,
+                                                        tft.width(), tft.height());
+                    if (hit != 0xFF) {
+                        lastTouch = now;
+                        const uint8_t* mac = IgnoreList::macAt(hit);
+                        if (mac) {
+                            // Copy first: remove() backfills the hole with
+                            // the last entry, so the pointer it was read
+                            // from stops meaning what it meant.
+                            uint8_t tmp[6];
+                            memcpy(tmp, mac, 6);
+                            IgnoreList::remove(tmp);
+                            uiIgnoreListScroll(0);   // re-clamp after shrink
+                        }
+                    }
+                }
+                ilActive = false;
             }
             break;
         }

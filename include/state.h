@@ -75,9 +75,11 @@ enum class AppState : uint8_t {
                        // also reachable later via Settings' "CHECK COLORS" row
     DETECTION_FILTER = 12, // per-type detection on/off, reached via
                             // Settings' "DETECTION FILTER" row
-    OUTFIT_UNLOCK    = 13  // "OUTFIT UNLOCKED" celebration, pushed
+    OUTFIT_UNLOCK    = 13, // "OUTFIT UNLOCKED" celebration, pushed
                             // automatically whenever Squachy earns a new
                             // costume; returns to CLEAR when dismissed
+    IGNORE_LIST      = 14  // muted devices, reached via Settings'
+                            // "IGNORED DEVICES" row
 };
 
 enum class ButtonId : uint8_t {

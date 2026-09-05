@@ -441,24 +441,27 @@ void drawPulsingBorder(TFT_eSPI& t, uint32_t now, uint16_t a, uint16_t b,
     }
 }
 
-void drawMatrixRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advance) {
-    // Dense columns (narrow gutters) with long, smoothly-decaying
-    // trails so this reads as a code-rain backdrop rather than a
-    // handful of isolated falling raindrops. Glyphs are plain ASCII
-    // (the default GLCD font can't render the old UTF-8 katakana bytes
-    // correctly) drawn from a dense symbol/letter/digit set. Column
-    // count adapts to the current width so it works in portrait
-    // (240px) through cyd35's 480px landscape without overflowing --
-    // MAX_COLS used to cap out at 320px/SPACING (64), which silently
-    // left the right third of cyd35's wider screen bare.
+void drawDigitalRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advance) {
+    // Dense columns with long, smoothly-decaying trails. Glyphs are plain
+    // ASCII (the default GLCD font can't render UTF-8 katakana correctly)
+    // from a dense symbol/letter/digit set. Column count adapts to width so
+    // this works from 240px portrait through cyd35's 480px landscape.
+    //
+    // The rule here is ADD, never subtract. An earlier pass at this shortened
+    // the trails and dimmed most columns, which bought 2.6ms of frame time
+    // nobody had asked for and cost the thing the effect is actually for --
+    // there was simply less rain. Trails are longer than the original now,
+    // not shorter, and the cheap wins below (white-hot heads, per-drop
+    // colour, shimmer, glow) all cost either nothing or O(cols).
     static const int  MAX_COLS = 96;
     static const int  SPACING  = 5;
     static const char GLYPHS[] =
         "01" "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         "!@#$%^&*<>{}[]/\\|+=~" "SASQUACH";
-    static const int  GLN   = sizeof(GLYPHS) - 1;
-    static const int  TRAIL = 22;
-    static const uint16_t HEADS[3] = { VAPOR_PINK, CYAN, GREEN };
+    static const int  GLN      = sizeof(GLYPHS) - 1;
+    static const int  MAXTRAIL = 24;
+    static const int  MINTRAIL = 17;      // averages ~21, just under the old flat 22
+    static const uint16_t HUES[4] = { VAPOR_PINK, CYAN, GREEN, VAPOR_PURPLE };
 
     int cols = t.width() / SPACING;
     if (cols > MAX_COLS) cols = MAX_COLS;
@@ -466,118 +469,247 @@ void drawMatrixRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advanc
 
     static int16_t yPos[MAX_COLS];
     static uint8_t ySpeed[MAX_COLS];
-    static uint8_t yTick[MAX_COLS] = {0};
-    // The glyph at each trailing position, so a character keeps
-    // decaying (dimming) as it falls instead of reshuffling every
-    // frame — that reshuffle is what read as noisy "raindrops" rather
-    // than a settled backdrop.
-    static uint8_t charBuf[MAX_COLS][TRAIL];
+    static uint8_t yTick[MAX_COLS];
+    // Per-DROP, re-rolled every time a column recycles. Hue used to be
+    // HUES[i % 3], which made column 0 permanently pink, column 1
+    // permanently cyan and so on -- a fixed stripe pattern across the whole
+    // screen that never changed for the life of the boot, and the most
+    // obviously machine-made thing about the effect.
+    static uint8_t colHue[MAX_COLS];
+    static uint8_t colLen[MAX_COLS];
+    // Depth, 0 far .. 255 near, driving brightness and fall speed together.
+    // Deliberately a NARROW range: pushing the far end down to 27% made half
+    // the screen look washed out rather than distant.
+    static uint8_t colDepth[MAX_COLS];
+    // A rare drop that is longer, faster and burns white most of the way
+    // down. Costs nothing extra -- it is a column that already exists.
+    static bool    colSurge[MAX_COLS];
+    static uint8_t charBuf[MAX_COLS][MAXTRAIL];
+    // Wind, lightning and splashes. All three are O(cols) or O(1), and none
+    // of them draws an extra glyph cell -- cells are the only thing on this
+    // screen that costs real pixels, so motion is where the budget goes.
+    // Wind is precomputed per (depth band, row) rather than per cell. The
+    // first version did windOff[j] * colDepth[i] / 255 inside the inner
+    // loop -- a multiply and a divide on every one of ~1300 cells a frame,
+    // which measured 10ms. Four depth bands is visually indistinguishable
+    // and turns the inner loop back into a table lookup and an add.
+    static const uint8_t WINDBANDS = 4;
+    static int8_t   windTab[WINDBANDS][MAXTRAIL];
+    // Glyphs that break loose, grow and fade. Drawn with a transparent
+    // background so they read as rising OFF the rain rather than punching
+    // holes in it -- at most five, so a handful of extra glyphs a frame.
+    static const uint8_t NPOP = 5;
+    static uint16_t popX[NPOP], popY[NPOP];
+    static uint8_t  popAge[NPOP], popHue[NPOP], popCh[NPOP];
+    static uint32_t boltAt = 0, boltNext = 0;
+    static uint16_t splashX[6];
+    static uint8_t  splashAge[6], splashHue[6];
+    static bool     fxInit = false;
     static bool    initialized = false;
     static int     lastCols = -1;
 
+    auto respawn = [&](int i, bool anywhere) {
+        colSurge[i] = (random(0, 14) == 0);
+        colDepth[i] = colSurge[i] ? 255 : (uint8_t)random(0, 256);
+        // Far drops fall slower; a surge drops fastest of all. ySpeed is a
+        // tick divider, so smaller is faster.
+        ySpeed[i]   = colSurge[i] ? 2
+                                  : (uint8_t)(5 - ((uint16_t)colDepth[i] * 3u) / 255u);
+        if (ySpeed[i] < 1) ySpeed[i] = 1;
+        colHue[i]   = (uint8_t)random(0, 4);
+        colLen[i]   = colSurge[i] ? MAXTRAIL : (uint8_t)random(MINTRAIL, MAXTRAIL + 1);
+        yTick[i]    = (uint8_t)random(0, ySpeed[i] ? ySpeed[i] : 1);
+        yPos[i]     = anywhere ? (int16_t)random(yStart, yEnd)
+                               : (int16_t)(yStart - random(0, 90));
+    };
+
     if (!initialized || cols != lastCols) {
         for (int i = 0; i < cols; i++) {
-            yPos[i]   = (int16_t)(yStart - random(0, 80));
-            ySpeed[i] = 2 + (uint8_t)random(0, 3);
-            for (int j = 0; j < TRAIL; j++) charBuf[i][j] = (uint8_t)random(0, GLN);
+            respawn(i, true);
+            for (int j = 0; j < MAXTRAIL; j++) charBuf[i][j] = (uint8_t)random(0, GLN);
         }
         initialized = true;
         lastCols = cols;
     }
 
-    // Full-band clear every frame, same as every other background
-    // style. Without it, a column that just wrapped (its whole trail
-    // still above yStart, see the respawn branch below) skips its
-    // narrow vertical strip entirely for several frames — nothing else
-    // ever repaints that strip, so anything drawn over it last frame
-    // (Squachy included, since he no longer erases his own footprint —
-    // see squachy.cpp) is left behind as a stale smear instead of
-    // being cleaned up.
+    if (!fxInit) {
+        for (uint8_t k = 0; k < 6; k++) splashAge[k] = 0;
+        for (uint8_t k = 0; k < NPOP; k++) popAge[k] = 0;
+        boltNext = now + (uint32_t)random(14000, 32000);
+        fxInit = true;
+    }
+
+    // WIND. One shared curve sampled per ROW of the trail, not per column,
+    // so a drop bends into an S rather than the whole field sliding sideways
+    // together. Twenty-four sinf calls a frame gives every cell on screen a
+    // horizontal offset for one array lookup and one add each.
+    const float gust = 2.4f + sinf((float)now / 5300.0f) * 1.8f;
+    for (int j = 0; j < MAXTRAIL; j++) {
+        const float w = sinf((float)now / 1450.0f + (float)j * 0.17f) * gust;
+        for (uint8_t b = 0; b < WINDBANDS; b++)
+            windTab[b][j] = (int8_t)(w * (float)(b + 1) / (float)WINDBANDS);
+    }
+
+    // LIGHTNING. Every 14-32s the field flares white for ~140ms and decays.
+    // Costs one comparison: it scales an alpha that is already computed.
+    if (advance && now >= boltNext) {
+        boltAt   = now;
+        boltNext = now + (uint32_t)random(14000, 32000);
+    }
+    const uint32_t boltAge = now - boltAt;
+    const uint16_t boltAmt = (boltAt && boltAge < 140)
+                             ? (uint16_t)(160u - (boltAge * 160u) / 140u) : 0;
+
+    // Full-band clear every frame, same as every other background style.
+    // Without it a column that just wrapped skips its narrow vertical strip
+    // for several frames, and nothing else ever repaints that strip -- so
+    // anything drawn over it last frame (Squachy included, since he no
+    // longer erases his own footprint) is left behind as a stale smear.
     t.fillRect(0, yStart, t.width(), yEnd - yStart, BG);
 
     t.setTextSize(1);
-    // Column advance is gated (see the header comment) -- yTick is a
-    // call-counted divider, not now-based, so calling this twice per
-    // logical frame would fall the rain at double speed otherwise.
+    // Column advance is gated: yTick is a call-counted divider, not
+    // now-based, so calling this twice per logical frame would otherwise
+    // fall the rain at double speed.
     if (advance) {
         for (int i = 0; i < cols; i++) {
+            // Two cells somewhere in the trail flicker to different glyphs.
+            // Freezing characters entirely was the right fix for the old
+            // reshuffle-every-frame noise but went a step too far and left
+            // the trails completely static. Rolling a couple of cells per
+            // column keeps the shimmer at O(cols) rather than O(cells).
+            charBuf[i][random(1, colLen[i])] = (uint8_t)random(0, GLN);
+            if (random(0, 2)) charBuf[i][random(1, colLen[i])] = (uint8_t)random(0, GLN);
+
             if (++yTick[i] >= ySpeed[i]) {
                 yTick[i] = 0;
                 yPos[i] += 8;
                 // A fresh glyph enters at the head; everything already in
-                // the buffer shifts one slot further from it (still the
-                // same characters, just older/dimmer).
-                for (int j = TRAIL - 1; j > 0; j--) charBuf[i][j] = charBuf[i][j - 1];
+                // the buffer shifts one slot further from it.
+                for (int j = MAXTRAIL - 1; j > 0; j--) charBuf[i][j] = charBuf[i][j - 1];
                 charBuf[i][0] = (uint8_t)random(0, GLN);
-                if (yPos[i] > yEnd + TRAIL * 8) {
-                    yPos[i] = (int16_t)(yStart - random(0, 80));
-                    ySpeed[i] = 2 + (uint8_t)random(0, 3);
+                // SPLASH. A head reaching the floor throws a brief flare
+                // sideways -- the one place the rain previously just
+                // stopped existing. Six slots, oldest reused.
+                if (yPos[i] >= yEnd - 8 && yPos[i] < yEnd) {
+                    uint8_t slot = 0, oldest = 0;
+                    for (uint8_t k = 0; k < 6; k++) {
+                        if (splashAge[k] == 0) { slot = k; break; }
+                        if (splashAge[k] > oldest) { oldest = splashAge[k]; slot = k; }
+                    }
+                    splashX[slot]   = (uint16_t)(3 + i * SPACING);
+                    splashHue[slot] = colHue[i];
+                    splashAge[slot] = 1;
                 }
+                // Occasionally a glyph breaks off the head and floats.
+                if (random(0, 90) == 0 && yPos[i] > yStart + 20 && yPos[i] < yEnd - 20) {
+                    for (uint8_t k = 0; k < NPOP; k++) {
+                        if (popAge[k]) continue;
+                        popX[k]   = (uint16_t)(3 + i * SPACING);
+                        popY[k]   = (uint16_t)yPos[i];
+                        popCh[k]  = charBuf[i][0];
+                        popHue[k] = colHue[i];
+                        popAge[k] = 1;
+                        break;
+                    }
+                }
+                if (yPos[i] > yEnd + colLen[i] * 8) respawn(i, false);
             }
         }
     }
+
     for (int i = 0; i < cols; i++) {
-        uint16_t head = HEADS[i % 3];
-        int x = 3 + i * SPACING;
-        for (int j = 0; j < TRAIL; j++) {
-            int16_t ry = yPos[i] - j * 8;
+        const uint16_t hue   = HUES[colHue[i]];
+        const int      len   = colLen[i];
+        const bool     surge = colSurge[i];
+        // Depth as a brightness ceiling, 170..255. Narrow on purpose.
+        const uint16_t deep = (uint16_t)(170u + ((uint16_t)colDepth[i] * 85u) / 255u);
+        const int xBase = 3 + i * SPACING;
+        // Near drops lean further than far ones, so a gust reads with depth
+        // instead of shunting the whole screen at once.
+        const int8_t* windRow = windTab[colDepth[i] >> 6];
+        for (int j = 0; j < len; j++) {
+            const int16_t ry = (int16_t)(yPos[i] - j * 8);
             if (ry < yStart || ry >= yEnd) continue;
-            char buf[2] = { GLYPHS[charBuf[i][j]], 0 };
-            if (j == 0) {
-                t.setTextColor(head, BG);
+            // Near drops lean further than far ones, so a gust reads with
+            // depth instead of shunting the whole screen at once.
+            const int x = xBase + windRow[j];
+
+            // Fade in across the top few rows. Drops used to appear at full
+            // brightness the instant they crossed yStart, which popped.
+            uint16_t edge = 255;
+            if (ry < yStart + 16) edge = (uint16_t)(((ry - yStart) * 255) / 16);
+
+            const char buf[2] = { GLYPHS[charBuf[i][j]], 0 };
+            uint16_t fg, bg;
+            // A white-hot core that decays INTO the hue, rather than the head
+            // simply being the hue. The leading character is the brightest
+            // thing on screen and the colour trails behind it. On a surge the
+            // white runs three cells deep instead of one.
+            const int hot = surge ? 3 : 1;
+            if (j < hot) {
+                const uint16_t a = (uint16_t)(((uint32_t)deep * edge) / 255u);
+                fg = blend(BG, WHITE, a);
+                (void)boltAmt;
+                // The glow is free: the glyph's own opaque background fill is
+                // drawn either way, so it is tinted rather than left at BG.
+                bg = blend(BG, hue, (uint16_t)(a / (surge ? 3u : 4u)));
             } else {
-                // Eased falloff (stays brighter a little longer right
-                // behind the head, then tails off) instead of a flat
-                // linear ramp — a longer, softer decay.
-                float f = 1.0f - (float)j / (float)TRAIL;
-                uint8_t b = (uint8_t)(210.0f * f * f);
-                t.setTextColor(blend(BG, head, b), BG);
+                const float f = 1.0f - (float)(j - hot) / (float)(len - hot);
+                uint32_t a = (uint32_t)((surge ? 245.0f : 225.0f) * f * f);
+                a = (a * deep) / 255u;
+                a = (a * edge) / 255u;
+                // Lightning lifts the trail toward white without touching
+                // the heads, which are already white -- so the flash reads
+                // as the whole field catching the light, not as a fade.
+                fg = boltAmt ? blend(blend(BG, hue, (uint16_t)a), WHITE, boltAmt)
+                             : blend(BG, hue, (uint16_t)a);
+                bg = (j <= hot + 1) ? blend(BG, hue, (uint16_t)(a / 6u)) : BG;
             }
+            t.setTextColor(fg, bg);
             t.setCursor(x, ry);
             t.print(buf);
         }
     }
 
-    // Rare glitch-in message — a message flashes through the rain for
-    // under a second every 10-25s, like a signal briefly cutting
-    // through the noise, then goes back to plain code-rain.
-    static const char* GLITCH_MSGS[] = { "SQUACHWATCH", "THEY SEE YOU", "STAY AWARE", "NOT TODAY" };
-    static bool     glitchActive = false;
-    static uint32_t glitchNextAt = 0, glitchStart = 0;
-    static uint8_t  glitchIdx = 0;
-    static bool     glitchInited = false;
-    // Jitter is re-rolled once per logical frame and reused by every
-    // band's render below -- otherwise each band would pick its own
-    // random offset for the same frame, visibly tearing the message.
-    static int      glitchJitter = 0;
-    if (advance) {
-        if (!glitchInited) { glitchNextAt = now + (uint32_t)random(10000, 20000); glitchInited = true; }
-        if (!glitchActive && now >= glitchNextAt) {
-            glitchActive = true;
-            glitchStart  = now;
-            glitchIdx    = (uint8_t)random(0, 4);
-        }
-        if (glitchActive) {
-            if (now - glitchStart < 850) {
-                glitchJitter = (int)random(-2, 3);
-            } else {
-                glitchActive = false;
-                glitchNextAt = now + (uint32_t)random(12000, 25000);
-            }
-        }
+    // Grow-and-fade glyphs. Size steps 1 -> 2 -> 3 over the life while the
+    // colour washes out, and each one drifts upward, so a character looks
+    // like it is lifting off the screen toward the viewer. Transparent
+    // background (single-argument setTextColor) is what makes it overlay
+    // the rain instead of stamping a black box over it.
+    if (advance) for (uint8_t k = 0; k < NPOP; k++) if (popAge[k]) {
+        if (++popAge[k] > 15) popAge[k] = 0;
     }
-    if (glitchActive) {
-        uint32_t age = now - glitchStart;
-        if (age < 850) {
-            t.setTextSize(2);
-            const char* msg = GLITCH_MSGS[glitchIdx];
-            int mw = t.textWidth(msg);
-            int mx = (t.width() - mw) / 2 + glitchJitter;
-            int my = yStart + (yEnd - yStart) / 2 - 8;
-            t.setTextColor(blend(BG, VAPOR_PINK, (age < 700) ? 230 : (uint16_t)(230 - (age - 700) * 2)), BG);
-            t.setCursor(mx, my);
-            t.print(msg);
-        }
+    for (uint8_t k = 0; k < NPOP; k++) {
+        if (!popAge[k]) continue;
+        const uint8_t age = popAge[k];
+        const uint8_t sz  = (age < 5) ? 1 : (age < 10 ? 2 : 3);
+        const uint16_t a  = (uint16_t)(235u - (uint16_t)age * 15u);
+        const char pb[2] = { GLYPHS[popCh[k]], 0 };
+        t.setTextSize(sz);
+        t.setTextColor(blend(BG, HUES[popHue[k]], a));
+        // Re-centre as it grows so it swells about its own middle rather
+        // than expanding down and to the right off its anchor.
+        t.setCursor((int)popX[k] - (sz - 1) * 3, (int)popY[k] - age - (sz - 1) * 4);
+        t.print(pb);
+    }
+    t.setTextSize(1);
+
+    // Splashes last ~8 ticks, spreading and fading. Two short horizontal
+    // strokes each, so the whole effect is at most twelve drawFastHLine
+    // calls in a frame where any are alive at all.
+    if (advance) for (uint8_t k = 0; k < 6; k++) if (splashAge[k]) {
+        if (++splashAge[k] > 8) splashAge[k] = 0;
+    }
+    for (uint8_t k = 0; k < 6; k++) {
+        if (!splashAge[k]) continue;
+        const uint8_t  age  = splashAge[k];
+        const int      sp   = age * 2;
+        const uint16_t a    = (uint16_t)(200u - (uint16_t)age * 24u);
+        const uint16_t col  = blend(BG, HUES[splashHue[k]], a);
+        const int      sy   = yEnd - 2;
+        t.drawFastHLine((int)splashX[k] - sp, sy, sp, col);
+        t.drawFastHLine((int)splashX[k] + 1,  sy, sp, col);
     }
 }
 
@@ -956,8 +1088,27 @@ void drawStarfield(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // rings further out so there is always geometry beyond the corners.
     static const uint8_t RINGS = 15;
     static const uint8_t SIDES = 7;
-    const float phase = fmodf((float)now * 0.00055f, 2.0f);
-    const float spin  = (float)now / 1800.0f;
+    // Both the outward scroll and the rotation ride the same warp the
+    // stars do, so a burst accelerates the whole scene together instead of
+    // the stars streaking past a tube that carries on at its own pace.
+    //
+    // That means accumulating rather than deriving from `now`: a phase
+    // computed straight from the clock cannot change speed without also
+    // jumping, because the value has to stay continuous while its
+    // derivative changes. dt is clamped so a long stall (a scan, a screen
+    // that blocked) cannot fling the tunnel forward on the next frame.
+    static uint32_t tunLast  = 0;
+    static float    tunPhase = 0.0f, tunSpin = 0.0f;
+    uint32_t dt = (tunLast && now > tunLast) ? (now - tunLast) : 16u;
+    if (dt > 100u) dt = 100u;
+    tunLast = now;
+    // warp rests at 1.0 and peaks near 7.0, so this is 1x at rest and
+    // about 3.7x flat out -- the tube pulls, without outrunning the stars.
+    const float rush = 0.55f + warp * 0.45f;
+    tunPhase = fmodf(tunPhase + (float)dt * 0.00055f * rush, 2.0f);
+    tunSpin += (float)dt * 0.000555f * rush;
+    const float phase = tunPhase;
+    const float spin  = tunSpin;
     const float drift = sinf((float)now / 4000.0f) * 0.03f;
 
     for (int i = RINGS - 1; i >= -2; i--) {
@@ -1197,9 +1348,10 @@ static const float WING_PROFILE[9] = {
 // One rounded bird wing: a curved lobe with a few feather divisions drawn
 // back onto it. It beats by swinging about the shoulder, which is what a
 // bird does -- a wing that only slides up and down reads as being dragged.
-static void drawWing(TFT_eSPI& t, float sx, float sy, float len, float angDeg,
-                     float flap, float width, uint8_t ndiv,
-                     uint16_t body, uint16_t edge, float curl, float lift) {
+void drawWing(TFT_eSPI& t, float sx, float sy, float len, float angDeg,
+              float flap, float width, uint8_t ndiv,
+              uint16_t body, uint16_t edge, float curl, float lift,
+              uint16_t shade) {
     static const uint8_t N = 8;
     const float step = len / (float)N;
     const float da   = curl * 60.0f * 0.017453293f / (float)N;
@@ -1231,12 +1383,33 @@ static void drawWing(TFT_eSPI& t, float sx, float sy, float len, float angDeg,
         const uint8_t j = (uint8_t)((i + 1) % n);
         t.drawLine(hx[i], hy[i], hx[j], hy[j], edge);
     }
+    // Shade whichever edge actually ends up LOWER on screen, rather than
+    // always the same array. The flock only ever wears wings on one flank
+    // so this never showed there, but Squachy wears a mirrored pair -- and
+    // mirroring flips the sign of the normal, which swaps which of top/bot
+    // is the lower edge. A fixed choice therefore put the shadow under one
+    // wing and over the other, which reads as one wing being upside down.
+    const bool shadeTop = ty[N / 2] > by[N / 2];
+    const int16_t* sxArr = shadeTop ? tx : bx;
+    const int16_t* syArr = shadeTop ? ty : by;
+
+    // 2*(N+1), not N+3. The shade polygon walks the centreline out and the
+    // shaded edge back, so it holds two runs of (N-1) points -- 14 at N=8,
+    // where N+3 is 11. The three-entry overflow ran off the end of shx into
+    // shy, so three coordinates became garbage and fillPoly drew spans to
+    // wherever they landed: stray white lines trailing off the wings.
+    int16_t shx[2 * (N + 1)], shy[2 * (N + 1)];
+    uint8_t sn = 0;
+    for (uint8_t i = 2; i <= N; i++) { shx[sn] = cx[i]; shy[sn] = cy[i]; sn++; }
+    for (int8_t i = (int8_t)N; i >= 2; i--) { shx[sn] = sxArr[i]; shy[sn] = syArr[i]; sn++; }
+    fillPoly(t, shx, shy, sn, shade);
+
     for (uint8_t d = 1; d <= ndiv; d++) {
         uint8_t i0 = (uint8_t)((float)N * (0.26f + 0.16f * (float)d));
         uint8_t i1 = (uint8_t)(i0 + 2);
         if (i1 > N) i1 = N;
         if (i1 <= i0) break;
-        t.drawLine(cx[i0], cy[i0], bx[i1], by[i1], edge);
+        t.drawLine(cx[i0], cy[i0], sxArr[i1], syArr[i1], edge);
     }
 }
 
@@ -1500,7 +1673,7 @@ static void drawMowinManAt(TFT_eSPI& t, int x, int baseY, uint32_t now, float sc
 }
 
 // Defined further down, next to backgroundTap() which consumes it.
-static void publishGoldToaster(int cx, int cy, int r, uint32_t now);
+static void publishGoldToaster(int cx, int cy, int hw, int hh, uint32_t now);
 
 void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     static const uint8_t N = 5;
@@ -1750,7 +1923,7 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         if (tx[i] > w + 40 || ty[i] < (float)yStart - 44) {
             tx[i]     = (float)(-random(0, 40) - 70);
             ty[i]     = (float)random(yStart + 12, yEnd - 12);
-            tcol[i]   = (random(0, 15) == 0) ? goldCol : chromeCol;
+            tcol[i]   = (random(0, 40) == 0) ? goldCol : chromeCol;
             tscale[i] = 0.55f + (float)random(0, 100) / 100.0f * 0.45f;
         }
         drawToasterAt(t, (int)tx[i], (int)ty[i], now, tcol[i], tscale[i]);
@@ -1758,9 +1931,14 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             // Publish the body's centre so a tap can find it. Radius covers
             // the body, not the wings -- the wings sweep and a hit box that
             // tracked them would move under the finger.
-            publishGoldToaster((int)tx[i] + (int)(22.0f * tscale[i]),
-                               (int)ty[i] + (int)(15.0f * tscale[i]),
-                               (int)(24.0f * tscale[i]), now);
+            // Only while it is fully on screen: a toaster half off the
+            // left edge still had a live hit box over the screen edge.
+            if (tx[i] >= 0.0f && tx[i] + 44.0f * tscale[i] <= (float)w) {
+                publishGoldToaster((int)tx[i] + (int)(22.0f * tscale[i]),
+                                   (int)ty[i] + (int)(15.0f * tscale[i]),
+                                   (int)(22.0f * tscale[i]),
+                                   (int)(15.0f * tscale[i]), now);
+            }
             for (uint8_t k = 1; k <= 3; k++) {
                 int spx = (int)(tx[i] - k * 3.5f), spy = (int)(ty[i] + k * 0.9f + 6);
                 t.drawPixel(spx, spy, blend(BG, goldCol, (uint16_t)(180 - k * 50)));
@@ -2948,7 +3126,7 @@ void drawActiveBackground(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
         case Settings::Background::SPECTRUM:   drawSpectrumWaterfall(t, now, yStart, yEnd, eng); break;
         case Settings::Background::TUNNEL:     drawWireframeTunnel(t, now, yStart, yEnd); break;
         case Settings::Background::SYNTHWAVE:  drawSynthwave(t, now, yStart, yEnd); break;
-        default:                               drawMatrixRain(t, now, yStart, yEnd, advance); break;
+        default:                               drawDigitalRain(t, now, yStart, yEnd, advance); break;
     }
 }
 
@@ -2957,12 +3135,18 @@ void drawActiveBackground(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
 // something to hit-test against -- the same shape as the moon's
 // s_moonX/s_moonY, and stale for the same reason: if it has not been
 // refreshed in the last few frames the toaster is gone.
-static int      s_goldX = -1, s_goldY = -1, s_goldR = 0;
+static int      s_goldX = -1, s_goldY = -1, s_goldHW = 0, s_goldHH = 0;
 static uint32_t s_goldAt = 0;
 static bool     s_goldCaught = false;
 
-static void publishGoldToaster(int cx, int cy, int r, uint32_t now) {
-    s_goldX = cx; s_goldY = cy; s_goldR = r; s_goldAt = now;
+// The body box, not a generous circle around it. The first version used a
+// circle of r = 24*scale + 10 -- about 29px, 4.3% of the band -- and since
+// a gold toaster is on screen roughly a third of the time (they take ~35s
+// to cross and there are five of them), a random background tap caught one
+// about 1.4% of the time. Over forty exploratory taps that is a 44% chance
+// of "unlocking" a costume you never knew you were reaching for.
+static void publishGoldToaster(int cx, int cy, int hw, int hh, uint32_t now) {
+    s_goldX = cx; s_goldY = cy; s_goldHW = hw; s_goldHH = hh; s_goldAt = now;
 }
 
 bool consumeToasterCatch() {
@@ -2978,8 +3162,8 @@ bool backgroundTap(int x, int y, uint32_t now) {
     // that will not still be there.
     if (s_goldX >= 0 && (now - s_goldAt) <= 250) {
         const int gdx = x - s_goldX, gdy = y - s_goldY;
-        const int gr  = s_goldR + 10;
-        if (gdx * gdx + gdy * gdy <= gr * gr) {
+        if (gdx <= s_goldHW && gdx >= -s_goldHW &&
+            gdy <= s_goldHH && gdy >= -s_goldHH) {
             s_goldCaught = true;
             s_goldX = -1;               // caught: stop accepting taps on it
             return true;
