@@ -23,7 +23,7 @@ Either way: no GPS, no buzzer, no extra modules. The board *is* the whole device
 
 ## Do I need to build it myself?
 
-No. That's what the [web flasher](https://skizzophrenic.github.io/SquachWatch-CYD/) is for — plug your board into a computer running Chrome, Edge, or Brave, hit Connect & Install, and the firmware goes straight from your browser onto the board. No compiler, no IDE, no me judging your PlatformIO setup (I would never. probably).
+No. That's what the [web flasher](https://skizzophrenic.github.io/SquachWatch-CYD/) is for — plug your board into a computer running Firefox, Chrome, Edge, or Brave, hit Connect & Install, and the firmware goes straight from your browser onto the board. No compiler, no IDE, no me judging your PlatformIO setup (I would never. probably).
 
 If you *do* want to build from source — maybe you're modifying something, maybe you just don't trust browsers with USB access, respectable — grab [PlatformIO](https://platformio.org/) and follow [docs/BUILD.md](docs/BUILD.md).
 

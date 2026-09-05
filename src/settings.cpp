@@ -34,7 +34,7 @@ const char* backgroundName(Background b) {
         case Background::FIREFLIES: return "FIREFLIES";
         case Background::FIRE:      return "FIRE";
         case Background::SNOWFALL:  return "SNOWFALL";
-        case Background::SPECTRUM:  return "RF SPECTRUM";
+        case Background::SPECTRUM:  return "THE GIBSON";
         case Background::TUNNEL:    return "WIREFRAME TUNNEL";
         case Background::SYNTHWAVE: return "SYNTHWAVE";
         default:                    return "?";

@@ -232,7 +232,7 @@ void uiRawScanTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool i
         case Settings::Background::FIREFLIES:  Theme::drawFireflies(t, now, sqTop, bodyBottom); break;
         case Settings::Background::FIRE:       Theme::drawFire(t, now, sqTop, bodyBottom); break;
         case Settings::Background::SNOWFALL:   Theme::drawSnowfall(t, now, sqTop, bodyBottom); break;
-        case Settings::Background::SPECTRUM:   Theme::drawSpectrumWaterfall(t, now, sqTop, bodyBottom, eng); break;
+        case Settings::Background::SPECTRUM:   Theme::drawGibson(t, now, sqTop, bodyBottom, eng); break;
         case Settings::Background::TUNNEL:     Theme::drawWireframeTunnel(t, now, sqTop, bodyBottom); break;
         case Settings::Background::SYNTHWAVE: Theme::drawSynthwave(t, now, sqTop, bodyBottom); break;
         default:                               Theme::drawDigitalRain(t, now, sqTop, bodyBottom, true); break;

@@ -110,6 +110,16 @@ namespace Theme {
     // with just one standalone button and room to spare (LOG's MORE
     // INFO panel's GOT IT) can pass 2 for a more prominent label --
     // caller's responsibility to size w/h generously enough to fit it.
+    // A short-lived confirmation panel, centred over whatever is beneath it.
+    // For actions that change state without changing screen: tapping IGNORE on
+    // the log's long-press menu closes the menu and otherwise looks exactly
+    // like tapping CANCEL, so without this there is no evidence the tap did
+    // anything at all. `sub` may be nullptr.
+    void showToast(const char* head, const char* sub, uint16_t accent);
+
+    // No-op unless a toast is live. Call last, after the screen has drawn.
+    void drawToast(TFT_eSPI& t, uint32_t now);
+
     void drawButton(TFT_eSPI& t, int x, int y, int w, int h,
                     const char* label, bool pressed, uint8_t textSize = 1);
 
@@ -220,12 +230,16 @@ namespace Theme {
     // band's edges — a calm, low-contrast option.
     void drawFireflies(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);
 
-    // Live RF spectrum waterfall: channels 1-13 across the top,
-    // scrolling activity history below, fed by DetectionEngine's real
-    // per-channel activity tracking — not decorative, this one shows
-    // actual ambient WiFi traffic.
-    void drawSpectrumWaterfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
-                               const DetectionEngine& eng);
+    // A run down a corridor of mainframe towers, with a live trace over
+    // the top: x maps across WiFi channels 1-13 and the trace height is
+    // that channel's real activity, so ambient traffic deforms it. A new
+    // entry at the front of the detection log locks onto one building --
+    // it floods with that detection's colour, takes a reticle, and the
+    // feed line names it. The corridor keeps flying either way, which is
+    // the point: the old waterfall showed nothing at all when nothing was
+    // on the air, which is nearly always.
+    void drawGibson(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
+                    const DetectionEngine& eng);
 
     // Textured corridor receding to a drifting vanishing point. Square
     // rather than round -- see its comment in theme.cpp for why that

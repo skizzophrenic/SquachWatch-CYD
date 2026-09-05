@@ -1785,7 +1785,7 @@ void loop() {
                     // is still the user acknowledging the alert.
                     lastTouch = now;
                     if (IgnoreList::contains(s_alertMac)) IgnoreList::remove(s_alertMac);
-                    else                                  IgnoreList::add(s_alertMac);
+                    else                                  IgnoreList::add(s_alertMac, lastAlertType);
                     Squachy::trigger(Squachy::Event::DETECTION, lastAlertType,
                                      engine.lifetimeTotal(), lastAlertHits);
                     enterClear();
@@ -1882,6 +1882,7 @@ void loop() {
             const char* infoTypeName = s_infoShowingPrimer ? nullptr : detectionTypeName(s_confirmType);
             uiLogTick(*canvas, now, engine, 0, s_confirmPending, s_confirmLabel,
                       s_infoPending, infoTypeName, infoText);
+            Theme::drawToast(*canvas, now);
 
             // Same "ignore the touch that opened this until it releases"
             // gate s_confirmArmed uses on the confirm panel, applied to
@@ -1930,8 +1931,15 @@ void loop() {
                     } else if (ctap == LogConfirmTap::IGNORE) {
                         lastTouch = now;
                         s_confirmPending = false;
-                        if (IgnoreList::contains(s_confirmMac)) IgnoreList::remove(s_confirmMac);
-                        else                                    IgnoreList::add(s_confirmMac);
+                        // Toggling, so the toast has to say which way it went --
+                        // "IGNORED" after un-ignoring would be worse than no
+                        // feedback at all.
+                        const bool wasOn = IgnoreList::contains(s_confirmMac);
+                        if (wasOn) IgnoreList::remove(s_confirmMac);
+                        else       IgnoreList::add(s_confirmMac, s_confirmType);
+                        Theme::showToast(wasOn ? "UN-IGNORED" : "IGNORED",
+                                         detectionTypeName(s_confirmType),
+                                         Theme::colorFor(s_confirmType));
                     } else if (ctap == LogConfirmTap::HUNT) {
                         lastTouch = now;
                         s_confirmPending = false;
@@ -2032,6 +2040,7 @@ void loop() {
         case AppState::RAWSCAN: {
             bool done = s_rawScanIsBle ? engine.rawBleScanDone() : engine.rawWifiScanDone();
             uiRawScanTick(*canvas, now, engine, s_rawScanIsBle, done, s_confirmPending, s_confirmLabel);
+            Theme::drawToast(*canvas, now);
 
             // The confirm panel is modal: while it's up, a tap only
             // ever means WATCH, HUNT, or CANCEL on it, nothing else on
@@ -2055,8 +2064,13 @@ void loop() {
                     } else if (ctap == RawScanConfirmTap::IGNORE) {
                         lastTouch = now;
                         s_confirmPending = false;
-                        if (IgnoreList::contains(s_confirmMac)) IgnoreList::remove(s_confirmMac);
-                        else                                    IgnoreList::add(s_confirmMac);
+                        // The raw scanner classifies nothing, so there is no
+                        // type to record and none to name in the toast.
+                        const bool wasOn = IgnoreList::contains(s_confirmMac);
+                        if (wasOn) IgnoreList::remove(s_confirmMac);
+                        else       IgnoreList::add(s_confirmMac, DetectionType::UNKNOWN);
+                        Theme::showToast(wasOn ? "UN-IGNORED" : "IGNORED",
+                                         nullptr, Theme::CYAN);
                     } else if (ctap == RawScanConfirmTap::HUNT) {
                         lastTouch = now;
                         s_confirmPending = false;

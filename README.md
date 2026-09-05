@@ -46,7 +46,7 @@ from your browser:
 
 **[https://skizzophrenic.github.io/SquachWatch-CYD/](https://skizzophrenic.github.io/SquachWatch-CYD/)**
 
-Works in Chrome, Edge, or Brave on desktop. Pick your board (2.8" CYD
+Works in Firefox, Chrome, Edge, or Brave on desktop. Pick your board (2.8" CYD
 or AWOK 2.4"), plug in, click Connect & Install, done.
 
 ## Build

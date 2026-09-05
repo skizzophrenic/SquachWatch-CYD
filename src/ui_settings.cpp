@@ -316,7 +316,7 @@ void uiSettingsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
         case Settings::Background::FIREFLIES:  Theme::drawFireflies(t, now, top, bodyBottom); break;
         case Settings::Background::FIRE:       Theme::drawFire(t, now, top, bodyBottom); break;
         case Settings::Background::SNOWFALL:   Theme::drawSnowfall(t, now, top, bodyBottom); break;
-        case Settings::Background::SPECTRUM:   Theme::drawSpectrumWaterfall(t, now, top, bodyBottom, eng); break;
+        case Settings::Background::SPECTRUM:   Theme::drawGibson(t, now, top, bodyBottom, eng); break;
         case Settings::Background::TUNNEL:     Theme::drawWireframeTunnel(t, now, top, bodyBottom); break;
         case Settings::Background::SYNTHWAVE: Theme::drawSynthwave(t, now, top, bodyBottom); break;
         default:                               Theme::drawDigitalRain(t, now, top, bodyBottom, true); break;

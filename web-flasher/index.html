@@ -705,8 +705,9 @@
     <esp-web-install-button id="installBtn" manifest="./manifest-cyd.json">
       <button slot="activate" class="install-btn">[ CONNECT &amp; INSTALL ]</button>
       <span slot="unsupported" class="unsupported">
-        Your browser can't do this. Web Serial only works in Chrome, Edge,
-        or another Chromium browser, on a computer (not a phone).
+        Your browser can't do this. Flashing needs Web Serial &mdash; Firefox,
+        Chrome, Edge or another Chromium browser, on a computer. Phones and
+        tablets can't do it at all, whatever browser they're running.
       </span>
       <span slot="not-allowed" class="not-allowed">
         This page needs to be loaded over HTTPS to flash a device.
@@ -720,7 +721,7 @@
       <li>Click Install and leave it be — don't unplug until it says done.</li>
     </ol>
 
-    <p class="browser-note">Works in Chrome / Edge / Brave on desktop. No app to install — just the browser.</p>
+    <p class="browser-note">Works in Firefox / Chrome / Edge / Brave on desktop. No app to install — just the browser.</p>
 
     <div class="identify-row">
       <button id="identifyBtn" class="identify-btn">[ IDENTIFY MY BOARD ]</button>
@@ -967,7 +968,7 @@
   var HOW_TO = [
     "Hey. Plug the board in over USB first.",
     "Then hit Connect & Install down there.",
-    "Chrome or Edge only — I don't make the rules.",
+    "Desktop browser, please. Phones can't talk serial.",
     "Pick the right port, click Install, and don't unplug on me.",
     "That's it. I'll be here the whole time."
   ];
@@ -1515,7 +1516,7 @@
   if (identifyBtn) {
     if (!('serial' in navigator)) {
       identifyBtn.disabled = true;
-      identifyBtn.textContent = '[ IDENTIFY MY BOARD ] (needs Chrome/Edge)';
+      identifyBtn.textContent = '[ IDENTIFY MY BOARD ] (needs a desktop browser)';
     } else {
       identifyBtn.addEventListener('click', identifyBoard);
     }

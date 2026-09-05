@@ -14,8 +14,10 @@ static int g_scroll = 0;
 static void computeGeom(TFT_eSPI& t, int screenH, int& top, int& bodyBottom, int& rowH) {
     top = TOP_MARGIN;
     bodyBottom = screenH - 4;
-    t.setTextSize(1);
-    rowH = t.fontHeight() + 12;
+    // Two lines per row now -- type above, MAC below -- so this is a fixed
+    // height rather than one derived from a single line of text.
+    (void)t;
+    rowH = 32;
 }
 
 void uiIgnoreListInit(TFT_eSPI& t) {
@@ -34,19 +36,28 @@ static void drawRow(TFT_eSPI& t, int w, int y, int hgt, uint8_t idx) {
     const uint8_t* mac = IgnoreList::macAt(idx);
     if (!mac) return;
 
+    // The same two-line shape a LOG row uses: the type in its own colour on
+    // top, the MAC underneath. A column of bare MACs told you that you had
+    // muted something without telling you what, and the log entry that would
+    // have answered that has usually scrolled out of the ring by then.
+    const DetectionType ty = IgnoreList::typeAt(idx);
+    t.setTextSize(2);
+    t.setTextColor(Theme::colorFor(ty), Theme::BG);
+    t.setCursor(6, y + 3);
+    t.print(detectionTypeName(ty));
+
     char buf[20];
     snprintf(buf, sizeof(buf), "%02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-
     t.setTextSize(1);
-    t.setTextColor(Theme::CYAN, Theme::BG);
-    t.setCursor(8, y + (hgt - t.fontHeight()) / 2);
+    t.setTextColor(Theme::WHITE, Theme::BG);
+    t.setCursor(6, y + 21);
     t.print(buf);
 
     // REMOVE, drawn as a real button so it reads as the one thing on the
     // row you can press. Its rect matches uiIgnoreListHitRemove() exactly.
-    const int bw = REMOVE_W - 12, bh = hgt - 6;
-    Theme::drawButton(t, w - REMOVE_W + 4, y + 3, bw, bh, "REMOVE", false);
+    const int bw = REMOVE_W - 12, bh = 20;
+    Theme::drawButton(t, w - REMOVE_W + 4, y + (hgt - bh) / 2, bw, bh, "REMOVE", false);
 
     t.drawFastHLine(4, y + hgt - 1, w - 8, Theme::PURPLE);
 }

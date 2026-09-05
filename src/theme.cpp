@@ -3202,6 +3202,52 @@ void dimRegion(TFT_eSPI& t, int x, int y, int w, int h, uint8_t amount) {
         t.drawFastHLine(x, yy, w, BG);
 }
 
+static char     s_toastHead[18] = {0};
+static char     s_toastSub[22]  = {0};
+static uint16_t s_toastAccent   = 0;
+static uint32_t s_toastUntil    = 0;
+
+void showToast(const char* head, const char* sub, uint16_t accent) {
+    strncpy(s_toastHead, head ? head : "", sizeof(s_toastHead) - 1);
+    s_toastHead[sizeof(s_toastHead) - 1] = 0;
+    strncpy(s_toastSub, sub ? sub : "", sizeof(s_toastSub) - 1);
+    s_toastSub[sizeof(s_toastSub) - 1] = 0;
+    s_toastAccent = accent;
+    s_toastUntil  = millis() + 1500u;
+}
+
+void drawToast(TFT_eSPI& t, uint32_t now) {
+    if (!s_toastUntil) return;
+    if ((int32_t)(now - s_toastUntil) >= 0) { s_toastUntil = 0; return; }
+
+    const int w = t.width(), h = t.height();
+    t.setTextSize(2);
+    int bw = t.textWidth(s_toastHead) + 30;
+    if (s_toastSub[0]) {
+        t.setTextSize(1);
+        const int sw = t.textWidth(s_toastSub) + 30;
+        if (sw > bw) bw = sw;
+    }
+    if (bw > w - 20) bw = w - 20;
+    const int bh = s_toastSub[0] ? 48 : 34;
+    const int bx = (w - bw) / 2, by = (h - bh) / 2;
+
+    t.fillRect(bx, by, bw, bh, BG);
+    t.drawRect(bx, by, bw, bh, s_toastAccent);
+    t.drawRect(bx + 1, by + 1, bw - 2, bh - 2, blend(s_toastAccent, BG, 160));
+
+    t.setTextSize(2);
+    t.setTextColor(s_toastAccent, BG);
+    t.setCursor(bx + (bw - t.textWidth(s_toastHead)) / 2, by + 8);
+    t.print(s_toastHead);
+    if (s_toastSub[0]) {
+        t.setTextSize(1);
+        t.setTextColor(WHITE, BG);
+        t.setCursor(bx + (bw - t.textWidth(s_toastSub)) / 2, by + 31);
+        t.print(s_toastSub);
+    }
+}
+
 void setBackgroundFloor(int y)  { s_bgFloor = y; }
 void clearBackgroundFloor()     { s_bgFloor = -1; }
 
@@ -3218,7 +3264,7 @@ void drawActiveBackground(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
         case Settings::Background::FIREFLIES:  drawFireflies(t, now, yStart, yEnd); break;
         case Settings::Background::FIRE:       drawFire(t, now, yStart, yEnd); break;
         case Settings::Background::SNOWFALL:   drawSnowfall(t, now, yStart, yEnd); break;
-        case Settings::Background::SPECTRUM:   drawSpectrumWaterfall(t, now, yStart, yEnd, eng); break;
+        case Settings::Background::SPECTRUM:   drawGibson(t, now, yStart, yEnd, eng); break;
         case Settings::Background::TUNNEL:     drawWireframeTunnel(t, now, yStart, yEnd); break;
         case Settings::Background::SYNTHWAVE:  drawSynthwave(t, now, yStart, yEnd); break;
         default:                               drawDigitalRain(t, now, yStart, yEnd, advance); break;
@@ -4159,62 +4205,848 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     }
 }
 
-static uint16_t waterfallColor(uint16_t bg, uint16_t vaporBlue, uint16_t vaporPink,
-                               uint16_t white, uint8_t level) {
-    if (level < 40) return blend(bg, vaporBlue, (uint16_t)(level * 255 / 40));
-    if (level < 75) return blend(vaporBlue, vaporPink, (uint16_t)((level - 40) * 255 / 35));
-    return blend(vaporPink, white, (uint16_t)((level - 75) * 255 / 25));
-}
+// The RF spectrum screen, rebuilt as a run down a corridor of mainframe towers
+// -- the Gibson from Hackers, which is also what talkingsasquach.com throws up
+// when you type "hack the planet" into its terminal. That version rotates a
+// field of 120 gradient-filled buildings and smears the frame with a
+// translucent black rect every tick. Two of those three things are affordable
+// here.
+//
+// What makes it cheap at all is that a tower is a BILLBOARD: positioned in 3D
+// and scaled by depth, but drawn as an axis-aligned rectangle. A whole building
+// is two fillRects and three fast lines. Perspective side faces would mean
+// diagonals per tower, and filled ones would mean a polygon scanline per tower.
+//
+// Two things that look like obvious wins are traps on this panel:
+//
+//   * Fading distant towers by dimming them. RGB332 gives red and green eight
+//     levels and blue four, so anything under roughly 15% brightness quantises
+//     to black -- a "subtle" far tower is not subtle, it is absent. Distance is
+//     carried by the SHADE tone of each tower's own hue instead.
+//
+//   * The motion-blur trail, which is most of why the browser version glows.
+//     That is an alpha blend over every pixel, and with no readable framebuffer
+//     it costs a read-modify-write round trip each -- the same cliff that killed
+//     the per-pixel dim on the starfield. Left out rather than faked badly.
+//
+// The trace across the middle is not decoration: x maps across WiFi channels
+// 1-13 and its height is that channel's live activity, so real traffic deforms
+// it. The slow wander underneath is what keeps the screen alive when nothing is
+// on the air, which is nearly always. It is white because the towers own every
+// other bright colour on screen -- a green trace disappeared into the green
+// buildings, and the instrument has to stay separable from the scenery.
+static const char* const GIB_FEED[] = {
+    "ACCESS GRANTED",   "GIBSON MAINFRAME", "ELLINGSON MINERAL", "ZERO COOL ONLINE",
+    "ACID BURN ONLINE", "TRACING... FAILED", "WORM DEPLOYED",    "UPLINK: ACTIVE",
+    "DA VINCI VIRUS",   "COOKIE: YOURS",     "GARBAGE FILE LIVE", "THE PLAGUE SEEN"
+};
+static const uint8_t  GIB_FEED_N = 12;
 
-void drawSpectrumWaterfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
-                           const DetectionEngine& eng) {
-    int w = t.width();
-    int bandH = yEnd - yStart;
-    if (bandH < 30) return;
+static const uint8_t  GIB_N    = 28;      // towers in the ring
+static_assert(GIB_N % 2 == 0, "towers alternate walls by index parity");
+static const uint16_t GIB_SPAN = 1500;    // depth the ring wraps over
+static const float    GIB_NEAR = 190.0f;  // reference depth: sizes below are quoted here
+static const float    GIB_PASS =  30.0f;  // how close a tower gets before it recycles
+static const uint8_t  GIB_CITY = 16;      // slots for the still rear skyline
+static const float    GIB_CAMY =  70.0f;  // camera height above the floor
+static const float    GIB_SPEED =  0.20f; // world units per millisecond
 
-    static const uint8_t MAXROWS = 56;
-    static uint8_t   hist[MAXROWS][13];
-    static bool      inited = false;
-    static uint32_t  lastTick = 0;
-    if (!inited) { memset(hist, 0, sizeof(hist)); inited = true; }
+void drawGibson(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
+                const DetectionEngine& eng) {
+    const int w = t.width();
+    if (yEnd - yStart < 48) return;
 
-    int labelH  = 10;
-    int gridTop = yStart + labelH;
-    int gridH   = yEnd - gridTop;
-    if (gridH < 8) return;
-    int rowH  = 4;
-    int rows  = gridH / rowH;
-    if (rows > MAXROWS) rows = MAXROWS;
-    int colW  = w / 13;
+    // CLEAR paints its counter block on top of this band afterwards, so
+    // anything laid out against yEnd ends up underneath the numbers -- the same
+    // trap that had Mowin' Man mowing under the readout. s_bgFloor is where the
+    // drawable area really stops; the band is still FILLED to yEnd so nothing
+    // shows through beside the counters.
+    const int yBot = (s_bgFloor > yStart + 40 && s_bgFloor <= yEnd) ? s_bgFloor : yEnd;
+    const int bandH = yBot - yStart;
+    if (bandH < 48) return;
 
-    // New row every ~160ms, scrolling everything else down one slot —
-    // classic waterfall motion, newest activity always enters at top.
-    if (now - lastTick > 160) {
-        lastTick = now;
-        for (int r = MAXROWS - 1; r > 0; r--) memcpy(hist[r], hist[r - 1], 13);
-        for (uint8_t ch = 1; ch <= 13; ch++) hist[0][ch - 1] = eng.channelActivity(ch);
+    // Building colours are derived from the live palette rather than fixed
+    // hex. Hardcoded constants ignored dimPaletteForOverlay() completely, which
+    // left a full-brightness city glaring out from under the Settings menu
+    // while every other background politely faded. Deriving them also means the
+    // city follows whichever theme the user picked, like everything else here.
+    //
+    // In the default vaporwave palette these land on the site's own three
+    // hues. CYAN and GREEN sit far enough apart to survive RGB332, which is
+    // what the site's 190 and 160 did not -- those quantised to nearly the
+    // same teal and left the city two-tone.
+    const uint16_t face[3]  = { CYAN, VAPOR_PURPLE, GREEN };
+    const uint16_t shade[3] = { blend(face[0], BG, 185),
+                                blend(face[1], BG, 185),
+                                blend(face[2], BG, 185) };
+    const uint16_t edge[3]  = { blend(face[0], WHITE, 70),
+                                blend(face[1], WHITE, 70),
+                                blend(face[2], WHITE, 70) };
+    const uint16_t win[3]   = { blend(face[0], WHITE, 175),
+                                blend(face[1], WHITE, 175),
+                                blend(face[2], WHITE, 175) };
+    const uint16_t gridNear = blend(GREEN, BG,  70);
+    const uint16_t gridFar  = blend(GREEN, BG, 175);
+    // The trace has to stay separable from the scenery, so it is the brightest
+    // thing on screen -- but derived from CYAN rather than literal white, so it
+    // fades with the rest when the palette is dimmed for an overlay.
+    const uint16_t traceLit = blend(CYAN, WHITE, 150);
+
+    const int   hz     = yStart + bandH * 52 / 100;
+    const float fHz    = (float)hz;
+    const float floorH = (float)(yBot - 1 - hz);
+    if (floorH < 10.0f) return;
+
+    // The projection is derived from the band rather than fixed, because this
+    // background is handed a different height on every screen -- CLEAR reserves
+    // room for counters, LOG does not. With a constant focal length the towers
+    // were composed for one of them and overflowed the others. Choosing f so
+    // the nearest tower's base lands just past the bottom edge makes the whole
+    // scene scale-invariant: tower sizes below are fractions of w and bandH,
+    // and they hold whatever band we are given.
+    const float f     = floorH * 1.15f * GIB_NEAR / GIB_CAMY;
+    const float xUnit = (float)w     * GIB_NEAR / f;   // world units per screen width
+    const float hUnit = (float)bandH * GIB_NEAR / f;   // world units per band height
+
+    // ---- the corridor, laid out once ---------------------------------
+    // xf/wf are thousandths of the panel width and hf thousandths of the band
+    // height, measured at closest approach.
+    struct Tw { int16_t xf; uint16_t wf, hf, z0; uint8_t hue; };
+    static Tw   tw[GIB_N];
+    static bool inited = false;
+    if (!inited) {
+        for (uint8_t i = 0; i < GIB_N; i++) {
+            const uint32_t r = (uint32_t)(i + 1) * 2654435761u;
+            tw[i].xf  = (int16_t) (((i & 1u) ? 1 : -1) * (int)(340 + ((r >>  3) % 380)));
+            tw[i].wf  = (uint16_t)( 85 + ((r >> 11) % 105));
+            tw[i].hf  = (uint16_t)(520 + ((r >> 17) % 900));
+            tw[i].z0  = (uint16_t)((uint32_t)i * GIB_SPAN / GIB_N);
+            tw[i].hue = (uint8_t) (       (r >> 25) %  3);
+        }
+
+        // No more than two towers of the same colour in a row down either wall.
+        // The hash that assigns hues is uniform, not blue-noise, so runs of four
+        // and five do turn up, and a wall going solid green for a stretch reads
+        // as a palette bug rather than as a city.
+        //
+        // Walls alternate by index parity, so "in a row on the same side" means
+        // i, i+2, i+4 -- and the ring wraps, so the last tower on a side
+        // neighbours the first. The pass has to close the loop, not just walk
+        // it, which is why the indices are taken modulo the per-side count.
+        //
+        // The replacement hue comes from the tower's OWN hash rather than from
+        // its position. Breaking runs with an index-parity rule removes the runs
+        // and leaves a 1,1,2,2,0,0 stripe marching down the wall in their place,
+        // which is a more obviously artificial artefact than the one it fixed.
+        for (uint8_t side = 0; side < 2; side++) {
+            const uint8_t cnt = GIB_N / 2;
+            for (uint8_t pass = 0; pass < 3; pass++) {
+                bool clean = true;
+                for (uint8_t k = 0; k < cnt; k++) {
+                    const uint8_t i0 = (uint8_t)(((k + cnt - 2) % cnt) * 2 + side);
+                    const uint8_t i1 = (uint8_t)(((k + cnt - 1) % cnt) * 2 + side);
+                    const uint8_t i2 = (uint8_t)(k * 2 + side);
+                    if (tw[i0].hue != tw[i1].hue || tw[i1].hue != tw[i2].hue) continue;
+                    const uint32_t rr = (uint32_t)(i2 + 1) * 2654435761u;
+                    tw[i2].hue = (uint8_t)((tw[i1].hue + 1u + ((rr >> 9) & 1u)) % 3u);
+                    clean = false;
+                }
+                if (clean) break;
+            }
+        }
+        inited = true;
     }
 
-    t.fillRect(0, yStart, w, bandH, BG);
+    // Frame-rate independent flight, with the same dt clamp the starfield uses
+    // so one stalled frame does not teleport the camera down the corridor.
+    static uint32_t lastMs = 0;
+    static float    flyZ   = 0.0f;
+    uint32_t dt = (lastMs && now > lastMs) ? (now - lastMs) : 16u;
+    if (dt > 100u) dt = 100u;
+    lastMs = now;
+    flyZ = fmodf(flyZ + (float)dt * GIB_SPEED, (float)GIB_SPAN);
 
-    t.setTextSize(1);
-    t.setTextColor(CYAN, BG);
-    for (uint8_t ch = 1; ch <= 13; ch++) {
-        char buf[3];
-        snprintf(buf, sizeof(buf), "%u", ch);
-        int lx = (ch - 1) * colW + colW / 2 - t.textWidth(buf) / 2;
-        t.setCursor(lx, yStart);
-        t.print(buf);
-    }
+    auto depthOf = [&](uint8_t i) {
+        // Recycling at the reference depth made towers pop out of existence
+        // while still square in the middle of the screen. Letting them run in to
+        // GIB_PASS carries them past the camera instead: the projection throws
+        // them sideways far faster than it grows them, so they slide off the
+        // edge of the panel and are long gone by the time the ring wraps.
+        return fmodf((float)tw[i].z0 - flyZ + (float)GIB_SPAN, (float)GIB_SPAN) + GIB_PASS;
+    };
+    auto groundY = [&](float z) { return fHz + GIB_CAMY * f / z; };
 
-    for (int r = 0; r < rows; r++) {
-        int py = gridTop + r * rowH;
-        if (py >= yEnd) break;
-        for (uint8_t ch = 0; ch < 13; ch++) {
-            uint16_t col = waterfallColor(BG, VAPOR_BLUE, VAPOR_PINK, WHITE, hist[r][ch]);
-            t.fillRect(ch * colW, py, colW - 1, rowH - 1, col);
+    // ---- what the corridor is reacting to ----------------------------
+    // A lock arms when a genuinely new entry reaches the front of the log.
+    // lastSeen ticks on every repeat hit of the same device, so keying off that
+    // would re-arm every few hundred ms for as long as something sat in range;
+    // firstSeen plus the MAC is what separates "a new thing" from "that thing
+    // again".
+    static const uint32_t LOCK_MS = 4200;
+    static uint32_t lockAt = 0, lockFirst = 0, lockMac = 0;
+    static int8_t   lockIdx  = -1;
+    static DetectionType lockType = DetectionType::UNKNOWN;
+
+    if (eng.logCount()) {
+        const Detection* d = eng.logAt(0);
+        if (d) {
+            const uint32_t mac4 = ((uint32_t)d->mac[2] << 24) | ((uint32_t)d->mac[3] << 16)
+                                | ((uint32_t)d->mac[4] <<  8) |  (uint32_t)d->mac[5];
+            if (mac4 != lockMac || d->firstSeen != lockFirst) {
+                lockMac   = mac4;
+                lockFirst = d->firstSeen;
+                lockType  = d->type;
+                lockAt    = now ? now : 1u;
+                // The target is chosen once, here, so the lock stays on one
+                // building for the whole hold. Re-picking the nearest tower
+                // every frame would make it hop forward as the city moves,
+                // which reads as a glitch rather than as a lock.
+                // Not the nearest tower -- the one that will ARRIVE. Picking
+                // the closest looked right in a still frame and was wrong in
+                // motion: it swept past the camera inside the first second of a
+                // four-second hold and spent the rest of the lock as a speck in
+                // the distance. Targeting the building one hold-length away
+                // instead means it grows the whole time it is lit and fills the
+                // screen just as the lock lets go.
+                const float want = GIB_NEAR * 0.6f + (float)LOCK_MS * GIB_SPEED;
+                float best = 1e9f; int bi = -1;
+                for (uint8_t i = 0; i < GIB_N; i++) {
+                    const float d = fabsf(depthOf(i) - want);
+                    if (d < best) { best = d; bi = i; }
+                }
+                lockIdx = (int8_t)bi;
+            }
         }
     }
+    const bool     locked  = lockAt && (now - lockAt) < LOCK_MS;
+    const float    lockK   = locked ? (float)(now - lockAt) / (float)LOCK_MS : 1.0f;
+    const float    lockA   = 1.0f - lockK * 0.7f;
+    const uint16_t lockCol = colorFor(lockType);
+
+    // ---- night sky ---------------------------------------------------
+    t.fillRect(0, yStart, w, yEnd - yStart, BG);
+    {
+        // One deliberate band, not a gradient: with two bits of blue there is no
+        // smooth ramp to be had, and a ramp bands anyway at whatever heights the
+        // quantiser picks. Better to choose the band.
+        //
+        // The blend weights here look heavy-handed and are not. Measured, the
+        // first attempt at this -- a tasteful 29% -- landed on (0,36,0): the
+        // blue channel quantised away completely and a dark blue horizon came
+        // out dark GREEN, competing with the floor grid instead of sitting
+        // behind it. Blue has four levels on this panel and needs a component
+        // of at least 64 to register at all, so a colour that is meant to read
+        // as blue has to be chosen by where it lands, not by how restrained the
+        // number looks.
+        const int glowH = bandH / 8 + 2;
+        if (hz - glowH >= yStart)
+            t.fillRect(0, hz - glowH, w, glowH, blend(BG, VAPOR_PURPLE, 110));
+
+        // Stars sit at infinity, so they do not travel with the corridor --
+        // only twinkle. Anything that scrolls up here would read as the sky
+        // being closer than the city, which is the one thing it cannot be.
+        const uint16_t starA = traceLit, starB = blend(traceLit, BG, 130);
+        const int skyH = hz - yStart - 3;
+        if (skyH > 6) {
+            for (uint8_t i = 0; i < 44; i++) {
+                const uint32_t r = (uint32_t)(i + 7) * 1103515245u;
+                const uint8_t  k = (uint8_t)(r & 7u);
+                if (k == 7u && ((now / (700u + ((r >> 5) % 900u))) & 1u) == 0u) continue;
+                t.drawPixel((int)((r >> 8) % (uint32_t)w),
+                            yStart + 1 + (int)((r >> 17) % (uint32_t)skyH),
+                            (k > 5u) ? starA : starB);
+            }
+        }
+
+        // The moon. It sits behind the skyline and behind the corridor, so it
+        // is routinely half-eclipsed by whatever passes in front of it -- which
+        // is most of what sells it as being far away rather than as a circle
+        // stuck on the glass. It also gives the sky glow band something to be
+        // the glow of.
+        {
+            const int mr = (hz - yStart) / 5;
+            const int mx = w * 3 / 4 + 6;
+            const int my = yStart + (hz - yStart) / 3;
+            if (mr >= 6 && my - mr - 2 >= yStart) {
+                const uint16_t disc   = blend(VAPOR_YELLOW, WHITE, 130);
+                const uint16_t crater = blend(disc, BG, 60);
+                t.fillCircle(mx, my, mr + 2, blend(BG, disc, 60));   // halo
+                t.fillCircle(mx, my, mr, disc);
+                t.fillCircle(mx + mr / 3, my - mr / 3, mr / 4, crater);
+                t.fillCircle(mx - mr / 3, my + mr / 5, mr / 3, crater);
+                t.fillCircle(mx + mr / 5, my + mr / 2, mr / 5, crater);
+            }
+        }
+
+        // Two searchlights sweeping the sky. Drawn BEFORE the skyline on
+        // purpose: with no alpha to spend, a beam painted over the buildings
+        // would simply erase them, so instead the buildings cut off its base and
+        // the beam reads as coming up off the rooftops. Three nested triangles
+        // give it a bright core without any per-pixel blending.
+        //
+        // The length is clamped rather than fixed, because the band we are drawn
+        // into does not start at the top of the panel: an unclamped beam paints
+        // straight through the title bar.
+        {
+            const uint16_t beam[3] = { blend(BG, CYAN, 96),
+                                       blend(BG, CYAN, 66),
+                                       blend(BG, CYAN, 44) };
+            const float spMax = 0.055f * 3.0f;
+            for (uint8_t L = 0; L < 2; L++) {
+                const int   bx = L ? (w * 3 / 4) : (w / 5);
+                const int   by = hz - (hz - yStart) * 3 / 10;
+                const float a  = (L ? 2.20f : 0.95f)
+                               + sinf((float)now / 1900.0f + (float)L * 2.1f) * 0.55f;
+                float sm = sinf(a);
+                const float s1 = sinf(a - spMax), s2 = sinf(a + spMax);
+                if (s1 > sm) sm = s1;
+                if (s2 > sm) sm = s2;
+                if (sm < 0.15f) sm = 0.15f;
+                float len = (float)(hz - yStart) * 1.6f;
+                const float cap = ((float)by - (float)(yStart + 1)) / sm;
+                if (len > cap) len = cap;
+                if (len < 8.0f) continue;
+                for (int q = 2; q >= 0; q--) {
+                    const float sp = 0.055f * (float)(q + 1);
+                    t.fillTriangle(bx, by,
+                        bx + (int)(cosf(a - sp) * len), by - (int)(sinf(a - sp) * len),
+                        bx + (int)(cosf(a + sp) * len), by - (int)(sinf(a + sp) * len),
+                        beam[q]);
+                }
+                t.fillRect(bx - 1, by - 1, 3, 3, blend(CYAN, WHITE, 120));
+            }
+        }
+
+        // The rear skyline: thin towers with real gaps between them, standing
+        // still far behind the corridor. It does not scroll -- at that distance
+        // parallax would be indistinguishable from a rendering fault, and
+        // holding it still is most of what makes the moving towers read as
+        // close. It sits LIGHTER than the sky band rather than darker, because a
+        // distant city at night reads as lit rather than as a silhouette, and a
+        // silhouette would disappear entirely above the band where the sky is
+        // plain black.
+        //
+        // Laid out once, into per-mille fractions rather than pixels: the three
+        // screens that draw this background each hand it a different band
+        // height, so anything baked in pixels is right on one of them and wrong
+        // on the other two.
+        struct CityB { uint16_t xf, wf, hf; uint8_t hue, tone; };
+        static CityB  city[GIB_CITY];
+        static uint8_t cityN   = 0;
+        static bool    cityGen = false;
+        if (!cityGen) {
+            cityGen = true;
+            uint16_t cx = 6;
+            for (uint8_t b = 0; b < GIB_CITY; b++) {
+                // A bare multiplicative hash leaves neighbouring inputs
+                // correlated inside any one bit field -- taking the widths from
+                // it produced a near-monotonic ramp, a staircase rather than a
+                // skyline. Two xorshift rounds decorrelate the fields.
+                uint32_t r = (uint32_t)(b + 11) * 2654435761u;
+                r ^= r >> 15; r *= 2246822519u; r ^= r >> 13;
+                const uint16_t wf = (uint16_t)(34u + ((r >> 7) % 39u));
+                if (cx + wf > 994u) break;
+                city[cityN].xf   = cx;
+                city[cityN].wf   = wf;
+                city[cityN].hf   = (uint16_t)(150u + ((r >> 19) % 851u));
+                city[cityN].tone = (uint8_t)((r >> 3) & 1u);
+                cx = (uint16_t)(cx + wf + 12u + ((r >> 15) % 19u));
+                cityN++;
+            }
+            // Rolling a hue per building leaves the colours badly skewed by
+            // chance. Measured, this layout gave five teal, five green, two rose
+            // and a SINGLE purple across thirteen buildings -- which is most of
+            // why the purple did not read as a colour in the skyline at all.
+            // Deal a balanced set and shuffle it instead, so each hue gets its
+            // fair share of the row.
+            for (uint8_t b = 0; b < cityN; b++) city[b].hue = (uint8_t)(b & 3u);
+            for (uint8_t b = cityN; b > 1; b--) {
+                uint32_t r = (uint32_t)(b + 41) * 2654435761u;
+                r ^= r >> 15; r *= 2246822519u; r ^= r >> 13;
+                const uint8_t j   = (uint8_t)(r % b);
+                const uint8_t tmp = city[b - 1].hue;
+                city[b - 1].hue = city[j].hue;
+                city[j].hue     = tmp;
+            }
+
+            // No more than two of the same colour side by side, for the same
+            // reason as the corridor: a uniform hash throws runs, and three
+            // identical blocks in a row read as a mistake rather than as a city.
+            // One forward pass is enough here -- unlike the corridor this row
+            // does not wrap, and each fix is read back by the next check.
+            for (uint8_t b = 2; b < cityN; b++) {
+                if (city[b].hue != city[b - 1].hue ||
+                    city[b - 1].hue != city[b - 2].hue) continue;
+                uint32_t r = (uint32_t)(b + 29) * 2654435761u;
+                r ^= r >> 15; r *= 2246822519u; r ^= r >> 13;
+                city[b].hue = (uint8_t)((city[b].hue + 1u + (r % 3u)) % 4u);
+            }
+
+            // Neighbours have to differ in height by a wide margin, or the row
+            // reads as a hedge. Generated freely, then any pair that landed too
+            // close is pushed apart -- toward whichever side still has room.
+            for (uint8_t pass = 0; pass < 4; pass++) {
+                bool clean = true;
+                for (uint8_t b = 1; b < cityN; b++) {
+                    const int prev = (int)city[b - 1].hf;
+                    int       cur  = (int)city[b].hf;
+                    const int d    = (cur > prev) ? (cur - prev) : (prev - cur);
+                    if (d >= 260) continue;
+                    clean = false;
+                    uint32_t r = (uint32_t)(b + 11) * 2654435761u;
+                    r ^= r >> 15; r *= 2246822519u; r ^= r >> 13;
+                    const int off = 260 + (int)((r >> 21) % 140u);
+                    const int up  = prev + off, dn = prev - off;
+                    cur = (cur >= prev) ? ((up <= 1000) ? up : dn)
+                                        : ((dn >=  150) ? dn : up);
+                    if (cur > 1000) cur = 1000;
+                    if (cur <  150) cur =  150;
+                    city[b].hf = (uint16_t)cur;
+                }
+                if (clean) break;
+            }
+            // Scale so the tallest reaches the very top of the sky band, just
+            // under the readout. Scaling up can only widen the neighbour gaps,
+            // so the contrast rule survives it.
+            uint16_t top = 0;
+            for (uint8_t b = 0; b < cityN; b++) if (city[b].hf > top) top = city[b].hf;
+            if (top)
+                for (uint8_t b = 0; b < cityN; b++)
+                    city[b].hf = (uint16_t)((uint32_t)city[b].hf * 1000u / top);
+        }
+
+        // Each rear building takes its own hue. One shared teal across the
+        // whole skyline made the corridor's three colours look like the only
+        // palette in the scene, and a distant city is not monochrome.
+        //
+        // Purple is handled differently from the other three on purpose. It is
+        // the darkest hue in the palette to begin with, so blending it toward
+        // the background as far as the rest left a near-black smudge that read
+        // as a gap in the skyline rather than as a building -- it gets the
+        // shallowest blend of the four. And its windows are gold rather than a
+        // tint of its own body: warm light against a cool wall is what makes a
+        // block read as lit from inside, which is the whole trick a night
+        // skyline runs on, and it is the one hue here cool enough to sell it.
+        const uint16_t cityBase[4]   = { CYAN, VAPOR_PURPLE, GREEN, VAPOR_PINK };
+        static const uint8_t CITY_DIM[4][2] = { {135,178}, {100,142}, {150,190}, {140,182} };
+        const uint16_t cityWinC[4]   = { blend(CYAN,         BG, 40),
+                                         blend(VAPOR_YELLOW, BG, 28),
+                                         blend(GREEN,        BG, 45),
+                                         blend(VAPOR_PINK,   BG, 40) };
+        const int      skyTop   = yStart + 10;               // clear of the readout
+        const int      maxH     = hz - skyTop;
+        uint8_t        cityBudget = 140;
+        if (maxH > 14) {
+            for (uint8_t b = 0; b < cityN; b++) {
+                const int bx   = (int)((uint32_t)city[b].xf * (uint32_t)w / 1000u);
+                const int bwid = (int)((uint32_t)city[b].wf * (uint32_t)w / 1000u);
+                const int bh   = (int)((uint32_t)city[b].hf * (uint32_t)maxH / 1000u);
+                const int by   = hz - bh;
+                if (bwid < 5 || bh < 7 || by < yStart) continue;
+                const uint8_t  ch   = city[b].hue;
+                const uint16_t base = cityBase[ch];
+                t.fillRect(bx, by, bwid, bh, blend(base, BG, CITY_DIM[ch][city[b].tone]));
+                t.drawFastHLine(bx, by, bwid, blend(base, BG, 70));
+                const uint16_t wOn  = cityWinC[ch];
+                const uint16_t wHot = blend(wOn, WHITE, 130);
+
+                // At this size a building only reads as a building if its
+                // windows sit on a grid and some of them are out; light them
+                // evenly and it goes back to reading as a bar chart.
+                // Aircraft warning lights, on the tall ones only. Each runs on
+                // its own offset: real ones are not synchronised, and a row of
+                // them blinking in step reads as a rendering artefact rather
+                // than as a skyline.
+                if (city[b].hf > 620) {
+                    const int byy = by - 3;
+                    if (byy >= yStart) {
+                        const bool on = ((now + (uint32_t)b * 130u) % 1500u) < 480u;
+                        t.fillRect(bx + bwid / 2 - 1, byy, 3, 3,
+                                   on ? RED : blend(RED, BG, 190));
+                    }
+                }
+
+                const int cols = (bwid - 3) / 5;
+                const int rows = (bh   - 4) / 7;
+                for (int c = 0; c < cols && cityBudget; c++) {
+                    for (int rr = 0; rr < rows && cityBudget; rr++) {
+                        const uint32_t q = ((uint32_t)(b  + 1) * 2654435761u)
+                                         ^ ((uint32_t)(c  + 1) *      40503u)
+                                         ^ ((uint32_t)(rr + 1) * 2246822519u);
+                        const uint8_t k = (uint8_t)(q & 7u);
+                        bool lit;
+                        if      (k < 3u) lit = false;     // out, and staying out
+                        else if (k < 6u) lit = true;      // on, and staying on
+                        else {
+                            // The quarter that changes. Each gets its OWN period
+                            // and phase: run them off one shared clock and the
+                            // whole skyline blinks at once, which reads as a
+                            // display fault rather than as somebody turning a
+                            // light off.
+                            const uint32_t per = 2400u + ((q >> 5) % 6000u);
+                            const uint32_t e   = (now + ((q >> 12) % per)) / per;
+                            lit = ((q ^ (e * 2654435761u)) & 3u) != 0u;
+                        }
+                        if (!lit) continue;
+                        t.fillRect(bx + 2 + c * 5, by + 4 + rr * 7, 2, 3,
+                                   (k == 5u) ? wHot : wOn);
+                        cityBudget--;
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- floor -------------------------------------------------------
+    {
+        const float spacing = (float)GIB_SPAN / 17.0f;
+        int last = 30000;
+        for (int k = 1; k <= 24; k++) {
+            const float z = (float)k * spacing - fmodf(flyZ, spacing);
+            if (z < 30.0f) continue;
+            const int gy = (int)(groundY(z) + 0.5f);
+            if (gy > yBot - 1) continue;
+            // Past a certain depth every row lands on the same screen line.
+            // Drawing the rest does not add detail, it builds a solid slab
+            // along the horizon.
+            if (gy < hz + 3 || gy >= last - 1) break;
+            last = gy;
+            t.drawFastHLine(0, gy, w, (z > GIB_NEAR * 4.0f) ? gridFar : gridNear);
+        }
+        // Lanes to the vanishing point. A ground-plane lane projects to a
+        // straight line out of the vanishing point, so these need no depth
+        // maths of their own -- only the width they fan to at the bottom edge.
+        const int fan = (int)((float)w * 0.124f);
+        for (int g = -5; g <= 5; g++)
+            t.drawLine(w / 2, hz, w / 2 + g * fan, yBot - 1, gridFar);
+
+        // Packets running down the lanes toward you, one lane per WiFi channel,
+        // and ONLY where that channel is actually carrying something. This is
+        // the one part of the scene that goes quiet when the air does, which is
+        // deliberate: the trace already keeps the screen alive with nothing on,
+        // so the floor can afford to mean something instead.
+        //
+        // They travel in DEPTH rather than in screen space. A packet moving a
+        // constant number of pixels per frame reads as sliding across a flat
+        // picture; moving it through z and projecting makes it accelerate into
+        // the foreground the way everything else here does.
+        const uint16_t pktA = blend(CYAN,      WHITE, 100);
+        const uint16_t pktB = blend(VAPOR_PINK, WHITE, 80);
+        for (int g = -5; g <= 5; g++) {
+            const uint8_t chn = (uint8_t)(1 + ((g + 5) * 12) / 10);
+            const uint8_t act = eng.channelActivity(chn);
+            if (act < 12) continue;
+            const uint8_t  n   = (uint8_t)(1 + act / 40);
+            const uint16_t per = (uint16_t)(2300u - (uint16_t)act * 14u);
+            for (uint8_t k = 0; k < n; k++) {
+                const float ph = fmodf((float)now / (float)per + (float)k / (float)n, 1.0f);
+                const float z  = (float)GIB_SPAN * 0.8f * (1.0f - ph) + 60.0f;
+                const int   gy = (int)groundY(z);
+                if (gy > yBot - 3 || gy < hz + 2) continue;
+                const float lane = (float)(gy - hz) / floorH;
+                const int   px   = w / 2 + (int)((float)(g * fan) * lane);
+                const int   sz   = (lane > 0.55f) ? 4 : ((lane > 0.25f) ? 3 : 2);
+                if (px - sz / 2 < 0 || px + sz > w) continue;
+                t.fillRect(px - sz / 2, gy - sz / 2, sz, sz, (k & 1u) ? pktA : pktB);
+            }
+        }
+    }
+
+    // ---- channel meter bridge ----------------------------------------
+    // Thirteen live channel levels down the right edge, drawn BEFORE the
+    // corridor so the towers pass in front of it.
+    //
+    // That ordering is the whole point. Painted on top it would win every
+    // argument with the scene and take the right-hand quarter permanently,
+    // which is exactly where the corridor is most worth looking at. Behind the
+    // towers it reads as something standing in the city rather than a panel
+    // stuck over the glass, and a near tower sweeping past simply eclipses a
+    // few rows of it for a second.
+    {
+        const int rowH = (bandH - 6) / 13;
+        if (rowH >= 5) {
+            const int barW = (w >= 240) ? 11 : 8;
+            const int barX = w - barW - 2;
+            const int labX = barX - 14;
+
+            // Peak hold on its own clock. channelActivity already holds a peak
+            // and decays it 4 every 200 ms, which is fast enough that the bars
+            // twitch; without a slower mark on top there is nothing steady
+            // enough to actually read a level off.
+            static uint8_t  peak[14] = {0};
+            static uint32_t peakAt = 0;
+            if (now - peakAt > 90u) {
+                peakAt = now;
+                for (uint8_t c = 1; c <= 13; c++) if (peak[c]) peak[c]--;
+            }
+
+            // 215 landed on (0,36,0) -- dark green, blue quantised away, the
+            // same trap as the sky band. 180 keeps a blue component and reads
+            // as an unlit track rather than as more scenery.
+            const uint16_t track = blend(CYAN, BG, 180);
+            const uint16_t mark  = blend(CYAN, WHITE, 140);
+            t.setTextSize(1);
+            for (uint8_t c = 1; c <= 13; c++) {
+                const uint8_t a = eng.channelActivity(c);
+                if (a > peak[c]) peak[c] = a;
+
+                const int ry = yStart + 3 + (int)(c - 1) * rowH;
+                const int rh = rowH - 2;
+                if (ry + rh > yBot) break;
+
+                t.fillRect(barX, ry, barW, rh, track);
+                const int fw = (int)a * barW / 100;
+                if (fw > 0)
+                    t.fillRect(barX, ry, fw, rh,
+                               (a > 72) ? RED : ((a > 42) ? AMBER : GREEN));
+                const int pw = (int)peak[c] * barW / 100;
+                if (pw > 1) t.drawFastVLine(barX + pw - 1, ry, rh, mark);
+
+                // Single digits shift right so the column right-aligns.
+                t.setTextColor(a > 42 ? blend(CYAN, WHITE, 160) : blend(CYAN, BG, 130));
+                t.setCursor(labX + (c < 10 ? 6 : 0), ry + (rh - 8) / 2 + 1);
+                char cb[3];
+                snprintf(cb, sizeof(cb), "%u", (unsigned)c);
+                t.print(cb);
+            }
+        }
+    }
+
+    // ---- towers, far to near -----------------------------------------
+    uint8_t order[GIB_N];
+    float   zs[GIB_N];
+    for (uint8_t i = 0; i < GIB_N; i++) { order[i] = i; zs[i] = depthOf(i); }
+    // Painter's order. At 22 items an insertion sort is both the clearest thing
+    // to read and faster than anything cleverer.
+    for (uint8_t i = 1; i < GIB_N; i++) {
+        const uint8_t key = order[i];
+        const float   kz  = zs[key];
+        int j = (int)i - 1;
+        while (j >= 0 && zs[order[j]] < kz) { order[j + 1] = order[j]; j--; }
+        order[j + 1] = key;
+    }
+
+    // Distance is carried by haze as well as hue now. Fading a far tower toward
+    // black is the obvious move and the wrong one -- black is exactly where dim
+    // colours already land on this panel, so it reads as the tower switching off
+    // rather than as it being far away. Tinting toward the sky's own colour
+    // instead makes it recede into the sky. Same number of fills; one blend.
+    const uint16_t haze = blend(BG, VAPOR_PURPLE, 110);
+
+    int     ringX     = w / 2;
+    uint8_t winBudget = 200;      // one very near tower can ask for more than this
+
+    for (uint8_t n = 0; n < GIB_N; n++) {
+        const uint8_t i = order[n];
+        const float   z = zs[i];
+        const float   s = f / z;
+        const float  sw = (float)tw[i].wf * 0.001f * xUnit * s;
+        const float  sh = (float)tw[i].hf * 0.001f * hUnit * s;
+        const float sxc = (float)(w / 2) + (float)tw[i].xf * 0.001f * xUnit * s;
+
+        int iw = (int)(sw + 0.5f); if (iw < 1) iw = 1;
+        int ih = (int)(sh + 0.5f); if (ih < 1) ih = 1;
+        const int x0 = (int)(sxc - sw * 0.5f + 0.5f);
+        const int y0 = (int)(groundY(z) - sh  + 0.5f);
+        if (x0 >= w || x0 + iw <= 0) continue;
+
+        // Clip to the band by hand. fillRect clips to the panel, not to the
+        // strip we were given, and a near tower is several times taller than
+        // that strip -- unclipped it paints over the title bar.
+        int clipX = x0, clipW = iw;
+        if (clipX < 0)          { clipW += clipX; clipX = 0; }
+        if (clipX + clipW > w)    clipW = w - clipX;
+        int clipY = y0, clipH = ih;
+        if (clipY < yStart)     { clipH -= (yStart - clipY); clipY = yStart; }
+        if (clipY + clipH > yBot) clipH = yBot - clipY;
+        if (clipW <= 0 || clipH <= 0) continue;
+
+        if (locked && lockIdx >= 0 && (uint8_t)lockIdx == i) {
+            ringX = (int)sxc;
+            t.fillRect(clipX, clipY, clipW, clipH,
+                       blend(BG, blend(lockCol, WHITE, 40), (uint16_t)(150.0f + 105.0f * lockA)));
+            // The fill already carries the detection's own colour, and that
+            // colour is frequently the same hue as the towers either side of it.
+            // The outline and reticle go white, which appears nowhere else on
+            // screen except the trace.
+            if (x0 >= 0 && x0 < w)                   t.drawFastVLine(x0, clipY, clipH, traceLit);
+            if (x0 + iw - 1 >= 0 && x0 + iw - 1 < w) t.drawFastVLine(x0 + iw - 1, clipY, clipH, traceLit);
+            if (y0 >= yStart && y0 < yBot)           t.drawFastHLine(clipX, y0, clipW, traceLit);
+
+            // Reticle. Each bracket is bounds-checked on its own: a near tower
+            // is clipped at both the top and the bottom of the band, so gating
+            // the whole reticle on both corners being inside meant the biggest
+            // and most worth marking locks drew no reticle whatsoever.
+            const int L   = (clipW < 26) ? (clipW / 2 + 1) : 12;
+            const int rx0 = clipX - 3, rx1 = clipX + clipW + 2;
+            const int ry0 = clipY - 3, ry1 = clipY + clipH + 2;
+            if (L > 1) {
+                if (ry0 >= yStart) {
+                    t.drawFastHLine(rx0, ry0, L, traceLit); t.drawFastHLine(rx1 - L, ry0, L, traceLit);
+                    t.drawFastVLine(rx0, ry0, L, traceLit); t.drawFastVLine(rx1, ry0, L, traceLit);
+                }
+                if (ry1 < yBot) {
+                    t.drawFastHLine(rx0, ry1, L, traceLit);     t.drawFastHLine(rx1 - L, ry1, L, traceLit);
+                    t.drawFastVLine(rx0, ry1 - L, L, traceLit); t.drawFastVLine(rx1, ry1 - L, L, traceLit);
+                }
+                if (ry0 < yStart && ry1 >= yBot) {
+                    // Both ends off the band: mark the middle instead, so a
+                    // full-height lock is still visibly bracketed.
+                    const int my = clipY + clipH / 2;
+                    t.drawFastHLine(rx0, my, L, traceLit); t.drawFastHLine(rx1 - L, my, L, traceLit);
+                }
+            }
+            continue;
+        }
+
+        const uint8_t h = tw[i].hue;
+        if (z > GIB_NEAR * 5.2f) {
+            // Far tier: one flat block with a lit roof line, well into the haze.
+            // Windows are sub-pixel out here and would buy nothing but calls.
+            t.fillRect(clipX, clipY, clipW, clipH, blend(shade[h], haze, 150));
+            if (y0 >= yStart && y0 < yBot)
+                t.drawFastHLine(clipX, y0, clipW, blend(face[h], haze, 120));
+            continue;
+        }
+
+        // Mid tier fades into the same haze on a ramp, so there is no step
+        // between the two tiers.
+        uint16_t hzT = 0;
+        if (z > GIB_NEAR * 1.4f) {
+            const float f2 = (z - GIB_NEAR * 1.4f) / (GIB_NEAR * 4.0f) * 140.0f;
+            hzT = (f2 > 140.0f) ? 140u : (uint16_t)f2;
+        }
+        const uint16_t faceC  = hzT ? blend(face[h],  haze, hzT) : face[h];
+        const uint16_t shadeC = hzT ? blend(shade[h], haze, hzT) : shade[h];
+        const uint16_t edgeC  = hzT ? blend(edge[h],  haze, hzT) : edge[h];
+
+        // The site paints each face with a horizontal gradient. RGB332 has no
+        // smooth ramp to give, so it becomes two flat bands -- a lit side and a
+        // shaded one -- which is also two fillRects instead of a per-column loop.
+        int litW = (int)(sw * 0.58f + 0.5f); if (litW < 1) litW = 1;
+        {
+            int lx = x0, lw = litW;
+            if (lx < 0)      { lw += lx; lx = 0; }
+            if (lx + lw > w)   lw = w - lx;
+            if (lw > 0) t.fillRect(lx, clipY, lw, clipH, faceC);
+            int dx = x0 + litW, dw = iw - litW;
+            if (dx < 0)      { dw += dx; dx = 0; }
+            if (dx + dw > w)   dw = w - dx;
+            if (dw > 0) t.fillRect(dx, clipY, dw, clipH, shadeC);
+        }
+        if (x0 >= 0 && x0 < w)                   t.drawFastVLine(x0, clipY, clipH, edgeC);
+        if (x0 + iw - 1 >= 0 && x0 + iw - 1 < w) t.drawFastVLine(x0 + iw - 1, clipY, clipH, edgeC);
+        if (y0 >= yStart && y0 < yBot)           t.drawFastHLine(clipX, y0, clipW, edgeC);
+
+        // Rim glow: one dim pixel of spill just OUTSIDE the silhouette. Not a
+        // real bloom -- that needs to read back the framebuffer, which this
+        // panel will not do at any sane speed -- but against a black sky a dim
+        // outline is what light spilling off an edge actually looks like, and
+        // it costs three fast lines.
+        if (z < GIB_NEAR * 4.0f) {
+            const uint16_t halo = blend(edgeC, BG, 150);
+            if (x0 - 1 >= 0)                     t.drawFastVLine(x0 - 1, clipY, clipH, halo);
+            if (x0 + iw < w)                     t.drawFastVLine(x0 + iw, clipY, clipH, halo);
+            if (y0 - 1 >= yStart && y0 - 1 < yBot) t.drawFastHLine(clipX, y0 - 1, clipW, halo);
+        }
+
+        // Mainframe lights. The site re-rolls Math.random() for every window on
+        // every frame; at two pixels that reads as static rather than as
+        // blinkenlights, so each cell gets a fixed role from a hash instead --
+        // dark, steady, or a blinker with its own period. A lock divides every
+        // blinker's period by three, so the racks visibly quicken on a catch.
+        if (z < GIB_NEAR * 3.4f && iw >= 9 && ih >= 16 && winBudget) {
+            int cols = (iw - 3) / 4; if (cols > 5) cols = 5;
+            const uint16_t wcol = win[h];
+            const uint16_t wlit = blend(win[h], WHITE, 165);   // the glitter
+            // Start at the first row that is actually inside the band. Walking
+            // down from the roof wasted the budget on rows far above the strip
+            // and then ran out -- so the nearest and biggest towers, the ones
+            // whose lights you can actually see, came out completely dark.
+            int wr = (yStart - (y0 + 4)) / 5;
+            if (wr < 0) wr = 0;
+            for (int guard = 0; guard < 44 && winBudget; guard++, wr++) {
+                const int wy = y0 + 4 + wr * 5;
+                if (wy + 2 > yBot || wy > y0 + ih - 4) break;
+                if (wy < yStart) continue;
+                for (int c = 0; c < cols && winBudget; c++) {
+                    const uint32_t hsh = ((uint32_t)(i  + 1) * 2654435761u)
+                                       ^ ((uint32_t)(c  + 1) *      40503u)
+                                       ^ ((uint32_t)(wr + 1) * 2246822519u);
+                    const uint8_t kind = (uint8_t)(hsh & 7u);
+                    if (kind < 1u) continue;                       // permanently dark
+                    if (kind >= 3u) {                              // a blinker
+                        uint16_t per = (uint16_t)(180u + ((hsh >> 3) % 820u));
+                        if (locked) per = (uint16_t)(per / 3u + 45u);
+                        if (((now / per) & 1u) == 0u) continue;
+                    }
+                    const int wx = x0 + 2 + c * 4;
+                    if (wx < 0 || wx + 2 > w) continue;
+                    t.fillRect(wx, wy, 2, 2, ((hsh >> 20) & 7u) ? wcol : wlit);
+                    winBudget--;
+                }
+            }
+        }
+    }
+
+    // ---- the instrument ----------------------------------------------
+    const int      mid = yStart + bandH * 56 / 100;
+    const float    lim = (float)bandH * 0.24f;
+    const uint16_t traceCol = locked ? blend(traceLit, lockCol, (uint16_t)(90.0f * lockA))
+                                     : traceLit;
+    int prevY = mid;
+    for (int x = 0; x < w; x += 2) {
+        const float chf = 1.0f + (float)x * 12.0f / (float)(w - 1);
+        int c0 = (int)chf; if (c0 < 1) c0 = 1; if (c0 > 13) c0 = 13;
+        const int   c1 = (c0 < 13) ? c0 + 1 : 13;
+        const float fr = chf - (float)c0;
+        float act = ((float)eng.channelActivity((uint8_t)c0) * (1.0f - fr)
+                   + (float)eng.channelActivity((uint8_t)c1) * fr) * 0.01f;
+        if (act > 1.0f) act = 1.0f;
+
+        float v = sinf((float)x * 0.062f + (float)now / 300.0f) * lim * 0.15f
+                + sinf((float)x * 0.171f - (float)now / 190.0f) * lim * 0.10f;
+        v -= act * lim * 0.85f;                    // real traffic pushes the trace up
+        if (locked) {
+            const float d = (float)(x - ringX);
+            float bell = 1.0f / (1.0f + d * d * 0.0011f);
+            bell *= bell;                       // tails tight enough to be local
+            v += bell * sinf(d * 0.42f - (float)now / 38.0f) * lim * 1.7f * (1.0f - lockK);
+        }
+        if (v >  lim) v =  lim;
+        if (v < -lim) v = -lim;
+
+        const int y = mid + (int)v;
+        int a = (y < prevY) ? y : prevY;
+        int b = (y > prevY) ? y : prevY;
+        if (a < yStart)   a = yStart;
+        if (b + 2 > yBot) b = yBot - 2;
+        if (b >= a) t.fillRect(x, a, 2, b - a + 2, traceCol);
+        prevY = y;
+    }
+
+    // ---- the feed ----------------------------------------------------
+    t.setTextSize(1);
+    const uint8_t step = (uint8_t)((now / 620u) % GIB_FEED_N);
+    for (int i = 0; i < 3; i++) {
+        const int fy = yBot - 9 - i * 9;
+        if (fy < hz + 2) break;
+        t.setCursor(3, fy);
+        if (i == 0 && locked) {
+            t.setTextColor(lockCol);
+            t.print("> ");
+            t.print(detectionTypeName(lockType));
+            t.print(" :: LOCKED");
+        } else {
+            t.setTextColor(blend(BG, GREEN, (uint16_t)(256 - i * 60)));
+            t.print("> ");
+            t.print(GIB_FEED[(step + GIB_FEED_N - (uint8_t)i) % GIB_FEED_N]);
+            t.print("_");
+        }
+    }
+    t.setTextColor(edge[0], BG);
+    t.setCursor(3, yStart + 1);
+    t.print("GIBSON // 2.4GHz");
 }
 
 // Vector tube, Tempest-style: bright thin lines on black, a web of
