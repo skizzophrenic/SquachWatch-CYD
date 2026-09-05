@@ -256,6 +256,18 @@ namespace Theme {
     // background. `eng` is only read by SPECTRUM (it needs live RSSI);
     // `advance` is DIGITAL's once-per-logical-frame guard -- see
     // drawDigitalRain().
+    // Where the usable bottom of the background band actually is, for
+    // props that need to stand on something. The band runs BEHIND the
+    // detection counters -- CLEAR draws them on top of it afterwards -- so
+    // anything placed at yEnd ends up underneath them. CLEAR sets this to
+    // the top of its counter block; a screen that never calls it gets yEnd,
+    // which is the old behaviour.
+    //
+    // Reset it rather than leaving it set: the value is only right for the
+    // screen that computed it, and the layout changes with rotation.
+    void setBackgroundFloor(int y);
+    void clearBackgroundFloor();
+
     void drawActiveBackground(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
                               const DetectionEngine& eng, bool advance = true);
 

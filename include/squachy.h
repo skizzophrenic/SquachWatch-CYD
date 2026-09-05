@@ -37,6 +37,13 @@ namespace Squachy {
     // tap on him pets him instead of doing nothing.
     bool hitTest(int x, int y);
 
+    // Where he was drawn last frame, and how wide, so a background can
+    // react to him standing in it. Returns false before he has ever been
+    // drawn. Backgrounds render BEFORE he does, so this is one frame
+    // stale -- invisible for something that ambles as slowly as he does,
+    // and far cheaper than reordering the draw.
+    bool lastFootprint(int& cx, int& halfW, int& top, int& bot);
+
     // Re-runs the first-boot walkthrough on demand (wired to Settings'
     // "REPLAY INTRO" row). trigger(Event::BOOTED) also starts it
     // automatically the very first time the device ever boots — this

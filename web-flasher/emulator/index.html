@@ -22,7 +22,10 @@
     font-family:var(--mono);font-size:14px;line-height:1.6;
     background-image:repeating-linear-gradient(180deg,rgba(255,255,255,.022) 0 1px,transparent 1px 3px);
   }
-  .wrap{max-width:1000px;margin:0 auto;padding:40px 22px 80px}
+  /* Grows with the zoom level. At 3x and 4x the canvas alone is wider
+     than a two-column layout can hold, so the page widens and main stacks
+     -- see .stacked below. */
+  .wrap{max-width:var(--page-max,1040px);margin:0 auto;padding:40px 22px 80px}
   header{border-bottom:1px solid var(--rule);padding-bottom:22px;margin-bottom:28px}
   .kicker{color:var(--cyan);letter-spacing:.22em;text-transform:uppercase;font-size:11px;margin:0 0 10px}
   h1{
@@ -33,16 +36,80 @@
   .sub{max-width:60ch;margin:14px 0 0;color:var(--ink)}
   main{display:grid;grid-template-columns:minmax(0,auto) minmax(260px,1fr);gap:26px;align-items:start}
   @media (max-width:820px){main{grid-template-columns:1fr}}
+  main.stacked{grid-template-columns:1fr}
 
   .device{
+    /* Sizes to whatever the canvas is, so an explicit zoom just works and
+       "fit" still collapses to the column. */
+    width:max-content;max-width:100%;
     background:var(--panel);border:1px solid var(--rule);border-radius:10px;
     padding:16px;display:flex;flex-direction:column;gap:12px;align-items:center;
     box-shadow:0 0 0 1px rgba(0,255,245,.06),0 18px 50px rgba(0,0,0,.6);
   }
+  /* The canvas is a 320x240 buffer stretched to fill its column, so on a
+     desktop it is a 2-3x upscale. With nearest-neighbour that turns every
+     single-pixel feature into a hard 2-3px block -- a 1px outline tracing
+     a rounded corner becomes an obvious staircase. On the real 2.4" panel
+     those pixels are tiny and bleed slightly into their neighbours, so the
+     same art reads as a soft edge.
+     LCD mode approximates the panel: interpolated upscale, a whisker of
+     blur for the bleed, and a faint pixel grid. Toggled at runtime rather
+     than baked in, so the raw buffer is always one click away. */
+  .screen-wrap{position:relative;display:block;line-height:0;width:100%}
   canvas{
+    /* Width is set from the zoom control. Integer multiples keep every
+       device pixel exactly N CSS px wide -- at a fractional scale
+       nearest-neighbour makes some pixels wider than others, which on pixel
+       art reads as a wobble in the grid. "Fit" accepts that trade so the
+       thing still works on a phone. */
+    width:100%;height:auto;
     image-rendering:pixelated;display:block;background:#000;
     border:1px solid #2a1440;border-radius:3px;cursor:crosshair;touch-action:none;
   }
+  /* Keep the crisp nearest-neighbour upscale and put only a whisker of
+     blur on top. Switching to image-rendering:auto hands the browser a
+     bilinear stretch, which is already soft BEFORE any blur is applied --
+     the two together were far more than "slightly softened". */
+  .lcd canvas{
+    filter:blur(var(--lcd-blur,.18px)) saturate(1.03) contrast(.98);
+  }
+  /* Grid spacing is one DEVICE pixel, measured from the canvas's rendered
+     width, so the lines land on pixel boundaries instead of moiring against
+     them. It fades out entirely below ~2.5x, where a 1px line would cover
+     half of every cell. */
+  /* Horizontal scanlines only. A full pixel grid adds vertical rules too,
+     which on a 320px-wide buffer is 320 of them -- that reads as mesh, not
+     as a panel. One line per device pixel row is the CRT/LCD cue. */
+  /* Periods are ONE DEVICE PIXEL wide, measured from how far the canvas is
+     actually being stretched -- so the lines trace real pixel boundaries
+     instead of an arbitrary screen rhythm. The line itself is a third of a
+     cell, which keeps the apparent density the same whether the emulator is
+     at 1.5x on a phone or 2.5x on a desktop.
+
+     SCANLINES: horizontal only. PIXEL GRID: both axes, and weaker, because
+     every pixel there is touched by two lines rather than one. */
+  .lcd[data-lcd="scan"] .lcd-grid{
+    background-image:
+      repeating-linear-gradient(to bottom,
+        rgba(0,0,0,.42) 0 var(--lcd-line,1px), transparent var(--lcd-line,1px) var(--lcd-px,2px));
+  }
+  .lcd[data-lcd="grid"] .lcd-grid{
+    background-image:
+      repeating-linear-gradient(to bottom,
+        rgba(0,0,0,.30) 0 var(--lcd-line,1px), transparent var(--lcd-line,1px) var(--lcd-px,2px)),
+      repeating-linear-gradient(to right,
+        rgba(0,0,0,.24) 0 var(--lcd-line,1px), transparent var(--lcd-line,1px) var(--lcd-px,2px));
+  }
+  .lcd .lcd-grid{opacity:var(--lcd-grid-alpha,0)}
+  @media (prefers-reduced-motion:reduce){ .lcd-grid{transition:none} }
+  /* Both controls on one row, centred under the screen. They wrap only if
+     the device column is genuinely too narrow for them. */
+  .lcd-controls{
+    display:flex;gap:14px;align-items:center;justify-content:center;
+    flex-wrap:wrap;font-size:12px;color:var(--mute)
+  }
+  .lcd-controls label{display:flex;gap:6px;align-items:center;user-select:none}
+  .lcd-controls select{width:auto;padding:4px 7px;font-size:12px}
   .readout{display:flex;gap:16px;align-items:baseline;font-size:12px;color:var(--mute)}
   .readout b{color:var(--cyan);font-weight:500}
   .boot{color:var(--mute);font-size:12px;min-height:1.2em}
@@ -90,12 +157,33 @@
 
 <main>
   <div class="device">
-    <canvas id="screen" width="320" height="240"></canvas>
+    <div class="screen-wrap" id="screenWrap">
+      <canvas id="screen" width="320" height="240"></canvas>
+      <div class="lcd-grid" id="lcdGrid"></div>
+    </div>
     <div class="readout">
       <span>state <b id="state">booting</b></span>
       <span>fps <b id="fps">—</b></span>
     </div>
     <div class="boot" id="boot">loading firmware…</div>
+    <div class="lcd-controls">
+      <label>zoom
+        <select id="lcdZoom">
+          <option value="fit">fit</option>
+          <option value="1">1&times;</option>
+          <option value="2" selected>2&times;</option>
+          <option value="3">3&times;</option>
+          <option value="4">4&times;</option>
+        </select>
+      </label>
+      <label>panel
+        <select id="lcdMode">
+          <option value="off">off</option>
+          <option value="scan" selected>scanlines</option>
+          <option value="grid">pixel grid</option>
+        </select>
+      </label>
+    </div>
   </div>
 
   <div class="panel">
@@ -204,8 +292,11 @@ function blit() {
   const w = wOf(), h = hOf();
   if (w !== lastW || h !== lastH) {          // the rotate button changes geometry
     cv.width = w; cv.height = h;
-    cv.style.width  = (w * 2) + 'px';
-    cv.style.height = (h * 2) + 'px';
+    // The rotate button swaps w and h, so an explicit zoom has to be
+    // recomputed against the new buffer width rather than left at the old
+    // pixel value.
+    cv.style.height = '';
+    if (window.__squachZoom) window.__squachZoom();
     img = ctx.createImageData(w, h);
     lastW = w; lastH = h;
   }
@@ -300,6 +391,91 @@ function tick(now) {
   }
 }
 requestAnimationFrame(tick);
+</script>
+<script>
+// LCD panel simulation. The blur and grid are both scaled off how far the
+// canvas is actually being stretched, because the artefact this corrects
+// only exists at upscale: at 1:1 there is nothing to soften, and a grid
+// line would be half the picture.
+(function () {
+  var wrap = document.getElementById('screenWrap');
+  var cv   = document.getElementById('screen');
+  var sel  = document.getElementById('lcdMode');
+  var zoom = document.getElementById('lcdZoom');
+  var main = document.querySelector('main');
+  if (!wrap || !cv || !sel || !zoom) return;
+
+  function applyZoom() {
+    var v = zoom.value;
+    var bw = cv.width || 320;
+    if (v === 'fit') {
+      cv.style.width = '100%';
+      if (main) main.classList.remove('stacked');
+      document.documentElement.style.setProperty('--page-max', '1040px');
+    } else {
+      var n = parseInt(v, 10) || 2;
+      cv.style.width = (bw * n) + 'px';
+      // Past 2x the canvas is wider than a two-column layout can hold, so
+      // the panel drops underneath and the page widens to suit.
+      var wide = (bw * n) > 700;
+      if (main) main.classList.toggle('stacked', wide);
+      document.documentElement.style.setProperty(
+        '--page-max', wide ? ((bw * n) + 76) + 'px' : '1040px');
+    }
+    sync();
+  }
+  window.__squachZoom = applyZoom;
+
+  function sync() {
+    // How many CSS pixels one device pixel occupies right now.
+    var scale = cv.getBoundingClientRect().width / (cv.width || 320);
+    if (!isFinite(scale) || scale <= 0) scale = 1;
+    wrap.style.setProperty('--lcd-px', scale.toFixed(3) + 'px');
+    // WHOLE pixels. A fractional stop -- 0.68px at 2x -- gets antialiased
+    // into a soft grey smear rather than drawn as a line, which is why the
+    // scanlines went faint the moment the width started tracking the scale.
+    // One solid pixel per cell up to 3x, two from 4x.
+    wrap.style.setProperty('--lcd-line',
+                           Math.max(1, Math.floor(scale * 0.4)) + 'px');
+    // Blur is a fraction of a device pixel, so it stays proportionate as
+    // the emulator is resized.
+    wrap.style.setProperty('--lcd-blur',
+                           Math.min(scale * 0.09, 0.40).toFixed(2) + 'px');
+    // Below about 1.4x a line eats too much of each cell and the overlay
+    // becomes a flat wash, so it fades out instead. Full strength by 1.9x.
+    var ramp = scale < 1.4 ? 0 : Math.min((scale - 1.4) / 0.5, 1);
+    var mode = sel.value;
+    wrap.style.setProperty('--lcd-grid-alpha',
+      (mode === 'grid' ? 0.62 * ramp : mode === 'scan' ? 0.55 * ramp : 0).toFixed(3));
+  }
+
+  function apply() {
+    var mode = sel.value;
+    wrap.classList.toggle('lcd', mode !== 'off');
+    wrap.dataset.lcd = mode;
+    sync();
+    try { localStorage.setItem('squachsim.lcd', mode); } catch (e) {}
+  }
+
+  try {
+    var saved = localStorage.getItem('squachsim.lcd');
+    if (saved === '1') saved = 'scan';
+    if (saved === '0') saved = 'off';
+    if (saved === 'off' || saved === 'scan' || saved === 'grid') sel.value = saved;
+    var z = localStorage.getItem('squachsim.zoom');
+    if (z && /^(fit|1|2|3|4)$/.test(z)) zoom.value = z;
+  } catch (e) {}
+
+  sel.addEventListener('change', apply);
+  zoom.addEventListener('change', function () {
+    try { localStorage.setItem('squachsim.zoom', zoom.value); } catch (e) {}
+    applyZoom();
+  });
+  addEventListener('resize', sync);
+  if (window.ResizeObserver) new ResizeObserver(sync).observe(cv);
+  applyZoom();
+  apply();
+})();
 </script>
 </body>
 </html>

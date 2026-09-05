@@ -8,6 +8,12 @@
 
 namespace Theme {
 
+// Usable bottom of the background band, published by whichever screen
+// owns the layout. -1 means nobody said, so backgrounds fall back to
+// their own yEnd. Declared up here because drawFlyingToasters() reads
+// it and sits well above the setters.
+static int s_bgFloor = -1;
+
 // Default-initialized to the original SquachWare vaporwave values —
 // applyPalette(0) (VAPRW4VE) reproduces these exactly.
 uint16_t BG           = 0x0801;
@@ -461,7 +467,12 @@ void drawDigitalRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advan
     static const int  GLN      = sizeof(GLYPHS) - 1;
     static const int  MAXTRAIL = 24;
     static const int  MINTRAIL = 17;      // averages ~21, just under the old flat 22
-    static const uint16_t HUES[4] = { VAPOR_PINK, CYAN, GREEN, VAPOR_PURPLE };
+    // Ordered cool -> warm so that indexing them by depth gives distance:
+    // violet sits at the back, pink at the front.
+    static const uint16_t HUES[4] = { VAPOR_PURPLE, CYAN, GREEN, VAPOR_PINK };
+    // One switch back to the old behaviour, where hue was rolled at random
+    // per drop and had nothing to do with how far away it was.
+    static const bool RAIN_DEPTH_HUE = true;
 
     int cols = t.width() / SPACING;
     if (cols > MAX_COLS) cols = MAX_COLS;
@@ -488,13 +499,6 @@ void drawDigitalRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advan
     // Wind, lightning and splashes. All three are O(cols) or O(1), and none
     // of them draws an extra glyph cell -- cells are the only thing on this
     // screen that costs real pixels, so motion is where the budget goes.
-    // Wind is precomputed per (depth band, row) rather than per cell. The
-    // first version did windOff[j] * colDepth[i] / 255 inside the inner
-    // loop -- a multiply and a divide on every one of ~1300 cells a frame,
-    // which measured 10ms. Four depth bands is visually indistinguishable
-    // and turns the inner loop back into a table lookup and an add.
-    static const uint8_t WINDBANDS = 4;
-    static int8_t   windTab[WINDBANDS][MAXTRAIL];
     // Glyphs that break loose, grow and fade. Drawn with a transparent
     // background so they read as rising OFF the rain rather than punching
     // holes in it -- at most five, so a handful of extra glyphs a frame.
@@ -502,6 +506,11 @@ void drawDigitalRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advan
     static uint16_t popX[NPOP], popY[NPOP];
     static uint8_t  popAge[NPOP], popHue[NPOP], popCh[NPOP];
     static uint32_t boltAt = 0, boltNext = 0;
+    // CRT roll bar and the VHS head-switch tear. Both are decided once per
+    // frame and applied as a per-cell comparison, so neither draws a single
+    // extra glyph.
+    static uint32_t sweepAt = 0;
+    static uint32_t tearAt = 0, tearNext = 0;
     static uint16_t splashX[6];
     static uint8_t  splashAge[6], splashHue[6];
     static bool     fxInit = false;
@@ -516,7 +525,12 @@ void drawDigitalRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advan
         ySpeed[i]   = colSurge[i] ? 2
                                   : (uint8_t)(5 - ((uint16_t)colDepth[i] * 3u) / 255u);
         if (ySpeed[i] < 1) ySpeed[i] = 1;
-        colHue[i]   = (uint8_t)random(0, 4);
+        // Hue follows depth rather than being rolled at random: far drops
+        // run cool, near ones warm, so the field reads as having space in
+        // it instead of four colours scattered arbitrarily. Set
+        // RAIN_DEPTH_HUE to false for the old random roll.
+        colHue[i]   = RAIN_DEPTH_HUE ? (uint8_t)(colDepth[i] >> 6)
+                                     : (uint8_t)random(0, 4);
         colLen[i]   = colSurge[i] ? MAXTRAIL : (uint8_t)random(MINTRAIL, MAXTRAIL + 1);
         yTick[i]    = (uint8_t)random(0, ySpeed[i] ? ySpeed[i] : 1);
         yPos[i]     = anywhere ? (int16_t)random(yStart, yEnd)
@@ -539,17 +553,6 @@ void drawDigitalRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advan
         fxInit = true;
     }
 
-    // WIND. One shared curve sampled per ROW of the trail, not per column,
-    // so a drop bends into an S rather than the whole field sliding sideways
-    // together. Twenty-four sinf calls a frame gives every cell on screen a
-    // horizontal offset for one array lookup and one add each.
-    const float gust = 2.4f + sinf((float)now / 5300.0f) * 1.8f;
-    for (int j = 0; j < MAXTRAIL; j++) {
-        const float w = sinf((float)now / 1450.0f + (float)j * 0.17f) * gust;
-        for (uint8_t b = 0; b < WINDBANDS; b++)
-            windTab[b][j] = (int8_t)(w * (float)(b + 1) / (float)WINDBANDS);
-    }
-
     // LIGHTNING. Every 14-32s the field flares white for ~140ms and decays.
     // Costs one comparison: it scales an alpha that is already computed.
     if (advance && now >= boltNext) {
@@ -559,6 +562,49 @@ void drawDigitalRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advan
     const uint32_t boltAge = now - boltAt;
     const uint16_t boltAmt = (boltAt && boltAge < 140)
                              ? (uint16_t)(160u - (boltAge * 160u) / 140u) : 0;
+
+    // CRT SWEEP. One pass down the field every ten seconds, then nothing --
+    // it used to roll continuously, which at three seconds a pass made it
+    // scenery rather than an event.
+    //
+    // What makes the bar legible is the blanking gap: the beam is off
+    // during retrace, so a few rows go DARK immediately ahead of the bright
+    // edge. Dark-then-hard-bright-then-short-decay is the whole effect. An
+    // earlier attempt was a pure brightness lift with a long falloff, which
+    // on a black field reads as a vague haze -- there is nothing for a
+    // bright edge to be bright AGAINST.
+    //
+    // Driven off elapsed time rather than an accumulator, so the pass takes
+    // the same wall-clock time regardless of frame rate, and parking it far
+    // off screen between passes means every per-cell test below is simply
+    // false for the other nine seconds.
+    static const uint32_t SWEEP_PERIOD_MS = 10000;
+    static const uint32_t SWEEP_TRAVEL_MS = 1200;
+    if (advance && (now - sweepAt) >= SWEEP_PERIOD_MS) sweepAt = now;
+    const uint32_t sweepAge = now - sweepAt;
+    const int      travel   = (yEnd - yStart) + 80;
+    const int rollAt = (sweepAt && sweepAge < SWEEP_TRAVEL_MS)
+                       ? (yStart - 40 + (int)(((uint32_t)travel * sweepAge)
+                                              / SWEEP_TRAVEL_MS))
+                       : -30000;
+
+    // VHS HEAD-SWITCH TEAR. On tape the bottom few lines are written by a
+    // different head and never quite line up, so they sit torn sideways.
+    // Here it fires as an occasional glitch rather than permanently.
+    if (advance && now >= tearNext) {
+        tearAt   = now;
+        tearNext = now + 5000u + (uint32_t)random(0, 9000);
+    }
+    const bool tearOn = (tearAt != 0) && (now - tearAt < 260u);
+    const int  tearY  = yEnd - 14;
+    const int  tearDx = tearOn ? (int)random(-7, 8) : 0;
+
+    // SQUACHY DISPLACES THE RAIN. Columns behind him are knocked back and
+    // pushed aside, so he stands IN the field rather than on top of it.
+    // Per column, not per cell -- his footprint is one comparison against
+    // each column's x.
+    int sqCx = 0, sqHalf = 0, sqTop = 0, sqBot = 0;
+    const bool sqHere = Squachy::lastFootprint(sqCx, sqHalf, sqTop, sqBot);
 
     // Full-band clear every frame, same as every other background style.
     // Without it a column that just wrapped skips its narrow vertical strip
@@ -627,18 +673,42 @@ void drawDigitalRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advan
         const int xBase = 3 + i * SPACING;
         // Near drops lean further than far ones, so a gust reads with depth
         // instead of shunting the whole screen at once.
-        const int8_t* windRow = windTab[colDepth[i] >> 6];
+        // How far into his silhouette this column falls, 0 outside.
+        int sqPush = 0, sqDim = 0;
+        if (sqHere) {
+            const int d = xBase - sqCx;
+            const int a = d < 0 ? -d : d;
+            if (a < sqHalf + 10) {
+                // Nearest the middle of him gets pushed hardest and dimmed
+                // most; it tapers off to nothing at the edge of the push
+                // zone so there is no hard line down the screen.
+                const int strength = ((sqHalf + 10) - a) * 255 / (sqHalf + 10);
+                sqPush = ((d < 0 ? -1 : 1) * strength * 7) / 255;
+                sqDim  = strength;
+            }
+        }
         for (int j = 0; j < len; j++) {
             const int16_t ry = (int16_t)(yPos[i] - j * 8);
             if (ry < yStart || ry >= yEnd) continue;
             // Near drops lean further than far ones, so a gust reads with
             // depth instead of shunting the whole screen at once.
-            const int x = xBase + windRow[j];
+            int x = xBase + sqPush;
+            // Inside the roll bar the row is dragged sideways; on the tear
+            // it is dragged further still.
+            const int rd = ry - rollAt;
+            // Rows inside the bright core get dragged sideways, the way a
+            // tracking error smears the lines it passes through.
+            if (rd >= 0 && rd < 4)       x += 5 - rd;
+            if (tearOn && ry >= tearY)   x += tearDx;
 
             // Fade in across the top few rows. Drops used to appear at full
             // brightness the instant they crossed yStart, which popped.
             uint16_t edge = 255;
             if (ry < yStart + 16) edge = (uint16_t)(((ry - yStart) * 255) / 16);
+            // Only dim behind him where he actually is vertically, so the
+            // rain above and below his head is untouched.
+            if (sqDim && ry >= sqTop && ry <= sqBot)
+                edge = (uint16_t)((edge * (uint16_t)(255 - (sqDim * 3) / 4)) / 255u);
 
             const char buf[2] = { GLYPHS[charBuf[i][j]], 0 };
             uint16_t fg, bg;
@@ -648,7 +718,11 @@ void drawDigitalRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advan
             // white runs three cells deep instead of one.
             const int hot = surge ? 3 : 1;
             if (j < hot) {
-                const uint16_t a = (uint16_t)(((uint32_t)deep * edge) / 255u);
+                uint16_t a = (uint16_t)(((uint32_t)deep * edge) / 255u);
+                // Heads blank across the retrace gap too -- a bar that only
+                // suppressed the trails would leave the heads hanging in
+                // the dark, which reads as a bug rather than a sweep.
+                if (rd >= -5 && rd < 0) a = (uint16_t)(a / 7u);
                 fg = blend(BG, WHITE, a);
                 (void)boltAmt;
                 // The glow is free: the glyph's own opaque background fill is
@@ -662,8 +736,21 @@ void drawDigitalRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advan
                 // Lightning lifts the trail toward white without touching
                 // the heads, which are already white -- so the flash reads
                 // as the whole field catching the light, not as a fade.
-                fg = boltAmt ? blend(blend(BG, hue, (uint16_t)a), WHITE, boltAmt)
-                             : blend(BG, hue, (uint16_t)a);
+                // Retrace gap: five rows immediately ahead of the bar are
+                // knocked down to near nothing. This is what the bright
+                // edge is read against.
+                if (rd >= -5 && rd < 0) a = (a * 22u) / 255u;
+                uint16_t lift = boltAmt;
+                if (rd >= 0 && rd < 18) {
+                    // Hard core for three rows, then a short decay -- short
+                    // on purpose, since a long tail is exactly the haze the
+                    // first version turned into.
+                    const uint16_t rl = (rd < 3) ? 225u
+                                                 : (uint16_t)(150u - (rd - 3) * 10u);
+                    if (rl > lift) lift = rl;
+                }
+                fg = lift ? blend(blend(BG, hue, (uint16_t)a), WHITE, lift)
+                          : blend(BG, hue, (uint16_t)a);
                 bg = (j <= hot + 1) ? blend(BG, hue, (uint16_t)(a / 6u)) : BG;
             }
             t.setTextColor(fg, bg);
@@ -1996,7 +2083,12 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     }
     if (mmLive) {
         mmX += 0.85f;
-        const int gBase = yEnd - 1;
+        // Stand him on the background floor when the screen has told us
+        // where that is. At yEnd he mowed along the very bottom of the
+        // band, which is where the detection counters are drawn on top of
+        // him -- so he was working underneath the numbers.
+        const int gBase = (s_bgFloor > yStart && s_bgFloor <= yEnd)
+                          ? s_bgFloor - 1 : yEnd - 1;
         const int colW  = (w + GRASSW - 1) / GRASSW;
         const uint16_t g1 = t.color565(60, 150, 70);
         const uint16_t g2 = t.color565(40, 110, 50);
@@ -3109,6 +3201,9 @@ void dimRegion(TFT_eSPI& t, int x, int y, int w, int h, uint8_t amount) {
     for (int yy = y + (step - 1); yy < y + h; yy += step)
         t.drawFastHLine(x, yy, w, BG);
 }
+
+void setBackgroundFloor(int y)  { s_bgFloor = y; }
+void clearBackgroundFloor()     { s_bgFloor = -1; }
 
 // Single place that maps the Settings background choice onto a
 // renderer. Lifted out of uiClearTick(), which owned it while CLEAR was

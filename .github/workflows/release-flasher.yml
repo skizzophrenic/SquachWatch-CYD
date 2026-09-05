@@ -230,6 +230,53 @@ jobs:
           cp web-flasher/emulator/squachsim.js   _site/emulator/squachsim.js
           cp web-flasher/emulator/squachsim.wasm _site/emulator/squachsim.wasm
 
+      - name: Keep the previous two releases flashable
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
+        run: |
+          # Release assets carry no CORS headers, so a browser cannot fetch
+          # them from the Releases tab -- everything the flasher touches has
+          # to be same-origin on Pages. And a Pages deploy replaces the whole
+          # site, so older builds only stay reachable if this run puts them
+          # back. CI downloads them server-side, where CORS does not apply.
+          #
+          # Two previous versions is the point where this stops being free:
+          # each one is 15 binaries, so the site grows by roughly its own
+          # size again per version retained.
+          PREV=$(gh release list --limit 12 --json tagName -q '.[].tagName' \
+                 | grep -v "^${TAG}$" | head -2)
+          for tag in $PREV; do
+            mkdir -p "_site/$tag"
+            # The manifests are release assets too, already stamped with
+            # that release's version, and they name the same relative
+            # paths -- so dropping a manifest into its own release's
+            # directory resolves to that release's binaries with no
+            # rewriting at all.
+            gh release download "$tag" -D "_site/$tag" \
+              -p '*-bootloader.bin' -p '*-partitions.bin' \
+              -p '*-firmware.bin' -p 'manifest-*.json' \
+              || echo "::warning::could not fetch $tag; skipping it"
+          done
+
+          # What the flasher offers in its version picker. Written as a
+          # file rather than inlined into index.html so the page stays a
+          # static asset that does not need regenerating.
+          {
+            echo '{'
+            echo "  \"latest\": \"${TAG}\","
+            echo '  "versions": ['
+            echo "    { \"tag\": \"${TAG}\", \"dir\": \"\" }"
+            for tag in $PREV; do
+              if [ -f "_site/$tag/manifest-cyd.json" ]; then
+                echo "    ,{ \"tag\": \"$tag\", \"dir\": \"$tag/\" }"
+              fi
+            done
+            echo '  ]'
+            echo '}'
+          } > _site/versions.json
+          cat _site/versions.json
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

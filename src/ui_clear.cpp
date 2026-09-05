@@ -132,7 +132,12 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
 
     // Background animation, from below the title bar down to just
     // above the button bar — style picked from the settings menu.
+    // The counters get drawn over the band further down, so tell the
+    // background where its usable floor really is before it places
+    // anything that stands on the ground.
+    Theme::setBackgroundFloor(countersTop);
     Theme::drawActiveBackground(t, now, titleBottom, rainEnd, eng, advance);
+    Theme::clearBackgroundFloor();
 
     // Squachy: main character, reacts to events, cracks jokes when idle.
     // His available region runs all the way to countersTop (not

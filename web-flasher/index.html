@@ -349,6 +349,8 @@
     color:var(--vapor-blue);
     margin-bottom:6px;
   }
+  .version-row{margin:0 0 18px}
+  .version-hint{margin:7px 0 0;font-size:13px;opacity:.72}
   .board-select{
     display:block;
     width:100%;
@@ -666,6 +668,15 @@
   <div class="card">
     <h2>FLASH YOUR DETECTOR</h2>
     <p class="version-note" id="versionNote">checking latest version&hellip;</p>
+
+    <div class="version-row" id="versionRow" hidden>
+      <label class="board-picker-label" for="versionSelect">Firmware version:</label>
+      <select class="board-select" id="versionSelect" aria-label="Firmware version">
+      </select>
+      <p class="version-hint">
+        On the latest build and stuck in a boot loop? Flash the one before it.
+      </p>
+    </div>
 
     <label class="board-picker-label" for="boardSelect">Select your board:</label>
     <select class="board-select" id="boardSelect" aria-label="Board select">
@@ -1436,6 +1447,34 @@
     var OVERCLOCK_LINE =
       "Overclock, huh. If it comes up white or torn, that panel said no — flash again with the box unticked.";
 
+    // Which release directory the manifest lives in. "" is the latest,
+    // which sits at the site root; older ones are in <tag>/ subdirectories
+    // laid down by the release workflow.
+    var verDir = '';
+    var verSel = document.getElementById('versionSelect');
+    var verRow = document.getElementById('versionRow');
+
+    fetch('./versions.json', { cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (v) {
+        if (!v || !v.versions || v.versions.length < 2) return;   // nothing to roll back to
+        v.versions.forEach(function (e, i) {
+          var o = document.createElement('option');
+          o.value = e.dir;
+          o.textContent = e.tag + (i === 0 ? ' (latest)' : '');
+          verSel.appendChild(o);
+        });
+        if (verRow) verRow.hidden = false;
+      })
+      .catch(function () { /* no picker; latest still works */ });
+
+    if (verSel) {
+      verSel.addEventListener('change', function () {
+        verDir = verSel.value;
+        applySelection('version');
+      });
+    }
+
     function applySelection(announce) {
       var opt = select.options[select.selectedIndex];
       var fast = opt.dataset.fast;
@@ -1445,12 +1484,18 @@
         if (ocDesc) ocDesc.textContent = fast ? OC_DESC_ON : OC_DESC_OFF;
       }
       var useFast = !!fast && !!(ocChk && ocChk.checked && !ocChk.disabled);
-      var manifest = useFast ? fast : opt.value;
+      // Board and overclock choose WHICH manifest; the version picker
+      // chooses which release's copy of it. The manifest's own relative
+      // paths then resolve to the binaries beside it.
+      var manifest = './' + verDir + (useFast ? fast : opt.value).replace(/^\.\//, '');
       installBtn.setAttribute('manifest', manifest);
       var isCyd28 = opt.dataset.cyd28 === '1';
       if (note) note.hidden = !isCyd28;
       if (announce === 'board' && isCyd28) say(WHITE_SCREEN_LINE, 8000);
       if (announce === 'overclock' && useFast) say(OVERCLOCK_LINE, 8000);
+      if (announce === 'version' && verDir) {
+        say("Rolling back. If that one behaves, tell me which build broke it.", 8000);
+      }
       loadVersion(manifest);
     }
 

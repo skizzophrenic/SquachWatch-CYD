@@ -817,6 +817,15 @@ void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal, uint32_t hitCo
     nextIdleAt = now + 15000 + random(0, 15000);
 }
 
+bool lastFootprint(int& cx, int& halfW, int& top, int& bot) {
+    if (s_lastCx < -5000) return false;
+    cx    = s_lastCx;
+    halfW = (int)(24 * s_lastScale);
+    top   = s_lastHeadTopY - (int)(20 * s_lastScale);
+    bot   = s_lastHeadTopY + (int)(62 * s_lastScale);
+    return true;
+}
+
 bool hitTest(int x, int y) {
     // Generous fixed bounding box (not a pixel-perfect silhouette
     // test) sized off his last known position/scale — good enough for
@@ -1673,6 +1682,21 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     }
 
     // Shadow (fixed, doesn't bob)
+    // Silhouette keyline helpers. Drawn as slightly expanded copies UNDER
+    // each shape, so no per-pose outline maths is needed -- whatever the
+    // limb does, its outline does too.
+    const uint16_t keyCol = blend(FUR_DARK, BLACK, 150);
+    const int kb = (S(1) < 1) ? 1 : S(1);          // rim thickness, min 1px
+    auto keyRR = [&](int x, int y, int w, int h, int r) {
+        if (SQUACHY_KEYLINE) t.fillRoundRect(x - kb, y - kb, w + 2 * kb, h + 2 * kb, r, keyCol);
+    };
+    auto keyR = [&](int x, int y, int w, int h) {
+        if (SQUACHY_KEYLINE) t.fillRect(x - kb, y - kb, w + 2 * kb, h + 2 * kb, keyCol);
+    };
+    auto keyW = [&](int x0, int y0, int x1, int y1, int w) {
+        if (SQUACHY_KEYLINE) t.drawWideLine(x0, y0, x1, y1, w + 2 * kb, keyCol);
+    };
+
     // ---- silhouette keyline -------------------------------------------
     // A dark outline one pixel proud of every major mass. Squachy's own
     // darkest brown is close to several of the backgrounds -- he sinks
@@ -1684,15 +1708,18 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     // have to be recomputed per pose, where an oversized copy just works.
     // Flip SQUACHY_KEYLINE to false to take the whole thing back out.
     if (SQUACHY_KEYLINE) {
-        const uint16_t key = blend(FUR_DARK, BLACK, 150);
-        t.fillRoundRect(cx2 - S(16), hy - S(1), S(32), S(26), S(8), key);
-        t.fillRoundRect(cx2 - S(16), hy + S(22), S(32), S(20), S(6), key);
-        t.fillRoundRect(cx2 - S(19), hy + S(21), S(10), S(24), S(4), key);
-        t.fillRoundRect(cx2 + S(9),  hy + S(21), S(10), S(24), S(4), key);
-        t.fillRect(cx2 - S(11), hy + S(39), S(10), S(12), key);
-        t.fillRect(cx2 + S(1),  hy + S(39), S(10), S(12), key);
-        t.fillRoundRect(cx2 - S(14), hy + S(48), S(14), S(8), S(3), key);
-        t.fillRoundRect(cx2,         hy + S(48), S(14), S(8), S(3), key);
+        // Head and torso ONLY. Both are anchored to hy, which already
+        // carries the bob, so a copy drawn here stays under them.
+        //
+        // Arms and legs are deliberately not outlined here. They move --
+        // legs lift on the walk cycle, arms sway on idle, and several
+        // moods throw the arms out as wide lines at entirely different
+        // angles. An outline drawn once at the neutral pose stays put
+        // while the limb slides out from under it, which is exactly the
+        // "outline isn't stuck to him" effect. Each limb draws its own,
+        // immediately before itself, further down.
+        t.fillRoundRect(cx2 - S(16), hy - S(1), S(32), S(26), S(8), keyCol);
+        t.fillRoundRect(cx2 - S(16), hy + S(22), S(32), S(20), S(6), keyCol);
     }
 
     t.fillEllipse(cx2, headTopY + S(62), S(18), S(4), blend(BG, FUR_DARK, 70));
@@ -1705,11 +1732,19 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         float legPhase = (float)(now % 400) / 400.0f * 6.2831853f;
         int legL = (int)(sinf(legPhase) * S(3));
         int legR = (int)(sinf(legPhase + 3.14159265f) * S(3));
+        keyR(cx2 - S(10), hy + S(40) + legL, S(8), S(10) - legL);
+        keyR(cx2 + S(2),  hy + S(40) + legR, S(8), S(10) - legR);
+        keyRR(cx2 - S(13), hy + S(49) + legL, S(12), S(6), 2);
+        keyRR(cx2 + S(1),  hy + S(49) + legR, S(12), S(6), 2);
         t.fillRect(cx2 - S(10), hy + S(40) + legL, S(8), S(10) - legL, furMain);
         t.fillRect(cx2 + S(2),  hy + S(40) + legR, S(8), S(10) - legR, furMain);
         t.fillRoundRect(cx2 - S(13), hy + S(49) + legL, S(12), S(6), 2, furLight);
         t.fillRoundRect(cx2 + S(1),  hy + S(49) + legR, S(12), S(6), 2, furLight);
     } else {
+        keyR(cx2 - S(10), hy + S(40), S(8), S(10));
+        keyR(cx2 + S(2),  hy + S(40), S(8), S(10));
+        keyRR(cx2 - S(13), hy + S(49), S(12), S(6), 2);
+        keyRR(cx2 + S(1),  hy + S(49), S(12), S(6), 2);
         t.fillRect(cx2 - S(10), hy + S(40), S(8), S(10), furMain);
         t.fillRect(cx2 + S(2),  hy + S(40), S(8), S(10), furMain);
         t.fillRoundRect(cx2 - S(13), hy + S(49), S(12), S(6), 2, furLight);
@@ -1732,7 +1767,9 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         float wa = -1.0f + sinf((float)(now % 400) / 400.0f * 6.2831853f) * 0.5f;
         float ex = cx2 + S(13) + cosf(wa) * (18.0f * scale);
         float ey = hy + S(28) + sinf(wa) * (18.0f * scale);
+        keyW(cx2 + S(11), hy + S(28), ex, ey, S(7));
         t.drawWideLine(cx2 + S(11), hy + S(28), ex, ey, S(7), furLight);
+        keyRR(cx2 - S(18), hy + S(22), S(8), S(22), S(3));
         t.fillRoundRect(cx2 - S(18), hy + S(22), S(8), S(22), S(3), furLight);
     } else if (m == Mood::SHOCKED) {
         // Fast small shake layered onto whichever pose reactPoseFor()
@@ -1744,7 +1781,9 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         int shake = (int)(sinf(shakeT) * S(2));
         switch (reactPoseFor(s_reactType)) {
             case ReactPose::HANDS_UP:
+                keyW(cx2 - S(11), hy + S(26), cx2 - S(14) + shake, hy - S(10), S(7));
                 t.drawWideLine(cx2 - S(11), hy + S(26), cx2 - S(14) + shake, hy - S(10), S(7), furLight);
+                keyW(cx2 + S(11), hy + S(26), cx2 + S(14) + shake, hy - S(10), S(7));
                 t.drawWideLine(cx2 + S(11), hy + S(26), cx2 + S(14) + shake, hy - S(10), S(7), furLight);
                 break;
             case ReactPose::COVER_FACE:
@@ -1755,13 +1794,16 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
             case ReactPose::DISGUST:
                 // Resting arm now; the pointing/covering arm is drawn
                 // after the head for the same in-front-of-face reason.
-                t.fillRoundRect(cx2 - S(18), hy + S(22), S(8), S(22), S(3), furLight);
+                keyRR(cx2 - S(18), hy + S(22), S(8), S(22), S(3));
+        t.fillRoundRect(cx2 - S(18), hy + S(22), S(8), S(22), S(3), furLight);
                 break;
             case ReactPose::LOOK_UP:
             case ReactPose::LOOK_AROUND:
             case ReactPose::STARTLED:
             default:
+                keyW(cx2 - S(11), hy + S(26), cx2 - S(23) + shake, hy + S(10), S(7));
                 t.drawWideLine(cx2 - S(11), hy + S(26), cx2 - S(23) + shake, hy + S(10), S(7), furLight);
+                keyW(cx2 + S(11), hy + S(26), cx2 + S(23) + shake, hy + S(10), S(7));
                 t.drawWideLine(cx2 + S(11), hy + S(26), cx2 + S(23) + shake, hy + S(10), S(7), furLight);
                 break;
         }
@@ -1781,7 +1823,9 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         // the arm detaching mid-move instead of swinging from it.
         float daT = (float)(now % 500) / 500.0f * 6.2831853f;
         int armX = (int)(sinf(daT) * S(11));
+        keyW(cx2 - S(14), hy + S(20), cx2 - S(14) + armX, hy + S(44), S(8));
         t.drawWideLine(cx2 - S(14), hy + S(20), cx2 - S(14) + armX, hy + S(44), S(8), furLight);
+        keyW(cx2 + S(14), hy + S(20), cx2 + S(14) + armX, hy + S(44), S(8));
         t.drawWideLine(cx2 + S(14), hy + S(20), cx2 + S(14) + armX, hy + S(44), S(8), furLight);
     } else if (m == Mood::WALK) {
         // Opposite-arm-opposite-leg swing, same phase the legs above
@@ -1791,12 +1835,16 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         float legPhase = (float)(now % 400) / 400.0f * 6.2831853f;
         int armL = (int)(sinf(legPhase + 3.14159265f) * S(4));
         int armR = (int)(sinf(legPhase) * S(4));
+        keyRR(cx2 - S(18), hy + S(22) + armL, S(8), S(22), S(3));
         t.fillRoundRect(cx2 - S(18), hy + S(22) + armL, S(8), S(22), S(3), furLight);
+        keyRR(cx2 + S(10), hy + S(22) + armR, S(8), S(22), S(3));
         t.fillRoundRect(cx2 + S(10), hy + S(22) + armR, S(8), S(22), S(3), furLight);
     } else if (m == Mood::SLEEPY) {
         // Static/droopy on purpose -- motion here would fight the
         // "tired" read the rest of this pose is going for.
+        keyRR(cx2 - S(18), hy + S(22), S(8), S(22), S(3));
         t.fillRoundRect(cx2 - S(18), hy + S(22), S(8), S(22), S(3), furLight);
+        keyRR(cx2 + S(10), hy + S(22), S(8), S(22), S(3));
         t.fillRoundRect(cx2 + S(10), hy + S(22), S(8), S(22), S(3), furLight);
     } else {
         // IDLE/BOUNCE -- gentle continuous opposing sway so just
@@ -1804,7 +1852,9 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         float armPhase = (float)(now % 1800) / 1800.0f * 6.2831853f;
         int armSwingL = (int)(sinf(armPhase) * S(3));
         int armSwingR = (int)(sinf(armPhase + 3.14159265f) * S(3));
+        keyRR(cx2 - S(18), hy + S(22) + armSwingL, S(8), S(22), S(3));
         t.fillRoundRect(cx2 - S(18), hy + S(22) + armSwingL, S(8), S(22), S(3), furLight);
+        keyRR(cx2 + S(10), hy + S(22) + armSwingR, S(8), S(22), S(3));
         t.fillRoundRect(cx2 + S(10), hy + S(22) + armSwingR, S(8), S(22), S(3), furLight);
     }
 
@@ -1871,11 +1921,15 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         // the face, so it's drawn last, in front of the head just
         // painted above, instead of underneath it with the other arm.
         if (pose == ReactPose::COVER_FACE) {
+            keyW(cx2 - S(11), hy + S(26), cx2 + S(7), hy + S(6), S(7));
             t.drawWideLine(cx2 - S(11), hy + S(26), cx2 + S(7), hy + S(6), S(7), furLight);
+            keyW(cx2 + S(11), hy + S(26), cx2 - S(7), hy + S(6), S(7));
             t.drawWideLine(cx2 + S(11), hy + S(26), cx2 - S(7), hy + S(6), S(7), furLight);
         } else if (pose == ReactPose::POINT_SHADES) {
+            keyW(cx2 + S(11), hy + S(26), cx2 + S(4), hy + S(8), S(7));
             t.drawWideLine(cx2 + S(11), hy + S(26), cx2 + S(4), hy + S(8), S(7), furLight);
         } else if (pose == ReactPose::DISGUST) {
+            keyW(cx2 + S(11), hy + S(26), cx2, hy + S(17), S(7));
             t.drawWideLine(cx2 + S(11), hy + S(26), cx2, hy + S(17), S(7), furLight);
         }
     } else if (m == Mood::SLEEPY) {
