@@ -73,8 +73,11 @@ enum class AppState : uint8_t {
                        // (the "HUNT" choice alongside WATCH/CANCEL)
     COLOR_CHECK = 11, // first-boot RED/GREEN/BLUE display sanity check,
                        // also reachable later via Settings' "CHECK COLORS" row
-    DETECTION_FILTER = 12  // per-type detection on/off, reached via
+    DETECTION_FILTER = 12, // per-type detection on/off, reached via
                             // Settings' "DETECTION FILTER" row
+    OUTFIT_UNLOCK    = 13  // "OUTFIT UNLOCKED" celebration, pushed
+                            // automatically whenever Squachy earns a new
+                            // costume; returns to CLEAR when dismissed
 };
 
 enum class ButtonId : uint8_t {

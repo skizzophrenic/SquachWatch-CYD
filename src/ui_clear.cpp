@@ -132,19 +132,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
 
     // Background animation, from below the title bar down to just
     // above the button bar — style picked from the settings menu.
-    switch (Settings::background()) {
-        case Settings::Background::STARFIELD: Theme::drawStarfield(t, now, titleBottom, rainEnd); break;
-        case Settings::Background::TOASTERS:   Theme::drawFlyingToasters(t, now, titleBottom, rainEnd); break;
-        case Settings::Background::AQUARIUM:   Theme::drawAquarium(t, now, titleBottom, rainEnd); break;
-        case Settings::Background::TERMINAL:   Theme::drawTerminalLog(t, now, titleBottom, rainEnd); break;
-        case Settings::Background::FIREFLIES:  Theme::drawFireflies(t, now, titleBottom, rainEnd); break;
-        case Settings::Background::FIRE:       Theme::drawFire(t, now, titleBottom, rainEnd); break;
-        case Settings::Background::SNOWFALL:   Theme::drawSnowfall(t, now, titleBottom, rainEnd); break;
-        case Settings::Background::SPECTRUM:   Theme::drawSpectrumWaterfall(t, now, titleBottom, rainEnd, eng); break;
-        case Settings::Background::TUNNEL:     Theme::drawWireframeTunnel(t, now, titleBottom, rainEnd); break;
-        case Settings::Background::SYNTHWAVE: Theme::drawSynthwave(t, now, titleBottom, rainEnd); break;
-        default:                               Theme::drawMatrixRain(t, now, titleBottom, rainEnd, advance); break;
-    }
+    Theme::drawActiveBackground(t, now, titleBottom, rainEnd, eng, advance);
 
     // Squachy: main character, reacts to events, cracks jokes when idle.
     // His available region runs all the way to countersTop (not

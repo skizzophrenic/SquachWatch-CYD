@@ -2,6 +2,7 @@
 #include "ui_alert.h"
 #include "theme.h"
 #include "signatures.h"
+#include "detection.h"
 #include <Arduino.h>
 
 static const char* targetLabel(DetectionType t) {
@@ -26,6 +27,14 @@ static const char* targetLabel(DetectionType t) {
 
 static Detection s_last;
 static bool s_touched = false;
+
+// Whether the player's selected background animates behind the alert.
+// Kept as a named constant rather than inlined so it is one edit to take
+// back out, and 0..255 of dim so it can be tuned without touching the
+// draw order.
+static const bool     ALERT_SHOW_BACKGROUND = true;
+static const uint16_t ALERT_PALETTE_DIM     = 150;  // palette knock-back
+static const uint8_t  ALERT_BACKGROUND_DIM  = 128;  // every other row to BG
 
 // ALERT gets its own deliberate glitch cadence instead of waiting on
 // the shared ambient 5-10s roll -- one right away (so the screen reads
@@ -117,7 +126,7 @@ bool uiAlertHitMoreInfo(int x, int y, int screenW, int screenH) {
     return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
 }
 
-void uiAlertTick(TFT_eSPI& t, uint32_t now,
+void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
                  bool infoPending, const char* infoTypeName, const char* infoText) {
     int w = t.width();
     int h = t.height();
@@ -133,11 +142,28 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now,
         s_glitchStep++;
     }
 
-    // Ambient background, themed to what was actually detected — draws
-    // first since it fully repaints the whole w x h region every call,
-    // same as the CLEAR-screen backgrounds. Everything below (border,
-    // text) draws on top of it.
-    Theme::drawAlertFx(t, s_last.type, now, w, h);
+    // The player's chosen background runs behind the alert, then the
+    // themed detection FX layer on top of it without their own erase.
+    // Dimmed on the way past: at full brightness a starfield or a fire
+    // competes with the headline type for attention, and this screen has
+    // to stay readable first. ALERT_SHOW_BACKGROUND is the single switch
+    // if that turns out to be the wrong call -- false restores the flat
+    // Theme::BG this screen had before.
+    if (ALERT_SHOW_BACKGROUND) {
+        // Two-stage knock-back, both cheap. The palette dim costs
+        // nothing at all -- the background renderers read these globals,
+        // so they simply draw darker -- but it only reaches colours that
+        // come from the palette, and several backgrounds (the starfield's
+        // tunnel rings and planets especially) pack their own literals.
+        // The scanline pass catches whatever the palette could not.
+        Theme::Palette saved = Theme::dimPaletteForOverlay(ALERT_PALETTE_DIM);
+        Theme::drawActiveBackground(t, now, 0, h, eng);
+        Theme::restorePalette(saved);
+        Theme::dimRegion(t, 0, 0, w, h, ALERT_BACKGROUND_DIM);
+        Theme::drawAlertFx(t, s_last.type, now, w, h, false);
+    } else {
+        Theme::drawAlertFx(t, s_last.type, now, w, h);
+    }
 
     // Pulsing border (6 px, PINK <-> VAPOR_PINK)
     Theme::drawPulsingBorder(t, now, Theme::VAPOR_PINK, Theme::PINK, 6);

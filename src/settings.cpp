@@ -45,7 +45,12 @@ void load() {
     s_prefs.begin("settings", false);
     s_palette    = (uint8_t)s_prefs.getUChar("pal", 0);
     if (s_palette >= Theme::PALETTE_COUNT) s_palette = 0;
-    s_background = (Background)s_prefs.getUChar("bg", (uint8_t)Background::MATRIX);
+    // SYNTHWAVE is the default a fresh device comes up on -- it is the
+    // scene the boot splash already uses, so first power-on flows from
+    // the splash into the same sunset instead of switching to something
+    // else the moment onboarding ends. Only affects installs with no
+    // saved value; anyone who has ever picked a background keeps theirs.
+    s_background = (Background)s_prefs.getUChar("bg", (uint8_t)Background::SYNTHWAVE);
     if ((uint8_t)s_background >= BACKGROUND_COUNT) s_background = Background::MATRIX;
     s_inverted   = s_prefs.getBool("inv", false);
     s_rgbSwapped = s_prefs.getBool("rgbswap", false);

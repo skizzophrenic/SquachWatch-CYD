@@ -4,6 +4,8 @@
 #include <stdint.h>
 #include "state.h"
 
+class DetectionEngine;
+
 void uiAlertInit(TFT_eSPI& t, const Detection& d);
 // infoPending/infoTypeName/infoText: drawn on top of the normal ALERT
 // screen (which keeps rendering underneath, same as LOG's confirm/info
@@ -12,7 +14,10 @@ void uiAlertInit(TFT_eSPI& t, const Detection& d);
 // uiAlertHitMoreInfo() below); both strings are ignored when
 // infoPending is false. main.cpp owns all three, same pattern as
 // ui_log.h's uiLogTick().
-void uiAlertTick(TFT_eSPI& t, uint32_t now,
+// eng is only needed so the player's selected background can animate
+// behind the alert -- SPECTRUM is the one background that reads live
+// radio state. See ALERT_SHOW_BACKGROUND in the implementation.
+void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
                  bool infoPending, const char* infoTypeName, const char* infoText);
 bool uiAlertTouched();   // any touch since uiAlertInit
 

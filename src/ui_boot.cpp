@@ -32,6 +32,15 @@ static const char* BOOT_LINES[] = {
 static const uint8_t BOOT_LINE_COUNT = sizeof(BOOT_LINES) / sizeof(BOOT_LINES[0]);
 static uint8_t s_bootLineIdx = 0;
 
+// When this splash started, and how far through its scripted glitch
+// bursts we are. The subtitle's chromatic split rides the shared burst
+// (Theme::glitchActive()), but that rolls on its own every 5-10s while
+// the splash only lasts 3000ms -- so left to the ambient schedule the
+// effect would usually never fire during a boot at all. Driving the
+// same shared burst deliberately is what triggerGlitchBurst() is for.
+static uint32_t s_bootAt      = 0;
+static uint8_t  s_glitchStage = 0;
+
 void uiBootInit(TFT_eSPI& t) {
     // fillScreen() relies on TFT_eSPI's base-class width/height, which
     // TFT_eSprite::createSprite() never updates — it leaves stale
@@ -39,9 +48,20 @@ void uiBootInit(TFT_eSPI& t) {
     // correctly-overridden) width()/height() clears the whole thing.
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
     s_bootLineIdx = (uint8_t)random(0, BOOT_LINE_COUNT);
+    s_bootAt      = 0;
+    s_glitchStage = 0;
 }
 
 void uiBootTick(TFT_eSPI& t, uint32_t now) {
+    if (s_bootAt == 0) s_bootAt = now ? now : 1;
+    const uint32_t bootEl = now - s_bootAt;
+    // Two bursts inside the 3s window: one early enough to be seen, one
+    // late enough to feel like the thing is still settling. Intensities
+    // stay mild -- 3 and up add a full-screen pixel-shift tear, which
+    // on a splash reads as a fault rather than as style.
+    if (s_glitchStage == 0 && bootEl > 500)  { Theme::triggerGlitchBurst(2); s_glitchStage = 1; }
+    if (s_glitchStage == 1 && bootEl > 1750) { Theme::triggerGlitchBurst(1); s_glitchStage = 2; }
+
     int w = t.width();
     int h = t.height();
     int yHoriz = (h * 5) / 8;
@@ -84,39 +104,72 @@ void uiBootTick(TFT_eSPI& t, uint32_t now) {
         t.drawFastHLine(x, 46, 1, Theme::titlebarColor(x, w));
     }
 
-    // TALKING SASQUACH subtitle — the brand line under the product
+    // TALKING SASQUACH subtitle -- the brand line under the product
     // name, not just the product name again.
     //
-    // Black outlined, same as the title above and for the same reason:
-    // it sits over the sunset, and purple against the sun's oranges has
-    // almost no separation where the two overlap.
+    // Chromatic: a white core with cyan and magenta copies split either
+    // side, over a hard black drop shadow. The shadow replaces the old
+    // 8-way outline and does the same job -- purple over the sun's
+    // oranges had almost no separation -- but reads as depth rather
+    // than as a sticker.
     //
-    // One pixel, not the title's three. This is the built-in font at
-    // size 2, so the strokes are already only two pixels wide -- a
-    // heavier outline competes with the letterform instead of just
-    // separating it from the background, and the counters in A, G and Q
-    // start filling in.
+    // The split rides Theme::glitchActive(), the shared burst the
+    // Bangers headings already roll every 5-10s, rather than running a
+    // timer of its own. That is the whole point of that flag being
+    // exposed: when the wordmark above corrupts, this corrupts with it
+    // and the two read as one event instead of two things that happen
+    // to twitch near each other.
     //
-    // All eight neighbours, so the stroke closes on the diagonals too;
-    // the four-way cross alternative leaves visible gaps at every corner
-    // of a glyph. The single-argument setTextColor leaves the background
-    // transparent, which is what lets the copies build a stroke instead
-    // of each one painting a box over the last.
+    // Deliberately NOT built with setViewport, which is the obvious way
+    // to slice a proper tear: real TFT_eSPI moves the drawing origin
+    // when a viewport is set (vpDatum defaults to true) while the
+    // emulator shim ignores that argument and treats it as a pure clip
+    // rectangle. Anything built on it would look correct in one and
+    // wrong on the other, and the emulator is where this gets checked.
     t.setTextSize(2);
     const char* sub = "TALKING SASQUACH";
-    int sw = t.textWidth(sub);
+    const int sw = t.textWidth(sub);
     const int sx = (w - sw) / 2;
+    const int sy = 54;
+
+    const bool glitch = Theme::glitchActive();
+    const int  split  = glitch ? 3 + (int)random(0, 3) : 1;
+    const int  jitter = glitch ? (int)random(-2, 3) : 0;
+
+    // Shadow first, so everything else sits on top of it. Two pixels
+    // down and right: enough to lift the word off the sunset without
+    // the gap reading as a second, blurrier copy of the text.
     t.setTextColor(Theme::BLACK);
-    for (int dy = -1; dy <= 1; dy++) {
-        for (int dx = -1; dx <= 1; dx++) {
-            if (dx == 0 && dy == 0) continue;
-            t.setCursor(sx + dx, 54 + dy);
-            t.print(sub);
-        }
-    }
-    t.setTextColor(Theme::VAPOR_PURPLE);
-    t.setCursor(sx, 54);
+    t.setCursor(sx + 2, sy + 2);
     t.print(sub);
+
+    // Magenta trails right, cyan leads left -- the direction a
+    // mistracked CRT actually smears.
+    t.setTextColor(Theme::PINK);
+    t.setCursor(sx + split + jitter, sy);
+    t.print(sub);
+    t.setTextColor(Theme::CYAN);
+    t.setCursor(sx - split + jitter, sy);
+    t.print(sub);
+
+    // Burst only: one more cyan copy dropped a row or two, like a scan
+    // that failed to land. Kept to a couple of rows so it reads as a
+    // fault and not as a second line of text.
+    if (glitch) {
+        t.setTextColor(Theme::CYAN);
+        t.setCursor(sx + jitter * 2, sy + 1 + (int)random(0, 2));
+        t.print(sub);
+    }
+
+    // White core last, so the word stays legible whatever the copies
+    // are doing around it.
+    t.setTextColor(Theme::WHITE);
+    t.setCursor(sx + jitter, sy);
+    t.print(sub);
+
+    // Snow over the subtitle's own box. A no-op while glitchActive() is
+    // false, so this is safe to call every frame.
+    Theme::drawGlitchStatic(t, sx - 4, sy - 2, sx + sw + 4, sy + 18);
 
     // Squachy himself, standing on the floor just past the horizon,
     // giving a friendly wave (and a little on-brand attitude) while

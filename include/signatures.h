@@ -33,9 +33,16 @@ DetectionType lookupSsid(const char* ssid);   // case-insensitive prefix
 const char* ssidVendorName(const char* ssid);
 DetectionType lookupMfgId(uint16_t mfgId);
 
-// Apple AirTag subtype check: 0x12 (near owner) or 0x1E (separated).
-// Pass the full mfg-data payload (after the 2-byte mfgId).
-bool isAirTagSubtype(const uint8_t* mfgPayload, uint8_t len);
+// AirTag check, run against the RAW advertisement bytes rather than
+// NimBLE's parsed manufacturer-data field -- pass adv->getPayload() and
+// adv->getPayloadLength(). Scanning the raw advert also catches tags
+// whose Find My structure sits behind other AD structures, or arrives
+// in a scan response, where the parsed field alone would miss it.
+//
+// See the implementation for exactly which byte patterns match and what
+// that costs; the short version is that this deliberately trades some
+// precision for actually catching a tag that has just been powered on.
+bool isAirTagPayload(const uint8_t* payload, uint8_t len);
 
 // How sure we are that a match is really what it claims to be — mirrors
 // the per-signature grading in docs/DETECTIONS.md, collapsed to one

@@ -4,6 +4,7 @@
 #include "detection.h"
 #include "bangers_font.h"
 #include "squachy.h"
+#include "settings.h"
 
 namespace Theme {
 
@@ -293,13 +294,21 @@ static void alertFxPing(TFT_eSPI& t, int cx, int cy, uint32_t now, uint16_t col,
     }
 }
 
-void drawAlertFx(TFT_eSPI& t, DetectionType type, uint32_t now, int w, int h) {
+void drawAlertFx(TFT_eSPI& t, DetectionType type, uint32_t now, int w, int h,
+                 bool clearFirst) {
     // Full repaint every call — the old single scanline this replaced
     // never erased its own trail, so it just accumulated into a wash
     // across the screen the longer an alert stayed up. Same "always
     // fully repaint" discipline the CLEAR-screen backgrounds already
     // use, for the same reason.
-    t.fillRect(0, 0, w, h, BG);
+    //
+    // clearFirst=false is for a caller that has already painted
+    // something it wants kept -- ALERT drawing the live background
+    // behind these icons. The icons themselves are all opaque fills, so
+    // they read fine over a busy backdrop; it is only the erase that has
+    // to be skipped, and that caller takes on the job of repainting the
+    // region itself (which the animated backgrounds all do anyway).
+    if (clearFirst) t.fillRect(0, 0, w, h, BG);
     int cx = w / 2;
     // The rest of this screen's text layout is dense (title, target
     // type, confidence, vendor, MAC, RSSI, radar all stacked between
@@ -572,122 +581,567 @@ void drawMatrixRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advanc
     }
 }
 
-void drawStarfield(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
-    static const uint8_t N = 44;
-    static float   sa[N];   // angle, radians
-    static float   sd[N];   // distance from center, 0..maxD
-    static float   sspeed[N];
-    static bool    inited = false;
-    static uint32_t lastMs = 0;
+// Defined below, next to the aquarium that first needed it. Declared
+// here because drawStarfield sits earlier in the file and its nebula
+// gradient is exactly the kind of smooth dark ramp RGB332 bands worst.
+static uint16_t ditherRGB(TFT_eSPI& t, float r, float g, float b, uint8_t cell);
 
-    int w = t.width();
-    int bandH = yEnd - yStart;
-    if (bandH < 4) return;
-    int cx = w / 2;
-    int cy = yStart + bandH / 2;
-    float maxD = sqrtf((float)(cx * cx + (bandH / 2) * (bandH / 2))) + 4.0f;
-
-    if (!inited) {
-        for (int i = 0; i < N; i++) {
-            sa[i]     = (float)random(0, 6283) / 1000.0f;
-            sd[i]     = (float)random(0, (int)maxD);
-            sspeed[i] = 0.6f + (float)random(0, 100) / 100.0f;
-        }
-        inited = true;
-        lastMs = now;
+// Hue helper for the nebula and the warp tint. Only used by the
+// starfield, which is the one background that wants arbitrary hues
+// rather than the fixed theme palette.
+static void hsv2rgb(float h, float s, float v, float& r, float& g, float& b) {
+    h -= floorf(h);
+    const float i = floorf(h * 6.0f);
+    const float f = h * 6.0f - i;
+    const float p = v * (1.0f - s);
+    const float q = v * (1.0f - f * s);
+    const float u = v * (1.0f - (1.0f - f) * s);
+    switch ((int)i % 6) {
+        case 0:  r = v; g = u; b = p; break;
+        case 1:  r = q; g = v; b = p; break;
+        case 2:  r = p; g = v; b = u; break;
+        case 3:  r = p; g = q; b = v; break;
+        case 4:  r = u; g = p; b = v; break;
+        default: r = v; g = p; b = q; break;
     }
-    float dt = (float)(now - lastMs) / 16.0f;   // ~1.0 at 60fps
-    if (dt > 4.0f) dt = 4.0f;
-    lastMs = now;
+}
 
-    t.fillRect(0, yStart, w, bandH, BG);
-    for (int i = 0; i < N; i++) {
-        sd[i] += sspeed[i] * dt * (0.4f + sd[i] / maxD * 1.6f);
-        if (sd[i] > maxD) {
-            sa[i] = (float)random(0, 6283) / 1000.0f;
-            sd[i] = 0;
-            sspeed[i] = 0.6f + (float)random(0, 100) / 100.0f;
+// The junk that comes through the portals. Everything is drawn from
+// primitives at an arbitrary size, so the same routine covers a speck on
+// the horizon and something filling a third of the screen -- which is
+// the whole trick behind objects that fly AT you rather than across.
+//
+// Every object opens with a black underlay: the one or two shapes that
+// define its outer contour, drawn a pixel or two oversized in black,
+// before the real art goes on top. That single pass is the biggest
+// readability win here -- without it these dissolve into a moving
+// starfield, because nothing separates object from background. It is
+// the same reason the boot subtitle carries a drop shadow.
+//
+// Below about 4px none of the detail survives, so they degrade to a
+// coloured blob rather than a smear of overlapping circles.
+static const uint8_t JUNK_KINDS = 8;
+static void drawJunk(TFT_eSPI& t, uint8_t kind, int x, int y, int s, uint32_t now) {
+    using namespace Theme;
+    if (s < 4) {
+        static const uint16_t FAR_TINT[JUNK_KINDS] = { 0 };
+        (void)FAR_TINT;
+        t.fillCircle(x, y, s < 1 ? 1 : s, VAPOR_PINK);
+        return;
+    }
+    // Proportional helper: every offset below is a fraction of s, so the
+    // art scales without a second set of numbers.
+    auto P = [s](float f) { return (int)(s * f); };
+
+    switch (kind) {
+        case 0: {   // eyeball
+            const uint16_t sclera = WHITE;
+            const uint16_t shade  = t.color565(236, 226, 234);
+            t.fillCircle(x, y, s + 1, BLACK);
+            t.fillCircle(x, y, s, sclera);
+            t.fillCircle(x - P(0.06f), y + P(0.10f), P(0.94f), shade);
+            t.fillCircle(x, y - P(0.06f), P(0.90f), sclera);
+            t.fillCircle(x + P(0.16f), y, P(0.58f), t.color565(10, 48, 120));
+            t.fillCircle(x + P(0.16f), y, P(0.50f), t.color565(26, 112, 224));
+            for (uint8_t k = 0; k < 12; k++) {          // iris spokes
+                const float a = (float)k * 0.5236f;
+                t.drawLine(x + P(0.16f) + (int)(cosf(a) * P(0.20f)),
+                           y            + (int)(sinf(a) * P(0.20f)),
+                           x + P(0.16f) + (int)(cosf(a) * P(0.48f)),
+                           y            + (int)(sinf(a) * P(0.48f)),
+                           t.color565(13, 74, 168));
+            }
+            t.fillCircle(x + P(0.16f), y, P(0.24f), BLACK);
+            t.fillCircle(x - P(0.08f), y - P(0.36f), P(0.17f), sclera);
+            t.fillCircle(x + P(0.40f), y + P(0.30f), P(0.07f) + 1, sclera);
+            const uint16_t vein = t.color565(208, 32, 32);
+            t.drawLine(x - P(0.96f), y - P(0.34f), x - P(0.34f), y - P(0.16f), vein);
+            t.drawLine(x - P(0.90f), y + P(0.44f), x - P(0.28f), y + P(0.24f), vein);
+            t.drawLine(x - P(0.62f), y - P(0.62f), x - P(0.30f), y - P(0.40f), vein);
+            break;
         }
-        int x = cx + (int)(cosf(sa[i]) * sd[i]);
-        int y = cy + (int)(sinf(sa[i]) * sd[i]);
+        case 1: {   // a face, mid-scream
+            t.fillCircle(x, y, s + 1, BLACK);
+            t.fillCircle(x, y, s, t.color565(255, 233, 92));
+            t.fillCircle(x, y + P(0.10f), P(0.94f), t.color565(245, 197, 24));
+            t.fillCircle(x, y - P(0.08f), P(0.86f), t.color565(255, 233, 92));
+            t.fillCircle(x - P(0.60f), y + P(0.28f), P(0.20f), t.color565(240, 168, 0));
+            t.fillCircle(x + P(0.60f), y + P(0.28f), P(0.20f), t.color565(240, 168, 0));
+            t.fillEllipse(x - P(0.40f), y - P(0.24f), P(0.22f) + 1, P(0.30f) + 1, BLACK);
+            t.fillEllipse(x + P(0.40f), y - P(0.24f), P(0.22f) + 1, P(0.30f) + 1, BLACK);
+            t.fillCircle(x - P(0.34f), y - P(0.34f), P(0.08f), WHITE);
+            t.fillCircle(x + P(0.46f), y - P(0.34f), P(0.08f), WHITE);
+            const uint16_t brow = t.color565(122, 82, 0);
+            t.drawWideLine(x - P(0.66f), y - P(0.62f), x - P(0.18f), y - P(0.48f), P(0.13f) + 1, brow);
+            t.drawWideLine(x + P(0.18f), y - P(0.48f), x + P(0.66f), y - P(0.62f), P(0.13f) + 1, brow);
+            t.fillEllipse(x, y + P(0.46f), P(0.42f), P(0.34f), BLACK);
+            t.fillEllipse(x, y + P(0.60f), P(0.24f), P(0.16f), t.color565(208, 48, 74));
+            t.fillRect(x - P(0.26f), y + P(0.16f), P(0.16f) + 1, P(0.13f) + 1, WHITE);
+            t.fillRect(x + P(0.10f), y + P(0.16f), P(0.16f) + 1, P(0.13f) + 1, WHITE);
+            t.fillCircle(x + P(0.92f), y - P(0.62f), P(0.13f), t.color565(127, 212, 255));
+            break;
+        }
+        case 2: {   // saucer, with an occupant
+            const uint16_t beam = blend(BG, t.color565(120, 240, 180), 80);
+            t.fillTriangle(x - P(0.28f), y + P(0.24f), x + P(0.62f), y + P(1.05f),
+                           x - P(0.62f), y + P(1.05f), beam);
+            t.fillTriangle(x - P(0.28f), y + P(0.24f), x + P(0.28f), y + P(0.24f),
+                           x + P(0.62f), y + P(1.05f), beam);
+            t.fillEllipse(x, y + P(0.06f), s + 1, P(0.34f) + 2, BLACK);
+            t.fillEllipse(x, y + P(0.34f), P(0.80f), P(0.26f), t.color565(58, 42, 96));
+            t.fillEllipse(x, y + P(0.06f), s, P(0.34f), t.color565(125, 136, 168));
+            t.fillEllipse(x, y - P(0.02f), P(0.96f), P(0.26f), t.color565(170, 182, 212));
+            t.fillEllipse(x, y - P(0.08f), P(0.90f), P(0.16f), t.color565(214, 224, 244));
+            t.fillCircle(x, y - P(0.34f), P(0.44f) + 1, BLACK);
+            t.fillCircle(x, y - P(0.34f), P(0.44f), t.color565(42, 208, 255));
+            t.fillCircle(x, y - P(0.32f), P(0.36f), t.color565(156, 240, 255));
+            t.fillCircle(x, y - P(0.30f), P(0.17f), t.color565(26, 106, 80));
+            t.fillCircle(x - P(0.07f), y - P(0.36f), P(0.05f) + 1, BLACK);
+            t.fillCircle(x + P(0.07f), y - P(0.36f), P(0.05f) + 1, BLACK);
+            t.fillCircle(x - P(0.16f), y - P(0.48f), P(0.10f), WHITE);
+            for (int k = -2; k <= 2; k++) {
+                t.fillCircle(x + k * P(0.36f), y + P(0.16f), P(0.10f) + 1,
+                             (k & 1) ? AMBER : PINK);
+            }
+            t.drawWideLine(x - P(0.30f), y + P(0.30f), x - P(0.42f), y + P(0.62f),
+                           P(0.09f) + 1, t.color565(92, 102, 132));
+            break;
+        }
+        case 3: {   // CRT television
+            const uint16_t chassis = t.color565(138, 138, 160);
+            const uint16_t hi      = t.color565(198, 198, 222);
+            const uint16_t lo      = t.color565(92, 96, 112);
+            t.drawWideLine(x - P(0.26f), y - P(0.62f), x - P(0.86f), y - P(1.30f), 2, hi);
+            t.drawWideLine(x + P(0.26f), y - P(0.62f), x + P(0.86f), y - P(1.30f), 2, hi);
+            t.fillCircle(x - P(0.86f), y - P(1.30f), P(0.09f) + 1, WHITE);
+            t.fillCircle(x + P(0.86f), y - P(1.30f), P(0.09f) + 1, WHITE);
+            t.fillRect(x - P(0.62f), y + P(0.72f), P(0.20f) + 1, P(0.26f) + 1, lo);
+            t.fillRect(x + P(0.42f), y + P(0.72f), P(0.20f) + 1, P(0.26f) + 1, lo);
+            t.fillRect(x - s - 1, y - P(0.66f) - 1, 2 * s + 3, P(1.40f) + 3, BLACK);
+            t.fillRect(x - s, y - P(0.66f), 2 * s, P(1.40f), chassis);
+            t.fillRect(x - s, y - P(0.66f), 2 * s, P(0.14f) + 1, hi);
+            t.fillRect(x - s, y + P(0.62f), 2 * s, P(0.12f) + 1, lo);
+            t.fillRect(x - P(0.86f), y - P(0.52f), P(1.42f), P(1.08f), t.color565(16, 16, 32));
+            static const uint16_t BAR[5] = { 0, 0, 0, 0, 0 };
+            (void)BAR;
+            const uint16_t bars[5] = { PINK, AMBER, VAPOR_YELLOW, CYAN, GREEN };
+            for (uint8_t k = 0; k < 5; k++) {
+                t.fillRect(x - P(0.82f) + k * P(0.27f), y - P(0.48f),
+                           P(0.25f) + 1, P(1.00f), bars[k]);
+            }
+            t.fillRect(x - P(0.82f), y - P(0.20f), P(1.35f), P(0.10f) + 1, WHITE);
+            t.fillRect(x + P(0.56f), y - P(0.52f), P(0.30f), P(1.08f), chassis);
+            t.fillCircle(x + P(0.76f), y - P(0.24f), P(0.13f) + 1, t.color565(58, 58, 74));
+            t.fillCircle(x + P(0.76f), y - P(0.24f), P(0.07f), hi);
+            t.fillCircle(x + P(0.76f), y + P(0.10f), P(0.13f) + 1, t.color565(58, 58, 74));
+            t.fillCircle(x + P(0.76f), y + P(0.10f), P(0.07f), hi);
+            for (uint8_t k = 0; k < 3; k++) {
+                t.fillRect(x + P(0.66f), y + P(0.34f) + k * (P(0.09f) + 1),
+                           P(0.22f), P(0.05f) + 1, lo);
+            }
+            break;
+        }
+        case 4: {   // burger
+            const uint16_t bunTop = t.color565(240, 180, 92);
+            const uint16_t bunLo  = t.color565(217, 144, 56);
+            t.fillEllipse(x, y - P(0.20f), s + 1, P(0.68f) + 1, BLACK);
+            t.fillEllipse(x, y - P(0.20f), s, P(0.66f), bunTop);
+            t.fillRect(x - s, y - P(0.20f), 2 * s, P(0.24f), bunLo);
+            t.fillRect(x - s, y - P(0.36f), 2 * s, P(0.22f), bunTop);
+            const float sx[5] = { -0.62f, -0.20f, 0.24f, 0.62f, 0.02f };
+            const float sy[5] = { -0.62f, -0.72f, -0.68f, -0.56f, -0.50f };
+            for (uint8_t k = 0; k < 5; k++) {
+                t.fillEllipse(x + P(sx[k]), y + P(sy[k]), P(0.11f) + 1, P(0.07f) + 1,
+                              t.color565(255, 242, 204));
+            }
+            const uint16_t lettuce = t.color565(63, 191, 95);
+            t.fillRect(x - P(1.02f), y - P(0.16f), P(2.04f), P(0.16f) + 1, lettuce);
+            for (int k = -3; k <= 3; k++) t.fillCircle(x + k * P(0.30f), y - P(0.04f), P(0.15f), lettuce);
+            t.fillEllipse(x, y + P(0.06f), P(0.94f), P(0.14f) + 1, t.color565(216, 56, 40));
+            t.fillEllipse(x, y + P(0.04f), P(0.72f), P(0.08f) + 1, t.color565(240, 96, 80));
+            t.fillRect(x - P(0.90f), y + P(0.14f), P(1.80f), P(0.16f) + 1, t.color565(255, 192, 32));
+            t.fillRect(x - P(0.58f), y + P(0.28f), P(0.20f), P(0.18f), t.color565(255, 192, 32));
+            t.fillRect(x + P(0.34f), y + P(0.28f), P(0.20f), P(0.16f), t.color565(255, 192, 32));
+            t.fillRect(x - P(0.94f), y + P(0.28f), P(1.88f), P(0.32f), t.color565(122, 61, 22));
+            t.fillRect(x - P(0.94f), y + P(0.28f), P(1.88f), P(0.08f) + 1, t.color565(152, 81, 31));
+            t.fillEllipse(x + P(0.74f), y + P(0.22f), P(0.22f), P(0.09f) + 1, t.color565(87, 176, 74));
+            t.fillEllipse(x, y + P(0.56f), P(0.94f) + 1, P(0.32f) + 1, BLACK);
+            t.fillEllipse(x, y + P(0.54f), P(0.94f), P(0.30f), t.color565(224, 162, 78));
+            t.fillRect(x - P(0.94f), y + P(0.36f), P(1.88f), P(0.18f), t.color565(224, 162, 78));
+            break;
+        }
+        case 5: {   // pizza
+            t.fillTriangle(x, y - s - 1, x - P(0.92f), y + P(0.84f),
+                           x + P(0.92f), y + P(0.84f), BLACK);
+            t.fillTriangle(x, y - P(1.02f), x - P(0.90f), y + P(0.82f),
+                           x + P(0.90f), y + P(0.82f), t.color565(232, 176, 64));
+            t.fillTriangle(x, y - P(0.82f), x - P(0.72f), y + P(0.64f),
+                           x + P(0.72f), y + P(0.64f), t.color565(192, 72, 40));
+            t.fillTriangle(x, y - P(0.66f), x - P(0.60f), y + P(0.52f),
+                           x + P(0.60f), y + P(0.52f), t.color565(248, 208, 96));
+            t.fillTriangle(x, y - P(0.60f), x - P(0.34f), y + P(0.10f),
+                           x + P(0.34f), y + P(0.10f), t.color565(255, 230, 148));
+            t.fillEllipse(x, y + P(0.80f), P(0.94f), P(0.26f), t.color565(216, 152, 64));
+            t.fillRect(x - P(0.92f), y + P(0.66f), P(1.84f), P(0.16f) + 1, t.color565(216, 152, 64));
+            const float bx[3] = { -0.55f, 0.0f, 0.55f };
+            for (uint8_t k = 0; k < 3; k++) {
+                t.fillCircle(x + P(bx[k]), y + P(0.80f), P(0.09f) + 1, t.color565(168, 106, 32));
+            }
+            const float px[3] = {  0.00f, -0.28f,  0.30f };
+            const float py[3] = { -0.20f,  0.26f,  0.22f };
+            const float pr[3] = {  0.19f,  0.16f,  0.16f };
+            for (uint8_t k = 0; k < 3; k++) {
+                const int r = P(pr[k]) + 1;
+                t.fillCircle(x + P(px[k]), y + P(py[k]), r, t.color565(142, 28, 28));
+                t.fillCircle(x + P(px[k]), y + P(py[k]), (r * 72) / 100, t.color565(212, 58, 42));
+                t.fillCircle(x + P(px[k]) - (r * 28) / 100, y + P(py[k]) - (r * 28) / 100,
+                             (r * 24) / 100, t.color565(240, 106, 82));
+            }
+            const float hx[3] = { -0.14f, 0.20f, -0.34f };
+            const float hy[3] = {  0.50f, -0.44f, -0.10f };
+            for (uint8_t k = 0; k < 3; k++) {
+                t.fillEllipse(x + P(hx[k]), y + P(hy[k]), P(0.09f) + 1, P(0.05f) + 1,
+                              t.color565(47, 143, 58));
+            }
+            break;
+        }
+        case 6: {   // toilet, lid down
+            const uint16_t porc = t.color565(228, 233, 242);
+            const uint16_t lit  = WHITE;
+            const uint16_t shad = t.color565(185, 194, 212);
+            t.fillRect(x - P(0.78f), y - P(1.08f), P(1.56f), P(0.22f) + 2, BLACK);
+            t.fillRect(x - P(0.76f), y - P(1.06f), P(1.52f), P(0.18f) + 1, porc);
+            t.fillRect(x - P(0.76f), y - P(1.06f), P(1.52f), P(0.07f) + 1, lit);
+            t.fillRect(x - P(0.76f), y - P(0.90f), P(1.52f), P(0.05f) + 1, shad);
+            t.fillRect(x - P(0.68f), y - P(0.90f), P(1.36f), P(0.72f), BLACK);
+            t.fillRect(x - P(0.66f), y - P(0.88f), P(1.32f), P(0.68f), porc);
+            t.fillRect(x - P(0.66f), y - P(0.26f), P(1.32f), P(0.10f) + 1, shad);
+            t.fillRect(x + P(0.50f), y - P(0.66f), P(0.26f), P(0.14f) + 1, t.color565(200, 160, 32));
+            t.fillCircle(x - P(0.86f), y - P(0.60f), P(0.18f) + 1, lit);
+            t.fillCircle(x - P(0.86f), y - P(0.60f), P(0.07f), shad);
+            t.fillEllipse(x, y + P(0.14f), P(0.88f) + 1, P(0.48f) + 1, BLACK);
+            t.fillEllipse(x, y + P(0.14f), P(0.88f), P(0.48f), porc);
+            t.fillEllipse(x, y + P(0.06f), P(0.80f), P(0.40f), lit);
+            t.fillEllipse(x, y + P(0.10f), P(0.62f), P(0.30f), t.color565(147, 163, 192));
+            t.fillEllipse(x, y + P(0.12f), P(0.50f), P(0.23f), t.color565(47, 159, 216));
+            t.fillEllipse(x - P(0.14f), y + P(0.06f), P(0.22f), P(0.09f) + 1, t.color565(143, 224, 255));
+            t.fillRect(x - P(0.32f), y + P(0.50f), P(0.64f), P(0.42f), BLACK);
+            t.fillRect(x - P(0.30f), y + P(0.52f), P(0.60f), P(0.40f), t.color565(223, 228, 238));
+            t.fillRect(x - P(0.30f), y + P(0.52f), P(0.12f) + 1, P(0.40f), lit);
+            t.fillEllipse(x, y + P(0.92f), P(0.56f), P(0.16f) + 1, porc);
+            break;
+        }
+        default: {  // rubber duck
+            const uint16_t body = t.color565(255, 200, 32);
+            const uint16_t lit  = t.color565(255, 224, 96);
+            const uint16_t shad = t.color565(240, 170, 0);
+            t.fillEllipse(x - P(0.05f), y + P(0.66f), P(1.05f), P(0.22f) + 1,
+                          blend(BG, t.color565(120, 200, 255), 90));
+            t.fillTriangle(x - P(0.78f), y + P(0.10f), x - P(1.24f), y - P(0.28f),
+                           x - P(0.66f), y - P(0.16f), t.color565(255, 180, 0));
+            t.fillEllipse(x - P(0.08f), y + P(0.30f), P(0.94f) + 1, P(0.54f) + 1, BLACK);
+            t.fillEllipse(x - P(0.08f), y + P(0.30f), P(0.94f), P(0.54f), body);
+            t.fillEllipse(x - P(0.08f), y + P(0.16f), P(0.86f), P(0.36f), lit);
+            t.fillEllipse(x - P(0.18f), y + P(0.30f), P(0.50f), P(0.28f), shad);
+            for (int k = -2; k <= 2; k++) {
+                t.fillCircle(x - P(0.18f) + k * P(0.17f), y + P(0.50f), P(0.10f) + 1, shad);
+            }
+            t.fillEllipse(x - P(0.22f), y + P(0.22f), P(0.34f), P(0.16f) + 1, t.color565(255, 210, 60));
+            t.fillCircle(x + P(0.50f), y - P(0.42f), P(0.46f) + 1, BLACK);
+            t.fillCircle(x + P(0.50f), y - P(0.42f), P(0.46f), body);
+            t.fillCircle(x + P(0.44f), y - P(0.52f), P(0.34f), lit);
+            t.fillRect(x + P(0.84f), y - P(0.38f), P(0.46f), P(0.22f) + 1, t.color565(255, 140, 16));
+            t.fillRect(x + P(0.84f), y - P(0.24f), P(0.36f), P(0.11f) + 1, t.color565(216, 96, 0));
+            t.fillCircle(x + P(1.02f), y - P(0.34f), P(0.04f) + 1, t.color565(160, 70, 0));
+            t.fillCircle(x + P(0.56f), y - P(0.56f), P(0.13f) + 1, BLACK);
+            t.fillCircle(x + P(0.60f), y - P(0.60f), P(0.05f) + 1, WHITE);
+            t.drawWideLine(x + P(0.44f), y - P(0.74f), x + P(0.68f), y - P(0.72f),
+                           P(0.07f) + 1, t.color565(201, 138, 0));
+            t.fillCircle(x + P(0.26f), y - P(0.26f), P(0.11f) + 1, t.color565(255, 157, 176));
+            break;
+        }
+    }
+}
+
+void drawStarfield(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
+    const int w     = t.width();
+    const int bandH = yEnd - yStart;
+    if (bandH < 8) return;
+
+    // The tube wanders rather than staring down a fixed pipe. Everything
+    // else in the scene -- stars, planets, junk -- is projected from the
+    // same centre, so the whole thing banks together.
+    const float wob = (float)now / 2860.0f;
+    const int   cx  = w / 2              + (int)(sinf(wob) * 14.0f);
+    const int   cy  = yStart + bandH / 2 + (int)(cosf(wob * 1.29f) * 9.0f);
+    const float aspect = (float)bandH / (float)w * 1.25f;
+    const float maxR   = sqrtf((float)(w * w + bandH * bandH)) * 0.62f;
+
+    // Flat clear. The old nebula gradient was ~190 dithered drawFastHLine
+    // calls a frame for a wash that mostly read as murk; the tunnel below
+    // gives the band its colour now, for a fraction of the pixels.
+    t.fillRect(0, yStart, w, bandH, BG);
+
+    // ---- warp stars, behind the tube ------------------------------------
+    static const uint8_t NS = 72;
+    static float  sx[NS], sy[NS], sz[NS];
+    static bool   starsInit = false;
+    static uint32_t warpNext = 0;
+    static float  warp = 1.0f;
+    if (!starsInit) {
+        for (uint8_t i = 0; i < NS; i++) {
+            sx[i] = (float)random(-200, 201);
+            sy[i] = (float)random(-160, 161);
+            sz[i] = (float)random(20, 420);
+        }
+        starsInit = true;
+        warpNext  = now + (uint32_t)random(4000, 9000);
+    }
+    float targetWarp = 1.0f;
+    if (now >= warpNext) {
+        if (now < warpNext + 1900) targetWarp = 7.0f;
+        else                       warpNext   = now + (uint32_t)random(6000, 14000);
+    }
+    warp += (targetWarp - warp) * 0.07f;
+
+    const float step = 1.4f + warp * 1.9f;
+    for (uint8_t i = 0; i < NS; i++) {
+        const float zPrev = sz[i];
+        sz[i] -= step;
+        if (sz[i] < 6.0f) {
+            sx[i] = (float)random(-200, 201);
+            sy[i] = (float)random(-160, 161);
+            sz[i] = (float)random(330, 430);
+            continue;
+        }
+        const float k = 110.0f / sz[i];
+        const int   x = cx + (int)(sx[i] * k);
+        const int   y = cy + (int)(sy[i] * k);
         if (x < 0 || x >= w || y < yStart || y >= yEnd) continue;
-        float near = sd[i] / maxD;               // 0 = center (far), 1 = edge (near)
-        uint8_t bri = (uint8_t)(60.0f + 195.0f * near);
-        uint16_t col = t.color565(bri, bri, bri);
-        if (near > 0.72f) {
-            t.drawPixel(x, y, col);
-            t.drawPixel(x + 1, y, col);
+        const float near = 1.0f - sz[i] / 430.0f;
+        const uint8_t bri = (uint8_t)(70.0f + 185.0f * (near < 0.0f ? 0.0f : near));
+        const uint16_t col = t.color565(bri, bri, bri > 235 ? 255 : bri + 20);
+        if (warp > 1.6f) {
+            const float kp = 110.0f / zPrev;
+            t.drawLine(cx + (int)(sx[i] * kp), cy + (int)(sy[i] * kp), x, y, col);
         } else {
             t.drawPixel(x, y, col);
         }
     }
 
-    // Meteor: a rare bright diagonal streak with a fading trail,
-    // crossing from one random corner-ish edge to the opposite side.
-    static bool     metActive = false;
-    static uint32_t metNextAt = 0;
-    static float    metX, metY, metVx, metVy;
-    static bool     metInited = false;
-    if (!metInited) { metNextAt = now + (uint32_t)random(2500, 7000); metInited = true; }
-    if (!metActive && now >= metNextAt) {
-        metActive = true;
-        bool fromLeft = random(0, 2);
-        metX  = fromLeft ? (float)-10 : (float)(w + 10);
-        metY  = (float)(yStart + random(0, bandH / 3));
-        float spd = 4.0f + (float)random(0, 100) / 100.0f * 3.0f;
-        metVx = (fromLeft ? 1.0f : -1.0f) * spd;
-        metVy = spd * 0.55f;
-    }
-    if (metActive) {
-        for (int k = 6; k >= 1; k--) {
-            int tx = (int)(metX - metVx * k * 0.5f), ty = (int)(metY - metVy * k * 0.5f);
-            uint16_t col = blend(BG, WHITE, (uint16_t)(200 * (1.0f - (float)k / 6.0f)));
-            t.drawPixel(tx, ty, col);
-        }
-        t.drawPixel((int)metX, (int)metY, WHITE);
-        t.drawPixel((int)metX + 1, (int)metY, WHITE);
-        metX += metVx; metY += metVy;
-        if (metX < -20 || metX > w + 20 || metY > yEnd + 20) {
-            metActive = false;
-            metNextAt = now + (uint32_t)random(3000, 9000);
+    // ---- the tube --------------------------------------------------------
+    // Concentric rings, the whole stack scrolling outward, drawn as
+    // OUTLINES: the filled version matches the reference more exactly but
+    // repaints the whole band every frame, which is the cost the nebula
+    // was already paying. Seven sides keeps it angular; a rounder tube
+    // stops reading as facets and starts reading as circles.
+    //
+    // Two things have to stay continuous across the scroll or the tube
+    // visibly flashes once per cycle:
+    //
+    //  * COLOUR. The blue/violet alternation is a period-2 pattern, so the
+    //    scroll phase has to run over 2 rings, not 1. On a period-1 wrap
+    //    the geometry ring i had is inherited by ring i+1, whose parity is
+    //    the opposite -- so the entire tube inverted its colours every
+    //    1.8s. Over a period of 2 the geometry passes to ring i+2, which
+    //    has the same parity, and nothing changes at the seam.
+    //
+    //  * ROTATION. Giving each ring its own extra twist made a spiral, but
+    //    the twist was keyed to the index too, so the same wrap snapped
+    //    the whole tube round by 0.13 rad. Every ring now shares one
+    //    rotation: concentric rather than spiralled, and seamless.
+    //
+    // Because the phase now travels two ring-widths, the outermost ring
+    // shrinks to 55% of the band before it recycles. The loop starts two
+    // rings further out so there is always geometry beyond the corners.
+    static const uint8_t RINGS = 15;
+    static const uint8_t SIDES = 7;
+    const float phase = fmodf((float)now * 0.00055f, 2.0f);
+    const float spin  = (float)now / 1800.0f;
+    const float drift = sinf((float)now / 4000.0f) * 0.03f;
+
+    for (int i = RINGS - 1; i >= -2; i--) {
+        const float fi = (float)i + phase;
+        const float r  = maxR * expf(-fi * 0.30f);
+        if (r < 3.0f || r > maxR * 1.9f) continue;
+        float d = fi / (float)RINGS;
+        if (d < 0.0f) d = 0.0f;
+
+        // Variant D: electric blue alternating with purple. The violet was
+        // originally hue 0.74 at 55% value, which lands on (73,0,170) once
+        // RGB332 has had it -- only two bits of blue and a red channel too
+        // dark to survive, so it read as a dimmer blue rather than a
+        // different hue. Pushing toward magenta and raising the value puts
+        // red on a level that quantisation keeps: (146,0,170), which reads
+        // as purple against the (0,0,255) rings.
+        float rr, gg, bb;
+        if (i & 1) hsv2rgb(0.66f + drift, 1.0f, 1.00f - d * 0.62f, rr, gg, bb);
+        else       hsv2rgb(0.80f + drift, 1.0f, 0.72f - d * 0.42f, rr, gg, bb);
+        const uint16_t col = t.color565((uint8_t)(rr * 255.0f),
+                                        (uint8_t)(gg * 255.0f),
+                                        (uint8_t)(bb * 255.0f));
+        const int lw = (int)(4.2f * (1.0f - d));
+        const float rot = spin;
+
+        int px = cx + (int)(cosf(rot) * r);
+        int py = cy + (int)(sinf(rot) * r * aspect);
+        for (uint8_t k = 1; k <= SIDES; k++) {
+            const float a = rot + (float)k * (6.2831853f / SIDES);
+            const int nx = cx + (int)(cosf(a) * r);
+            const int ny = cy + (int)(sinf(a) * r * aspect);
+            // NOT drawWideLine: that is TFT_eSPI's anti-aliased wedge
+            // routine, which alpha-blends every pixel it touches. With
+            // 15 rings x 7 sides it measured 69ms of drawing per frame,
+            // three times the entire rest of the scene. Parallel
+            // Bresenham lines give the same visual weight for a small
+            // fraction of that. Offset across the segment's minor axis
+            // so near-vertical edges actually thicken.
+            if (lw >= 2) {
+                const bool horiz = (nx - px) * (nx - px) >= (ny - py) * (ny - py);
+                for (int o = 0; o < lw; o++) {
+                    const int d = o - lw / 2;
+                    if (horiz) t.drawLine(px, py + d, nx, ny + d, col);
+                    else       t.drawLine(px + d, py, nx + d, ny, col);
+                }
+            } else {
+                t.drawLine(px, py, nx, ny, col);
+            }
+            px = nx; py = ny;
         }
     }
 
-    // UFO: a rare little saucer drifting across with blinking lights.
-    static bool     ufoActive = false;
-    static uint32_t ufoNextAt = 0;
-    static float    ufoX, ufoY;
-    static int8_t   ufoDir;
-    static bool     ufoInited = false;
-    if (!ufoInited) { ufoNextAt = now + (uint32_t)random(6000, 14000); ufoInited = true; }
-    if (!ufoActive && now >= ufoNextAt) {
-        ufoActive = true;
-        ufoDir = random(0, 2) ? 1 : -1;
-        ufoX   = (ufoDir > 0) ? -20.0f : (float)(w + 20);
-        ufoY   = (float)(yStart + random(bandH / 6, bandH / 2));
+    // ---- planets ---------------------------------------------------------
+    // Drawn as horizontal chords rather than stacked circles: one span per
+    // row means the bands and the terminator come out of the same loop,
+    // and a planet costs about 2r line draws instead of a pile of fills.
+    static const uint8_t NP = 2;
+    static float   px_[NP], py_[NP], pvx[NP];
+    static uint8_t pr_[NP], ppal[NP];
+    static bool    planetsInit = false;
+    if (!planetsInit) {
+        for (uint8_t i = 0; i < NP; i++) {
+            px_[i]  = (float)random(0, w);
+            py_[i]  = (float)(yStart + random(bandH / 6, bandH * 5 / 6));
+            pvx[i]  = 0.10f + (float)random(0, 12) / 100.0f;
+            pr_[i]  = (uint8_t)random(8, 20);
+            ppal[i] = (uint8_t)random(0, 3);
+        }
+        planetsInit = true;
     }
-    if (ufoActive) {
-        ufoX += ufoDir * 1.1f;
-        ufoY += sinf(ufoX * 0.05f) * 0.4f;
-        int ux = (int)ufoX, uy = (int)ufoY;
-        t.fillEllipse(ux, uy, 11, 4, blend(BG, CYAN, 200));
-        t.fillEllipse(ux, uy - 3, 5, 4, blend(BG, WHITE, 220));
-        for (uint8_t k = 0; k < 3; k++) {
-            uint16_t lcol = (((now / 150) + k) % 3 == 0) ? VAPOR_YELLOW : blend(BG, VAPOR_YELLOW, 90);
-            t.drawPixel(ux - 7 + k * 7, uy + 3, lcol);
+    static const uint8_t PAL[3][9] = {
+        { 200,106, 60,  224,138, 74,  168, 80, 44 },   // rust
+        {  70,120,190,   96,160,220,   48, 84,150 },   // ice
+        { 150, 90,180,  186,124,214,  110, 58,140 },   // violet
+    };
+    for (uint8_t i = 0; i < NP; i++) {
+        px_[i] += pvx[i];
+        if (px_[i] - pr_[i] > (float)w) {
+            px_[i]  = -(float)pr_[i] - 2.0f;
+            py_[i]  = (float)(yStart + random(bandH / 6, bandH * 5 / 6));
+            pr_[i]  = (uint8_t)random(8, 20);
+            pvx[i]  = 0.10f + (float)random(0, 12) / 100.0f;
+            ppal[i] = (uint8_t)random(0, 3);
         }
-        if (ufoX < -30 || ufoX > w + 30) {
-            ufoActive = false;
-            ufoNextAt = now + (uint32_t)random(8000, 18000);
+        const int   R  = pr_[i];
+        const int   ox = (int)px_[i];
+        const int   oy = (int)py_[i];
+        if (oy - R < yStart || oy + R >= yEnd) continue;
+        const uint8_t* p = PAL[ppal[i]];
+        for (int dy = -R; dy <= R; dy++) {
+            const int hw = (int)sqrtf((float)(R * R - dy * dy));
+            if (hw < 1) continue;
+            // Three latitude bands, picked by row.
+            const int b = ((dy + R) * 3) / (2 * R + 1);
+            const uint16_t lit = t.color565(p[b * 3], p[b * 3 + 1], p[b * 3 + 2]);
+            t.drawFastHLine(ox - hw, oy + dy, hw * 2 + 1, lit);
+            // Terminator: the trailing third falls into shadow.
+            const int sw = (hw * 2 + 1) / 3;
+            if (sw > 0) {
+                const uint16_t dark = t.color565(p[b * 3] / 3, p[b * 3 + 1] / 3, p[b * 3 + 2] / 3);
+                t.drawFastHLine(ox + hw - sw, oy + dy, sw, dark);
+            }
         }
+    }
+
+    // ---- junk ------------------------------------------------------------
+    // Rare arrivals rather than a permanent crowd: at most two on screen,
+    // one turning up every 4-7 seconds, flying out of the vanishing point
+    // straight at the viewer. Five of them milling about was both busier
+    // than the scene wanted and, measured on hardware, about 14ms a frame.
+    static const uint8_t NJ = 2;
+    static float   jx[NJ], jy[NJ], jz[NJ];
+    static uint8_t jkind[NJ];
+    static bool    jlive[NJ];
+    static bool    junkInit = false;
+    static uint32_t jNextAt = 0;
+    if (!junkInit) {
+        for (uint8_t i = 0; i < NJ; i++) jlive[i] = false;
+        jNextAt  = now + (uint32_t)random(1500, 4000);
+        junkInit = true;
+    }
+    if (now >= jNextAt) {
+        for (uint8_t i = 0; i < NJ; i++) {
+            if (jlive[i]) continue;
+            // Just off the vanishing point, so it grows out of the tube
+            // rather than fading in somewhere arbitrary.
+            // Spawn on a ring, never near dead centre. A piece with a
+            // small offset flies straight down the barrel at the viewer
+            // and never clears the middle of the screen; giving every
+            // one a real radial offset means they all peel outward and
+            // leave by an edge.
+            const float a   = (float)random(0, 628) / 100.0f;
+            const float rad = (float)random(42, 88);
+            jz[i]    = 300.0f;
+            jx[i]    = cosf(a) * rad;
+            jy[i]    = sinf(a) * rad * 0.78f;
+            jkind[i] = (uint8_t)random(0, JUNK_KINDS);
+            jlive[i] = true;
+            break;
+        }
+        jNextAt = now + (uint32_t)random(6500, 11000);
+    }
+    for (uint8_t i = 0; i < NJ; i++) {
+        if (!jlive[i]) continue;
+        // Closing at a constant rate is the wrong curve: apparent size
+        // goes as 1/z, so a piece stays a speck for most of its flight
+        // and is only briefly big. Making the step proportional to the
+        // remaining distance flips that -- it rushes out of the
+        // vanishing point, then slows as it fills out, spending roughly
+        // 40% of its life small and 60% large and heading for an edge.
+        jz[i] -= (0.030f * jz[i] + 0.35f) * (1.0f + warp * 0.5f);
+        if (jz[i] < 6.0f) { jlive[i] = false; continue; }
+        const float k = 110.0f / jz[i];
+        const int   x = cx + (int)(jx[i] * k);
+        const int   y = cy + (int)(jy[i] * k);
+        int s = (int)(60.0f * k);
+        if (s < 2)  s = 2;
+        if (s > 52) s = 52;
+        if (x + s < 0 || x - s >= w || y + s < yStart || y - s >= yEnd) {
+            // Gone past an edge: retire it now so the next arrival can
+            // use the slot, rather than tracking an invisible object.
+            if (jz[i] < 120.0f) jlive[i] = false;
+            continue;
+        }
+        drawJunk(t, jkind[i], x, y, s, now);
+    }
+
+    // ---- channel change ---------------------------------------------------
+    static uint32_t glitchAt = 0;
+    static bool     glitchInit = false;
+    if (!glitchInit) { glitchAt = now + (uint32_t)random(6000, 14000); glitchInit = true; }
+    if (now >= glitchAt && now < glitchAt + 240) {
+        for (int k = 0; k < 5; k++) {
+            const int gy  = yStart + (int)random(0, bandH - 6);
+            const int gh  = (int)random(2, 7);
+            const int off = (int)random(-20, 21);
+            t.fillRect(off, gy, w, gh,
+                       blend(BG, (random(0, 2) ? CYAN : VAPOR_PINK), (uint16_t)random(90, 190)));
+        }
+    } else if (now >= glitchAt + 240) {
+        glitchAt = now + (uint32_t)random(8000, 18000);
     }
 }
 
-// Toaster glyph matched against the actual reference art: a boxy
-// isometric-ish body (not a loaf — that was still wrong), olive-green
-// sides with a chrome "dome" across the top-front carrying two red
-// racing stripes, a front slot/lever, and big layered feathered wings
-// with a dark outline stroke, cartoon-icon style.
 static void drawToasterAt(TFT_eSPI& t, int x, int y, uint32_t now, uint16_t domeCol, float scale) {
     auto S = [scale](int v) { return (int)(v * scale + 0.5f); };
     int bw = S(23), bh = S(17);
@@ -1893,6 +2347,38 @@ bool consumeWerewolfSummon() {
     return true;
 }
 
+void dimRegion(TFT_eSPI& t, int x, int y, int w, int h, uint8_t amount) {
+    if (amount == 0) return;
+    if (amount >= 250) { t.fillRect(x, y, w, h, BG); return; }
+    // amount -> row spacing: 128 blanks every other row, 85 every third,
+    // 64 every fourth, and so on. Below ~50 the effect stops being worth
+    // the pass at all.
+    const int step = 255 / (int)amount + 1;
+    if (step < 2) { t.fillRect(x, y, w, h, BG); return; }
+    for (int yy = y + (step - 1); yy < y + h; yy += step)
+        t.drawFastHLine(x, yy, w, BG);
+}
+
+// Single place that maps the Settings background choice onto a
+// renderer. Lifted out of uiClearTick(), which owned it while CLEAR was
+// the only screen with a live backdrop.
+void drawActiveBackground(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
+                          const DetectionEngine& eng, bool advance) {
+    switch (Settings::background()) {
+        case Settings::Background::STARFIELD:  drawStarfield(t, now, yStart, yEnd); break;
+        case Settings::Background::TOASTERS:   drawFlyingToasters(t, now, yStart, yEnd); break;
+        case Settings::Background::AQUARIUM:   drawAquarium(t, now, yStart, yEnd); break;
+        case Settings::Background::TERMINAL:   drawTerminalLog(t, now, yStart, yEnd); break;
+        case Settings::Background::FIREFLIES:  drawFireflies(t, now, yStart, yEnd); break;
+        case Settings::Background::FIRE:       drawFire(t, now, yStart, yEnd); break;
+        case Settings::Background::SNOWFALL:   drawSnowfall(t, now, yStart, yEnd); break;
+        case Settings::Background::SPECTRUM:   drawSpectrumWaterfall(t, now, yStart, yEnd, eng); break;
+        case Settings::Background::TUNNEL:     drawWireframeTunnel(t, now, yStart, yEnd); break;
+        case Settings::Background::SYNTHWAVE:  drawSynthwave(t, now, yStart, yEnd); break;
+        default:                               drawMatrixRain(t, now, yStart, yEnd, advance); break;
+    }
+}
+
 bool backgroundTap(int x, int y, uint32_t now) {
     // Not drawn recently means not on screen.
     if (s_moonX < 0 || (now - s_moonAt) > 250) return false;
@@ -2240,36 +2726,48 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             // about 180ms every four seconds -- rather than the
             // frame-rate flicker the old tree had.
             {
+                // Authored at the original 1x offsets and multiplied
+                // through O, same trick as the werewolf: proportions stay
+                // locked and resizing is one number. The perch offset
+                // scales with him so he stays sat ON the limb rather than
+                // hovering above it as he grows.
+                auto O = [](int v) { return (v * 3) / 2; };
+
                 const uint8_t LI = 2;                   // left-pointing limb
                 const float f = LIMB[LI].f;
                 const int  by = groundY - (int)(span * f);
                 const int  bx = tx + (int)(sinf(f * 2.4f) * 6.0f - f * 3.0f);
                 const float L = span * 0.30f * LIMB[LI].len;
                 const int  ox = bx - (int)(L * 0.55f);  // out along it, leftward
-                const int  oy = by - (int)(L * 0.34f) - 9;
+                const int  oy = by - (int)(L * 0.34f) - O(9);
                 owlX = ox; owlY = oy;
 
                 const uint16_t owlBody = t.color565(158, 140, 116);
                 const uint16_t owlDark = t.color565(12, 10, 8);
 
-                t.fillRect(ox - 4, oy,     9, 9, owlBody);   // body
-                t.drawFastHLine(ox - 3, oy + 9, 7, owlBody); // tail
-                t.fillRect(ox - 5, oy - 4, 11, 5, owlBody);  // head
-                t.drawLine(ox - 5, oy - 4, ox - 6, oy - 7, owlBody);  // ear tufts
-                t.drawLine(ox + 5, oy - 4, ox + 6, oy - 7, owlBody);
+                t.fillRect(ox - O(4), oy,        O(9),  O(9), owlBody);   // body
+                t.fillRect(ox - O(3), oy + O(9), O(7),  2,     owlBody);  // tail
+                t.fillRect(ox - O(5), oy - O(4), O(11), O(5), owlBody);   // head
+                // Ear tufts as filled wedges rather than 1px lines --
+                // a hairline stayed a hairline when everything around it
+                // grew, which is what made the werewolf claws look
+                // spindly at 1.6x.
+                t.fillRect(ox - O(5), oy - O(6), 2, O(3), owlBody);
+                t.fillRect(ox - O(6), oy - O(7), 2, O(2), owlBody);
+                t.fillRect(ox + O(4), oy - O(6), 2, O(3), owlBody);
+                t.fillRect(ox + O(5), oy - O(7), 2, O(2), owlBody);
 
                 if ((now % 4000) < 180) {
-                    t.drawFastHLine(ox - 4, oy - 1, 3, owlDark);
-                    t.drawFastHLine(ox + 2, oy - 1, 3, owlDark);
+                    t.fillRect(ox - O(4), oy - O(1), O(3), 2, owlDark);
+                    t.fillRect(ox + O(2), oy - O(1), O(3), 2, owlDark);
                 } else {
                     const uint16_t eye = t.color565(255, 196, 44);
-                    t.fillRect(ox - 4, oy - 2, 3, 3, eye);
-                    t.fillRect(ox + 2, oy - 2, 3, 3, eye);
-                    t.drawPixel(ox - 3, oy - 1, owlDark);
-                    t.drawPixel(ox + 3, oy - 1, owlDark);
+                    t.fillRect(ox - O(4), oy - O(2), O(3), O(3), eye);
+                    t.fillRect(ox + O(2), oy - O(2), O(3), O(3), eye);
+                    t.fillRect(ox - O(3), oy - O(1), 2, 2, owlDark);
+                    t.fillRect(ox + O(3), oy - O(1), 2, 2, owlDark);
                 }
-                t.drawPixel(ox, oy,     owlDark);            // beak
-                t.drawPixel(ox, oy + 1, owlDark);
+                t.fillRect(ox, oy, 2, O(2), owlDark);        // beak
             }
         }
     }
@@ -2339,9 +2837,17 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             const int breathe = (int)(sinf((float)now / 520.0f) * 1.0f);
             const int lift    = (int)(howl * 4.0f);
 
+            // Everything below is authored at the original 1x offsets
+            // and multiplied through Z, so the proportions stay locked
+            // and resizing the creature is one number rather than forty.
+            // At 1.6x the silhouette runs about 67px wide and 76 tall,
+            // which still clears the mascot on the left (he ends around
+            // x=208) and the right edge of a 320px panel.
+            auto Z = [](int v) { return (v * 8) / 5; };
+
             const int cx  = wx;
             const int bob = breathe;
-            const int hy  = gy - 48 + bob - lift;      // top of the skull
+            const int hy  = gy - Z(48) + bob - lift;   // top of the skull
 
             // Speaks from the moment the body has fully resolved right
             // through the howl, so the line is up while it rears back
@@ -2351,83 +2857,81 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             if (e >= WOLF_EYES + WOLF_BODY &&
                 e <  WOLF_EYES + WOLF_BODY + WOLF_HOLD + WOLF_HOWL) {
                 wolfSayX = cx;
-                wolfSayY = hy - 15;
+                wolfSayY = hy - Z(15);
             }
 
             if (bodyF > 0.02f) {
                 // Legs, planted wide, and heavy dark feet.
-                t.fillRect(cx - 10, gy - 19, 7, 16, body);
-                t.fillRect(cx +  4, gy - 19, 7, 16, body);
-                t.fillRect(cx - 13, gy -  4, 11, 4, pelt);
-                t.fillRect(cx +  3, gy -  4, 11, 4, pelt);
+                t.fillRect(cx - Z(10), gy - Z(19), Z(7),  Z(16), body);
+                t.fillRect(cx + Z(4),  gy - Z(19), Z(7),  Z(16), body);
+                t.fillRect(cx - Z(13), gy - Z(4),  Z(11), Z(4),  pelt);
+                t.fillRect(cx + Z(3),  gy - Z(4),  Z(11), Z(4),  pelt);
 
                 // Torso with a lighter chest panel -- the two-tone is
                 // most of what stops this reading as one dark blob.
-                t.fillRect(cx - 11, gy - 35 + bob, 23, 17, body);
-                t.fillRect(cx -  5, gy - 34 + bob, 11, 14, pelt);
+                t.fillRect(cx - Z(11), gy - Z(35) + bob, Z(23), Z(17), body);
+                t.fillRect(cx - Z(5),  gy - Z(34) + bob, Z(11), Z(14), pelt);
 
                 // Hunched shoulders, wider than the chest.
-                t.fillRect(cx - 15, gy - 39 + bob, 31,  6, body);
+                t.fillRect(cx - Z(15), gy - Z(39) + bob, Z(31), Z(6), body);
 
                 // Arms hanging long and slightly out, with black hands
                 // and red claws at the tips.
-                t.fillRect(cx - 20, gy - 38 + bob, 6, 21, body);
-                t.fillRect(cx + 15, gy - 38 + bob, 6, 21, body);
-                t.fillRect(cx - 21, gy - 18 + bob, 8,  5, pelt);
-                t.fillRect(cx + 14, gy - 18 + bob, 8,  5, pelt);
+                t.fillRect(cx - Z(20), gy - Z(38) + bob, Z(6), Z(21), body);
+                t.fillRect(cx + Z(15), gy - Z(38) + bob, Z(6), Z(21), body);
+                t.fillRect(cx - Z(21), gy - Z(18) + bob, Z(8), Z(5),  pelt);
+                t.fillRect(cx + Z(14), gy - Z(18) + bob, Z(8), Z(5),  pelt);
                 for (int k = 0; k < 3; k++) {
-                    t.drawFastVLine(cx - 20 + k * 3, gy - 13 + bob, 4, claw);
-                    t.drawFastVLine(cx + 15 + k * 3, gy - 13 + bob, 4, claw);
+                    t.fillRect(cx - Z(20) + k * Z(3), gy - Z(13) + bob, Z(2), Z(4), claw);
+                    t.fillRect(cx + Z(15) + k * Z(3), gy - Z(13) + bob, Z(2), Z(4), claw);
                 }
 
                 // Neck, sized from lift so the head stays attached when
                 // it goes back for the howl.
-                t.fillRect(cx - 5, hy + 11, 11, 8 + lift, body);
+                t.fillRect(cx - Z(5), hy + Z(11), Z(11), Z(8) + lift, body);
 
                 // Skull, with a lighter muzzle mask over it.
-                t.fillRect(cx - 10, hy, 21, 13, pelt);
-                t.fillRect(cx -  5, hy + 4, 11, 10, lit);
+                t.fillRect(cx - Z(10), hy,        Z(21), Z(13), pelt);
+                t.fillRect(cx - Z(5),  hy + Z(4), Z(11), Z(10), lit);
 
                 // Ears taper to a point over three steps and stand well
-                // proud of the crest. The first version had ears and
+                // proud of the crest. An earlier version had ears and
                 // crest tufts at the same height and even spacing, which
                 // turned the whole skull into a crown.
-                t.fillRect(cx - 11, hy - 4, 4, 4, pelt);
-                t.fillRect(cx - 10, hy - 7, 3, 3, pelt);
-                t.fillRect(cx -  9, hy - 9, 2, 2, pelt);
-                t.fillRect(cx +  8, hy - 4, 4, 4, pelt);
-                t.fillRect(cx +  8, hy - 7, 3, 3, pelt);
-                t.fillRect(cx +  8, hy - 9, 2, 2, pelt);
+                t.fillRect(cx - Z(11), hy - Z(4), Z(4), Z(4), pelt);
+                t.fillRect(cx - Z(10), hy - Z(7), Z(3), Z(3), pelt);
+                t.fillRect(cx - Z(9),  hy - Z(9), Z(2), Z(2), pelt);
+                t.fillRect(cx + Z(8),  hy - Z(4), Z(4), Z(4), pelt);
+                t.fillRect(cx + Z(8),  hy - Z(7), Z(3), Z(3), pelt);
+                t.fillRect(cx + Z(8),  hy - Z(9), Z(2), Z(2), pelt);
                 // Ragged crest: short, uneven, and well below the ears.
-                t.fillRect(cx - 5, hy - 2, 2, 2, pelt);
-                t.fillRect(cx - 1, hy - 3, 2, 3, pelt);
-                t.fillRect(cx + 3, hy - 2, 2, 2, pelt);
+                t.fillRect(cx - Z(5), hy - Z(2), Z(2), Z(2), pelt);
+                t.fillRect(cx - Z(1), hy - Z(3), Z(2), Z(3), pelt);
+                t.fillRect(cx + Z(3), hy - Z(2), Z(2), Z(2), pelt);
 
                 // Nose, then the open snarl. The howl drops the jaw
                 // further and the teeth go with it.
-                const int jaw = (int)(howl * 3.0f);
-                t.fillRect(cx - 2, hy + 6, 4, 3, pelt);
-                t.fillRect(cx - 5, hy + 10, 11, 4 + jaw, maw);
-                t.drawFastHLine(cx - 5, hy + 10, 11, tooth);
-                t.drawFastHLine(cx - 5, hy + 13 + jaw, 11, tooth);
+                const int jaw = (int)(howl * 3.0f) * 8 / 5;
+                t.fillRect(cx - Z(2), hy + Z(6),  Z(4),  Z(3), pelt);
+                t.fillRect(cx - Z(5), hy + Z(10), Z(11), Z(4) + jaw, maw);
+                t.fillRect(cx - Z(5), hy + Z(10), Z(11), Z(1) + 1, tooth);
+                t.fillRect(cx - Z(5), hy + Z(13) + jaw, Z(11), Z(1) + 1, tooth);
             }
 
-            // Eyes last so nothing paints over them: red, angled inward,
-            // with a hot centre. These arrive before the body does and
-            // are the whole of the first beat.
-            // Angled inward along the top edge, which is the whole of
-            // an angry expression at this size -- a plain rectangle pair
-            // read as goggles.
-            t.fillRect(cx - 8, hy + 5, 6, 3, eyeR);
-            t.fillRect(cx + 3, hy + 5, 6, 3, eyeR);
-            t.fillRect(cx - 5, hy + 4, 3, 1, eyeR);
-            t.fillRect(cx + 3, hy + 4, 3, 1, eyeR);
+            // Eyes last so nothing paints over them: red, angled inward
+            // along the top edge, with a hot centre. A plain rectangle
+            // pair read as goggles. These arrive before the body does
+            // and are the whole of the first beat.
+            t.fillRect(cx - Z(8), hy + Z(5), Z(6), Z(3), eyeR);
+            t.fillRect(cx + Z(3), hy + Z(5), Z(6), Z(3), eyeR);
+            t.fillRect(cx - Z(5), hy + Z(4), Z(3), Z(1) + 1, eyeR);
+            t.fillRect(cx + Z(3), hy + Z(4), Z(3), Z(1) + 1, eyeR);
             if (howl > 0.55f) {
-                t.drawFastHLine(cx - 7, hy + 6, 4, eyeC);
-                t.drawFastHLine(cx + 4, hy + 6, 4, eyeC);
+                t.fillRect(cx - Z(7), hy + Z(6), Z(4), Z(1) + 1, eyeC);
+                t.fillRect(cx + Z(4), hy + Z(6), Z(4), Z(1) + 1, eyeC);
             } else {
-                t.fillRect(cx - 6, hy + 6, 2, 2, eyeC);
-                t.fillRect(cx + 5, hy + 6, 2, 2, eyeC);
+                t.fillRect(cx - Z(6), hy + Z(6), Z(2), Z(2), eyeC);
+                t.fillRect(cx + Z(5), hy + Z(6), Z(2), Z(2), eyeC);
             }
         }
     }
@@ -2532,10 +3036,9 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         // over the background afterwards, so a wide bubble gets its last
         // letters clipped by Squachy. See the placement below.
         static const char* const QUIPS[] = {
-            "who? me?",    "no comment",  "wasn't me",   "i saw that",
-            "seen worse",  "touch grass", "unsubscribe", "still legal",
-            "for now",     "log off",     "big opsec",   "hard nope",
-            "off grid",    "shh"
+            "it's always DNS", "RTFM",          "rm -rf /",
+            "ROT13 twice",       "allegedly",     "flag{h00t}",
+            "salt your hash",    "0 days since"
         };
         static const uint8_t NQUIP = sizeof(QUIPS) / sizeof(QUIPS[0]);
         // While the werewolf is on stage the owl has other priorities.
@@ -2545,9 +3048,12 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         const bool wolfOut = (s_wolfAt != 0);
         const uint32_t CYCLE = 30000, SHOW = 3400;
         if (wolfOut || (now % CYCLE) < SHOW) {
-            // Stride of 5 against 14 entries: coprime, so it still visits
-            // every line, just not in list order. Straight sequential
-            // reads as a loop once you have watched it a few times.
+            // Stride of 5 against 8 entries: coprime, so it still visits
+            // every line, just not in list order (2,7,4,1,6,3,0,5).
+            // Straight sequential reads as a loop once you have watched
+            // it a few times. Check this stays coprime if the list
+            // length changes -- a stride sharing a factor with the count
+            // silently hides some of the lines forever.
             const char* q = wolfOut
                 ? SCARED[((now - s_wolfAt) / 1400) % (sizeof(SCARED) / sizeof(SCARED[0]))]
                 : QUIPS[((now / CYCLE) * 5 + 2) % NQUIP];
@@ -2843,7 +3349,7 @@ void drawWireframeTunnel(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     if (bandH < 20) return;
     t.fillRect(0, yStart, w, bandH, BG);
 
-    static const uint8_t RINGS = 12;
+    static const uint8_t RINGS = 15;
     static const uint8_t SIDES = 14;      // rounder than the old hexagon
     float aspect = (float)bandH / (float)w;
 
@@ -3249,6 +3755,54 @@ void drawSynthwave(TFT_eSPI& t, uint32_t now, int yTop, int yBottom,
                 int hh = h0 + (int)((h1 - h0) * f);
                 if (hh > 0) t.drawFastVLine(x, yHoriz - hh, hh, c);
             }
+        }
+    }
+
+    // ---- birds -----------------------------------------------------
+    // Drawn after the ridgeline so nothing occludes them: they are the
+    // nearest thing in the scene. Position is derived straight from
+    // `now` rather than integrated frame to frame -- no accumulated
+    // state means no drift, and no dt to clamp when the frame rate
+    // moves around.
+    //
+    // The silhouette colour is deliberately close to the darkest part of
+    // the sky. Crossing the sun they read as hard cut-outs, which is the
+    // shot; out over open sky they nearly vanish, which is both cheaper
+    // to look at and roughly what a distant bird actually does.
+    {
+        static const uint8_t NBIRD = 5;
+        static uint8_t birdY[NBIRD], birdSz[NBIRD];
+        static bool birdsInited = false;
+        static int  birdW = 0, birdH = 0;
+        if (!birdsInited || birdW != w || birdH != skyH) {
+            for (uint8_t i = 0; i < NBIRD; i++) {
+                // Upper two thirds of the sky: low enough to cross the
+                // sun, high enough to clear the ridgeline.
+                birdY[i]  = (uint8_t)random(2, (skyH * 2) / 3);
+                birdSz[i] = (uint8_t)random(3, 6);
+            }
+            birdsInited = true; birdW = w; birdH = skyH;
+        }
+        const uint16_t birdCol = t.color565(26, 6, 34);
+        const float    span    = (float)(w + 28);
+        for (uint8_t i = 0; i < NBIRD; i++) {
+            const float spd = 0.009f + (float)(i % 3) * 0.005f;   // px per ms
+            const float fx  = fmodf((float)now * spd + (float)i * 63.0f, span) - 14.0f;
+            const int   x   = (int)fx;
+            const int   y   = yTop + birdY[i];
+            if (y < yTop + 1 || y >= yHoriz - 1) continue;
+            const int   sz  = birdSz[i];
+            // Wing beat. Each bird carries its own phase so the flock
+            // does not pulse in unison, which reads as one object.
+            const float flap = sinf((float)now / (120.0f + i * 17.0f) + (float)i * 1.7f);
+            const int   dy   = (int)(flap * (float)sz * 0.7f);
+            if (x - sz < 0 || x + sz >= w) continue;
+            // Two shallow strokes per wing give the gull kink; a single
+            // straight V reads as a chevron, not a bird.
+            t.drawLine(x - sz,     y - dy,     x - sz / 2, y,          birdCol);
+            t.drawLine(x - sz / 2, y,          x,          y - dy / 2, birdCol);
+            t.drawLine(x + sz,     y - dy,     x + sz / 2, y,          birdCol);
+            t.drawLine(x + sz / 2, y,          x,          y - dy / 2, birdCol);
         }
     }
 

@@ -26,6 +26,7 @@
 #include "detection_info.h"
 #include "ui_diary.h"
 #include "ui_outfit.h"
+#include "ui_outfit_unlock.h"
 #include "ui_detfilter.h"
 #include "squachy.h"
 #include "cap_touch.h"
@@ -234,6 +235,9 @@ const uint16_t      TOUCH_DEBOUNCE_MS = 200;
 // fallback still needs to actually clear itself in a reasonable time
 // if nobody's there to tap it.
 const uint32_t      ALERT_AUTO_DISMISS_MS = 10000;
+// Longer than an alert's: this one is a reward, not a warning, and the
+// reveal animation alone eats the first second of it.
+const uint32_t      OUTFIT_UNLOCK_AUTO_MS = 12000;
 // TFT_eSPI rotation: all four orientations are supported (0/2 portrait,
 // 1/3 landscape), cycled in order by the rotate button in the title
 // bar -- except AWOK, which has no rotate button (see loop()) and
@@ -864,6 +868,28 @@ static void enterClear() {
 #endif
 }
 
+static uint32_t outfitUnlockStart = 0;
+
+static void enterOutfitUnlock(uint8_t idx) {
+    state = AppState::OUTFIT_UNLOCK;
+    outfitUnlockStart = millis();
+    transitionStart = outfitUnlockStart;
+    uiOutfitUnlockInit(*canvas, idx);
+}
+
+// Pops the celebration if Squachy has earned anything that has not been
+// shown yet. Polled from CLEAR rather than pushed from the unlock sites:
+// an outfit can be earned mid-ALERT (the detection that crossed the
+// threshold is the one being alerted about) or from the werewolf summon
+// on the FIRE background, and CLEAR is the one screen both of those
+// paths land back on. Returns true if the screen changed.
+static bool maybeEnterOutfitUnlock() {
+    uint8_t idx;
+    if (!Squachy::consumeOutfitUnlock(idx)) return false;
+    enterOutfitUnlock(idx);
+    return true;
+}
+
 static void enterAlert(const Detection& d) {
     state = AppState::ALERT;
     alertStart = millis();
@@ -1436,6 +1462,10 @@ void loop() {
             break;
         }
         case AppState::CLEAR: {
+            // Checked before drawing so the celebration takes over on the
+            // same frame it becomes due, rather than after one frame of
+            // CLEAR flashing up behind it.
+            if (maybeEnterOutfitUnlock()) break;
 #if defined(CYD35)
             if (frameBufferOk) {
                 // Two passes through the half-height `frame` sprite
@@ -1673,17 +1703,17 @@ void loop() {
                 // data, so calling it twice with the same `now` is safe.
                 int halfH = tft.height() / 2;
                 frame.setViewport(0, 0, tft.width(), tft.height(), true);
-                uiAlertTick(frame, now, s_infoPending, alertInfoTypeName, alertInfoText);
+                uiAlertTick(frame, now, engine, s_infoPending, alertInfoTypeName, alertInfoText);
                 pushFrame(0, 0);
                 frame.setViewport(0, -halfH, tft.width(), tft.height(), true);
-                uiAlertTick(frame, now, s_infoPending, alertInfoTypeName, alertInfoText);
+                uiAlertTick(frame, now, engine, s_infoPending, alertInfoTypeName, alertInfoText);
                 pushFrame(0, halfH);
                 frame.resetViewport();
             } else {
-                uiAlertTick(tft, now, s_infoPending, alertInfoTypeName, alertInfoText);
+                uiAlertTick(tft, now, engine, s_infoPending, alertInfoTypeName, alertInfoText);
             }
 #else
-            uiAlertTick(*canvas, now, s_infoPending, alertInfoTypeName, alertInfoText);
+            uiAlertTick(*canvas, now, engine, s_infoPending, alertInfoTypeName, alertInfoText);
 #endif
             // Same "ignore the touch that opened this until it releases"
             // gate LOG's info panel uses, applied here too -- MORE INFO
@@ -1746,6 +1776,39 @@ void loop() {
             } else if ((now - alertStart) > ALERT_AUTO_DISMISS_MS) {
                 Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits);
                 enterClear();
+            }
+            break;
+        }
+        case AppState::OUTFIT_UNLOCK: {
+#if defined(CYD35)
+            if (frameBufferOk) {
+                // Same two-pass half-height `frame` trick the other
+                // full-screen states use. This one draws Squachy, so
+                // `advance` would matter -- except uiOutfitUnlockTick()
+                // drives him through drawWaving(), which is a pure
+                // function of `now` with no state to double-advance.
+                int halfH = tft.height() / 2;
+                frame.setViewport(0, 0, tft.width(), tft.height(), true);
+                uiOutfitUnlockTick(frame, now, engine);
+                pushFrame(0, 0);
+                frame.setViewport(0, -halfH, tft.width(), tft.height(), true);
+                uiOutfitUnlockTick(frame, now, engine);
+                pushFrame(0, halfH);
+                frame.resetViewport();
+            } else {
+                uiOutfitUnlockTick(tft, now, engine);
+            }
+#else
+            uiOutfitUnlockTick(*canvas, now, engine);
+#endif
+            const bool timedOut = (now - outfitUnlockStart) > OUTFIT_UNLOCK_AUTO_MS;
+            const bool tapped   = tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
+                                  uiOutfitUnlockDismissable(now);
+            if (tapped || timedOut) {
+                if (tapped) lastTouch = now;
+                // Straight into the next one if two were earned at once,
+                // rather than bouncing through CLEAR between them.
+                if (!maybeEnterOutfitUnlock()) enterClear();
             }
             break;
         }

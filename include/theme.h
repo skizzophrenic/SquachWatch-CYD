@@ -156,7 +156,8 @@ namespace Theme {
     // etc.) instead of one generic effect for every type. Fully
     // repaints the w x h region every call, same discipline as the
     // CLEAR-screen backgrounds, so nothing trails between frames.
-    void drawAlertFx(TFT_eSPI& t, DetectionType type, uint32_t now, int w, int h);
+    void drawAlertFx(TFT_eSPI& t, DetectionType type, uint32_t now, int w, int h,
+                     bool clearFirst = true);
 
     // Animated pulsing border (call once per frame from a ui tick).
     void drawPulsingBorder(TFT_eSPI& t, uint32_t now, uint16_t a, uint16_t b,
@@ -247,6 +248,29 @@ namespace Theme {
     // land, which is the only feedback that the count is going up --
     // without it the egg is unfindable and, worse, unconfirmable when
     // you are halfway through it.
+    // Draws whichever background Settings::background() currently
+    // selects, into the band yStart..yEnd. CLEAR had this switch inline
+    // for a long time because it was the only screen with an animated
+    // backdrop; ALERT now wants the same one behind it, and a second
+    // copy of an 11-case switch is a second place to forget a new
+    // background. `eng` is only read by SPECTRUM (it needs live RSSI);
+    // `advance` is MATRIX's once-per-logical-frame guard -- see
+    // drawMatrixRain().
+    void drawActiveBackground(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
+                              const DetectionEngine& eng, bool advance = true);
+
+    // Knocks an already-drawn region back so foreground text reads over
+    // it, by blanking evenly spaced rows to BG -- CRT scanlines, not a
+    // true alpha dim. amount is 0 (untouched) to 255 (every row blanked);
+    // in between it picks the row spacing.
+    //
+    // Deliberately NOT a per-pixel readPixel/blend/drawPixel pass. That
+    // version is ~77k round trips for a 320x240 screen every frame, the
+    // same order of cost as the anti-aliased line routine that once ate
+    // three quarters of the starfield's frame budget. Row fills are a
+    // handful of spans per row and land in the same visual place.
+    void dimRegion(TFT_eSPI& t, int x, int y, int w, int h, uint8_t amount);
+
     bool backgroundTap(int x, int y, uint32_t now);
 
     // True exactly once after the werewolf has been summoned, then

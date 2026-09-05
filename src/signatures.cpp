@@ -214,25 +214,45 @@ DetectionType lookupMfgId(uint16_t mfgId) {
     return DetectionType::UNKNOWN;
 }
 
-bool isAirTagSubtype(const uint8_t* mfgPayload, uint8_t len) {
-    // Fails closed on a short payload. The caller used to gate this
-    // whole check behind `mfg.size() >= 3`, which meant any Apple
-    // advertisement too short to carry a subtype byte skipped filtering
-    // entirely and stayed classified as a tag.
-    if (!mfgPayload || len < 3) return false;
-    uint8_t subtype = mfgPayload[2];
-    // Find My / "offline finding" only. 0x12 is the beacon a tag sends
-    // once it has been separated from its registered owner; 0x1E is the
-    // same family.
-    //
-    // 0x07 ("Proximity Pairing") used to be accepted here as well, to
-    // catch a tag before it reached lost-mode. That was the wrong
-    // trade: 0x07 is what AirPods and most other Apple accessories
-    // broadcast constantly, so in practice it reported half of Apple's
-    // product line as a tracker. It is also the wrong threat model --
-    // a tag sitting next to its owner is not following you. Separated
-    // is the whole point, and 0x12 is exactly that state.
-    return (subtype == 0x12 || subtype == 0x1E);
+// Ported from nyanBOX's airtag_detector.cpp (jbohack, MIT) -- known
+// good against a real tag, which the previous subtype-only check was
+// not. Scans the whole raw advertisement for either of two sequences.
+//
+// PATTERN 1: 1E FF 4C 00
+//   0x1E is an AD structure LENGTH byte (30), 0xFF is the AD type
+//   "manufacturer specific", 4C 00 is Apple. So this matches any Apple
+//   manufacturer advert that is exactly 30 bytes -- NOT a subtype test,
+//   which is what the old code here mistook it for. That is why this
+//   file used to accept a subtype of 0x1E: there is no such Apple
+//   subtype, and that branch never once fired.
+//
+// PATTERN 2: 4C 00 12 19
+//   Apple, type 0x12 (Find My), payload length 0x19. The beacon a tag
+//   sends once separated from its owner.
+//
+// KNOWN COST, accepted deliberately. Pattern 1 also matches Apple's
+// Proximity Pairing advert (4C 00 07 19 ...), which is likewise 30
+// bytes -- so AirPods and similar accessories will report as AIRTAG
+// again, which is the false positive v1.5.0 removed by dropping 0x07.
+// It is back on purpose: a freshly powered AirTag advertises 0x07, not
+// 0x12, so rejecting it meant the detector could not see a tag at the
+// exact moment someone is most likely to be testing it. Catching the
+// tag matters more than the accessory noise.
+//
+// The way to get both is to look further into the Proximity Pairing
+// payload, which carries a device model ID that separates a tag from
+// headphones. That needs a capture of real bytes from both to get
+// right, and guessing model IDs from memory is how this gets subtly
+// wrong again.
+bool isAirTagPayload(const uint8_t* payload, uint8_t len) {
+    if (!payload || len < 4) return false;
+    for (uint8_t i = 0; i + 3 < len; i++) {
+        if (payload[i] == 0x1E && payload[i + 1] == 0xFF &&
+            payload[i + 2] == 0x4C && payload[i + 3] == 0x00) return true;
+        if (payload[i] == 0x4C && payload[i + 1] == 0x00 &&
+            payload[i + 2] == 0x12 && payload[i + 3] == 0x19) return true;
+    }
+    return false;
 }
 
 Confidence confidenceFor(DetectionType t) {

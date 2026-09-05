@@ -89,19 +89,29 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             if (mfg.size() >= 2) {
                 uint16_t mfgId = (uint8_t)mfg[0] | ((uint8_t)mfg[1] << 8);
                 det.type = lookupMfgId(mfgId);
-                // No length guard here on purpose: isAirTagSubtype()
-                // rejects anything shorter than 3 bytes itself, so a
-                // truncated Apple advert now fails closed. Gating the
-                // call on mfg.size() >= 3 meant those adverts bypassed
-                // the check and kept the AIRTAG type they got from the
-                // company ID alone -- which is every Apple device.
+                // Apple's company ID alone is every Apple device, so it
+                // still has to be confirmed as a tag. That check now
+                // runs against the RAW advert rather than this parsed
+                // field -- see isAirTagPayload().
                 if (det.type == DetectionType::AIRTAG) {
-                    if (!isAirTagSubtype((const uint8_t*)mfg.data(), mfg.size())) {
+                    if (!isAirTagPayload(adv->getPayload(),
+                                         (uint8_t)adv->getPayloadLength())) {
                         det.type = DetectionType::UNKNOWN;
                     }
                 }
             }
         }
+        // Raw-advert fallback. The block above only runs when NimBLE
+        // parsed a manufacturer-data field and put Apple's company ID
+        // first; the reference implementation this came from does not
+        // depend on either, it just scans the bytes. An advert that
+        // carries the Find My structure behind another AD structure, or
+        // in a scan response, reaches the detector only through here.
+        if (det.type == DetectionType::UNKNOWN &&
+            isAirTagPayload(adv->getPayload(), (uint8_t)adv->getPayloadLength())) {
+            det.type = DetectionType::AIRTAG;
+        }
+
         // Service UUIDs
         if (det.type == DetectionType::UNKNOWN && adv->haveServiceUUID()) {
             for (int j = 0; j < adv->getServiceUUIDCount(); j++) {

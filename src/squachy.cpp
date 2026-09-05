@@ -328,11 +328,25 @@ static uint8_t  s_nickIdx          = 0;
 static uint8_t  s_outfitIdx        = 0;
 static bool     s_allOutfitsUnlocked = false;  // hidden button-sequence easter egg
 static bool     s_wolfPeltUnlocked   = false;  // earned by summoning the werewolf
+// Bitmask of outfits whose unlock popup has already been shown. Persisted,
+// because "new" has to survive a reboot: without it every boot would
+// re-announce everything already earned. Seeded on first run with whatever
+// is unlocked at that moment (see refreshOutfitUnlocks()), so upgrading
+// firmware onto a device that already has six outfits does not greet the
+// owner with six popups.
+static uint32_t s_outfitAnnounced    = 0;
 
 // Runtime-only — reset every boot, not persisted.
 static uint32_t s_cachedLifetimeTotal = 0;  // from the last DETECTION trigger (or BOOTED)
 static uint32_t s_sessionDetections   = 0;  // this boot's count, vs. s_bestSessionCount
 static uint32_t s_lastDetectionAt     = 0;  // millis() of the last catch, for the live streak
+// Outfits unlocked but not yet shown to the player. A queue rather than a
+// single slot because one detection can cross two thresholds at once, and
+// because RESET STATS followed by a rebuild can re-earn several in a row;
+// they are shown one popup at a time. Runtime-only -- s_outfitAnnounced is
+// what actually persists, and it is written the moment a popup is consumed.
+static uint8_t  s_outfitQueue[8];
+static uint8_t  s_outfitQueueN = 0;
 static bool     s_haveLastDetection   = false;
 
 // A rolling "how much has been happening lately" signal — nudged up on
@@ -474,13 +488,57 @@ static uint8_t stepOutfit(uint8_t from, int8_t dir) {
     return 0;                                   // NONE is always unlocked
 }
 
+// Compares what is unlocked now against what has already been announced
+// and queues the difference. Called from every trigger() that can move
+// the lifetime total, and from the two event-driven unlocks.
+//
+// The 0xFFFF default on "outfitSeen" is doing real work: a device that has
+// never written the key is either brand new or is upgrading from firmware
+// that predates unlock popups, and in both cases the correct behaviour is
+// "announce nothing retroactively". Reading all-ones and then immediately
+// rewriting it to the true current set means the first scan announces
+// nothing, and everything earned from then on is genuinely new.
+static void refreshOutfitUnlocks() {
+    static bool seeded = false;
+    uint32_t nowMask = 0;
+    for (uint8_t i = 1; i < OUTFITS_N; i++)          // NONE is never announced
+        if (outfitUnlocked(i)) nowMask |= (1u << i);
+
+    if (!seeded) {
+        seeded = true;
+        if (s_outfitAnnounced == 0xFFFFFFFFu) {
+            s_outfitAnnounced = nowMask;
+            s_petPrefs.putUInt("outfitSeen", s_outfitAnnounced);
+            return;
+        }
+    }
+
+    const uint32_t fresh = nowMask & ~s_outfitAnnounced;
+    if (!fresh) return;
+    for (uint8_t i = 1; i < OUTFITS_N; i++) {
+        if (!(fresh & (1u << i))) continue;
+        if (s_outfitQueueN >= (uint8_t)(sizeof(s_outfitQueue) / sizeof(s_outfitQueue[0]))) break;
+        s_outfitQueue[s_outfitQueueN++] = i;
+    }
+}
+
 // Clamps s_outfitIdx back to NONE if it's pointing past what's
 // currently unlocked -- the only way that happens is RESET STATS
 // zeroing lifetimeTotal out from under a costume that needed it.
 // Assumes prefs are already loaded, same as the rest of drawBody()'s
 // direct s_shadeIdx/etc. reads -- safe because trigger(BOOTED) loads
 // them at boot, before any tick() ever runs.
+// Set while the unlock popup is drawing, so the whole existing render
+// path (drawBody -> drawOutfit, plus the handful of per-outfit special
+// cases in tick()) shows an outfit the player has not switched to. An
+// override rather than a parallel "draw this outfit" entry point: the
+// outfit is consulted from several places in the draw, and duplicating
+// that path would leave two versions to keep in step.
+static int8_t s_outfitOverride = -1;
+
 static OutfitId currentOutfit() {
+    if (s_outfitOverride >= 0 && s_outfitOverride < (int8_t)OUTFITS_N)
+        return (OutfitId)s_outfitOverride;
     if (s_outfitIdx >= OUTFITS_N || !outfitUnlocked(s_outfitIdx)) s_outfitIdx = 0;
     return (OutfitId)s_outfitIdx;
 }
@@ -577,6 +635,7 @@ static void ensurePrefsLoaded() {
     s_outfitIdx       = s_petPrefs.getUChar("outfitIdx", 0);
     s_allOutfitsUnlocked = s_petPrefs.getBool("allOutfits", false);
     s_wolfPeltUnlocked   = s_petPrefs.getBool("wolfPelt", false);
+    s_outfitAnnounced    = s_petPrefs.getUInt("outfitSeen", 0xFFFFFFFFu);
     s_petPrefsLoaded  = true;
 }
 
@@ -595,6 +654,7 @@ void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal, uint32_t hitCo
             s_reactType = dt;
             ensurePrefsLoaded();
             s_cachedLifetimeTotal = lifetimeTotal;
+            refreshOutfitUnlocks();
 
             // Streak/session/heat bookkeeping for the Diary screen and
             // the activity-biased idle chatter below — none of this
@@ -681,6 +741,7 @@ void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal, uint32_t hitCo
         case Event::BOOTED:
             ensurePrefsLoaded();
             s_cachedLifetimeTotal = lifetimeTotal;
+            refreshOutfitUnlocks();
             s_bootCount++;
             s_petPrefs.putUInt("boots", s_bootCount);
             if (!s_petPrefs.getBool("onboarded", false)) {
@@ -991,15 +1052,45 @@ void unlockWolfPelt() {
     if (s_wolfPeltUnlocked) return;             // already had it; stay quiet
     s_wolfPeltUnlocked = true;
     s_petPrefs.putBool("wolfPelt", true);
+    refreshOutfitUnlocks();
     mood      = Mood::SHOCKED;
     moodUntil = millis() + 2000;
     say("...it left me its coat.", 3600);
+}
+
+bool consumeOutfitUnlock(uint8_t& outIdx) {
+    if (s_outfitQueueN == 0) return false;
+    outIdx = s_outfitQueue[0];
+    for (uint8_t i = 1; i < s_outfitQueueN; i++) s_outfitQueue[i - 1] = s_outfitQueue[i];
+    s_outfitQueueN--;
+    // Marked seen at the moment it is handed out, not when the popup is
+    // dismissed: if the player powers down mid-popup the outfit is still
+    // theirs, and re-announcing it on the next boot would read as a bug.
+    ensurePrefsLoaded();
+    s_outfitAnnounced |= (1u << outIdx);
+    s_petPrefs.putUInt("outfitSeen", s_outfitAnnounced);
+    return true;
+}
+
+const char* outfitNameAt(uint8_t idx) {
+    if (idx >= OUTFITS_N) return "";
+    return OUTFITS[idx].name;
+}
+
+void setOutfitPreview(int8_t idx) {
+    s_outfitOverride = idx;
 }
 
 void unlockAllOutfits() {
     ensurePrefsLoaded();
     s_allOutfitsUnlocked = true;
     s_petPrefs.putBool("allOutfits", true);
+    // No popups for the cheat: it already has its own rainbow-and-confetti
+    // tell below, and eleven modals in a row would bury it. Mark the lot as
+    // seen so nothing queues now or on the next boot.
+    s_outfitAnnounced = 0xFFFFFFFFu >> (32 - OUTFITS_N);
+    s_petPrefs.putUInt("outfitSeen", s_outfitAnnounced);
+    s_outfitQueueN = 0;
 
     // A visible tell that the hidden sequence actually landed, reusing
     // the same rainbow-wash-and-confetti flourish the rare idle party

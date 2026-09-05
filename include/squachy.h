@@ -105,6 +105,25 @@ namespace Squachy {
     // already been earned, so re-summoning does not re-announce it.
     void unlockWolfPelt();
 
+    // Unlock announcements. Any outfit that becomes available -- by
+    // crossing its lifetime-detection threshold, or by the werewolf
+    // summon -- is queued once, and main.cpp drains the queue by popping
+    // the OUTFIT UNLOCKED screen. Returns false when there is nothing
+    // pending. An outfit is marked as announced the moment it is handed
+    // out here, so it never repeats across a reboot.
+    bool consumeOutfitUnlock(uint8_t& outIdx);
+
+    // Name of an outfit by index, for the popup -- outfitName() only
+    // ever reports the one currently worn.
+    const char* outfitNameAt(uint8_t idx);
+
+    // Forces the whole draw path to render a given outfit regardless of
+    // which one is actually selected, so the unlock popup can show off
+    // the new costume without switching the player into it. -1 clears
+    // the override. Set it, draw, clear it -- leaving it set would
+    // silently take over every other screen.
+    void setOutfitPreview(int8_t idx);
+
     // Draws Squachy and his speech bubble, and advances his idle
     // animation/quip timers. Call every tick from the CLEAR screen.
     // cx = horizontal center. topY = where the bubble row starts (just
