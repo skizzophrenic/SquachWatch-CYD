@@ -43,5 +43,5 @@ int uiRawScanRowAt(TFT_eSPI& t, int x, int y, int screenW, int screenH);
 // WATCH_ALERT later, passively, whenever it's next seen); HUNT sets
 // the same target but goes straight into the live-tracking HUNT screen
 // instead.
-enum class RawScanConfirmTap { NONE, WATCH, HUNT, CANCEL };
+enum class RawScanConfirmTap { NONE, WATCH, HUNT, IGNORE, CANCEL };
 RawScanConfirmTap uiRawScanHitConfirm(int x, int y, int screenW, int screenH);

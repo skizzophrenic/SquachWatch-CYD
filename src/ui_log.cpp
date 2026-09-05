@@ -31,42 +31,54 @@ static void confirmRects(int screenW, int screenH,
                           int& wX, int& wY, int& wW, int& wH,
                           int& huX, int& huY, int& huW, int& huH,
                           int& infX, int& infY, int& infW, int& infH,
+                          int& igX, int& igY, int& igW, int& igH,
                           int& cnX, int& cnY, int& cnW, int& cnH) {
     pw = screenW - 40;
     if (pw > 240) pw = 240;
-    ph = 132; // taller than a plain-text heading needed -- room for the Bangers "TRACK THIS TARGET?" title
+    // Was 132 for a 2x2 grid. IGNORE makes it three rows: WATCH/HUNT,
+    // IGNORE/MORE INFO, then CANCEL alone across the bottom. CANCEL gets
+    // the full width because it is the one button you hit by reflex and
+    // the one that must never be mistaken for its neighbour.
+    ph = 164;
     px = (screenW - pw) / 2;
     py = (screenH - ph) / 2;
     const int margin = 10, gap = 8, btnH = 24;
     int btnW = (pw - 2 * margin - gap) / 2;
 
     cnY = py + ph - btnH - margin;
-    infY = cnY;
-    infH = cnH = btnH;
-    infX = px + margin;      infW = btnW;
-    cnX  = infX + btnW + gap; cnW  = btnW;
+    cnH = btnH;
+    cnX = px + margin;
+    cnW = pw - 2 * margin;
 
-    wY = huY = cnY - gap - btnH;
+    igY = infY = cnY - gap - btnH;
+    igH = infH = btnH;
+    igX  = px + margin;       igW  = btnW;
+    infX = igX + btnW + gap;  infW = btnW;
+
+    wY = huY = igY - gap - btnH;
     wH = huH = btnH;
     wX  = px + margin;      wW  = btnW;
     huX = wX + btnW + gap;  huW = btnW;
 }
 
 LogConfirmTap uiLogHitConfirm(int x, int y, int screenW, int screenH) {
-    int px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, infX, infY, infW, infH, cnX, cnY, cnW, cnH;
+    int px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, infX, infY, infW, infH,
+        igX, igY, igW, igH, cnX, cnY, cnW, cnH;
     confirmRects(screenW, screenH, px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH,
-                 infX, infY, infW, infH, cnX, cnY, cnW, cnH);
+                 infX, infY, infW, infH, igX, igY, igW, igH, cnX, cnY, cnW, cnH);
     if (x >= wX && x <= wX + wW && y >= wY && y <= wY + wH) return LogConfirmTap::WATCH;
     if (x >= huX && x <= huX + huW && y >= huY && y <= huY + huH) return LogConfirmTap::HUNT;
+    if (x >= igX && x <= igX + igW && y >= igY && y <= igY + igH) return LogConfirmTap::IGNORE;
     if (x >= infX && x <= infX + infW && y >= infY && y <= infY + infH) return LogConfirmTap::INFO;
     if (x >= cnX && x <= cnX + cnW && y >= cnY && y <= cnY + cnH) return LogConfirmTap::CANCEL;
     return LogConfirmTap::NONE;
 }
 
 static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label) {
-    int px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, infX, infY, infW, infH, cnX, cnY, cnW, cnH;
+    int px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, infX, infY, infW, infH,
+        igX, igY, igW, igH, cnX, cnY, cnW, cnH;
     confirmRects(w, h, px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH,
-                 infX, infY, infW, infH, cnX, cnY, cnW, cnH);
+                 infX, infY, infW, infH, igX, igY, igW, igH, cnX, cnY, cnW, cnH);
     t.fillRoundRect(px, py, pw, ph, 6, Theme::BG);
     t.drawRoundRect(px, py, pw, ph, 6, Theme::PURPLE);
 
@@ -96,6 +108,7 @@ static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label) {
 
     Theme::drawButton(t, wX, wY, wW, wH, "WATCH", false);
     Theme::drawButton(t, huX, huY, huW, huH, "HUNT", false);
+    Theme::drawButton(t, igX, igY, igW, igH, "IGNORE", false);
     Theme::drawButton(t, infX, infY, infW, infH, "MORE INFO", false);
     Theme::drawButton(t, cnX, cnY, cnW, cnH, "CANCEL", false);
 }

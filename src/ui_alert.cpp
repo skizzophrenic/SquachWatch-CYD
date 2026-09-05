@@ -3,6 +3,7 @@
 #include "theme.h"
 #include "signatures.h"
 #include "detection.h"
+#include "ignore_list.h"
 #include <Arduino.h>
 
 static const char* targetLabel(DetectionType t) {
@@ -112,6 +113,30 @@ static void huntBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, int
     bh = 48;
     bx = 4;
     by = screenH - bh - 4;
+}
+
+// IGNORE sits in the top-right. The bottom two corners are taken by HUNT
+// and MORE INFO, and the top-left is where the "!! DETECTION !!" headline
+// starts, so this is the remaining corner that stays clear on the narrow
+// rotations as well as the wide ones.
+static void ignoreBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, int& bh) {
+    (void)screenH;
+    // Deliberately smaller than HUNT and MORE INFO, which are 70x48 down
+    // in the corners where nothing else goes. Up here it shares a row with
+    // the "!! DETECTION !!" headline: that is ~166px of Bangers LG, centred,
+    // so on the 240px rotation it runs to x=203 and a 70px button starting
+    // at x=166 sits right on top of it. At 50x24 with size-1 text the
+    // button starts at x=186 and the headline clears it.
+    bw = 50;
+    bh = 24;
+    bx = screenW - bw - 4;
+    by = 4;
+}
+
+bool uiAlertHitIgnore(int x, int y, int screenW, int screenH) {
+    int bx, by, bw, bh;
+    ignoreBtnRect(screenW, screenH, bx, by, bw, bh);
+    return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
 }
 
 bool uiAlertHitHunt(int x, int y, int screenW, int screenH) {
@@ -256,6 +281,23 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
     // "MORE"/"INFO" stacked on two lines (see moreInfoBtnRect()'s
     // comment) rather than Theme::drawButton()'s usual single-line
     // label, so this button doesn't need to go wide to stay legible.
+    // IGNORE: stops this exact device raising the alert again. Labelled on
+    // two lines like its neighbours so all three buttons match.
+    {
+        int bx, by, bw, bh;
+        ignoreBtnRect(w, h, bx, by, bw, bh);
+        const bool already = IgnoreList::contains(s_last.mac);
+        Theme::drawButton(t, bx, by, bw, bh, "", false);
+        // One line at size 1 now it is short enough to fit: "IGNORE" is
+        // 36px at this size inside a 50px button, so it no longer needs
+        // hyphenating across two rows the way the 70px version did.
+        t.setTextSize(1);
+        t.setTextColor(already ? Theme::GREEN : Theme::AMBER);
+        const char* lbl = already ? "MUTED" : "IGNORE";
+        t.setCursor(bx + (bw - t.textWidth(lbl)) / 2, by + 9);
+        t.print(lbl);
+    }
+
     {
         int bx, by, bw, bh;
         moreInfoBtnRect(w, h, bx, by, bw, bh);

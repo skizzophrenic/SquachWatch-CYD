@@ -105,6 +105,11 @@ namespace Squachy {
     // already been earned, so re-summoning does not re-announce it.
     void unlockWolfPelt();
 
+    // CHROME WING is the second outfit not earned by a detection count --
+    // main.cpp calls this when the player catches the rare gold toaster on
+    // the TOASTERS background. Persists immediately; a no-op once earned.
+    void unlockChromeWing();
+
     // Unlock announcements. Any outfit that becomes available -- by
     // crossing its lifetime-detection threshold, or by the werewolf
     // summon -- is queued once, and main.cpp drains the queue by popping

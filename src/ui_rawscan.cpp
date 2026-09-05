@@ -69,26 +69,35 @@ static void confirmRects(int screenW, int screenH,
                           int& px, int& py, int& pw, int& ph,
                           int& wX, int& wY, int& wW, int& wH,
                           int& huX, int& huY, int& huW, int& huH,
+                          int& igX, int& igY, int& igW, int& igH,
                           int& cnX, int& cnY, int& cnW, int& cnH) {
     pw = screenW - 40;
     if (pw > 240) pw = 240;
-    ph = 90;
+    // Two rows of two rather than one row of four. A fourth button in the
+    // single row would be ~40px wide on the narrowest portrait rotation,
+    // which is below a reliable finger target.
+    ph = 124;
     px = (screenW - pw) / 2;
     py = (screenH - ph) / 2;
     const int margin = 10, gap = 10, btnH = 26;
-    int btnW = (pw - 2 * margin - 2 * gap) / 3;
-    wY = huY = cnY = py + ph - btnH - margin;
-    wH = huH = cnH = btnH;
-    wX  = px + margin;         wW  = btnW;
-    huX = wX + btnW + gap;     huW = btnW;
-    cnX = huX + btnW + gap;    cnW = btnW;
+    int btnW = (pw - 2 * margin - gap) / 2;
+    igY = cnY = py + ph - btnH - margin;
+    igH = cnH = btnH;
+    igX = px + margin;        igW = btnW;
+    cnX = igX + btnW + gap;   cnW = btnW;
+    wY = huY = igY - gap - btnH;
+    wH = huH = btnH;
+    wX  = px + margin;        wW  = btnW;
+    huX = wX + btnW + gap;    huW = btnW;
 }
 
 RawScanConfirmTap uiRawScanHitConfirm(int x, int y, int screenW, int screenH) {
-    int px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, cnX, cnY, cnW, cnH;
-    confirmRects(screenW, screenH, px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, cnX, cnY, cnW, cnH);
+    int px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, igX, igY, igW, igH, cnX, cnY, cnW, cnH;
+    confirmRects(screenW, screenH, px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH,
+                 igX, igY, igW, igH, cnX, cnY, cnW, cnH);
     if (x >= wX && x <= wX + wW && y >= wY && y <= wY + wH) return RawScanConfirmTap::WATCH;
     if (x >= huX && x <= huX + huW && y >= huY && y <= huY + huH) return RawScanConfirmTap::HUNT;
+    if (x >= igX && x <= igX + igW && y >= igY && y <= igY + igH) return RawScanConfirmTap::IGNORE;
     if (x >= cnX && x <= cnX + cnW && y >= cnY && y <= cnY + cnH) return RawScanConfirmTap::CANCEL;
     return RawScanConfirmTap::NONE;
 }
@@ -98,8 +107,9 @@ RawScanConfirmTap uiRawScanHitConfirm(int x, int y, int screenW, int screenH) {
 // right before every return point in uiRawScanTick() rather than
 // restructuring those into a single shared tail.
 static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label) {
-    int px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, cnX, cnY, cnW, cnH;
-    confirmRects(w, h, px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, cnX, cnY, cnW, cnH);
+    int px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, igX, igY, igW, igH, cnX, cnY, cnW, cnH;
+    confirmRects(w, h, px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH,
+                 igX, igY, igW, igH, cnX, cnY, cnW, cnH);
     t.fillRoundRect(px, py, pw, ph, 6, Theme::BG);
     t.drawRoundRect(px, py, pw, ph, 6, Theme::PURPLE);
 
@@ -120,6 +130,7 @@ static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label) {
 
     Theme::drawButton(t, wX, wY, wW, wH, "WATCH", false);
     Theme::drawButton(t, huX, huY, huW, huH, "HUNT", false);
+    Theme::drawButton(t, igX, igY, igW, igH, "IGNORE", false);
     Theme::drawButton(t, cnX, cnY, cnW, cnH, "CANCEL", false);
 }
 

@@ -1142,71 +1142,365 @@ void drawStarfield(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     }
 }
 
-static void drawToasterAt(TFT_eSPI& t, int x, int y, uint32_t now, uint16_t domeCol, float scale) {
-    auto S = [scale](int v) { return (int)(v * scale + 0.5f); };
-    int bw = S(23), bh = S(17);
-    int cx = x + bw / 2, cy = y + bh / 2;
-
-    uint16_t olive    = t.color565(95, 100, 58);
-    uint16_t oliveDk  = t.color565(70, 74, 42);
-    uint16_t stripe   = t.color565(168, 36, 36);
-    uint16_t outline  = t.color565(25, 25, 22);
-    uint16_t feather2 = t.color565(230, 226, 214);
-
-    // Wings first (behind the body) — one above, one below (not side
-    // by side), two layered shapes each for a feathered look, each
-    // with a dark outline stroke. Both trail backward (toward -x, the
-    // direction they just flew in from).
-    float wing = sinf((float)((now + (uint32_t)x * 37) % 500) / 500.0f * 6.2831853f);
-    int wx = (int)(wing * S(5));
-    t.fillTriangle(cx, cy - S(2), cx - S(12) - wx, cy - S(22), cx + S(6) - wx, cy - S(8), TFT_WHITE);
-    t.fillTriangle(cx - S(1), cy - S(4), cx - S(9) - wx, cy - S(16), cx + S(2) - wx, cy - S(7), feather2);
-    t.drawTriangle(cx, cy - S(2), cx - S(12) - wx, cy - S(22), cx + S(6) - wx, cy - S(8), outline);
-    t.fillTriangle(cx, cy + S(2), cx - S(12) + wx, cy + S(22), cx + S(6) + wx, cy + S(8), TFT_WHITE);
-    t.fillTriangle(cx - S(1), cy + S(4), cx - S(9) + wx, cy + S(16), cx + S(2) + wx, cy + S(7), feather2);
-    t.drawTriangle(cx, cy + S(2), cx - S(12) + wx, cy + S(22), cx + S(6) + wx, cy + S(8), outline);
-
-    // Olive box body, darker base shading along the bottom edge.
-    t.fillRoundRect(x, y, bw, bh, S(3), olive);
-    t.fillRect(x, y + bh - S(3), bw, S(3), oliveDk);
-
-    // Chrome dome across the top-front (olive shows through as a
-    // border around it), carrying the two red racing stripes.
-    t.fillRoundRect(x + S(2), y + S(1), bw - S(4), S(10), S(3), domeCol);
-    t.fillRect(cx - S(7), y + S(3), S(14), S(2), stripe);
-    t.fillRect(cx - S(7), y + S(6), S(14), S(2), stripe);
-
-    // Front slot/lever.
-    t.fillRect(x + S(3), y + bh - S(7), S(3), S(6), BLACK);
-
-    t.drawRoundRect(x, y, bw, bh, S(3), outline);
+// TFT_eSPI has fillTriangle but no polygon fill, and a wing lobe is an
+// 18-vertex shape. Fanning it into triangles costs ~16 fillTriangle calls
+// per wing, and each of those runs its own scanline pass over a bounding
+// box that overlaps its neighbours'. One scanline pass over the whole
+// polygon is a single drawFastHLine per row instead -- about 30 row fills
+// for a wing, and a row fill is the cheapest thing the sprite can do.
+//
+// Even-odd rule, so a wing that curls back over itself still fills
+// correctly. MAXHIT is generous: the curled variants cross a scanline
+// four times at most.
+static void fillPoly(TFT_eSPI& t, const int16_t* xs, const int16_t* ys,
+                     uint8_t n, uint16_t col) {
+    if (n < 3) return;
+    int16_t ymin = ys[0], ymax = ys[0];
+    for (uint8_t i = 1; i < n; i++) {
+        if (ys[i] < ymin) ymin = ys[i];
+        if (ys[i] > ymax) ymax = ys[i];
+    }
+    static const uint8_t MAXHIT = 12;
+    for (int16_t y = ymin; y <= ymax; y++) {
+        int16_t xh[MAXHIT];
+        uint8_t hits = 0;
+        for (uint8_t i = 0; i < n && hits < MAXHIT; i++) {
+            const uint8_t j = (uint8_t)((i + 1) % n);
+            const int16_t y1 = ys[i], y2 = ys[j];
+            if ((y1 <= y && y2 > y) || (y2 <= y && y1 > y)) {
+                xh[hits++] = (int16_t)(xs[i] +
+                    (int32_t)(y - y1) * (xs[j] - xs[i]) / (y2 - y1));
+            }
+        }
+        for (uint8_t a = 1; a < hits; a++) {          // tiny insertion sort
+            const int16_t v = xh[a];
+            int8_t b = (int8_t)a - 1;
+            while (b >= 0 && xh[b] > v) { xh[b + 1] = xh[b]; b--; }
+            xh[b + 1] = v;
+        }
+        for (uint8_t a = 0; (uint8_t)(a + 1) < hits; a += 2)
+            t.drawFastHLine(xh[a], y, xh[a + 1] - xh[a] + 1, col);
+    }
 }
 
-// A slice of toast, flying under its own power just like the
-// toasters — the signature After Dark gag. A minority get a little
-// smiley face, the fan-favorite detail from the original.
-static void drawToastAt(TFT_eSPI& t, int x, int y, uint32_t now, bool hasFace, float scale) {
-    auto S = [scale](int v) { return (int)(v * scale + 0.5f); };
-    uint16_t toastCol = t.color565(214, 163, 74);
-    uint16_t crustCol = t.color565(150, 100, 40);
-    int bw = S(14), bh = S(16);
-    t.fillRoundRect(x, y, bw, bh, S(4), toastCol);
-    t.drawRoundRect(x, y, bw, bh, S(4), crustCol);
-    t.drawPixel(x + S(3), y + S(4), crustCol);
-    t.drawPixel(x + S(9), y + S(6), crustCol);
-    t.drawPixel(x + S(5), y + S(10), crustCol);
+// Wing width along its length, sampled at the 9 points the wing is built
+// from. Baked rather than evaluated because the real curve is
+// (1-t^5)^0.45 * (0.4 + 0.6*min(1, t/0.3)), and two powf() calls per point
+// per wing per sprite per frame is a lot of transcendental for a shape
+// that never changes. The profile holds its width through the middle and
+// drops only at the very end -- a width that falls off linearly gives a
+// spike, and the tip has to read as rounded.
+static const float WING_PROFILE[9] = {
+    0.400f, 0.650f, 0.900f, 0.997f, 0.986f, 0.956f, 0.885f, 0.724f, 0.0f
+};
+
+// One rounded bird wing: a curved lobe with a few feather divisions drawn
+// back onto it. It beats by swinging about the shoulder, which is what a
+// bird does -- a wing that only slides up and down reads as being dragged.
+static void drawWing(TFT_eSPI& t, float sx, float sy, float len, float angDeg,
+                     float flap, float width, uint8_t ndiv,
+                     uint16_t body, uint16_t edge, float curl, float lift) {
+    static const uint8_t N = 8;
+    const float step = len / (float)N;
+    const float da   = curl * 60.0f * 0.017453293f / (float)N;
+    float a  = (angDeg + flap * lift) * 0.017453293f;
+    float px = sx, py = sy;
+
+    int16_t tx[N + 1], ty[N + 1], bx[N + 1], by[N + 1];
+    int16_t cx[N + 1], cy[N + 1];
+    for (uint8_t i = 0; i <= N; i++) {
+        const float wgt = WING_PROFILE[i] * width * len;
+        const float nx = -sinf(a), ny = cosf(a);
+        cx[i] = (int16_t)px;              cy[i] = (int16_t)py;
+        tx[i] = (int16_t)(px + nx * wgt * 0.58f);
+        ty[i] = (int16_t)(py + ny * wgt * 0.58f);
+        bx[i] = (int16_t)(px - nx * wgt * 0.44f);
+        by[i] = (int16_t)(py - ny * wgt * 0.44f);
+        px += cosf(a) * step;
+        py += sinf(a) * step;
+        a  += da;
+    }
+
+    int16_t hx[2 * (N + 1)], hy[2 * (N + 1)];
+    uint8_t n = 0;
+    for (uint8_t i = 0; i <= N; i++)      { hx[n] = tx[i]; hy[n] = ty[i]; n++; }
+    for (int8_t i = (int8_t)N; i >= 0; i--) { hx[n] = bx[i]; hy[n] = by[i]; n++; }
+    fillPoly(t, hx, hy, n, body);
+
+    for (uint8_t i = 0; i < n; i++) {
+        const uint8_t j = (uint8_t)((i + 1) % n);
+        t.drawLine(hx[i], hy[i], hx[j], hy[j], edge);
+    }
+    for (uint8_t d = 1; d <= ndiv; d++) {
+        uint8_t i0 = (uint8_t)((float)N * (0.26f + 0.16f * (float)d));
+        uint8_t i1 = (uint8_t)(i0 + 2);
+        if (i1 > N) i1 = N;
+        if (i1 <= i0) break;
+        t.drawLine(cx[i0], cy[i0], bx[i1], by[i1], edge);
+    }
+}
+
+// HIGH SWEEP: chrome body, two slots, and rounded wings mounted on the
+// SIDES -- far wing, then the body, then the near wing, so the body sits
+// between them the way a bird's does. Shoulders are set high and both
+// wings sweep upward, which is the posture that reads most like a bird
+// rather than a box with fins.
+//
+// The chrome ramp is chosen by what it QUANTISES to, not by how it looks
+// unquantised. RGB332 gives blue only four levels, so an obvious-looking
+// chrome like (200,205,228) lands on (219,219,255) -- lavender. These sit
+// on (182,182,170), the closest neutral available at this lightness.
+static void drawToasterAt(TFT_eSPI& t, int x, int y, uint32_t now, uint16_t bodyCol, float scale) {
+    auto S = [scale](float v) { return v * scale; };
+    const int bw = (int)S(44.0f), bh = (int)S(30.0f);
+
+    const uint16_t chHi  = t.color565(250, 250, 250);
+    // Shade toward a dark BLUE, not toward BG. RGB332 has no neutral
+    // mid-grey: anything around 100-130 brightness has its blue snap down
+    // to 85 while red and green hold at 109, giving (109,109,85) -- olive,
+    // which is the exact cast this sprite exists to avoid. Blending
+    // toward BG measured (146,146,170), (109,109,85), (36,36,0): two of
+    // the three shade tones were olive. Carrying blue through the blend
+    // keeps them on (146,146,170) and (109,109,170), and a slightly cool
+    // chrome is right where a warm one is simply wrong.
+    const uint16_t shadeTo = t.color565(48, 48, 168);
+    const uint16_t chMid = blend(bodyCol, shadeTo, 70);
+    const uint16_t chLo  = blend(bodyCol, shadeTo, 130);
+    const uint16_t chDk  = blend(bodyCol, shadeTo, 200);
+    // (52,52,60) quantises to (36,36,0) -- a dark olive keyline round a
+    // chrome body. Blue needs to clear 64 to land on 85 at all.
+    const uint16_t edge  = t.color565(52, 52, 96);
+    const uint16_t slot  = t.color565(18, 18, 24);
+    const uint16_t glow  = t.color565(150, 88, 30);
+    const uint16_t glow2 = t.color565(110, 50, 20);
+    const uint16_t wh    = t.color565(252, 252, 252);
+    const uint16_t wh3   = t.color565(170, 174, 190);
+
+    // 500 ms beat, offset per sprite so a flock does not pulse in unison.
+    const float flap = sinf((float)((now + (uint32_t)x * 37u) % 500u) / 500.0f * 6.2831853f);
+
+    // The flock climbs up and to the RIGHT (see drawFlyingToasters), so the
+    // sprite has to face that way -- wings trailing behind on the left, the
+    // lever on the leading edge. The art was authored facing left, matching
+    // the source animation, so everything below is mirrored about the body
+    // centre: an x becomes (x + bw - x), an angle becomes (180 - angle),
+    // and the wing curl becomes its own negative.
+    //
+    // The far wing is deliberately NOT a straight mirror of the near one.
+    // Mirrored literally it pointed up-and-FORWARD, ahead of the leading
+    // edge, which read as a wing being shoved through the air rather than
+    // one holding the toaster up. It now sits further back along the body
+    // and sweeps up-and-back, so it reads as the far wing seen past the
+    // shell instead of a second wing on the wrong side.
+    //
+    // Both wings take the SAME flap sign. Opposite signs made them
+    // scissor -- spreading apart and closing again -- because the lift
+    // term is added to each wing's own base angle, and the two base
+    // angles already point different ways. Same sign walks both toward
+    // 270 degrees together, which is a bird beating rather than a pair
+    // of shears.
+    drawWing(t, x + bw - S(13), y + S(15.5f), S(28), 248.0f, flap, 0.47f, 3,
+             wh, wh3, -0.55f, 20.0f);
+
+    t.fillRoundRect(x, y, bw, bh, (int)S(8), bodyCol);
+    t.fillRect(x + (int)S(4), y + bh - (int)S(9),  bw - (int)S(8),  (int)S(4), chMid);
+    t.fillRect(x + (int)S(4), y + bh - (int)S(5),  bw - (int)S(8),  (int)S(3), chLo);
+    t.fillRect(x + (int)S(7), y + bh - (int)S(16), bw - (int)S(15), (int)S(2), chHi);
+
+    // Two slots, running straight across. The body is drawn axis-aligned,
+    // so its side edges are vertical and the slots have to be exactly
+    // perpendicular to them -- the earlier slant was borrowed from the
+    // source's 3/4 view and read as a mistake against straight sides.
+    // Axis-aligned also means these are plain rects rather than polygons:
+    // four fillRect instead of four scanline fills.
+    for (uint8_t i = 0; i < 2; i++) {
+        const int yy = y + (int)S(5.0f + (float)i * 7.0f);
+        t.fillRect(x + (int)S(9),  yy,             bw - (int)S(17), (int)S(4), slot);
+        t.fillRect(x + (int)S(11), yy + (int)S(1), bw - (int)S(21), (int)S(2),
+                   i ? glow2 : glow);
+    }
+
+    t.fillRect(x + bw - (int)S(7), y + bh - (int)S(16), (int)S(4), (int)S(10), chDk);
+    t.fillRect(x + bw - (int)S(6), y + bh - (int)S(15), (int)S(2), (int)S(8),  slot);
+
+    // Against a black field an unedged chrome body has no silhouette at
+    // all -- it just fades out along the bottom.
+    t.drawRoundRect(x, y, bw, bh, (int)S(8), edge);
+
+    drawWing(t, x + bw - S(17), y + S(16.5f), S(35), 214.0f, flap, 0.51f, 3,
+             wh, wh3, -0.55f, 20.0f);
+}
+
+// A slice of toast, flying under its own power just like the toasters --
+// the signature After Dark gag. INNER CRUMB: the source draws it as an
+// isometric slab with real crust thickness, not as the upright rounded
+// square this used to be. Two flat tones for the face (crust rim, pale
+// middle) rather than a gradient, which would band in RGB332.
+//
+// x,y is the top-left of the whole slab including its thickness.
+static void drawToastAt(TFT_eSPI& t, int x, int y, uint32_t now, bool hasFace,
+                        float scale, bool burnt) {
+    auto S = [scale](float v) { return v * scale; };
+    const float hw = S(26.0f), hh = S(14.0f), th = S(7.0f);
+    const float cx = x + hw, cy = y + hh;
+
+    // Every so often one comes out cremated -- straight from the original,
+    // where a blackened slice turns up among the golden ones. The burnt
+    // ramp is picked for RGB332 the same way the chrome was: (120,90,20)
+    // lands on (109,73,0) and (80,50,15) on (73,36,0), both real browns,
+    // where an obvious-looking charcoal would collapse to flat black and
+    // lose the slab's faces entirely.
+    const uint16_t top   = burnt ? t.color565(120,  90, 20) : t.color565(233, 190, 120);
+    const uint16_t crumb = burnt ? t.color565(150, 115, 30) : t.color565(246, 213, 158);
+    const uint16_t crust = burnt ? t.color565( 80,  50, 15) : t.color565(198, 132, 56);
+    const uint16_t edge  = burnt ? t.color565( 40,  14, 10) : t.color565(150,  90, 34);
+
+    int16_t px[4], py[4];
+    // Front-left crust wall, then front-right: the two faces you can see.
+    px[0] = (int16_t)(cx - hw); py[0] = (int16_t)cy;
+    px[1] = (int16_t)cx;        py[1] = (int16_t)(cy + hh);
+    px[2] = (int16_t)cx;        py[2] = (int16_t)(cy + hh + th);
+    px[3] = (int16_t)(cx - hw); py[3] = (int16_t)(cy + th);
+    fillPoly(t, px, py, 4, edge);
+
+    px[0] = (int16_t)cx;        py[0] = (int16_t)(cy + hh);
+    px[1] = (int16_t)(cx + hw); py[1] = (int16_t)cy;
+    px[2] = (int16_t)(cx + hw); py[2] = (int16_t)(cy + th);
+    px[3] = (int16_t)cx;        py[3] = (int16_t)(cy + hh + th);
+    fillPoly(t, px, py, 4, crust);
+
+    // Top face, then the pale crumb inset -- the two-tone that actually
+    // says "bread" rather than "gold tile".
+    px[0] = (int16_t)cx;        py[0] = (int16_t)(cy - hh);
+    px[1] = (int16_t)(cx + hw); py[1] = (int16_t)cy;
+    px[2] = (int16_t)cx;        py[2] = (int16_t)(cy + hh);
+    px[3] = (int16_t)(cx - hw); py[3] = (int16_t)cy;
+    fillPoly(t, px, py, 4, top);
+
+    px[0] = (int16_t)cx;              py[0] = (int16_t)(cy - hh + S(4));
+    px[1] = (int16_t)(cx + hw - S(8)); py[1] = (int16_t)cy;
+    px[2] = (int16_t)cx;              py[2] = (int16_t)(cy + hh - S(4));
+    px[3] = (int16_t)(cx - hw + S(8)); py[3] = (int16_t)cy;
+    fillPoly(t, px, py, 4, crumb);
+
+    t.drawLine((int)cx, (int)(cy - hh), (int)(cx + hw), (int)cy, edge);
+    t.drawLine((int)(cx + hw), (int)cy, (int)cx, (int)(cy + hh), edge);
+    t.drawLine((int)cx, (int)(cy + hh), (int)(cx - hw), (int)cy, edge);
+    t.drawLine((int)(cx - hw), (int)cy, (int)cx, (int)(cy - hh), edge);
+
+    // A thread of smoke off a burnt one, drifting and thinning as it
+    // rises. Phase is keyed off x so two burnt slices never smoke in step.
+    if (burnt) {
+        for (uint8_t k = 0; k < 5; k++) {
+            const float up = (float)k * S(3.5f);
+            const float sway = sinf((float)now / 240.0f + (float)k * 0.9f
+                                    + (float)x * 0.13f) * S(2.6f) * ((float)k * 0.35f);
+            const uint16_t a = (uint16_t)(120 - k * 22);
+            t.drawPixel((int)(cx + sway), (int)(cy - hh - up), blend(BG, WHITE, a));
+        }
+    }
+
+    // The fan-favourite face, kept for the minority of slices that already
+    // got one, now sitting on the crumb panel.
     if (hasFace) {
-        t.drawPixel(x + S(4), y + S(6), 0x0000);
-        t.drawPixel(x + S(9), y + S(6), 0x0000);
-        float mood = sinf((float)now / 500.0f + x);
-        if (mood > 0.0f) {
-            t.drawLine(x + S(4), y + S(10), x + S(9), y + S(10), 0x0000);   // content smile
+        const uint16_t ink = t.color565(60, 36, 12);
+        t.fillRect((int)(cx - S(7)), (int)(cy - S(3)), (int)S(3), (int)S(3), ink);
+        t.fillRect((int)(cx + S(4)), (int)(cy - S(3)), (int)S(3), (int)S(3), ink);
+        if (sinf((float)now / 500.0f + (float)x) > 0.0f) {
+            t.drawLine((int)(cx - S(5)), (int)(cy + S(5)),
+                       (int)(cx + S(5)), (int)(cy + S(5)), ink);
         } else {
-            t.drawPixel(x + S(4), y + S(10), 0x0000);                      // startled 'o'
-            t.drawPixel(x + S(9), y + S(10), 0x0000);
+            t.fillRect((int)(cx - S(2)), (int)(cy + S(3)), (int)S(4), (int)S(4), ink);
         }
     }
 }
+
+// Boris, Berkeley Systems' cat and the deepest cut in the whole After Dark
+// catalogue -- he turned up across several of their modules. He drifts
+// through batting at a slice of toast that travels just ahead of him, so
+// the gag is self-contained rather than needing him to find real toast to
+// interact with.
+//
+// Drawn as a side-on silhouette in two greys: at this size a cat reads by
+// outline alone -- ears, back, haunch, tail -- and any interior detail
+// beyond eyes and a nose just turns him into a smudge.
+static void drawBorisAt(TFT_eSPI& t, int x, int y, uint32_t now, float scale, bool swipe) {
+    auto S = [scale](float v) { return (int)(v * scale + 0.5f); };
+    const uint16_t furD = t.color565(96, 96, 118);
+    const uint16_t furL = t.color565(150, 150, 172);
+    const uint16_t eye  = t.color565(210, 230, 90);
+    const uint16_t pink = t.color565(230, 140, 160);
+
+    // Tail: a swishing arc behind him, three segments so it curls.
+    const float sw = sinf((float)now / 300.0f) * 0.55f;
+    int tx0 = x + S(4), ty0 = y + S(17);
+    for (uint8_t k = 0; k < 3; k++) {
+        const float a = 3.3f + sw * (float)(k + 1) * 0.4f;
+        const int nx = tx0 - (int)(cosf(a) * S(7));
+        const int ny = ty0 - (int)(sinf(a) * S(7));
+        t.drawLine(tx0, ty0, nx, ny, furD);
+        t.drawLine(tx0, ty0 + 1, nx, ny + 1, furD);
+        tx0 = nx; ty0 = ny;
+    }
+
+    // Body and haunch.
+    t.fillRoundRect(x + S(4), y + S(10), S(24), S(12), S(5), furD);
+    t.fillRoundRect(x + S(3), y + S(12), S(11), S(11), S(5), furL);
+    // Head, with the ears as two triangles off the top.
+    t.fillRoundRect(x + S(23), y + S(4), S(14), S(12), S(5), furL);
+    t.fillTriangle(x + S(24), y + S(6), x + S(26), y + S(-1), x + S(30), y + S(5), furL);
+    t.fillTriangle(x + S(32), y + S(5), x + S(36), y + S(-1), x + S(37), y + S(6), furL);
+    t.fillTriangle(x + S(26), y + S(5), x + S(27), y + S(1),  x + S(29), y + S(5), pink);
+    t.fillTriangle(x + S(33), y + S(5), x + S(35), y + S(1),  x + S(36), y + S(6), pink);
+    // Eyes and nose.
+    t.fillRect(x + S(27), y + S(8), S(3), S(3), eye);
+    t.fillRect(x + S(33), y + S(8), S(3), S(3), eye);
+    t.drawPixel(x + S(37), y + S(12), pink);
+
+    // Front paw: tucked while drifting, thrown forward on the swipe.
+    if (swipe) {
+        t.fillRoundRect(x + S(34), y + S(13), S(12), S(5), S(2), furL);
+        t.fillRect(x + S(45), y + S(13), S(2), S(2), pink);
+    } else {
+        t.fillRoundRect(x + S(24), y + S(18), S(9), S(5), S(2), furL);
+    }
+    // Back leg.
+    t.fillRoundRect(x + S(6), y + S(19), S(9), S(5), S(2), furL);
+}
+
+// Mowin' Man, from the module of the same name -- a small figure who walks
+// the bottom edge pushing a mower. The original mowed the desktop; there
+// is no desktop here, so he mows a strip of grass that grows back behind
+// him, which is the same joke without needing something to destroy.
+static void drawMowinManAt(TFT_eSPI& t, int x, int baseY, uint32_t now, float scale) {
+    auto S = [scale](float v) { return (int)(v * scale + 0.5f); };
+    const uint16_t skin  = t.color565(232, 186, 140);
+    const uint16_t shirt = t.color565(70, 120, 200);
+    const uint16_t trous = t.color565(60, 60, 90);
+    const uint16_t mower = t.color565(200, 60, 50);
+    const uint16_t metal = t.color565(150, 150, 172);
+
+    // Legs alternate on a walk cycle; the body bobs with it.
+    const bool step = ((now / 180u) & 1u) != 0;
+    const int bob = step ? 0 : S(1);
+
+    t.fillRect(x + S(6), baseY - S(9) + bob,  S(3), S(9), trous);
+    t.fillRect(x + (step ? S(10) : S(3)), baseY - S(9) + bob, S(3), S(9), trous);
+    t.fillRoundRect(x + S(4), baseY - S(19) + bob, S(10), S(11), S(3), shirt);
+    t.fillRect(x + S(13), baseY - S(17) + bob, S(7), S(3), skin);        // arms out to the handle
+    t.fillCircle(x + S(9), baseY - S(22) + bob, S(4), skin);
+    t.fillRect(x + S(5), baseY - S(26) + bob, S(9), S(3), t.color565(40, 40, 60));
+
+    // Mower: handle up to his hands, deck on the ground, wheels.
+    t.drawLine(x + S(19), baseY - S(16) + bob, x + S(27), baseY - S(4), metal);
+    t.drawLine(x + S(20), baseY - S(16) + bob, x + S(28), baseY - S(4), metal);
+    t.fillRoundRect(x + S(21), baseY - S(7), S(14), S(6), S(2), mower);
+    t.fillCircle(x + S(23), baseY - S(1), S(2), trous);
+    t.fillCircle(x + S(33), baseY - S(1), S(2), trous);
+}
+
+// Defined further down, next to backgroundTap() which consumes it.
+static void publishGoldToaster(int cx, int cy, int r, uint32_t now);
 
 void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     static const uint8_t N = 5;
@@ -1214,34 +1508,236 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     static uint16_t tcol[N];
     static const uint8_t NT = 6;
     static float    ox[NT], oy[NT], oscale[NT];
-    static bool      oface[NT];
+    static bool      oface[NT], oburnt[NT];
     static bool      inited = false;
+
+    // Deep space behind the flock. The original art is just toasters on
+    // black; this is a deliberate addition, so it stays quiet -- the
+    // toasters are the subject and none of this is allowed to compete
+    // with them for attention.
+    static const uint8_t NSTAR = 44;
+    static float   starX[NSTAR], starY[NSTAR];
+    static uint8_t starMag[NSTAR], starPh[NSTAR];
+
+    // One shooting star and one comet at a time, both usually absent.
+    // Rarity is the whole point: something that happens continuously is
+    // texture, and texture here would just be visual noise.
+    static float    ssX = 0, ssY = 0, ssVX = 0, ssVY = 0;
+    static uint16_t ssAge = 0, ssLife = 0;
+    static uint32_t ssNext = 0;
+    static float    cmX = 0, cmY = 0, cmVX = 0, cmVY = 0, cmTurn = 0;
+    static bool     cmLive = false;
+    static uint32_t cmNext = 0;
+    // The tail is drawn through where the comet has actually BEEN, not
+    // back along its current heading. A heading-derived tail is rigid: it
+    // pivots as one piece and reads as a painted-on cone. A position
+    // history lags, curves when the flight path curves, and straightens
+    // out again behind -- which is the whole difference between a comet
+    // and an arrow.
+    static const uint8_t CMTRAIL = 30;
+    static float    cmHx[CMTRAIL], cmHy[CMTRAIL];
+    static uint8_t  cmHn = 0;
+
+    // Two After Dark cameos, both rare enough to be a surprise rather than
+    // scenery: Boris chasing a slice, and Mowin' Man working the bottom
+    // edge. Neither is ever on screen at the same time as the other.
+    static float    boX = 0, boY = 0, boS = 1.0f;
+    static bool     boLive = false;
+    static uint32_t boNext = 0;
+    static float    mmX = 0;
+    static bool     mmLive = false;
+    static uint32_t mmNext = 0;
+    // Grass Mowin' Man cuts. One byte per column: height now, regrowing
+    // slowly behind him. A strip rather than a full lawn, because the flock
+    // is the subject and a mown lawn across the whole band would take over.
+    static const uint8_t GRASSW = 80;
+    static uint8_t  grass[GRASSW];
 
     int w = t.width();
     int bandH = yEnd - yStart;
     if (bandH < 20) return;
 
-    // Plain black space — the actual reference art has no starfield at
-    // all, just the flock against solid black.
-    uint16_t chromeCol = t.color565(200, 202, 208);
+    // The reference art is a flock on plain black. Stars, a shooting star
+    // and a comet were added on top of that deliberately -- see the
+    // starfield block below, which draws before the flock so everything
+    // passes in front of it.
+    // (190,190,150) quantises to (182,182,170) -- see drawToasterAt().
+    uint16_t chromeCol = t.color565(190, 190, 150);
 
     if (!inited) {
         for (uint8_t i = 0; i < N; i++) {
             tx[i]     = (float)random(-w, w);
             ty[i]     = (float)random(yStart, yEnd - 12);
             tcol[i]   = chromeCol;
-            tscale[i] = 0.7f + (float)random(0, 100) / 100.0f * 0.7f;
+            tscale[i] = 0.55f + (float)random(0, 100) / 100.0f * 0.45f;
         }
         for (uint8_t i = 0; i < NT; i++) {
             ox[i]     = (float)random(-w, w);
             oy[i]     = (float)random(yStart, yEnd - 14);
             oface[i]  = random(0, 3) == 0;
-            oscale[i] = 0.7f + (float)random(0, 100) / 100.0f * 0.7f;
+            oburnt[i] = random(0, 7) == 0;
+            oscale[i] = 0.50f + (float)random(0, 100) / 100.0f * 0.40f;
         }
+        for (uint8_t i = 0; i < NSTAR; i++) {
+            starX[i]   = (float)random(0, w);
+            starY[i]   = (float)random(yStart, yEnd);
+            // A handful of bright ones carry the field; the rest sit far
+            // back. A uniform magnitude reads as a grid of dots.
+            starMag[i] = (uint8_t)(random(0, 8) == 0 ? random(200, 256)
+                                                     : random(70, 150));
+            starPh[i]  = (uint8_t)random(0, 255);
+        }
+        ssNext = now + (uint32_t)random(2500, 7000);
+        cmNext = now + (uint32_t)random(9000, 22000);
+        boNext = now + (uint32_t)random(40000, 90000);
+        mmNext = now + (uint32_t)random(55000, 120000);
+        for (uint8_t i = 0; i < GRASSW; i++) grass[i] = (uint8_t)random(3, 7);
         inited = true;
     }
 
     t.fillRect(0, yStart, w, bandH, BG);
+
+    // ---- starfield -------------------------------------------------------
+    // Drifting down-left while the flock climbs up-right, which reads as
+    // parallax for the cost of two adds. Twinkle is a sine on a per-star
+    // phase rather than random(), so a star breathes instead of flickering.
+    for (uint8_t i = 0; i < NSTAR; i++) {
+        starX[i] -= 0.06f;
+        starY[i] += 0.03f;
+        if (starX[i] < 0.0f)          starX[i] = (float)w;
+        if (starY[i] >= (float)yEnd)  starY[i] = (float)yStart;
+        if (starY[i] < (float)yStart) starY[i] = (float)(yEnd - 1);
+
+        const float tw = sinf((float)now / 900.0f + (float)starPh[i] * 0.0246f);
+        int b = (int)starMag[i] + (int)(tw * 38.0f);
+        if (b < 24)  b = 24;
+        if (b > 255) b = 255;
+        const uint16_t sc = t.color565((uint8_t)b, (uint8_t)b,
+                                       (uint8_t)(b > 235 ? 255 : b + 20));
+        t.drawPixel((int)starX[i], (int)starY[i], sc);
+        // The brightest few get a one-pixel cross so they read as stars
+        // rather than as dust.
+        if (starMag[i] > 200) {
+            const uint16_t dim = blend(BG, sc, 150);
+            t.drawPixel((int)starX[i] - 1, (int)starY[i], dim);
+            t.drawPixel((int)starX[i] + 1, (int)starY[i], dim);
+            t.drawPixel((int)starX[i], (int)starY[i] - 1, dim);
+            t.drawPixel((int)starX[i], (int)starY[i] + 1, dim);
+        }
+    }
+
+    // ---- shooting star ---------------------------------------------------
+    // Fast, short-lived, and gone. Drawn as three segments behind the head,
+    // each dimmer than the last, so the streak tapers off instead of
+    // ending in a hard stop.
+    if (ssLife == 0 && now >= ssNext) {
+        ssX    = (float)random(w / 4, w);
+        ssY    = (float)random(yStart, yStart + bandH / 3);
+        const float sp = 5.0f + (float)random(0, 40) / 10.0f;
+        ssVX   = -sp * 0.86f;
+        ssVY   =  sp * 0.50f;
+        ssAge  = 0;
+        ssLife = (uint16_t)random(16, 30);
+    }
+    if (ssLife > 0) {
+        ssX += ssVX;
+        ssY += ssVY;
+        // Fade in over the first few frames and out over the last few, so
+        // it neither appears nor vanishes as a hard pop.
+        const uint16_t rem = (uint16_t)(ssLife - ssAge);
+        uint16_t amp = 255;
+        if (ssAge < 4) amp = (uint16_t)(64 * (ssAge + 1));
+        if (rem  < 6)  amp = (uint16_t)(42 * rem);
+        for (uint8_t k = 0; k < 3; k++) {
+            const float t0 = (float)k * 2.4f, t1 = (float)(k + 1) * 2.4f;
+            const uint16_t a = (uint16_t)((amp * (uint16_t)(200 - k * 62)) / 255);
+            t.drawLine((int)(ssX - ssVX * t0), (int)(ssY - ssVY * t0),
+                       (int)(ssX - ssVX * t1), (int)(ssY - ssVY * t1),
+                       blend(BG, WHITE, a));
+        }
+        t.drawPixel((int)ssX, (int)ssY, blend(BG, WHITE, amp));
+        if (++ssAge >= ssLife || ssX < -20.0f || ssY > (float)yEnd) {
+            ssLife = 0;
+            ssNext = now + (uint32_t)random(2500, 7000);
+        }
+    }
+
+    // ---- comet -----------------------------------------------------------
+    // Slower and much rarer than the shooting star, and built the other way
+    // round: a solid head with a glow, and a trail that follows the path it
+    // actually flew.
+    if (!cmLive && now >= cmNext) {
+        cmLive = true;
+        cmX    = (float)(w + 30);
+        cmY    = (float)random(yStart + 4, yEnd - bandH / 3);
+        cmVX   = -(1.7f + (float)random(0, 120) / 100.0f);
+        cmVY   =  (0.35f + (float)random(0, 55) / 100.0f);
+        // A slow constant turn, direction and rate both random, so no two
+        // passes trace the same arc.
+        cmTurn = (float)random(-16, 17) / 12000.0f;
+        cmHn   = 0;
+    }
+    if (cmLive) {
+        // Curve the flight by rotating the velocity a little each frame.
+        // Travelling dead straight is most of what made it look static.
+        const float cs = cosf(cmTurn), sn = sinf(cmTurn);
+        const float nvx = cmVX * cs - cmVY * sn;
+        cmVY = cmVX * sn + cmVY * cs;
+        cmVX = nvx;
+        cmX += cmVX;
+        cmY += cmVY;
+
+        // Push the new position on, oldest falling off the end.
+        for (uint8_t k = CMTRAIL - 1; k > 0; k--) {
+            cmHx[k] = cmHx[k - 1];
+            cmHy[k] = cmHy[k - 1];
+        }
+        cmHx[0] = cmX; cmHy[0] = cmY;
+        if (cmHn < CMTRAIL) cmHn++;
+
+        const uint16_t ICE = t.color565(190, 226, 255);
+        // Walk the history from the far end forward, so brighter, wider
+        // trail nearer the head simply paints over the dimmer tail behind
+        // it -- no need to sort or blend anything.
+        for (uint8_t k = (uint8_t)(cmHn - 1); k > 0; k--) {
+            const float agef = 1.0f - (float)k / (float)CMTRAIL;   // 0 tail .. 1 head
+            uint16_t a = (uint16_t)(20.0f + 200.0f * agef * agef);
+            const uint16_t col = blend(BG, ICE, a);
+            t.drawLine((int)cmHx[k], (int)cmHy[k],
+                       (int)cmHx[k - 1], (int)cmHy[k - 1], col);
+            // The trail thickens toward the head. Offset across the minor
+            // axis so a near-horizontal trail actually gains height.
+            if (agef > 0.58f) {
+                const float dx = cmHx[k - 1] - cmHx[k], dy = cmHy[k - 1] - cmHy[k];
+                const int off = (agef > 0.84f) ? 2 : 1;
+                for (int o = 1; o <= off; o++) {
+                    if (dx * dx >= dy * dy) {
+                        t.drawLine((int)cmHx[k], (int)cmHy[k] - o,
+                                   (int)cmHx[k - 1], (int)cmHy[k - 1] - o, col);
+                        t.drawLine((int)cmHx[k], (int)cmHy[k] + o,
+                                   (int)cmHx[k - 1], (int)cmHy[k - 1] + o, col);
+                    } else {
+                        t.drawLine((int)cmHx[k] - o, (int)cmHy[k],
+                                   (int)cmHx[k - 1] - o, (int)cmHy[k - 1], col);
+                        t.drawLine((int)cmHx[k] + o, (int)cmHy[k],
+                                   (int)cmHx[k - 1] + o, (int)cmHy[k - 1], col);
+                    }
+                }
+            }
+        }
+
+        // Head: a bright core that pulses, so it reads as burning rather
+        // than as a drawn dot.
+        const float pulse = sinf((float)now / 110.0f);
+        t.fillCircle((int)cmX, (int)cmY, 3, WHITE);
+        t.drawCircle((int)cmX, (int)cmY, 4, blend(BG, ICE, (uint16_t)(170 + pulse * 60.0f)));
+        t.drawCircle((int)cmX, (int)cmY, 6, blend(BG, ICE, (uint16_t)(60 + pulse * 34.0f)));
+
+        if (cmX < -70.0f || cmY > (float)yEnd + 24.0f || cmY < (float)yStart - 24.0f) {
+            cmLive = false;
+            cmNext = now + (uint32_t)random(9000, 22000);
+        }
+    }
 
     // Classic flight path: diagonally up and to the right, off the top
     // corner, re-entering from the lower-left. Every so often a
@@ -1251,14 +1747,20 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     for (uint8_t i = 0; i < N; i++) {
         tx[i] += (0.6f + (float)(i % 3) * 0.25f) * tscale[i];
         ty[i] -= (0.15f + (float)(i % 2) * 0.1f) * tscale[i];
-        if (tx[i] > w + 30 || ty[i] < (float)yStart - 12) {
-            tx[i]     = (float)(-random(0, 40) - 20);
+        if (tx[i] > w + 40 || ty[i] < (float)yStart - 44) {
+            tx[i]     = (float)(-random(0, 40) - 70);
             ty[i]     = (float)random(yStart + 12, yEnd - 12);
             tcol[i]   = (random(0, 15) == 0) ? goldCol : chromeCol;
-            tscale[i] = 0.7f + (float)random(0, 100) / 100.0f * 0.7f;
+            tscale[i] = 0.55f + (float)random(0, 100) / 100.0f * 0.45f;
         }
         drawToasterAt(t, (int)tx[i], (int)ty[i], now, tcol[i], tscale[i]);
         if (tcol[i] == goldCol) {
+            // Publish the body's centre so a tap can find it. Radius covers
+            // the body, not the wings -- the wings sweep and a hit box that
+            // tracked them would move under the finger.
+            publishGoldToaster((int)tx[i] + (int)(22.0f * tscale[i]),
+                               (int)ty[i] + (int)(15.0f * tscale[i]),
+                               (int)(24.0f * tscale[i]), now);
             for (uint8_t k = 1; k <= 3; k++) {
                 int spx = (int)(tx[i] - k * 3.5f), spy = (int)(ty[i] + k * 0.9f + 6);
                 t.drawPixel(spx, spy, blend(BG, goldCol, (uint16_t)(180 - k * 50)));
@@ -1268,13 +1770,84 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     for (uint8_t i = 0; i < NT; i++) {
         ox[i] += (0.7f + (float)(i % 3) * 0.2f) * oscale[i];
         oy[i] -= (0.18f + (float)(i % 2) * 0.12f) * oscale[i];
-        if (ox[i] > w + 20 || oy[i] < (float)yStart - 14) {
+        if (ox[i] > w + 40 || oy[i] < (float)yStart - 30) {
             ox[i]     = (float)(-random(0, 60) - 16);
             oy[i]     = (float)random(yStart + 14, yEnd - 14);
             oface[i]  = random(0, 3) == 0;
-            oscale[i] = 0.7f + (float)random(0, 100) / 100.0f * 0.7f;
+            oburnt[i] = random(0, 7) == 0;
+            oscale[i] = 0.50f + (float)random(0, 100) / 100.0f * 0.40f;
         }
-        drawToastAt(t, (int)ox[i], (int)oy[i], now, oface[i], oscale[i]);
+        drawToastAt(t, (int)ox[i], (int)oy[i], now, oface[i], oscale[i], oburnt[i]);
+    }
+
+    // ---- Boris -----------------------------------------------------------
+    if (!boLive && now >= boNext) {
+        boLive = true;
+        boX    = (float)(-70);
+        boY    = (float)random(yStart + 10, yEnd - 46);
+        boS    = 0.65f + (float)random(0, 40) / 100.0f;
+    }
+    if (boLive) {
+        boX += 1.1f;
+        // He rises and falls gently as he drifts, and swipes on a cadence.
+        const float bob = sinf((float)now / 620.0f) * 5.0f;
+        const bool swipe = ((now / 900u) % 3u) == 0u;
+        // The slice he is after, always just out of reach ahead of him.
+        const int tx2 = (int)(boX + 52.0f * boS + (swipe ? 5.0f : 0.0f));
+        const int ty2 = (int)(boY + bob - 4.0f + sinf((float)now / 300.0f) * 3.0f);
+        drawToastAt(t, tx2, ty2, now, false, boS * 0.55f, false);
+        drawBorisAt(t, (int)boX, (int)(boY + bob), now, boS, swipe);
+        if (boX > (float)(w + 80)) {
+            boLive = false;
+            boNext = now + (uint32_t)random(40000, 90000);
+        }
+    }
+
+    // ---- Mowin' Man ------------------------------------------------------
+    // The grass only exists while he does. It grows in ahead of his arrival
+    // and is gone once he leaves, so the band is plain black the rest of
+    // the time -- a permanent lawn under a flock of toasters is a different
+    // screensaver.
+    if (!mmLive && now >= mmNext) {
+        mmLive = true;
+        mmX    = -50.0f;
+        // Starts bare. Seeding the whole strip at once put a full-width
+        // green bar across the screen the instant he spawned, which read
+        // as a UI element rather than as a lawn.
+        for (uint8_t i = 0; i < GRASSW; i++) grass[i] = 0;
+    }
+    if (mmLive) {
+        mmX += 0.85f;
+        const int gBase = yEnd - 1;
+        const int colW  = (w + GRASSW - 1) / GRASSW;
+        const uint16_t g1 = t.color565(60, 150, 70);
+        const uint16_t g2 = t.color565(40, 110, 50);
+        for (uint8_t i = 0; i < GRASSW; i++) {
+            const int gx = (int)i * colW;
+            if (gx > w) break;
+            // A patch that travels with him: grows in ahead, gets cut as the
+            // deck passes, holds as stubble just behind, and dies off once
+            // he is well past. Nothing exists outside that window, so the
+            // band is plain black except right where he is working.
+            const float ahead = (float)gx - mmX;
+            if (ahead > 26.0f && ahead < 150.0f) {
+                if (grass[i] < 7 && ((now / 40u + i * 3u) % 5u) == 0u) grass[i]++;
+            } else if (ahead <= 26.0f && ahead > -6.0f) {
+                grass[i] = 1;                                  // under the deck
+            } else if (ahead <= -6.0f && ahead > -110.0f) {
+                if (grass[i] < 3 && ((now / 90u + i) % 29u) == 0u) grass[i]++;
+            } else if (grass[i] > 0 && ((now / 60u + i) % 7u) == 0u) {
+                grass[i]--;
+            }
+            const int gh = (int)grass[i];
+            if (gh <= 0) continue;
+            t.drawFastVLine(gx, gBase - gh, gh, (i & 1) ? g1 : g2);
+        }
+        drawMowinManAt(t, (int)mmX, gBase, now, 0.85f);
+        if (mmX > (float)(w + 60)) {
+            mmLive = false;
+            mmNext = now + (uint32_t)random(55000, 120000);
+        }
     }
 }
 
@@ -2379,7 +2952,40 @@ void drawActiveBackground(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
     }
 }
 
+// Where the gold toaster was last drawn, and how big. Published by
+// drawFlyingToasters() every frame it is on screen so backgroundTap() has
+// something to hit-test against -- the same shape as the moon's
+// s_moonX/s_moonY, and stale for the same reason: if it has not been
+// refreshed in the last few frames the toaster is gone.
+static int      s_goldX = -1, s_goldY = -1, s_goldR = 0;
+static uint32_t s_goldAt = 0;
+static bool     s_goldCaught = false;
+
+static void publishGoldToaster(int cx, int cy, int r, uint32_t now) {
+    s_goldX = cx; s_goldY = cy; s_goldR = r; s_goldAt = now;
+}
+
+bool consumeToasterCatch() {
+    if (!s_goldCaught) return false;
+    s_goldCaught = false;
+    return true;
+}
+
 bool backgroundTap(int x, int y, uint32_t now) {
+    // The rare gold toaster is catchable. One tap, unlike the moon's three:
+    // it is only on screen for a few seconds at a time and moving, which is
+    // difficulty enough without also demanding a triple-tap on a target
+    // that will not still be there.
+    if (s_goldX >= 0 && (now - s_goldAt) <= 250) {
+        const int gdx = x - s_goldX, gdy = y - s_goldY;
+        const int gr  = s_goldR + 10;
+        if (gdx * gdx + gdy * gdy <= gr * gr) {
+            s_goldCaught = true;
+            s_goldX = -1;               // caught: stop accepting taps on it
+            return true;
+        }
+    }
+
     // Not drawn recently means not on screen.
     if (s_moonX < 0 || (now - s_moonAt) > 250) return false;
     const int dx = x - s_moonX, dy = y - s_moonY;

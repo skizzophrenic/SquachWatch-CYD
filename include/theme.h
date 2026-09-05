@@ -279,6 +279,11 @@ namespace Theme {
     // Squachy without theme.cpp needing to know that outfits exist.
     bool consumeWerewolfSummon();
 
+    // True once, after the player has tapped the rare gold toaster on the
+    // TOASTERS background. Same consume-once contract as the werewolf
+    // summon above; main.cpp turns it into an outfit unlock.
+    bool consumeToasterCatch();
+
     // Falling snow with a gentle sideways sway, a few larger bright
     // flakes mixed into a field of smaller dim ones.
     void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);

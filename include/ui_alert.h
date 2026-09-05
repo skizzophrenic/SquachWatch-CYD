@@ -32,3 +32,15 @@ bool uiAlertHitMoreInfo(int x, int y, int screenW, int screenH);
 // Same "only meaningful while the info panel is down" caveat as
 // uiAlertHitMoreInfo() above -- once the panel is up it owns the touch.
 bool uiAlertHitHunt(int x, int y, int screenW, int screenH);
+
+// Hit test for the IGNORE button, top-right. Same 70x48 footprint as HUNT
+// and MORE INFO so the three read as one set of controls, and in the one
+// corner the rest of this screen's centred layout leaves clear at every
+// rotation. Same "only meaningful while the info panel is down" caveat.
+bool uiAlertHitIgnore(int x, int y, int screenW, int screenH);
+
+// Hit test for the IGNORE button, top-right. Same 70x48 footprint as HUNT
+// and MORE INFO so the three read as one set of controls, and in the one
+// corner the rest of this screen's centred layout leaves clear at every
+// rotation. Same "only meaningful while the info panel is down" caveat.
+bool uiAlertHitIgnore(int x, int y, int screenW, int screenH);

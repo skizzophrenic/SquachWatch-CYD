@@ -8,6 +8,11 @@
 
 namespace Squachy {
 
+// Single switch for the silhouette keyline added to drawBody(). Left as a
+// named constant rather than inlined so taking it back out is one edit,
+// not an archaeology exercise across the draw order.
+static const bool SQUACHY_KEYLINE = true;
+
 enum class Mood : uint8_t { IDLE, WAVE, SHOCKED, BOUNCE, SLEEPY, WALK, DANCE, WINK };
 
 // Which reaction pose a SHOCKED mood strikes — varies by what triggered
@@ -328,6 +333,7 @@ static uint8_t  s_nickIdx          = 0;
 static uint8_t  s_outfitIdx        = 0;
 static bool     s_allOutfitsUnlocked = false;  // hidden button-sequence easter egg
 static bool     s_wolfPeltUnlocked   = false;  // earned by summoning the werewolf
+static bool     s_chromeWingUnlocked = false;  // earned by catching the gold toaster
 // Bitmask of outfits whose unlock popup has already been shown. Persisted,
 // because "new" has to survive a reboot: without it every boot would
 // re-announce everything already earned. Seeded on first run with whatever
@@ -433,6 +439,7 @@ enum class OutfitId : uint8_t {
     TINFOIL, SHADOW, PLUMBER, TALLBRO, SPACE, BLUEBLUR,
     CAPTAIN,
     WOLFPELT,
+    CHROMEWING,
     COUNT
 };
 
@@ -455,6 +462,9 @@ static const OutfitDef OUTFITS[] = {
     // unlocked by something happening instead -- summoning the werewolf
     // on the FIRE background. See outfitUnlocked().
     { "WOLF PELT",      OUTFIT_BY_EVENT },
+    // Earned by catching the rare gold toaster on the TOASTERS
+    // background -- see Theme::consumeToasterCatch().
+    { "CHROME WING",    OUTFIT_BY_EVENT },
 };
 static const uint8_t OUTFITS_N = sizeof(OUTFITS) / sizeof(OUTFITS[0]);
 static_assert(OUTFITS_N == (uint8_t)OutfitId::COUNT, "OUTFITS must match OutfitId");
@@ -467,7 +477,17 @@ static_assert(OUTFITS_N == (uint8_t)OutfitId::COUNT, "OUTFITS must match OutfitI
 // what makes a hole in the middle representable.
 static bool outfitUnlocked(uint8_t i) {
     if (s_allOutfitsUnlocked)                     return true;
-    if (OUTFITS[i].threshold == OUTFIT_BY_EVENT)  return s_wolfPeltUnlocked;
+    // OUTFIT_BY_EVENT says "not earned by counting"; which event is a
+    // property of the outfit, so it is switched on here rather than
+    // encoded in the threshold. Two of these now, and adding a third is
+    // one case label.
+    if (OUTFITS[i].threshold == OUTFIT_BY_EVENT) {
+        switch ((OutfitId)i) {
+            case OutfitId::WOLFPELT:   return s_wolfPeltUnlocked;
+            case OutfitId::CHROMEWING: return s_chromeWingUnlocked;
+            default:                   return false;
+        }
+    }
     return s_cachedLifetimeTotal >= OUTFITS[i].threshold;
 }
 
@@ -635,6 +655,7 @@ static void ensurePrefsLoaded() {
     s_outfitIdx       = s_petPrefs.getUChar("outfitIdx", 0);
     s_allOutfitsUnlocked = s_petPrefs.getBool("allOutfits", false);
     s_wolfPeltUnlocked   = s_petPrefs.getBool("wolfPelt", false);
+    s_chromeWingUnlocked = s_petPrefs.getBool("chromeWing", false);
     s_outfitAnnounced    = s_petPrefs.getUInt("outfitSeen", 0xFFFFFFFFu);
     s_petPrefsLoaded  = true;
 }
@@ -1081,6 +1102,17 @@ void setOutfitPreview(int8_t idx) {
     s_outfitOverride = idx;
 }
 
+void unlockChromeWing() {
+    ensurePrefsLoaded();
+    if (s_chromeWingUnlocked) return;           // already had it; stay quiet
+    s_chromeWingUnlocked = true;
+    s_petPrefs.putBool("chromeWing", true);
+    refreshOutfitUnlocks();
+    mood      = Mood::DANCE;
+    moodUntil = millis() + 2000;
+    say("caught one!", 3400);
+}
+
 void unlockAllOutfits() {
     ensurePrefsLoaded();
     s_allOutfitsUnlocked = true;
@@ -1349,6 +1381,37 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
             t.fillCircle(cx2 + S(27), hy + S(30), S(4), ringDark);
             break;
         }
+        case OutfitId::CHROMEWING: {
+            // Chrome toaster wings, worn. Same two-tone the flock uses --
+            // white leading edge, cool grey trailing half -- so it reads as
+            // the same material rather than as generic angel wings. Drawn
+            // from the shoulders outward and swept back, with a slow beat
+            // that runs whether or not he is moving.
+            const uint16_t wh  = TFT_WHITE;
+            const uint16_t wh2 = t.color565(214, 214, 228);
+            const uint16_t wh3 = t.color565(150, 150, 172);
+            const float beat = sinf((float)now / 620.0f);
+            const int sy = hy + S(20);
+            for (int8_t side = -1; side <= 1; side += 2) {
+                const int sx = cx2 + side * S(13);
+                const int tipX = sx + side * S(20);
+                const int tipY = sy - S(15) - (int)(beat * (float)S(5));
+                const int midX = sx + side * S(14);
+                const int midY = sy - S(2) - (int)(beat * (float)S(2));
+                t.fillTriangle(sx, sy - S(4), tipX, tipY, midX, midY, wh);
+                t.fillTriangle(sx, sy + S(2), midX, midY,
+                               sx + side * S(9), sy + S(9), wh2);
+                t.drawLine(sx, sy - S(4), tipX, tipY, wh3);
+                t.drawLine(tipX, tipY, midX, midY, wh3);
+                t.drawLine(midX, midY, sx + side * S(9), sy + S(9), wh3);
+                // Two feather divisions, same trick as the flock's wings.
+                t.drawLine(sx + side * S(4), sy - S(2),
+                           sx + side * S(15), sy - S(8), wh3);
+                t.drawLine(sx + side * S(4), sy + S(1),
+                           sx + side * S(13), sy + S(2), wh3);
+            }
+            break;
+        }
         case OutfitId::WOLFPELT: {
             // Worn, not become: the skull is pushed back on his head
             // like a hood, jaw hanging over his brow, pelt down the
@@ -1601,6 +1664,28 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     }
 
     // Shadow (fixed, doesn't bob)
+    // ---- silhouette keyline -------------------------------------------
+    // A dark outline one pixel proud of every major mass. Squachy's own
+    // darkest brown is close to several of the backgrounds -- he sinks
+    // into the fire and the tunnel -- and this is the cheapest thing that
+    // fixes him everywhere at once rather than per background.
+    //
+    // Drawn as expanded copies of the shapes underneath rather than as
+    // stroked outlines: the arms and legs move, and a real outline would
+    // have to be recomputed per pose, where an oversized copy just works.
+    // Flip SQUACHY_KEYLINE to false to take the whole thing back out.
+    if (SQUACHY_KEYLINE) {
+        const uint16_t key = blend(FUR_DARK, BLACK, 150);
+        t.fillRoundRect(cx2 - S(16), hy - S(1), S(32), S(26), S(8), key);
+        t.fillRoundRect(cx2 - S(16), hy + S(22), S(32), S(20), S(6), key);
+        t.fillRoundRect(cx2 - S(19), hy + S(21), S(10), S(24), S(4), key);
+        t.fillRoundRect(cx2 + S(9),  hy + S(21), S(10), S(24), S(4), key);
+        t.fillRect(cx2 - S(11), hy + S(39), S(10), S(12), key);
+        t.fillRect(cx2 + S(1),  hy + S(39), S(10), S(12), key);
+        t.fillRoundRect(cx2 - S(14), hy + S(48), S(14), S(8), S(3), key);
+        t.fillRoundRect(cx2,         hy + S(48), S(14), S(8), S(3), key);
+    }
+
     t.fillEllipse(cx2, headTopY + S(62), S(18), S(4), blend(BG, FUR_DARK, 70));
 
     // Legs + big bigfoot feet — a simple alternating step lift while

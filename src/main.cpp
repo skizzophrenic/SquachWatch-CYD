@@ -27,6 +27,8 @@
 #include "ui_diary.h"
 #include "ui_outfit.h"
 #include "ui_outfit_unlock.h"
+#include "ignore_list.h"
+#include "ignore_list.h"
 #include "ui_detfilter.h"
 #include "squachy.h"
 #include "cap_touch.h"
@@ -1516,7 +1518,14 @@ void loop() {
             } else {
                 const Detection* latest = engine.latest();
                 if (latest && (now - latest->firstSeen) < 200 &&
-                    confidenceFor(latest->type) >= Settings::minConfidence()) {
+                    confidenceFor(latest->type) >= Settings::minConfidence() &&
+                    // Your own AirTag and your own doorbell are true
+                    // positives every single time, and a detector that
+                    // shouts about them constantly is one you stop reading.
+                    // Only the ALERT is suppressed -- the detection is
+                    // still counted and still written to the LOG above, so
+                    // the device stays visible and un-ignorable.
+                    !IgnoreList::contains(latest->mac)) {
                     enterAlert(*latest);
                 }
             }
@@ -1536,6 +1545,7 @@ void loop() {
             // here rather than inside theme.cpp so the background
             // renderer stays unaware of the outfit system.
             if (Theme::consumeWerewolfSummon()) Squachy::unlockWolfPelt();
+            if (Theme::consumeToasterCatch())   Squachy::unlockChromeWing();
 
             bool boring = Settings::boringMode();
             ButtonId barBtn = tp.valid ? Theme::hitTestButtonBar(tp.x, tp.y, tft.width(), tft.height()) : ButtonId::NONE;
@@ -1757,6 +1767,18 @@ void loop() {
                     s_infoShowingPrimer  = !Settings::infoPrimerShown();
                     s_infoPending        = true;
                     s_infoArmed          = false;
+                } else if (uiAlertHitIgnore(tp.x, tp.y, tft.width(), tft.height())) {
+                    // Toggle, not just add: the button reads MUTED once the
+                    // device is on the list, so tapping it again has to be
+                    // the way back off. Fires the DETECTION trigger for the
+                    // same reason HUNT does below -- leaving by this route
+                    // is still the user acknowledging the alert.
+                    lastTouch = now;
+                    if (IgnoreList::contains(s_alertMac)) IgnoreList::remove(s_alertMac);
+                    else                                  IgnoreList::add(s_alertMac);
+                    Squachy::trigger(Squachy::Event::DETECTION, lastAlertType,
+                                     engine.lifetimeTotal(), lastAlertHits);
+                    enterClear();
                 } else if (uiAlertHitHunt(tp.x, tp.y, tft.width(), tft.height())) {
                     // Same call pair LOG's confirm panel makes. The
                     // DETECTION trigger fires here too: leaving via HUNT
@@ -1895,6 +1917,11 @@ void loop() {
                         s_confirmPending = false;
                         if (s_confirmIsBle) engine.watchBle(s_confirmMac, s_confirmLabel);
                         else                engine.watchWifi(s_confirmMac, s_confirmLabel);
+                    } else if (ctap == LogConfirmTap::IGNORE) {
+                        lastTouch = now;
+                        s_confirmPending = false;
+                        if (IgnoreList::contains(s_confirmMac)) IgnoreList::remove(s_confirmMac);
+                        else                                    IgnoreList::add(s_confirmMac);
                     } else if (ctap == LogConfirmTap::HUNT) {
                         lastTouch = now;
                         s_confirmPending = false;
@@ -2015,6 +2042,11 @@ void loop() {
                         else                engine.watchWifi(s_confirmMac, s_confirmLabel);
                         engine.stopRawScan();
                         enterClear();
+                    } else if (ctap == RawScanConfirmTap::IGNORE) {
+                        lastTouch = now;
+                        s_confirmPending = false;
+                        if (IgnoreList::contains(s_confirmMac)) IgnoreList::remove(s_confirmMac);
+                        else                                    IgnoreList::add(s_confirmMac);
                     } else if (ctap == RawScanConfirmTap::HUNT) {
                         lastTouch = now;
                         s_confirmPending = false;

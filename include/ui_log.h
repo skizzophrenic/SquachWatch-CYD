@@ -39,5 +39,5 @@ int uiLogRowAt(TFT_eSPI& t, int x, int y, int screenW, int screenH);
 // Hit test for the confirm panel's WATCH/HUNT/INFO/CANCEL buttons --
 // only meaningful while uiLogTick() is being called with confirmPending
 // true; main.cpp owns that flag, not this module.
-enum class LogConfirmTap { NONE, WATCH, HUNT, INFO, CANCEL };
+enum class LogConfirmTap { NONE, WATCH, HUNT, INFO, IGNORE, CANCEL };
 LogConfirmTap uiLogHitConfirm(int x, int y, int screenW, int screenH);
