@@ -411,7 +411,8 @@ static uint8_t s_shadeDrop = 0;
 static uint32_t s_dtStart = 0;
 // Gum bubble: when the current one started inflating. GROW then POP;
 // the mood outlasts both slightly so he gets a beat afterward.
-static const uint32_t GUM_GROW_MS = 1800;
+static const uint32_t GUM_GROW_MS = 1200;
+static const uint32_t GUM_HOLD_MS = 600;    // full size, wobbling, before it goes
 static const uint32_t GUM_POP_MS  = 400;
 static uint32_t s_gumStart = 0;
 // Waking stretch: anchored to its own start rather than to now %
@@ -2662,16 +2663,21 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
 
     if (m == Mood::GUM && s_gumStart != 0) {
         const uint32_t ge = now - s_gumStart;
-        if (ge < GUM_GROW_MS) {
-            // Squared curve, so it starts slow and then runs away with
-            // itself the way a real one does.
-            const float gk = (float)ge / (float)GUM_GROW_MS;
-            // Scaled as one float expression, not through S(): that
-            // lambda takes an int, so S(1.5f) and S(6.5f) silently
-            // truncated to S(1) and S(6) and the bubble came out a
-            // little smaller than it was drawn to be.
-            const int r = (int)(scale * (1.5f + gk * gk * 6.5f
-                                         + sinf((float)now / 120.0f) * gk));
+        if (ge < GUM_GROW_MS + GUM_HOLD_MS) {
+            // Square root, NOT squared. A squared curve is the physically
+            // truthful one -- a bubble really does start slow -- but it
+            // spent the whole first second under six pixels across and
+            // only looked like a bubble for the last few frames before it
+            // burst, so what anyone actually saw was a pop with nothing in
+            // front of it. This is readable within about 300 ms and then
+            // holds at full size for GUM_HOLD_MS so there is something to
+            // look at before it goes.
+            //
+            // Scaled as one float expression, not through S(): that lambda
+            // takes an int, so S(1.5f) and S(6.5f) silently truncated.
+            const float gk = (ge < GUM_GROW_MS) ? (float)ge / (float)GUM_GROW_MS : 1.0f;
+            const int r = (int)(scale * (2.0f + 8.0f * sqrtf(gk)
+                                         + sinf((float)now / 120.0f) * gk * 0.8f));
             const int by = hh + S(21) + (int)(r * 0.75f);
             t.fillCircle(cx2, by, r + kb, keyCol);
             // Toward WHITE rather than toward BG: blending a pink down
@@ -2679,8 +2685,8 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
             // sphere on his chest reads as anything but bubblegum.
             t.fillCircle(cx2, by, r, blend(VAPOR_PINK, WHITE, 55));
             t.fillCircle(cx2 - r / 3, by - r / 3, r / 5 + 1, WHITE);
-        } else if (ge < GUM_GROW_MS + GUM_POP_MS) {
-            const float pk = (float)(ge - GUM_GROW_MS) / (float)GUM_POP_MS;
+        } else if (ge < GUM_GROW_MS + GUM_HOLD_MS + GUM_POP_MS) {
+            const float pk = (float)(ge - GUM_GROW_MS - GUM_HOLD_MS) / (float)GUM_POP_MS;
             const int d = (int)(pk * S(16));
             for (uint8_t i = 0; i < 6; i++) {
                 const float ang = (float)i / 6.0f * 6.2831853f;
@@ -3000,7 +3006,7 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
             say(pick(GUM_LINES, 4), 3000);
             mood = Mood::GUM;
             s_gumStart = now;
-            moodUntil = now + GUM_GROW_MS + GUM_POP_MS + 400;
+            moodUntil = now + GUM_GROW_MS + GUM_HOLD_MS + GUM_POP_MS + 400;
             nextIdleAt = now + 14000 + random(0, 18000);
         } else if (random(0, 9) == 0) {
             // A stretch on its own, not only on the way out of a nap.
