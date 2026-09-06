@@ -172,6 +172,14 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         IdleEvents::tick(t, now, 0, titleBottom, w, countersTop, advance);
     }
 
+    // Whatever the background wants on top of the mascot. Right now
+    // that is the werewolf's speech bubble: drawFire computes it but
+    // deliberately does not paint it, because the background is drawn
+    // before Squachy and the bubble was ending up behind him. Same
+    // reasoning as ALL CLEAR below -- text is the one thing here that
+    // cannot afford to be half-covered.
+    Theme::drawBackgroundOverlay(t, now);
+
     // Title bar at the top
     Theme::drawTitleBar(t, ">> SQUACHWATCH <<  SCANNING");
 

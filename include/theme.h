@@ -282,6 +282,14 @@ namespace Theme {
     void setBackgroundFloor(int y);
     void clearBackgroundFloor();
 
+    // Draws whatever the active background needs placed ON TOP of the
+    // mascot -- currently the werewolf's speech bubble, which drawFire
+    // computes but must not paint, because the background runs before
+    // Squachy does. Call it after the mascot and the idle-event
+    // flourishes. Cheap and safe to call on every background: it does
+    // nothing unless something published itself this frame.
+    void drawBackgroundOverlay(TFT_eSPI& t, uint32_t now);
+
     void drawActiveBackground(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
                               const DetectionEngine& eng, bool advance = true);
 

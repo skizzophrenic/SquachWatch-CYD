@@ -3161,6 +3161,22 @@ void drawFireflies(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
 }
 
 // ---- tappable background bits -----------------------------------------
+// The werewolf's speech bubble is PUBLISHED rather than drawn where it
+// is computed. drawFire is the background: ui_clear paints Squachy over
+// it, then the idle-event flourishes, then the ALL CLEAR headline -- so
+// a bubble drawn inside drawFire ends up underneath the mascot, and for
+// text that does not read as depth, it reads as a rendering fault. It is
+// the same reason ALL CLEAR is drawn after Squachy rather than before.
+//
+// Stale for the same reason the moon below is: if the background is
+// switched away from FIRE mid-howl, nothing clears these, so the
+// overlay checks the timestamp before it trusts them.
+static int      s_wolfSayX = -1, s_wolfSayY = -1;
+static int      s_wolfSayKind = 0;
+static float    s_wolfHowlK = 0.0f;
+static int      s_wolfSayW = 0, s_wolfSayTop = 0;
+static uint32_t s_wolfSayAt = 0;
+
 // drawFire publishes its moon here every frame it draws one, and
 // backgroundTap() below tests against that. The timestamp matters: a
 // moon position left over from a background that is no longer on screen
@@ -4029,51 +4045,17 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // stands at 80% across, and centring it would run the left end back
     // under the mascot -- who is drawn over this background by ui_clear
     // and would clip the first few letters off mid-word.
-    if (wolfSayY >= 0) {
-        // One helper now rather than one hardcoded block, because there
-        // are up to three bubbles on a howl: the note and two echoes
-        // rolling off behind it. dim fades a bubble toward the night
-        // instead of using alpha, which this display does not have.
-        auto wolfBubble = [&](const char* txt, int by, uint8_t dim, bool big) {
-            t.setTextSize(big ? 2 : 1);
-            const int bw = t.textWidth(txt) + (big ? 11 : 7);
-            const int bh = big ? 20 : 11;
-            int bx = w - 2 - bw;
-            if (bx < 1)          bx = 1;
-            if (by < yStart + 1) by = yStart + 1;
-            const uint16_t paper = blend(BG, t.color565(236, 232, 218), dim);
-            const uint16_t ink   = blend(BG, t.color565(16, 12, 10), dim);
-            t.fillRect(bx, by, bw, bh, paper);
-            t.drawRect(bx, by, bw, bh, ink);
-            // Tail under the wolf, not under the corner of the bubble.
-            int tailX = wolfSayX - 3;
-            if (tailX < bx + 2)      tailX = bx + 2;
-            if (tailX > bx + bw - 6) tailX = bx + bw - 6;
-            t.drawFastHLine(tailX, by + bh,     4, paper);
-            t.drawFastHLine(tailX, by + bh + 1, 2, paper);
-            t.drawPixel(tailX - 1, by + bh, ink);
-            t.setTextColor(ink, paper);
-            t.setCursor(bx + 4, by + (big ? 4 : 2));
-            t.print(txt);
-            t.setTextSize(1);
-        };
-
-        if (wolfSayKind == 1) {
-            wolfBubble("Don't Be a SKID!", wolfSayY, 255, false);
-        } else if (wolfSayKind == 2) {
-            // Echoes come in behind the note and step up and back as the
-            // sound rolls off the valley -- drawn first so the loud one
-            // sits in front of them.
-            const float k = wolfHowlK;
-            // One echo, not two. The howl puts wolfSayY near the top of
-            // the band already, so a second one stacked above it just
-            // clamped to the same line and the pair drew on top of each
-            // other -- a bubble jammed under the title bar reads as a
-            // fault, not as distance.
-            if (k > 0.20f) wolfBubble("awooo...", wolfSayY - 22, 110, false);
-            wolfBubble("AWOOOO!", wolfSayY, 255, true);
-        }
-    }
+    // Published, not drawn. See s_wolfSayX's declaration up top: this is
+    // the background, and Squachy lands on top of it a few lines later
+    // in ui_clear. Theme::drawBackgroundOverlay() puts the bubble down
+    // once the mascot and the flourishes are already there.
+    s_wolfSayX    = wolfSayX;
+    s_wolfSayY    = wolfSayY;
+    s_wolfSayKind = wolfSayKind;
+    s_wolfHowlK   = wolfHowlK;
+    s_wolfSayW    = w;
+    s_wolfSayTop  = yStart;
+    s_wolfSayAt   = now;
 
     // Owl quips. Drawn AFTER the flames, unlike the owl itself: a
     // half-occluded glyph reads as a rendering fault rather than as
@@ -4260,6 +4242,11 @@ static SnowFlake s_flk[SNOW_N];
 static SnowObj   s_far[TREE_FAR];
 static SnowObj   s_act[TREE_ACT];
 static SnowObj   s_prop[PROP_N];                  // kind in .b: 0 rock 1 stump 2 jump
+// The active trees carry a snow load in .b: 0..255, built up during a
+// squall and shed in one dump when it gets too heavy. Loading them one
+// at a time rather than all together is the whole point -- a hillside
+// where every tree whitens on the same frame reads as a palette swap.
+static float     s_lodgeX = 0.0f;                 // the lodge, on the far plane
 static float     s_nearX = 0.0f;                  // one foreground tree
 static uint8_t   s_bankD[SNOW_COLS];
 static uint8_t   s_trackD[SNOW_COLS];             // carved tracks, fill back in
@@ -4282,11 +4269,25 @@ static const uint8_t RIDER_N = 3;
 struct Rider {
     float    x, air, vy;
     uint32_t next;
+    uint32_t crashAt;   // 0 = upright; otherwise when he went down
+    const char* say;    // his own bubble, independent of the chase
+    uint32_t sayTil;
     uint8_t  trick;
     uint8_t  kind;      // 0 skis, 1 board
     uint8_t  var;       // which outfit
     bool     live;
 };
+// What he says once the snow has settled. Short, and none of them a
+// complaint that lasts longer than the crash did.
+static const char* const CRASH_SAY[8] = {
+    "oof", "ow.", "*crunch*", "I'm fine", "worth it", "my skis",
+    "send it", "did you see" };
+// How long he is down for. TUMBLE is gear still leaving, then he lies
+// there, and the bubble only appears once he has stopped moving --
+// a speech bubble over a body still cartwheeling is a caption, not a
+// reaction.
+static const uint32_t CRASH_TUMBLE = 420;
+static const uint32_t CRASH_HOLD   = 1500;
 static Rider  s_rid[RIDER_N];
 static int8_t s_chaseTgt = -1;     // the rider the yeti has picked, or -1
 
@@ -4323,6 +4324,18 @@ static const char* const YETI_TAUNT[6] = {
 static const char* const SAY_GIVEUP[2] = { "worth a try", "...fine" };
 static const char* const SAY_WINDED[2] = { "*wheeze*", "one sec" };
 static const char* const SAY_BEATEN[2] = { "BONK", "not today" };
+// The eat talks in two beats now, because it has two beats. The first
+// pair lands while he is holding the rider up and looking at him, and
+// the second when he decides. Kept short: the bubble is 6px type over a
+// busy hill and gets one glance.
+static const char* const EAT_LOOK_Y[4] = {
+    "hm.", "let me see", "checks out", "no lift pass" };
+static const char* const EAT_LOOK_S[4] = {
+    "hi.", "sir?", "I'm mostly bone", "we can talk" };
+static const char* const EAT_BITE_Y[4] = {
+    "yep", "five stars", "mm", "worth the run" };
+static const char* const EAT_BITE_S[4] = {
+    "oh COME on", "not the face", "tell my dog", "bye" };
 
 static const char* s_saySkiTxt = nullptr;
 static const char* s_sayYetTxt = nullptr;
@@ -4351,60 +4364,337 @@ static void snowSay(TFT_eSPI& t, int x, int topY, const char* txt) {
     t.print(txt);
 }
 
-// The eat is the payoff and it used to be a single held pose for a
-// second and a half. It is a sequence now: grab, lift, chomp, swallow,
-// pat the belly. Timings are cumulative ms from the catch.
-static const uint32_t EAT_GRAB  = 420;    // hoisted off his skis, kicking
-static const uint32_t EAT_LIFT  = 900;    // raised to the mouth
-static const uint32_t EAT_CHOMP = 1350;   // only the skis still showing
-static const uint32_t EAT_GULP  = 1750;   // gone; the gut swells
-static const uint32_t EAT_PAT   = 2300;   // satisfied, and a grin
+// THE EAT. The payoff, and it runs about one chase in six, so it has to
+// be worth having waited for.
+//
+// It used to be grab-lift-chomp: the yeti being fast. It is an
+// INSPECTION now -- he catches the rider, raises him to eye level, holds
+// him there and looks at him, turns him over to check the other side,
+// and only then eats him. The pause in the middle is the whole joke, and
+// a pause was the one thing the old version had none of.
+//
+// It also reads better at this size for an unglamorous reason: a held
+// pose gives the eye time to work out what it is looking at, where a
+// fast one is over before it has been parsed.
+static const uint32_t EAT_GRAB  = 300;    // hoisted off his skis, kicking
+static const uint32_t EAT_RAISE = 760;    // lifted to eye level
+static const uint32_t EAT_LOOK  = 1320;   // held there. nothing moves.
+static const uint32_t EAT_TURN  = 1720;   // rotated over to head-first
+static const uint32_t EAT_CHOMP = 2140;   // in, and the jaw closes
+static const uint32_t EAT_GULP  = 2440;   // gone; the gut swells
+static const uint32_t EAT_PAT   = 2980;   // satisfied
 static const uint32_t EAT_TOTAL = EAT_PAT;
 
-// The victim, drawn in front of the yeti. Posed off the original
-// sprite: he goes in HEAD FIRST and HORIZONTAL, with his body and skis
-// sticking out sideways past the yeti's jaw -- not lifted upright and
-// not upside down, which is what the first pass guessed at.
-static void snowVictim(TFT_eSPI& t, int x, int y, uint32_t age, uint32_t now) {
-    const uint16_t ski  = t.color565(255, 210, 26), pant = t.color565(47, 179, 30);
-    const uint16_t coat = t.color565(47, 79, 208),  hat  = t.color565(224, 32, 10);
+// The victim, drawn in front of the yeti. There is no rotation on this
+// display, so "turning him over" is three discrete orientations --
+// upright, tilted, horizontal -- which is the same lookup-table answer
+// every rotating thing in this project has had to use.
+static void snowVictim(TFT_eSPI& t, int x, int y, uint32_t age, uint32_t now,
+                       uint8_t kind, uint8_t var) {
+    if (age >= EAT_CHOMP) return;          // nothing left to show
     const uint16_t skin = t.color565(240, 192, 140), boot = t.color565(35, 40, 48);
-    const int kick = (int)(sinf((float)now / 55.0f) * 3.0f);
-    const int B = y - (int)(sinf((float)now / 90.0f) * 1.5f);
+    uint16_t coat = t.color565(47, 79, 208), coatL = t.color565(122, 160, 255);
+    uint16_t pant = t.color565(47, 179, 30), hat = t.color565(224, 32, 10);
+    uint16_t gear = t.color565(255, 210, 26);
+    if (kind) {                            // a boarder: different kit
+        coat = t.color565(146, 60, 210); coatL = t.color565(196, 140, 250);
+        pant = t.color565(38, 42, 54);   hat  = t.color565(255, 210, 26);
+        gear = t.color565(255, 96, 20);
+    }
+    if (var == 1) { coat = t.color565(224, 46, 30); coatL = t.color565(255, 140, 110);
+                    pant = t.color565(30, 34, 46); hat = t.color565(255, 210, 26); }
+    else if (var == 2) { coat = t.color565(236, 238, 244); coatL = WHITE;
+                         pant = t.color565(146, 60, 210); hat = t.color565(47, 179, 30); }
 
-    if (age < EAT_GRAB) {
-        // Caught: still upright, off his skis, arms up. One beat only.
-        const int vy = B - 34;
-        t.fillRect(x + 12, vy + 10, 4, 7, pant);
-        t.fillRect(x + 18, vy + 10, 4, 7, pant);
-        t.fillRect(x + 11, vy, 11, 10, coat);
-        t.fillRect(x + 14, vy - 6, 7, 6, skin);
-        t.fillRect(x + 13, vy - 10, 9, 4, hat);
-        t.fillRect(x + 9,  vy - 4 - kick, 4, 7, coat);
-        t.fillRect(x + 21, vy - 4 + kick, 4, 7, coat);
-        t.fillRect(x + 8,  vy + 17, 11, 2, ski);
-        t.fillRect(x + 16, vy + 19, 11, 2, ski);
+    const int B = y - (int)(sinf((float)now / 90.0f) * 1.5f);
+    // How hard he is struggling. Frantic on the way up, then almost
+    // nothing while he is being looked at -- he has worked out how this
+    // ends, and stillness there is what sells the beat.
+    float fight = 1.0f;
+    if (age >= EAT_RAISE && age < EAT_TURN) fight = 0.18f;
+    else if (age >= EAT_TURN) fight = 0.55f;
+    const int kick = (int)(sinf((float)now / 55.0f) * 3.0f * fight);
+    const int wav  = (int)(sinf((float)now / 70.0f) * 3.0f * fight);
+
+    if (age < EAT_TURN) {
+        // ---- upright: caught, lifted, then held out to be looked at --
+        int vx, vy;
+        if (age < EAT_GRAB) { vx = x + 15; vy = B - 26; }
+        else if (age < EAT_RAISE) {
+            const float k = (float)(age - EAT_GRAB) / (float)(EAT_RAISE - EAT_GRAB);
+            vx = x + 15 + (int)(k * 6.0f);
+            vy = B - 26 - (int)(k * 22.0f);
+        } else { vx = x + 21; vy = B - 48; }
+        t.fillRect(vx - 5, vy + 12, 4, 8 + kick, pant);     // legs, dangling
+        t.fillRect(vx + 1, vy + 12, 4, 8 - kick, pant);
+        t.fillRect(vx - 6, vy + 19 + kick, 5, 3, boot);
+        t.fillRect(vx + 1, vy + 19 - kick, 5, 3, boot);
+        t.fillRect(vx - 6, vy, 12, 13, coat);
+        t.fillRect(vx - 6, vy, 12, 3, coatL);
+        t.fillRect(vx - 10, vy + 2 - wav, 5, 6, coat);      // arms
+        t.fillRect(vx + 6,  vy + 2 + wav, 5, 6, coat);
+        t.fillRect(vx - 3, vy - 7, 8, 7, skin);
+        // Eyes: wide on the way up, then flat resignation while he is
+        // being inspected. Two pixels of difference and it does the work.
+        if (age < EAT_RAISE) {
+            t.fillRect(vx - 2, vy - 5, 2, 3, t.color565(58, 42, 26));
+            t.fillRect(vx + 2, vy - 5, 2, 3, t.color565(58, 42, 26));
+        } else {
+            t.fillRect(vx - 2, vy - 4, 2, 1, t.color565(58, 42, 26));
+            t.fillRect(vx + 2, vy - 4, 2, 1, t.color565(58, 42, 26));
+        }
+        t.fillRect(vx - 4, vy - 11, 10, 4, hat);
         return;
     }
-    if (age >= EAT_CHOMP) return;      // nothing left to show
 
-    // Head first into the jaw, body angled down and out to the right,
-    // skis last. Slides further in as the chomp progresses.
-    const int adv = (age < EAT_LIFT) ? 0 : (int)((age - EAT_LIFT) * 9u / (EAT_CHOMP - EAT_LIFT));
-    const int hx = x + 6 - adv, hy = B - 39;
-    t.fillRect(hx + 2, hy, 6, 5, hat);                    // cap, at the teeth
-    t.fillRect(hx + 7, hy + 2, 5, 5, skin);               // face
-    t.fillRect(hx + 10, hy + 5, 11, 8, coat);             // jacket
-    t.fillRect(hx + 12, hy + 3, 5, 4, coat);              // shoulder
-    t.fillRect(hx + 19, hy + 10, 9, 7, pant);             // trousers
+    // ---- turning over, then head first ------------------------------
+    // Two frames of tilt between upright and horizontal. Three
+    // orientations is the fewest that reads as a rotation rather than
+    // as a cut, which is exactly what two of them looked like.
+    const float k = (float)(age - EAT_TURN) / (float)(EAT_CHOMP - EAT_TURN);
+    if (k < 0.34f) {
+        const int vx = x + 19, vy = B - 46;
+        t.fillRect(vx - 8, vy + 4, 13, 9, coat);            // body on the diagonal
+        t.fillRect(vx - 8, vy + 4, 13, 3, coatL);
+        t.fillRect(vx + 4, vy + 9, 9, 7, pant);
+        t.fillRect(vx - 14, vy - 1, 8, 7, skin);            // head dropping
+        t.fillRect(vx - 17, vy - 3, 5, 6, hat);
+        t.fillRect(vx + 11, vy + 14 + kick, 5, 3, boot);
+        t.fillRect(vx - 5, vy + 12 + wav, 5, 5, coat);
+        if (kind) t.fillRect(vx + 13, vy + 12, 14, 3, gear);
+        else { t.fillRect(vx + 13, vy + 11, 11, 2, gear);
+               t.fillRect(vx + 13, vy + 16, 11, 2, gear); }
+        return;
+    }
+    // Horizontal, head first at the teeth, sliding in as the jaw works.
+    const int adv = (int)((k - 0.34f) / 0.66f * 11.0f);
+    const int hx = x + 4 - adv, hy = B - 42;
+    t.fillRect(hx + 2, hy, 6, 5, hat);                      // cap, at the teeth
+    t.fillRect(hx + 7, hy + 2, 5, 5, skin);
+    t.fillRect(hx + 10, hy + 5, 11, 8, coat);
+    t.fillRect(hx + 10, hy + 5, 11, 2, coatL);
+    t.fillRect(hx + 12, hy + 3, 5, 4, coat);
+    t.fillRect(hx + 19, hy + 10, 9, 7, pant);
     t.fillRect(hx + 25, hy + 15 + kick, 5, 4, boot);
     t.fillRect(hx + 25, hy + 20 - kick, 5, 4, boot);
-    t.fillRect(hx + 27, hy + 13 + kick, 11, 2, ski);      // skis, still on
-    t.fillRect(hx + 27, hy + 21 - kick, 11, 2, ski);
+    if (kind) t.fillRect(hx + 27, hy + 16, 15, 3, gear);    // one plank
+    else { t.fillRect(hx + 27, hy + 13 + kick, 11, 2, gear);
+           t.fillRect(hx + 27, hy + 21 - kick, 11, 2, gear); }
 }
 
 // ---- sprites ---------------------------------------------------------
-static void snowPine(TFT_eSPI& t, int x, int y, int h, bool snowy, uint16_t haze, uint16_t mix) {
+
+// An aurora, drawn as undulating horizontal ribbons rather than as
+// vertical curtains. Two reasons, and the second is the real one.
+//
+// Cheapness: a ribbon is one drawFastHLine per row, where a curtain is
+// several fillRects per COLUMN -- about 70 calls against 200 for the
+// same band of sky.
+//
+// And the palette. This is the one large soft thing this display can
+// actually render, because green has EIGHT levels where blue has four.
+// Every other atmospheric effect on this hill has had to be fought
+// through a four-step blue ramp; an aurora is mostly green with a warm
+// base, so the falloff gets eight steps in the channel doing the work
+// and the ordered dither only has to cover the gaps between them.
+static void snowAurora(TFT_eSPI& t, int w, int yStart, int bandH,
+                       uint32_t now, float strength, uint16_t skyTop, uint16_t skyLow) {
+    if (strength <= 0.02f) return;
+    const int top = yStart + 3;
+    const int hgt = (bandH * 32) / 100;
+    if (hgt < 10) return;
+    static const int8_t ADITH[4] = { -7, 3, 7, -3 };
+    for (uint8_t rb = 0; rb < 2; rb++) {
+        const float ph = (float)now / (2600.0f + rb * 900.0f) + rb * 2.3f;
+        const int   th = hgt - rb * (hgt / 4);
+        // Top of this ribbon, not its centre. Centring it put half of the
+        // first ribbon above yStart, where every row was thrown away by
+        // the clamp below -- so the brightest part of the aurora, which
+        // is its middle, was the part being clipped off.
+        const int   cy = top + rb * (hgt / 5);
+        for (int r = 0; r < th; r++) {
+            const int y = cy + r;
+            if (y < yStart + 1 || y >= yStart + bandH) continue;
+            // The ribbon snakes sideways as it descends, which is what
+            // makes it read as a sheet rather than as a stack of bars.
+            const float sway = sinf((float)r * 0.16f + ph) * 44.0f
+                             + sinf((float)r * 0.07f - ph * 0.7f) * 30.0f;
+            const int cx = w / 2 + (int)sway;
+            const int half = 52 + (int)(sinf((float)r * 0.11f + ph * 1.4f) * 26.0f);
+            int x0 = cx - half, x1 = cx + half;
+            if (x0 < 0) x0 = 0;
+            if (x1 > w) x1 = w;
+            if (x1 - x0 < 2) continue;
+            // Brightest through the middle of the ribbon, dying at both
+            // edges, plus the row dither so the boundary is not a line.
+            float f = 1.0f - fabsf((float)r - th * 0.5f) / (th * 0.5f);
+            f = f * f;
+            int a = (int)(f * strength * 190.0f) + ADITH[y & 3];
+            if (a <= 3) continue;
+            if (a > 255) a = 255;
+            // Green through the body, warming to red at the bottom edge
+            // where a real one goes pink. Blue is left near the sky's own
+            // value throughout: four levels cannot ramp, and trying makes
+            // a band.
+            const float low = (float)r / (float)th;
+            const uint16_t hue = t.color565((uint8_t)(40 + low * 190.0f),
+                                            (uint8_t)(255 - low * 60.0f),
+                                            (uint8_t)(120 - low * 60.0f));
+            const uint16_t sky = blend(skyTop, skyLow,
+                                       (uint16_t)((y - yStart) * 255 / (bandH > 0 ? bandH : 1)));
+            t.drawFastHLine(x0, y, x1 - x0, blend(sky, hue, (uint16_t)a));
+        }
+    }
+}
+
+// The lodge on the far ridge. Every window runs its own slow brightness
+// cycle off a hash of its index, so they drift out of step: one dims
+// while another comes up, one flickers like there is a fire in it, and
+// now and then one goes out completely for a while and comes back. A row
+// of windows all at one brightness reads as a decal; the same row
+// varying independently reads as a building with people in it.
+static void snowLodge(TFT_eSPI& t, int x, int ridgeY, uint32_t now,
+                      float dawn, uint16_t haze) {
+    const uint16_t beam  = blend(t.color565(84, 58, 40), haze, 60);
+    const uint16_t beamD = blend(t.color565(52, 36, 26), haze, 60);
+    const uint16_t roof  = blend(t.color565(232, 240, 248), haze, 40);
+    const uint16_t roofE = blend(t.color565(176, 190, 206), haze, 40);
+    const uint16_t frame = blend(t.color565(40, 30, 24), haze, 50);
+    // Night is when the windows matter; they wash out as the sun comes up.
+    const float lit = 1.0f - dawn * 0.85f;
+
+    // Body: two storeys, with the upper one set back a little so the
+    // roofline has a step in it instead of being one long wedge.
+    t.fillRect(x - 17, ridgeY - 13, 34, 13, beam);
+    t.fillRect(x - 17, ridgeY - 13, 34, 1,  beamD);
+    t.fillRect(x - 12, ridgeY - 22, 24, 9,  beam);
+    // Horizontal log courses -- three lines is enough to say timber.
+    for (uint8_t i = 0; i < 3; i++) t.fillRect(x - 17, ridgeY - 10 + i * 4, 34, 1, beamD);
+    // Roofs, snow-loaded, with an overhang and a shaded eave under it.
+    t.fillRect(x - 20, ridgeY - 17, 40, 4, roof);
+    t.fillRect(x - 20, ridgeY - 18, 40, 2, blend(roof, WHITE, 120));
+    t.fillRect(x - 20, ridgeY - 13, 40, 1, roofE);
+    t.fillRect(x - 15, ridgeY - 26, 30, 4, roof);
+    t.fillRect(x - 15, ridgeY - 27, 30, 2, blend(roof, WHITE, 120));
+    t.fillRect(x - 15, ridgeY - 22, 30, 1, roofE);
+
+    // ---- the windows -------------------------------------------------
+    // Five of them: three along the ground floor, two upstairs.
+    static const int8_t WX[5] = { -13, -3, 7, -8, 3 };
+    static const int8_t WY[5] = {  -9, -9, -9, -20, -20 };
+    for (uint8_t i = 0; i < 5; i++) {
+        uint32_t h = (uint32_t)(i + 3) * 2654435761u;
+        h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
+        // Each window on its own period, none of them harmonics of the
+        // others, so the row never resynchronises into a pulse. The
+        // periods are long on purpose: at two to seven seconds this read
+        // as a string of fairy lights blinking, which is a decoration.
+        // At six to seventeen it reads as rooms whose light is changing
+        // because somebody in them moved.
+        const float per = 6200.0f + (float)(h % 11000u);
+        float k = 0.55f + 0.45f * sinf((float)now / per + (float)(h % 628u) * 0.01f);
+        // One of them has a fire in it and flickers fast and shallow.
+        if ((h & 3u) == 0u) k = 0.74f + 0.26f * sinf((float)now / 340.0f);
+        // And occasionally a window is simply dark -- somebody went to
+        // bed. A slow square wave with a long duty cycle, per window.
+        const uint32_t slot = (uint32_t)(now / 21000u) + i * 7u;
+        uint32_t hs = slot * 2246822519u; hs ^= hs >> 13;
+        const bool out = (hs % 100u) < 22u;
+        const float b = out ? 0.06f : k;
+        const uint16_t glow = t.color565((uint8_t)(255 * lit),
+                                         (uint8_t)((150 + 90 * b) * lit * b + 30),
+                                         (uint8_t)(60 * b * lit));
+        const int wx = x + WX[i], wy = ridgeY + WY[i];
+        t.fillRect(wx - 1, wy - 1, 7, 7, frame);
+        t.fillRect(wx, wy, 5, 5, blend(beam, glow, (uint16_t)(60 + b * 195.0f)));
+        // Warm spill on the wall beneath a bright one. Two rectangles,
+        // and it is what makes the light look like it is coming OUT.
+        if (b > 0.55f && !out)
+            t.fillRect(wx - 1, wy + 5, 7, 2, blend(beam, glow, (uint16_t)(b * 90.0f)));
+    }
+    // Door, with light spilling onto the snow in front of it.
+    t.fillRect(x + 12, ridgeY - 8, 5, 8, frame);
+    t.fillRect(x + 13, ridgeY - 7, 3, 7, blend(beam, t.color565(255, 190, 90),
+                                               (uint16_t)(170 * lit)));
+    t.fillRect(x + 11, ridgeY, 8, 2, blend(roof, t.color565(255, 200, 110),
+                                           (uint16_t)(110 * lit)));
+    // Chimney and its smoke, leaning with the same wind as everything else.
+    t.fillRect(x - 9, ridgeY - 32, 4, 7, beamD);
+    t.fillRect(x - 10, ridgeY - 33, 6, 2, blend(roof, WHITE, 90));
+    for (uint8_t i = 0; i < 4; i++) {
+        const float ag = fmodf((float)now / 700.0f + (float)i * 0.9f, 4.0f);
+        const int sx = x - 7 + (int)(sinf(ag * 1.3f) * 5.0f + ag * 2.4f);
+        const int sy = ridgeY - 35 - (int)(ag * 5.0f);
+        if (sy < 2) continue;
+        t.fillRect(sx, sy, 2 + (int)ag, 2, blend(haze, WHITE, (uint16_t)(90 - ag * 18.0f)));
+    }
+}
+
+// A rider who has just lost it. Three beats: the tumble, where his gear
+// is still leaving; the sit, where he is face down and not moving; and
+// the pickup. The middle beat is the joke -- a crash that resolves in
+// four frames reads as a glitch, and one that holds still for a second
+// reads as a person having a bad time.
+static void snowWreck(TFT_eSPI& t, int x, int y, uint32_t age, uint8_t kind, uint8_t var) {
+    const uint16_t skin = t.color565(240, 192, 140);
+    uint16_t coat = t.color565(47, 79, 208), pant = t.color565(47, 179, 30);
+    uint16_t hat  = t.color565(224, 32, 10),  gear = t.color565(255, 210, 26);
+    if (var == 1) { coat = t.color565(224, 46, 30); pant = t.color565(30, 34, 46);
+                    hat = t.color565(255, 210, 26); }
+    else if (var == 2) { coat = t.color565(236, 238, 244); pant = t.color565(146, 60, 210);
+                         hat = t.color565(47, 179, 30); }
+    if (kind) gear = t.color565(255, 96, 20);        // a board, not skis
+    const uint16_t coatL = blend(coat, WHITE, 90), pantD = blend(pant, BLACK, 80);
+
+    // How far the debris has travelled. It stops where it lands: gear
+    // that keeps sliding while he sits there is a cartoon, and the
+    // stillness is what sells this.
+    const float fly = (age < 420u) ? (float)age / 420.0f : 1.0f;
+    const int   d   = (int)(fly * 13.0f);
+    const int   up  = (age < 420u) ? (int)((1.0f - fly) * 14.0f) : 0;
+
+    // The gear, thrown clear.
+    if (kind) {
+        t.fillRect(x + 6 + d, y - 3 - up, 18, 3, gear);
+        t.fillRect(x + 6 + d, y - up, 18, 1, blend(gear, BLACK, 80));
+    } else {
+        t.fillRect(x - 14 - d, y - 2, 14, 2, gear);
+        t.fillRect(x + 7 + d, y - 9 - up, 3, 13, gear);
+    }
+    t.fillRect(x - 17 - d, y - 5, 8, 1, t.color565(58, 64, 73));    // a pole
+    t.fillRect(x + 12 + d, y - 7 - up / 2, 1, 8, t.color565(58, 64, 73));
+
+    // Him. Face down at first, then up on one elbow, then sitting.
+    if (age < 420u) {
+        t.fillRect(x - 9, y - 7, 18, 6, coat);
+        t.fillRect(x - 9, y - 7, 18, 2, coatL);
+        t.fillRect(x - 13, y - 4, 5, 3, pant);
+        t.fillRect(x + 8,  y - 9, 6, 4, pantD);
+        t.fillRect(x - 4, y - 11, 7, 5, skin);
+        t.fillRect(x - 6 + (int)(fly * 8.0f), y - 20 - up, 8, 4, hat);   // hat in the air
+    } else {
+        t.fillRect(x - 8, y - 9, 15, 8, coat);
+        t.fillRect(x - 8, y - 9, 15, 2, coatL);
+        t.fillRect(x - 12, y - 4, 6, 3, pant);
+        t.fillRect(x + 6,  y - 5, 6, 4, pant);
+        t.fillRect(x - 3, y - 16, 8, 7, skin);
+        // Eyes shut. Two dashes, and they do more than a whole face would.
+        t.fillRect(x - 2, y - 13, 2, 1, t.color565(58, 42, 26));
+        t.fillRect(x + 2, y - 13, 2, 1, t.color565(58, 42, 26));
+        t.fillRect(x - 4, y - 20, 9, 4, hat);
+        // An arm going up to check the head is still there.
+        if (age > 900u) t.fillRect(x + 4, y - 22, 3, 7, coat);
+    }
+    // Snow still settling out of the air where he went in.
+    for (uint8_t i = 0; i < 5; i++) {
+        const int px = x - 12 + i * 6 + (int)(fly * ((i & 1) ? 4 : -4));
+        const int py = y - 14 - (int)((1.0f - fly) * 10.0f) + (i % 3) * 4;
+        t.fillRect(px, py, 2, 2, blend(WHITE, t.color565(196, 214, 236), (uint16_t)(fly * 160.0f)));
+    }
+}
+
+static void snowPine(TFT_eSPI& t, int x, int y, int h, bool snowy, uint16_t haze, uint16_t mix,
+                     float bend = 0.0f, uint8_t load = 0) {
     if (h < 8) return;
     // Blue kept under 30 on every green: this panel quantises blue to
     // 0/85/170/255, so anything near 42 rounds UP and the tree lands on
@@ -4456,6 +4746,11 @@ static void snowPine(TFT_eSPI& t, int x, int y, int h, bool snowy, uint16_t haze
         const int bw = (w * wid[ti]) / 100;
         const int by = y - (h * base[ti]) / 100;
         const int th = (h * 38) / 100;
+        // WIND. The offset grows with height, which is the whole trick:
+        // a uniform shift reads as three tiers sliding sideways, and a
+        // height-weighted one reads as a trunk bending. Costs nothing --
+        // it moves rectangles that were being drawn anyway.
+        const int bx = x + (int)(bend * (float)(ti + 1) * 0.8f);
         // Lower tiers sit in their own shade; the crown gets the light.
         const uint16_t core  = (ti == 0) ? deep : ((ti == 1) ? dk : md);
         const uint16_t face  = (ti == 0) ? dk   : ((ti == 1) ? md : lt);
@@ -4465,7 +4760,7 @@ static void snowPine(TFT_eSPI& t, int x, int y, int h, bool snowy, uint16_t haze
             if (rw < 3) continue;
             const int ry = by - (th * r) / 6;
             const int rh = th / 6 + 2;
-            const int rx = x - rw / 2;
+            const int rx = bx - rw / 2;
             // shadow half, lit half, then a bright tip on the lit edge
             t.fillRect(rx, ry - rh, rw, rh, core);
             t.fillRect(rx, ry - rh, (rw * 46) / 100, rh, face);
@@ -4473,19 +4768,31 @@ static void snowPine(TFT_eSPI& t, int x, int y, int h, bool snowy, uint16_t haze
         }
         // A dark notch under each tier so the tiers separate instead of
         // merging into one cone.
-        if (bw > 9) t.fillRect(x - bw / 2 + 2, by - 1, bw - 4, 1, deep);
+        if (bw > 9) t.fillRect(bx - bw / 2 + 2, by - 1, bw - 4, 1, deep);
         if (snowy && bw > 9) {
             // Snow sits on the branch tops, not in an even bar across --
             // three short runs read as settled snow, one long one reads
             // as a stripe, which is the same mistake in a lighter colour.
-            t.fillRect(x - bw / 2 + 1, by - 3, (bw * 30) / 100, 2, snow);
-            t.fillRect(x - (bw * 8) / 100, by - 4, (bw * 26) / 100, 2, snow);
-            t.fillRect(x + (bw * 22) / 100, by - 3, (bw * 22) / 100, 2, snow);
+            // SNOW LOAD. The runs grow with what the tree has caught, so
+            // a hillside during a squall whitens tree by tree instead of
+            // all at once. load is 0..255 and lives in SnowObj::b.
+            const int L = 60 + (int)load * 195 / 255;
+            t.fillRect(bx - bw / 2 + 1, by - 3, (bw * 30 * L) / 25500, 2, snow);
+            t.fillRect(bx - (bw * 8) / 100, by - 4, (bw * 26 * L) / 25500, 2, snow);
+            t.fillRect(bx + (bw * 22) / 100, by - 3, (bw * 22 * L) / 25500, 2, snow);
+            if (load > 150) {
+                // Heavily loaded: it starts to sit on top of the tier
+                // rather than just along its front edge.
+                t.fillRect(bx - bw / 2 + 3, by - 5, (bw * 34) / 100, 1, snow);
+                t.fillRect(bx + (bw * 4) / 100, by - 6, (bw * 24) / 100, 1, snow);
+            }
         }
     }
-    // Leader at the very top.
-    t.fillRect(x - 1, y - h - 2, 3, 5, lt);
-    t.fillRect(x - 1, y - h - 2, 1, 5, tip);
+    // Leader at the very top -- it gets the full bend, being furthest up.
+    const int lx = x + (int)(bend * 3.2f);
+    t.fillRect(lx - 1, y - h - 2, 3, 5, lt);
+    t.fillRect(lx - 1, y - h - 2, 1, 5, tip);
+    if (load > 110) t.fillRect(lx - 1, y - h - 3, 3, 1, snow);
 }
 
 static void snowSkier(TFT_eSPI& t, int x, int y, int8_t carve, uint8_t trick,
@@ -4639,7 +4946,31 @@ static void snowBoarder(TFT_eSPI& t, int x, int y, int8_t carve, uint8_t trick,
     t.fillRect(x - 5, y - 37, 11, 2, blend(beanie, WHITE, 90));
 }
 
-static void snowYeti(TFT_eSPI& t, int x, int y, uint32_t now, YPose pose, int bulge = 0) {
+// A rooster tail off the uphill edge. It scales with how hard he is
+// actually turning -- strongest through the middle of a carve, nothing
+// at all through the transition -- so it appears and disappears with the
+// turn instead of trailing him like a permanent exhaust, which is what
+// made the first version look like a smoke machine.
+static void snowSpray(TFT_eSPI& t, int x, int gy, int8_t carve, float power, uint32_t now) {
+    if (power < 0.45f) return;                 // nothing through the flat part
+    const uint16_t pw = blend(WHITE, t.color565(206, 224, 244), 70);
+    const int n = 2 + (int)(power * 2.6f);     // three or four, not eight
+    for (int i = 0; i < n; i++) {
+        const float ph = fmodf((float)now / 78.0f + (float)i * 2.1f, 5.0f);
+        const int dx = -carve * (3 + (int)(ph * 2.4f));
+        const int dy = -1 - (int)(ph * 1.05f) - ((i & 1) ? 1 : 0);
+        const int sz = (ph < 2.2f) ? 2 : 1;
+        t.fillRect(x + dx, gy + dy, sz, sz, ((i % 3) != 0) ? pw : WHITE);
+    }
+}
+
+// holding: put the arms in the reaching pose regardless of what the
+// face is doing. The inspection needs his hands out in front while his
+// mouth is still SHUT -- the jaw only opens once he has decided -- and
+// the arm branch used to key entirely off the pose, so there was no way
+// to have one without the other.
+static void snowYeti(TFT_eSPI& t, int x, int y, uint32_t now, YPose pose, int bulge = 0,
+                     bool holding = false, int holdDX = 0, int holdDY = 0) {
     // Mid grey, not off-white. At (201,206,214) he quantised to
     // (219,219,255) -- within one palette step of the snow he stands on,
     // so his whole body vanished and he read as a floating head. The
@@ -4668,10 +4999,25 @@ static void snowYeti(TFT_eSPI& t, int x, int y, uint32_t now, YPose pose, int bu
                           * (pose == YPose::WINDED ? 2.5f : 1.5f));
     const int B = y - bob;
     const int lean = (pose == YPose::WINDED) ? 4 : ((pose == YPose::RECOIL) ? -6 : 0);
-    t.fillRect(x - 8, B - 13, 4, 11, limb);
-    t.fillRect(x + 4, B - 13, 4, 11, limb);
-    t.fillRect(x - 12, B - 3, 8, 3, limb);
-    t.fillRect(x + 4,  B - 3, 8, 3, limb);
+    // The legs were detached, twice over. The body's six rows start at
+    // B-38 and are 22 tall, so the belly ends at B-16 -- and the legs
+    // started at B-13, leaving three pixels of night between his hips
+    // and his torso. Worse, `lean` moved the body and not the legs, so
+    // WINDED and RECOIL slid the whole torso six pixels off them.
+    //
+    // Legs now start at B-17, one pixel INTO the bottom body row so
+    // there is no seam at any bob offset, and they carry half the lean:
+    // his hips move with him, just less than his shoulders do.
+    const int hip = lean / 2;
+    // A gait, in opposition. Free -- it moves rectangles that were being
+    // drawn anyway -- and a running character with rigid legs was the
+    // other half of why he read as a cardboard cutout.
+    const int gait = (pose == YPose::RUN) ? (int)(sinf((float)now / 90.0f) * 4.0f) : 0;
+    t.fillRect(x - 8 + hip, B - 17, 4, 15, limb);
+    t.fillRect(x + 4 + hip, B - 17, 4, 15, limb);
+    // Feet swing fore and aft, and the trailing one lifts off the snow.
+    t.fillRect(x - 12 + hip + gait, B - 3 - ((gait > 2) ? 1 : 0), 8, 3, limb);
+    t.fillRect(x +  4 + hip - gait, B - 3 - ((gait < -2) ? 1 : 0), 8, 3, limb);
     static const int8_t  gw[6] = { 8, 10, 11, 11, 10, 8 };
     static const uint8_t gh[6] = { 3, 3, 4, 5, 4, 3 };
     int yy = B - 38;
@@ -4682,16 +5028,67 @@ static void snowYeti(TFT_eSPI& t, int x, int y, uint32_t now, YPose pose, int bu
     }
     t.fillRect(x - 11 + lean, B - 33, 3, 14, furS);
     t.fillRect(x + 6 + lean,  B - 35, 4, 12, furHi);
-    const bool up = (pose == YPose::EAT || pose == YPose::RECOIL);
-    const int ay = up ? B - 52 : (pose == YPose::WINDED ? B - 30 : B - 40);
-    const int ah = up ? 16 : 12;
-    const int ax = up ? 15 : 17;
-    t.fillRect(x - ax - 3 + lean, ay, 4, ah, limb);
-    t.fillRect(x + ax - 1 + lean, ay, 4, ah, limb);
-    for (int c = 0; c < 3; c++) {
-        const int e = (c == 1) ? 1 : 0;
-        t.fillRect(x - ax - 4 + c * 3 + lean, ay - 3 - e, 2, 4 + e, claw);
-        t.fillRect(x + ax - 2 + c * 3 + lean, ay - 3 - e, 2, 4 + e, claw);
+    // ---- arms: shoulder, elbow, hand ---------------------------------
+    // What was here before was two dark bars floating beside him. The arm
+    // rect ran y B-40..B-28 at x-20..x-16, while the torso's widest row
+    // only reaches x-11 -- a five to six pixel channel of background down
+    // the whole arm, with the top two rows above the torso entirely,
+    // since the body does not start until B-38. Against white snow, with
+    // the arms in near-black limb and the body in pale fur, they read as
+    // two objects rather than as one animal.
+    //
+    // The joint is now at x +/- 7, B-34, which is INSIDE the second body
+    // row (that one runs -10..10 across B-35..B-32), and the upper arm is
+    // drawn in FUR rather than limb, so it emerges from the creature
+    // instead of being bolted to the side of it. Only the forearm goes
+    // dark. The colour change does as much work here as the geometry.
+    const int jy = B - 34;
+    for (int8_t sd = -1; sd <= 1; sd += 2) {
+        int ex, ey, hx, hy;
+        if (holding || pose == YPose::EAT || pose == YPose::RECOIL) {
+            // Reaching. Held rather than cycling -- this is a gesture with
+            // a victim on the end of it, not a loop. holdDX/holdDY let the
+            // eat sequence walk the hands from the snow up to eye level
+            // and back in to the mouth.
+            ex = sd * 13;          ey = -46 + holdDY / 2;
+            hx = sd * 11 + 4 + holdDX; hy = -56 + holdDY;
+        } else if (pose == YPose::WINDED) {
+            // Hands down on his knees, barely moving.
+            ex = sd * 13; ey = -30;
+            hx = sd * 11; hy = -22 + (int)(sinf((float)now / 260.0f) * 1.5f);
+        } else {
+            // TUBE MAN. The whole arm ripples: the elbow leads and the
+            // hand follows about a quarter cycle behind it. That LAG is
+            // the entire reason it reads as loose rather than as merely
+            // fast -- an arm whose parts all move in phase is a rigid arm
+            // being waved, which is what the old swing looked like.
+            //
+            // The two sides run on opposite phases so he is never
+            // symmetrical, which is the other half of it.
+            const float ph = (float)now / 294.0f + (float)sd * 2.0f;
+            const float a  = sinf(ph);
+            const float b  = sinf(ph - 1.5f);
+            ex = (int)((float)sd * (15.0f + a * 6.0f));
+            ey = (int)(-42.0f + a * 7.0f);
+            hx = (int)((float)sd * (17.0f + b * 10.0f));
+            hy = (int)(-55.0f + b * 9.0f);
+        }
+        const int sx  = x + sd * 7 + lean, sy = jy;
+        const int aex = x + ex + lean,     aey = B + ey;
+        const int ahx = x + hx + lean,     ahy = B + hy;
+        // Upper arm: fur, with a shaded core down the middle so it has
+        // the same two-tone the rest of him does.
+        t.drawWideLine(sx, sy, aex, aey, 7, fur);
+        t.drawWideLine(sx, sy, aex, aey, 4, furS);
+        // Forearm, dark, and a patch over the elbow so the corner between
+        // the two segments does not notch.
+        t.drawWideLine(aex, aey, ahx, ahy, 5, limb);
+        t.fillRect(aex - 3, aey - 3, 6, 6, fur);
+        t.fillRect(ahx - 3, ahy - 2, 7, 5, limb);
+        for (int c = 0; c < 3; c++) {
+            const int e = (c == 1) ? 1 : 0;
+            t.fillRect(ahx - 4 + c * 3, ahy + 3 - e, 2, 4 + e, claw);
+        }
     }
     t.fillRect(x - 11 + lean, B - 52, 22, 4, mane);
     t.fillRect(x - 13 + lean, B - 50, 3, 7, mane);
@@ -4705,6 +5102,72 @@ static void snowYeti(TFT_eSPI& t, int x, int y, uint32_t now, YPose pose, int bu
     t.fillRect(x - 7 + lean, B - 40, 14, th, tooth);
     for (int i = 0; i < 4; i++) t.fillRect(x - 4 + i * 3 + lean, B - 40, 1, th, head);
     if (pose == YPose::EAT) t.fillRect(x - 7 + lean, B - 40 + th / 2, 14, 1, head);
+}
+
+// Anything the background needs drawn ON TOP of the mascot. Called by
+// ui_clear after Squachy and the idle-event flourishes, before the title
+// bar (which owns its own row and repaints it whole).
+//
+// Only the werewolf's bubble uses this so far. It is here rather than in
+// drawFire because drawFire runs first by definition -- it is the
+// background -- and a speech bubble is the one thing in a scene that
+// cannot afford to be half-covered. Everything else the fire draws is
+// happy to be occluded by the mascot; text is not.
+void drawBackgroundOverlay(TFT_eSPI& t, uint32_t now) {
+    // Stale guard, same shape as the moon's: a background switch does
+    // not clear these, so an old position must not paint a ghost.
+    if (s_wolfSayY < 0 || (now - s_wolfSayAt) > 250u) return;
+    const int w = s_wolfSayW;
+    const int yStart = s_wolfSayTop;
+        auto wolfBubble = [&](const char* txt, int by, uint8_t dim, bool big) {
+            t.setTextSize(big ? 2 : 1);
+            const int bw = t.textWidth(txt) + (big ? 11 : 7);
+            const int bh = big ? 20 : 11;
+            int bx = w - 2 - bw;
+            if (bx < 1)          bx = 1;
+            if (by < yStart + 1) by = yStart + 1;
+            const uint16_t paper = blend(BG, t.color565(236, 232, 218), dim);
+            const uint16_t ink   = blend(BG, t.color565(16, 12, 10), dim);
+            t.fillRect(bx, by, bw, bh, paper);
+            t.drawRect(bx, by, bw, bh, ink);
+            // Tail under the wolf, not under the corner of the bubble.
+            int tailX = s_wolfSayX - 3;
+            if (tailX < bx + 2)      tailX = bx + 2;
+            if (tailX > bx + bw - 6) tailX = bx + bw - 6;
+            t.drawFastHLine(tailX, by + bh,     4, paper);
+            t.drawFastHLine(tailX, by + bh + 1, 2, paper);
+            t.drawPixel(tailX - 1, by + bh, ink);
+            t.setTextColor(ink, paper);
+            t.setCursor(bx + 4, by + (big ? 4 : 2));
+            t.print(txt);
+            t.setTextSize(1);
+        };
+
+        if (s_wolfSayKind == 1) {
+            wolfBubble("Don't Be a SKID!", s_wolfSayY, 255, false);
+        } else if (s_wolfSayKind == 2) {
+            // Echoes come in behind the note and step up and back as the
+            // sound rolls off the valley -- drawn first so the loud one
+            // sits in front of them.
+            const float k = s_wolfHowlK;
+            // One echo, not two. The howl puts s_wolfSayY near the top of
+            // the band already, so a second one stacked above it just
+            // clamped to the same line and the pair drew on top of each
+            // other -- a bubble jammed under the title bar reads as a
+            // fault, not as distance.
+            if (k > 0.20f) wolfBubble("awooo...", s_wolfSayY - 22, 110, false);
+            wolfBubble("AWOOOO!", s_wolfSayY, 255, true);
+        }
+    if (s_wolfSayKind == 1) {
+        wolfBubble("Don't Be a SKID!", s_wolfSayY, 255, false);
+    } else if (s_wolfSayKind == 2) {
+        // Echoes come in behind the note and step up and back as the
+        // sound rolls off the valley -- drawn first so the loud one sits
+        // in front of them.
+        const float k = s_wolfHowlK;
+        if (k > 0.20f) wolfBubble("awooo...", s_wolfSayY - 22, 110, false);
+        wolfBubble("AWOOOO!", s_wolfSayY, 255, true);
+    }
 }
 
 void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
@@ -4728,13 +5191,19 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         }
         for (uint8_t i = 0; i < SNOW_COLS; i++) { s_bankD[i] = (uint8_t)random(4, 9); s_trackD[i] = 0; }
         for (uint8_t i = 0; i < TREE_FAR; i++) { s_far[i].x = (float)(i * (w + 60) / TREE_FAR); s_far[i].a = (uint8_t)random(18, 28); }
-        for (uint8_t i = 0; i < TREE_ACT; i++) { s_act[i].x = (float)(i * (w + 90) / TREE_ACT); s_act[i].a = (uint8_t)random(52, 70); }
+        for (uint8_t i = 0; i < TREE_ACT; i++) {
+            s_act[i].x = (float)(i * (w + 90) / TREE_ACT);
+            s_act[i].a = (uint8_t)random(52, 70);
+            s_act[i].b = (uint8_t)random(0, 90);          // starting snow load
+        }
+        s_lodgeX = (float)(w + 140);
         for (uint8_t i = 0; i < PROP_N; i++)   { s_prop[i].x = (float)(i * (w + 70) / PROP_N); s_prop[i].b = (uint8_t)(i % 3); }
         s_nearX = (float)(w + 120);
         s_snLastMs = now; s_dawnAt = now;
         for (uint8_t i = 0; i < RIDER_N; i++) {
             s_rid[i].x = -40.0f; s_rid[i].air = 0.0f; s_rid[i].vy = 0.0f;
             s_rid[i].trick = 0;  s_rid[i].live = false;
+            s_rid[i].crashAt = 0; s_rid[i].say = nullptr; s_rid[i].sayTil = 0;
             s_rid[i].kind = (uint8_t)((i == 1) ? 1 : 0);   // one boarder to open with
             s_rid[i].var  = i;
             // Staggered, so they come down the hill in a loose procession
@@ -4854,6 +5323,15 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         if (k > 255) k = 255;
         return blend(skyTop, skyLow, (uint16_t)k);
     };
+
+    // Aurora, over the stars and under everything solid. It wants a dark
+    // clear sky: it fades out as dawn comes up and as the weather closes
+    // in, because an aurora through a blizzard is neither.
+    {
+        const float au = (1.0f - dawn) * (1.0f - inten * 0.85f)
+                       * (0.45f + 0.55f * sinf((float)now / 41000.0f));
+        if (au > 0.05f) snowAurora(t, w, yStart, bandH, now, au, skyTop, skyLow);
+    }
 
     // Stars: 34, at three brightnesses, and they twinkle. There were 14
     // and they never moved. Cost is 34 drawPixel, which is nothing.
@@ -4978,12 +5456,21 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     const uint16_t farSnow = blend(t.color565(196, 214, 236),
                                    blend(haze, WHITE, 160), 70);
     t.fillRect(0, ridgeY, w, yBot - ridgeY, farSnow);
+    // The lodge sits ON the ridge line and travels with the far plane, so
+    // it obeys the same parallax rule as everything else: small, high,
+    // and slow. It is off screen for most of a couple of minutes, which
+    // is what makes it read as a landmark rather than as scenery.
+    {
+        const int lx = (int)s_lodgeX;
+        if (lx > -40 && lx < w + 40) snowLodge(t, lx, ridgeY + 2, now, dawn, haze);
+    }
     if (step) for (uint8_t i = 0; i < TREE_FAR; i++) {
         s_far[i].x -= WORLD_SPD * PL_FAR * ds;
         if (s_far[i].x < -20.0f) { s_far[i].x = (float)(w + 18); s_far[i].a = (uint8_t)random(18, 28); }
     }
     for (uint8_t i = 0; i < TREE_FAR; i++)
-        snowPine(t, (int)s_far[i].x, ridgeY + 2, (int)s_far[i].a, inten > 0.4f, haze, 150);
+        snowPine(t, (int)s_far[i].x, ridgeY + 2, (int)s_far[i].a, inten > 0.4f, haze, 150,
+                 wind * 1.1f, 0);
 
     // ---- the slope ---------------------------------------------------
     const uint16_t snowLit = blend(WHITE, VAPOR_BLUE, (uint16_t)(16 + inten * 26.0f));
@@ -5007,8 +5494,22 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         }
         for (uint8_t i = 0; i < TREE_ACT; i++) {
             s_act[i].x -= WORLD_SPD * PL_ACT * ds;
-            if (s_act[i].x < -34.0f) { s_act[i].x = (float)(w + 32); s_act[i].a = (uint8_t)random(52, 70); }
+            if (s_act[i].x < -34.0f) {
+                s_act[i].x = (float)(w + 32);
+                s_act[i].a = (uint8_t)random(52, 70);
+                s_act[i].b = (uint8_t)random(0, 60);
+            }
+            // Snow load. Each tree catches at its own rate, so they never
+            // whiten together, and a loaded one sheds the lot at once --
+            // which is what actually happens, and reads far better than
+            // fading back down would.
+            int ld = (int)s_act[i].b + (int)(inten * 1.7f * ds);
+            if (ld > 232 && random(0, 100) < 3) ld = (int)random(0, 40);   // dumps
+            if (inten < 0.2f) ld -= (int)(0.6f * ds);                      // slow melt
+            s_act[i].b = (uint8_t)(ld < 0 ? 0 : (ld > 255 ? 255 : ld));
         }
+        s_lodgeX -= WORLD_SPD * PL_FAR * ds;
+        if (s_lodgeX < -60.0f) s_lodgeX = (float)(w + 90 + random(0, 900));
         s_nearX -= WORLD_SPD * PL_NEAR * ds;
         if (s_nearX < -60.0f) s_nearX = (float)(w + 60 + random(0, 700));
     }
@@ -5033,7 +5534,8 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     for (uint8_t i = 0; i < TREE_ACT; i++) {
         const int px = (int)s_act[i].x;
         if (px < -34 || px > w + 34) continue;
-        snowPine(t, px, groundAt(px) + 2, (int)s_act[i].a, inten > 0.4f, haze, 30);
+        snowPine(t, px, groundAt(px) + 2, (int)s_act[i].a, inten > 0.4f, haze, 30,
+                 wind * 3.4f, s_act[i].b);
     }
 
     // The gondola line is gone. It went from five small cabins to two
@@ -5050,6 +5552,7 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             if (!r.live) {
                 if (now >= r.next) {
                     r.live = true; r.x = -26.0f; r.air = 0.0f; r.vy = 0.0f; r.trick = 0;
+                    r.crashAt = 0; r.say = nullptr; r.sayTil = 0;
                     // Re-rolled on every run, so the mix keeps changing
                     // instead of the same one always being the boarder.
                     r.kind = (uint8_t)((random(0, 100) < 40) ? 1 : 0);
@@ -5061,6 +5564,18 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             // his own pace on top of that. It is a small thing and it is
             // the whole difference between three riders and one rider
             // drawn three times.
+            // Down in the snow: he does not move at all, which is the
+            // point of it. The bubble comes up once the tumble is over.
+            if (r.crashAt) {
+                const uint32_t ca = now - r.crashAt;
+                if (ca > CRASH_TUMBLE && !r.say) {
+                    r.say    = CRASH_SAY[random(0, 8)];
+                    r.sayTil = now + CRASH_HOLD - CRASH_TUMBLE + 200u;
+                }
+                if (ca > CRASH_TUMBLE + CRASH_HOLD) { r.crashAt = 0; r.say = nullptr; }
+                continue;                       // no movement, no jumps, no carving
+            }
+            const float wasX = r.x;             // for the crossing test below
             r.x += ((r.kind ? 0.70f : 0.82f) + (float)k * 0.06f) * ds;
             if (r.air > 0.0f || r.vy != 0.0f) {
                 r.vy  += 0.105f * ds;
@@ -5068,11 +5583,32 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
                 // A spin or a flip advances through its four frames while
                 // he is off the ground.
                 if (r.trick >= 3) r.trick = (uint8_t)(3 + (((int)(r.air) / 7) & 3));
-                if (r.air <= 0.0f) { r.air = 0.0f; r.vy = 0.0f; r.trick = 0; }
+                if (r.air <= 0.0f) {
+                    // Touchdown. One landing in four goes wrong, and the
+                    // harder the trick the likelier that is -- a spin has
+                    // him facing the wrong way when the snow arrives.
+                    const long odds = (r.trick >= 3) ? 34 : 20;
+                    r.air = 0.0f; r.vy = 0.0f;
+                    if (random(0, 100) < odds) {
+                        r.crashAt = now;
+                        r.say = nullptr;
+                        s_birdAt = now;                 // the birds go again
+                        s_birdX  = r.x;
+                        s_birdY  = (float)(groundAt((int)r.x) - 26);
+                    }
+                    r.trick = 0;
+                }
             } else {
                 for (uint8_t i = 0; i < PROP_N; i++) {
                     if (s_prop[i].b != 2) continue;
-                    if (r.x > s_prop[i].x - 3.0f && r.x < s_prop[i].x + 3.0f) {
+                    // A CROSSING test, not a proximity one. The ramp moves
+                    // left while he moves right, so they close at about
+                    // 3px a frame at 22fps -- and on a long frame, where
+                    // ds is clamped at 12.5, at fourteen. A +/-3px window
+                    // gets stepped clean over and the jump silently never
+                    // happens, which is exactly what it was doing.
+                    const float px = s_prop[i].x;
+                    if (wasX <= px && r.x >= px - 1.0f) {
                         // Big launch, light gravity: eight frames of air
                         // is not long enough to read a trick at all.
                         r.vy = -3.4f; r.air = 0.1f;
@@ -5080,6 +5616,7 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
                         s_birdAt = now;                    // startles the birds
                         s_birdX  = r.x;
                         s_birdY  = (float)(groundAt((int)r.x) - 30);
+                        break;
                     }
                 }
             }
@@ -5099,7 +5636,12 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         const int sx = (int)r.x;
         if (sx < -28 || sx > w + 28) continue;
         const int gy = groundAt(sx) - (int)r.air;
-        const int8_t carve = (sinf(r.x * 0.06f + (float)k * 1.7f) > 0.0f) ? 1 : -1;
+        if (r.crashAt) { snowWreck(t, sx, groundAt(sx), now - r.crashAt, r.kind, r.var); continue; }
+        const float cs = sinf(r.x * 0.06f + (float)k * 1.7f);
+        const int8_t carve = (cs > 0.0f) ? 1 : -1;
+        // Powder first, so it comes off from BEHIND him rather than
+        // spraying over his own boots.
+        if (r.air < 1.0f) snowSpray(t, sx, groundAt(sx), carve, fabsf(cs), now);
         if (r.kind) snowBoarder(t, sx, gy, carve, r.trick, r.var);
         else        snowSkier  (t, sx, gy, carve, r.trick, r.var);
     }
@@ -5181,11 +5723,24 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
                             s_saySkiTxt = SAY_BEATEN[random(0, 2)]; s_saySkiTil = now + 1600u;
                             s_sayYetTxt = "ow";  s_sayYetTil = now + 1600u; break;
                         case ChaseEnd::EAT:
-                            s_saySkiTxt = "oh no"; s_saySkiTil = now + 700u;
-                            s_sayYetTxt = "NOM";   s_sayYetTil = now + 1900u; break;
+                            // Just the grab here. The rest of it is timed
+                            // against the sequence, below.
+                            s_saySkiTxt = "urk"; s_saySkiTil = now + 600u;
+                            s_sayYetTxt = nullptr; break;
                         default:
                             s_sayYetTxt = SAY_GIVEUP[random(0, 2)]; s_sayYetTil = now + 1600u;
                             s_saySkiTxt = nullptr; break;
+                    }
+                }
+                // The inspection has its own two beats to speak on, so it
+                // does not get everything said at the top like the others.
+                if (s_cEnd == ChaseEnd::EAT) {
+                    if (age >= EAT_RAISE && age < EAT_RAISE + 70u) {
+                        s_sayYetTxt = EAT_LOOK_Y[random(0, 4)]; s_sayYetTil = now + 1000u;
+                        s_saySkiTxt = EAT_LOOK_S[random(0, 4)]; s_saySkiTil = now + 1000u;
+                    } else if (age >= EAT_TURN && age < EAT_TURN + 70u) {
+                        s_sayYetTxt = EAT_BITE_Y[random(0, 4)]; s_sayYetTil = now + 1300u;
+                        s_saySkiTxt = EAT_BITE_S[random(0, 4)]; s_saySkiTil = now + 800u;
                     }
                 }
                 if (s_cEnd == ChaseEnd::BEATEN && age < 900u) s_yX -= 0.9f * ds;   // knocked back
@@ -5211,14 +5766,37 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
                   : (s_cEnd == ChaseEnd::WINDED) ? YPose::WINDED : YPose::RUN;
             }
             if (p == YPose::EAT) {
-                // Arms stay up until he has swallowed, then come down and
-                // he pats the gut that just arrived.
                 const uint32_t age = now - s_cAt;
                 const int bulge = (age < EAT_GULP) ? 0
                                 : (age < EAT_PAT)  ? (int)(3 + (age - EAT_GULP) / 140u) : 5;
-                snowYeti(t, yx, groundAt(yx), now,
-                         (age < EAT_GULP) ? YPose::EAT : YPose::RUN, bulge);
-                snowVictim(t, yx, groundAt(yx), age, now);
+                // Where his hands are through the sequence: down at the
+                // snow for the grab, up at eye level and out in front for
+                // the look, then back in toward the mouth to feed him in.
+                int hdx = 4, hdy = 24;
+                if (age < EAT_GRAB) { hdx = 2; hdy = 24; }
+                else if (age < EAT_RAISE) {
+                    const uint32_t d = age - EAT_GRAB, span = EAT_RAISE - EAT_GRAB;
+                    hdy = 24 - (int)(d * 16u / span);
+                    hdx = 2  + (int)(d *  8u / span);
+                } else if (age < EAT_TURN) { hdx = 10; hdy = 8; }
+                else if (age < EAT_CHOMP) {
+                    const uint32_t d = age - EAT_TURN, span = EAT_CHOMP - EAT_TURN;
+                    hdx = 10 - (int)(d * 9u / span);
+                    hdy = 8  - (int)(d * 6u / span);
+                } else { hdx = 1; hdy = 2; }
+                // The mouth stays SHUT until he has made his mind up. Using
+                // the EAT pose the whole way through had him examining the
+                // rider with his jaw already hanging open, which gives the
+                // ending away and wastes the pause.
+                const YPose face = (age < EAT_TURN) ? YPose::RUN
+                                 : ((age < EAT_GULP) ? YPose::EAT : YPose::RUN);
+                const bool hold = (age < EAT_CHOMP);
+                // A slight lean in while he is looking. Curiosity, and it
+                // stops the held beat being completely static.
+                snowYeti(t, yx, groundAt(yx), now, face, bulge, hold, hdx, hdy);
+                const uint8_t vk = (s_chaseTgt >= 0) ? s_rid[s_chaseTgt].kind : 0;
+                const uint8_t vv = (s_chaseTgt >= 0) ? s_rid[s_chaseTgt].var  : 0;
+                snowVictim(t, yx, groundAt(yx), age, now, vk, vv);
                 if (age >= EAT_GULP) {
                     // A hand on the belly. One rectangle, and it lands.
                     const int py = groundAt(yx) - 26 + (int)(sinf((float)now / 110.0f) * 2.0f);
@@ -5239,19 +5817,42 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // ---- what they are shouting at each other ------------------------
     // After both of them, so a bubble is never behind a body -- and
     // before the foreground tree, so it can still be occluded by it.
-    if (s_saySkiTxt && now < s_saySkiTil && s_chaseTgt >= 0 && s_rid[s_chaseTgt].live) {
-        const int sx = (int)s_rid[s_chaseTgt].x;
-        if (sx > 10 && sx < w - 10) snowSay(t, sx, groundAt(sx) - 34, s_saySkiTxt);
+    // Crash bubbles first: they belong to a specific rider rather than to
+    // the chase, and one of them can be up while a chase is running
+    // somewhere else on the hill.
+    for (uint8_t k = 0; k < RIDER_N; k++) {
+        const Rider& r = s_rid[k];
+        if (!r.live || !r.say || now >= r.sayTil) continue;
+        const int sx = (int)r.x;
+        if (sx > 8 && sx < w - 8) snowSay(t, sx, groundAt(sx) - 22, r.say);
+    }
+    // During the eat the rider is in the yeti's HANDS, so his bubble
+    // cannot come from where he was standing -- and he is not live any
+    // more either, which is what used to silence him entirely for the
+    // one sequence where he has the best lines.
+    const bool eating = (s_cSt == ChaseSt::RESOLVE && s_cEnd == ChaseEnd::EAT);
+    if (s_saySkiTxt && now < s_saySkiTil) {
+        int sx = -100, sy = 0;
+        if (eating) { sx = (int)s_yX + 20; sy = groundAt((int)s_yX) - 62; }
+        else if (s_chaseTgt >= 0 && s_rid[s_chaseTgt].live) {
+            sx = (int)s_rid[s_chaseTgt].x; sy = groundAt(sx) - 34;
+        }
+        if (sx > 10 && sx < w - 10) snowSay(t, sx, sy, s_saySkiTxt);
     }
     if (s_sayYetTxt && now < s_sayYetTil && s_cSt != ChaseSt::NONE) {
         const int yx = (int)s_yX;
-        if (yx > 10 && yx < w - 10) snowSay(t, yx, groundAt(yx) - 56, s_sayYetTxt);
+        // Pushed left and up during the eat so the two bubbles do not
+        // land on top of each other while they are both at the yeti.
+        const int bx = eating ? yx - 18 : yx;
+        const int by = groundAt(yx) - (eating ? 78 : 56);
+        if (bx > 10 && bx < w - 10) snowSay(t, bx, by, s_sayYetTxt);
     }
 
     // ---- near plane: one big tree, fast, low -------------------------
     {
         const int px = (int)s_nearX;
-        if (px > -60 && px < w + 60) snowPine(t, px, yBot + 6, 96, inten > 0.4f, haze, 0);
+        if (px > -60 && px < w + 60)
+            snowPine(t, px, yBot + 6, 96, inten > 0.4f, haze, 0, wind * 5.0f, 190);
     }
 
     // ---- wildlife ----------------------------------------------------
