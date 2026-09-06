@@ -227,6 +227,7 @@ uint32_t            lastTouch = 0;
 bool                prevTouchValid = false; // last frame's tp.valid, for true press/release edge detection (see loop())
 DetectionType       lastAlertType = DetectionType::UNKNOWN;
 uint32_t            lastAlertHits = 1; // times this exact MAC+type has ever matched — see Squachy's "seen before" reaction
+int8_t              lastAlertRssi = 0; // signal strength of that hit — scales how hard Squachy reacts to it
 const uint16_t      TOUCH_DEBOUNCE_MS = 200;
 
 // Hidden "unlock every Squachy outfit" gesture: hold CLR for
@@ -899,6 +900,7 @@ static void enterAlert(const Detection& d) {
     transitionStart = alertStart;
     lastAlertType = d.type;
     lastAlertHits = d.hits;
+    lastAlertRssi = d.rssi;
     // Copied rather than kept as a Detection* -- the log is a ring
     // buffer that keeps being written while the alert is up, so the
     // entry this came from can be overwritten before HUNT is tapped.
@@ -1623,7 +1625,14 @@ void loop() {
                 clrHoldStart  = now;
             }
 
-            if (!boring && Squachy::onboardingActive() && tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
+            // Any tap at all ends the parade, and is consumed doing it --
+            // checked ahead of everything else so a tap cannot both stop
+            // the show and cycle a background or pet him on the way out.
+            if (Squachy::showOffActive() && tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                Squachy::stopShowOff();
+                lastTouch = now;
+                sqActive  = false;
+            } else if (!boring && Squachy::onboardingActive() && tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
                 Squachy::onboardingTapAdvance(tp.x, tp.y)) {
                 lastTouch = now;
             } else if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
@@ -1653,10 +1662,18 @@ void loop() {
             } else if (!boring && tp.valid && sqActive) {
                 int32_t dx = tp.x - sqStartX;
                 int32_t dy = tp.y - sqStartY;
-                if ((dx * dx + dy * dy) > SQ_MOVE_PX_SQ) sqPetting = true;
-                if (sqPetting) {
+                // Moving BEFORE the hold threshold is a stroke; moving
+                // after it is a carry. Latching sqPetting only while
+                // !sqHeld is what keeps the two gestures apart -- without
+                // that guard the first drag after a successful hold fell
+                // straight back into petting, and he could never be
+                // picked up at all.
+                if (!sqHeld && (dx * dx + dy * dy) > SQ_MOVE_PX_SQ) sqPetting = true;
+                if (sqHeld) {
+                    Squachy::grabTo(tp.x, tp.y);
+                } else if (sqPetting) {
                     Squachy::trigger(Squachy::Event::PETTING);
-                } else if (!sqHeld && (now - sqStartMs) >= SQ_HOLD_MS) {
+                } else if ((now - sqStartMs) >= SQ_HOLD_MS) {
                     sqHeld = true;
                     Squachy::trigger(Squachy::Event::HELD);
                 }
@@ -1691,7 +1708,9 @@ void loop() {
             // releases, wherever the finger happens to end up (it can
             // slide off him mid-stroke and still release cleanly).
             if (touchJustUp && sqActive) {
-                if (!sqPetting && !sqHeld) {
+                if (sqHeld) {
+                    Squachy::release();     // drop him wherever he ended up
+                } else if (!sqPetting) {
                     Squachy::trigger(Squachy::Event::PETTED);
                 }
                 sqActive = false;
@@ -1763,7 +1782,7 @@ void loop() {
                         // dismiss step once you'd already read the
                         // explanation.
                         s_infoPending = false;
-                        Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits);
+                        Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits, lastAlertRssi);
                         enterClear();
                     }
                 }
@@ -1787,7 +1806,7 @@ void loop() {
                     if (IgnoreList::contains(s_alertMac)) IgnoreList::remove(s_alertMac);
                     else                                  IgnoreList::add(s_alertMac, lastAlertType);
                     Squachy::trigger(Squachy::Event::DETECTION, lastAlertType,
-                                     engine.lifetimeTotal(), lastAlertHits);
+                                     engine.lifetimeTotal(), lastAlertHits, lastAlertRssi);
                     enterClear();
                 } else if (uiAlertHitHunt(tp.x, tp.y, tft.width(), tft.height())) {
                     // Same call pair LOG's confirm panel makes. The
@@ -1799,14 +1818,14 @@ void loop() {
                     // on the info panel) both fire it.
                     if (s_alertIsBle) engine.huntBle(s_alertMac, s_alertLabel);
                     else              engine.huntWifi(s_alertMac, s_alertLabel);
-                    Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits);
+                    Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits, lastAlertRssi);
                     enterHunt();
                 } else {
-                    Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits);
+                    Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits, lastAlertRssi);
                     enterClear();
                 }
             } else if ((now - alertStart) > ALERT_AUTO_DISMISS_MS) {
-                Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits);
+                Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits, lastAlertRssi);
                 enterClear();
             }
             break;
@@ -2260,6 +2279,10 @@ void loop() {
                         case SettingsRow::DIAGNOSTICS:  enterDiagnostics(); break;
                         case SettingsRow::REPLAY_INTRO:
                             Squachy::replayIntro();
+                            enterClear();
+                            break;
+                        case SettingsRow::SHOW_OFF:
+                            Squachy::startShowOff();
                             enterClear();
                             break;
                         case SettingsRow::NICKNAME:     Squachy::cycleNickname(); break;

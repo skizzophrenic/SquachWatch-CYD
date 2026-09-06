@@ -28,8 +28,35 @@ namespace Squachy {
     // times is a real pattern (something following you, not a one-off
     // ping), so a high count gets its own "seen you before" reaction
     // instead of the normal fresh-detection line.
+    // rssi (DETECTION only) is the signal strength of the thing that
+    // just tripped, straight off its log entry. It scales how hard he
+    // reacts -- a weak, distant ping gets a flinch and something
+    // sitting on top of you gets a full stumble backwards, from the
+    // same pose maths. 0 means "not known", which draws a middling
+    // reaction rather than either extreme; real RSSI is always
+    // negative, so 0 can never collide with a genuine reading.
     void trigger(Event evt, DetectionType dt = DetectionType::UNKNOWN,
-                 uint32_t lifetimeTotal = 0, uint32_t hitCount = 1);
+                 uint32_t lifetimeTotal = 0, uint32_t hitCount = 1,
+                 int8_t rssi = 0);
+
+    // Carry him with a finger. The CLEAR screen calls this every frame
+    // of a drag that began with a successful press-and-hold on him --
+    // a stroke that never held is still petting, and still reports
+    // itself through Event::PETTING. Coordinates are raw screen space;
+    // he clamps himself into whatever band the caller gave tick().
+    void grabTo(int x, int y);
+
+    // Let go. He falls back to where he was standing and lands in a
+    // squash. Safe to call when nothing was ever grabbed.
+    void release();
+
+    // A background telling him something is about to hit him, in screen
+    // coordinates -- the reverse of lastFootprint(), which backgrounds
+    // already call to find out where he is. He decides for himself
+    // whether that is close enough to be worth ducking, and rate-limits
+    // his own reaction, so a caller can fire this every frame for every
+    // object it draws without thinking about it.
+    void toasterNear(int x, int y);
 
     // Hit test against wherever he was actually drawn last tick() call
     // (position/scale tracked internally) — call this before falling
@@ -43,6 +70,16 @@ namespace Squachy {
     // stale -- invisible for something that ambles as slowly as he does,
     // and far cheaper than reordering the draw.
     bool lastFootprint(int& cx, int& halfW, int& top, int& bot);
+
+    // Runs every pose he has, back to back, naming each one in his own
+    // speech bubble as it plays -- wired to Settings' "SHOW OFF" row.
+    // Most of what he does is gated behind a random idle roll, a real
+    // detection, a particular background or a gesture nobody is told
+    // about, so without this there is no way to see the set. Any tap
+    // ends it; it also ends on its own after the last pose.
+    void startShowOff();
+    void stopShowOff();
+    bool showOffActive();
 
     // Re-runs the first-boot walkthrough on demand (wired to Settings'
     // "REPLAY INTRO" row). trigger(Event::BOOTED) also starts it

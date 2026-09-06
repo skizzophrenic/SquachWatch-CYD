@@ -23,13 +23,14 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE, SettingsRow::DETECTION_FILTER,
     SettingsRow::IGNORED_DEVICES,
     SettingsRow::NICKNAME, SettingsRow::SHADES_COLOR, SettingsRow::OUTFIT,
-    SettingsRow::REPLAY_INTRO, SettingsRow::VIEW_DIARY,
+    SettingsRow::REPLAY_INTRO, SettingsRow::SHOW_OFF, SettingsRow::VIEW_DIARY,
     SettingsRow::CALIBRATE, SettingsRow::CHECK_COLORS, SettingsRow::DIAGNOSTICS, SettingsRow::RESET_STATS, SettingsRow::BACK,
 };
 static const uint8_t ALL_ROWS_N = sizeof(ALL_ROWS) / sizeof(ALL_ROWS[0]);
 
 static bool isSquachyOnlyRow(SettingsRow r) {
-    return r == SettingsRow::REPLAY_INTRO || r == SettingsRow::NICKNAME ||
+    return r == SettingsRow::REPLAY_INTRO || r == SettingsRow::SHOW_OFF ||
+           r == SettingsRow::NICKNAME ||
            r == SettingsRow::SHADES_COLOR || r == SettingsRow::OUTFIT;
 }
 
@@ -55,6 +56,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::OUTFIT:
         case SettingsRow::REPLAY_INTRO:
         case SettingsRow::VIEW_DIARY:
+        case SettingsRow::SHOW_OFF:
             return RowGroupId::SQUACHY;
         default:  // CALIBRATE, CHECK_COLORS, DIAGNOSTICS, RESET_STATS, BACK
             return RowGroupId::SYSTEM;
@@ -264,6 +266,9 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             break;
         case SettingsRow::REPLAY_INTRO:
             label = "REPLAY INTRO";
+            break;
+        case SettingsRow::SHOW_OFF:
+            label = "SHOW OFF";
             break;
         case SettingsRow::NICKNAME:
             label = "NICKNAME"; value = Squachy::nickname();

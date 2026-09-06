@@ -2013,6 +2013,12 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             tcol[i]   = (random(0, 40) == 0) ? goldCol : chromeCol;
             tscale[i] = 0.55f + (float)random(0, 100) / 100.0f * 0.45f;
         }
+        // Tell him it is coming. The reverse of the lastFootprint()
+        // call this file already makes to find out where he is
+        // standing -- he decides for himself whether it is close enough
+        // to duck, and rate-limits his own reaction, so firing this for
+        // every toaster on every frame costs a couple of compares.
+        Squachy::toasterNear((int)tx[i], (int)ty[i]);
         drawToasterAt(t, (int)tx[i], (int)ty[i], now, tcol[i], tscale[i]);
         if (tcol[i] == goldCol) {
             // Publish the body's centre so a tap can find it. Radius covers
@@ -3179,7 +3185,14 @@ static bool     s_wolfSummonPending = false;   // consumed by main.cpp
 static const uint32_t WOLF_EYES = 1300;   // eyes fade up in the dark
 static const uint32_t WOLF_BODY = 1100;   // silhouette resolves around them
 static const uint32_t WOLF_HOLD = 2600;   // it just stands there
-static const uint32_t WOLF_HOWL = 1400;   // head goes back
+// The howl is now a shaped move rather than a linear ramp: COIL is the
+// crouch he gathers on, RISE is the snap up into the note, and whatever
+// is left of WOLF_HOWL is the note held. Longer than it was because the
+// SKID line no longer overlaps it -- the howl finally has the stage to
+// itself and needs room to land, plus its echoes.
+static const uint32_t WOLF_COIL = 420;    // crouch and gather
+static const uint32_t WOLF_RISE = 380;    // snap up into the note
+static const uint32_t WOLF_HOWL = 2400;   // head goes back
 static const uint32_t WOLF_GONE = 1500;   // fades back into the dark
 static const uint32_t WOLF_TOTAL = WOLF_EYES + WOLF_BODY + WOLF_HOLD +
                                    WOLF_HOWL + WOLF_GONE;
@@ -3452,11 +3465,35 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             if (g > 0.0f) acc[x] += g * flick;
         }
     }
+    // The howl drives the fire. Computed up here rather than down in the
+    // werewolf block because the seed row is written before that runs,
+    // and a surge has to go into the FUEL -- painting brighter flame on
+    // top would just be a tint, where feeding the seed lets the heat
+    // propagate up through the sim on its own and settle afterwards.
+    float wolfSurge = 0.0f;
+    if (s_wolfAt) {
+        const uint32_t we = now - s_wolfAt;
+        const uint32_t hs = WOLF_EYES + WOLF_BODY + WOLF_HOLD + WOLF_COIL;
+        const uint32_t he = WOLF_EYES + WOLF_BODY + WOLF_HOLD + WOLF_HOWL;
+        if (we > hs && we < he) {
+            const uint32_t hh = we - hs;
+            wolfSurge = (hh < WOLF_RISE) ? (float)hh / (float)WOLF_RISE : 1.0f;
+            const uint32_t tail = WOLF_HOWL - WOLF_COIL;
+            if (hh > tail - 600u) wolfSurge *= 1.0f - (float)(hh - (tail - 600u)) / 600.0f;
+            if (wolfSurge < 0.0f) wolfSurge = 0.0f;
+        }
+    }
+
     float litSum = 0.0f;
     for (int x = 0; x < fw; x++) {
         float v = acc[x];
         if (v > 1.25f) v = 1.25f;
-        uint8_t base = (uint8_t)(48.0f * (v / 1.25f));
+        // 0.25, not 0.6. At 0.6 the surge roughly doubled the flame
+        // height and washed straight up over the counter rows -- the
+        // howl has to lift the fire, not set the whole screen on fire.
+        float bf = 48.0f * (v / 1.25f) * (1.0f + wolfSurge * 0.25f);
+        if (bf > (float)HEAT_MAX) bf = (float)HEAT_MAX;
+        uint8_t base = (uint8_t)bf;
         heat[(fh - 1) * MAXFW + x] = (random(0, 6) == 0) ? 0 : base;
         litSum += (float)base;
     }
@@ -3587,6 +3624,11 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // so the draw pass needs to hand its position forward. -1 means it
     // is not on stage, or is on stage but not in its speaking beat.
     int wolfSayX = -1, wolfSayY = -1;
+    // 1 = the SKID line during the hold, 2 = the howl. They no longer
+    // overlap: his one spoken beat and his one physical beat each get a
+    // moment instead of landing on top of each other.
+    int   wolfSayKind = 0;
+    float wolfHowlK   = 0.0f;
 
     // Spooky tree, standing BEHIND the fire. Being behind is the whole
     // point: it is drawn before the flames, so they cover it a pixel at
@@ -3718,15 +3760,26 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         if (e >= WOLF_TOTAL) {
             s_wolfAt = 0;
         } else {
-            float eyeF = 1.0f, bodyF = 1.0f, howl = 0.0f;
+            float eyeF = 1.0f, bodyF = 1.0f, howl = 0.0f, coil = 0.0f;
             if (e < WOLF_EYES) {
                 eyeF  = (float)e / (float)WOLF_EYES;
                 bodyF = 0.0f;
             } else if (e < WOLF_EYES + WOLF_BODY) {
                 bodyF = (float)(e - WOLF_EYES) / (float)WOLF_BODY;
             } else if (e >= WOLF_EYES + WOLF_BODY + WOLF_HOLD) {
+                // Coil, then snap up, then hold the note. Anticipation is
+                // what makes the rise read as force rather than as a
+                // position change, and it costs one extra float.
                 const uint32_t h = e - (WOLF_EYES + WOLF_BODY + WOLF_HOLD);
-                howl = (h < WOLF_HOWL) ? (float)h / (float)WOLF_HOWL : 1.0f;
+                if (h < WOLF_COIL) {
+                    coil = (float)h / (float)WOLF_COIL;
+                } else if (h < WOLF_COIL + WOLF_RISE) {
+                    const float k = (float)(h - WOLF_COIL) / (float)WOLF_RISE;
+                    coil = 1.0f - k;
+                    howl = k;
+                } else {
+                    howl = 1.0f;
+                }
             }
             // Common fade-out over the tail of the whole sequence.
             if (e > WOLF_TOTAL - WOLF_GONE) {
@@ -3766,7 +3819,11 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             const int gy = yStart + (int)((yEnd - yStart) * 0.66f);
             const int wx = (int)(w * 0.80f);
             const int breathe = (int)(sinf((float)now / 520.0f) * 1.0f);
-            const int lift    = (int)(howl * 4.0f);
+            // Head goes back three times as far as it used to, and the
+            // coil pulls it DOWN first. rise lifts the whole animal --
+            // legs and neck stretch rather than the drawing translating.
+            const int lift = (int)(howl * 14.0f) - (int)(coil * 5.0f);
+            const int rise = (int)(howl * 6.0f)  - (int)(coil * 4.0f);
 
             // Everything below is authored at the original 1x offsets
             // and multiplied through Z, so the proportions stay locked
@@ -3778,43 +3835,63 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
 
             const int cx  = wx;
             const int bob = breathe;
-            const int hy  = gy - Z(48) + bob - lift;   // top of the skull
+            const int hy  = gy - Z(48) + bob - lift - rise;   // top of the skull
 
             // Speaks from the moment the body has fully resolved right
             // through the howl, so the line is up while it rears back
             // and throws its head -- the animation is the delivery. Only
             // the fades are excluded, where the text would still be
             // perfectly legible while the speaker was not.
+            // The line lands during the hold and is gone before he moves;
+            // the howl then has the stage. Previously the SKID text was up
+            // through the whole howl, so neither beat read.
             if (e >= WOLF_EYES + WOLF_BODY &&
-                e <  WOLF_EYES + WOLF_BODY + WOLF_HOLD + WOLF_HOWL) {
+                e <  WOLF_EYES + WOLF_BODY + WOLF_HOLD) {
                 wolfSayX = cx;
                 wolfSayY = hy - Z(15);
+                wolfSayKind = 1;
+            } else if (howl > 0.25f) {
+                wolfSayX = cx;
+                wolfSayY = hy - Z(20);
+                wolfSayKind = 2;
+                wolfHowlK = (howl - 0.25f) / 0.75f;
             }
 
             if (bodyF > 0.02f) {
                 // Legs, planted wide, and heavy dark feet.
-                t.fillRect(cx - Z(10), gy - Z(19), Z(7),  Z(16), body);
-                t.fillRect(cx + Z(4),  gy - Z(19), Z(7),  Z(16), body);
+                // Legs stretch as he rears rather than sliding upward, so
+                // his feet stay planted where they were.
+                t.fillRect(cx - Z(10), gy - Z(19) - rise, Z(7),  Z(16) + rise, body);
+                t.fillRect(cx + Z(4),  gy - Z(19) - rise, Z(7),  Z(16) + rise, body);
                 t.fillRect(cx - Z(13), gy - Z(4),  Z(11), Z(4),  pelt);
                 t.fillRect(cx + Z(3),  gy - Z(4),  Z(11), Z(4),  pelt);
 
                 // Torso with a lighter chest panel -- the two-tone is
                 // most of what stops this reading as one dark blob.
-                t.fillRect(cx - Z(11), gy - Z(35) + bob, Z(23), Z(17), body);
-                t.fillRect(cx - Z(5),  gy - Z(34) + bob, Z(11), Z(14), pelt);
+                t.fillRect(cx - Z(11), gy - Z(35) + bob - rise, Z(23), Z(17), body);
+                t.fillRect(cx - Z(5),  gy - Z(34) + bob - rise, Z(11), Z(14), pelt);
 
                 // Hunched shoulders, wider than the chest.
-                t.fillRect(cx - Z(15), gy - Z(39) + bob, Z(31), Z(6), body);
+                t.fillRect(cx - Z(15), gy - Z(39) + bob - rise, Z(31), Z(6), body);
 
-                // Arms hanging long and slightly out, with black hands
-                // and red claws at the tips.
-                t.fillRect(cx - Z(20), gy - Z(38) + bob, Z(6), Z(21), body);
-                t.fillRect(cx + Z(15), gy - Z(38) + bob, Z(6), Z(21), body);
-                t.fillRect(cx - Z(21), gy - Z(18) + bob, Z(8), Z(5),  pelt);
-                t.fillRect(cx + Z(14), gy - Z(18) + bob, Z(8), Z(5),  pelt);
+                // Arms swing from a fixed shoulder instead of standing as
+                // two frozen rectangles. There is no rotation on this
+                // display, but drawWideLine takes arbitrary endpoints and
+                // costs the same as the fillRect it replaces -- so the
+                // coil pulls them in and the note throws them wide, and
+                // the hands and claws simply follow wherever the arm ends.
+                const int shy = gy - Z(37) + bob - rise;
+                const int ahL = cx - Z(17) + (int)(coil * Z(6)) - (int)(howl * Z(9));
+                const int ahR = cx + Z(17) - (int)(coil * Z(6)) + (int)(howl * Z(9));
+                const int ahy = gy - Z(18) + bob - rise
+                                - (int)(coil * Z(4)) - (int)(howl * Z(7));
+                t.drawWideLine(cx - Z(16), shy, ahL, ahy, Z(6), body);
+                t.drawWideLine(cx + Z(16), shy, ahR, ahy, Z(6), body);
+                t.fillRect(ahL - Z(4), ahy - Z(2), Z(8), Z(5), pelt);
+                t.fillRect(ahR - Z(4), ahy - Z(2), Z(8), Z(5), pelt);
                 for (int k = 0; k < 3; k++) {
-                    t.fillRect(cx - Z(20) + k * Z(3), gy - Z(13) + bob, Z(2), Z(4), claw);
-                    t.fillRect(cx + Z(15) + k * Z(3), gy - Z(13) + bob, Z(2), Z(4), claw);
+                    t.fillRect(ahL - Z(4) + k * Z(3), ahy + Z(3), Z(2), Z(4), claw);
+                    t.fillRect(ahR - Z(4) + k * Z(3), ahy + Z(3), Z(2), Z(4), claw);
                 }
 
                 // Neck, sized from lift so the head stays attached when
@@ -3842,7 +3919,7 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
 
                 // Nose, then the open snarl. The howl drops the jaw
                 // further and the teeth go with it.
-                const int jaw = (int)(howl * 3.0f) * 8 / 5;
+                const int jaw = (int)(howl * 5.0f) * 8 / 5;
                 t.fillRect(cx - Z(2), hy + Z(6),  Z(4),  Z(3), pelt);
                 t.fillRect(cx - Z(5), hy + Z(10), Z(11), Z(4) + jaw, maw);
                 t.fillRect(cx - Z(5), hy + Z(10), Z(11), Z(1) + 1, tooth);
@@ -3863,6 +3940,36 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             } else {
                 t.fillRect(cx - Z(6), hy + Z(6), Z(2), Z(2), eyeC);
                 t.fillRect(cx + Z(5), hy + Z(6), Z(2), Z(2), eyeC);
+            }
+
+            // The note itself, as three rings rolling off the muzzle.
+            // TFT_eSPI has no arc primitive and a full drawCircle centred
+            // here would run straight down through his own body, so each
+            // ring is a short run of line segments over a limited angle.
+            // Twelve a ring is enough that the joins do not read at this
+            // radius, and 36 drawLine calls on an 8-second easter egg is
+            // not a number worth optimising.
+            if (howl > 0.05f) {
+                const int mx = cx, my = hy + Z(9);
+                for (int r = 0; r < 3; r++) {
+                    float k = howl * 1.6f + (float)r * 0.33f;
+                    k -= (float)(int)k;                    // wrap to 0..1
+                    const int rad = Z(10) + (int)(k * Z(34));
+                    // Full strength at the near edge: these have to read
+                    // against flame, which is the brightest thing in the
+                    // scene, so anything dimmer than this is simply lost.
+                    const uint16_t ring = blend(BG, t.color565(255, 219, 0),
+                                                (uint16_t)(255.0f * (1.0f - k * 0.75f) * bodyF));
+                    int px = 0, py = 0;
+                    for (int i = 0; i <= 12; i++) {
+                        // -145 deg to -35 deg: up and outward, never down
+                        const float a = -2.53f + (float)i * (1.92f / 12.0f);
+                        const int qx = mx + (int)(cosf(a) * (float)rad);
+                        const int qy = my + (int)(sinf(a) * (float)rad);
+                        if (i) t.drawLine(px, py, qx, qy, ring);
+                        px = qx; py = qy;
+                    }
+                }
             }
         }
     }
@@ -3923,28 +4030,49 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // under the mascot -- who is drawn over this background by ui_clear
     // and would clip the first few letters off mid-word.
     if (wolfSayY >= 0) {
-        static const char SKID[] = "Don't Be a SKID!";
-        t.setTextSize(1);
-        const int bw = t.textWidth(SKID) + 7;
-        const int bh = 11;
-        int bx = w - 2 - bw;
-        int by = wolfSayY;
-        if (bx < 1)          bx = 1;
-        if (by < yStart + 1) by = yStart + 1;
-        const uint16_t paper = t.color565(236, 232, 218);
-        const uint16_t ink   = t.color565(16, 12, 10);
-        t.fillRect(bx, by, bw, bh, paper);
-        t.drawRect(bx, by, bw, bh, ink);
-        // Tail under the wolf, not under the corner of the bubble.
-        int tailX = wolfSayX - 3;
-        if (tailX < bx + 2)      tailX = bx + 2;
-        if (tailX > bx + bw - 6) tailX = bx + bw - 6;
-        t.drawFastHLine(tailX, by + bh,     4, paper);
-        t.drawFastHLine(tailX, by + bh + 1, 2, paper);
-        t.drawPixel(tailX - 1, by + bh, ink);
-        t.setTextColor(ink, paper);
-        t.setCursor(bx + 4, by + 2);
-        t.print(SKID);
+        // One helper now rather than one hardcoded block, because there
+        // are up to three bubbles on a howl: the note and two echoes
+        // rolling off behind it. dim fades a bubble toward the night
+        // instead of using alpha, which this display does not have.
+        auto wolfBubble = [&](const char* txt, int by, uint8_t dim, bool big) {
+            t.setTextSize(big ? 2 : 1);
+            const int bw = t.textWidth(txt) + (big ? 11 : 7);
+            const int bh = big ? 20 : 11;
+            int bx = w - 2 - bw;
+            if (bx < 1)          bx = 1;
+            if (by < yStart + 1) by = yStart + 1;
+            const uint16_t paper = blend(BG, t.color565(236, 232, 218), dim);
+            const uint16_t ink   = blend(BG, t.color565(16, 12, 10), dim);
+            t.fillRect(bx, by, bw, bh, paper);
+            t.drawRect(bx, by, bw, bh, ink);
+            // Tail under the wolf, not under the corner of the bubble.
+            int tailX = wolfSayX - 3;
+            if (tailX < bx + 2)      tailX = bx + 2;
+            if (tailX > bx + bw - 6) tailX = bx + bw - 6;
+            t.drawFastHLine(tailX, by + bh,     4, paper);
+            t.drawFastHLine(tailX, by + bh + 1, 2, paper);
+            t.drawPixel(tailX - 1, by + bh, ink);
+            t.setTextColor(ink, paper);
+            t.setCursor(bx + 4, by + (big ? 4 : 2));
+            t.print(txt);
+            t.setTextSize(1);
+        };
+
+        if (wolfSayKind == 1) {
+            wolfBubble("Don't Be a SKID!", wolfSayY, 255, false);
+        } else if (wolfSayKind == 2) {
+            // Echoes come in behind the note and step up and back as the
+            // sound rolls off the valley -- drawn first so the loud one
+            // sits in front of them.
+            const float k = wolfHowlK;
+            // One echo, not two. The howl puts wolfSayY near the top of
+            // the band already, so a second one stacked above it just
+            // clamped to the same line and the pair drew on top of each
+            // other -- a bubble jammed under the title bar reads as a
+            // fault, not as distance.
+            if (k > 0.20f) wolfBubble("awooo...", wolfSayY - 22, 110, false);
+            wolfBubble("AWOOOO!", wolfSayY, 255, true);
+        }
     }
 
     // Owl quips. Drawn AFTER the flames, unlike the owl itself: a

@@ -20,6 +20,7 @@ enum class SettingsRow : uint8_t {
     CHECK_COLORS,
     DIAGNOSTICS,
     REPLAY_INTRO,
+    SHOW_OFF,
     NICKNAME,
     SHADES_COLOR,
     OUTFIT,

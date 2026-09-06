@@ -13,7 +13,10 @@ namespace Squachy {
 // not an archaeology exercise across the draw order.
 static const bool SQUACHY_KEYLINE = true;
 
-enum class Mood : uint8_t { IDLE, WAVE, SHOCKED, BOUNCE, SLEEPY, WALK, DANCE, WINK };
+enum class Mood : uint8_t { IDLE, WAVE, SHOCKED, BOUNCE, SLEEPY, WALK, DANCE, WINK,
+                            STRETCH,   // waking out of a nap -- see the nap-exit branch
+                            GUM,       // blowing a bubble, rare idle flourish
+                            JUGGLE };  // showing off recent catches, needs activity heat
 
 // Which reaction pose a SHOCKED mood strikes — varies by what triggered
 // it so a detection actually reads differently depending on the type,
@@ -150,7 +153,7 @@ static const char* const ONBOARD_LINES[] = {
 #else
     "Up top: left icon is Settings, right one rotates. Far left/right edges of the screen swap backgrounds.",
 #endif
-    "Tap me for a pet, hold me for a beat longer, or stroke me for the good stuff.",
+    "Tap me for a pet, hold me for a beat longer, or stroke me. Hold then drag to carry me.",
     "That's everything. Stay squachy.",
 };
 static const uint8_t  ONBOARD_N        = sizeof(ONBOARD_LINES) / sizeof(ONBOARD_LINES[0]);
@@ -283,6 +286,10 @@ static uint32_t      moodUntil       = 0;
 // step needed. WALK_DURATION_MS is a single cycle's length times the
 // repeat count, not an independently-chosen total, so the per-cycle
 // pace stays the same regardless of how many times he crosses.
+// How long a double-take runs before SHOCKED settles into its normal
+// pose. See the offset curve in tick().
+static const uint32_t DT_TOTAL_MS = 900;
+
 static const uint32_t WALK_CYCLE_MS   = 9000;
 static const uint8_t  WALK_CYCLES     = 5;
 static const uint32_t WALK_DURATION_MS = WALK_CYCLE_MS * WALK_CYCLES;
@@ -290,6 +297,10 @@ static uint32_t       s_walkStart = 0;
 static int8_t         s_walkDir   = 1;
 static const char*   bubbleText      = nullptr;
 static uint32_t      bubbleUntil     = 0;
+// When the current line started, for the bubble's pop-in (see
+// bubblePop()). Separate from bubbleUntil because the grow is measured
+// forward from the start, not backward from the expiry.
+static uint32_t      bubbleStart     = 0;
 static uint32_t      nextIdleAt      = 4000;
 static uint32_t      lastInteraction = 0;
 static DetectionType s_reactType     = DetectionType::UNKNOWN;
@@ -375,6 +386,106 @@ static uint8_t s_cfcol[CONFETTI_N];
 // tick()/drawWaving() call, read by hitTest() so a tap only counts if
 // it lands where he's currently standing (he moves/scales with the
 // screen, this isn't a fixed region).
+// ---- pose channels ------------------------------------------------
+// Small per-frame offsets computed in tick() and read by drawBody().
+// Kept as file statics rather than added to drawBody()'s already-long
+// parameter list, matching how s_topLimit and s_hyCeiling already work.
+// Everything here is derived from state tick() has anyway, so the
+// banded renderers that call tick() several times per logical frame
+// recompute identical values on every band.
+//
+// s_headDrop  squash and stretch: the head sinks into the shoulders as
+//             he lands and extends at the apex. Head group only -- the
+//             torso, arms and legs keep their own anchor, which is what
+//             makes it read as a neck compressing rather than as the
+//             whole character sliding.
+// s_shadowAdj the shadow spreads as he gets closer to it. Same source
+//             number as the bob, so the two can never disagree.
+// s_shadeDrop double-take: the shades slip down his nose so he is
+//             looking over the top of them.
+static int     s_headDrop  = 0;
+static int     s_shadowAdj = 0;
+static uint8_t s_shadeDrop = 0;
+// When the current double-take started, or 0. See the DT_ constants
+// and the offset computed in tick().
+static uint32_t s_dtStart = 0;
+// Gum bubble: when the current one started inflating. GROW then POP;
+// the mood outlasts both slightly so he gets a beat afterward.
+static const uint32_t GUM_GROW_MS = 1800;
+static const uint32_t GUM_POP_MS  = 400;
+static uint32_t s_gumStart = 0;
+// Waking stretch: anchored to its own start rather than to now %
+// STRETCH_MS, so the yawn peaks in the middle of the pose instead of
+// wherever the clock happened to be when he woke up.
+static const uint32_t STRETCH_MS = 1900;
+static uint32_t s_stretchStart = 0;
+// The last three detection types, newest first -- what he juggles.
+// UNKNOWN until something has actually been seen, which is also what
+// keeps the juggle from firing on a fresh device.
+static DetectionType s_recentTypes[3] = { DetectionType::UNKNOWN,
+                                          DetectionType::UNKNOWN,
+                                          DetectionType::UNKNOWN };
+// True while the caller is drawing the scan effect (see tick()'s
+// scanningFx). Not a mood: it is a property of which screen is open,
+// so it outranks the mood machine in the arm chain.
+static bool s_binoc = false;
+
+// Which little beat he is striking mid-pace, or 0 for "just keep
+// walking". A patrol runs WALK_CYCLE_MS * WALK_CYCLES = 45 seconds, and
+// for all of it he used to do exactly one thing: swing his arms. The
+// beat fires at the far end of a sweep, where the sine's slope is
+// almost zero and he is momentarily stopped anyway, so stopping to do
+// something there costs no extra motion to sell.
+static uint8_t s_walkBeat = 0;
+
+// ---- SHOW OFF -------------------------------------------------------
+// A parade of every pose, one per SHOW_STEP_MS, each announcing itself
+// through the ordinary speech bubble so it needs no UI of its own.
+// s_showWB forces a walk beat, which is otherwise chosen by a hash of
+// which sweep he is on and cannot be asked for directly.
+static const uint32_t SHOW_STEP_MS = 2200;
+static const uint8_t  SHOW_N       = 16;
+static bool     s_showOff   = false;
+static uint32_t s_showStart = 0;
+static uint8_t  s_showIdx   = 0xFF;
+static int8_t   s_showWB    = -1;
+
+// ---- published arm positions ----------------------------------------
+// Where each arm actually ended up this frame: shoulder (0) and hand
+// (1), left and right. drawBody()'s arm chain writes these, and
+// drawOutfit() reads them so a costume can hang something on an arm
+// instead of guessing where the arm probably is. The wolf pelt used
+// fixed coordinates and simply sat still while the arm slid out from
+// under it, which is the bug these exist to fix.
+static int s_armL0x = 0, s_armL0y = 0, s_armL1x = 0, s_armL1y = 0;
+static int s_armR0x = 0, s_armR0y = 0, s_armR1x = 0, s_armR1y = 0;
+
+// ---- recoil ---------------------------------------------------------
+// How hard the last detection hit, 0..1, derived from its RSSI. Scales
+// the double-take amplitudes rather than adding a second animation --
+// same pose, different size, which is the whole idea.
+static float s_recoilK = 0.55f;
+
+// ---- carry ----------------------------------------------------------
+// s_grabbed while a finger is holding him; the drop that follows runs
+// on s_dropStart from wherever he was let go. s_dangle is what the draw
+// path reads -- true for both the carry and the fall, since he hangs
+// the same way through either.
+static const uint32_t DROP_MS = 260;
+static const uint32_t LAND_MS = 220;
+static bool     s_grabbed  = false;
+static bool     s_dangle   = false;
+static int      s_grabX = 0, s_grabY = 0;
+static uint32_t s_dropStart = 0;
+static int      s_dropX = 0, s_dropY = 0;
+
+// ---- ducking --------------------------------------------------------
+// Set by toasterNear() when something is genuinely on a collision
+// course. The cooldown is his, not the caller's: backgrounds fire the
+// hook for every object they draw, every frame.
+static uint32_t s_duckUntil    = 0;
+static uint32_t s_duckCooldown = 0;
+
 static int   s_lastCx = -10000, s_lastHeadTopY = 0;
 // Top of the region the caller gave us. Costume detail that reaches ABOVE
 // the head needs this: hy is not a fixed distance from the top of the
@@ -383,6 +494,11 @@ static int   s_lastCx = -10000, s_lastHeadTopY = 0;
 // others. Three passes at the wolf skull were lost to exactly that. With a
 // real limit, tall detail can be clamped instead of guessed at.
 static int   s_topLimit = -10000;
+// The smallest y hy will take across the whole bob cycle -- the top of the
+// bounce, not the current frame. Costume detail that has to clear the region
+// top needs this rather than hy: sizing against a moving anchor makes the
+// detail itself change size as he moves, which reads as the costume breathing.
+static int   s_hyCeiling = -10000;
 static float s_lastScale = 1.0f;
 
 // After this long with no interaction at all (not even idle quips
@@ -409,7 +525,8 @@ static const char* pick(const char* const* arr, int n) {
 
 static void say(const char* line, uint32_t ms) {
     bubbleText  = line;
-    bubbleUntil = millis() + ms;
+    bubbleStart = millis();
+    bubbleUntil = bubbleStart + ms;
 }
 
 // Every bubble stays up at least this long, no matter which line fires.
@@ -417,6 +534,32 @@ static const uint32_t MIN_BUBBLE_MS = 5000;
 
 // Curated, cycle-through options rather than free-text entry — there's
 // no keyboard UI on this device worth building just for a nickname.
+static const char* const STRETCH_LINES[] = {
+    "Nnngh. Okay. I'm up.",
+    "Five more minutes. ...Fine.",
+    "That's the good stretch.",
+    "Back on watch.",
+};
+static const char* const GUM_LINES[] = {
+    "Watch this.",
+    "Bubblegum. Standard issue.",
+    "Been saving this one.",
+    "Perfectly good stakeout snack.",
+};
+static const char* const DUCK_LINES[] = {
+    "Damn toaster nearly got me!",
+    "That one had my name on it.",
+    "Watch where you're flying!",
+    "Who keeps launching those things?",
+    "Missed me, chrome-wing.",
+};
+static const char* const JUGGLE_LINES[] = {
+    "Look what I caught.",
+    "Three at once. Casual.",
+    "Busy out there, huh?",
+    "Juggling the evidence.",
+};
+
 static const char* const NICKNAMES[] = {
     "SQUACHY", "BIGSY", "FOOTS", "STOMPER", "SHADOW",
     "TRACKER", "CHONK", "WOODS", "YETI", "SASSY",
@@ -672,14 +815,33 @@ static void ensurePrefsLoaded() {
 // device's very first boot.
 static void startOnboardingInternal();
 
-void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal, uint32_t hitCount) {
+void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal, uint32_t hitCount,
+             int8_t rssi) {
     uint32_t now = millis();
     lastInteraction = now;
     switch (evt) {
         case Event::DETECTION: {
             mood = Mood::SHOCKED;
             moodUntil = now + 1400;
+            s_dtStart = now;   // see the double-take offset in tick()
+            // Map RSSI onto 0..1. Anything at or below -100 dBm is the
+            // floor and anything above -40 is on top of you; 0 means the
+            // caller had no reading, which lands mid-scale rather than
+            // at either extreme.
+            if (rssi == 0) {
+                s_recoilK = 0.55f;
+            } else {
+                float k = ((float)rssi + 100.0f) / 60.0f;
+                if (k < 0.0f) k = 0.0f;
+                if (k > 1.0f) k = 1.0f;
+                s_recoilK = k;
+            }
             s_reactType = dt;
+            // Newest-first ring of three, for the juggle. Shifted rather
+            // than indexed so the oldest simply falls off the end.
+            s_recentTypes[2] = s_recentTypes[1];
+            s_recentTypes[1] = s_recentTypes[0];
+            s_recentTypes[0] = dt;
             ensurePrefsLoaded();
             s_cachedLifetimeTotal = lifetimeTotal;
             refreshOutfitUnlocks();
@@ -833,6 +995,68 @@ bool lastFootprint(int& cx, int& halfW, int& top, int& bot) {
     return true;
 }
 
+void grabTo(int x, int y) {
+    s_grabbed   = true;
+    s_dropStart = 0;
+    s_grabX = x;
+    s_grabY = y;
+    lastInteraction = millis();
+}
+
+void release() {
+    if (!s_grabbed) return;
+    s_grabbed   = false;
+    s_dropStart = millis();
+    // Fall from exactly where he was let go rather than from the
+    // finger's last raw position -- tick() clamps the carry into the
+    // band, and starting the fall from the unclamped point would make
+    // him jump before he dropped.
+    s_dropX = s_lastCx;
+    s_dropY = s_lastHeadTopY;
+}
+
+void toasterNear(int x, int y) {
+    if (s_lastCx <= -9999) return;              // never drawn yet
+    const uint32_t now = millis();
+    if (now < s_duckCooldown) return;
+    const float sc = s_lastScale;
+    if (abs(x - s_lastCx) > (int)(30.0f * sc)) return;
+    const int headY = s_lastHeadTopY;
+    if (y < headY - (int)(16.0f * sc)) return;  // sailing well overhead
+    if (y > headY + (int)(26.0f * sc)) return;  // passing below his chin
+    s_duckUntil    = now + 900;
+    // Half a minute between ducks. At 5 s this fired constantly: the
+    // TOASTERS background keeps a whole flock on screen and every one of
+    // them passes through his box, so the cooldown is the only thing
+    // deciding how often this happens -- proximity alone is met almost
+    // continuously.
+    s_duckCooldown = now + 30000;
+    // A detection outranks a kitchen appliance, so a startle keeps the
+    // floor. He still ducks either way; he just does not comment on it.
+    if (mood != Mood::SHOCKED) say(pick(DUCK_LINES, 5), 3000);
+}
+
+void startShowOff() {
+    s_showOff   = true;
+    s_showStart = millis();
+    s_showIdx   = 0xFF;          // no step armed yet, so the first one arms
+    s_showWB    = -1;
+}
+
+void stopShowOff() {
+    if (!s_showOff) return;
+    s_showOff   = false;
+    s_showWB    = -1;
+    s_grabbed   = false;
+    s_dropStart = 0;
+    s_binoc     = false;
+    s_duckUntil = 0;
+    mood        = Mood::IDLE;
+    bubbleUntil = 0;
+}
+
+bool showOffActive() { return s_showOff; }
+
 bool hitTest(int x, int y) {
     // Generous fixed bounding box (not a pixel-perfect silhouette
     // test) sized off his last known position/scale — good enough for
@@ -862,6 +1086,50 @@ static bool hadBubble   = false;
 // (or past) both screen edges, which is what happened before this.
 static const uint8_t BUBBLE_MAX_LINES = 2;
 
+// A bubble used to exist on one frame and not on the frame before it,
+// which is the most conspicuously un-animated thing on the CLEAR
+// screen. This grows the box out of nothing over BUBBLE_POP_MS with a
+// small overshoot so it settles rather than snapping to size.
+//
+// Both bubble layouts call this with their own final box and return
+// early if it reports true, so the compact and the wrapped one animate
+// identically. Text is skipped for the duration on purpose: there is no
+// way to scale a font on this display, and text laid into a half-width
+// box would clip rather than shrink.
+//
+// Pure function of millis() and bubbleStart -- no state of its own --
+// so a board rendering in two physical bands draws the same size in
+// both of them.
+static const uint32_t BUBBLE_POP_MS = 220;
+
+static bool bubblePop(TFT_eSPI& t, int bx, int topY, int bw, int bh) {
+    const uint32_t now = millis();
+    if (now < bubbleStart) return false;
+    const uint32_t e = now - bubbleStart;
+    if (e >= BUBBLE_POP_MS) return false;
+    const float u = (float)e / (float)BUBBLE_POP_MS;
+    // Ease out past 1.0 and back: peaks at 1.12 three-quarters of the
+    // way through, settles exactly on 1.0.
+    const float k = (u < 0.75f) ? (u / 0.75f) * 1.12f
+                                : 1.12f - 0.12f * ((u - 0.75f) / 0.25f);
+    int pw = (int)(bw * k), ph = (int)(bh * k);
+    if (pw < 5) pw = 5;
+    if (ph < 4) ph = 4;
+    int px = bx + (bw - pw) / 2;
+    int py = topY + (bh - ph) / 2;
+    // The overshoot frame is taller than the final box; let it grow
+    // downward rather than up into the title bar.
+    if (py < topY) py = topY;
+    if (px < 2) px = 2;
+    t.fillRoundRect(px, py, pw, ph, 3, Theme::BG);
+    t.drawRoundRect(px, py, pw, ph, 3, Theme::VAPOR_PINK);
+    lastBubbleX = px;
+    lastBubbleY = py;
+    lastBubbleW = pw;
+    lastBubbleH = ph;
+    return true;
+}
+
 static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text) {
     t.setTextSize(1);
     t.setTextWrap(false);
@@ -876,6 +1144,7 @@ static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text) {
         int bx = cx - bw / 2;
         if (bx + bw > screenW - 2) bx = screenW - 2 - bw;
         if (bx < 2) bx = 2;
+        if (bubblePop(t, bx, topY, bw, bh)) return;
         t.fillRoundRect(bx, topY, bw, bh, 3, Theme::BG);
         t.drawRoundRect(bx, topY, bw, bh, 3, Theme::VAPOR_PINK);
         t.setTextColor(Theme::WHITE, Theme::BG);
@@ -901,6 +1170,7 @@ static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text) {
     const int lineH = 11;
     int bh = 6 + (int)n * lineH + 3;
 
+    if (bubblePop(t, bx, topY, bw, bh)) return;
     t.fillRoundRect(bx, topY, bw, bh, 3, Theme::BG);
     t.drawRoundRect(bx, topY, bw, bh, 3, Theme::VAPOR_PINK);
     t.setTextColor(Theme::WHITE, Theme::BG);
@@ -1471,21 +1741,145 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
             t.fillRoundRect(cx2 - S(14), hy - S(8), S(28), S(7), S(3), peltDark);
             t.fillRoundRect(cx2 - S(10), hy - S(7), S(20), S(4), S(2), peltMid);
 
-            int earTip = hy - S(20);
-            if (s_topLimit > -5000 && earTip < s_topLimit + 1) earTip = s_topLimit + 1;
-            if (earTip > hy - S(10)) earTip = hy - S(10);   // never stubbier than the hood
+            // A fixed ear LENGTH that translates with the bob, not a fixed tip
+            // position re-clamped every frame. Clamping the tip meant the
+            // length changed as he moved -- by up to 9px of scale at BOUNCE --
+            // so the ears visibly squashed and stretched through every cycle,
+            // which read as the pelt breathing rather than as him bouncing.
+            //
+            // s_hyCeiling is the highest hy reaches across the whole bob, so
+            // clamping against it once gives ears that still clear the region
+            // top at the very top of the bounce and hold that length all the
+            // way down.
+            // ---- the skull -------------------------------------------
+            // Worn askew: the whole thing is TILTED rather than square --
+            // one ear taller and set further back than the other, the
+            // sockets at different heights, the jaw running at an angle
+            // and the teeth shortening as they follow it. A mask that
+            // sits perfectly straight reads as a face; one that has
+            // slipped reads as something he put on, which is the entire
+            // premise of this costume.
+            //
+            // It stays centred on him, though. The design this came from
+            // was also shifted a few pixels to one side, and at this size
+            // that pushed the far ear past his own silhouette. The tilt
+            // carries the "worn" read on its own; the shift only cost
+            // symmetry with the rest of him.
+            //
+            // Integer S() cannot express the 1.25 sizing without rounding
+            // every coefficient twice, so this case scales off the float.
+            // Named Sf and not F: Arduino defines F() as the flash-string
+            // helper macro, and a lambda by that name compiles to a pile
+            // of "invalid cast from float to const __FlashStringHelper*".
+            // Named Sf, not F: Arduino defines F() as the flash-string
+            // helper macro, and a lambda by that name turns every call
+            // site into "invalid cast from float to
+            // const __FlashStringHelper*".
+            auto Sf = [scale](float v) { return (int)(v * scale); };
 
-            // Base sits inboard of the hood edge and the tip leans slightly
-            // out, so they read as ears rather than as horns.
-            t.fillTriangle(cx2 - S(13), hy - S(4), cx2 -  S(4), hy - S(7),
-                           cx2 - S(11), earTip, peltDark);
-            t.fillTriangle(cx2 + S(13), hy - S(4), cx2 +  S(4), hy - S(7),
-                           cx2 + S(11), earTip, peltDark);
+            // The whole mask sits a little lower on his head than the
+            // skull's own geometry would put it. Two things wanted this at
+            // once: it looked like a headband riding above his forehead
+            // rather than a hood pulled on, and the ears were coming out
+            // stubby -- they are length-clamped against the top of the
+            // region, so every pixel the mask moves DOWN is a pixel of ear
+            // length the clamp can afford to give back. Dropping it and
+            // un-squashing them is the same edit.
+            const int md  = Sf(2.5f);
+            const int mhy = hy + md;
+
+            // Ears: the exact proportions that shipped in v1.5.11 --
+            // Sf(20) nominal, a 9-unit base, and BOTH SIDES THE SAME
+            // LENGTH. Narrowing them and giving each side a different
+            // length to sell the tilt made them worse, not better; the
+            // slanted skull and the offset sockets carry the askew read
+            // perfectly well on their own.
+            //
+            // The one thing deliberately not restored from that release is
+            // how the length is arrived at. That version clamped the TIP
+            // against the region top and recomputed it every frame from a
+            // bobbing hy, so the ears changed length as he moved -- by up
+            // to 9 px of scale on a BOUNCE -- and visibly squashed through
+            // every cycle. This clamps the LENGTH once, against
+            // s_hyCeiling (the highest hy ever reaches), so they hold it
+            // all the way down. Same ears, minus the breathing.
+            int earLen = Sf(25.0f);                        // 25% up from Sf(20)
+            if (s_topLimit > -5000 && s_hyCeiling > -5000) {
+                // The tips are MEANT to pass behind the title bar now
+                // rather than stop short of it. Stopping short was the
+                // only way to guarantee a constant length, but it also
+                // capped them at about 33 px -- well under their design --
+                // and no amount of raising the nominal could get past it.
+                //
+                // Clipping is safe here because the title bar paints AFTER
+                // Squachy, so an over-length ear is occluded rather than
+                // corrupting anything, and sliding behind a hard edge reads
+                // as occlusion rather than as the ear shrinking. That is
+                // the difference between this and the old squash bug,
+                // where a tip was re-clamped to a position with nothing
+                // on screen to explain it.
+                //
+                // The overshoot is bounded rather than unlimited: this
+                // outfit also renders in the small cameos on RAW SCAN and
+                // HUNT, where whatever sits above Squachy's region is NOT
+                // guaranteed to be drawn after him. Sf(10) is enough for
+                // full length on CLEAR and not enough to reach anyone
+                // else's UI.
+                const int maxLen = s_hyCeiling + md - (s_topLimit + 1) + Sf(10.0f);
+                if (earLen > maxLen) earLen = maxLen;
+            }
+            if (earLen < Sf(10.0f)) earLen = Sf(10.0f);     // never stubbier than the hood
+            const int earTip = mhy - earLen;
+
+            // Cranium, as a slanted quad rather than an upright box --
+            // two triangles sharing a diagonal. An axis-aligned rounded
+            // rect cannot tilt, and without the tilt the skull read as a
+            // grey visor rather than as something worn crooked.
+            //
+            // The top edge sits at mhy - Sf(7.5), NOT at the Sf(10)
+            // ceiling. It went to Sf(10) first and that was a mistake:
+            // the ears are length-clamped to roughly mhy - 11.6 units on a
+            // normal CLEAR region, so a crown at 10 left barely a pixel of
+            // ear showing above it and swallowed the one silhouette cue
+            // that says wolf. 7.5 restores the same ear clearance the
+            // original mask had, and the extra size goes into width --
+            // Sf(27) against a head that is only S(30) across -- where
+            // there is no budget to run out of.
+            // A unit shallower than it was: every unit off the crown is a
+            // unit of ear that shows above it, and the ears are the cue
+            // that says wolf.
+            const int ctl = mhy - Sf(6.5f), ctr = mhy - Sf(8.0f);   // top corners
+            const int cbl = mhy - Sf(0.5f), cbr = mhy - Sf(2.0f);   // bottom corners
+            t.fillTriangle(cx2 - Sf(13.5f), ctl, cx2 + Sf(13.5f), ctr,
+                           cx2 + Sf(13.5f), cbr, peltMid);
+            t.fillTriangle(cx2 - Sf(13.5f), ctl, cx2 + Sf(13.5f), cbr,
+                           cx2 - Sf(13.5f), cbl, peltMid);
+            // Brow, a shade lighter along the top edge, following the same
+            // slant so the tilt reads even where the skull meets the ears.
+            t.fillTriangle(cx2 - Sf(13.5f), ctl, cx2 + Sf(13.5f), ctr,
+                           cx2 + Sf(13.5f), ctr + Sf(2.2f), peltLit);
+            t.fillTriangle(cx2 - Sf(13.5f), ctl, cx2 + Sf(13.5f), ctr + Sf(2.2f),
+                           cx2 - Sf(13.5f), ctl + Sf(2.2f), peltLit);
+
+            // Ears go on AFTER the skull, not under it. This was the whole
+            // reason they looked stubby: drawn first, the new cranium
+            // covered everything below the tip and left a nub. v1.5.11
+            // drew them over its own skull plate for exactly this reason,
+            // and the full triangle is the shape people read as an ear.
+            // Bases lifted a unit and a half so they emerge from the
+            // crown line rather than from down beside the sockets --
+            // ears growing out of the top of a skull, not out of its
+            // temples. The tips are set by earTip, so this raises where
+            // each ear starts without shortening it.
+            t.fillTriangle(cx2 - Sf(13.0f), mhy - Sf(5.5f), cx2 - Sf(4.0f), mhy - Sf(8.5f),
+                           cx2 - Sf(11.0f), earTip, peltDark);
+            t.fillTriangle(cx2 + Sf(13.0f), mhy - Sf(5.5f), cx2 + Sf(4.0f), mhy - Sf(8.5f),
+                           cx2 + Sf(11.0f), earTip, peltDark);
             // Inner ear, a touch lighter and shorter.
-            t.fillTriangle(cx2 - S(11), hy - S(5), cx2 -  S(6), hy - S(7),
-                           cx2 - S(10), earTip + S(4), peltLit);
-            t.fillTriangle(cx2 + S(11), hy - S(5), cx2 +  S(6), hy - S(7),
-                           cx2 + S(10), earTip + S(4), peltLit);
+            t.fillTriangle(cx2 - Sf(11.0f), mhy - Sf(6.5f), cx2 - Sf(6.0f), mhy - Sf(8.5f),
+                           cx2 - Sf(10.0f), earTip + Sf(4.0f), peltLit);
+            t.fillTriangle(cx2 + Sf(11.0f), mhy - Sf(6.5f), cx2 + Sf(6.0f), mhy - Sf(8.5f),
+                           cx2 + Sf(10.0f), earTip + Sf(4.0f), peltLit);
 
             // Sockets, lit. These used to be deliberately dead on the
             // reasoning that a live pair belongs to the werewolf out on
@@ -1499,33 +1893,67 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
             const uint16_t glowOut = blend(BLACK, RED, (uint16_t)(70.0f + ember * 60.0f));
             const uint16_t glowIn  = blend(RED, VAPOR_YELLOW, (uint16_t)(ember * 120.0f));
             // Halo first, then the core on top of it.
-            t.fillRect(cx2 - S(8), hy - S(7), S(6), S(4), glowOut);
-            t.fillRect(cx2 + S(2), hy - S(7), S(6), S(4), glowOut);
-            t.fillRect(cx2 - S(7), hy - S(6), S(4), S(2), glowIn);
-            t.fillRect(cx2 + S(3), hy - S(6), S(4), S(2), glowIn);
+            // Set at different heights -- the tilt, in the place it reads
+            // hardest. Two eyes level with each other undo the whole pose.
+            // Set at different heights, following the skull's own slant --
+            // the tilt in the one place it reads hardest. Two sockets level
+            // with each other undo the whole pose.
+            t.fillRect(cx2 - Sf(10.5f), mhy - Sf(5.0f), Sf(8.0f), Sf(4.0f), glowOut);
+            t.fillRect(cx2 + Sf(2.5f),  mhy - Sf(6.5f), Sf(8.0f), Sf(4.0f), glowOut);
+            t.fillRect(cx2 - Sf(9.0f),  mhy - Sf(4.2f), Sf(5.0f), Sf(2.4f), glowIn);
+            t.fillRect(cx2 + Sf(4.0f),  mhy - Sf(5.7f), Sf(5.0f), Sf(2.4f), glowIn);
 
-            // Fangs hang off the jaw line and come right down over the
-            // lenses. Stopping them short of his shades was the safe
-            // read but the timid one -- overlapping the eyes is what
-            // makes it look like a head worn as a hood rather than a
-            // hat, and his face still reads underneath because the
-            // teeth are narrow and the gaps carry it.
-            //
-            // Alternating lengths: five identical spikes looked like a
-            // comb, which is the same mistake the shark fin made.
-            t.fillRect(cx2 - S(11), hy - S(2), S(22), S(2), peltLit);
-            for (int i = 0; i < 5; i++) {
-                const int fx  = cx2 - S(9) + S(5) * i;
-                const int len = (i % 2) ? S(5) : S(8);
-                t.fillTriangle(fx, hy, fx + S(3), hy, fx + S(1), hy + len, WHITE);
+            // Jaw line, running at an angle across him rather than square.
+            // Two triangles making one slanted band: thicker on the left,
+            // riding up toward the right.
+            t.fillTriangle(cx2 - Sf(14.0f), mhy - Sf(1.0f), cx2 + Sf(14.0f), mhy - Sf(2.5f),
+                           cx2 + Sf(14.0f), mhy + Sf(1.0f), peltLit);
+            t.fillTriangle(cx2 - Sf(14.0f), mhy - Sf(1.0f), cx2 - Sf(14.0f), mhy + Sf(2.5f),
+                           cx2 + Sf(14.0f), mhy + Sf(1.0f), peltLit);
+
+            // Four teeth, shortening as they climb the slanted jaw. The
+            // longest stops at mhy + 5*scale, one unit clear of the lenses
+            // at mhy + S(6) -- the old row ran to mhy + S(8) and sat on top
+            // of them, which is what made the whole mask read as teeth.
+            // There is far more skull above them now to carry it instead.
+            for (int i = 0; i < 4; i++) {
+                const int fx = cx2 - Sf(10.5f) + Sf(6.5f) * i;
+                // Measured against the undropped hy on purpose: his lenses
+                // are at hy + S(6) and they did not move down with the
+                // mask, so the bite has to give back exactly what the drop
+                // took. The longest tooth ends at hy + 6.0 * scale --
+                // touching the top edge of the lens, never over it.
+                const int ty = mhy + (int)(scale * (1.3f - 0.5f * (float)i));
+                const int tl = (int)(scale * (2.2f - 0.3f * (float)i));
+                t.fillTriangle(fx, ty, fx + Sf(3.4f), ty, fx + Sf(1.7f), ty + tl, WHITE);
             }
 
-            // Pelt hanging down both shoulders, just outside the torso
-            // (drawBody puts that at cx2 +/- S(15), hy + S(23)).
-            t.fillRoundRect(cx2 - S(20), hy + S(21), S(7), S(17), S(3), peltDark);
-            t.fillRoundRect(cx2 + S(13), hy + S(21), S(7), S(17), S(3), peltDark);
-            t.fillRect(cx2 - S(19), hy + S(24), S(3), S(9), peltMid);
-            t.fillRect(cx2 + S(16), hy + S(24), S(3), S(9), peltMid);
+            // Pelt over both shoulders, hung on the arms THEMSELVES.
+            //
+            // This used to be four rectangles at fixed coordinates, which
+            // was fine while the arms only ever hung straight down. They
+            // do not: they sway on idle, swing on a wave, throw wide on a
+            // startle, go overhead on a stretch and alternate on a
+            // juggle -- and the pelt stayed exactly where it was through
+            // all of it, so the arm slid out from under its own fur.
+            //
+            // drawBody() now publishes where each arm actually ended up
+            // (see s_armL0x and friends, written by limbTo()/restArms()),
+            // so the pelt is drawn along the upper arm wherever that
+            // turned out to be, offset outboard so it sits over the arm
+            // rather than down its middle.
+            //
+            // Upper arm only, to a little past half way: a pelt that ran
+            // the whole length would read as a sleeve, and this is a hide
+            // thrown over a shoulder.
+            auto peltOn = [&](int x0, int y0, int x1, int y1, int outward) {
+                const int mx = x0 + (x1 - x0) * 55 / 100;
+                const int my = y0 + (y1 - y0) * 55 / 100;
+                t.drawWideLine(x0 + outward, y0 - Sf(2.0f), mx + outward, my, Sf(9.0f), peltDark);
+                t.drawWideLine(x0 + outward, y0 + Sf(1.0f), mx + outward, my - Sf(1.0f), Sf(3.0f), peltMid);
+            };
+            peltOn(s_armL0x, s_armL0y, s_armL1x, s_armL1y, -Sf(3.0f));
+            peltOn(s_armR0x, s_armR0y, s_armR1x, s_armR1y,  Sf(3.0f));
             break;
         }
         case OutfitId::UNICORN: {
@@ -1765,14 +2193,35 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         t.fillRoundRect(cx2 - S(16), hy + S(22), S(32), S(20), S(6), keyCol);
     }
 
-    t.fillEllipse(cx2, headTopY + S(62), S(18), S(4), blend(BG, FUR_DARK, 70));
+    // Widens as he drops toward it and narrows as he rises -- see
+    // s_shadowAdj. Deliberately outside the head-group offset below:
+    // the shadow belongs to his feet, not his head.
+    t.fillEllipse(cx2, headTopY + S(62), S(18) + s_shadowAdj, S(4), blend(BG, FUR_DARK, 70));
 
     // Legs + big bigfoot feet — a simple alternating step lift while
     // walking (TFT_eSPI has no canvas-style transforms to pivot a real
     // leg swing on, so this just varies each leg's vertical offset in
     // opposition, which reads fine at this size). Static otherwise.
-    if (m == Mood::WALK) {
-        float legPhase = (float)(now % 400) / 400.0f * 6.2831853f;
+    if (s_dangle) {
+        // Hanging: both legs straight down and kicking out of phase.
+        // Same shapes as the walk cycle, driven faster and without the
+        // ground contact that makes a walk a walk.
+        const float kp = (float)(now % 260) / 260.0f * 6.2831853f;
+        const int kL = (int)(sinf(kp) * S(4));
+        const int kR = (int)(sinf(kp + 3.14159265f) * S(4));
+        keyR(cx2 - S(10) + kL, hy + S(40), S(8), S(12));
+        keyR(cx2 + S(2) + kR,  hy + S(40), S(8), S(12));
+        keyRR(cx2 - S(13) + kL, hy + S(51), S(12), S(6), 2);
+        keyRR(cx2 + S(1) + kR,  hy + S(51), S(12), S(6), 2);
+        t.fillRect(cx2 - S(10) + kL, hy + S(40), S(8), S(12), furMain);
+        t.fillRect(cx2 + S(2) + kR,  hy + S(40), S(8), S(12), furMain);
+        t.fillRoundRect(cx2 - S(13) + kL, hy + S(51), S(12), S(6), 2, furLight);
+        t.fillRoundRect(cx2 + S(1) + kR,  hy + S(51), S(12), S(6), 2, furLight);
+    } else if (m == Mood::WALK) {
+        // Feet stop while he is striking a beat. A walk cycle still
+        // running under a character who has visibly paused is the single
+        // thing that would read as broken here.
+        float legPhase = s_walkBeat ? 0.0f : (float)(now % 400) / 400.0f * 6.2831853f;
         int legL = (int)(sinf(legPhase) * S(3));
         int legR = (int)(sinf(legPhase + 3.14159265f) * S(3));
         keyR(cx2 - S(10), hy + S(40) + legL, S(8), S(10) - legL);
@@ -1799,6 +2248,35 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     t.fillRect(cx2 - S(15), hy + S(23), S(5), S(18), furLight);
     t.fillRect(cx2 + S(10), hy + S(23), S(5), S(18), furLight);
 
+    // Shoulder-anchored limb: the keyline copy and then the limb, which
+    // is the pair every posed arm in here needs. The original branches
+    // below still write it out longhand; the poses added later use this
+    // rather than adding four more copies of the same two lines.
+    // Records where it put the limb before drawing it -- see s_armL0x.
+    // Side is decided by the SHOULDER, not the hand: DANCE throws both
+    // arms to the same side of centre, and keying off the hand would
+    // file both of them as the same arm.
+    auto limbTo = [&](int x0, int y0, int x1, int y1, int w = 0) {
+        if (x0 < cx2) { s_armL0x = x0; s_armL0y = y0; s_armL1x = x1; s_armL1y = y1; }
+        else          { s_armR0x = x0; s_armR0y = y0; s_armR1x = x1; s_armR1y = y1; }
+        const int ww = w ? w : S(7);
+        keyW(x0, y0, x1, y1, ww);
+        t.drawWideLine(x0, y0, x1, y1, ww, furLight);
+    };
+
+    // The resting pose's equivalent: the hanging roundrects are drawn
+    // longhand in several branches, so this records their centre line
+    // rather than trying to rewrite all of them.
+    auto restArms = [&](int dL, int dR) {
+        s_armL0x = cx2 - S(14); s_armL0y = hy + S(24) + dL;
+        s_armL1x = cx2 - S(14); s_armL1y = hy + S(42) + dL;
+        s_armR0x = cx2 + S(14); s_armR0y = hy + S(24) + dR;
+        s_armR1x = cx2 + S(14); s_armR1y = hy + S(42) + dR;
+    };
+    // Seeded, so a branch that leaves one arm hanging (WAVE, and the
+    // pointing SHOCKED poses) still reports that arm correctly.
+    restArms(0, 0);
+
     // Arms — long, ape-like, hanging past the waist. Depend on mood; a
     // SHOCKED reaction further varies pose by what triggered it. Static
     // hanging arms used to be the default for every mood except WAVE/
@@ -1806,12 +2284,52 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     // all drew the exact same frozen pose) -- everything below except
     // SLEEPY now has some motion of its own so standing still never
     // reads as a paused animation.
-    if (m == Mood::WAVE) {
+    if (s_dangle) {
+        // Both arms up and windmilling. He is being held by something
+        // above him, so the arms go up whatever mood he was in.
+        const int fw = (int)(sinf((float)(now % 220) / 220.0f * 6.2831853f) * S(6));
+        limbTo(cx2 - S(11), hy + S(26), cx2 - S(20), hy - S(2) + fw);
+        limbTo(cx2 + S(11), hy + S(26), cx2 + S(20), hy - S(2) - fw);
+    } else if (now < s_duckUntil) {
+        // Ducking, then swatting after whatever just buzzed him. The
+        // second half is the better half: a duck alone reads as fear,
+        // and a duck followed by a swipe reads as annoyance, which is
+        // much more him.
+        const uint32_t de = s_duckUntil - now;
+        if (de > 380u) {
+            limbTo(cx2 - S(11), hy + S(26), cx2 - S(13), hy + S(2));
+            limbTo(cx2 + S(11), hy + S(26), cx2 + S(13), hy + S(2));
+        } else {
+            const float k = sinf((float)(380u - de) / 380.0f * 3.14159265f);
+            limbTo(cx2 - S(18), hy + S(22), cx2 - S(18), hy + S(40));
+            limbTo(cx2 + S(11), hy + S(26), cx2 + S(14) + (int)(S(10) * k), hy + S(6) - (int)(S(14) * k));
+        }
+    } else if (s_binoc) {
+        // Both fists up at eye level. Checked ahead of the mood chain
+        // rather than inside it: this is a property of which screen is
+        // open, not of how he feels, and it has to win over whatever
+        // mood happens to be running underneath it.
+        const int sw = (int)(sinf((float)(now % 3200) / 3200.0f * 6.2831853f) * (4.0f * scale));
+        limbTo(cx2 - S(11), hy + S(26), cx2 - S(8) + sw, hy + S(9));
+        limbTo(cx2 + S(11), hy + S(26), cx2 + S(8) + sw, hy + S(9));
+    } else if (m == Mood::STRETCH) {
+        // Both arms overhead, lengthening through the yawn and coming
+        // back down as it ends.
+        const uint32_t se = (now > s_stretchStart) ? (now - s_stretchStart) : 0;
+        const float sk = sinf(fminf((float)se / (float)STRETCH_MS, 1.0f) * 3.14159265f);
+        limbTo(cx2 - S(11), hy + S(26), cx2 - S(13) - (int)(S(6) * sk), hy + S(26) - (int)(S(33) * sk));
+        limbTo(cx2 + S(11), hy + S(26), cx2 + S(13) + (int)(S(6) * sk), hy + S(26) - (int)(S(33) * sk));
+    } else if (m == Mood::JUGGLE) {
+        // Hands alternate on the same 1200 ms cycle the packets use, so
+        // a hand is always at the top of its travel as a packet leaves.
+        const int jw = (int)(sinf((float)(now % 1200) / 1200.0f * 6.2831853f) * S(5));
+        limbTo(cx2 - S(11), hy + S(26), cx2 - S(19), hy + S(20) + jw);
+        limbTo(cx2 + S(11), hy + S(26), cx2 + S(19), hy + S(20) - jw);
+    } else if (m == Mood::WAVE) {
         float wa = -1.0f + sinf((float)(now % 400) / 400.0f * 6.2831853f) * 0.5f;
         float ex = cx2 + S(13) + cosf(wa) * (18.0f * scale);
         float ey = hy + S(28) + sinf(wa) * (18.0f * scale);
-        keyW(cx2 + S(11), hy + S(28), ex, ey, S(7));
-        t.drawWideLine(cx2 + S(11), hy + S(28), ex, ey, S(7), furLight);
+        limbTo(cx2 + S(11), hy + S(28), (int)ex, (int)ey);
         keyRR(cx2 - S(18), hy + S(22), S(8), S(22), S(3));
         t.fillRoundRect(cx2 - S(18), hy + S(22), S(8), S(22), S(3), furLight);
     } else if (m == Mood::SHOCKED) {
@@ -1824,10 +2342,8 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         int shake = (int)(sinf(shakeT) * S(2));
         switch (reactPoseFor(s_reactType)) {
             case ReactPose::HANDS_UP:
-                keyW(cx2 - S(11), hy + S(26), cx2 - S(14) + shake, hy - S(10), S(7));
-                t.drawWideLine(cx2 - S(11), hy + S(26), cx2 - S(14) + shake, hy - S(10), S(7), furLight);
-                keyW(cx2 + S(11), hy + S(26), cx2 + S(14) + shake, hy - S(10), S(7));
-                t.drawWideLine(cx2 + S(11), hy + S(26), cx2 + S(14) + shake, hy - S(10), S(7), furLight);
+                limbTo(cx2 - S(11), hy + S(26), cx2 - S(14) + shake, hy - S(10));
+                limbTo(cx2 + S(11), hy + S(26), cx2 + S(14) + shake, hy - S(10));
                 break;
             case ReactPose::COVER_FACE:
                 // The crossing lines land on the face — drawn later,
@@ -1844,10 +2360,8 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
             case ReactPose::LOOK_AROUND:
             case ReactPose::STARTLED:
             default:
-                keyW(cx2 - S(11), hy + S(26), cx2 - S(23) + shake, hy + S(10), S(7));
-                t.drawWideLine(cx2 - S(11), hy + S(26), cx2 - S(23) + shake, hy + S(10), S(7), furLight);
-                keyW(cx2 + S(11), hy + S(26), cx2 + S(23) + shake, hy + S(10), S(7));
-                t.drawWideLine(cx2 + S(11), hy + S(26), cx2 + S(23) + shake, hy + S(10), S(7), furLight);
+                limbTo(cx2 - S(11), hy + S(26), cx2 - S(23) + shake, hy + S(10));
+                limbTo(cx2 + S(11), hy + S(26), cx2 + S(23) + shake, hy + S(10));
                 break;
         }
     } else if (m == Mood::DANCE) {
@@ -1866,10 +2380,27 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         // the arm detaching mid-move instead of swinging from it.
         float daT = (float)(now % 500) / 500.0f * 6.2831853f;
         int armX = (int)(sinf(daT) * S(11));
-        keyW(cx2 - S(14), hy + S(20), cx2 - S(14) + armX, hy + S(44), S(8));
-        t.drawWideLine(cx2 - S(14), hy + S(20), cx2 - S(14) + armX, hy + S(44), S(8), furLight);
-        keyW(cx2 + S(14), hy + S(20), cx2 + S(14) + armX, hy + S(44), S(8));
-        t.drawWideLine(cx2 + S(14), hy + S(20), cx2 + S(14) + armX, hy + S(44), S(8), furLight);
+        limbTo(cx2 - S(14), hy + S(20), cx2 - S(14) + armX, hy + S(44), S(8));
+        limbTo(cx2 + S(14), hy + S(20), cx2 + S(14) + armX, hy + S(44), S(8));
+    } else if (m == Mood::WALK && s_walkBeat == 1) {
+        // Nose down, having a good sniff at whatever is on the floor.
+        limbTo(cx2 - S(11), hy + S(26), cx2 - S(15), hy + S(42));
+        limbTo(cx2 + S(11), hy + S(26), cx2 + S(15), hy + S(42));
+    } else if (m == Mood::WALK && s_walkBeat == 2) {
+        // One hand up shading his eyes at something above him. The other
+        // stays hanging, so restArms() records that side correctly before
+        // limbTo() overwrites only this one.
+        restArms(0, 0);
+        keyRR(cx2 - S(18), hy + S(22), S(8), S(22), S(3));
+        t.fillRoundRect(cx2 - S(18), hy + S(22), S(8), S(22), S(3), furLight);
+        limbTo(cx2 + S(11), hy + S(26), cx2 + S(5), hy + S(1));
+    } else if (m == Mood::WALK && s_walkBeat == 3) {
+        // A scratch behind the ear, hand buzzing.
+        const int bz = (int)(sinf((float)now / 45.0f) * S(2));
+        restArms(0, 0);
+        keyRR(cx2 - S(18), hy + S(22), S(8), S(22), S(3));
+        t.fillRoundRect(cx2 - S(18), hy + S(22), S(8), S(22), S(3), furLight);
+        limbTo(cx2 + S(11), hy + S(26), cx2 + S(16) + bz, hy + S(11));
     } else if (m == Mood::WALK) {
         // Opposite-arm-opposite-leg swing, same phase the legs above
         // already use (recomputed here rather than threaded through --
@@ -1878,6 +2409,7 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         float legPhase = (float)(now % 400) / 400.0f * 6.2831853f;
         int armL = (int)(sinf(legPhase + 3.14159265f) * S(4));
         int armR = (int)(sinf(legPhase) * S(4));
+        restArms(armL, armR);
         keyRR(cx2 - S(18), hy + S(22) + armL, S(8), S(22), S(3));
         t.fillRoundRect(cx2 - S(18), hy + S(22) + armL, S(8), S(22), S(3), furLight);
         keyRR(cx2 + S(10), hy + S(22) + armR, S(8), S(22), S(3));
@@ -1895,16 +2427,26 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         float armPhase = (float)(now % 1800) / 1800.0f * 6.2831853f;
         int armSwingL = (int)(sinf(armPhase) * S(3));
         int armSwingR = (int)(sinf(armPhase + 3.14159265f) * S(3));
+        restArms(armSwingL, armSwingR);
         keyRR(cx2 - S(18), hy + S(22) + armSwingL, S(8), S(22), S(3));
         t.fillRoundRect(cx2 - S(18), hy + S(22) + armSwingL, S(8), S(22), S(3), furLight);
         keyRR(cx2 + S(10), hy + S(22) + armSwingR, S(8), S(22), S(3));
         t.fillRoundRect(cx2 + S(10), hy + S(22) + armSwingR, S(8), S(22), S(3), furLight);
     }
 
+    // ---- head group ---------------------------------------------------
+    // Everything from here down hangs off hh rather than hy. The
+    // squash-and-stretch pass (s_headDrop) sinks the head into the
+    // shoulders on landing and extends it at the apex; the torso, arms
+    // and legs above keep using hy, and that difference is the whole
+    // effect. The outfit comes along because a hat that stayed put
+    // while the head moved would read as detached.
+    const int hh = hy + s_headDrop;
+
     // Head — broader jaw than before, brow ridge over the eyes.
-    t.fillRoundRect(cx2 - S(15), hy, S(30), S(24), S(7), furLight);
-    t.fillRoundRect(cx2 - S(12), hy + S(2), S(24), S(19), S(5), furMain);
-    t.fillRoundRect(cx2 - S(9),  hy + S(7), S(18), S(11), S(4), SKIN_TAN);
+    t.fillRoundRect(cx2 - S(15), hh, S(30), S(24), S(7), furLight);
+    t.fillRoundRect(cx2 - S(12), hh + S(2), S(24), S(19), S(5), furMain);
+    t.fillRoundRect(cx2 - S(9),  hh + S(7), S(18), S(11), S(4), SKIN_TAN);
 
     // Sagittal crest (the pronounced skull peak real bigfoot sightings
     // always mention) plus a couple of smaller shaggy fringe tufts.
@@ -1918,35 +2460,35 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     // in that silhouette that doesn't belong. Every other outfit, and
     // plain Squachy, still get it.
     if (currentOutfit() != OutfitId::BLUEBLUR) {
-        keyT(cx2 - S(6), hy + S(2), cx2, hy - S(14), cx2 + S(6), hy + S(2));
-        t.fillTriangle(cx2 - S(6), hy + S(2), cx2, hy - S(14), cx2 + S(6), hy + S(2), furLight);
+        keyT(cx2 - S(6), hh + S(2), cx2, hh - S(14), cx2 + S(6), hh + S(2));
+        t.fillTriangle(cx2 - S(6), hh + S(2), cx2, hh - S(14), cx2 + S(6), hh + S(2), furLight);
     }
-        keyT(cx2 - S(13), hy + S(3), cx2 - S(9), hy - S(4), cx2 - S(5), hy + S(3));
-        t.fillTriangle(cx2 - S(13), hy + S(3), cx2 - S(9), hy - S(4), cx2 - S(5), hy + S(3), furLight);
-        keyT(cx2 + S(5),  hy + S(3), cx2 + S(9), hy - S(4), cx2 + S(13),hy + S(3));
-        t.fillTriangle(cx2 + S(5),  hy + S(3), cx2 + S(9), hy - S(4), cx2 + S(13),hy + S(3), furLight);
+        keyT(cx2 - S(13), hh + S(3), cx2 - S(9), hh - S(4), cx2 - S(5), hh + S(3));
+        t.fillTriangle(cx2 - S(13), hh + S(3), cx2 - S(9), hh - S(4), cx2 - S(5), hh + S(3), furLight);
+        keyT(cx2 + S(5),  hh + S(3), cx2 + S(9), hh - S(4), cx2 + S(13),hh + S(3));
+        t.fillTriangle(cx2 + S(5),  hh + S(3), cx2 + S(9), hh - S(4), cx2 + S(13),hh + S(3), furLight);
 
     // A tiny top hat, unlocked once he reaches Legend stage — perched
-    // just above the crest peak (hy - S(14)). Skipped for the Unicorn
+    // just above the crest peak (hh - S(14)). Skipped for the Unicorn
     // outfit specifically: its horn already occupies that exact spot,
     // and the two stacked together read as clutter rather than two
     // readable accessories.
     if (currentStage() == GrowthStage::LEGEND && currentOutfit() != OutfitId::UNICORN) {
-        t.fillRoundRect(cx2 - S(9), hy - S(22), S(18), S(3), 1, BLACK);
-        t.fillRect(cx2 - S(5), hy - S(30), S(10), S(9), BLACK);
-        t.fillRect(cx2 - S(5), hy - S(24), S(10), S(2), VAPOR_PINK);
+        t.fillRoundRect(cx2 - S(9), hh - S(22), S(18), S(3), 1, BLACK);
+        t.fillRect(cx2 - S(5), hh - S(30), S(10), S(9), BLACK);
+        t.fillRect(cx2 - S(5), hh - S(24), S(10), S(2), VAPOR_PINK);
     }
 
     // Ears — small and tucked close, like a real Sasquach rather than
     // a cartoon animal's.
-    t.fillCircle(cx2 - S(15), hy + S(13), S(3), furMain);
-    t.fillCircle(cx2 + S(15), hy + S(13), S(3), furMain);
-    t.fillCircle(cx2 - S(15), hy + S(13), S(1), SKIN_DARK);
-    t.fillCircle(cx2 + S(15), hy + S(13), S(1), SKIN_DARK);
+    t.fillCircle(cx2 - S(15), hh + S(13), S(3), furMain);
+    t.fillCircle(cx2 + S(15), hh + S(13), S(3), furMain);
+    t.fillCircle(cx2 - S(15), hh + S(13), S(1), SKIN_DARK);
+    t.fillCircle(cx2 + S(15), hh + S(13), S(1), SKIN_DARK);
 
     // Blush
-    t.fillCircle(cx2 - S(8), hy + S(15), S(2), VAPOR_PINK);
-    t.fillCircle(cx2 + S(8), hy + S(15), S(2), VAPOR_PINK);
+    t.fillCircle(cx2 - S(8), hh + S(15), S(2), VAPOR_PINK);
+    t.fillCircle(cx2 + S(8), hh + S(15), S(2), VAPOR_PINK);
 
     // Eyes / sunglasses + mouth
     if (m == Mood::SHOCKED) {
@@ -1957,37 +2499,50 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         } else if (pose == ReactPose::LOOK_AROUND) {
             pdx = (int)(sinf((float)(now % 600) / 600.0f * 6.2831853f) * S(2));
         }
-        t.fillEllipse(cx2 - S(5), hy + S(9), S(3), S(4), WHITE);
-        t.fillEllipse(cx2 + S(5), hy + S(9), S(3), S(4), WHITE);
-        t.fillCircle(cx2 - S(5) + pdx, hy + S(9) + pdy, S(1), BLACK);
-        t.fillCircle(cx2 + S(5) + pdx, hy + S(9) + pdy, S(1), BLACK);
-        t.fillEllipse(cx2, hy + S(18), S(4), S(5), BLACK);
+        t.fillEllipse(cx2 - S(5), hh + S(9), S(3), S(4), WHITE);
+        t.fillEllipse(cx2 + S(5), hh + S(9), S(3), S(4), WHITE);
+        t.fillCircle(cx2 - S(5) + pdx, hh + S(9) + pdy, S(1), BLACK);
+        t.fillCircle(cx2 + S(5) + pdx, hh + S(9) + pdy, S(1), BLACK);
+        t.fillEllipse(cx2, hh + S(18), S(4), S(5), BLACK);
 
         // The pointing/covering gesture for these reactions lands on
         // the face, so it's drawn last, in front of the head just
         // painted above, instead of underneath it with the other arm.
         if (pose == ReactPose::COVER_FACE) {
-            keyW(cx2 - S(11), hy + S(26), cx2 + S(7), hy + S(6), S(7));
-            t.drawWideLine(cx2 - S(11), hy + S(26), cx2 + S(7), hy + S(6), S(7), furLight);
-            keyW(cx2 + S(11), hy + S(26), cx2 - S(7), hy + S(6), S(7));
-            t.drawWideLine(cx2 + S(11), hy + S(26), cx2 - S(7), hy + S(6), S(7), furLight);
+            keyW(cx2 - S(11), hh + S(26), cx2 + S(7), hh + S(6), S(7));
+            t.drawWideLine(cx2 - S(11), hh + S(26), cx2 + S(7), hh + S(6), S(7), furLight);
+            keyW(cx2 + S(11), hh + S(26), cx2 - S(7), hh + S(6), S(7));
+            t.drawWideLine(cx2 + S(11), hh + S(26), cx2 - S(7), hh + S(6), S(7), furLight);
         } else if (pose == ReactPose::POINT_SHADES) {
-            keyW(cx2 + S(11), hy + S(26), cx2 + S(4), hy + S(8), S(7));
-            t.drawWideLine(cx2 + S(11), hy + S(26), cx2 + S(4), hy + S(8), S(7), furLight);
+            keyW(cx2 + S(11), hh + S(26), cx2 + S(4), hh + S(8), S(7));
+            t.drawWideLine(cx2 + S(11), hh + S(26), cx2 + S(4), hh + S(8), S(7), furLight);
         } else if (pose == ReactPose::DISGUST) {
-            keyW(cx2 + S(11), hy + S(26), cx2, hy + S(17), S(7));
-            t.drawWideLine(cx2 + S(11), hy + S(26), cx2, hy + S(17), S(7), furLight);
+            keyW(cx2 + S(11), hh + S(26), cx2, hh + S(17), S(7));
+            t.drawWideLine(cx2 + S(11), hh + S(26), cx2, hh + S(17), S(7), furLight);
         }
+    } else if (m == Mood::STRETCH) {
+        // Eyes still shut and one enormous yawn -- he is not awake yet,
+        // he is waking up, and those are different poses.
+        t.drawLine(cx2 - S(9), hh + S(9), cx2 - S(2), hh + S(11), furLight);
+        t.drawLine(cx2 + S(2), hh + S(11), cx2 + S(9), hh + S(9), furLight);
+        const uint32_t se2 = (now > s_stretchStart) ? (now - s_stretchStart) : 0;
+        // Peaks at 0.85, not 1.25: the face patch is only S(11) tall, and
+        // a yawn drawn any bigger than this covers the closed eyes that
+        // are half of what makes the pose read as waking rather than
+        // shouting.
+        const float yk = 0.30f + sinf(fminf((float)se2 / (float)STRETCH_MS, 1.0f) * 3.14159265f) * 0.55f;
+        t.fillEllipse(cx2, hh + S(18), (int)(S(4) * yk) + 1, (int)(S(5) * yk) + 1, BLACK);
+        t.fillEllipse(cx2, hh + S(19), (int)(S(2) * yk) + 1, (int)(S(2) * yk) + 1, PINK);
     } else if (m == Mood::SLEEPY) {
         // Closed, content eyes — soft downward arcs instead of shades —
         // plus a little "o" mouth and a drifting Z to sell the nap.
-        t.drawLine(cx2 - S(9), hy + S(9), cx2 - S(2), hy + S(11), furLight);
-        t.drawLine(cx2 + S(2), hy + S(11), cx2 + S(9), hy + S(9), furLight);
-        t.fillCircle(cx2, hy + S(18), S(2), BLACK);
+        t.drawLine(cx2 - S(9), hh + S(9), cx2 - S(2), hh + S(11), furLight);
+        t.drawLine(cx2 + S(2), hh + S(11), cx2 + S(9), hh + S(9), furLight);
+        t.fillCircle(cx2, hh + S(18), S(2), BLACK);
 
         float zPhase = (float)(now % 1600) / 1600.0f;
         int zx = cx2 + S(15) + (int)(zPhase * S(6));
-        int zy = hy + S(1) - (int)(zPhase * S(14));
+        int zy = hh + S(1) - (int)(zPhase * S(14));
         uint16_t zCol = blend(BG, CYAN, (uint16_t)(220 * (1.0f - zPhase)));
         t.setTextSize(scale > 1.4f ? 2 : 1);
         t.setTextColor(zCol, BG);
@@ -1998,7 +2553,39 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         // COLOR) rather than always cyan — see cycleShadesColor().
         static const uint16_t SHADE_TINTS[4] = { CYAN, VAPOR_PINK, GREEN, VAPOR_PURPLE };
         uint16_t shadeTint = SHADE_TINTS[s_shadeIdx % 4];
-        bool blink = ((now / 2200) % 40) < 3;
+        // His blink used to be ((now / 2200) % 40) < 3 -- a perfect
+        // metronome, both eyes, identical duration, forever. Regularity
+        // at that scale is most of what makes a face read as a machine
+        // rather than as something alive.
+        //
+        // This picks a different moment, length and kind inside every
+        // slot: usually one ordinary blink, sometimes a double, rarely a
+        // long slow one. It is a pure function of `now` with no state,
+        // which matters more than it looks -- drawBody() runs more than
+        // once per logical frame on a banded board, and a blink driven
+        // by a stored "next blink at" would land in one band and not the
+        // other, tearing his face in half.
+        //
+        // 140 ms rather than the ~100 that looks right in a browser: at
+        // the 22 fps this board actually runs, 100 ms is barely two
+        // frames, and a blink that short is skipped more often than seen.
+        bool blink = false;
+        {
+            const uint32_t SLOT = 2600;
+            const uint32_t slot = now / SLOT;
+            uint32_t h = slot * 2654435761u;
+            h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
+            const uint32_t t0 = slot * SLOT + 300 + (h % (SLOT - 900));
+            const uint8_t kind = (uint8_t)((h >> 20) & 7u);
+            if (kind == 0) {              // rare slow one
+                blink = (now >= t0 && now < t0 + 440);
+            } else if (kind == 1) {       // double
+                blink = (now >= t0 && now < t0 + 140) ||
+                        (now >= t0 + 230 && now < t0 + 370);
+            } else {                      // ordinary
+                blink = (now >= t0 && now < t0 + 140);
+            }
+        }
         // Mood::WINK forces the left lens shut on its own, independent
         // of the normal both-eyes blink cycle -- a wink is one eye,
         // not two.
@@ -2006,25 +2593,34 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         uint16_t openLens = blend(BG, shadeTint, 60);
         uint16_t lensL = (blink || winking) ? BLACK : openLens;
         uint16_t lensR = blink ? BLACK : openLens;
-        t.fillRoundRect(cx2 - S(12), hy + S(6), S(10), S(7), 2, BLACK);
-        t.fillRoundRect(cx2 + S(2),  hy + S(6), S(10), S(7), 2, BLACK);
-        t.fillRect(cx2 - S(2), hy + S(8), S(4), S(2), BLACK);
-        t.fillRoundRect(cx2 - S(11), hy + S(7), S(8), S(5), 1, lensL);
-        t.fillRoundRect(cx2 + S(3),  hy + S(7), S(8), S(5), 1, lensR);
+        // sd slides the whole pair down the bridge of his nose during a
+        // double-take, so he ends up looking over the top of them.
+        const int sd = (int)s_shadeDrop;
+        t.fillRoundRect(cx2 - S(12), hh + S(6) + sd, S(10), S(7), 2, BLACK);
+        t.fillRoundRect(cx2 + S(2),  hh + S(6) + sd, S(10), S(7), 2, BLACK);
+        t.fillRect(cx2 - S(2), hh + S(8) + sd, S(4), S(2), BLACK);
+        t.fillRoundRect(cx2 - S(11), hh + S(7) + sd, S(8), S(5), 1, lensL);
+        t.fillRoundRect(cx2 + S(3),  hh + S(7) + sd, S(8), S(5), 1, lensR);
+        if (sd > 0) {
+            // Two eyes peering over the frames -- without these the
+            // dropped shades just read as badly-placed shades.
+            t.fillCircle(cx2 - S(7), hh + S(6), S(2), BLACK);
+            t.fillCircle(cx2 + S(7), hh + S(6), S(2), BLACK);
+        }
 
         // A glint sweeps across each open lens (skipped while shut) so
         // the shades read as reflective glass instead of a flat fill.
         float sweep = (float)(now % 2400) / 2400.0f;
         int gx = (int)(sweep * 6.0f);
-        if (lensL != BLACK) t.drawFastVLine(cx2 - S(11) + S(1 + gx), hy + S(7), S(4), WHITE);
-        if (lensR != BLACK) t.drawFastVLine(cx2 + S(3)  + S(1 + gx), hy + S(7), S(4), WHITE);
+        if (lensL != BLACK) t.drawFastVLine(cx2 - S(11) + S(1 + gx), hh + S(7) + sd, S(4), WHITE);
+        if (lensR != BLACK) t.drawFastVLine(cx2 + S(3)  + S(1 + gx), hh + S(7) + sd, S(4), WHITE);
 
         // A little cartoon "wink sparkle" beside the shut lens --
         // purely additive on top of the pose above rather than
         // touching its geometry, so it can never misalign with the
         // frame.
         if (winking) {
-            int sx = cx2 - S(16), sy = hy + S(3);
+            int sx = cx2 - S(16), sy = hh + S(3);
             t.drawLine(sx - S(2), sy, sx + S(2), sy, WHITE);
             t.drawLine(sx, sy - S(2), sx, sy + S(2), WHITE);
         }
@@ -2032,18 +2628,84 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         // Mouth: resting smile most of the time, or an open/close
         // "talking" flap while a speech bubble is actually up.
         bool talking = forceTalking || (bubbleText && now < bubbleUntil);
-        if (talking && ((now / 160) % 2) == 0) {
-            t.fillRoundRect(cx2 - S(8), hy + S(15), S(16), S(9), S(3), BLACK);
-            t.fillRect(cx2 - S(6), hy + S(16), S(12), S(2), WHITE);
-            t.fillEllipse(cx2, hy + S(21), S(5), S(3), PINK);
+        if (m == Mood::GUM) {
+            // Pursed, because there is a bubble coming out of it.
+            t.fillCircle(cx2, hh + S(18), S(2), BLACK);
+        } else if (talking && ((now / 160) % 2) == 0) {
+            t.fillRoundRect(cx2 - S(8), hh + S(15), S(16), S(9), S(3), BLACK);
+            t.fillRect(cx2 - S(6), hh + S(16), S(12), S(2), WHITE);
+            t.fillEllipse(cx2, hh + S(21), S(5), S(3), PINK);
         } else {
-            t.fillRoundRect(cx2 - S(8), hy + S(16), S(16), S(7), S(3), BLACK);
-            t.fillRect(cx2 - S(6), hy + S(17), S(12), S(2), WHITE);
-            t.fillRect(cx2 - S(6), hy + S(19), S(12), S(3), PINK);
+            t.fillRoundRect(cx2 - S(8), hh + S(16), S(16), S(7), S(3), BLACK);
+            t.fillRect(cx2 - S(6), hh + S(17), S(12), S(2), WHITE);
+            t.fillRect(cx2 - S(6), hh + S(19), S(12), S(3), PINK);
         }
     }
 
-    drawOutfit(t, cx2, hy, now, m, scale, outfitNow);
+    drawOutfit(t, cx2, hh, now, m, scale, outfitNow);
+
+    // ---- props ---------------------------------------------------------
+    // Drawn last, so they sit in front of the costume as well as the body.
+    if (s_binoc) {
+        // Lenses over the shades. The pair sweeps with the arms above
+        // while the head stays put -- he is panning the binoculars, not
+        // his skull, which is also the only version of this that does
+        // not drag every hat sideways along with it.
+        const int sw = (int)(sinf((float)(now % 3200) / 3200.0f * 6.2831853f) * (4.0f * scale));
+        for (int8_t sgn = -1; sgn <= 1; sgn += 2) {
+            const int lx = cx2 + sgn * S(7) + sw;
+            t.fillCircle(lx, hh + S(9), S(5) + kb, keyCol);
+            t.fillCircle(lx, hh + S(9), S(5), blend(BLACK, WHITE, 45));
+            t.fillCircle(lx, hh + S(9), S(3), blend(CYAN, BG, 150));
+        }
+    }
+
+    if (m == Mood::GUM && s_gumStart != 0) {
+        const uint32_t ge = now - s_gumStart;
+        if (ge < GUM_GROW_MS) {
+            // Squared curve, so it starts slow and then runs away with
+            // itself the way a real one does.
+            const float gk = (float)ge / (float)GUM_GROW_MS;
+            // Scaled as one float expression, not through S(): that
+            // lambda takes an int, so S(1.5f) and S(6.5f) silently
+            // truncated to S(1) and S(6) and the bubble came out a
+            // little smaller than it was drawn to be.
+            const int r = (int)(scale * (1.5f + gk * gk * 6.5f
+                                         + sinf((float)now / 120.0f) * gk));
+            const int by = hh + S(21) + (int)(r * 0.75f);
+            t.fillCircle(cx2, by, r + kb, keyCol);
+            // Toward WHITE rather than toward BG: blending a pink down
+            // into this background walks it to purple, and a purple
+            // sphere on his chest reads as anything but bubblegum.
+            t.fillCircle(cx2, by, r, blend(VAPOR_PINK, WHITE, 55));
+            t.fillCircle(cx2 - r / 3, by - r / 3, r / 5 + 1, WHITE);
+        } else if (ge < GUM_GROW_MS + GUM_POP_MS) {
+            const float pk = (float)(ge - GUM_GROW_MS) / (float)GUM_POP_MS;
+            const int d = (int)(pk * S(16));
+            for (uint8_t i = 0; i < 6; i++) {
+                const float ang = (float)i / 6.0f * 6.2831853f;
+                t.fillCircle(cx2 + (int)(cosf(ang) * d), hh + S(25) + (int)(sinf(ang) * d),
+                             (int)(S(2) * (1.0f - pk)) + 1, blend(VAPOR_PINK, WHITE, 55));
+            }
+        }
+    }
+
+    if (m == Mood::JUGGLE) {
+        // Three packets on half-sine arcs 400 ms apart, alternating
+        // which hand they land in. Coloured by the types actually in
+        // the log, so what he is juggling is what he just caught.
+        for (uint8_t i = 0; i < 3; i++) {
+            const uint32_t ph = now + (uint32_t)i * 400u;
+            const float u = (float)(ph % 1200u) / 1200.0f;
+            const int8_t side = ((ph / 1200u) & 1u) ? 1 : -1;
+            const int px = cx2 - side * (int)(S(19) * cosf(u * 3.14159265f));
+            // Peaks at hy - S(14), level with the tip of his crest, so
+            // the packets pass over his head rather than across his eyes.
+            const int py = hy + S(26) - (int)(sinf(u * 3.14159265f) * S(40));
+            t.fillRect(px - S(3) - kb, py - S(3) - kb, S(6) + 2 * kb, S(6) + 2 * kb, keyCol);
+            t.fillRect(px - S(3), py - S(3), S(6), S(6), Theme::colorFor(s_recentTypes[i]));
+        }
+    }
 }
 
 void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const char* line,
@@ -2051,11 +2713,24 @@ void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const
     // This cameo is placed by callers that have already reserved room, so
     // there is no region to clamp against.
     s_topLimit = -10000;
+    // The cameo has no mood machine driving the pose channels, so clear
+    // them rather than letting whatever CLEAR left behind leak into the
+    // boot splash.
+    s_headDrop = 0; s_shadowAdj = 0; s_shadeDrop = 0; s_binoc = false;
+    s_dangle = false;
     // Same idle bob as tick()'s WAVE mood, just without the quip/mood
     // state machine — a self-contained cameo for the boot splash.
     float bobAmt = 6.0f * scale;
     float bob = sinf((float)(now % 900) / 900.0f * 6.2831853f) * bobAmt;
     int headTopY = baseY - (int)(58.0f * scale);
+    // Deliberately the idle amplitude rather than this mood's own bobAmt.
+    // Using the live value made the ear length constant within a mood but step
+    // whenever the mood changed the bounce height, which is the same squash
+    // just less often. Pinning it means the length never changes at all; the
+    // cost is that at the apex of a BOUNCE the tips pass behind the title bar,
+    // which reads as him bouncing up out of frame rather than as the costume
+    // deforming.
+    s_hyCeiling = headTopY - (int)(3.0f * scale);
     int hy = headTopY + (int)bob;
 
     // Continuous back-and-forth patrol, opted into by a caller that has
@@ -2152,6 +2827,77 @@ static void drawPartyFx(TFT_eSPI& t, uint32_t now, int topY, int availHeight, bo
 void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
           bool advance, float minScale, bool scanningFx, int wanderRangePx) {
     s_topLimit = topY;
+    // A property of the caller's screen, not of his mood -- see the arm
+    // chain in drawBody(). Assigned on every call, band calls included,
+    // so a banded board cannot paint one band holding binoculars and
+    // the next band without them.
+    s_binoc = scanningFx;
+
+    // ---- SHOW OFF ---------------------------------------------------
+    // Split deliberately: arming a step mutates state and is gated on
+    // advance, but the continuous parts (the binocular flag, the forced
+    // walk beat, where a carried Squachy is being held) are assigned on
+    // every call, so a banded board cannot paint one band mid-pose and
+    // the next one out of it.
+    if (s_showOff) {
+        const uint32_t se  = now - s_showStart;
+        const uint8_t  idx = (uint8_t)(se / SHOW_STEP_MS);
+        if (idx >= SHOW_N) {
+            if (advance) stopShowOff();
+        } else {
+            const uint32_t within = se - (uint32_t)idx * SHOW_STEP_MS;
+            if (advance && idx != s_showIdx) {
+                s_showIdx = idx;
+                // +300 so the mood cannot expire in the gap between the
+                // end of a step and the arming of the next one.
+                moodUntil  = now + SHOW_STEP_MS + 300u;
+                nextIdleAt = now + SHOW_STEP_MS + 300u;
+                switch (idx) {
+                    case 0:  mood = Mood::IDLE;    say("IDLE + SQUASH", SHOW_STEP_MS); break;
+                    case 1:  mood = Mood::WAVE;    say("WAVE", SHOW_STEP_MS); break;
+                    case 2:  mood = Mood::BOUNCE;  say("BOUNCE", SHOW_STEP_MS); break;
+                    case 3:  mood = Mood::WINK;    say("WINK", SHOW_STEP_MS); break;
+                    case 4:  mood = Mood::STRETCH; s_stretchStart = now;
+                             say("STRETCH + YAWN", SHOW_STEP_MS); break;
+                    case 5:  mood = Mood::GUM;     s_gumStart = now;
+                             say("GUM BUBBLE", SHOW_STEP_MS); break;
+                    case 6:  mood = Mood::JUGGLE;
+                             // Real types, so the packets are the colours
+                             // they would be if these had just been caught.
+                             s_recentTypes[0] = DetectionType::AIRTAG;
+                             s_recentTypes[1] = DetectionType::FLOCK;
+                             s_recentTypes[2] = DetectionType::CAMERA;
+                             say("PACKET JUGGLE", SHOW_STEP_MS); break;
+                    case 7:  mood = Mood::DANCE;   say("DANCE", SHOW_STEP_MS); break;
+                    case 8:  mood = Mood::WALK; s_walkStart = now; s_walkDir = 1;
+                             s_showWB = 1; say("WALK: SNIFF", SHOW_STEP_MS); break;
+                    case 9:  s_showWB = 2; say("WALK: LOOK UP", SHOW_STEP_MS); break;
+                    case 10: s_showWB = 3; say("WALK: SCRATCH", SHOW_STEP_MS); break;
+                    case 11: s_showWB = -1; mood = Mood::SHOCKED;
+                             s_reactType = DetectionType::AXON;
+                             s_dtStart = now; s_recoilK = 1.0f;
+                             say("DOUBLE-TAKE + RECOIL", SHOW_STEP_MS); break;
+                    case 12: mood = Mood::IDLE; say("BINOCULARS", SHOW_STEP_MS); break;
+                    case 13: mood = Mood::IDLE; s_duckCooldown = 0;
+                             s_duckUntil = now + 900u;
+                             say("TOASTER DUCK", SHOW_STEP_MS); break;
+                    case 14: mood = Mood::IDLE; say("PICK UP + DROP", SHOW_STEP_MS); break;
+                    default: mood = Mood::SLEEPY; say("NAP", SHOW_STEP_MS); break;
+                }
+            }
+            if (s_showIdx == 12) s_binoc = true;
+            if (s_showIdx == 14) {
+                if (within < 1300u) {
+                    // Carried, swinging gently, as if on a finger.
+                    s_grabbed = true;
+                    s_grabX = cx + (int)(sinf((float)within / 260.0f) * 26.0f);
+                    s_grabY = topY + 46;
+                } else if (advance && s_grabbed) {
+                    release();          // and let him fall
+                }
+            }
+        }
+    }
     // Everything in this block mutates mood/timers/particle state —
     // gated to run once per logical frame (see the header comment on
     // tick()) regardless of how many physical bands call this. The
@@ -2183,7 +2929,7 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     // Random idle fun: bounce/wave + a quip, only when nothing else
     // triggered a reaction recently, and never while the walkthrough
     // above is running.
-    if (!s_onboardActive && mood == Mood::IDLE && now >= nextIdleAt) {
+    if (!s_onboardActive && !s_showOff && mood == Mood::IDLE && now >= nextIdleAt) {
         uint32_t idleFor = now - lastInteraction;
         bool longIdle  = idleFor > 90000;
         // idleFor only ever grows while nothing happens, so without the
@@ -2206,9 +2952,13 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
             // though idleFor is still well past SLEEPY_AFTER_MS.
             s_napStart = 0;
             s_napCooldownUntil = now + SLEEPY_AFTER_MS;
-            say(pick(BORED_LINES, 4), MIN_BUBBLE_MS);
-            mood = random(0, 2) ? Mood::WAVE : Mood::BOUNCE;
-            moodUntil = now + 1200;
+            // Waking up used to snap straight to a wave -- the one
+            // transition in his whole state machine with no transition
+            // at all. STRETCH gives it an exit.
+            say(pick(STRETCH_LINES, 4), MIN_BUBBLE_MS);
+            mood = Mood::STRETCH;
+            s_stretchStart = now;
+            moodUntil = now + STRETCH_MS;
             nextIdleAt = now + 8000;
         } else if (random(0, 250) == 0) {
             // Rare shimmering flourish — see drawBody's fur-color swap
@@ -2225,13 +2975,50 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
                 s_cfvy[i]  = 0.8f + (float)random(0, 100) / 100.0f * 1.4f;
                 s_cfcol[i] = (uint8_t)random(0, 6);
             }
-            nextIdleAt = now + 12000 + random(0, 18000);
+            nextIdleAt = now + 9000 + random(0, 13000);
+        } else if (s_haveLastDetection && (now - s_lastDetectionAt) < 120000u
+                   && s_recentTypes[0] != DetectionType::UNKNOWN
+                   && random(0, 3) == 0) {
+            // Gated on "caught something in the last two minutes" rather
+            // than on activity heat. Heat could not actually reach this:
+            // a detection adds 30 against a 50 floor and it bleeds off at
+            // 2 a second, so one catch never qualified and two qualified
+            // for about five seconds -- inside a window this chain only
+            // samples every 12 to 30 seconds. It was unreachable in
+            // practice, which is not the same as rare.
+            // Showing off the last three catches. Gated on real recent
+            // activity so it can only appear when there is genuinely
+            // something to show -- the one flourish here that carries
+            // information rather than just character.
+            say(pick(JUGGLE_LINES, 4), 3600);
+            mood = Mood::JUGGLE;
+            moodUntil = now + 3600;
+            nextIdleAt = now + 14000 + random(0, 18000);
+        } else if (random(0, 7) == 0) {
+            // Gum. Means nothing, which is the argument for it: every
+            // other thing he does is a reaction to the radio.
+            say(pick(GUM_LINES, 4), 3000);
+            mood = Mood::GUM;
+            s_gumStart = now;
+            moodUntil = now + GUM_GROW_MS + GUM_POP_MS + 400;
+            nextIdleAt = now + 14000 + random(0, 18000);
+        } else if (random(0, 9) == 0) {
+            // A stretch on its own, not only on the way out of a nap.
+            // Nap exit was the only route in, and a nap needs
+            // SLEEPY_AFTER_MS -- ten full minutes of being ignored --
+            // before it will even start, so the pose was effectively
+            // unreachable on a device anyone was actually looking at.
+            say(pick(STRETCH_LINES, 4), 3000);
+            mood = Mood::STRETCH;
+            s_stretchStart = now;
+            moodUntil = now + STRETCH_MS;
+            nextIdleAt = now + 12000 + random(0, 16000);
         } else if (random(0, 8) == 0) {
             // A little dance break -- see drawBody()'s DANCE arm case.
             say(pick(DANCE_LINES, 4), 3200);
             mood = Mood::DANCE;
             moodUntil = now + 2400;
-            nextIdleAt = now + 12000 + random(0, 18000);
+            nextIdleAt = now + 9000 + random(0, 13000);
         } else if (random(0, 6) == 0) {
             // A little wander away from center and back — see the
             // bodyCx computation below and the leg-cycle in drawBody().
@@ -2247,7 +3034,7 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
             say(pick(WINK_LINES, 4), MIN_BUBBLE_MS);
             mood = Mood::WINK;
             moodUntil = now + 1800;
-            nextIdleAt = now + 12000 + random(0, 18000);
+            nextIdleAt = now + 9000 + random(0, 13000);
         } else {
             // Recent real activity (or a long stretch of none) biases
             // which pool this pulls from, so idle chatter reads as
@@ -2272,7 +3059,7 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
             }
             mood = random(0, 2) ? Mood::WAVE : Mood::BOUNCE;
             moodUntil = now + 1200;
-            nextIdleAt = now + 12000 + random(0, 18000);
+            nextIdleAt = now + 9000 + random(0, 13000);
         }
     }
     } // if (advance)
@@ -2295,15 +3082,53 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     // scale clamp just below was already forcing the same end result
     // through regardless (any charAvail under BASE_HEIGHT still landed
     // on scale 1.0), so nothing about today's on-screen sizes changes.
+    // Two of the hats reach well above the head anchor -- the wolf ears 26px
+    // and the unicorn horn 24px -- against the 16px of bubble row that is all
+    // the headroom there is. At CLEAR's ~1.8x scale that puts their tips above
+    // topY, where the title bar paints over them a few lines later: they are
+    // not clipped so much as buried.
+    //
+    // Rather than reshape either costume, the whole character drops a few
+    // pixels while one of them is on, and gives up the same few from his
+    // height so his feet stay inside the band. Both halves pull the same way:
+    // the drop adds headroom directly, and the slightly smaller scale means
+    // the hat needs less of it, since its reach is scale-multiplied.
+    //
+    // This does not clear them completely and is not meant to. Fully seating
+    // the horn would take roughly a 27px drop plus a 15% shrink, which is a
+    // different character standing in a different place.
+    //
+    // Fixed pixels rather than scaled, to match bubbleRowH itself, which is
+    // also a flat 16 however large he happens to be drawn.
+    // Everyone sits a little lower than the bubble row alone would put them.
+    // Same coupling as the per-outfit headroom below: the drop comes out of
+    // charAvail too, so he loses the same few pixels off his height and his
+    // feet stay inside the band instead of sliding under whatever draws next.
+    static const int BASE_DROP = 5;
+    int headroom = BASE_DROP;
+    switch (currentOutfit()) {
+        // The wolf gets more than the unicorn. Its ears are LENGTH-clamped
+        // against the top of the region (see the WOLFPELT case in
+        // drawOutfit) and that clamp was already maxed out -- the tips sit
+        // one pixel under topY, so there was no way to raise them by
+        // moving them. Headroom is the only thing that actually buys ear:
+        // every pixel he drops is a pixel the clamp can afford to give
+        // back, one for one. The horn does not have that problem, so it
+        // keeps the smaller value rather than dropping him for nothing.
+        case OutfitId::WOLFPELT: headroom += 14; break;
+        case OutfitId::UNICORN:  headroom += 8;  break;
+        default:                 break;
+    }
+
     int charAvailFloor = (int)(BASE_HEIGHT * minScale);
     if (charAvailFloor < 8) charAvailFloor = 8;   // keep the division sane at extreme minScale
-    int charAvail = availHeight - bubbleRowH;
+    int charAvail = availHeight - bubbleRowH - headroom;
     if (charAvail < charAvailFloor) charAvail = charAvailFloor;
     float scale = (float)charAvail / (float)BASE_HEIGHT;
     if (scale < minScale) scale = minScale;
     if (scale > 3.0f) scale = 3.0f;
 
-    int headTopY = topY + bubbleRowH;
+    int headTopY = topY + bubbleRowH + headroom;
 
     // A little wander away from center during Mood::WALK. bodyCx (not
     // cx) drives everything about where he's actually drawn; the
@@ -2328,7 +3153,72 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
         // at center, so there's no teleport when WALK expires back to
         // idle.
         bodyCx = cx + (int)(sinf(walkT * 6.2831853f * WALK_CYCLES) * maxRange * s_walkDir);
+
+        // One beat per sweep, at the far end of it. cf is how far through
+        // the current cycle he is; 0.25 and 0.75 are the two extremes,
+        // where |sin| is 1 and he has effectively stopped. Parking a
+        // pause there means he is not sliding sideways while he does it.
+        const float cyc = walkT * (float)WALK_CYCLES;
+        const int   ci  = (int)cyc;
+        const float cf  = cyc - (float)ci;
+        if (cf > 0.18f && cf < 0.36f) {
+            // Kind is a hash of which sweep this is, so a given patrol
+            // does a different sequence each time but stays consistent
+            // within itself -- rolling per frame would flicker between
+            // poses several times a second.
+            uint32_t hb = ((uint32_t)ci + 1u) * 2654435761u ^ s_walkStart;
+            hb ^= hb >> 15; hb *= 2246822519u; hb ^= hb >> 13;
+            s_walkBeat = (uint8_t)(hb % 4u);      // 0 = just keep walking
+        } else {
+            s_walkBeat = 0;
+        }
+        // SHOW OFF asks for a specific beat; the hash above cannot be
+        // told which one to pick, so it is overridden here instead.
+        if (s_showWB >= 0) s_walkBeat = (uint8_t)s_showWB;
+        if (s_walkBeat == 1)      s_headDrop += (int)(4.0f * scale);   // nose down
+        else if (s_walkBeat == 2) s_headDrop -= (int)(3.0f * scale);   // looking up
+    } else {
+        s_walkBeat = 0;
+    }
+    if (mood == Mood::SHOCKED && s_dtStart != 0 && now - s_dtStart < DT_TOTAL_MS) {
+        // Double-take. The head snaps the WRONG way first, holds a
+        // beat, then whips back and settles -- the classic "wait, what
+        // was that" read, and a much better fit for a detector than
+        // going straight to a startle.
+        //
+        // Whole-body rather than head-only, deliberately: several
+        // outfits hang off the torso as well as the skull, and turning
+        // just the head would slide a hat or a pelt off him.
+        //
+        // 200 ms on the whip rather than the 130 that felt right on a
+        // 60 fps mockup. At the 22 fps this board actually runs, 130 ms
+        // is under three frames, and a movement that brief reads as a
+        // teleport rather than as speed.
+        const uint32_t e = now - s_dtStart;
+        // Both amplitudes scale with how strong the signal was, so this
+        // one curve covers everything from a twitch at the noise floor
+        // to a full stumble at point-blank range. The floor is
+        // deliberately not zero -- a detection he does not react to at
+        // all would read as a bug.
+        const float A =  (2.0f + 7.0f  * s_recoilK) * scale;
+        const float B = -(3.0f + 10.0f * s_recoilK) * scale;
+        float o;
+        if (e < 140u)      o = A * (float)e / 140.0f;
+        else if (e < 380u) o = A;
+        else if (e < 580u) o = A + (B - A) * ((float)(e - 380u) / 200.0f);
+        else {
+            const float k = (float)(e - 580u) / (float)(DT_TOTAL_MS - 580u);
+            o = B * (1.0f - k) * cosf(k * 6.0f);   // settle, with a wobble
+        }
+        bodyCx = cx + (int)o;
+        // Shades slip once the whip starts, not before -- they are the
+        // reaction, not the setup.
+        // Only a strong hit knocks the shades down his nose. On a weak
+        // one they stay put, which is most of what separates the two
+        // reactions at a glance.
+        s_shadeDrop = (e > 380u && s_recoilK > 0.45f) ? (uint8_t)(2.0f * scale) : 0;
     } else if (mood == Mood::SHOCKED && wanderRangePx >= 0) {
+        s_shadeDrop = 0;
         // Panicked dart, opted into by a caller via wanderRangePx (see
         // its comment in squachy.h). Same per-cycle pace as WALK's own
         // amble (WALK_CYCLE_MS) rather than a separately-tuned speed --
@@ -2343,12 +3233,81 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     // Idle bob runs noticeably quicker than a resting breathing rate —
     // he should read as lively even when nothing's happening. Bob
     // amplitude scales with him so it stays proportional when he's big.
+    if (mood != Mood::SHOCKED) s_shadeDrop = 0;
+
     float bobAmt   = (mood == Mood::BOUNCE) ? 9.0f : (mood == Mood::SLEEPY ? 1.5f : (mood == Mood::DANCE ? 6.0f : 3.0f));
     bobAmt *= scale;
     float bobSpeed = (mood == Mood::BOUNCE) ? 220.0f : (mood == Mood::SLEEPY ? 2200.0f : (mood == Mood::DANCE ? 300.0f : 1100.0f));
     float bob = sinf((float)(now % (uint32_t)bobSpeed) / bobSpeed * 6.2831853f) * bobAmt;
+    s_hyCeiling = headTopY - (int)bobAmt;
     if (mood == Mood::BOUNCE) bob = -fabsf(bob); // hop upward only
     int hy = headTopY + (int)bob;
+
+    // ---- squash and stretch ----------------------------------------
+    // The bob on its own translates a rigid drawing, which is the one
+    // thing that most reads as a sprite being moved rather than a
+    // character moving. These two channels fix that without adding a
+    // single shape: both are derived from the bob that already exists.
+    //
+    // u is how high he is through the current bob -- 0 at the bottom,
+    // 1 at the top. BOUNCE only ever goes up from the floor (bob is
+    // forced negative above) so its u never goes below 0, which is why
+    // it gets its own, much stronger curve: a hop has a real landing to
+    // absorb, and a breathing idle does not.
+    const float u = (bobAmt > 0.01f) ? (-bob / bobAmt) : 0.0f;
+    if (mood == Mood::BOUNCE) {
+        s_headDrop  = (int)((0.35f - u) * 0.40f * bobAmt);
+        s_shadowAdj = (int)(bob * 0.32f);
+    } else {
+        s_headDrop  = (int)(-u * 0.16f * bobAmt);
+        s_shadowAdj = (int)(bob * 0.20f);
+    }
+
+    // ---- carry and drop --------------------------------------------
+    // A finger holding him overrides every other position: the mood
+    // machine keeps running underneath (he can be shocked while being
+    // held) but where he actually is comes from the touch.
+    if (s_grabbed) {
+        const int loY = topY + bubbleRowH;
+        const int hiY = topY + availHeight - (int)(46.0f * scale);
+        bodyCx = s_grabX;
+        hy = s_grabY - (int)(14.0f * scale);
+        if (hy < loY) hy = loY;
+        if (hy > hiY) hy = hiY;
+        const int halfW = (int)(24.0f * scale);
+        if (bodyCx < halfW) bodyCx = halfW;
+        if (bodyCx > t.width() - halfW) bodyCx = t.width() - halfW;
+        s_dangle = true;
+    } else if (s_dropStart != 0) {
+        const uint32_t de = now - s_dropStart;
+        const int restY = headTopY + (int)bob;
+        if (de < DROP_MS) {
+            // Squared, so he accelerates into the floor rather than
+            // sliding back to rest at a constant speed.
+            const float k = (float)de / (float)DROP_MS;
+            bodyCx = s_dropX + (int)((float)(cx - s_dropX) * k);
+            hy     = s_dropY + (int)((float)(restY - s_dropY) * k * k);
+            s_dangle = true;
+        } else if (de < DROP_MS + LAND_MS) {
+            // Landing squash, on the same channels the hop already uses.
+            const float k = 1.0f - (float)(de - DROP_MS) / (float)LAND_MS;
+            s_headDrop  = (int)(6.0f * scale * k);
+            s_shadowAdj = (int)(5.0f * scale * k);
+            s_dangle = false;
+        } else {
+            if (advance) s_dropStart = 0;
+            s_dangle = false;
+        }
+    } else {
+        s_dangle = false;
+    }
+
+    // A duck is a whole-body crouch, not just an arm pose -- see the
+    // arm chain in drawBody() for the other half of it.
+    if (!s_dangle && now < s_duckUntil && s_duckUntil - now > 380u) {
+        s_headDrop += (int)(7.0f * scale);
+        hy         += (int)(6.0f * scale);
+    }
 
     // Party mode draws first — a full wash across his region — so his
     // body and the hearts below land on top of it, not under it.
