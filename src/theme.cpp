@@ -4222,8 +4222,8 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
 }
 
 // ---- SNOWFALL -------------------------------------------------------
-// A night ski hill with a moon over it, a gondola line crossing the sky,
-// and a yeti who is usually not quite fast enough.
+// A night ski hill with a moon over it, riders on skis and boards coming
+// down it, and a yeti who is usually not quite fast enough.
 //
 // PARALLAX. Three planes, and the rule that makes them work is that
 // speed, SIZE and HEIGHT all move together. The version before this gave
@@ -4274,10 +4274,21 @@ static const uint32_t DAWN_CYCLE = 210000;
 static uint32_t s_dawnAt = 0;
 
 // ---- skier -----------------------------------------------------------
-static bool     s_skLive = false;
-static float    s_skX = -30.0f, s_skAir = 0.0f, s_skVy = 0.0f;
-static uint32_t s_skNext = 0;
-static uint8_t  s_skTrick = 0;
+// Three riders on the hill instead of one, each on its own timer and
+// each on either skis or a board. One rider meant the slope stood empty
+// most of the time and the yeti had nothing to chase whenever he felt
+// like turning up, so he sat waiting on a target that was not there.
+static const uint8_t RIDER_N = 3;
+struct Rider {
+    float    x, air, vy;
+    uint32_t next;
+    uint8_t  trick;
+    uint8_t  kind;      // 0 skis, 1 board
+    uint8_t  var;       // which outfit
+    bool     live;
+};
+static Rider  s_rid[RIDER_N];
+static int8_t s_chaseTgt = -1;     // the rider the yeti has picked, or -1
 
 // ---- the chase -------------------------------------------------------
 // The outcome is rolled ONCE when he sets off, and his speed follows
@@ -4290,7 +4301,55 @@ static ChaseEnd s_cEnd = ChaseEnd::GIVEUP;
 static uint32_t s_cAt = 0, s_cNext = 0;
 static float    s_yX = -60.0f;
 
+// Wildlife. The dog trots the hill and breaks into a run alongside the
+// skier when he passes; the hare bolts flat out the moment the yeti is
+// anywhere on screen; birds burst off a tree when a jump goes off next
+// to it. All three exist to make the hill feel occupied between chases.
+static float    s_dogX = -60.0f, s_hareX = -60.0f;
+static uint32_t s_birdAt = 0;
+static float    s_birdX = 0.0f, s_birdY = 0.0f;
+
 enum class YPose : uint8_t { RUN, EAT, WINDED, DOWN, RECOIL };
+
+// ---- chase chatter ---------------------------------------------------
+// They talk while it happens. Short lines only: the bubble uses the 6px
+// font over a busy hill, and much past fourteen characters it stops
+// being readable at a glance, which is the only glance it gets.
+static const char* const SKI_TAUNT[6] = {
+    "can't catch me", "too slow!", "nice legs", "later, furball",
+    "eat my powder", "still hungry?" };
+static const char* const YETI_TAUNT[6] = {
+    "GRAAAH", "COME HERE", "MINE", "RRRAAA", "HUNGRY", "STOP RUNNING" };
+static const char* const SAY_GIVEUP[2] = { "worth a try", "...fine" };
+static const char* const SAY_WINDED[2] = { "*wheeze*", "one sec" };
+static const char* const SAY_BEATEN[2] = { "BONK", "not today" };
+
+static const char* s_saySkiTxt = nullptr;
+static const char* s_sayYetTxt = nullptr;
+static uint32_t    s_saySkiTil = 0, s_sayYetTil = 0, s_sayNextAt = 0;
+
+// A small speech bubble with a tail, above whoever said it. Same paper
+// and ink the werewolf uses on FIRE, at half the size.
+static void snowSay(TFT_eSPI& t, int x, int topY, const char* txt) {
+    if (!txt) return;
+    t.setTextSize(1);
+    const int bw = t.textWidth(txt) + 6, bh = 11;
+    int bx = x - bw / 2;
+    if (bx < 1) bx = 1;
+    if (bx + bw > t.width() - 1) bx = t.width() - 1 - bw;
+    const int by = topY - bh - 4;
+    const uint16_t paper = t.color565(240, 238, 228), ink = t.color565(18, 14, 12);
+    t.fillRect(bx, by, bw, bh, paper);
+    t.drawRect(bx, by, bw, bh, ink);
+    int tx = x - 2;
+    if (tx < bx + 2) tx = bx + 2;
+    if (tx > bx + bw - 5) tx = bx + bw - 5;
+    t.fillRect(tx, by + bh, 3, 2, paper);
+    t.fillRect(tx, by + bh + 2, 1, 2, paper);
+    t.setTextColor(ink, paper);
+    t.setCursor(bx + 3, by + 2);
+    t.print(txt);
+}
 
 // The eat is the payoff and it used to be a single held pose for a
 // second and a half. It is a sequence now: grab, lift, chomp, swallow,
@@ -4350,32 +4409,123 @@ static void snowPine(TFT_eSPI& t, int x, int y, int h, bool snowy, uint16_t haze
     // Blue kept under 30 on every green: this panel quantises blue to
     // 0/85/170/255, so anything near 42 rounds UP and the tree lands on
     // a teal slate instead of a colour a tree could be.
-    const uint16_t dk = blend(t.color565(10,  95, 12), haze, mix);
-    const uint16_t md = blend(t.color565(30, 132, 20), haze, mix);
-    const uint16_t lt = blend(t.color565(62, 172, 28), haze, mix);
-    const uint16_t tr = blend(t.color565(96, 62, 30),  haze, mix);
+    const uint16_t deep = blend(t.color565( 8,  62, 10), haze, mix);
+    const uint16_t dk   = blend(t.color565(14,  92, 14), haze, mix);
+    const uint16_t md   = blend(t.color565(28, 124, 20), haze, mix);
+    const uint16_t lt   = blend(t.color565(54, 162, 26), haze, mix);
+    const uint16_t tip  = blend(t.color565(96, 200, 40), haze, mix);
+    const uint16_t bark = blend(t.color565(96,  62, 30), haze, mix);
+    const uint16_t snow = blend(t.color565(238, 244, 250), haze, mix);
     const int w = (h * 58) / 100;
-    t.fillRect(x - (h > 40 ? 3 : 2), y - (h * 22) / 100, (h > 40 ? 6 : 4), (h * 22) / 100, tr);
-    const int base[3] = { 22, 48, 72 }, wid[3] = { 100, 74, 46 };
-    for (int ti = 0; ti < 3; ti++) {
-        const int bw = (w * wid[ti]) / 100, by = y - (h * base[ti]) / 100, th = (h * 36) / 100;
-        for (int r = 0; r < 5; r++) {
-            const int rw = bw - (bw * r * 88) / 500, ry = by - (th * r) / 5;
-            if (rw < 2) continue;
-            t.fillRect(x - rw / 2, ry - th / 5 - 1, rw, th / 5 + 2, (r < 2) ? dk : ((r < 4) ? md : lt));
+
+    // Trunk, with its own shaded side.
+    const int tw = (h > 40) ? 6 : 4;
+    t.fillRect(x - tw / 2, y - (h * 22) / 100, tw, (h * 22) / 100, bark);
+    t.fillRect(x - tw / 2, y - (h * 22) / 100, tw / 2, (h * 22) / 100,
+               blend(bark, BLACK, 70));
+
+    // Small trees on the far ridge get the cheap version -- at 24 px the
+    // detail below is invisible and it is six of them every frame.
+    if (h < 34) {
+        const int base[3] = { 22, 48, 72 }, wid[3] = { 100, 74, 46 };
+        for (int ti = 0; ti < 3; ti++) {
+            const int bw = (w * wid[ti]) / 100, by = y - (h * base[ti]) / 100;
+            const int th = (h * 36) / 100;
+            for (int r = 0; r < 4; r++) {
+                const int rw = bw - (bw * r * 88) / 400, ry = by - (th * r) / 4;
+                if (rw < 2) continue;
+                t.fillRect(x - rw / 2, ry - th / 4 - 1, rw, th / 4 + 2, (r < 2) ? dk : md);
+            }
         }
-        if (snowy && bw > 7) t.fillRect(x - bw / 2 + 1, by - 2, bw - 2, 2,
-                                        blend(t.color565(238, 244, 250), haze, mix));
+        return;
     }
+
+    // ---- the full version -------------------------------------------
+    // Two changes do all the work. First, the rows do NOT taper cleanly:
+    // the little jumps back out are branch tips catching light, and a
+    // monotonic taper is exactly what made these read as a striped
+    // triangle rather than as a tree.
+    //
+    // Second, the shading runs ACROSS the tree, not down it. Banding by
+    // row is the thing the eye reads as stripes; banding by side is what
+    // it reads as a lit object. The moon sits low on the left in this
+    // scene, so the left face is lit and the right is in shadow.
+    static const uint8_t ROW_W[6] = { 100, 86, 94, 72, 78, 52 };
+    const int base[3] = { 20, 46, 70 }, wid[3] = { 100, 78, 52 };
+    for (int ti = 0; ti < 3; ti++) {
+        const int bw = (w * wid[ti]) / 100;
+        const int by = y - (h * base[ti]) / 100;
+        const int th = (h * 38) / 100;
+        // Lower tiers sit in their own shade; the crown gets the light.
+        const uint16_t core  = (ti == 0) ? deep : ((ti == 1) ? dk : md);
+        const uint16_t face  = (ti == 0) ? dk   : ((ti == 1) ? md : lt);
+        const uint16_t edge  = (ti == 2) ? tip  : lt;
+        for (int r = 0; r < 6; r++) {
+            int rw = (bw * ROW_W[r]) / 100 - (bw * r * 62) / 600;
+            if (rw < 3) continue;
+            const int ry = by - (th * r) / 6;
+            const int rh = th / 6 + 2;
+            const int rx = x - rw / 2;
+            // shadow half, lit half, then a bright tip on the lit edge
+            t.fillRect(rx, ry - rh, rw, rh, core);
+            t.fillRect(rx, ry - rh, (rw * 46) / 100, rh, face);
+            if (rw > 7) t.fillRect(rx, ry - rh, 2, rh, edge);
+        }
+        // A dark notch under each tier so the tiers separate instead of
+        // merging into one cone.
+        if (bw > 9) t.fillRect(x - bw / 2 + 2, by - 1, bw - 4, 1, deep);
+        if (snowy && bw > 9) {
+            // Snow sits on the branch tops, not in an even bar across --
+            // three short runs read as settled snow, one long one reads
+            // as a stripe, which is the same mistake in a lighter colour.
+            t.fillRect(x - bw / 2 + 1, by - 3, (bw * 30) / 100, 2, snow);
+            t.fillRect(x - (bw * 8) / 100, by - 4, (bw * 26) / 100, 2, snow);
+            t.fillRect(x + (bw * 22) / 100, by - 3, (bw * 22) / 100, 2, snow);
+        }
+    }
+    // Leader at the very top.
+    t.fillRect(x - 1, y - h - 2, 3, 5, lt);
+    t.fillRect(x - 1, y - h - 2, 1, 5, tip);
 }
 
-static void snowSkier(TFT_eSPI& t, int x, int y, int8_t carve, uint8_t trick) {
+static void snowSkier(TFT_eSPI& t, int x, int y, int8_t carve, uint8_t trick,
+                      uint8_t var = 0) {
     const int l = carve * 2;
     const uint16_t ski = t.color565(255, 210, 26), boot = t.color565(35, 40, 48);
-    const uint16_t pant = t.color565(47, 179, 30), coat = t.color565(47, 79, 208);
-    const uint16_t coatL = t.color565(122, 160, 255), arm = t.color565(224, 85, 159);
-    const uint16_t skin = t.color565(240, 192, 140), hat = t.color565(224, 32, 10);
+    const uint16_t skin = t.color565(240, 192, 140);
+    // Three of them share the hill now, so they cannot share a jacket.
+    // Only the coat, trousers and hat change -- the silhouette is the
+    // same person, which is the point; the colour is what says it is a
+    // different one.
+    uint16_t pant = t.color565(47, 179, 30), coat = t.color565(47, 79, 208);
+    uint16_t coatL = t.color565(122, 160, 255), arm = t.color565(224, 85, 159);
+    uint16_t hat = t.color565(224, 32, 10);
+    if (var == 1) {
+        coat = t.color565(224, 46, 30);  coatL = t.color565(255, 140, 110);
+        pant = t.color565(30, 34, 46);   hat   = t.color565(255, 210, 26);
+        arm  = t.color565(255, 196, 96);
+    } else if (var == 2) {
+        coat = t.color565(236, 238, 244); coatL = t.color565(255, 255, 255);
+        pant = t.color565(146, 60, 210);  hat   = t.color565(47, 179, 30);
+        arm  = t.color565(58, 64, 73);
+    }
     const uint16_t pole = t.color565(58, 64, 73);
+    if (trick >= 3) {
+        // Backflip. No rotation on this display, so it is four discrete
+        // tucked orientations -- the same trick the Squachy flip uses,
+        // and the same reason: a lookup table is the only rotation there
+        // is. trick carries the frame as 3 + (0..3).
+        const uint8_t f = (uint8_t)(trick - 3);
+        const int cy = y - 16;
+        t.fillRect(x - 7, cy - 7, 15, 14, pant);            // tucked ball
+        t.fillRect(x - 5, cy - 5, 11, 8,  coat);
+        static const int8_t SK[4][4] = { {-11,-2, 11,2}, {-2,-11, 2,11},
+                                         { 11, 2,-11,-2}, { 2, 11,-2,-11} };
+        t.fillRect(x + SK[f][0] - 1, cy + SK[f][1] - 1, (f & 1) ? 3 : 11, (f & 1) ? 11 : 3, ski);
+        t.fillRect(x + SK[f][2] - 1, cy + SK[f][3] - 1, (f & 1) ? 3 : 11, (f & 1) ? 11 : 3, ski);
+        t.fillRect(x - 3, cy - 9, 7, 4, hat);
+        return;
+    }
     if (trick == 1) {                 // tuck: knees up, skis crossed
         t.fillRect(x - 10, y - 6, 13, 2, ski);
         t.fillRect(x - 3,  y - 9, 13, 2, ski);
@@ -4409,6 +4559,86 @@ static void snowSkier(TFT_eSPI& t, int x, int y, int8_t carve, uint8_t trick) {
 
 // bulge > 0 fattens the gut -- he is full. Used by the eat sequence and
 // nothing else, which is why it is a plain int rather than a pose.
+// A snowboarder, at the same scale as the skier and deliberately a
+// different silhouette: one plank instead of two, a wide stance with the
+// shoulders square across the hill rather than pointed down it, no poles,
+// and a beanie instead of a bobble hat. At 35 px tall the board and the
+// stance are the entire difference, so both are drawn a shade larger than
+// strict scale would ask for -- readable beats accurate at this size.
+static void snowBoarder(TFT_eSPI& t, int x, int y, int8_t carve, uint8_t trick,
+                        uint8_t var = 0) {
+    const int l = carve * 2;
+    const uint16_t skin = t.color565(240, 192, 140), boot = t.color565(24, 26, 34);
+    const uint16_t eye  = t.color565(58, 42, 26);
+    uint16_t deck = t.color565(255, 96, 20), deckD = t.color565(176, 58, 10);
+    uint16_t coat = t.color565(146, 60, 210), coatL = t.color565(196, 140, 250);
+    uint16_t pant = t.color565(38, 42, 54),  beanie = t.color565(255, 210, 26);
+    if (var == 1) {
+        deck = t.color565(36, 200, 190); deckD = t.color565(20, 130, 124);
+        coat = t.color565(30, 34, 46);   coatL = t.color565(96, 104, 124);
+        pant = t.color565(200, 202, 210); beanie = t.color565(255, 96, 20);
+    } else if (var == 2) {
+        deck = t.color565(255, 232, 40); deckD = t.color565(176, 150, 10);
+        coat = t.color565(224, 46, 30);  coatL = t.color565(255, 140, 110);
+        pant = t.color565(38, 42, 54);   beanie = t.color565(240, 240, 246);
+    }
+
+    if (trick >= 3) {
+        // A spin, as four discrete orientations of the board around a
+        // tucked rider. Same lookup table the skier's backflip uses, and
+        // the same reason for it: nothing on this display rotates.
+        const uint8_t f = (uint8_t)(trick - 3);
+        const int cy = y - 17;
+        t.fillRect(x - 7, cy - 7, 14, 14, coat);
+        t.fillRect(x - 7, cy - 7, 14, 3, coatL);
+        t.fillRect(x - 5, cy + 1, 10, 6, pant);
+        static const int8_t BD[4][4] = { { -14,  4, 28,  4 }, { -10, -12, 20, 22 },
+                                         { -14, -8, 28,  4 }, {  -9, -12, 18, 22 } };
+        t.fillRect(x + BD[f][0], cy + BD[f][1], BD[f][2], BD[f][3],
+                   ((f & 1) != 0) ? deckD : deck);
+        t.fillRect(x - 3, cy - 11, 7, 4, beanie);
+        return;
+    }
+
+    // The plank, with a lit top sheet and a dark edge under it.
+    t.fillRect(x - 13 + l, y - 2, 27, 3, deck);
+    t.fillRect(x - 13 + l, y + 1, 27, 1, deckD);
+    t.fillRect(x - 15 + l, y - 4, 3, 4, deck);          // nose kick
+    t.fillRect(x + 13 + l, y - 4, 3, 4, deck);          // tail kick
+    // Bindings set wide apart. A stance this wide is most of what says
+    // snowboard rather than ski from thirty pixels away.
+    t.fillRect(x -  9 + l, y - 7, 6, 5, boot);
+    t.fillRect(x +  4 + l, y - 7, 6, 5, boot);
+
+    if (trick == 1) {
+        // Indy grab: knees folded up, trailing hand down on the deck.
+        t.fillRect(x - 6, y - 15, 13, 8, pant);
+        t.fillRect(x - 6, y - 25, 13, 10, coat);
+        t.fillRect(x - 6, y - 25, 13, 3, coatL);
+        t.fillRect(x - 12, y - 16, 6, 4, coat);         // reaching arm
+        t.fillRect(x + 7, y - 27, 5, 8, coat);          // other arm up
+    } else if (trick == 2) {
+        // Method: back arched, board pulled up behind him.
+        t.fillRect(x - 6, y - 16, 13, 9, pant);
+        t.fillRect(x - 7, y - 26, 14, 11, coat);
+        t.fillRect(x - 7, y - 26, 14, 3, coatL);
+        t.fillRect(x - 13, y - 28, 7, 4, coat);         // lead arm thrown out
+        t.fillRect(x + 6, y - 20, 6, 4, coat);
+    } else {
+        t.fillRect(x - 6 + l / 2, y - 16, 13, 10, pant);
+        t.fillRect(x - 7, y - 26, 14, 11, coat);
+        t.fillRect(x - 7, y - 26, 14, 3, coatL);
+        // Arms out across the hill for balance -- the boarder's tell.
+        t.fillRect(x - 13, y - 25, 6, 4, coat);
+        t.fillRect(x +  7, y - 23, 6, 4, coat);
+    }
+    t.fillRect(x - 4, y - 32, 9, 6, skin);
+    t.fillRect(x - 2, y - 30, 2, 2, eye);
+    t.fillRect(x + 2, y - 30, 2, 2, eye);
+    t.fillRect(x - 5, y - 36, 11, 5, beanie);
+    t.fillRect(x - 5, y - 37, 11, 2, blend(beanie, WHITE, 90));
+}
+
 static void snowYeti(TFT_eSPI& t, int x, int y, uint32_t now, YPose pose, int bulge = 0) {
     // Mid grey, not off-white. At (201,206,214) he quantised to
     // (219,219,255) -- within one palette step of the snow he stands on,
@@ -4479,7 +4709,14 @@ static void snowYeti(TFT_eSPI& t, int x, int y, uint32_t now, YPose pose, int bu
 
 void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     const int w = t.width();
-    const int yBot  = (s_bgFloor > yStart + 40 && s_bgFloor <= yEnd) ? s_bgFloor : yEnd;
+    // One pixel of air above the counters. The bank already runs down
+    // OVER the "ACTIVE DETECTIONS" row -- that text sits at
+    // countersTop - 34 and survives on any background because it is
+    // drawn with a 24-pass black outline first. What it must not do is
+    // butt straight into the counter numbers below, which are a plain
+    // t.print with no outline at all: cyan on white snow is the one
+    // combination here that genuinely cannot be read.
+    const int yBot  = ((s_bgFloor > yStart + 40 && s_bgFloor <= yEnd) ? s_bgFloor : yEnd) - 1;
     const int bandH = yBot - yStart;
     if (bandH < 50) return;
     const int ridgeY = yStart + (bandH * 52) / 100;      // where the far plane stands
@@ -4495,7 +4732,16 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         for (uint8_t i = 0; i < PROP_N; i++)   { s_prop[i].x = (float)(i * (w + 70) / PROP_N); s_prop[i].b = (uint8_t)(i % 3); }
         s_nearX = (float)(w + 120);
         s_snLastMs = now; s_dawnAt = now;
-        s_skNext = now + 3000; s_cNext = now + 12000;
+        for (uint8_t i = 0; i < RIDER_N; i++) {
+            s_rid[i].x = -40.0f; s_rid[i].air = 0.0f; s_rid[i].vy = 0.0f;
+            s_rid[i].trick = 0;  s_rid[i].live = false;
+            s_rid[i].kind = (uint8_t)((i == 1) ? 1 : 0);   // one boarder to open with
+            s_rid[i].var  = i;
+            // Staggered, so they come down the hill in a loose procession
+            // rather than three abreast on the first pass.
+            s_rid[i].next = now + 2200u + (uint32_t)i * 5200u;
+        }
+        s_cNext = now + 12000;
         s_snowInit = true;
     }
 
@@ -4559,8 +4805,13 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // here, so a night sky needs blue well over 42 or it collapses to a
     // pure-green band -- which is exactly what the first pass did.
     const uint8_t wl = (uint8_t)(inten * 70.0f);
-    uint8_t tr = (uint8_t)(12 + wl), tg = (uint8_t)(26 + wl), tb = (uint8_t)(100 + inten * 50.0f);
-    uint8_t br = (uint8_t)(30 + wl), bg = (uint8_t)(146 + wl / 2), bb = (uint8_t)(180 + inten * 40.0f);
+    // Endpoints spread wider than before, deliberately. A ramp is only
+    // as smooth as the number of quantisation levels it actually crosses:
+    // green 26 -> 146 passed four, where 10 -> 190 passes six, and red
+    // now moves too. More boundaries crossed means more places the dither
+    // has something to mix, which is what actually buys smoothness here.
+    uint8_t tr = (uint8_t)(8 + wl),  tg = (uint8_t)(10 + wl),  tb = (uint8_t)(96 + inten * 44.0f);
+    uint8_t br = (uint8_t)(54 + wl), bg = (uint8_t)(190 - wl / 3), bb = (uint8_t)(190 + inten * 40.0f);
     if (dawn > 0.01f) {
         // Sunrise is allowed low blue -- that is what makes it warm.
         tr = (uint8_t)(tr + dawn * 120.0f); tg = (uint8_t)(tg + dawn * 40.0f);
@@ -4570,15 +4821,107 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     }
     const uint16_t skyTop = t.color565(tr, tg, tb);
     const uint16_t skyLow = t.color565(br, bg, bb);
-    const int BANDS = 18;
-    for (int b = 0; b < BANDS; b++) {
-        const int y0 = yStart + bandH * b / BANDS, y1 = yStart + bandH * (b + 1) / BANDS;
-        t.fillRect(0, y0, w, y1 - y0, blend(skyTop, skyLow, (uint16_t)(b * 255 / (BANDS - 1))));
+    // Ordered dither, one row at a time. Blue has FOUR levels on this
+    // panel, so a straight eighteen-band ramp could only ever show four
+    // flat steps no matter how many bands it was cut into -- which is
+    // why the sky read as stripes. Nudging each row's interpolation by a
+    // repeating 4-row threshold pushes alternate rows either side of the
+    // quantisation boundary, so the eye mixes them: about thirteen
+    // apparent shades out of four real ones.
+    //
+    // The pixel count is identical to the band version. It costs ~150
+    // more drawFastHLine calls and buys the single biggest visual
+    // improvement available in this whole background.
+    // Gentle on purpose. At +/-11 the nudge was large enough to flip the
+    // GREEN channel too, which has eight levels and did not need help --
+    // that showed as teal streaks rather than as a smooth ramp. At +/-6
+    // it only crosses a boundary where one is genuinely close, which is
+    // what dithering is supposed to do.
+    static const int8_t SKY_DITH[4] = { -9, 4, 9, -4 };
+    for (int y = yStart; y < yBot; y++) {
+        int k = ((y - yStart) * 255) / (bandH > 1 ? bandH - 1 : 1);
+        k += SKY_DITH[(y - yStart) & 3];
+        if (k < 0) k = 0;
+        if (k > 255) k = 255;
+        t.drawFastHLine(0, y, w, blend(skyTop, skyLow, (uint16_t)k));
     }
-    for (uint8_t i = 0; i < 14; i++) {
-        const int sx = (int)((uint32_t)(i * 2654435761u >> 12) % (uint32_t)w);
-        const int sy = yStart + 4 + (int)((uint32_t)(i * 40503u >> 5) % 40u);
-        t.drawPixel(sx, sy, blend(skyTop, WHITE, (uint16_t)(170.0f * (1.0f - inten) * (1.0f - dawn))));
+    // A helper for anything that has to sit ON the gradient: the sky is
+    // dithered per row now, so a single sampled colour is wrong almost
+    // everywhere. This gives the undithered value at a given height.
+    auto skyAt = [&](int y) -> uint16_t {
+        int k = ((y - yStart) * 255) / (bandH > 1 ? bandH - 1 : 1);
+        if (k < 0) k = 0;
+        if (k > 255) k = 255;
+        return blend(skyTop, skyLow, (uint16_t)k);
+    };
+
+    // Stars: 34, at three brightnesses, and they twinkle. There were 14
+    // and they never moved. Cost is 34 drawPixel, which is nothing.
+    {
+        const float vis = (1.0f - inten) * (1.0f - dawn);
+        for (uint8_t i = 0; i < 34; i++) {
+            uint32_t h = (uint32_t)(i + 1) * 2654435761u;
+            h ^= h >> 15; h *= 2246822519u; h ^= h >> 13;
+            const int sx = (int)(h % (uint32_t)w);
+            const int sy = yStart + 3 + (int)((h >> 11) % 52u);
+            if (sy >= ridgeY - 4) continue;
+            // Each star twinkles on its own period, or it reads as one
+            // flashing sheet rather than as a sky.
+            const float tw = 0.45f + 0.55f * sinf((float)now / (620.0f + (float)(h % 900u))
+                                                  + (float)(h % 628u) * 0.01f);
+            const uint16_t c = blend(skyAt(sy), WHITE, (uint16_t)(230.0f * vis * tw));
+            t.drawPixel(sx, sy, c);
+            if ((h & 7u) == 0) { t.drawPixel(sx + 1, sy, c); t.drawPixel(sx, sy + 1, c); }
+        }
+    }
+
+    // Three cloud banks drifting at different speeds, lit along their
+    // undersides. Red and green carry the underlight, and those are the
+    // two channels with eight levels -- this is the sort of thing the
+    // palette is actually good at, unlike a blue ramp.
+    // Two, not three, and built as a stepped silhouette rather than a
+    // bar. At nine pixels tall they were the same shape as the dither's
+    // own row texture and simply added to the streaking instead of
+    // reading as cloud -- a cloud needs a lumpy edge more than it needs
+    // shading.
+    for (uint8_t c = 0; c < 2; c++) {
+        const float sp = 0.0035f + (float)c * 0.0030f;
+        const int   cy = yStart + 11 + c * 21;
+        const int   cw2 = 78 + (int)c * 22;
+        const int   cx = (int)(fmodf((float)now * sp + (float)c * 240.0f,
+                                     (float)(w + 220))) - 110;
+        if (cx < -cw2 || cx > w + cw2) continue;
+        const uint16_t sk   = skyAt(cy);
+        const uint16_t body = blend(sk, BLACK, 78);
+        const uint16_t topL = blend(sk, WHITE, 34);
+        // Five stacked runs of different widths and offsets: the ragged
+        // profile is what says cloud at this size.
+        static const int8_t LW[5] = { 46, 74, 100, 84, 58 };
+        static const int8_t LO[5] = { -6,  4,   0, -8,  6 };
+        for (uint8_t r = 0; r < 5; r++) {
+            const int rw = (cw2 * LW[r]) / 100;
+            t.fillRect(cx - rw / 2 + LO[r], cy + r * 3, rw, 4,
+                       (r == 0) ? topL : body);
+        }
+        // Lit underside, warming as dawn comes up.
+        t.fillRect(cx - (cw2 * 58) / 200 + 6, cy + 15, (cw2 * 58) / 100, 2,
+                   blend(sk, t.color565(255, (uint8_t)(206 - dawn * 60.0f), 150), 105));
+    }
+
+    // One satellite, crossing steadily and blinking. A surveillance
+    // detector quietly tracking something overhead is about nine pixels
+    // of work and the most on-the-nose thing in the whole project.
+    {
+        const float sp = fmodf((float)now / 26000.0f, 1.0f);
+        if (sp < 0.80f && dawn < 0.5f) {
+            const int sx = (int)(sp * (float)w * 1.25f) - 20;
+            const int sy = yStart + 8 + (int)(sp * 30.0f);
+            if (sx >= 0 && sx < w) {
+                const bool on = ((now / 430u) & 1u) == 0;
+                t.drawPixel(sx, sy, blend(skyAt(sy), WHITE, on ? 255 : 130));
+                if (on) t.drawPixel(sx, sy - 1, blend(skyAt(sy), WHITE, 90));
+            }
+        }
     }
 
     // ---- moon, with a real glow --------------------------------------
@@ -4593,44 +4936,54 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         // has already lightened by the time it gets down here.
         const uint16_t skyHere = blend(skyTop, skyLow,
                                        (uint16_t)((my - yStart) * 255 / (bandH > 0 ? bandH : 1)));
-        for (int r = 3; r >= 1; r--)
-            t.fillCircle(mx, my, 11 + r * 6, blend(skyHere, moon, (uint16_t)(40 / r)));
-        t.fillCircle(mx, my, 11, moon);
-        t.fillCircle(mx - 4, my - 3, 3, blend(moon, skyTop, 60));
-        t.fillCircle(mx + 3, my + 4, 2, blend(moon, skyTop, 60));
+        // No halo. Three attempts at one, all wrong for the same
+        // underlying reason: a glow spans fifty-odd rows of a vertical
+        // gradient, so ANY approximation built from a single sky sample
+        // is too dark at one end and too light at the other, and reads
+        // as a disc cut out of the sky. Per-ring sampling does not help
+        // -- a circle itself spans many rows. It needs real alpha, which
+        // this panel does not have, so the moon gets a crisp rim instead
+        // and the sky behind it is left alone.
+        t.fillCircle(mx, my, 15, moon);
+        // Maria first -- big soft dark seas, overlapping so the edges are
+        // irregular rather than three obvious circles.
+        const uint16_t mare = blend(moon, skyHere, 74);
+        t.fillCircle(mx - 5, my - 4, 5, mare);
+        t.fillCircle(mx - 1, my - 7, 3, mare);
+        t.fillCircle(mx + 4, my + 3, 4, mare);
+        t.fillCircle(mx + 1, my + 6, 3, mare);
+        t.fillCircle(mx - 7, my + 3, 2, mare);
+        // Craters: a darker floor with a lit rim on the sunward side,
+        // which is what actually makes a disc read as cratered rather
+        // than as a blotchy circle.
+        const uint16_t pit = blend(moon, skyHere, 120);
+        const uint16_t rim = blend(moon, WHITE, 90);
+        static const int8_t CR[5][3] = { {6,-6,3}, {-8,-1,2}, {2,-2,2}, {8,6,2}, {-3,8,2} };
+        for (uint8_t i = 0; i < 5; i++) {
+            t.fillCircle(mx + CR[i][0], my + CR[i][1], CR[i][2], pit);
+            t.fillCircle(mx + CR[i][0] - 1, my + CR[i][1] - 1, CR[i][2] - 1, rim);
+        }
+        // Limb shading down the trailing edge so it reads as a sphere.
+        t.drawCircle(mx, my, 15, blend(moon, skyHere, 60));
+        t.drawCircle(mx, my, 14, blend(moon, skyHere, 30));
     }
 
     // ---- far plane: ridge, then small trees on it --------------------
     const uint16_t haze = skyLow;
-    t.fillRect(0, ridgeY, w, yBot - ridgeY, blend(t.color565(210, 224, 240), haze, 120));
+    // Distant snow stays SNOW. This blended 120/256 toward the sky, which
+    // is unobjectionable at night and turns the whole far slope PINK the
+    // moment dawn warms the horizon. Snow takes a little of the light but
+    // it does not become the light, so the haze is weaker and is pulled
+    // most of the way to white before it is mixed in.
+    const uint16_t farSnow = blend(t.color565(196, 214, 236),
+                                   blend(haze, WHITE, 160), 70);
+    t.fillRect(0, ridgeY, w, yBot - ridgeY, farSnow);
     if (step) for (uint8_t i = 0; i < TREE_FAR; i++) {
         s_far[i].x -= WORLD_SPD * PL_FAR * ds;
         if (s_far[i].x < -20.0f) { s_far[i].x = (float)(w + 18); s_far[i].a = (uint8_t)random(18, 28); }
     }
     for (uint8_t i = 0; i < TREE_FAR; i++)
         snowPine(t, (int)s_far[i].x, ridgeY + 2, (int)s_far[i].a, inten > 0.4f, haze, 150);
-
-    // ---- gondolas ----------------------------------------------------
-    // Small enclosed cabins, not chairs: taller than wide, with one lit
-    // window and a two-pixel halo. They were four times this size and
-    // read as furniture rather than as a lift a long way off.
-    const uint16_t cable = blend(skyLow, BLACK, (uint16_t)(160.0f * (1.0f - dawn * 0.5f)));
-    const int cy0 = yStart + 30, cy1 = yStart + 17;
-    t.drawLine(0, cy0, w, cy1, cable);
-    for (uint8_t i = 0; i < 5; i++) {
-        const float p = fmodf((float)now / 15000.0f + (float)i * 0.2f, 1.0f);
-        const int cx = (int)(p * (float)w), cyy = cy0 + (int)((cy1 - cy0) * p);
-        t.fillRect(cx, cyy, 1, 4, cable);
-        t.fillRect(cx - 2, cyy + 4, 5, 7, blend(skyLow, BLACK, 130));
-        const uint16_t lamp = blend(skyLow, t.color565(255, 196, 96), (uint16_t)(230 - dawn * 190.0f));
-        t.fillRect(cx - 3, cyy + 6, 7, 3, blend(skyLow, lamp, 70));   // halo
-        t.fillRect(cx - 1, cyy + 6, 3, 3, lamp);
-    }
-    for (uint8_t i = 0; i < 3; i++) {
-        const int px = 56 + i * (w / 3), py = cy0 + ((cy1 - cy0) * px) / (w > 0 ? w : 1);
-        t.fillRect(px, py, 2, 20, cable);
-        t.fillRect(px - 4, py, 10, 2, cable);
-    }
 
     // ---- the slope ---------------------------------------------------
     const uint16_t snowLit = blend(WHITE, VAPOR_BLUE, (uint16_t)(16 + inten * 26.0f));
@@ -4683,48 +5036,90 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         snowPine(t, px, groundAt(px) + 2, (int)s_act[i].a, inten > 0.4f, haze, 30);
     }
 
-    // ---- skier -------------------------------------------------------
+    // The gondola line is gone. It went from five small cabins to two
+    // large ones with passengers inside, and at every size in between it
+    // read as a separate scene happening above the hill rather than as
+    // part of it -- a horizontal thing crossing a screen whose whole
+    // subject is a slope running the other way. The sky carries weather,
+    // stars and a moon, and that is enough for it to do.
+
+    // ---- the riders --------------------------------------------------
     if (step) {
-        if (!s_skLive) {
-            if (now >= s_skNext) { s_skLive = true; s_skX = -24.0f; s_skAir = 0.0f; s_skVy = 0.0f; s_skTrick = 0; }
-        } else {
-            s_skX += 0.80f * ds;
-            if (s_skAir > 0.0f || s_skVy != 0.0f) {
-                s_skVy += 0.13f * ds;
-                s_skAir -= s_skVy * ds;
-                if (s_skAir <= 0.0f) { s_skAir = 0.0f; s_skVy = 0.0f; s_skTrick = 0; }
+        for (uint8_t k = 0; k < RIDER_N; k++) {
+            Rider& r = s_rid[k];
+            if (!r.live) {
+                if (now >= r.next) {
+                    r.live = true; r.x = -26.0f; r.air = 0.0f; r.vy = 0.0f; r.trick = 0;
+                    // Re-rolled on every run, so the mix keeps changing
+                    // instead of the same one always being the boarder.
+                    r.kind = (uint8_t)((random(0, 100) < 40) ? 1 : 0);
+                    r.var  = (uint8_t)random(0, 3);
+                }
+                continue;
+            }
+            // A board runs a shade slower than skis, and each rider has
+            // his own pace on top of that. It is a small thing and it is
+            // the whole difference between three riders and one rider
+            // drawn three times.
+            r.x += ((r.kind ? 0.70f : 0.82f) + (float)k * 0.06f) * ds;
+            if (r.air > 0.0f || r.vy != 0.0f) {
+                r.vy  += 0.105f * ds;
+                r.air -= r.vy * ds;
+                // A spin or a flip advances through its four frames while
+                // he is off the ground.
+                if (r.trick >= 3) r.trick = (uint8_t)(3 + (((int)(r.air) / 7) & 3));
+                if (r.air <= 0.0f) { r.air = 0.0f; r.vy = 0.0f; r.trick = 0; }
             } else {
                 for (uint8_t i = 0; i < PROP_N; i++) {
                     if (s_prop[i].b != 2) continue;
-                    if (s_skX > s_prop[i].x - 3.0f && s_skX < s_prop[i].x + 3.0f) {
-                        s_skVy = -2.7f; s_skAir = 0.1f;
-                        s_skTrick = (uint8_t)random(1, 3);
+                    if (r.x > s_prop[i].x - 3.0f && r.x < s_prop[i].x + 3.0f) {
+                        // Big launch, light gravity: eight frames of air
+                        // is not long enough to read a trick at all.
+                        r.vy = -3.4f; r.air = 0.1f;
+                        r.trick = (uint8_t)random(1, 4);   // grab, method or spin
+                        s_birdAt = now;                    // startles the birds
+                        s_birdX  = r.x;
+                        s_birdY  = (float)(groundAt((int)r.x) - 30);
                     }
                 }
             }
             // Carving cuts a track into the bank wherever he actually is.
-            int c = (int)s_skX * SNOW_COLS / (w > 0 ? w : 1);
-            if (c >= 0 && c < SNOW_COLS && s_skAir < 2.0f) s_trackD[c] = 26;
-            if (s_skX > (float)w + 26.0f) {
-                s_skLive = false;
-                s_skNext = now + (uint32_t)random(7000, 17000);
+            const int c = (int)r.x * SNOW_COLS / (w > 0 ? w : 1);
+            if (c >= 0 && c < SNOW_COLS && r.air < 2.0f) s_trackD[c] = 26;
+            if (r.x > (float)w + 28.0f) {
+                r.live = false;
+                r.next = now + (uint32_t)random(5000, 15000);
+                if (s_chaseTgt == (int8_t)k) s_chaseTgt = -1;   // he got away
             }
         }
     }
-    if (s_skLive) {
-        const int sx = (int)s_skX;
-        if (sx > -26 && sx < w + 26)
-            snowSkier(t, sx, groundAt(sx) - (int)s_skAir,
-                      (sinf(s_skX * 0.06f) > 0.0f) ? 1 : -1, s_skTrick);
+    for (uint8_t k = 0; k < RIDER_N; k++) {
+        const Rider& r = s_rid[k];
+        if (!r.live) continue;
+        const int sx = (int)r.x;
+        if (sx < -28 || sx > w + 28) continue;
+        const int gy = groundAt(sx) - (int)r.air;
+        const int8_t carve = (sinf(r.x * 0.06f + (float)k * 1.7f) > 0.0f) ? 1 : -1;
+        if (r.kind) snowBoarder(t, sx, gy, carve, r.trick, r.var);
+        else        snowSkier  (t, sx, gy, carve, r.trick, r.var);
     }
 
     // ---- the chase ---------------------------------------------------
     if (step) {
         const uint32_t age = now - s_cAt;
         switch (s_cSt) {
-            case ChaseSt::NONE:
+            case ChaseSt::NONE: {
                 // Dawn keeps him off the hill entirely.
-                if (now >= s_cNext && s_skLive && dawn < 0.15f && s_skX < (float)w * 0.45f) {
+                // Pick a rider: the one furthest along who still has most
+                // of the hill left, so the chase has somewhere to happen.
+                int8_t pick = -1;
+                if (now >= s_cNext && dawn < 0.15f) {
+                    for (uint8_t k = 0; k < RIDER_N; k++)
+                        if (s_rid[k].live && s_rid[k].x < (float)w * 0.45f
+                            && (pick < 0 || s_rid[k].x > s_rid[pick].x)) pick = (int8_t)k;
+                }
+                if (pick >= 0) {
+                    s_chaseTgt = pick;
                     const long r = random(0, 100);
                     // Most of the time the skier gets away. The eat is the
                     // rare one, which is the only thing that makes it land.
@@ -4733,31 +5128,73 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
                            : (r < 66) ? ChaseEnd::TRIP
                            : (r < 84) ? ChaseEnd::BEATEN
                                       : ChaseEnd::EAT;
-                    s_cSt = ChaseSt::RUN; s_cAt = now; s_yX = s_skX - 74.0f;
+                    s_cSt = ChaseSt::RUN; s_cAt = now; s_yX = s_rid[pick].x - 74.0f;
+                    // He announces himself; the skier answers a beat
+                    // later, from the RUN case below.
+                    s_sayYetTxt = YETI_TAUNT[random(0, 6)];
+                    s_sayYetTil = now + 1500u;
+                    s_sayNextAt = now + 1100u;
                 }
                 break;
+            }
             case ChaseSt::RUN: {
+                if (s_chaseTgt < 0) { s_cSt = ChaseSt::LEAVE; s_cAt = now; break; }
+                Rider& tg = s_rid[s_chaseTgt];
+                // They trade lines the whole way down, alternating, so it
+                // reads as an argument rather than as two monologues.
+                if (now >= s_sayNextAt) {
+                    if ((s_sayNextAt & 1u) != 0u) {
+                        s_saySkiTxt = SKI_TAUNT[random(0, 6)];  s_saySkiTil = now + 1500u;
+                    } else {
+                        s_sayYetTxt = YETI_TAUNT[random(0, 6)]; s_sayYetTil = now + 1500u;
+                    }
+                    s_sayNextAt = now + (uint32_t)random(1300, 2100);
+                }
                 // A yeti who is going to lose runs slower the whole way,
                 // rather than teleporting to a decision at the last frame.
                 const bool fast = (s_cEnd == ChaseEnd::EAT || s_cEnd == ChaseEnd::TRIP
                                    || s_cEnd == ChaseEnd::BEATEN);
                 s_yX += (fast ? 1.05f : 0.66f) * ds;
                 if (s_cEnd == ChaseEnd::WINDED && age > 2600u) { s_cSt = ChaseSt::RESOLVE; s_cAt = now; }
-                else if (!s_skLive || s_yX > (float)w + 34.0f) { s_cSt = ChaseSt::LEAVE; s_cAt = now; }
-                else if (fast && s_yX > s_skX - 13.0f) {
-                    if (s_cEnd == ChaseEnd::EAT) { s_skLive = false; s_skNext = now + (uint32_t)random(9000, 20000); }
+                else if (!tg.live || s_yX > (float)w + 34.0f) { s_cSt = ChaseSt::LEAVE; s_cAt = now; }
+                else if (fast && s_yX > tg.x - 13.0f) {
+                    if (s_cEnd == ChaseEnd::EAT) {
+                        tg.live = false;
+                        tg.next = now + (uint32_t)random(9000, 20000);
+                    }
                     s_cSt = ChaseSt::RESOLVE; s_cAt = now;
                 }
                 break;
             }
             case ChaseSt::RESOLVE:
+                if (age < 60u) {
+                    // The punchline, and who gets it, depends on how it
+                    // went. The loser generally says less.
+                    switch (s_cEnd) {
+                        case ChaseEnd::WINDED:
+                            s_sayYetTxt = SAY_WINDED[random(0, 2)]; s_sayYetTil = now + 1800u;
+                            s_saySkiTxt = nullptr; break;
+                        case ChaseEnd::TRIP:
+                            s_sayYetTxt = "OOF"; s_sayYetTil = now + 1500u;
+                            s_saySkiTxt = "HA";  s_saySkiTil = now + 1500u; break;
+                        case ChaseEnd::BEATEN:
+                            s_saySkiTxt = SAY_BEATEN[random(0, 2)]; s_saySkiTil = now + 1600u;
+                            s_sayYetTxt = "ow";  s_sayYetTil = now + 1600u; break;
+                        case ChaseEnd::EAT:
+                            s_saySkiTxt = "oh no"; s_saySkiTil = now + 700u;
+                            s_sayYetTxt = "NOM";   s_sayYetTil = now + 1900u; break;
+                        default:
+                            s_sayYetTxt = SAY_GIVEUP[random(0, 2)]; s_sayYetTil = now + 1600u;
+                            s_saySkiTxt = nullptr; break;
+                    }
+                }
                 if (s_cEnd == ChaseEnd::BEATEN && age < 900u) s_yX -= 0.9f * ds;   // knocked back
                 if (age > (s_cEnd == ChaseEnd::EAT ? EAT_TOTAL : 1900u)) { s_cSt = ChaseSt::LEAVE; s_cAt = now; }
                 break;
             case ChaseSt::LEAVE:
                 s_yX -= 1.5f * ds;
                 if (s_yX < -50.0f) {
-                    s_cSt = ChaseSt::NONE;
+                    s_cSt = ChaseSt::NONE; s_chaseTgt = -1;
                     s_cNext = now + (uint32_t)random(16000, 34000);
                 }
                 break;
@@ -4791,18 +5228,85 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
                 snowYeti(t, yx, groundAt(yx), now, p);
             }
             // The skier turns and swings for himself.
-            if (p == YPose::RECOIL && s_skLive) {
-                const int sx = (int)s_skX;
+            if (p == YPose::RECOIL && s_chaseTgt >= 0 && s_rid[s_chaseTgt].live) {
+                const int sx = (int)s_rid[s_chaseTgt].x;
                 t.drawLine(sx + 4, groundAt(sx) - 22, yx - 8, groundAt(yx) - 30,
                            t.color565(58, 64, 73));
             }
         }
     }
 
+    // ---- what they are shouting at each other ------------------------
+    // After both of them, so a bubble is never behind a body -- and
+    // before the foreground tree, so it can still be occluded by it.
+    if (s_saySkiTxt && now < s_saySkiTil && s_chaseTgt >= 0 && s_rid[s_chaseTgt].live) {
+        const int sx = (int)s_rid[s_chaseTgt].x;
+        if (sx > 10 && sx < w - 10) snowSay(t, sx, groundAt(sx) - 34, s_saySkiTxt);
+    }
+    if (s_sayYetTxt && now < s_sayYetTil && s_cSt != ChaseSt::NONE) {
+        const int yx = (int)s_yX;
+        if (yx > 10 && yx < w - 10) snowSay(t, yx, groundAt(yx) - 56, s_sayYetTxt);
+    }
+
     // ---- near plane: one big tree, fast, low -------------------------
     {
         const int px = (int)s_nearX;
         if (px > -60 && px < w + 60) snowPine(t, px, yBot + 6, 96, inten > 0.4f, haze, 0);
+    }
+
+    // ---- wildlife ----------------------------------------------------
+    if (step) {
+        // The dog runs with the skier if he is close, otherwise trots.
+        bool alongside = false;
+        for (uint8_t k = 0; k < RIDER_N; k++)
+            if (s_rid[k].live && fabsf(s_rid[k].x - s_dogX) < 46.0f) alongside = true;
+        s_dogX += (alongside ? 0.80f : 0.30f) * ds;
+        if (s_dogX > (float)w + 34.0f) s_dogX = -34.0f - (float)random(0, 1500);
+        // The hare wants nothing to do with any of this.
+        s_hareX -= ((s_cSt != ChaseSt::NONE) ? 1.7f : 0.55f) * ds;
+        if (s_hareX < -30.0f) s_hareX = (float)w + 30.0f + (float)random(0, 2200);
+    }
+    if (s_dogX > -24.0f && s_dogX < (float)w + 24.0f) {
+        const int dx = (int)s_dogX, dy = groundAt(dx);
+        const uint16_t dog = t.color565(181, 112, 40), dogD = t.color565(132, 78, 26);
+        const int gait = (int)(sinf((float)now / 95.0f) * 2.0f);
+        t.fillRect(dx - 8, dy - 10, 15, 7, dog);
+        t.fillRect(dx + 5, dy - 15, 8, 7, dog);              // head
+        t.fillRect(dx + 11, dy - 16, 3, 4, dogD);            // ear
+        t.fillRect(dx + 12, dy - 11, 3, 2, t.color565(40, 30, 24));
+        t.fillRect(dx - 11, dy - 13, 4, 5, dogD);            // tail, up
+        t.fillRect(dx - 6, dy - 4 + gait, 3, 4, dogD);
+        t.fillRect(dx + 2, dy - 4 - gait, 3, 4, dogD);
+    }
+    if (s_hareX > -22.0f && s_hareX < (float)w + 22.0f) {
+        const int hx = (int)s_hareX;
+        const int hop = (int)(fabsf(sinf((float)now / 120.0f))
+                              * ((s_cSt != ChaseSt::NONE) ? 9.0f : 4.0f));
+        const int hy2 = groundAt(hx) - hop;
+        t.fillRect(hx - 5, hy2 - 6, 10, 5, WHITE);
+        t.fillRect(hx + 4, hy2 - 9, 5, 5, WHITE);            // head
+        t.fillRect(hx + 6, hy2 - 14, 2, 6, WHITE);           // ears, laid back
+        t.fillRect(hx + 3, hy2 - 14, 2, 6, WHITE);
+        t.fillRect(hx - 6, hy2 - 3, 3, 3, WHITE);            // scut
+        t.fillRect(hx + 7, hy2 - 8, 2, 2, t.color565(180, 60, 60));
+    }
+    if (s_birdAt && now - s_birdAt < 2600u) {
+        // Startled off a pine by the jump. They climb and scatter.
+        const float ba = (float)(now - s_birdAt) / 2600.0f;
+        for (uint8_t i = 0; i < 5; i++) {
+            const int bx = (int)(s_birdX + ba * (28.0f + (float)i * 13.0f));
+            const int by = (int)(s_birdY - ba * (30.0f + (float)i * 6.0f)
+                                 + sinf((float)now / 90.0f + (float)i) * 3.0f);
+            if (bx < -6 || bx > w + 6 || by < yStart) continue;
+            const uint16_t bc = blend(skyLow, BLACK, (uint16_t)(190 * (1.0f - ba)));
+            const int flap = (((now / 110) + i) & 1) ? 1 : -1;
+            t.fillRect(bx - 3, by, 3, 1, bc);
+            t.fillRect(bx + 1, by, 3, 1, bc);
+            t.fillRect(bx - 3, by - flap, 2, 1, bc);
+            t.fillRect(bx + 2, by - flap, 2, 1, bc);
+        }
+    } else if (s_birdAt && now - s_birdAt >= 2600u) {
+        if (step) s_birdAt = 0;
     }
 
     // ---- snow --------------------------------------------------------
