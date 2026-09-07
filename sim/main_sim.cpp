@@ -106,6 +106,7 @@ int main(int argc, char** argv) {
 
     bool portrait = false, onboard = false, showoff = false;
     int confirmRow = -1;   // settings screen: put a confirm panel up
+    int scrollBy = 0;      // settings screen: scroll down N rows first
     int bg = -1, themeIdx = -1, frames = 90, sequence = 1, outfitIdx = -1;
     std::string rawPath;
     for (int i = 2; i < argc; i++) {
@@ -120,6 +121,7 @@ int main(int argc, char** argv) {
         else if (a == "--raw" && i + 1 < argc) rawPath = argv[++i];
         else if (a == "--showoff") showoff = true;
         else if (a == "--confirm" && i + 1 < argc) confirmRow = atoi(argv[++i]);
+        else if (a == "--scroll" && i + 1 < argc) scrollBy = atoi(argv[++i]);
     }
     if (sequence < 1) sequence = 1;
 
@@ -231,6 +233,7 @@ int main(int argc, char** argv) {
 
     // After uiSettingsInit(), which clears any pending question.
     if (confirmRow >= 0) uiSettingsSetConfirm((SettingsRow)confirmRow);
+    for (int k = 0; k < scrollBy; k++) uiSettingsScroll(1);
 
     for (int i = 0; i < frames; i++) {
         if (!tick(now + (uint32_t)i * STEP_MS)) { usage(); return 2; }

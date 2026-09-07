@@ -1678,6 +1678,7 @@ void loop() {
             if (Theme::consumeToasterCatch())   Squachy::unlockChromeWing();
             if (Theme::consumeEyeCatch())       Squachy::unlockVoidEye();
             if (Theme::consumeLodgeKnock())     Squachy::unlockParka();
+    if (Theme::consumePetUnlock())      Squachy::unlockPet();
 
             bool boring = Settings::boringMode();
             ButtonId barBtn = tp.valid ? Theme::hitTestButtonBar(tp.x, tp.y, tft.width(), tft.height()) : ButtonId::NONE;
@@ -2441,6 +2442,7 @@ void loop() {
                         case SettingsRow::NICKNAME:     Squachy::cycleNickname(); break;
                         case SettingsRow::SHADES_COLOR: Squachy::cycleShadesColor(); break;
                         case SettingsRow::OUTFIT:       enterOutfit(); break;
+                        case SettingsRow::PET:          Squachy::togglePet(); break;
                         case SettingsRow::VIEW_DIARY:   enterDiary(); break;
                         case SettingsRow::BACK:        enterClear(); break;
                         default: break;

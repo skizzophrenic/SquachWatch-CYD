@@ -2,6 +2,7 @@
 #include "ui_clear.h"
 #include "theme.h"
 #include "squachy.h"
+#include "pet.h"
 #include "settings.h"
 #include "idle_events.h"
 #include <Arduino.h>
@@ -162,6 +163,11 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     if (!Settings::boringMode()) {
         Squachy::tick(t, w / 2, titleBottom, countersTop - titleBottom, now, advance);
     }
+
+    // The pet, after Squachy and before the flourishes: he perches on
+    // top of him, so he has to be drawn on top of him. Does nothing at all
+    // unless one is unlocked and switched on.
+    if (!Settings::boringMode()) Pet::tick(t, now, w, titleBottom, countersTop);
 
     // Rare decorative flourishes (UFO/sparkle/critter/glitch-line) --
     // see idle_events.h. Skipped for the same reasons Squachy's own

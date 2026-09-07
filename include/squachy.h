@@ -143,6 +143,25 @@ namespace Squachy {
     // completes. Persists immediately, same as any other cosmetic.
     void unlockAllOutfits();
 
+    // ---- the pet -------------------------------------------------------
+    // VAPOR SHAGGY, who turns up on CLEAR and climbs him. The unlock lives
+    // here rather than in Settings because it shares ensurePrefsLoaded()
+    // and the NVS namespace with every other unlock, and because holding
+    // CLR unlocks it alongside the outfits.
+    //
+    // Note the word: "pet" here is the companion. s_petCount inside
+    // squachy.cpp is how many times you have STROKED him, which is a
+    // different thing that unfortunately shares the English.
+    void unlockPet();          // earned: tap him on the toasters
+    bool petUnlocked();
+    bool petEnabled();         // the Settings > PET row
+    void togglePet();
+
+    // True while a finger is carrying him, or he is dangling after being
+    // dropped. The pet checks it: perching on a head that is itself flying
+    // through the air reads as a bug rather than as a joke.
+    bool isHeld();
+
     // WOLF PELT is the one outfit not earned by a detection count --
     // main.cpp calls this when the werewolf easter egg on the FIRE
     // background is summoned. Persists immediately; a no-op once it has

@@ -819,6 +819,7 @@ static const int EYE_CATCH_MIN_R = 26;
 // Knock on the lodge door: five taps on the SNOWFALL lodge, same count and
 // same window as the moon. Declared here because drawSnowfall sits earlier in
 // the file than backgroundTap(), which is what consumes them.
+static void publishLilGuy(int x, int baseY, int w, int h, uint32_t now);
 static void publishLodge(int cx, int ridgeY, uint32_t now);
 uint8_t lodgeKnocks();
 static void publishBigEye(int cx, int cy, int r, int8_t slot, uint32_t now);
@@ -1764,20 +1765,21 @@ static void drawBorisAt(TFT_eSPI& t, int x, int y, uint32_t now, float scale, bo
 // frame comes off the clock rather than off a frame counter, because 80 ms is
 // slower than this board's own frame time and a counter would run him at
 // whatever speed the rest of the scene happened to be managing.
-static void drawLilGuyAt(TFT_eSPI& t, int x, int baseY, uint32_t now) {
+void drawLilGuy(TFT_eSPI& t, int x, int baseY, uint32_t now, uint8_t scale) {
     static const uint16_t PAL[4] = { 0, 0, 0, 0 };
     (void)PAL;
     const uint16_t hair = t.color565(0, 255, 245);
     const uint16_t skin = t.color565(255, 208, 240);
     const uint16_t body = t.color565(185, 103, 255);
     const uint8_t  f    = (uint8_t)((now / 80u) % LILGUY_FRAMES);
-    const int      top  = baseY - LILGUY_H * 2;
+    const int      s    = scale ? scale : 2;
+    const int      top  = baseY - LILGUY_H * s;
     for (uint8_t y = 0; y < LILGUY_H; y++) {
         const uint32_t row = LILGUY[f * LILGUY_H + y];
         for (uint8_t xx = 0; xx < LILGUY_W; xx++) {
             const uint8_t c = (uint8_t)((row >> (xx * 2)) & 3u);
             if (!c) continue;
-            t.fillRect(x + xx * 2, top + y * 2, 2, 2,
+            t.fillRect(x + xx * s, top + y * s, s, s,
                        (c == 1) ? hair : (c == 2) ? skin : body);
         }
     }
@@ -2220,7 +2222,8 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             lgX += 0.025f * (float)ld;               // 25 px a second
             const int gBase2 = (s_bgFloor > yStart && s_bgFloor <= yEnd)
                                ? s_bgFloor - 1 : yEnd - 1;
-            drawLilGuyAt(t, (int)lgX, gBase2, now);
+            drawLilGuy(t, (int)lgX, gBase2, now, 2);
+            publishLilGuy((int)lgX, gBase2, LILGUY_W * 2, LILGUY_H * 2, now);
             if (lgX > (float)(w + 8)) {
                 lgLive = false;
                 lgNext = now + 300000u;              // once every five minutes
@@ -3861,6 +3864,24 @@ static uint8_t  s_lodgeKnocks = 0;
 static uint32_t s_lodgeKnockAt = 0;
 static bool     s_lodgePending = false;
 
+// Where the toasters cameo is RIGHT NOW, so a tap can find him. Same shape
+// as the lodge and the starfield eye: the drawing code publishes a box each
+// frame, backgroundTap() tests it, and the staleness check means a tap can
+// only land while he is actually on screen.
+static int      s_lilX = 0, s_lilY = 0, s_lilW = 0, s_lilH = 0;
+static uint32_t s_lilAt = 0;
+static bool     s_lilPending = false;
+
+static void publishLilGuy(int x, int baseY, int w, int h, uint32_t now) {
+    s_lilX = x; s_lilY = baseY - h; s_lilW = w; s_lilH = h; s_lilAt = now;
+}
+
+bool consumePetUnlock() {
+    if (!s_lilPending) return false;
+    s_lilPending = false;
+    return true;
+}
+
 static void publishLodge(int cx, int ridgeY, uint32_t now) {
     s_lodgeHitX = cx; s_lodgeHitY = ridgeY; s_lodgeAt = now;
 }
@@ -3883,6 +3904,19 @@ bool consumeEyeCatch() {
 }
 
 bool backgroundTap(int x, int y, uint32_t now) {
+    // The lil guy, while he is crossing. Generous by a few pixels each way
+    // on purpose -- he is twenty pixels square and moving, which is a much
+    // harder target than a lodge that stays still, and this is the EARNED
+    // route to the pet rather than a secret meant to resist being found.
+    if (s_lilAt && (now - s_lilAt) <= 250) {
+        const int m = 6;
+        if (x >= s_lilX - m && x <= s_lilX + s_lilW + m &&
+            y >= s_lilY - m && y <= s_lilY + s_lilH + m) {
+            s_lilPending = true;
+            s_lilAt = 0;                          // caught: one tap is enough
+            return true;
+        }
+    }
     // The Starfield eye, while it is close. Circle hit test on the sphere it
     // actually draws -- no generous margin, the way the gold toaster's box
     // was tightened: this one is a big target already, and the whole point of

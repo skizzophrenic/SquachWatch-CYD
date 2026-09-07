@@ -22,7 +22,7 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::RGB_SWAP, SettingsRow::ROTATION_LOCK,
     SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE, SettingsRow::DETECTION_FILTER,
     SettingsRow::IGNORED_DEVICES,
-    SettingsRow::NICKNAME, SettingsRow::SHADES_COLOR, SettingsRow::OUTFIT,
+    SettingsRow::NICKNAME, SettingsRow::SHADES_COLOR, SettingsRow::OUTFIT, SettingsRow::PET,
     SettingsRow::REPLAY_INTRO, SettingsRow::SHOW_OFF, SettingsRow::VIEW_DIARY,
     SettingsRow::POWER_SAVER,
     SettingsRow::CALIBRATE, SettingsRow::CHECK_COLORS, SettingsRow::DIAGNOSTICS, SettingsRow::RESET_STATS, SettingsRow::BACK,
@@ -32,7 +32,8 @@ static const uint8_t ALL_ROWS_N = sizeof(ALL_ROWS) / sizeof(ALL_ROWS[0]);
 static bool isSquachyOnlyRow(SettingsRow r) {
     return r == SettingsRow::REPLAY_INTRO || r == SettingsRow::SHOW_OFF ||
            r == SettingsRow::NICKNAME ||
-           r == SettingsRow::SHADES_COLOR || r == SettingsRow::OUTFIT;
+           r == SettingsRow::SHADES_COLOR || r == SettingsRow::OUTFIT ||
+           r == SettingsRow::PET;
 }
 
 enum class RowGroupId : uint8_t { APPEARANCE, BEHAVIOR, SQUACHY, SYSTEM };
@@ -55,6 +56,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::NICKNAME:
         case SettingsRow::SHADES_COLOR:
         case SettingsRow::OUTFIT:
+        case SettingsRow::PET:
         case SettingsRow::REPLAY_INTRO:
         case SettingsRow::VIEW_DIARY:
         case SettingsRow::SHOW_OFF:
@@ -102,6 +104,10 @@ static uint8_t buildDisplayList(DisplayItem* out) {
     bool boring = Settings::boringMode();
     for (uint8_t i = 0; i < ALL_ROWS_N; i++) {
         if (boring && isSquachyOnlyRow(ALL_ROWS[i])) continue;
+        // PET is the only row that is hidden by not being EARNED rather
+        // than by a mode. Showing a permanently-off row for something you
+        // have never seen would give the secret away.
+        if (ALL_ROWS[i] == SettingsRow::PET && !Squachy::petUnlocked()) continue;
         rows[n++] = ALL_ROWS[i];
     }
 
@@ -476,6 +482,10 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             snprintf(valBuf, valBufN, "%s (%u/%u)", Squachy::outfitName(),
                      (unsigned)Squachy::unlockedOutfitCount(), (unsigned)Squachy::outfitCount());
             value = valBuf;
+            break;
+        case SettingsRow::PET:
+            label = "PET";
+            value = Squachy::petEnabled() ? "VAPOR SHAGGY" : "OFF";
             break;
         case SettingsRow::VIEW_DIARY:
             label = "SQUACHY'S DIARY";

@@ -42,6 +42,7 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/idle_events.cpp \
             $(SRC)/ui_clear.cpp \
             $(SRC)/ui_power.cpp \
+            $(SRC)/pet.cpp \
             $(SRC)/ui_log.cpp \
             $(SRC)/ui_alert.cpp \
             $(SRC)/ui_settings.cpp \

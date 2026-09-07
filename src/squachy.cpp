@@ -348,6 +348,8 @@ static bool     s_wolfPeltUnlocked   = false;  // earned by summoning the werewo
 static bool     s_chromeWingUnlocked = false;  // earned by catching the gold toaster
 static bool     s_voidEyeUnlocked    = false;  // earned by catching two Starfield eyes in a row
 static bool     s_parkaUnlocked      = false;  // earned by knocking five times on the Snowfall lodge
+static bool     s_petUnlocked        = false;  // earned by tapping the lil guy on the toasters
+static bool     s_petEnabled         = true;   // Settings > PET, only shown once unlocked
 // Bitmask of outfits whose unlock popup has already been shown. Persisted,
 // because "new" has to survive a reboot: without it every boot would
 // re-announce everything already earned. Seeded on first run with whatever
@@ -826,6 +828,10 @@ static void ensurePrefsLoaded() {
     s_nickIdx         = s_petPrefs.getUChar("nick", 0);
     s_outfitIdx       = s_petPrefs.getUChar("outfitIdx", 0);
     s_allOutfitsUnlocked = s_petPrefs.getBool("allOutfits", false);
+    s_petUnlocked        = s_petPrefs.getBool("petUnlk", false);
+    // Defaults ON once earned: somebody who just unlocked a pet wants to
+    // see it, not to go and find a switch.
+    s_petEnabled         = s_petPrefs.getBool("petOn", true);
     s_wolfPeltUnlocked   = s_petPrefs.getBool("wolfPelt", false);
     s_chromeWingUnlocked = s_petPrefs.getBool("chromeWing", false);
     s_voidEyeUnlocked    = s_petPrefs.getBool("voidEye", false);
@@ -1412,6 +1418,27 @@ void setOutfitPreview(int8_t idx) {
     s_outfitOverride = idx;
 }
 
+void unlockPet() {
+    ensurePrefsLoaded();
+    if (s_petUnlocked) return;                  // already had him; stay quiet
+    s_petUnlocked = true;
+    s_petPrefs.putBool("petUnlk", true);
+    mood      = Mood::BOUNCE;
+    moodUntil = millis() + 2000;
+    say("he followed me home.", 3600);
+}
+
+bool petUnlocked() { ensurePrefsLoaded(); return s_petUnlocked; }
+bool petEnabled()  { ensurePrefsLoaded(); return s_petEnabled;  }
+
+void togglePet() {
+    ensurePrefsLoaded();
+    s_petEnabled = !s_petEnabled;
+    s_petPrefs.putBool("petOn", s_petEnabled);
+}
+
+bool isHeld() { return s_grabbed || s_dangle; }
+
 void unlockParka() {
     ensurePrefsLoaded();
     if (s_parkaUnlocked) return;                // already had it; stay quiet
@@ -1449,6 +1476,10 @@ void unlockAllOutfits() {
     ensurePrefsLoaded();
     s_allOutfitsUnlocked = true;
     s_petPrefs.putBool("allOutfits", true);
+    // The pet rides along. This gesture is "give me everything", and a
+    // costume set that stops short of the one companion would be a strange
+    // place to draw the line.
+    if (!s_petUnlocked) { s_petUnlocked = true; s_petPrefs.putBool("petUnlk", true); }
     // No popups for the cheat: it already has its own rainbow-and-confetti
     // tell below, and eleven modals in a row would bury it. Mark the lot as
     // seen so nothing queues now or on the next boot.

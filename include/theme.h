@@ -292,6 +292,16 @@ namespace Theme {
     // nothing unless something published itself this frame.
     void drawBackgroundOverlay(TFT_eSPI& t, uint32_t now);
 
+    // VAPOR SHAGGY, drawn with his feet at baseY. `scale` is device pixels
+    // per art pixel: 2 for the cameo that crosses the toasters, 4 for the
+    // pet, which has to be big enough to look like the one talking.
+    void drawLilGuy(TFT_eSPI& t, int x, int baseY, uint32_t now, uint8_t scale);
+
+    // True once, after the lil guy has been tapped mid-stroll on the flying
+    // toasters. main.cpp polls it and unlocks the pet -- same shape as
+    // consumeLodgeKnock() and consumeEyeCatch().
+    bool consumePetUnlock();
+
     // Microseconds spent in the last drawActiveBackground() call,
     // exponentially smoothed. Held across screen changes so DIAGNOSTICS
     // -- which draws no background of its own -- reports the cost of
