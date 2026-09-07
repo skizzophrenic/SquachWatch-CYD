@@ -8,11 +8,11 @@
       "chipFamily": "ESP32",
       "parts": [
         {
-          "path": "cyd-ili9341-bootloader.bin",
+          "path": "esp32-bootloader.bin",
           "offset": 4096
         },
         {
-          "path": "cyd-ili9341-partitions.bin",
+          "path": "esp32-partitions.bin",
           "offset": 32768
         },
         {

@@ -107,31 +107,52 @@ jobs:
             0x1000  .pio/build/awok/bootloader.bin \
             0x8000  .pio/build/awok/partitions.bin \
             0x10000 .pio/build/awok/firmware.bin
-          # GitHub release assets need unique filenames within a release
-          # -- every board's raw PlatformIO artifacts share the same
-          # basenames (bootloader.bin/partitions.bin/firmware.bin), which
-          # made the very first two-board release fail partway through
-          # uploading (second partitions.bin collided with the first).
-          # Board-prefixed copies here are what actually get uploaded.
-          cp .pio/build/cyd/bootloader.bin  cyd-bootloader.bin
-          cp .pio/build/cyd/partitions.bin  cyd-partitions.bin
-          cp .pio/build/cyd/firmware.bin    cyd-firmware.bin
-          cp .pio/build/cyd-ili9341/bootloader.bin  cyd-ili9341-bootloader.bin
-          cp .pio/build/cyd-ili9341/partitions.bin  cyd-ili9341-partitions.bin
-          cp .pio/build/cyd-ili9341/firmware.bin    cyd-ili9341-firmware.bin
-          cp .pio/build/awok/bootloader.bin awok-bootloader.bin
-          cp .pio/build/awok/partitions.bin awok-partitions.bin
-          cp .pio/build/awok/firmware.bin   awok-firmware.bin
-          # The 80MHz display-overclock variants the flasher's
-          # "experimental overclock" checkbox targets. Identical to
-          # cyd/cyd-ili9341 apart from -DSPI_FREQUENCY. No merged image
-          # for these on purpose: the merged blob is a manual-recovery
-          # artifact, and recovery should land you on the spec-compliant
-          # build rather than the overclocked one.
-          for v in cyd-fast cyd-ili9341-fast; do
-            cp ".pio/build/$v/bootloader.bin" "$v-bootloader.bin"
-            cp ".pio/build/$v/partitions.bin" "$v-partitions.bin"
-            cp ".pio/build/$v/firmware.bin"   "$v-firmware.bin"
+          # Every board's raw PlatformIO artifacts share the same basenames
+          # (bootloader.bin/partitions.bin/firmware.bin), and release assets
+          # need unique names -- the very first two-board release failed
+          # partway through uploading when the second partitions.bin
+          # collided with the first. The firmware is board-prefixed below.
+          #
+          # The bootloader and the partition table are NOT. All five builds
+          # produce them byte for byte identical: they depend on the chip,
+          # the partition CSV and the flash mode/size, and every environment
+          # shares all of those. Only the display driver header and the pin
+          # map differ, and both live entirely in the app. Five copies of
+          # two identical files was eight redundant assets on the release
+          # and eight more on the Pages site, every one of them fetched
+          # over the wire by somebody.
+          #
+          # That identity is a property of today's configuration, not a
+          # guarantee, so it is checked rather than assumed. Add a board
+          # with a different flash size or partition table and this fails
+          # loudly right here, which is far better than shipping it: a
+          # mismatched bootloader does not report an error, it produces a
+          # board that looks bricked.
+          for f in bootloader partitions; do
+            ref="$(sha256sum ".pio/build/cyd/$f.bin" | cut -d' ' -f1)"
+            for v in cyd cyd-ili9341 awok cyd-fast cyd-ili9341-fast; do
+              got="$(sha256sum ".pio/build/$v/$f.bin" | cut -d' ' -f1)"
+              if [ "$got" != "$ref" ]; then
+                echo "::error::$v/$f.bin differs from cyd/$f.bin."
+                echo "These ship as one shared esp32-$f.bin, which is only"
+                echo "valid while every environment produces the same file."
+                echo "Give that board its own copy, or work out why it"
+                echo "diverged, before releasing this."
+                exit 1
+              fi
+            done
+            cp ".pio/build/cyd/$f.bin" "esp32-$f.bin"
+            echo "esp32-$f.bin is identical across all five builds ($ref)"
+          done
+          # The app, which is the only part that actually differs. cyd-fast
+          # and cyd-ili9341-fast are the 80MHz display-overclock variants
+          # the flasher's "experimental overclock" checkbox targets,
+          # identical to their base build apart from -DSPI_FREQUENCY. No
+          # merged image for those on purpose: the merged blob is a
+          # manual-recovery artifact, and recovery should land you on the
+          # spec-compliant build rather than the overclocked one.
+          for v in cyd cyd-ili9341 awok cyd-fast cyd-ili9341-fast; do
+            cp ".pio/build/$v/firmware.bin" "$v-firmware.bin"
           done
 
       - name: Stamp manifest versions
@@ -145,6 +166,14 @@ jobs:
               m["version"] = "${{ steps.ver.outputs.version }}"
               json.dump(m, open(p, "w"), indent=2)
           PY
+          # These are attached to the release as well, and they are not
+          # redundant with the Pages copies even though the flasher only
+          # ever loads the Pages ones. "Keep the previous two releases
+          # flashable" downloads each OLD release's manifest and drops it
+          # into that release's own directory, where its relative paths
+          # resolve against that release's binaries with no rewriting.
+          # Stop attaching them and every release silently falls out of the
+          # version picker one tag after it ships.
           cp web-flasher/manifest-cyd.json manifest-cyd.json
           cp web-flasher/manifest-cyd-ili9341.json manifest-cyd-ili9341.json
           cp web-flasher/manifest-awok.json manifest-awok.json
@@ -161,29 +190,16 @@ jobs:
           gh release create "${{ steps.ver.outputs.tag }}" \
             --title "SquachWatch-CYD ${{ steps.ver.outputs.tag }}" \
             --notes-file ".github/release-notes/${{ steps.ver.outputs.tag }}.md" \
-            cyd-bootloader.bin \
-            cyd-partitions.bin \
+            esp32-bootloader.bin \
+            esp32-partitions.bin \
             cyd-firmware.bin \
-            cyd-ili9341-bootloader.bin \
-            cyd-ili9341-partitions.bin \
             cyd-ili9341-firmware.bin \
-            awok-bootloader.bin \
-            awok-partitions.bin \
             awok-firmware.bin \
+            cyd-fast-firmware.bin \
+            cyd-ili9341-fast-firmware.bin \
             firmware-cyd-merged.bin \
             firmware-cyd-ili9341-merged.bin \
-            firmware-awok-merged.bin \
-            manifest-cyd.json \
-            manifest-cyd-ili9341.json \
-            manifest-awok.json \
-            manifest-cyd-fast.json \
-            manifest-cyd-ili9341-fast.json \
-            cyd-fast-bootloader.bin \
-            cyd-fast-partitions.bin \
-            cyd-fast-firmware.bin \
-            cyd-ili9341-fast-bootloader.bin \
-            cyd-ili9341-fast-partitions.bin \
-            cyd-ili9341-fast-firmware.bin
+            firmware-awok-merged.bin             manifest-cyd.json             manifest-cyd-ili9341.json             manifest-awok.json             manifest-cyd-fast.json             manifest-cyd-ili9341-fast.json
 
       - name: Assemble Pages site
         # The flasher ships each board's three raw regions rather than
@@ -212,10 +228,13 @@ jobs:
           cp web-flasher/manifest-awok.json _site/manifest-awok.json
           cp web-flasher/manifest-cyd-fast.json _site/manifest-cyd-fast.json
           cp web-flasher/manifest-cyd-ili9341-fast.json _site/manifest-cyd-ili9341-fast.json
+          # One shared bootloader and partition table (see the build step
+          # for why that is safe and how it is enforced), then one app per
+          # variant. Every manifest points at the same two shared files.
+          cp esp32-bootloader.bin _site/esp32-bootloader.bin
+          cp esp32-partitions.bin _site/esp32-partitions.bin
           for board in cyd cyd-ili9341 awok cyd-fast cyd-ili9341-fast; do
-            cp "$board-bootloader.bin" "_site/$board-bootloader.bin"
-            cp "$board-partitions.bin" "_site/$board-partitions.bin"
-            cp "$board-firmware.bin"   "_site/$board-firmware.bin"
+            cp "$board-firmware.bin" "_site/$board-firmware.bin"
           done
           # The browser emulator: this firmware compiled to WebAssembly,
           # so the site can offer "try it" next to "flash it". Built from
@@ -241,9 +260,10 @@ jobs:
           # site, so older builds only stay reachable if this run puts them
           # back. CI downloads them server-side, where CORS does not apply.
           #
-          # Two previous versions is the point where this stops being free:
-          # each one is 15 binaries, so the site grows by roughly its own
-          # size again per version retained.
+          # Two previous versions is the point where this stops being free.
+          # A retained release costs whatever that release shipped: seven
+          # binaries from v1.5.17 onward, fifteen for anything older, since
+          # those predate the shared esp32-bootloader/partitions pair.
           PREV=$(gh release list --limit 12 --json tagName -q '.[].tagName' \
                  | grep -v "^${TAG}$" | head -2)
           for tag in $PREV; do

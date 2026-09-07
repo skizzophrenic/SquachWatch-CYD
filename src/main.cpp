@@ -1067,12 +1067,44 @@ static void enterPower() {
 #define SERIAL_BAUD 921600
 #endif
 
+// The serial boot banner. Box-drawing and block characters, so it wants a
+// UTF-8 terminal -- every monitor used with this board is one, and the
+// console runs at 2,000,000 baud where a few hundred extra bytes cost
+// nothing. Written out as literal characters rather than \u escapes so the
+// art is legible here, which is the only place anyone will edit it.
+//
+// The version is NOT typed in. The line this replaced said "v1.0" from the
+// day it was written to the day it was deleted, which is what happens to a
+// hand-written version string. FIRMWARE_VERSION is stamped from the git tag
+// at build time by extra_script.py -- the same one the boot screen and the
+// diary already show.
+#ifndef FIRMWARE_VERSION
+#define FIRMWARE_VERSION "unknown"
+#endif
+static void printBootBanner() {
+    Serial.println("╔══════════════════════════════════════════════════╗");
+    Serial.println("║   .-\"\"\"-.                                        ║");
+    Serial.println("║  /  ^ ^  \\     ███ S Q U A C H W A T C H ███     ║");
+    Serial.println("║  | [o|o] |     surveillance detector             ║");
+    // %-13.13s holds the right border in place whatever the tag turns out
+    // to be: the fixed text ahead of it is 37 columns and the box is 50.
+    // The precision matters as much as the width -- a working tree builds as
+    // "v1.5.16-dirty" and a commit past a tag as "v1.5.16-3-g554330d", both
+    // of which walk the border off the end of the line. Truncated here only;
+    // the boot screen and the diary still show the version in full.
+    Serial.printf ("║  |   -   |     TALKING SASQUACH  .  %-13.13s║\n", FIRMWARE_VERSION);
+    Serial.println("║  \\  \\_/  /                                       ║");
+    Serial.println("║   )     (      2.4 GHz  .  ESP32  .  CYD         ║");
+    Serial.println("║  /_/   \\_\\                                       ║");
+    Serial.println("╚══════════════════════════════════════════════════╝");
+}
+
 // ---- Arduino setup / loop ----
 void setup() {
     Serial.begin(SERIAL_BAUD);
     delay(200);
     Serial.println();
-    Serial.println("SquachWatch-CYD v1.0  --  TALKING SASQUACH");
+    printBootBanner();
 #if defined(CYD35)
     // One-time diagnostic: is PSRAM actually present on this unit? The
     // "no PSRAM" conclusion driving the no-full-framebuffer tradeoff
