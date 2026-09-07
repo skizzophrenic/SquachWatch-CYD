@@ -1167,7 +1167,30 @@ static bool bubblePop(TFT_eSPI& t, int bx, int topY, int bw, int bh) {
     return true;
 }
 
-static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text) {
+// How far a bubble may climb into the rows the title bar used to own, and
+// when it is allowed to. Those rows are not empty any more: the settings and
+// rotate buttons live in the top corners and are now the ONLY navigation on
+// the device, so a box that covers them is a worse bug than a bubble sitting
+// a little close to his crest.
+//
+// A one-liner is centred and 90-200 wide, so it clears both corners and can
+// rise. A WRAPPED bubble is screenW-16 across, pinned two pixels off the left
+// edge, and would bury both -- it stays where it is. The test is geometric
+// rather than a flag, so a one-liner beside a Squachy who has wandered far
+// enough right to reach the rotate button also stays put.
+static const int BUBBLE_RISE = 16;   // exactly the row tick() reserves
+static const int CORNER_W    = 30;   // icon box plus a pixel of air
+static const int CORNER_H    = 20;   // ICON_BOX_H over in theme.cpp
+
+static int risenBubbleTop(int topY, int bx, int bw, int screenW) {
+    const int ry = topY - BUBBLE_RISE;
+    if (ry < 0)          return topY;   // never off the top
+    if (ry >= CORNER_H)  return ry;     // starts below the buttons anyway
+    if (bx < CORNER_W || bx + bw > screenW - CORNER_W) return topY;
+    return ry;
+}
+static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text,
+                       bool mayRise = false) {
     t.setTextSize(1);
     t.setTextWrap(false);
     int screenW = t.width();
@@ -1181,14 +1204,15 @@ static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text) {
         int bx = cx - bw / 2;
         if (bx + bw > screenW - 2) bx = screenW - 2 - bw;
         if (bx < 2) bx = 2;
-        if (bubblePop(t, bx, topY, bw, bh)) return;
-        t.fillRoundRect(bx, topY, bw, bh, 3, Theme::BG);
-        t.drawRoundRect(bx, topY, bw, bh, 3, Theme::VAPOR_PINK);
+        const int by = mayRise ? risenBubbleTop(topY, bx, bw, screenW) : topY;
+        if (bubblePop(t, bx, by, bw, bh)) return;
+        t.fillRoundRect(bx, by, bw, bh, 3, Theme::BG);
+        t.drawRoundRect(bx, by, bw, bh, 3, Theme::VAPOR_PINK);
         t.setTextColor(Theme::WHITE, Theme::BG);
-        t.setCursor(bx + 5, topY + 3);
+        t.setCursor(bx + 5, by + 3);
         t.print(text);
         lastBubbleX = bx;
-        lastBubbleY = topY;
+        lastBubbleY = by;
         lastBubbleW = bw;
         lastBubbleH = bh;
         return;
@@ -1207,17 +1231,22 @@ static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text) {
     const int lineH = 11;
     int bh = 6 + (int)n * lineH + 3;
 
-    if (bubblePop(t, bx, topY, bw, bh)) return;
-    t.fillRoundRect(bx, topY, bw, bh, 3, Theme::BG);
-    t.drawRoundRect(bx, topY, bw, bh, 3, Theme::VAPOR_PINK);
+    // Asked the same question, and the width answers it: a wrapped box is
+    // always too wide to clear the corners, so this always returns topY.
+    // Written as the same call rather than a hardcoded topY so that if the
+    // wrap width ever narrows, this starts rising on its own.
+    const int by = mayRise ? risenBubbleTop(topY, bx, bw, screenW) : topY;
+    if (bubblePop(t, bx, by, bw, bh)) return;
+    t.fillRoundRect(bx, by, bw, bh, 3, Theme::BG);
+    t.drawRoundRect(bx, by, bw, bh, 3, Theme::VAPOR_PINK);
     t.setTextColor(Theme::WHITE, Theme::BG);
     for (uint8_t i = 0; i < n; i++) {
         int lw = t.textWidth(lines[i]);
-        t.setCursor(bx + (bw - lw) / 2, topY + 3 + i * lineH);
+        t.setCursor(bx + (bw - lw) / 2, by + 3 + i * lineH);
         t.print(lines[i]);
     }
     lastBubbleX = bx;
-    lastBubbleY = topY;
+    lastBubbleY = by;
     lastBubbleW = bw;
     lastBubbleH = bh;
 }
@@ -3899,7 +3928,7 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     }
     if (showBubble) {
         if (s_onboardActive) drawOnboardBubble(t, cx, topY, bubbleText, s_onboardStep, ONBOARD_N);
-        else                 drawBubble(t, cx, topY, bubbleText);
+        else                 drawBubble(t, cx, topY, bubbleText, true);
     }
     // Gated: hadBubble tracks "did we draw a bubble last FRAME" for the
     // erase above. drawBubble()/drawOnboardBubble() compute identical
