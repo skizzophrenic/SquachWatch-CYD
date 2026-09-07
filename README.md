@@ -154,6 +154,7 @@ SquachWatch-CYD/
     ├── *.h                       (Arduino/TFT_eSPI/NVS shims)
     ├── make_demo.py              (renders the animation at the top of this file)
     ├── make_gallery.py           (renders the outfit sheet above)
+    ├── make_social.py            (renders the repo's social preview card)
     └── web/                      (the browser build)
 ```
 
