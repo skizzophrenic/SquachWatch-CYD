@@ -1093,10 +1093,36 @@ static void printBootBanner() {
     // of which walk the border off the end of the line. Truncated here only;
     // the boot screen and the diary still show the version in full.
     Serial.printf ("║  |   -   |     TALKING SASQUACH  .  %-13.13s║\n", FIRMWARE_VERSION);
-    Serial.println("║  \\  \\_/  /                                       ║");
+    // Same %-34s trick as the version line above: the reason is variable
+    // length ("interrupt watchdog" is the longest at eighteen characters)
+    // and the right border has to stay put.
+    char rst[40];
+    snprintf(rst, sizeof(rst), "last reset: %s", resetReasonName());
+    Serial.printf ("║  \\  \\_/  /     %-34s║\n", rst);
     Serial.println("║   )     (      2.4 GHz  .  ESP32  .  CYD         ║");
     Serial.println("║  /_/   \\_\\                                       ║");
     Serial.println("╚══════════════════════════════════════════════════╝");
+
+    // A panic, a watchdog or a brownout is worth shouting about rather than
+    // leaving as one word inside a box. The crash itself is already sitting
+    // in the coredump partition (0x3F0000, 64K -- see the partition table in
+    // platformio.ini), and nobody goes looking for it unless they are told
+    // it is there. This is the difference between a bug report that says
+    // "it keeps restarting" and one that says which task died.
+    switch (esp_reset_reason()) {
+        case ESP_RST_PANIC:
+        case ESP_RST_INT_WDT:
+        case ESP_RST_TASK_WDT:
+        case ESP_RST_WDT:
+        case ESP_RST_BROWNOUT:
+            Serial.println("*** That was not a clean boot.");
+            Serial.println("*** The crash is saved in flash. To read it out:");
+            Serial.println("***   esptool read_flash 0x3F0000 0x10000 core.bin");
+            Serial.println("***   espcoredump.py info_corefile -c core.bin firmware.elf");
+            break;
+        default:
+            break;
+    }
 }
 
 // ---- Arduino setup / loop ----
