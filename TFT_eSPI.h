@@ -136,6 +136,14 @@ public:
     void fillRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color) {
         for (int32_t j = 0; j < h; j++) drawFastHLine(x, y + j, w, color);
     }
+    // Framebuffer push, for backgrounds that render pixels on the CPU.
+    // The real library byte-swaps on the way out when asked; here the
+    // colours are already native, so the flag is accepted and ignored.
+    void setSwapBytes(bool) {}
+    void pushImage(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t* data) {
+        for (int32_t j = 0; j < h; j++)
+            for (int32_t i = 0; i < w; i++) drawPixel(x + i, y + j, data[j * w + i]);
+    }
     void drawRect(int32_t x, int32_t y, int32_t w, int32_t h, uint32_t color) {
         drawFastHLine(x, y, w, color);
         drawFastHLine(x, y + h - 1, w, color);

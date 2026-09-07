@@ -7,6 +7,7 @@
 // tools/sim/README.md for the full list of what's deliberately not
 // emulated (WiFi/BLE/SD -- see detection_sim.cpp instead).
 #pragma once
+
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -144,3 +145,11 @@ struct SerialShim {
     int  availableForWrite() { return 256; }
 };
 inline SerialShim Serial;
+
+// ESP32 core-clock control. The firmware's POWER SAVER menu calls this; on a
+// PC there is nothing to scale, so it records the request and does nothing.
+// Kept as a real symbol rather than a #define so squachsim-live still links
+// and the setting can be exercised in the emulator.
+inline uint32_t g_simCpuMhz = 240;
+inline bool setCpuFrequencyMhz(uint32_t mhz) { g_simCpuMhz = mhz; return true; }
+inline uint32_t getCpuFrequencyMhz() { return g_simCpuMhz; }

@@ -105,6 +105,50 @@ public:
     uint32_t getUInt(const char* k, uint32_t d = 0) const {
         auto it = _ui.find(k); return it == _ui.end() ? d : it->second;
     }
+    // Blob API. The real Preferences has had this all along -- the shim
+    // never needed it because the only callers (touch calibration) sit
+    // behind board guards the simulator does not build. IgnoreList stores
+    // its whole MAC list as one blob, so it does.
+    //
+    // Backed by the existing string map with the bytes hex-encoded, so it
+    // rides the same localStorage save/load path as everything else
+    // instead of needing a second serialisation format.
+    size_t putBytes(const char* k, const void* v, size_t len) {
+        static const char* HEX = "0123456789abcdef";
+        const uint8_t* p = (const uint8_t*)v;
+        std::string out;
+        out.reserve(len * 2);
+        for (size_t i = 0; i < len; i++) {
+            out += HEX[(p[i] >> 4) & 0xF];
+            out += HEX[p[i] & 0xF];
+        }
+        _s[k] = out;
+        save();
+        return len;
+    }
+    size_t getBytesLength(const char* k) const {
+        auto it = _s.find(k);
+        return it == _s.end() ? 0 : it->second.size() / 2;
+    }
+    size_t getBytes(const char* k, void* out, size_t maxLen) const {
+        auto it = _s.find(k);
+        if (it == _s.end()) return 0;
+        const std::string& h = it->second;
+        size_t n = h.size() / 2;
+        if (n > maxLen) n = maxLen;
+        uint8_t* o = (uint8_t*)out;
+        for (size_t i = 0; i < n; i++) {
+            auto nyb = [](char c) -> uint8_t {
+                if (c >= '0' && c <= '9') return (uint8_t)(c - '0');
+                if (c >= 'a' && c <= 'f') return (uint8_t)(c - 'a' + 10);
+                if (c >= 'A' && c <= 'F') return (uint8_t)(c - 'A' + 10);
+                return 0;
+            };
+            o[i] = (uint8_t)((nyb(h[i * 2]) << 4) | nyb(h[i * 2 + 1]));
+        }
+        return n;
+    }
+
     size_t putString(const char* k, const char* v) { _s[k] = v; save(); return strlen(v); }
     size_t getString(const char* k, char* buf, size_t maxLen) const {
         auto it = _s.find(k);

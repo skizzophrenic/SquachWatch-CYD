@@ -38,6 +38,7 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/detection_info.cpp \
             $(SRC)/idle_events.cpp \
             $(SRC)/ui_clear.cpp \
+            $(SRC)/ui_power.cpp \
             $(SRC)/ui_log.cpp \
             $(SRC)/ui_alert.cpp \
             $(SRC)/ui_settings.cpp \
@@ -47,6 +48,9 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/ui_diary.cpp \
             $(SRC)/ui_hunt.cpp \
             $(SRC)/ui_outfit.cpp \
+            $(SRC)/ui_outfit_unlock.cpp \
+            $(SRC)/ignore_list.cpp \
+            $(SRC)/ui_ignorelist.cpp \
             $(SRC)/ui_detfilter.cpp \
             $(SRC)/ui_rawscan.cpp \
             $(SRC)/ui_watchalert.cpp

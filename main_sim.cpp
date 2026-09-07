@@ -37,6 +37,7 @@
 #include "ui_diagnostics.h"
 #include "ui_boot.h"
 #include "ui_detfilter.h"
+#include "ui_power.h"
 #include "png_writer.h"
 
 // A few plausible log entries so screens have something real to draw --
@@ -87,7 +88,7 @@ static std::vector<uint8_t> toRgb888(const std::vector<uint16_t>& src) {
 static void usage() {
     fprintf(stderr,
         "usage: squachsim <screen> [out.png] [options]\n"
-        "  screens: clear log alert settings detfilter diary hunt rawscan watchalert colorcheck boot\n"
+        "  screens: clear log alert settings detfilter power diary hunt rawscan watchalert colorcheck boot\n"
         "  --portrait        render 240x320 instead of 320x240\n"
         "  --bg N            background style 0..9 (see Settings::Background)\n"
         "  --theme N         palette index\n"
@@ -103,7 +104,8 @@ int main(int argc, char** argv) {
     std::string screen  = argv[1];
     std::string outPath = (argc > 2 && argv[2][0] != '-') ? argv[2] : "squachsim.png";
 
-    bool portrait = false, onboard = false;
+    bool portrait = false, onboard = false, showoff = false;
+    int confirmRow = -1;   // settings screen: put a confirm panel up
     int bg = -1, themeIdx = -1, frames = 90, sequence = 1, outfitIdx = -1;
     std::string rawPath;
     for (int i = 2; i < argc; i++) {
@@ -116,6 +118,8 @@ int main(int argc, char** argv) {
         else if (a == "--frames" && i + 1 < argc) frames = atoi(argv[++i]);
         else if (a == "--sequence" && i + 1 < argc) sequence = atoi(argv[++i]);
         else if (a == "--raw" && i + 1 < argc) rawPath = argv[++i];
+        else if (a == "--showoff") showoff = true;
+        else if (a == "--confirm" && i + 1 < argc) confirmRow = atoi(argv[++i]);
     }
     if (sequence < 1) sequence = 1;
 
@@ -153,6 +157,9 @@ int main(int argc, char** argv) {
     seedDetections(engine);
 
     if (onboard) Squachy::trigger(Squachy::Event::BOOTED);
+    // Runs every pose he has back to back, which is the only way to see
+    // the whole set -- most are gated behind random idle rolls.
+    if (showoff) Squachy::startShowOff();
 
     // Backgrounds (matrix rain, starfield, aquarium, fire...) and
     // Squachy's idle animation all build state across frames -- a single
@@ -165,9 +172,10 @@ int main(int argc, char** argv) {
     auto tick = [&](uint32_t t) {
         if      (screen == "clear")    uiClearTick(frame, t, engine, true, false);
         else if (screen == "log")      uiLogTick(frame, t, engine, 0, false, "", false, nullptr, "");
-        else if (screen == "alert")    uiAlertTick(frame, t, false, nullptr, "");
+        else if (screen == "alert")    uiAlertTick(frame, t, engine, false, nullptr, "");
         else if (screen == "settings") uiSettingsTick(frame, t, engine);
         else if (screen == "detfilter") uiDetFilterTick(frame, t);
+        else if (screen == "power")    uiPowerTick(frame, t);
         else if (screen == "diary")    uiDiaryTick(frame, t, engine);
         else if (screen == "hunt")     uiHuntTick(frame, t, engine);
         else if (screen == "rawscan")  uiRawScanTick(frame, t, engine, true, true, false, "");
@@ -220,6 +228,9 @@ int main(int argc, char** argv) {
         if (!d) { fprintf(stderr, "no seeded detection to alert on\n"); return 1; }
         uiAlertInit(frame, *d);
     }
+
+    // After uiSettingsInit(), which clears any pending question.
+    if (confirmRow >= 0) uiSettingsSetConfirm((SettingsRow)confirmRow);
 
     for (int i = 0; i < frames; i++) {
         if (!tick(now + (uint32_t)i * STEP_MS)) { usage(); return 2; }
