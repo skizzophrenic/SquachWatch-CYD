@@ -145,7 +145,127 @@ static void computeGeom(TFT_eSPI& t, int screenH, int& top, int& bodyBottom, int
 
 void uiSettingsInit(TFT_eSPI& t) {
     g_scroll = 0;
+    // Any pending question dies with the screen. Coming back to Settings and
+    // finding a confirm panel still up from last time would be answering
+    // something you no longer remember asking.
+    uiSettingsSetConfirm(SettingsRow::NONE);
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
+}
+
+// ---- confirmation panel ---------------------------------------------------
+// Which row is waiting to be answered, or NONE. Cleared by main.cpp on either
+// button and by uiSettingsInit(), so leaving the screen and coming back never
+// lands you on a stale question.
+static SettingsRow s_confirmRow = SettingsRow::NONE;
+
+// The text for each row that has a panel. Anything not listed here has no
+// panel and uiSettingsSetConfirm() refuses it, which is what stops a future
+// row from silently getting a blank dialog.
+struct ConfirmText {
+    SettingsRow row;
+    const char* title;    // Bangers, so uppercase only
+    const char* line1;
+    const char* line2;
+    const char* verb;     // the button that goes through with it
+};
+static const ConfirmText CONFIRMS[] = {
+    { SettingsRow::CALIBRATE, "RECALIBRATE?",
+      "Replaces the touch calibration",
+      "you are using right now.", "CALIBRATE" },
+    // The second line is the part worth stopping for. Outfits earned by
+    // detection count are gated on the lifetime total, so zeroing it takes
+    // them away again; the ones earned by finding something are not, and
+    // stay put.
+    { SettingsRow::RESET_STATS, "RESET STATS?",
+      "Clears every detection total.",
+      "Outfits earned by count re-lock.", "RESET" },
+    // The second line is the whole reason this row has a panel: boring mode
+    // hides every Squachy row, so the first thing it does is take away the
+    // OUTFIT row, and the way back is not obvious once it has.
+    { SettingsRow::BORING_MODE, "BORING MODE?",
+      "Hides Squachy and his rows,",
+      "OUTFIT included. Same row undoes.", "TURN ON" },
+    { SettingsRow::REPLAY_INTRO, "REPLAY INTRO?",
+      "Runs the first-boot walkthrough",
+      "again, from the top.", "REPLAY" },
+};
+static const uint8_t CONFIRMS_N = sizeof(CONFIRMS) / sizeof(CONFIRMS[0]);
+
+static const ConfirmText* confirmTextFor(SettingsRow r) {
+    for (uint8_t i = 0; i < CONFIRMS_N; i++) if (CONFIRMS[i].row == r) return &CONFIRMS[i];
+    return nullptr;
+}
+
+// Geometry shared by the drawing and the hit test, same reason every other
+// panel in here shares one: two copies drift.
+//
+// The going-through-with-it button sits on its own row and CANCEL takes the
+// full width underneath it. That is the log screen's rule and it applies more
+// strongly here: CANCEL is the one you reach for by reflex, and it must not be
+// possible to hit the other one instead.
+static void settingsConfirmRects(int screenW, int screenH,
+                                 int& px, int& py, int& pw, int& ph,
+                                 int& okX, int& okY, int& okW, int& okH,
+                                 int& cnX, int& cnY, int& cnW, int& cnH) {
+    pw = screenW - 40;
+    if (pw > 240) pw = 240;
+    ph = 128;
+    px = (screenW - pw) / 2;
+    py = (screenH - ph) / 2;
+    const int margin = 10, gap = 8, btnH = 24;
+    cnH = okH = btnH;
+    cnY = py + ph - btnH - margin;
+    cnX = px + margin;
+    cnW = pw - 2 * margin;
+    okY = cnY - gap - btnH;
+    okX = px + margin;
+    okW = pw - 2 * margin;
+}
+
+void uiSettingsSetConfirm(SettingsRow r) {
+    s_confirmRow = (r == SettingsRow::NONE || confirmTextFor(r)) ? r : SettingsRow::NONE;
+}
+
+SettingsRow uiSettingsConfirmRow() { return s_confirmRow; }
+
+SettingsConfirmTap uiSettingsHitConfirm(int x, int y, int screenW, int screenH) {
+    if (s_confirmRow == SettingsRow::NONE) return SettingsConfirmTap::NONE;
+    int px, py, pw, ph, okX, okY, okW, okH, cnX, cnY, cnW, cnH;
+    settingsConfirmRects(screenW, screenH, px, py, pw, ph, okX, okY, okW, okH, cnX, cnY, cnW, cnH);
+    if (x >= okX && x <= okX + okW && y >= okY && y <= okY + okH) return SettingsConfirmTap::CONFIRM;
+    if (x >= cnX && x <= cnX + cnW && y >= cnY && y <= cnY + cnH) return SettingsConfirmTap::CANCEL;
+    // A tap anywhere else on the panel is swallowed rather than falling
+    // through to the row underneath it, which would be the row you were
+    // trying to think about.
+    if (x >= px && x <= px + pw && y >= py && y <= py + ph) return SettingsConfirmTap::NONE;
+    return SettingsConfirmTap::CANCEL;
+}
+
+static void drawSettingsConfirm(TFT_eSPI& t, int w, int h) {
+    const ConfirmText* ct = confirmTextFor(s_confirmRow);
+    if (!ct) return;
+    int px, py, pw, ph, okX, okY, okW, okH, cnX, cnY, cnW, cnH;
+    settingsConfirmRects(w, h, px, py, pw, ph, okX, okY, okW, okH, cnX, cnY, cnW, cnH);
+
+    t.fillRoundRect(px, py, pw, ph, 6, Theme::BG);
+    t.drawRoundRect(px, py, pw, ph, 6, Theme::RED);
+
+    int tw = Theme::bangersTextWidth(ct->title, Theme::BangersSize::MD);
+    if (tw > pw - 16) tw = pw - 16;
+    Theme::drawBangersText(t, px + (pw - tw) / 2, py + 8, ct->title, Theme::RED, Theme::BangersSize::MD);
+
+    t.setTextWrap(false);
+    t.setTextSize(1);
+    t.setTextColor(Theme::WHITE, Theme::BG);
+    const char* lines[2] = { ct->line1, ct->line2 };
+    for (uint8_t i = 0; i < 2; i++) {
+        int lw = t.textWidth(lines[i]);
+        t.setCursor(px + (pw - lw) / 2, py + 34 + i * 11);
+        t.print(lines[i]);
+    }
+
+    Theme::drawButton(t, okX, okY, okW, okH, ct->verb, false);
+    Theme::drawButton(t, cnX, cnY, cnW, cnH, "CANCEL", false);
 }
 
 void uiSettingsScroll(int delta) {
@@ -360,6 +480,10 @@ void uiSettingsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     }
 
     Theme::drawScrollbar(t, w - 4, top, bodyBottom - top, n, visibleCount, g_scroll);
+
+    // Over the top of everything, so the list is still visible around it and
+    // it is obvious which screen you are being asked about.
+    drawSettingsConfirm(t, w, h);
 }
 
 SettingsRow uiSettingsHitTest(TFT_eSPI& t, int x, int y, int screenW, int screenH) {

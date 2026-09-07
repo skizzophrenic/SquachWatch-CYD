@@ -1862,6 +1862,14 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     static float    mmX = 0;
     static bool     mmLive = false;
     static uint32_t mmNext = 0;
+    // The lil guy walks the mower's line, so the two are interlocked and
+    // whichever is already out keeps it until he leaves. His state lives up
+    // here rather than in his own block for the same reason: the mower's
+    // block runs first and has to be able to see him.
+    static float    lgX = -40.0f;
+    static bool     lgLive = false;
+    static uint32_t lgNext = 0;
+    static uint32_t lgLast = 0;
     // Grass Mowin' Man cuts. One byte per column: height now, regrowing
     // slowly behind him. A strip rather than a full lawn, because the flock
     // is the subject and a mown lawn across the whole band would take over.
@@ -2134,7 +2142,11 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // and is gone once he leaves, so the band is plain black the rest of
     // the time -- a permanent lawn under a flock of toasters is a different
     // screensaver.
-    if (!mmLive && now >= mmNext) {
+    if (!mmLive && lgLive && now >= mmNext) {
+        // The lil guy has the line. Come back for it shortly rather than
+        // give up the slot: he is off it inside fourteen seconds.
+        mmNext = now + 5000u;
+    } else if (!mmLive && now >= mmNext) {
         mmLive = true;
         mmX    = -50.0f;
         // Starts bare. Seeding the whole strip at once put a full-width
@@ -2191,12 +2203,12 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // fourteen seconds to cross. He is off screen for the other four and
     // three quarter minutes.
     {
-        static float    lgX = -40.0f;
-        static bool     lgLive = false;
-        static uint32_t lgNext = 0;
-        static uint32_t lgLast = 0;
         if (!lgNext) lgNext = now + 20000u;          // first one soon after boot
-        if (!lgLive && now >= lgNext) {
+        if (!lgLive && mmLive && now >= lgNext) {
+            // Mowin' Man has the line. Same deal in reverse -- wait rather
+            // than skip a whole five minute cycle.
+            lgNext = now + 5000u;
+        } else if (!lgLive && now >= lgNext) {
             lgLive = true;
             lgX = -(float)(LILGUY_W * 2) - 4.0f;
             lgLast = now;

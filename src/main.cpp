@@ -867,6 +867,34 @@ static bool          s_infoArmed         = false;
 // flips true is ever allowed to register a WATCH/HUNT/CANCEL tap.
 static bool    s_confirmArmed = false;
 
+// Every way into touch calibration goes through here: the title-bar
+// long-press, Settings > CALIBRATE TOUCH, and the confirm panel that now sits
+// in front of that row. Callers decide where to go afterwards, which is the
+// only thing that ever differed between them.
+static void runTouchCalibration() {
+#if defined(AWOK)
+    awokRunCalibration();
+#elif defined(CYD35)
+    cyd35RunCalibration();
+#else
+    TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
+    TouchCal::Cal newCal;
+    // tft directly, not *canvas -- canvas points at `frame` (an offscreen
+    // sprite) on this board, and nothing in TouchCal::runInteractive() ever
+    // calls pushSprite() to actually display what it draws. It was rendering
+    // the entire calibration UI into invisible memory, which was the real
+    // cause of "the calibration screen never shows up" rather than any touch
+    // hardware fault. runInteractive() draws occasional targeted crosshairs,
+    // not a per-frame animation loop, so there is no flicker concern in
+    // going straight to the panel here.
+    if (TouchCal::runInteractive(tft, reader, Theme::BG, Theme::WHITE, Theme::CYAN, newCal,
+                                 usingCapTouch ? CAP_TOUCH_MIN_SPREAD : RESISTIVE_MIN_SPREAD)) {
+        applyCal(newCal);
+        s_usingSavedCal = true;
+    }
+#endif
+}
+
 static void enterBoot() {
     state = AppState::BOOT;
     bootStart = millis();
@@ -1460,30 +1488,12 @@ void loop() {
         else if (now - calHoldStart > 1500) {
             calHoldStart = 0;
             lastTouch = now;
-#if defined(AWOK)
-            awokRunCalibration();
-#elif defined(CYD35)
-            cyd35RunCalibration();
-#else
-            TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
-            TouchCal::Cal newCal;
-            // tft directly, not *canvas -- canvas points at `frame` (an
-            // offscreen sprite) on this board, and nothing in
-            // TouchCal::runInteractive() ever calls pushSprite() to
-            // actually display what it draws. It was rendering the
-            // entire calibration UI into invisible memory -- confirmed
-            // as the real cause of "the calibration screen never shows
-            // up", not a touch hardware fault. runInteractive() draws
-            // occasional targeted crosshairs, not a per-frame animation
-            // loop, so there's no flicker concern drawing straight to
-            // the real display here the way there would be for CLEAR's
-            // continuous redraws.
-            if (TouchCal::runInteractive(tft, reader, Theme::BG, Theme::WHITE, Theme::CYAN, newCal,
-                                         usingCapTouch ? CAP_TOUCH_MIN_SPREAD : RESISTIVE_MIN_SPREAD)) {
-                applyCal(newCal);
-                s_usingSavedCal = true;
-            }
-#endif
+            // No panel on this one. It is a deliberate 1.5 second hold on a
+            // strip of the title bar nobody finds by accident, and it is the
+            // way back when the touch is already too far out to hit a
+            // CONFIRM button -- which is exactly when a confirm button would
+            // be the thing standing between you and a working screen.
+            runTouchCalibration();
             enterClear();
         }
     } else {
@@ -2265,6 +2275,42 @@ void loop() {
             static bool gestureMoved  = false;
             static int  gestureStartX = 0, gestureStartY = 0;
             static int  lastY = -1;
+            // While a confirm panel is up it owns the screen: it answers the
+            // tap, and the list underneath neither scrolls nor acts. Handled
+            // before the gesture machinery rather than inside it so a drag
+            // that starts on the panel cannot scroll the list out from under
+            // the question being asked.
+            static int confirmDownX = 0, confirmDownY = 0;
+            if (uiSettingsConfirmRow() != SettingsRow::NONE) {
+                // Where the finger went DOWN, not where it came up: tp is not
+                // reliable on the release edge, which is why the row hit test
+                // below keeps its own start coordinates too.
+                if (touchJustDown) { confirmDownX = tp.x; confirmDownY = tp.y; }
+                if (touchJustUp) {
+                    lastTouch = now;
+                    const SettingsRow pending = uiSettingsConfirmRow();
+                    const SettingsConfirmTap ct =
+                        uiSettingsHitConfirm(confirmDownX, confirmDownY, tft.width(), tft.height());
+                    if (ct == SettingsConfirmTap::CONFIRM) {
+                        uiSettingsSetConfirm(SettingsRow::NONE);
+                        if (pending == SettingsRow::CALIBRATE) {
+                            runTouchCalibration();
+                            enterSettings();
+                        } else if (pending == SettingsRow::RESET_STATS) {
+                            engine.resetLifetime();
+                        } else if (pending == SettingsRow::BORING_MODE) {
+                            Settings::toggleBoringMode();
+                        } else if (pending == SettingsRow::REPLAY_INTRO) {
+                            Squachy::replayIntro();
+                            enterClear();
+                        }
+                    } else if (ct == SettingsConfirmTap::CANCEL) {
+                        uiSettingsSetConfirm(SettingsRow::NONE);
+                    }
+                }
+                gestureActive = false;
+                break;
+            }
             if (touchJustDown) {
                 gestureActive = true;
                 gestureMoved  = false;
@@ -2299,7 +2345,6 @@ void loop() {
                             applyColorOrder();
                             break;
                         case SettingsRow::ROTATION_LOCK: Settings::toggleRotationLock(); break;
-                        case SettingsRow::BORING_MODE: Settings::toggleBoringMode(); break;
                         case SettingsRow::BRIGHTNESS:
                             Settings::adjustBrightness(gestureStartX < tft.width() / 2 ? -16 : 16);
                             applyBrightness();
@@ -2308,32 +2353,29 @@ void loop() {
                         case SettingsRow::DETECTION_FILTER: enterDetFilter(); break;
                         case SettingsRow::POWER_SAVER: enterPower(); break;
                         case SettingsRow::IGNORED_DEVICES:  enterIgnoreList(); break;
-                        case SettingsRow::CALIBRATE: {
-#if defined(AWOK)
-                            awokRunCalibration();
-#elif defined(CYD35)
-                            cyd35RunCalibration();
-#else
-                            TouchCal::RawReader reader = usingCapTouch ? rawReadCap : rawReadResistive;
-                            TouchCal::Cal newCal;
-                            // tft directly, not *canvas -- see the other
-                            // call site's comment (title-bar long-press
-                            // trigger above) for why.
-                            if (TouchCal::runInteractive(tft, reader, Theme::BG, Theme::WHITE, Theme::CYAN, newCal,
-                                                         usingCapTouch ? CAP_TOUCH_MIN_SPREAD : RESISTIVE_MIN_SPREAD)) {
-                                applyCal(newCal);
-                                s_usingSavedCal = true;
-                            }
-#endif
-                            enterSettings();
+                        // These ask first -- see the confirm panel over in
+                        // ui_settings. A row earns one when tapping it a
+                        // second time does not put things back: calibration
+                        // overwrites the calibration you are using, reset
+                        // zeroes a count that most of the outfits are gated
+                        // on, and the intro takes the screen over.
+                        case SettingsRow::CALIBRATE:
+                        case SettingsRow::RESET_STATS:
+                        case SettingsRow::REPLAY_INTRO:
+                            uiSettingsSetConfirm(row);
                             break;
-                        }
+                        case SettingsRow::BORING_MODE:
+                            // Asked on the way IN only. Boring mode hides
+                            // every Squachy row, which is exactly what makes
+                            // it hard to undo by accident -- but turning it
+                            // back off restores all of them, so a panel there
+                            // would just be friction on the fix for the thing
+                            // the panel exists to warn about.
+                            if (Settings::boringMode()) Settings::toggleBoringMode();
+                            else                        uiSettingsSetConfirm(row);
+                            break;
                         case SettingsRow::CHECK_COLORS: enterColorCheck(true); break;
                         case SettingsRow::DIAGNOSTICS:  enterDiagnostics(); break;
-                        case SettingsRow::REPLAY_INTRO:
-                            Squachy::replayIntro();
-                            enterClear();
-                            break;
                         case SettingsRow::SHOW_OFF:
                             Squachy::startShowOff();
                             enterClear();
@@ -2342,7 +2384,6 @@ void loop() {
                         case SettingsRow::SHADES_COLOR: Squachy::cycleShadesColor(); break;
                         case SettingsRow::OUTFIT:       enterOutfit(); break;
                         case SettingsRow::VIEW_DIARY:   enterDiary(); break;
-                        case SettingsRow::RESET_STATS: engine.resetLifetime(); break;
                         case SettingsRow::BACK:        enterClear(); break;
                         default: break;
                     }

@@ -1818,7 +1818,7 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
             const uint16_t fur   = t.color565(107, 64, 40);
 
             const int oy = hy + S(8);
-            const int ow = (S(17) * 97) / 100, oh = (S(16) * 97) / 100;
+            const int ow = (S(17) * 102) / 100, oh = (S(16) * 102) / 100;
             const int R  = S(23);
 
             // ---- the hood, repainted as a solid ring OVER his head --------
@@ -2879,7 +2879,7 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         const int hcy = hy + s_headDrop + S(8);
         t.fillCircle(cx2, hcy, S(23) + 2, t.color565(18, 10, 4));
         t.fillCircle(cx2, hcy, S(23), t.color565(255, 138, 26));
-        const int pow_ = (S(17) * 97) / 100, poh = (S(16) * 97) / 100;
+        const int pow_ = (S(17) * 102) / 100, poh = (S(16) * 102) / 100;
         t.fillEllipse(cx2, hcy, pow_, poh, t.color565(107, 64, 40));
         t.fillEllipse(cx2, hcy, pow_ - S(4), poh - S(4), t.color565(72, 42, 26));
     }
