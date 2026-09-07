@@ -29,7 +29,24 @@ GIF  = os.path.join(HERE, "..", "SquachWatch-CYD", "docs", "demo.gif")
 
 ZOOM = 2     # integer only: nearest-neighbour has to keep device pixels square
 MS   = 66    # ~15fps, close to what the panel actually manages
-LEN  = 45    # frames per segment
+LEN  = 24    # frames per segment
+
+# On ZOOM and LEN, because the obvious trade is the wrong one. Rendering at
+# 1x and asking the README to display it at 640 does not work: GitHub strips
+# style attributes, so image-rendering:pixelated is unavailable and the
+# browser scales it smoothly, which is the one thing pixel art cannot take.
+#
+# Length is the lever instead, and it is a better one than resolution.
+# Measured on this exact footage:
+#
+#     180 frames   1530 KB at 2x     603 KB at 1x
+#      96 frames    821 KB at 2x     324 KB at 1x
+#      64 frames    565 KB at 2x     224 KB at 1x
+#
+# A four second clip at full size is SMALLER than a twelve second one at
+# half size, and it needs no scaling. So this stays at 2x and stays short.
+# That matters because the trailer has to be re-rendered often to stay
+# honest: every one of the last twenty commits touched the drawing code.
 
 # Each new outfit appears over the background that unlocks it, which is the
 # only place either of them makes sense. The warm-up counts differ so the
