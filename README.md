@@ -103,11 +103,22 @@ If a microSD card is present, every detection is also appended to
 No GPS, so logs are local-timeline only — but they're useful for
 documenting incident history.
 
-## Screenshots
+## Every outfit
 
-Screenshots will land here after the first hardware test. No
-fabricated marketing shots — what you see on a real CYD is what
-you'll get.
+Squachy has fourteen costumes. Most are earned by detection count; four are
+hidden behind things nobody tells you about, on the background they belong
+to. Two of them are in the animation at the top of this page.
+
+<p align="center">
+  <img src="docs/outfits.png" width="880"
+       alt="All fourteen of Squachy's outfits, rendered by the firmware">
+</p>
+
+No fabricated marketing shots, which was the promise here before there was
+anything to show. Every panel above was drawn by the firmware, one render
+per costume, and the labels are read out of the source rather than typed
+next to it — so a renamed or newly added outfit cannot end up captioned
+wrongly. Regenerate with `python3 make_gallery.py` in `sim/`.
 
 ## Project layout
 
@@ -117,6 +128,7 @@ SquachWatch-CYD/
 ├── README.md
 ├── LICENSE
 ├── docs/
+│   ├── FAQ.md                    (what it does, hardware, legality)
 │   ├── DESIGN.md                 (the contract — single source of truth)
 │   ├── BUILD.md                  (friendly walkthrough)
 │   ├── PINOUT.md                 (CYD pin map)
@@ -141,6 +153,7 @@ SquachWatch-CYD/
     ├── Makefile                  (`make` for the CLI, `make wasm` for the web build)
     ├── *.h                       (Arduino/TFT_eSPI/NVS shims)
     ├── make_demo.py              (renders the animation at the top of this file)
+    ├── make_gallery.py           (renders the outfit sheet above)
     └── web/                      (the browser build)
 ```
 

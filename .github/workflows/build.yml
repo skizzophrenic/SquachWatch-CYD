@@ -1,0 +1,78 @@
+# Builds every commit, which nothing did before this existed.
+#
+# release-flasher.yml only triggers on a v*.*.* tag, so the first thing that
+# ever compiled master was the release itself. A broken commit stayed
+# invisible until someone cut a tag, and then it surfaced as a FAILED
+# RELEASE -- the worst possible place to find out, because the tag is
+# already public by then and has to be deleted and re-pushed.
+#
+# This is deliberately not a copy of the release job. It builds and stops:
+# no merged images, no manifests, no Pages deploy, no release. Just the
+# question "does this still compile", answered in about two minutes.
+name: Build
+
+on:
+  push:
+    branches: [master]
+    # Documentation and release notes cannot break a build, and the tag
+    # workflow covers the release path already.
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/release-notes/**'
+  pull_request:
+  workflow_dispatch: {}
+
+# A second push to master supersedes the first: there is no point finishing
+# a build for a commit that is already two behind.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      # Both caches matter: the toolchain is a ~200MB download and the
+      # framework another large unpack, and neither changes between runs.
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      # The three that ship, which is what `pio run` with no -e does --
+      # cyd35 is excluded on purpose (see platformio.ini: it is frozen and
+      # boot loops on hardware, so a green build here would mean nothing)
+      # and the two -fast variants differ from their base build by one
+      # -D flag, so they cannot break independently of it.
+      - name: Build
+        run: pio run
+
+  emulator:
+    # Cheap, and it catches the failure mode the merge introduced: the
+    # emulator compiles the firmware's own sources against its shims, so a
+    # change to a header signature breaks it here rather than the next time
+    # somebody tries to render the README animation.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the PC emulator
+        run: make -C sim -j"$(nproc)"
+      - name: Render one frame
+        run: |
+          cd sim
+          ./squachsim clear /tmp/smoke.png --bg 7 --outfit 13 --frames 60
+          test -s /tmp/smoke.png

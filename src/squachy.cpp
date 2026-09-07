@@ -606,17 +606,22 @@ struct OutfitDef { const char* name; uint32_t threshold; };
 // Threshold sentinel: this outfit is not unlocked by lifetime count at
 // all, so no reachable total should ever satisfy it.
 static const uint32_t OUTFIT_BY_EVENT = 0xFFFFFFFFu;
+// Names are what the settings row and the outfit screen print, so they are
+// kept short: "TANOOKI SQUACH" and "CAPTAIN SQUACH" were fourteen characters
+// and ran off the end of the OUTFIT row. Dropping the redundant "SQUACH"
+// takes the longest name from fourteen down to eleven, and every one of
+// them is already displayed next to a picture of him.
 static const OutfitDef OUTFITS[] = {
     { "NONE",           0 },
-    { "TANOOKI SQUACH", 0 },
+    { "TANOOKI", 0 },
     { "UNICORN",        0 },
-    { "TINFOIL SQUACH", 5 },
-    { "SHADOW SQUACH",  15 },
+    { "TINFOIL", 5 },
+    { "SHADOW",  15 },
     { "PLUMBER BRO",    25 },
     { "TALL BRO",       40 },
-    { "SPACE SQUACH",   60 },
+    { "SPACE",   60 },
     { "BLUE BLUR",      100 },
-    { "CAPTAIN SQUACH", 150 },
+    { "CAPTAIN", 150 },
     // Not earned by counting anything: OUTFIT_BY_EVENT marks it as
     // unlocked by something happening instead -- summoning the werewolf
     // on the FIRE background. See outfitUnlocked().
