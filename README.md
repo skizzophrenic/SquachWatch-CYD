@@ -13,15 +13,17 @@ digital rain, Squachy the mascot, full-screen dramatic ALERT overlays, and
 the glitchy SquachWatch wordmark.
 
 <p align="center">
-  <img src="docs/demo.gif" width="640"
-       alt="SquachWatch running four of its backgrounds: the snow parka on the ski hill, the void eye over the starfield, then synthwave and the Gibson">
+  <a href="https://squachwatch.com/emulator/" title="Drive it in your browser">
+    <img src="docs/demo.gif" width="640"
+         alt="SquachWatch running four of its backgrounds: the snow parka on the ski hill, the void eye over the starfield, then synthwave and the Gibson">
+  </a>
 </p>
 
 <p align="center">
   <b>That is the firmware itself, not a mockup.</b><br>
   Every frame above was rendered by the same C++ that runs on the board,
   compiled for a PC.<br>
-  <a href="https://squachwatch.com/emulator/"><b>Drive it in your browser &rarr;</b></a>
+  <a href="https://squachwatch.com/emulator/"><b>Click it to drive it in your browser &rarr;</b></a>
 </p>
 
 ## What it detects
