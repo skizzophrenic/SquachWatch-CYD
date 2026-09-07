@@ -31,6 +31,7 @@
 #include "ignore_list.h"
 #include "ignore_list.h"
 #include "ui_detfilter.h"
+#include "ui_power.h"
 #include "squachy.h"
 #include "cap_touch.h"
 #include "touch_cal.h"
@@ -725,11 +726,31 @@ static bool rawReadResistive(int16_t& a, int16_t& b) {
 // left/right column respectively) — map them onto whichever named
 // constants pollTouch() actually uses, matching the same top/bottom/
 // left/right relationship already derived for each touch type above.
+// Set by the power-saver timer in loop(). Kept out of Settings on purpose:
+// it is a live state, not a preference, and it must never be persisted --
+// coming back from a reboot into a dimmed screen with no memory of why would
+// look exactly like a broken backlight.
+static bool s_screenDimmed = false;
+
 static void applyBrightness() {
-    uint8_t duty = Settings::brightness();
+    uint8_t duty = s_screenDimmed ? Settings::dimLevel() : Settings::brightness();
     ledcWrite(BL_CH_ORIG, duty);
     ledcWrite(BL_CH_CAP,  duty);
     ledcWrite(BL_CH_AWOK, duty);
+}
+
+// 240, 160 or 80 MHz. Never lower: the radio needs an 80 MHz APB clock, and
+// the display's SPI divisor and the console's baud divisor are both derived
+// from it, so going under would take out scanning, the panel and the serial
+// console in one move. Only called when the value actually changes --
+// setCpuFrequencyMhz() reconfigures peripherals, so calling it every frame
+// would be both wasteful and a good way to find a driver's re-entrancy bug.
+static uint16_t s_cpuMhzApplied = 240;
+static void applyCpuClock() {
+    const uint16_t want = Settings::cpuMhz();
+    if (want == s_cpuMhzApplied) return;
+    setCpuFrequencyMhz(want);
+    s_cpuMhzApplied = want;
 }
 
 // Set once at boot when a saved calibration passes TouchCal::load()'s
@@ -1004,6 +1025,12 @@ static void enterDetFilter() {
     uiDetFilterInit(*canvas);
 }
 
+static void enterPower() {
+    state = AppState::POWER_SAVER;
+    transitionStart = millis();
+    uiPowerInit(*canvas);
+}
+
 // Runtime UART speed -- set per-board in platformio.ini (-DSERIAL_BAUD=...)
 // for hardware confirmed to hold a faster rate cleanly; boards without
 // an explicit override fall back to this conservative default rather
@@ -1093,6 +1120,9 @@ void setup() {
     ledcSetup(BL_CH_AWOK, 5000, 8);
     ledcAttachPin(BL_PIN_AWOK, BL_CH_AWOK);
     applyBrightness();
+    // A saved core clock has to be restored here too, or the setting silently
+    // reverts to 240 MHz on every reboot and looks like it never took.
+    applyCpuClock();
 
 #if defined(CYD35)
     // No FULL-screen double buffer on this board — confirmed on real
@@ -1293,6 +1323,26 @@ void loop() {
     // once per physical press no matter how long it's held.
     bool touchJustDown = tp.valid && !prevTouchValid;
     bool touchJustUp    = !tp.valid && prevTouchValid;
+
+    // The tap that wakes a dimmed screen only wakes it. Without this, feeling
+    // for the device in the dark cycles a background or opens a menu on the
+    // way, because every screen's own handlers see that first touch as a real
+    // press. Swallowed for the whole gesture, not just the frame it lands on,
+    // so a wake tap that turns into a drag cannot scroll a list either.
+    //
+    // lastTouch is still updated here, because that is what actually undims
+    // on the next frame -- the touch is being consumed, not ignored.
+    static bool s_swallowTouch = false;
+    if (s_screenDimmed && touchJustDown) {
+        s_swallowTouch = true;
+        lastTouch = now;
+    }
+    if (!tp.valid) s_swallowTouch = false;
+    if (s_swallowTouch) {
+        tp.valid = false;
+        touchJustDown = false;
+        touchJustUp = false;
+    }
     engine.loop();
 
     // Rotate button lives in the title bar's top-right corner, shown on
@@ -1382,12 +1432,12 @@ void loop() {
     if (tp.valid && (state == AppState::CLEAR || state == AppState::LOG ||
                       state == AppState::SETTINGS || state == AppState::OUTFIT ||
                       state == AppState::RAWSCAN || state == AppState::DETECTION_FILTER ||
-                      state == AppState::IGNORE_LIST) &&
+                      state == AppState::IGNORE_LIST || state == AppState::POWER_SAVER) &&
         Theme::settingsButtonHit(tp.x, tp.y) &&
         (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
         lastTouch = now;
         if (state == AppState::OUTFIT || state == AppState::DETECTION_FILTER ||
-            state == AppState::IGNORE_LIST) enterSettings();
+            state == AppState::IGNORE_LIST || state == AppState::POWER_SAVER) enterSettings();
         else if (state == AppState::SETTINGS) enterClear();
         else {
             // Leaving RAWSCAN via the settings icon, same as BACK does
@@ -1558,6 +1608,8 @@ void loop() {
             // renderer stays unaware of the outfit system.
             if (Theme::consumeWerewolfSummon()) Squachy::unlockWolfPelt();
             if (Theme::consumeToasterCatch())   Squachy::unlockChromeWing();
+            if (Theme::consumeEyeCatch())       Squachy::unlockVoidEye();
+            if (Theme::consumeLodgeKnock())     Squachy::unlockParka();
 
             bool boring = Settings::boringMode();
             ButtonId barBtn = tp.valid ? Theme::hitTestButtonBar(tp.x, tp.y, tft.width(), tft.height()) : ButtonId::NONE;
@@ -2254,6 +2306,7 @@ void loop() {
                             break;
                         case SettingsRow::CONFIDENCE: Settings::cycleMinConfidence(); break;
                         case SettingsRow::DETECTION_FILTER: enterDetFilter(); break;
+                        case SettingsRow::POWER_SAVER: enterPower(); break;
                         case SettingsRow::IGNORED_DEVICES:  enterIgnoreList(); break;
                         case SettingsRow::CALIBRATE: {
 #if defined(AWOK)
@@ -2375,6 +2428,64 @@ void loop() {
             }
             break;
         }
+        case AppState::POWER_SAVER: {
+            uiPowerTick(*canvas, now);
+            // Same drag-to-scroll, commit-on-release gesture the Settings and
+            // type-filter lists use, and for the same reason: committing on
+            // press turns a swipe that happens to start on a row into a
+            // toggle before the drag is ever recognised as a scroll.
+            static bool gestureActive = false;
+            static bool gestureMoved  = false;
+            static int  gestureStartX = 0, gestureStartY = 0;
+            static int  lastY = -1;
+            if (touchJustDown) {
+                gestureActive = true; gestureMoved = false;
+                gestureStartX = tp.x; gestureStartY = tp.y; lastY = tp.y;
+            }
+            if (tp.valid && gestureActive) {
+                int dy = tp.y - lastY;
+                if (abs(dy) > 10) {
+                    gestureMoved = true;
+                    uiPowerScroll(dy > 0 ? -1 : 1);
+                    lastY = tp.y;
+                }
+            }
+            if (touchJustUp && gestureActive) {
+                if (!gestureMoved) {
+                    lastTouch = now;
+                    PowerRow hit = uiPowerHitTest(*canvas, gestureStartX, gestureStartY,
+                                                  tft.width(), tft.height());
+                    switch (hit) {
+                        case PowerRow::ENABLED:
+                            Settings::togglePowerSaver();
+                            // Turning it off has to undo whatever it was
+                            // doing, immediately and on this frame -- leaving
+                            // a dimmed screen behind after switching the
+                            // feature off would read as a bug.
+                            applyCpuClock();
+                            if (s_screenDimmed) { s_screenDimmed = false; applyBrightness(); }
+                            break;
+                        case PowerRow::SCREEN_TIMEOUT: Settings::cycleScreenTimeout(); break;
+                        case PowerRow::DIM_LEVEL:
+                            // Left half darker, right half brighter, the same
+                            // split the BRIGHTNESS row uses.
+                            Settings::adjustDimLevel(gestureStartX < tft.width() / 2 ? -8 : 8);
+                            if (s_screenDimmed) applyBrightness();   // show it live
+                            break;
+                        case PowerRow::IDLE_FPS:      Settings::cycleIdleFps(); break;
+                        case PowerRow::IDLE_AFTER:    Settings::cycleIdleAfter(); break;
+                        case PowerRow::CPU_CLOCK:
+                            Settings::cycleCpuMhz();
+                            applyCpuClock();
+                            break;
+                        case PowerRow::WAKE_ON_ALERT: Settings::toggleWakeOnAlert(); break;
+                        default: break;
+                    }
+                }
+                gestureActive = false;
+            }
+            break;
+        }
         case AppState::DIAGNOSTICS: {
             DiagnosticsInfo info;
 #if defined(AWOK)
@@ -2422,6 +2533,7 @@ void loop() {
             info.mappedY = tp.y;
             info.pushUs  = s_pushUsAvg;
             info.frameUs = s_frameUsAvg;
+            info.bgUs    = Theme::backgroundUs();
             info.freeHeap = ESP.getFreeHeap();
             info.largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
             info.resetReason = resetReasonName();
@@ -2519,6 +2631,42 @@ void loop() {
 
     s_pushUsAvg  = emaUpdate(s_pushUsAvg, s_pushAccumUs);
     s_frameUsAvg = emaUpdate(s_frameUsAvg, micros() - frameStartUs);
+
+    // ---- power saver ------------------------------------------------------
+    // Both timers hang off lastTouch, which every screen already maintains.
+    // They are separate settings because they are very different impositions:
+    // slowing the animation down is barely noticeable, and blanking the screen
+    // is not, so most people will want them on different clocks.
+    {
+        const uint32_t idleMs = now - lastTouch;
+
+        // An alert has to be visible. A detector that dims itself and then
+        // hides the thing it just found is worse than one with no saver at all.
+        const bool alerting = (state == AppState::ALERT || state == AppState::WATCH_ALERT);
+        const uint16_t timeoutSec = Settings::screenTimeoutSec();
+        const bool wantDim = timeoutSec && idleMs > (uint32_t)timeoutSec * 1000UL &&
+                             !(Settings::wakeOnAlert() && alerting);
+        if (wantDim != s_screenDimmed) {
+            s_screenDimmed = wantDim;
+            applyBrightness();
+        }
+
+        // Hold the loop to the chosen rate once idle. delay() hands the core
+        // to the RTOS idle task, which parks it in WAITI -- a real saving
+        // because the clock gates, though not the same order as a true light
+        // sleep, which this firmware cannot take while the radio is scanning.
+        //
+        // Note which way this points: the slack being given back only exists
+        // because the panel push is fast. On the 40 MHz build there is no idle
+        // time left to hand over, so the faster SPI clock is what makes this
+        // saving possible rather than something to trade against it.
+        const uint8_t fps = Settings::idleFps();
+        if (fps && idleMs > (uint32_t)Settings::idleAfterSec() * 1000UL) {
+            const uint32_t budgetUs = 1000000UL / fps;
+            const uint32_t spentUs  = micros() - frameStartUs;
+            if (spentUs < budgetUs) delay((budgetUs - spentUs) / 1000UL);
+        }
+    }
 
     prevTouchValid = tp.valid;
 }

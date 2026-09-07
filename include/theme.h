@@ -226,8 +226,10 @@ namespace Theme {
     // as it scrolls up and off.
     void drawTerminalLog(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);
 
-    // Fireflies: soft pulsing dots drifting slowly and bouncing off the
-    // band's edges — a calm, low-contrast option.
+    // Fireflies: a meadow at dusk. Dithered sky that swings from sunset to
+    // night, a moon with a per-row halo, a black treeline, fog over the
+    // far field, and fireflies at three depths -- far ones are single
+    // points, near ones are soft blooms that light the grass under them.
     void drawFireflies(TFT_eSPI& t, uint32_t now, int yStart, int yEnd);
 
     // A run down a corridor of mainframe towers, with a live trace over
@@ -290,6 +292,12 @@ namespace Theme {
     // nothing unless something published itself this frame.
     void drawBackgroundOverlay(TFT_eSPI& t, uint32_t now);
 
+    // Microseconds spent in the last drawActiveBackground() call,
+    // exponentially smoothed. Held across screen changes so DIAGNOSTICS
+    // -- which draws no background of its own -- reports the cost of
+    // the animation rather than the cost of itself.
+    uint32_t backgroundUs();
+
     void drawActiveBackground(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
                               const DetectionEngine& eng, bool advance = true);
 
@@ -317,6 +325,20 @@ namespace Theme {
     // TOASTERS background. Same consume-once contract as the werewolf
     // summon above; main.cpp turns it into an outfit unlock.
     bool consumeToasterCatch();
+
+    // True once, after the player has caught TWO eyes in a row on the
+    // STARFIELD background -- the eyeball is one of the eight junk objects
+    // that fly out of the vanishing point, and it only counts while it is
+    // close. Letting a close one leave the screen untapped puts the streak
+    // back to zero. Same consume-once contract as the two above; main.cpp
+    // turns it into the VOID EYE unlock.
+    bool consumeEyeCatch();
+
+    // True once, after five taps on the lodge on the SNOWFALL background --
+    // the same count and the same 2.5 s window the moon uses. Same
+    // consume-once contract as the three above; main.cpp turns it into the
+    // PARKA unlock.
+    bool consumeLodgeKnock();
 
     // The flock's wing, exposed so the CHROME WING outfit can wear the
     // exact same shape rather than an approximation of it: a curved lobe

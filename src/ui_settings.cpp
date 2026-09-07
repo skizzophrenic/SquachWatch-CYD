@@ -24,6 +24,7 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::IGNORED_DEVICES,
     SettingsRow::NICKNAME, SettingsRow::SHADES_COLOR, SettingsRow::OUTFIT,
     SettingsRow::REPLAY_INTRO, SettingsRow::SHOW_OFF, SettingsRow::VIEW_DIARY,
+    SettingsRow::POWER_SAVER,
     SettingsRow::CALIBRATE, SettingsRow::CHECK_COLORS, SettingsRow::DIAGNOSTICS, SettingsRow::RESET_STATS, SettingsRow::BACK,
 };
 static const uint8_t ALL_ROWS_N = sizeof(ALL_ROWS) / sizeof(ALL_ROWS[0]);
@@ -254,6 +255,9 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             label = "IGNORED";
             snprintf(valBuf, valBufN, "%u", (unsigned)IgnoreList::count());
             value = valBuf;
+            break;
+        case SettingsRow::POWER_SAVER:
+            label = "POWER SAVER"; value = Settings::powerSaver() ? "ON" : "OFF";
             break;
         case SettingsRow::CALIBRATE:
             label = "CALIBRATE TOUCH";

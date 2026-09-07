@@ -154,6 +154,15 @@ namespace Squachy {
     // the TOASTERS background. Persists immediately; a no-op once earned.
     void unlockChromeWing();
 
+    // VOID EYE is the third. main.cpp calls this when the player catches two
+    // eyes in a row on the STARFIELD background -- see Theme::consumeEyeCatch().
+    // Persists immediately; a no-op once earned.
+    void unlockVoidEye();
+
+    // PARKA is the fourth event unlock. main.cpp calls this after five taps on
+    // the lodge on the SNOWFALL background -- see Theme::consumeLodgeKnock().
+    void unlockParka();
+
     // Unlock announcements. Any outfit that becomes available -- by
     // crossing its lifetime-detection threshold, or by the werewolf
     // summon -- is queued once, and main.cpp drains the queue by popping

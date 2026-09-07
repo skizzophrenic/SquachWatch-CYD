@@ -24,6 +24,27 @@ static uint8_t     s_brightness = 255;
 static Confidence  s_minConf    = Confidence::LOW_CONF;
 static bool        s_boringMode = false;
 
+// ---- power saver ---------------------------------------------------------
+// Indices into the tables below rather than raw values, so the menu can
+// cycle them without knowing what the steps are and a saved index stays
+// valid if a step is ever inserted.
+static const uint16_t SCREEN_TIMEOUTS[] = { 0, 15, 30, 60, 120, 300 };
+static const uint8_t  SCREEN_TIMEOUTS_N = sizeof(SCREEN_TIMEOUTS) / sizeof(SCREEN_TIMEOUTS[0]);
+static const uint8_t  IDLE_FPS[]        = { 0, 20, 12, 8, 5 };
+static const uint8_t  IDLE_FPS_N        = sizeof(IDLE_FPS) / sizeof(IDLE_FPS[0]);
+static const uint16_t IDLE_AFTER[]      = { 5, 10, 20, 30, 60 };
+static const uint8_t  IDLE_AFTER_N      = sizeof(IDLE_AFTER) / sizeof(IDLE_AFTER[0]);
+static const uint16_t CPU_MHZ[]         = { 240, 160, 80 };
+static const uint8_t  CPU_MHZ_N         = sizeof(CPU_MHZ) / sizeof(CPU_MHZ[0]);
+
+static bool     s_powerSaver   = false;
+static uint8_t  s_scrTimeoutIx = 2;    // 30 s
+static uint8_t  s_dimLevel     = 16;   // ~6%, dim but not off
+static uint8_t  s_idleFpsIx    = 2;    // 12 fps
+static uint8_t  s_idleAfterIx  = 1;    // 10 s
+static uint8_t  s_cpuIx        = 0;    // 240 MHz, the stock clock
+static bool     s_wakeOnAlert  = true;
+
 const char* backgroundName(Background b) {
     switch (b) {
         case Background::DIGITAL:    return "DIGITAL RAIN";
@@ -39,6 +60,53 @@ const char* backgroundName(Background b) {
         case Background::SYNTHWAVE: return "SYNTHWAVE";
         default:                    return "?";
     }
+}
+
+// Every getter reports the STOCK value when the master switch is off, so
+// the rest of the firmware never has to ask twice: one call tells it both
+// whether the feature is on and what to do.
+bool     powerSaver()       { return s_powerSaver; }
+uint16_t screenTimeoutSec() { return s_powerSaver ? SCREEN_TIMEOUTS[s_scrTimeoutIx] : 0; }
+uint8_t  dimLevel()         { return s_dimLevel; }
+uint8_t  idleFps()          { return s_powerSaver ? IDLE_FPS[s_idleFpsIx] : 0; }
+uint16_t idleAfterSec()     { return IDLE_AFTER[s_idleAfterIx]; }
+uint16_t cpuMhz()           { return s_powerSaver ? CPU_MHZ[s_cpuIx] : 240; }
+bool     wakeOnAlert()      { return s_wakeOnAlert; }
+
+uint16_t screenTimeoutSecRaw() { return SCREEN_TIMEOUTS[s_scrTimeoutIx]; }
+uint8_t  idleFpsRaw()          { return IDLE_FPS[s_idleFpsIx]; }
+uint16_t cpuMhzRaw()           { return CPU_MHZ[s_cpuIx]; }
+
+void togglePowerSaver() {
+    s_powerSaver = !s_powerSaver;
+    s_prefs.putBool("pwrOn", s_powerSaver);
+}
+void cycleScreenTimeout() {
+    s_scrTimeoutIx = (uint8_t)((s_scrTimeoutIx + 1) % SCREEN_TIMEOUTS_N);
+    s_prefs.putUChar("pwrScrnT", s_scrTimeoutIx);
+}
+void adjustDimLevel(int8_t delta) {
+    int v = (int)s_dimLevel + delta;
+    if (v < 0)   v = 0;
+    if (v > 128) v = 128;          // past half brightness it is not dim any more
+    s_dimLevel = (uint8_t)v;
+    s_prefs.putUChar("pwrDim", s_dimLevel);
+}
+void cycleIdleFps() {
+    s_idleFpsIx = (uint8_t)((s_idleFpsIx + 1) % IDLE_FPS_N);
+    s_prefs.putUChar("pwrFps", s_idleFpsIx);
+}
+void cycleIdleAfter() {
+    s_idleAfterIx = (uint8_t)((s_idleAfterIx + 1) % IDLE_AFTER_N);
+    s_prefs.putUChar("pwrIdleT", s_idleAfterIx);
+}
+void cycleCpuMhz() {
+    s_cpuIx = (uint8_t)((s_cpuIx + 1) % CPU_MHZ_N);
+    s_prefs.putUChar("pwrCpu", s_cpuIx);
+}
+void toggleWakeOnAlert() {
+    s_wakeOnAlert = !s_wakeOnAlert;
+    s_prefs.putBool("pwrWake", s_wakeOnAlert);
 }
 
 void load() {
@@ -65,6 +133,20 @@ void load() {
     s_minConf    = (Confidence)s_prefs.getUChar("conf", (uint8_t)Confidence::LOW_CONF);
     if ((uint8_t)s_minConf > (uint8_t)Confidence::HIGH_CONF) s_minConf = Confidence::LOW_CONF;
     s_boringMode = s_prefs.getBool("boring", false);
+    s_powerSaver   = s_prefs.getBool("pwrOn", false);
+    s_scrTimeoutIx = s_prefs.getUChar("pwrScrnT", 2);
+    s_dimLevel     = s_prefs.getUChar("pwrDim", 16);
+    s_idleFpsIx    = s_prefs.getUChar("pwrFps", 2);
+    s_idleAfterIx  = s_prefs.getUChar("pwrIdleT", 1);
+    s_cpuIx        = s_prefs.getUChar("pwrCpu", 0);
+    s_wakeOnAlert  = s_prefs.getBool("pwrWake", true);
+    // A saved index from a build with more steps than this one must not walk
+    // off the end of the table.
+    if (s_scrTimeoutIx >= SCREEN_TIMEOUTS_N) s_scrTimeoutIx = 2;
+    if (s_idleFpsIx    >= IDLE_FPS_N)        s_idleFpsIx    = 2;
+    if (s_idleAfterIx  >= IDLE_AFTER_N)      s_idleAfterIx  = 1;
+    if (s_cpuIx        >= CPU_MHZ_N)         s_cpuIx        = 0;
+    if (s_dimLevel     > 128)                s_dimLevel     = 16;
 
     uint16_t allTypesOn = 0;
     for (uint8_t t = 1; t < (uint8_t)DetectionType::COUNT; t++) allTypesOn |= (uint16_t)(1u << t);

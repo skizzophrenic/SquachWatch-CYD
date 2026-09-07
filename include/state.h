@@ -78,8 +78,10 @@ enum class AppState : uint8_t {
     OUTFIT_UNLOCK    = 13, // "OUTFIT UNLOCKED" celebration, pushed
                             // automatically whenever Squachy earns a new
                             // costume; returns to CLEAR when dismissed
-    IGNORE_LIST      = 14  // muted devices, reached via Settings'
+    IGNORE_LIST      = 14, // muted devices, reached via Settings'
                             // "IGNORED DEVICES" row
+    POWER_SAVER      = 15  // battery settings, reached via Settings'
+                            // "POWER SAVER" row
 };
 
 enum class ButtonId : uint8_t {

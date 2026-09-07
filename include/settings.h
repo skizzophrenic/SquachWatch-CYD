@@ -99,6 +99,61 @@ namespace Settings {
     uint8_t    brightness();
     void       adjustBrightness(int8_t delta);   // clamps, persists
 
+    // ---- POWER SAVER -----------------------------------------------------
+    // Every one of these is an independent, manually chosen setting; the
+    // master switch below only gates whether any of them are acted on, so
+    // turning it off restores stock behaviour without losing the choices.
+    //
+    // Nothing here changes the display's SPI clock. That was the obvious
+    // idea and it is the wrong one: the panel push is a blocking, polled
+    // transfer, so halving the clock does not idle the chip, it keeps the
+    // core awake twice as long for the same frame. The savings that are
+    // real are the backlight, the idle frame rate, and the core clock.
+    bool       powerSaver();
+    void       togglePowerSaver();
+
+    // Seconds of no touch before the backlight drops to dimLevel(). 0 = never.
+    uint16_t   screenTimeoutSec();
+    void       cycleScreenTimeout();
+
+    // Duty the backlight falls to when it times out, 0..255. Allowed to go
+    // to 0 (fully off) unlike brightness(), which has a floor of 32: this
+    // one always comes back on the next touch, so it cannot strand anyone
+    // in front of a black screen the way a dark brightness() could.
+    uint8_t    dimLevel();
+    void       adjustDimLevel(int8_t delta);
+
+    // Frames per second the main loop is held to once idle. 0 = uncapped.
+    uint8_t    idleFps();
+    void       cycleIdleFps();
+
+    // Seconds of no touch before the idle frame cap applies. Kept separate
+    // from screenTimeoutSec() on purpose -- slowing the animation down is a
+    // much smaller imposition than dimming the screen, so most people will
+    // want it to happen sooner.
+    uint16_t   idleAfterSec();
+    void       cycleIdleAfter();
+
+    // Core clock in MHz: 240, 160 or 80. Never below 80 -- the radio needs
+    // an 80 MHz APB clock, and the display's SPI divisor and the UART's
+    // baud divisor are both derived from it, so dropping under that would
+    // take out scanning, the panel and the console together.
+    uint16_t   cpuMhz();
+    void       cycleCpuMhz();
+
+    // Whether an alert pulls the backlight back up. On by default: a
+    // detector that dims itself and then hides the alert it just found is
+    // worse than useless.
+    bool       wakeOnAlert();
+    void       toggleWakeOnAlert();
+
+    // What is CONFIGURED, ignoring the master switch. Only the power menu
+    // wants these: it has to show you what you have chosen while the feature
+    // is still switched off, which is the order most people will set it up in.
+    uint16_t   screenTimeoutSecRaw();
+    uint8_t    idleFpsRaw();
+    uint16_t   cpuMhzRaw();
+
     // Minimum confidence an alert needs to interrupt with the ALERT
     // screen. LOW_CONF = no filtering (every match alerts, the
     // original behavior).

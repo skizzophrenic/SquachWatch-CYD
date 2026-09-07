@@ -38,6 +38,10 @@ struct DiagnosticsInfo {
     // Both in microseconds.
     uint32_t    pushUs;
     uint32_t    frameUs;
+    // Cost of the animated backdrop alone, carried over from the last
+    // screen that drew one -- this screen does not. Without it FRAME
+    // here only ever describes the diagnostics screen.
+    uint32_t    bgUs;
 
     // System.
     uint32_t    freeHeap;

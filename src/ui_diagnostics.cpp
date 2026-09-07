@@ -88,6 +88,13 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
                      (unsigned long)(fus / 1000),
                      (unsigned long)((fus % 1000) / 100),
                      (unsigned long)(1000000UL / fus));
+        // FRAME above is this screen, which has no backdrop. BG is the
+        // last animated screen's, and is the only figure here that says
+        // anything about the background you picked.
+        y = drawLine(t, y, Theme::AMBER, "BG:", "%lu.%lu ms  (max %lu)",
+                     (unsigned long)(info.bgUs / 1000),
+                     (unsigned long)((info.bgUs % 1000) / 100),
+                     (unsigned long)(1000000UL / (info.bgUs ? info.bgUs : 1)));
     }
     y += 4;
 
