@@ -162,6 +162,12 @@ namespace Squachy {
     // through the air reads as a bug rather than as a joke.
     bool isHeld();
 
+    // Top of his head as actually drawn this frame, bob and squash included.
+    // lastFootprint()'s `top` is NOT this: that reports a generous, un-bobbed
+    // hit box so a tap target does not move under a finger. Anything that
+    // stands on him wants this one.
+    int crownY();
+
     // WOLF PELT is the one outfit not earned by a detection count --
     // main.cpp calls this when the werewolf easter egg on the FIRE
     // background is summoned. Persists immediately; a no-op once it has

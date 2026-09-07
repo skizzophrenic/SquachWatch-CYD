@@ -496,6 +496,11 @@ static uint32_t s_duckUntil    = 0;
 static uint32_t s_duckCooldown = 0;
 
 static int   s_lastCx = -10000, s_lastHeadTopY = 0;
+// The head's top for THIS frame, bob and squash included. Deliberately
+// separate from s_lastHeadTopY, which lastFootprint() reports and which is
+// the UN-animated base: a tap target that bobbed would move under a finger
+// mid-press. Anything standing ON him needs the opposite.
+static int   s_lastCrownY = 0;
 // Top of the region the caller gave us. Costume detail that reaches ABOVE
 // the head needs this: hy is not a fixed distance from the top of the
 // drawing area -- he sits lower with a speech bubble up and rides higher
@@ -1015,6 +1020,8 @@ void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal, uint32_t hitCo
     }
     nextIdleAt = now + 15000 + random(0, 15000);
 }
+
+int crownY() { return s_lastCrownY; }
 
 bool lastFootprint(int& cx, int& halfW, int& top, int& bot) {
     if (s_lastCx < -5000) return false;
@@ -2936,6 +2943,7 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     // effect. The outfit comes along because a hat that stayed put
     // while the head moved would read as detached.
     const int hh = hy + s_headDrop;
+    s_lastCrownY = hh;          // see the declaration: the live one, not the base
 
     // PARKA recolours his fur orange so the coat's sleeves and legs need no
     // repainting -- but that recolour must stop at his neck. His HEAD is his

@@ -73,6 +73,10 @@ static float     s_y       = 0.0f;
 // drift from the ascent even if the head moves under him mid-flight.
 static float     s_launchX = 0.0f, s_landX = 0.0f, s_groundY = 0.0f;
 static float     s_apexY   = 0.0f, s_tHalf = 0.0f;
+// Where he actually was when he stepped off, which is not where he landed:
+// he rides the bob while perched, so the drop starts from wherever the head
+// happened to be at that instant.
+static float     s_dropX   = 0.0f, s_dropY = 0.0f;
 
 void reset() {
     s_phase  = Phase::AWAY;
@@ -110,19 +114,17 @@ void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom) {
     // bug rather than as a joke.
     if (Squachy::isHeld()) { if (s_phase != Phase::AWAY) reset(); return; }
 
-    // lastFootprint() reports a generous HIT BOX, not his silhouette: `top`
-    // sits 20 scaled units above his crest so a tap near his head still pets
-    // him. Perching on that put the apex above the screen and he launched
-    // clean off the top. His real crown is top + 20*scale, and halfW is
-    // 24*scale, so the scale can be recovered from the two of them.
+    // lastFootprint() gives the floor and the width, but NOT the head: its
+    // `top` is a generous, un-bobbed hit box sitting twenty scaled units
+    // above his crest, and perching on that launched him off the screen.
+    // crownY() is the head as actually drawn this frame, which is also what
+    // makes riding the bob free.
+    (void)top;
     const float ground = (float)(bot - SPR);                       // feet on the floor
-    const float crown  = (float)(top + (20 * halfW) / 24);         // top of his head
-    // Six above the computed crown rather than eight below it. Measured
-    // against a real frame: the reported head top lands about six pixels
-    // into the skull, and sinking him further put his feet level with
-    // Squachy's eyes -- he read as standing IN his forehead rather than on
-    // top of him. His crest spikes rise either side of the pet from here.
-    float       headY  = crown - (float)SPR - 6.0f;
+    const float crown  = (float)Squachy::crownY();                 // top of his head
+    // Feet exactly on the crown. No fudge needed now that this is the real
+    // drawn head rather than a hit box: his crest spikes rise either side.
+    float       headY  = crown - (float)SPR;
     // Deliberately allowed above the band. At this size he is 40 tall and
     // Squachy's head top is only about 26 below the title bar, so clamping
     // him into the band is what put his feet in Squachy's eyes. The title
@@ -179,9 +181,29 @@ void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom) {
         break;
     }
     case Phase::PERCH: {
-        s_x = (s_launchX + s_landX) * 0.5f;
-        s_y = s_apexY;
-        if (now - s_at >= PERCH_MS) { s_phase = Phase::DOWN; s_at = now; }
+        // Glued to the crown rather than frozen where he landed. headY and
+        // cx are recomputed from lastFootprint() every frame anyway, so
+        // riding the bob and the squash exactly costs nothing -- the values
+        // were being thrown away. Horizontal too: Squachy ambles, and
+        // following his bob but not his drift would leave the pet hovering
+        // beside his head, which is worse than not following at all.
+        s_x = (float)(cx - SPR / 2);
+        s_y = headY;
+        if (now - s_at >= PERCH_MS) {
+            // The drop starts from HERE, and the landing is worked out from
+            // where Squachy is now rather than where he was when the jump
+            // began. The fall time is re-derived from the same G, so "the
+            // same gravity he went up with" still holds -- only the height
+            // it is solving for has changed.
+            s_dropX = s_x;
+            s_dropY = s_y;
+            s_landX = s_fromLeft ? (float)(cx + halfW) : (float)(cx - halfW - SPR);
+            const float dh = ground - s_dropY;
+            s_tHalf = (dh > 1.0f) ? sqrtf(2.0f * dh / G) : 1.0f;
+            s_groundY = ground;
+            s_phase = Phase::DOWN;
+            s_at = now;
+        }
         break;
     }
     case Phase::DOWN: {
@@ -191,8 +213,8 @@ void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom) {
         const float tt = (float)(now - s_at);
         if (tt >= s_tHalf) { s_y = s_groundY; s_x = s_landX;
                              s_phase = Phase::RUN_OUT; s_at = now; break; }
-        s_y = s_apexY + 0.5f * G * tt * tt;
-        s_x = ((s_launchX + s_landX) * 0.5f) + (s_landX - (s_launchX + s_landX) * 0.5f) * (tt / s_tHalf);
+        s_y = s_dropY + 0.5f * G * tt * tt;
+        s_x = s_dropX + (s_landX - s_dropX) * (tt / s_tHalf);
         break;
     }
     case Phase::RUN_OUT: {
