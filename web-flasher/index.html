@@ -382,6 +382,21 @@
     line-height:1.4;
   }
 
+  /* Same shape as the white-screen caution above, deliberately -- both are
+     "this looks broken and isn't your fault" notes. Pink rather than yellow
+     because this one is worse: a white screen is one reflash away, a boot
+     loop means the thing never comes up. */
+  .sd-note{
+    margin:0 0 16px;
+    font-size:0.82rem;
+    color:var(--vapor-pink);
+    background:rgba(255,113,206,0.07);
+    border:1px dashed var(--vapor-pink);
+    border-radius:6px;
+    padding:8px 10px;
+    line-height:1.4;
+  }
+
   /* Overclock opt-in. Deliberately styled closer to the white-screen
      caution note than to a feature toggle -- it is a thing that can
      make your display stop working, and the label has to carry that
@@ -688,6 +703,12 @@
       The 2.8&quot; CYD ships with one of two different display drivers depending on manufacturing
       batch, and there's no way to tell which from the outside. If you flash one and get a
       <strong>solid white screen</strong>, that's not broken — just flash the other 2.8&quot; option above instead.
+    </p>
+
+    <p class="sd-note">
+      <strong>First boot: take the microSD card out.</strong>
+      Some boards boot loop with a card in. Known bug, not a bad flash &mdash; pull it
+      and power cycle. Put it back once you&rsquo;re running.
     </p>
 
     <label class="overclock-row" id="overclockRow">

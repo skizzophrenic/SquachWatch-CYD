@@ -134,14 +134,41 @@ static uint8_t buildDisplayList(DisplayItem* out) {
 // and to keep them from eating too much vertical space. Needs a live
 // TFT_eSPI& since heights depend on actual font metrics -- shared by
 // drawing and hit-testing so they can't drift apart.
-static void computeGeom(TFT_eSPI& t, int screenH, int& top, int& bodyBottom, int& rowH, int& headerH) {
+// BACKGROUND and OUTFIT are the only two rows whose value can collide with
+// its own label, and they are worth measuring rather than guessing about.
+// The built-in font advances 12px a character at size 2, the label starts at
+// x=8, and the value is right-aligned with 18px held back for the scrollbar.
+// "WIREFRAME TUNNEL" is sixteen characters, so on a 320-wide screen it ran
+// 18px INTO "BACKGROUND" -- and in portrait, at 240 wide, it ran 98px in and
+// even "SYNTHWAVE" collided. drawRow() measures neither and clips nothing,
+// so they simply overprinted each other.
+//
+// Giving the value its own line makes that impossible for any name, now or
+// later, which is why this beats shrinking the text or truncating it.
+static bool isTwoLineRow(SettingsRow r) {
+    return r == SettingsRow::BACKGROUND || r == SettingsRow::OUTFIT;
+}
+
+static int itemHeight(const DisplayItem& it, int rowH, int headerH, int tallH) {
+    if (it.isHeader) return headerH;
+    return isTwoLineRow(it.row) ? tallH : rowH;
+}
+
+static void computeGeom(TFT_eSPI& t, int screenH, int& top, int& bodyBottom,
+                        int& rowH, int& headerH, int& tallH) {
     top = TOP_MARGIN;
     bodyBottom = screenH - 4;
     t.setTextSize(2);
     rowH = t.fontHeight() + 8;
+    const int big = t.fontHeight();
     t.setTextSize(1);
     headerH = t.fontHeight() + 6;
+    tallH   = t.fontHeight() + big + 7;
 }
+
+// Row height is decided in exactly one place, itemHeight() below, shared by
+// drawing and hit testing -- if those two ever disagree, a tap lands on the
+// row above the one you pressed.
 
 void uiSettingsInit(TFT_eSPI& t) {
     g_scroll = 0;
@@ -291,6 +318,50 @@ static void drawHeader(TFT_eSPI& t, int w, int y, int hgt, RowGroupId g) {
 // to size 2 metrics in computeGeom() so tap targets keep their full
 // height, and so hit-testing (which shares computeGeom) can't drift
 // away from what was drawn.
+// Label small on top, value big underneath. That way round on purpose: you
+// tap these rows to change the value, so the value is the thing being read,
+// and the label is the part you already know.
+//
+// The label keeps its group colour rather than going grey. This screen draws
+// a dimmed animated background behind itself, and a low-contrast label on a
+// moving backdrop is the one thing it cannot afford.
+//
+// `cycles` decides the arrows, and it is not decoration. BACKGROUND cycles
+// in place when tapped, so it gets a pair. OUTFIT opens the outfit chooser
+// instead, so it gets a single right chevron -- the same grammar the rest of
+// the UI uses for "this opens something". Showing a left arrow on a row that
+// cannot go left would be a lie told in pixels.
+static void drawTwoLineRow(TFT_eSPI& t, int w, int y, int hgt, const char* label,
+                           const char* value, uint16_t labelColor, bool cycles) {
+    t.setTextSize(1);
+    t.setTextColor(labelColor, Theme::BG);
+    t.setCursor(8, y + 2);
+    t.print(label);
+    const int lineY = y + 2 + t.fontHeight() + 1;
+
+    t.setTextSize(2);
+    const int chev = t.textWidth(">");
+    const int lo = 8 + chev + 4;
+    const int hi = w - 18 - chev - 4;
+    const int vw = value ? t.textWidth(value) : 0;
+    // Centred between the arrows rather than in the row, so the longest name
+    // still cannot slide underneath one of them.
+    int vx = lo + ((hi - lo) - vw) / 2;
+    if (vx < lo) vx = lo;
+    if (value) {
+        t.setTextColor(Theme::WHITE, Theme::BG);
+        t.setCursor(vx, lineY);
+        t.print(value);
+    }
+    t.setTextColor(Theme::PURPLE, Theme::BG);
+    if (cycles) { t.setCursor(8, lineY); t.print("<"); }
+    t.setCursor(w - 18 - chev, lineY);
+    t.print(">");
+
+    t.setTextSize(1);
+    t.drawFastHLine(4, y + hgt - 1, w - 8, Theme::PURPLE);
+}
+
 static void drawRow(TFT_eSPI& t, int w, int y, int hgt, const char* label,
                     const char* value, bool danger, uint16_t labelColor,
                     bool compact) {
@@ -427,8 +498,8 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
 void uiSettingsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     int w = t.width(), h = t.height();
 
-    int top, bodyBottom, rowH, headerH;
-    computeGeom(t, h, top, bodyBottom, rowH, headerH);
+    int top, bodyBottom, rowH, headerH, tallH;
+    computeGeom(t, h, top, bodyBottom, rowH, headerH, tallH);
 
     // Whatever background style CLEAR is showing, drawn at reduced
     // strength behind this screen's own rows -- see
@@ -461,7 +532,7 @@ void uiSettingsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     int idx = g_scroll;
     int visibleCount = 0;
     while (idx < n) {
-        int itemH = items[idx].isHeader ? headerH : rowH;
+        int itemH = itemHeight(items[idx], rowH, headerH, tallH);
         if (y + itemH > bodyBottom) break;
         if (items[idx].isHeader) {
             drawHeader(t, w, y, itemH, items[idx].group);
@@ -471,8 +542,13 @@ void uiSettingsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
             const char* value;
             bool danger;
             rowContent(items[idx].row, eng, valBuf, sizeof(valBuf), label, value, danger);
-            drawRow(t, w, y, itemH, label, value, danger, groupColor(items[idx].group),
-                    h > w);
+            if (isTwoLineRow(items[idx].row)) {
+                drawTwoLineRow(t, w, y, itemH, label, value, groupColor(items[idx].group),
+                               items[idx].row == SettingsRow::BACKGROUND);
+            } else {
+                drawRow(t, w, y, itemH, label, value, danger, groupColor(items[idx].group),
+                        h > w);
+            }
         }
         y += itemH;
         idx++;
@@ -488,8 +564,8 @@ void uiSettingsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
 
 SettingsRow uiSettingsHitTest(TFT_eSPI& t, int x, int y, int screenW, int screenH) {
     (void)x; (void)screenW;
-    int top, bodyBottom, rowH, headerH;
-    computeGeom(t, screenH, top, bodyBottom, rowH, headerH);
+    int top, bodyBottom, rowH, headerH, tallH;
+    computeGeom(t, screenH, top, bodyBottom, rowH, headerH, tallH);
 
     DisplayItem items[ALL_ROWS_N + 4];
     uint8_t n = buildDisplayList(items);
@@ -497,7 +573,7 @@ SettingsRow uiSettingsHitTest(TFT_eSPI& t, int x, int y, int screenW, int screen
     int cy = top;
     int idx = g_scroll;
     while (idx < n) {
-        int itemH = items[idx].isHeader ? headerH : rowH;
+        int itemH = itemHeight(items[idx], rowH, headerH, tallH);
         if (cy + itemH > bodyBottom) break;
         if (y >= cy && y < cy + itemH) {
             return items[idx].isHeader ? SettingsRow::NONE : items[idx].row;

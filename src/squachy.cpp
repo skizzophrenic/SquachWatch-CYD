@@ -1776,46 +1776,6 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
             // from behind his hip.
             break;
         }
-        case OutfitId::CHROMEWING: {
-            // BROAD: the flock's own wing routine, not an imitation of it.
-            // Same curved lobe, blunt tip, two-tone shading and feather
-            // divisions the toasters wear, just wider in the chord because
-            // a narrow wing thins out to nothing at CLEAR-screen scale.
-            //
-            // The pair is made by mirroring: angle becomes (180 - a) and
-            // the curl is negated. drawWing() picks its shaded edge by
-            // which one is lower on screen, so both wings get the shadow
-            // underneath instead of one of them looking flipped.
-            const uint16_t wh  = TFT_WHITE;
-            const uint16_t wh2 = t.color565(214, 214, 228);
-            const uint16_t wh3 = t.color565(150, 150, 172);
-            // Wings rest, then break into a short burst of three beats
-            // every few seconds, decaying so the last one is smallest.
-            // Constant gentle motion reads as a hover; a bird at rest that
-            // occasionally beats reads as a bird.
-            //
-            // Both wings take the SAME beat value. They are mirrored, so
-            // the lift is added to opposite base angles -- which is what
-            // makes one sign move them together rather than apart.
-            static uint32_t flapAt = 0, flapNext = 0;
-            if (now >= flapNext) {
-                flapAt   = now;
-                flapNext = now + 3200u + (uint32_t)random(0, 4200);
-            }
-            const uint32_t fAge = now - flapAt;
-            float beat = 0.0f;
-            if (fAge < 900u) {
-                const float fp = (float)fAge / 900.0f;
-                beat = sinf(fp * 3.0f * 6.2831853f) * (1.0f - fp);
-            }
-            const float sy   = (float)(hy + S(20));
-            const float len  = (float)S(25);
-            Theme::drawWing(t, (float)(cx2 - S(13)), sy, len,
-                            218.0f, -beat, 0.50f, 3, wh, wh3, -0.55f, 26.0f, wh2);
-            Theme::drawWing(t, (float)(cx2 + S(13)), sy, len,
-                            -38.0f, beat, 0.50f, 3, wh, wh3, 0.55f, 26.0f, wh2);
-            break;
-        }
         case OutfitId::PARKA: {
             const uint16_t ink   = t.color565(18, 10, 4);
             const uint16_t org   = t.color565(255, 138, 26);
@@ -2440,6 +2400,54 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         float ph = (float)(now % 900) / 900.0f;
         furMain  = blend(CYAN, VAPOR_PINK, (uint16_t)(ph * 256.0f));
         furLight = blend(VAPOR_PINK, VAPOR_PURPLE, (uint16_t)(ph * 256.0f));
+    }
+
+    // ---- CHROME WING's wings ----------------------------------------------
+    // Behind him, for the same reason the tail below is: drawOutfit() runs
+    // last, so drawn there they came out ON TOP of him -- a pair of wings
+    // lying across his chest rather than a pair he is wearing.
+    //
+    if (outfitNow == OutfitId::CHROMEWING) {
+        // BROAD: the flock's own wing routine, not an imitation of it.
+        // Same curved lobe, blunt tip, two-tone shading and feather
+        // divisions the toasters wear, just wider in the chord because
+        // a narrow wing thins out to nothing at CLEAR-screen scale.
+        //
+        // The pair is made by mirroring: angle becomes (180 - a) and
+        // the curl is negated. drawWing() picks its shaded edge by
+        // which one is lower on screen, so both wings get the shadow
+        // underneath instead of one of them looking flipped.
+        const uint16_t wh  = TFT_WHITE;
+        const uint16_t wh2 = t.color565(214, 214, 228);
+        const uint16_t wh3 = t.color565(150, 150, 172);
+        // Wings rest, then break into a short burst of three beats
+        // every few seconds, decaying so the last one is smallest.
+        // Constant gentle motion reads as a hover; a bird at rest that
+        // occasionally beats reads as a bird.
+        //
+        // Both wings take the SAME beat value. They are mirrored, so
+        // the lift is added to opposite base angles -- which is what
+        // makes one sign move them together rather than apart.
+        static uint32_t flapAt = 0, flapNext = 0;
+        if (now >= flapNext) {
+            flapAt   = now;
+            flapNext = now + 3200u + (uint32_t)random(0, 4200);
+        }
+        const uint32_t fAge = now - flapAt;
+        float beat = 0.0f;
+        if (fAge < 900u) {
+            const float fp = (float)fAge / 900.0f;
+            beat = sinf(fp * 3.0f * 6.2831853f) * (1.0f - fp);
+        }
+        // Anchored to hy, his shoulders, rather than the head anchor
+        // drawOutfit() used to pass in. Wings grow from a back, so they
+        // should not ride his head's squash-and-stretch.
+        const float sy   = (float)(hy + S(20));
+        const float len  = (float)S(25);
+        Theme::drawWing(t, (float)(cx2 - S(13)), sy, len,
+                        218.0f, -beat, 0.50f, 3, wh, wh3, -0.55f, 26.0f, wh2);
+        Theme::drawWing(t, (float)(cx2 + S(13)), sy, len,
+                        -38.0f, beat, 0.50f, 3, wh, wh3, 0.55f, 26.0f, wh2);
     }
 
     // ---- TANOOKI's tail ---------------------------------------------------
