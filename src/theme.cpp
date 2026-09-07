@@ -1765,7 +1765,7 @@ static void drawBorisAt(TFT_eSPI& t, int x, int y, uint32_t now, float scale, bo
 // frame comes off the clock rather than off a frame counter, because 80 ms is
 // slower than this board's own frame time and a counter would run him at
 // whatever speed the rest of the scene happened to be managing.
-void drawLilGuy(TFT_eSPI& t, int x, int baseY, uint32_t now, uint8_t scale) {
+void drawLilGuy(TFT_eSPI& t, int x, int baseY, uint32_t now, uint8_t scale, bool flip) {
     static const uint16_t PAL[4] = { 0, 0, 0, 0 };
     (void)PAL;
     const uint16_t hair = t.color565(0, 255, 245);
@@ -1779,7 +1779,9 @@ void drawLilGuy(TFT_eSPI& t, int x, int baseY, uint32_t now, uint8_t scale) {
         for (uint8_t xx = 0; xx < LILGUY_W; xx++) {
             const uint8_t c = (uint8_t)((row >> (xx * 2)) & 3u);
             if (!c) continue;
-            t.fillRect(x + xx * s, top + y * s, s, s,
+            // The art faces right, so travelling left is the mirrored column.
+            const uint8_t dx = flip ? (uint8_t)(LILGUY_W - 1 - xx) : xx;
+            t.fillRect(x + dx * s, top + y * s, s, s,
                        (c == 1) ? hair : (c == 2) ? skin : body);
         }
     }

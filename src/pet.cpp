@@ -234,7 +234,10 @@ void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom) {
     if (s_phase == Phase::AWAY) return;
     if (s_y + SPR > (float)bandBottom) s_y = (float)(bandBottom - SPR);
 
-    Theme::drawLilGuy(t, (int)s_x, (int)s_y + SPR, now, SCALE);
+    // He travels the same way for the whole visit -- in, up, over, down and
+    // out again -- so the facing is settled once, by the side he arrived
+    // from. Without this he ran in forwards and left backwards.
+    Theme::drawLilGuy(t, (int)s_x, (int)s_y + SPR, now, SCALE, !s_fromLeft);
     // Beside him, not above. Perched on the crown he is already as high as
     // the band goes, so a bubble over his head lands behind the title bar --
     // which is where the whole joke went the first time. Level with him, and
