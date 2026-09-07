@@ -44,7 +44,7 @@ BINARY = os.path.join(HERE, "squachsim")
 LIVE_BINARY = os.path.join(HERE, "squachsim-live")
 
 # Same default the Makefile uses -- the two repos sit side by side.
-SQUACHWATCH = os.environ.get("SQUACHWATCH", os.path.join(HERE, "..", "SquachWatch-CYD"))
+SQUACHWATCH = os.environ.get("SQUACHWATCH", os.path.dirname(HERE))
 
 # The live device's NVS. A real directory rather than a temp one on
 # purpose: settings, pet counts and "has seen the walkthrough" survive a

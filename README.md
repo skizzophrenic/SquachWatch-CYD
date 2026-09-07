@@ -130,13 +130,18 @@ SquachWatch-CYD/
 │   ├── sd_log.h
 │   ├── cyd_user_setup.h          (TFT_eSPI config for the CYD)
 │   └── ui_*.h
-└── src/
-    ├── main.cpp
-    ├── theme.cpp
-    ├── signatures.cpp
-    ├── detection.cpp
-    ├── sd_log.cpp
-    └── ui_*.cpp
+├── src/
+│   ├── main.cpp
+│   ├── theme.cpp
+│   ├── signatures.cpp
+│   ├── detection.cpp
+│   ├── sd_log.cpp
+│   └── ui_*.cpp
+└── sim/                          (PC emulator — compiles src/ natively)
+    ├── Makefile                  (`make` for the CLI, `make wasm` for the web build)
+    ├── *.h                       (Arduino/TFT_eSPI/NVS shims)
+    ├── make_demo.py              (renders the animation at the top of this file)
+    └── web/                      (the browser build)
 ```
 
 ## License

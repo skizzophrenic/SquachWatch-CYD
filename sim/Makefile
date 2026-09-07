@@ -15,12 +15,15 @@
 # detection_sim.cpp for the stand-in), and the touch calibration code.
 
 SIM_DIR  := .
-# Path to a SquachWatch-CYD checkout. Defaults to a sibling directory --
-# clone the two next to each other -- and can point anywhere:
+# Path to the firmware sources. The emulator lives INSIDE the firmware
+# checkout now, so this is just the parent directory -- it used to be a
+# sibling clone, which is precisely why CI could never build it. Still a
+# variable rather than a hard-coded "..", so a second checkout can be
+# pointed at:
 #   make SQUACHWATCH=/path/to/SquachWatch-CYD
-# Nothing is vendored from it, so the emulator always renders whatever
-# branch that checkout currently has.
-SQUACHWATCH ?= ../SquachWatch-CYD
+# Nothing is vendored, so the emulator always renders whatever the working
+# tree currently has.
+SQUACHWATCH ?= ..
 SRC      := $(SQUACHWATCH)/src
 INC      := $(SQUACHWATCH)/include
 

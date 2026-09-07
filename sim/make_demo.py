@@ -14,18 +14,18 @@ them up from the other side.
 It drives the real emulator -- the same C++ that runs on the board -- and
 encodes what comes out, so the README advertises the firmware rather than a
 recording somebody staged once and forgot. The output lands directly in the
-firmware checkout at ../SquachWatch-CYD/docs/demo.gif.
+firmware's own docs/ directory, one level up.
 
-It does NOT run in CI. This repo is not public and the release workflow has
-no way to fetch it, which is the same reason web/squachsim.wasm is committed
-as a static artifact over there. Re-run this by hand when the look changes,
-or the demo quietly drifts behind the thing it is demonstrating.
+This CAN run in CI now that the emulator lives in the firmware repo rather
+than beside it: the renderer needs nothing but g++ and sources that are
+already here. Until something schedules it, re-run it by hand when the look
+changes, or the demo quietly drifts behind what it demonstrates.
 """
 import os, subprocess, sys, glob, shutil
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT  = os.path.join(HERE, "out", "demo")
-GIF  = os.path.join(HERE, "..", "SquachWatch-CYD", "docs", "demo.gif")
+GIF  = os.path.join(HERE, "..", "docs", "demo.gif")
 
 ZOOM = 2     # integer only: nearest-neighbour has to keep device pixels square
 MS   = 66    # ~15fps, close to what the panel actually manages
