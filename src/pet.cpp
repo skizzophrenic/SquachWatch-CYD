@@ -50,13 +50,12 @@ static const uint8_t QUIPS_N = sizeof(QUIPS) / sizeof(QUIPS[0]);
 // read as a leap rather than a float.
 static const float    G        = 0.0018f;
 static const uint32_t PERCH_MS = 3200;      // long enough to read the line
-// Three, not four, and the reason is geometry rather than taste. Standing
-// on Squachy's crown there are only about 28 pixels between the title bar
-// and the top of his skull, so a 40-tall sprite has to either lose a third
-// of itself behind the title bar or sink its feet down to his eyes. Both
-// were tried. At 30 tall he fits with room to spare, and he is still half
-// again the size of the cameo that crosses the toasters.
-static const int      SCALE    = 3;
+// Four now, which is what was wanted all along. It was three while the
+// title bar existed: standing on Squachy's crown there were only about 28
+// pixels above his skull, and a 40-tall sprite had to either lose a third
+// of itself behind the bar or sink its feet to his eyes. The bar is gone,
+// those rows are the background's, and he fits at full size.
+static const int      SCALE    = 4;
 static const int      SPR      = LILGUY_W * SCALE;   // 40 across and tall
 static const float    RUN_PXMS = 0.075f;    // 75 px a second, a trot
 
@@ -248,12 +247,14 @@ void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom) {
         const int bx = ((int)s_x + SPR + 4 + bw <= screenW - 2)
                        ? (int)s_x + SPR + 4
                        : (int)s_x - bw - 4;
-        // Never above the band. Perched on the crown his own top sits only a
-        // few pixels below the title bar, so an unclamped bubble lands
-        // behind it -- which is exactly where the joke went the first two
-        // times this was wired up.
+        // Clear of the corner buttons, not just of the band. Perched on the
+        // crown he is high enough that an unclamped bubble used to land
+        // behind the old title bar; now that the bar is gone it slides under
+        // the settings icon instead, which is a 20-tall box in the top-left.
+        // Below both is the only place that is always safe.
         int by = (int)s_y + 6;
-        if (by < bandTop + 1) by = bandTop + 1;
+        if (by < 22) by = 22;
+        (void)bandTop;
         bubble(t, bx, by, screenW, QUIPS[s_quip]);
     }
 }

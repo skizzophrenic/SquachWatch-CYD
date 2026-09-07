@@ -133,16 +133,20 @@ uint16_t titlebarColor(int x, int w) {
 // target (ROTATE_HIT_*) is bigger than the visual icon and extends
 // below the title bar into the content area — a finger needs a much
 // bigger target than a stylus would.
-static const int ROTATE_ICON_W = 22;
-static const int ROTATE_HIT_W  = 44;
-static const int ROTATE_HIT_H  = 40;
+static const int ROTATE_ICON_W = 28;
+// A quarter bigger than they were, and the ICON grew as well as the target.
+// The targets were already 44x40, far larger than the 22px glyph inside them,
+// so what made these awkward to hit was never the hit box -- it was that they
+// looked tiny and people aimed at the drawing rather than at the button.
+static const int ROTATE_HIT_W  = 55;
+static const int ROTATE_HIT_H  = 50;
 
 static void drawRotateIcon(TFT_eSPI& t, int w, int barH) {
     int x0 = w - ROTATE_ICON_W;
     t.fillRect(x0, 0, ROTATE_ICON_W, barH, BG);
     int cx = x0 + ROTATE_ICON_W / 2;
     int cy = barH / 2;
-    int r  = 5;
+    int r  = 6;
     // Ring sweeps clockwise from 30 to 330 degrees (drawArc's 0 is 12
     // o'clock), leaving a 60 degree gap centered at the top for the
     // arrowhead to sit in.
@@ -164,17 +168,21 @@ bool rotateButtonHit(int x, int y, int w) {
 // Settings button, mirrored into the top-left corner of the title bar:
 // a 3-bar "hamburger" glyph, same oversized tap target treatment as the
 // rotate icon on the other side.
-static const int SETTINGS_ICON_W = 22;
-static const int SETTINGS_HIT_W  = 44;
-static const int SETTINGS_HIT_H  = 40;
+static const int SETTINGS_ICON_W = 28;
+static const int SETTINGS_HIT_W  = 55;
+static const int SETTINGS_HIT_H  = 50;
+// The two icons float over live background now that the bar behind them is
+// gone, so each keeps a small opaque box of its own -- without it a thin
+// cyan glyph disappears against the synthwave sun.
+static const int ICON_BOX_H      = 20;
 
 static void drawSettingsIcon(TFT_eSPI& t, int barH) {
     t.fillRect(0, 0, SETTINGS_ICON_W, barH, BG);
     int cx = SETTINGS_ICON_W / 2;
-    int y0 = barH / 2 - 4;
-    t.drawFastHLine(cx - 7, y0,     14, CYAN);
-    t.drawFastHLine(cx - 7, y0 + 4, 14, VAPOR_PINK);
-    t.drawFastHLine(cx - 7, y0 + 8, 14, CYAN);
+    int y0 = barH / 2 - 5;
+    t.drawFastHLine(cx - 9, y0,      18, CYAN);
+    t.drawFastHLine(cx - 9, y0 + 5,  18, VAPOR_PINK);
+    t.drawFastHLine(cx - 9, y0 + 10, 18, CYAN);
 }
 
 bool settingsButtonHit(int x, int y) {
@@ -187,31 +195,30 @@ void setRotateIconVisible(bool visible) {
     s_rotateIconVisible = visible;
 }
 
+// The bar is gone; the two buttons that lived on it are not.
+//
+// It used to paint a full-width gradient, a rule, and a centred title across
+// the top sixteen rows of every screen. What it actually CARRIED was the only
+// route into Settings, the only route back out of four screens, and the
+// rotation control -- so those stay, as floating corner buttons, and the
+// decoration goes.
+//
+// The `title` argument is deliberately kept and deliberately ignored. Twelve
+// screens call this, each passing its own name; keeping the signature means
+// none of them changed, and putting a title back later is a one-line edit
+// here rather than twelve.
+//
+// Note what did NOT change: every screen still starts its body at y=16 and
+// still tells Squachy his band begins there. He sizes himself from the space
+// he is given -- scale = charAvail / BASE_HEIGHT -- so handing him the
+// sixteen freed rows would have made him a tenth bigger and moved everything
+// hanging off him. The rows are freed on screen without being offered to the
+// layout, which is the whole trick.
 void drawTitleBar(TFT_eSPI& t, const char* title) {
+    (void)title;
     int w = t.width();
-    for (int x = 0; x < w; x++) {
-        t.drawFastVLine(x, 0, 14, titlebarColor(x, w));
-    }
-    t.drawFastHLine(0, 14, w, PURPLE);
-    // Row 15. The bar itself is rows 0-13 plus the rule on 14, but every
-    // screen in the app starts its body at y=16 -- so row 15 belonged to
-    // nobody and kept whatever the last frame left there, which showed
-    // up as a 1px strip of fragments under the rule. Clearing it here
-    // means the title bar owns the full 16 rows its callers already
-    // assume it does, and fixes the strip on every screen at once
-    // rather than screen by screen.
-    t.drawFastHLine(0, 15, w, BG);
-    t.setTextSize(1);
-    // Transparent background so the fade shows through between glyphs
-    // instead of a mismatched solid-color block behind the text. Black
-    // ink reads more like a print/stamp against the bright cyan/
-    // magenta gradient than white did.
-    t.setTextColor(BLACK);
-    int tw = t.textWidth(title);
-    t.setCursor((w - tw) / 2, 4);
-    t.print(title);
-    drawSettingsIcon(t, 14);
-    if (s_rotateIconVisible) drawRotateIcon(t, w, 14);
+    drawSettingsIcon(t, ICON_BOX_H);
+    if (s_rotateIconVisible) drawRotateIcon(t, w, ICON_BOX_H);
 }
 
 void drawButton(TFT_eSPI& t, int x, int y, int w, int h,

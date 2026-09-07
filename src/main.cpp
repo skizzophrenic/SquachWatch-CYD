@@ -1536,21 +1536,34 @@ void loop() {
     }
 
     // Long-press the middle of the title bar (between the settings and
-    // rotate icons) on CLEAR/LOG to (re)calibrate touch — held, not
-    // tapped, so normal use (including tapping either icon) can't
-    // trigger it by accident.
+    // BOTTOM centre now, not the title bar -- the bar is gone. A 1.5 second
+    // hold on the middle of the button bar on CLEAR/LOG recalibrates touch.
+    //
+    // It lands on the LOG button, which is deliberate rather than awkward:
+    // the CLR button beside it already carries a four second hold for the
+    // outfit unlock, so this follows a gesture the same bar already has
+    // instead of inventing one. LOG had no hold of its own.
+    //
+    // Still no confirmation panel. This is the way back when touch is
+    // already too far out to hit a button, which is exactly when a CONFIRM
+    // button would be the thing standing between you and a working screen.
+    //
+    // Honest trade against what it replaces: the old target was a 220x20
+    // strip and this is a 96x20 button, so the escape hatch is less than
+    // half the size. It is also one somebody might actually find.
     static uint32_t calHoldStart = 0;
-    bool overTitleBar = tp.valid && tp.x >= 50 && tp.x < tft.width() - 50 && tp.y < 20;
-    if ((state == AppState::CLEAR || state == AppState::LOG) && overTitleBar) {
+    const int calW = tft.width(), calH = tft.height();
+    bool overBottomMid = tp.valid && tp.x >= calW / 3 && tp.x < (calW * 2) / 3
+                         && tp.y >= calH - 34;
+    if ((state == AppState::CLEAR || state == AppState::LOG) && overBottomMid) {
         if (calHoldStart == 0) calHoldStart = now;
         else if (now - calHoldStart > 1500) {
             calHoldStart = 0;
             lastTouch = now;
-            // No panel on this one. It is a deliberate 1.5 second hold on a
-            // strip of the title bar nobody finds by accident, and it is the
-            // way back when the touch is already too far out to hit a
-            // CONFIRM button -- which is exactly when a confirm button would
-            // be the thing standing between you and a working screen.
+            // Swallow the rest of this gesture, or the finger coming off the
+            // LOG button opens the log the moment calibration finishes. Same
+            // whole-gesture swallow the dim-wake tap uses above.
+            s_swallowTouch = true;
             runTouchCalibration();
             enterClear();
         }

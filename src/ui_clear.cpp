@@ -137,7 +137,16 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // background where its usable floor really is before it places
     // anything that stands on the ground.
     Theme::setBackgroundFloor(countersTop);
-    Theme::drawActiveBackground(t, now, titleBottom, rainEnd, eng, advance);
+    // From the very top of the screen, not from titleBottom. The title bar
+    // used to own rows 0-15 and paint them every frame; with it gone they
+    // belonged to nobody and kept whatever the previous frame left there.
+    // Handing them to the background is also the point of removing the bar:
+    // the animation now runs edge to edge behind the two corner buttons.
+    //
+    // Squachy is still told his band starts at titleBottom. He sizes himself
+    // from the space he is given, so telling him about these rows would make
+    // him a tenth bigger and move everything hanging off him.
+    Theme::drawActiveBackground(t, now, 0, rainEnd, eng, advance);
     Theme::clearBackgroundFloor();
 
     // Squachy: main character, reacts to events, cracks jokes when idle.
