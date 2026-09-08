@@ -52,6 +52,12 @@ static void seedDetections(DetectionEngine& eng) {
         { DetectionType::RING,    "Amazon",  "Ring Doorbell", -55, 2 },
         { DetectionType::META,    "Meta",    "Ray-Ban Meta",  -73, 1 },
         { DetectionType::TILE,    "Tile",    "Tile Mate",     -81, 4 },
+        // The name is what the detector writes for a real one: six hex of
+        // the proximity UUID, then major.minor.
+        { DetectionType::IBEACON, "iBeacon", "B9407F 10.42",  -59, 9 },
+        // Named after the aircraft rather than after a service UUID, which
+        // is what the decoder buys. See the Remote ID seed below.
+        { DetectionType::DRONE,   "DroneID", "SIMDRONE-0001", -71, 2 },
     };
     uint32_t now = millis();
     for (size_t i = 0; i < sizeof(seeds) / sizeof(seeds[0]); i++) {
@@ -67,6 +73,45 @@ static void seedDetections(DetectionEngine& eng) {
         d.hits      = seeds[i].hits;
         d.active    = true;
         eng.postBle(d);
+    }
+
+    // Give the drone an actual Remote ID broadcast to have decoded.
+    //
+    // Built as three real ASTM F3411 adverts and pushed through the engine's
+    // own mergeRemoteId(), which in this build runs the REAL decoder -- so
+    // the info panel the emulator renders is showing genuinely decoded
+    // values, and a mistake in the decoder shows up here rather than only in
+    // a field with a drone overhead.
+    {
+        auto put32 = [](uint8_t* p, int32_t v) {
+            p[0] = (uint8_t)(v & 0xFF);         p[1] = (uint8_t)((v >> 8) & 0xFF);
+            p[2] = (uint8_t)((v >> 16) & 0xFF); p[3] = (uint8_t)((v >> 24) & 0xFF);
+        };
+        uint8_t msg[3][25];
+        memset(msg, 0, sizeof(msg));
+        msg[0][0] = (0x0 << 4) | 0x2;          // Basic ID
+        msg[0][1] = (0x1 << 4) | 0x2;          // serial, multirotor
+        memcpy(msg[0] + 2, "SIMDRONE-0001       ", 20);
+        msg[1][0] = (0x1 << 4) | 0x2;          // Location
+        put32(msg[1] + 5,  407128000);
+        put32(msg[1] + 9, -740060000);
+        { const uint16_t alt = (uint16_t)((120 + 1000) * 2);
+          msg[1][15] = (uint8_t)(alt & 0xFF); msg[1][16] = (uint8_t)(alt >> 8); }
+        msg[2][0] = (0x4 << 4) | 0x2;          // System: the operator
+        put32(msg[2] + 2,  407580000);
+        put32(msg[2] + 6, -739855000);
+
+        const uint8_t mac[6] = { 0x02, 0xFF, 0xFA, 0xA0, 0x01, 0x5D };
+        for (int i = 0; i < 3; i++) {
+            uint8_t adv[32];
+            adv[0] = 1 + 2 + 27;               // AD type + UUID + body
+            adv[1] = 0x16;                     // service data, 16-bit UUID
+            adv[2] = 0xFA; adv[3] = 0xFF;      // 0xFFFA, little endian
+            adv[4] = 0x0D;                     // ODID application code
+            adv[5] = (uint8_t)(i + 1);         // message counter
+            memcpy(adv + 6, msg[i], 25);
+            eng.mergeRemoteId(mac, adv, (uint8_t)(1 + adv[0]));
+        }
     }
 }
 
@@ -108,6 +153,10 @@ int main(int argc, char** argv) {
     int confirmRow = -1;   // settings screen: put a confirm panel up
     int scrollBy = 0;      // settings screen: scroll down N rows first
     int bg = -1, themeIdx = -1, frames = 90, sequence = 1, outfitIdx = -1;
+    // --info N renders LOG's MORE INFO panel for DetectionType N. The panel
+    // is a real layout with real wrapped text and it was previously only
+    // reachable on hardware, which is how two of its paragraphs went stale.
+    int infoType = -1;
     std::string rawPath;
     for (int i = 2; i < argc; i++) {
         std::string a = argv[i];
@@ -121,6 +170,7 @@ int main(int argc, char** argv) {
         else if (a == "--raw" && i + 1 < argc) rawPath = argv[++i];
         else if (a == "--showoff") showoff = true;
         else if (a == "--confirm" && i + 1 < argc) confirmRow = atoi(argv[++i]);
+        else if (a == "--info" && i + 1 < argc) infoType = atoi(argv[++i]);
         else if (a == "--scroll" && i + 1 < argc) scrollBy = atoi(argv[++i]);
     }
     if (sequence < 1) sequence = 1;
@@ -173,7 +223,13 @@ int main(int argc, char** argv) {
 
     auto tick = [&](uint32_t t) {
         if      (screen == "clear")    uiClearTick(frame, t, engine, true, false);
-        else if (screen == "log")      uiLogTick(frame, t, engine, 0, false, "", false, nullptr, "");
+        else if (screen == "log") {
+            const bool info = (infoType >= 0);
+            const DetectionType it = info ? (DetectionType)infoType : DetectionType::UNKNOWN;
+            uiLogTick(frame, t, engine, 0, false, "", info,
+                      info ? detectionTypeName(it) : nullptr,
+                      info ? DetectionInfo::explainLive(it, engine) : "");
+        }
         else if (screen == "alert")    uiAlertTick(frame, t, engine, false, nullptr, "");
         else if (screen == "settings") uiSettingsTick(frame, t, engine);
         else if (screen == "detfilter") uiDetFilterTick(frame, t);

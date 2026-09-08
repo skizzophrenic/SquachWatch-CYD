@@ -62,6 +62,20 @@ void DetectionEngine::pushLog(const Detection& d) {
 void DetectionEngine::postWiFi(const uint8_t*, int8_t, uint8_t, const char*, bool) {}
 void DetectionEngine::postDeauth(const uint8_t*, int8_t, uint8_t) {}
 void DetectionEngine::postBle(Detection d) { pushLog(d); }
+
+// Not a stub. Everything else in this file is inert because it would need
+// a radio, but the Remote ID decoder is pure arithmetic over a byte
+// buffer -- so the emulator runs the REAL one, and the drone info panel it
+// renders is showing genuinely decoded values rather than a mock-up.
+void DetectionEngine::mergeRemoteId(const uint8_t* mac, const uint8_t* payload,
+                                    uint8_t len) {
+    if (!mac || !payload) return;
+    if (memcmp(mac, _ridMac, 6) != 0) {
+        RemoteId::reset(_rid);
+        memcpy(_ridMac, mac, 6);
+    }
+    RemoteId::merge(payload, len, _rid, millis());
+}
 void DetectionEngine::postBtClassic(Detection d) { pushLog(d); }
 void DetectionEngine::postRawBle(RawBleResult r) {
     if (_rawBleCount < RAW_BLE_CAP) _rawBle[_rawBleCount++] = r;

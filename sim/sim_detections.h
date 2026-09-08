@@ -41,7 +41,10 @@ inline const SimDetectionProfile kSimProfiles[] = {
     { DetectionType::RAVEN,       {0x02, 0x31, 0x00}, "Raven",       "Gunshot Sensor",  -79 },
     { DetectionType::AIRTAG,      {0x02, 0x00, 0x4C}, "Apple",       "AirTag",          -42 },
     { DetectionType::DRONE,       {0x02, 0xFF, 0xFA}, "DroneID",     "OpenDroneID",     -71 },
-    { DetectionType::ALPR,        {0x00, 0x0E, 0x58}, "ALPR-Viglnt", "Vigilant ALPR",   -76 },
+    // Was 00:0E:58 "Vigilant ALPR" -- that block belongs to Sonos and the
+    // firmware dropped it. Motorola Solutions, which is what absorbed
+    // Vigilant and what the detector matches now.
+    { DetectionType::ALPR,        {0x00, 0x04, 0x7D}, "ALPR-Mtrla",  "Motorola ALPR",   -76 },
     { DetectionType::CAMERA,      {0xF0, 0x27, 0x2D}, "Hikvision",   "IP Camera",       -63 },
     { DetectionType::SAMSUNG_TAG, {0x02, 0xFD, 0x5A}, "SmartTag",    "Galaxy SmartTag", -58 },
     { DetectionType::GOOGLE_TAG,  {0x02, 0xFE, 0xAA}, "FindMyDev",   "Find My Device",  -61 },
@@ -52,6 +55,9 @@ inline const SimDetectionProfile kSimProfiles[] = {
     // what processWiFiQ() puts there on a real hit -- which network is
     // being spoofed is the useful part, not the rogue's own vendor.
     { DetectionType::EVILTWIN,    {0x02, 0xE7, 0x11}, "EvilTwin",    "HomeNet-5G",      -52 },
+    // The name field is what the detector puts there for a real one: six
+    // hex of the proximity UUID, then major.minor.
+    { DetectionType::IBEACON,     {0x02, 0x00, 0x4C}, "iBeacon",     "B9407F 10.42",    -59 },
 };
 inline const size_t kSimProfileCount = sizeof(kSimProfiles) / sizeof(kSimProfiles[0]);
 

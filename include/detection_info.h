@@ -6,6 +6,8 @@
 #pragma once
 #include "state.h"
 
+class DetectionEngine;
+
 namespace DetectionInfo {
     // One paragraph per DetectionType, written to explain what the
     // thing actually is and why it's worth knowing about -- distinct
@@ -18,4 +20,18 @@ namespace DetectionInfo {
     // confidence actually mean, since every explain() screen assumes
     // that context already.
     const char* rssiConfidencePrimer();
+
+    // explain() plus whatever the device has actually decoded about this
+    // detection, where there is any.
+    //
+    // Only DRONE has any today: a Remote ID advert carries the aircraft's
+    // serial, its position and the operator's, and reciting the generic
+    // paragraph about what Remote ID is while holding all of that would be
+    // a waste of the panel. Everything else falls straight through to
+    // explain(), so callers can use this everywhere without asking.
+    //
+    // Lives here rather than in the LOG screen's caller so the emulator
+    // gets it too -- main.cpp is not part of that build, and a panel that
+    // can only be seen on hardware is a panel nobody checks.
+    const char* explainLive(DetectionType t, const DetectionEngine& eng);
 }

@@ -1,5 +1,7 @@
 // SquachWatch-CYD — detection type explanations
 #include "detection_info.h"
+#include "detection.h"
+#include <stdio.h>
 
 namespace DetectionInfo {
 
@@ -54,6 +56,33 @@ const char* explain(DetectionType t) {
     uint8_t idx = (uint8_t)t;
     if (idx >= EXPLAIN_TEXT_N) idx = 0;
     return EXPLAIN_TEXT[idx];
+}
+
+const char* explainLive(DetectionType t, const DetectionEngine& eng) {
+    if (t != DetectionType::DRONE) return explain(t);
+
+    const RemoteId::Info& rid = eng.remoteId();
+    if (!rid.haveBasic && !rid.haveLoc && !rid.haveOperator) return explain(t);
+
+    // Replaces the paragraph rather than appending to it: Theme::wrapText
+    // caps at 320 characters and the stock DRONE text already spends 185.
+    // Only the parts actually received are printed -- the three messages
+    // arrive as separate adverts, and 0,0 is a real place off Africa rather
+    // than a safe stand-in for "not known yet".
+    static char buf[320];
+    int n = 0;
+    if (rid.haveBasic)
+        n += snprintf(buf + n, sizeof(buf) - n, "ID %s, a %s. ",
+                      rid.serial, RemoteId::uaTypeName(rid.uaType));
+    if (rid.haveLoc && n < (int)sizeof(buf))
+        n += snprintf(buf + n, sizeof(buf) - n, "AIRCRAFT %.5f, %.5f at %dm. ",
+                      (double)rid.lat, (double)rid.lon, (int)rid.altM);
+    if (rid.haveOperator && n < (int)sizeof(buf))
+        n += snprintf(buf + n, sizeof(buf) - n,
+                      "OPERATOR %.5f, %.5f -- that is where the pilot is standing.",
+                      (double)rid.opLat, (double)rid.opLon);
+    buf[sizeof(buf) - 1] = '\0';
+    return buf;
 }
 
 const char* rssiConfidencePrimer() {
