@@ -74,6 +74,7 @@ const char* backgroundName(Background b) {
         case Background::SPECTRUM:  return "THE GIBSON";
         case Background::TUNNEL:    return "WIREFRAME TUNNEL";
         case Background::SYNTHWAVE: return "SYNTHWAVE";
+        case Background::BLACK:     return "BLACK";
         default:                    return "?";
     }
 }
@@ -149,6 +150,13 @@ void load() {
     s_minConf    = (Confidence)s_prefs.getUChar("conf", (uint8_t)Confidence::LOW_CONF);
     if ((uint8_t)s_minConf > (uint8_t)Confidence::HIGH_CONF) s_minConf = Confidence::LOW_CONF;
     s_boringMode = s_prefs.getBool("boring", false);
+    // BLACK only exists while boring mode does. A board that saved it and
+    // then had boring mode turned off -- or one restored from someone
+    // else's settings -- would otherwise boot to a flat screen with the
+    // option missing from the ring, and no way to cycle out of it.
+    if (!s_boringMode && s_background == Background::BLACK) {
+        s_background = Background::DIGITAL;
+    }
     s_powerSaver   = s_prefs.getBool("pwrOn", false);
     s_scrTimeoutIx = s_prefs.getUChar("pwrScrnT", 2);
     s_dimLevel     = s_prefs.getUChar("pwrDim", 16);
@@ -203,13 +211,32 @@ void cyclePalette() {
 
 Background background() { return s_background; }
 
+bool backgroundSelectable(Background b) {
+    // BLACK is the only conditional one, and it is gated on boring mode
+    // rather than hidden behind a second setting: somebody who has already
+    // turned the mascot off is exactly the person who wants the option, and
+    // nobody else would go looking for it.
+    return (b != Background::BLACK) || s_boringMode;
+}
+
+// Both directions skip anything not currently selectable, so BLACK simply
+// is not in the ring until boring mode puts it there. Bounded by
+// BACKGROUND_COUNT rather than looping until it finds one: if a future
+// change ever made everything unselectable this would spin forever, and a
+// hung UI is a worse failure than a background that will not change.
 void cycleBackground() {
-    s_background = (Background)(((uint8_t)s_background + 1) % BACKGROUND_COUNT);
+    for (uint8_t i = 0; i < BACKGROUND_COUNT; i++) {
+        s_background = (Background)(((uint8_t)s_background + 1) % BACKGROUND_COUNT);
+        if (backgroundSelectable(s_background)) break;
+    }
     s_prefs.putUChar("bg", (uint8_t)s_background);
 }
 
 void cyclePrevBackground() {
-    s_background = (Background)(((uint8_t)s_background + BACKGROUND_COUNT - 1) % BACKGROUND_COUNT);
+    for (uint8_t i = 0; i < BACKGROUND_COUNT; i++) {
+        s_background = (Background)(((uint8_t)s_background + BACKGROUND_COUNT - 1) % BACKGROUND_COUNT);
+        if (backgroundSelectable(s_background)) break;
+    }
     s_prefs.putUChar("bg", (uint8_t)s_background);
 }
 
@@ -267,6 +294,13 @@ bool boringMode() { return s_boringMode; }
 void toggleBoringMode() {
     s_boringMode = !s_boringMode;
     s_prefs.putBool("boring", s_boringMode);
+    // Turning boring mode off strands anyone sitting on BLACK: the option
+    // is gone from the ring, and without this they would be looking at a
+    // flat screen with no way to cycle out of it.
+    if (!s_boringMode && s_background == Background::BLACK) {
+        s_background = Background::DIGITAL;
+        s_prefs.putUChar("bg", (uint8_t)s_background);
+    }
 }
 
 uint8_t brightness() { return s_brightness; }

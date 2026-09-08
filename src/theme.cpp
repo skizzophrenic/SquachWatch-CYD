@@ -3788,6 +3788,12 @@ void drawActiveBackground(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
         case Settings::Background::SPECTRUM:   drawGibson(t, now, yStart, yEnd, eng); break;
         case Settings::Background::TUNNEL:     drawWireframeTunnel(t, now, yStart, yEnd); break;
         case Settings::Background::SYNTHWAVE:  drawSynthwave(t, now, yStart, yEnd); break;
+        // Still a fill, not a skip. Every screen that draws a backdrop
+        // relies on it to erase the previous frame -- Squachy, the pet and
+        // the counters all stopped clearing their own footprints once the
+        // background started repainting the whole band. Drawing nothing
+        // here would smear rather than go black.
+        case Settings::Background::BLACK:      t.fillRect(0, yStart, t.width(), yEnd - yStart, BG); break;
         default:                               drawDigitalRain(t, now, yStart, yEnd, advance); break;
     }
     const uint32_t bgDt = micros() - bgT0;

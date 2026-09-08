@@ -120,7 +120,7 @@ static void drawRow(TFT_eSPI& t, int w, int y, int hgt, PowerRow r, bool compact
     t.drawFastHLine(4, y + hgt - 1, w - 8, Theme::PURPLE);
 }
 
-void uiPowerTick(TFT_eSPI& t, uint32_t now) {
+void uiPowerTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     int w = t.width(), h = t.height();
     int top, bodyBottom, rowH;
     computeGeom(t, h, top, bodyBottom, rowH);
@@ -149,7 +149,10 @@ switch (Settings::background()) {
         case Settings::Background::FIRE:      Theme::drawFire(t, now, bgTop, bodyBottom); break;
         case Settings::Background::SNOWFALL:  Theme::drawSnowfall(t, now, bgTop, bodyBottom); break;
         case Settings::Background::TUNNEL:    Theme::drawWireframeTunnel(t, now, bgTop, bodyBottom); break;
+        case Settings::Background::SPECTRUM:  Theme::drawGibson(t, now, bgTop, bodyBottom, eng); break;
         case Settings::Background::SYNTHWAVE: Theme::drawSynthwave(t, now, bgTop, bodyBottom); break;
+        // Fills rather than skips -- see the note in drawActiveBackground.
+        case Settings::Background::BLACK:      t.fillRect(0, bgTop, t.width(), bodyBottom - bgTop, Theme::BG); break;
         default:                              Theme::drawDigitalRain(t, now, bgTop, bodyBottom, true); break;
     }
     Theme::restorePalette(saved);

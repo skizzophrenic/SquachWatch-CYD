@@ -192,7 +192,21 @@ int main(int argc, char** argv) {
     // Settings' own cycle* mutators are the only public way in, so walk
     // them to the requested index rather than reaching past the API.
     if (themeIdx >= 0) while ((int)Settings::paletteIndex() != themeIdx % (int)Theme::PALETTE_COUNT) Settings::cyclePalette();
-    if (bg >= 0) while ((int)Settings::background() != bg % (int)Settings::BACKGROUND_COUNT) Settings::cycleBackground();
+    if (bg >= 0) {
+        const int want = bg % (int)Settings::BACKGROUND_COUNT;
+        // BLACK only exists while BORING MODE is on, so asking for it here
+        // means asking for that mode too -- which is also the honest render,
+        // since it is the only way a real device can show this screen.
+        if (want == (int)Settings::Background::BLACK && !Settings::boringMode())
+            Settings::toggleBoringMode();
+        // Bounded. This used to spin until it matched, which was fine while
+        // every index was reachable and became an infinite loop the moment
+        // one was not.
+        for (int i = 0; i < (int)Settings::BACKGROUND_COUNT; i++) {
+            if ((int)Settings::background() == want) break;
+            Settings::cycleBackground();
+        }
+    }
 
     // Outfits are gated behind lifetime-detection thresholds, so unlock
     // the lot before walking to the one asked for -- same "use the
@@ -232,8 +246,8 @@ int main(int argc, char** argv) {
         }
         else if (screen == "alert")    uiAlertTick(frame, t, engine, false, nullptr, "");
         else if (screen == "settings") uiSettingsTick(frame, t, engine);
-        else if (screen == "detfilter") uiDetFilterTick(frame, t);
-        else if (screen == "power")    uiPowerTick(frame, t);
+        else if (screen == "detfilter") uiDetFilterTick(frame, t, engine);
+        else if (screen == "power")    uiPowerTick(frame, t, engine);
         else if (screen == "diary")    uiDiaryTick(frame, t, engine);
         else if (screen == "hunt")     uiHuntTick(frame, t, engine);
         else if (screen == "rawscan")  uiRawScanTick(frame, t, engine, true, true, false, "");

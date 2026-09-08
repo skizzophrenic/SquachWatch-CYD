@@ -817,6 +817,10 @@ static const char* const BG_LINES[][3] = {
     /* SPECTRUM  */ { "RF spectrum's live. That's the real stuff.", "This is actual signal data. Neat, right?", "Watching the airwaves. Very on-brand." },
     /* TUNNEL    */ { "Wireframe tunnel. Very retro-future.", "Feels like we're going somewhere. We're not.", "80s sci-fi vibes today." },
     /* SYNTHWAVE */ { "That sunset never actually sets. I checked.", "Grid goes on forever. So does the drive.", "Look at that reflection. Water we even doing." },
+    // He is switched off in boring mode, so nobody will ever hear these.
+    // Written anyway: the assert below wants a row, and a placeholder row
+    // is how the last set of stale lines got in.
+    /* BLACK     */ { "Nothing on the walls today.", "Just us and the dark. Suits me.", "Minimalist phase. It happens." },
 };
 static_assert(sizeof(BG_LINES) / sizeof(BG_LINES[0]) == Settings::BACKGROUND_COUNT,
               "BG_LINES must have exactly one row per Settings::Background value -- "

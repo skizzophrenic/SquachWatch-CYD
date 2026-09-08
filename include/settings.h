@@ -13,9 +13,19 @@ namespace Settings {
         DIGITAL = 0, STARFIELD = 1, TOASTERS = 2,
         AQUARIUM = 3, TERMINAL = 4, FIREFLIES = 5,
         FIRE = 6, SNOWFALL = 7, SPECTRUM = 8, TUNNEL = 9,
-        SYNTHWAVE = 10
+        SYNTHWAVE = 10,
+        // No animation at all -- the band is filled flat and nothing moves.
+        // Only reachable while BORING MODE is on, which is the mode that
+        // already strips Squachy, the pet and the idle flourishes. It did
+        // not strip the backdrop, so "boring" still meant a screen full of
+        // falling glyphs; this is the rest of that thought.
+        BLACK = 11
     };
-    static const uint8_t BACKGROUND_COUNT = 11;
+    static const uint8_t BACKGROUND_COUNT = 12;
+
+    // Whether a background can be reached from the BACKGROUND row right
+    // now. Everything except BLACK always can.
+    bool backgroundSelectable(Background b);
     const char* backgroundName(Background b);
 
     // Reads all fields from NVS (namespace "settings"), falling back to
