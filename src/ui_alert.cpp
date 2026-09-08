@@ -228,7 +228,7 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
     // How sure we actually are — see docs/DETECTIONS.md. This is the
     // whole point of showing it here: a Medium/Low reading should look
     // visibly less certain than a High one, not get the same treatment.
-    Confidence conf = confidenceFor(s_last.type);
+    Confidence conf = s_last.conf;
     uint16_t confColor = (conf == Confidence::HIGH_CONF) ? Theme::GREEN
                         : (conf == Confidence::MED_CONF) ? Theme::AMBER
                         : Theme::RED;

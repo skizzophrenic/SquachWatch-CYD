@@ -35,9 +35,13 @@ namespace Squachy {
     // same pose maths. 0 means "not known", which draws a middling
     // reaction rather than either extreme; real RSSI is always
     // negative, so 0 can never collide with a genuine reading.
+    // conf is the matched SIGNATURE's grade, not the type's -- he reads a
+    // percentage out loud, so quoting the type's would misstate exactly the
+    // hits the per-entry split exists to be honest about.
     void trigger(Event evt, DetectionType dt = DetectionType::UNKNOWN,
                  uint32_t lifetimeTotal = 0, uint32_t hitCount = 1,
-                 int8_t rssi = 0);
+                 int8_t rssi = 0,
+                 Confidence conf = Confidence::HIGH_CONF);
 
     // Carry him with a finger. The CLEAR screen calls this every frame
     // of a drag that began with a successful press-and-hold on him --

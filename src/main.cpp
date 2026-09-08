@@ -228,6 +228,7 @@ uint32_t            watchAlertStart = 0;
 uint32_t            lastTouch = 0;
 bool                prevTouchValid = false; // last frame's tp.valid, for true press/release edge detection (see loop())
 DetectionType       lastAlertType = DetectionType::UNKNOWN;
+Confidence          lastAlertConf = Confidence::HIGH_CONF;
 uint32_t            lastAlertHits = 1; // times this exact MAC+type has ever matched — see Squachy's "seen before" reaction
 int8_t              lastAlertRssi = 0; // signal strength of that hit — scales how hard Squachy reacts to it
 const uint16_t      TOUCH_DEBOUNCE_MS = 200;
@@ -949,6 +950,7 @@ static void enterAlert(const Detection& d) {
     alertStart = millis();
     transitionStart = alertStart;
     lastAlertType = d.type;
+    lastAlertConf = d.conf;
     lastAlertHits = d.hits;
     lastAlertRssi = d.rssi;
     // Copied rather than kept as a Detection* -- the log is a ring
@@ -1665,7 +1667,12 @@ void loop() {
             } else {
                 const Detection* latest = engine.latest();
                 if (latest && (now - latest->firstSeen) < 200 &&
-                    confidenceFor(latest->type) >= Settings::minConfidence() &&
+                    // This sighting's grade, not the type's -- which is what
+                    // finally makes ALERT FILTER mean something. Set it to
+                    // High and an ESP32 probe request matching a
+                    // module-vendor OUI stays in the log without taking over
+                    // the screen.
+                    latest->conf >= Settings::minConfidence() &&
                     // Your own AirTag and your own doorbell are true
                     // positives every single time, and a detector that
                     // shouts about them constantly is one you stop reading.
@@ -1920,7 +1927,7 @@ void loop() {
                         // dismiss step once you'd already read the
                         // explanation.
                         s_infoPending = false;
-                        Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits, lastAlertRssi);
+                        Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits, lastAlertRssi, lastAlertConf);
                         enterClear();
                     }
                 }
@@ -1944,7 +1951,7 @@ void loop() {
                     if (IgnoreList::contains(s_alertMac)) IgnoreList::remove(s_alertMac);
                     else                                  IgnoreList::add(s_alertMac, lastAlertType);
                     Squachy::trigger(Squachy::Event::DETECTION, lastAlertType,
-                                     engine.lifetimeTotal(), lastAlertHits, lastAlertRssi);
+                                     engine.lifetimeTotal(), lastAlertHits, lastAlertRssi, lastAlertConf);
                     enterClear();
                 } else if (uiAlertHitHunt(tp.x, tp.y, tft.width(), tft.height())) {
                     // Same call pair LOG's confirm panel makes. The
@@ -1956,14 +1963,14 @@ void loop() {
                     // on the info panel) both fire it.
                     if (s_alertIsBle) engine.huntBle(s_alertMac, s_alertLabel);
                     else              engine.huntWifi(s_alertMac, s_alertLabel);
-                    Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits, lastAlertRssi);
+                    Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits, lastAlertRssi, lastAlertConf);
                     enterHunt();
                 } else {
-                    Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits, lastAlertRssi);
+                    Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits, lastAlertRssi, lastAlertConf);
                     enterClear();
                 }
             } else if ((now - alertStart) > ALERT_AUTO_DISMISS_MS) {
-                Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits, lastAlertRssi);
+                Squachy::trigger(Squachy::Event::DETECTION, lastAlertType, engine.lifetimeTotal(), lastAlertHits, lastAlertRssi, lastAlertConf);
                 enterClear();
             }
             break;

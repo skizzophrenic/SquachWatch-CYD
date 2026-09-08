@@ -11,29 +11,52 @@ Confidence:
 
 ---
 
-## Flock Safety — `FLOCK` — **High confidence**
+## Flock Safety — `FLOCK` — **one High prefix, the rest Low**
 
 **Why it works:** Flock Safety cameras have on-board WiFi modules
-(typically ESP32) that periodically emit probe requests searching
-for available networks. The probe requests use OUIs that fall in
-well-known Espressif and other manufacturer ranges. The `addr1`
-(receiver) trick catches "sleeper" cameras that aren't actively
-transmitting — they still leak their MAC when the promiscuous
-listener sends them a frame.
+(typically ESP32) that periodically emit probe requests searching for
+available networks. The `addr1` (receiver) trick catches "sleeper"
+cameras that aren't actively transmitting — they still leak their MAC
+when the promiscuous listener sends them a frame.
+
+**What the audit found.** Every prefix in this table was checked against
+the IEEE registry. Of 29 entries, exactly **one** is registered to Flock
+Safety: `B4:1E:52`. The rest break down as sixteen Espressif blocks, nine
+Liteon, one Shenzhen Intellirocks, one SPECTRA - TEK (labelled
+"Flock-Sierra" for a long time, which is neither Sierra nor Flock), one
+not in the registry at all, and one locally-administered address, which
+by definition identifies no vendor.
+
+That is not an argument for deleting them. Flock really does build on
+ESP32, so an Espressif prefix really is evidence — it is just evidence
+shared with every dev board, smart plug and hobby project on earth,
+including **another SquachWatch**. Two of these devices in a room would
+otherwise flag each other as ALPR cameras.
+
+So the rows stay and the *grading* changed. Confidence is now a property
+of the matched signature rather than of the type:
+
+| Grade | Meaning |
+|---|---|
+| **High** | The block is registered to the company that makes the product. |
+| **Medium** | Registered to a parent whose range is far wider than the product — Amazon owns Ring, and also Echo, Fire TV and Kindle. |
+| **Low** | A module or ODM vendor whose parts are in everything, or a block not in the IEEE registry. |
+
+Across all 73 OUI rows in the firmware that comes out at 31 High, 4
+Medium, 38 Low.
+
+**This is what makes ALERT FILTER work.** It has always been a minimum-
+confidence filter, and until now confidence was constant per type, so it
+had nothing to filter on. Set it to High and a passing ESP32 stays in the
+log without taking over the screen.
 
 **Source:** [`colonelpanichacks/flock-you`](https://github.com/colonelpanichacks/flock-you)
 (MIT) — the canonical Flock detector project. OUI research by
-`@NitekryDPaul` and the DeFlockJoplin community. Our OUI table
-contains 28 prefixes drawn from the flock-you repo and adjacent
-public research.
+`@NitekryDPaul` and the DeFlockJoplin community. Registrant for every
+prefix verified against the IEEE MA-L registry.
 
-**Confidence in v1.0:** **High** for the OUI match (we cover 28+
-prefixes). **Medium** for the wildcard probe signature (we detect
-the OUI on any management frame, not specifically the DeFlockJoplin
-high-precision signature — that's a v1.1 improvement).
-
-**Note:** Flock has reportedly turned off Bluetooth on newer
-hardware, so BLE-name based detection is opportunistic.
+**Note:** Flock has reportedly turned off Bluetooth on newer hardware, so
+BLE-name based detection is opportunistic.
 
 ---
 

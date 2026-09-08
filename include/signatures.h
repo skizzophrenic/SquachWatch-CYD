@@ -3,7 +3,21 @@
 #pragma once
 #include "state.h"
 
-struct OuiEntry   { uint8_t  b[3];     const char* name; DetectionType type; };
+// Every OUI carries its own confidence, because the registrant matters as
+// much as the prefix. Roughly:
+//
+//   HIGH  the block is registered to the company that makes the product.
+//   MED   registered to a parent whose range is much wider than the
+//         product -- Amazon owns Ring, and also Echo, Fire TV and Kindle.
+//   LOW   a module or ODM vendor whose parts are in everything (Espressif,
+//         Liteon, Murata, Realtek, Telink), or a block that is not in the
+//         IEEE registry at all.
+//
+// The LOW rows are not mistakes and are not being deleted: Flock really
+// does build on ESP32, so the prefix really is evidence. It is just
+// evidence shared with every dev board on earth, and saying so is the
+// difference between a detector and a rumour.
+struct OuiEntry   { uint8_t  b[3];     const char* name; DetectionType type; Confidence conf; };
 struct UuidEntry  { uint16_t uuid;     const char* name; DetectionType type; };
 struct NameEntry  { const char* name;  DetectionType type; };
 struct SsidEntry  { const char* prefix; const char* name; DetectionType type; };
@@ -21,7 +35,9 @@ extern const MfgIdEntry  kMfgIdTable[];
 extern const uint16_t    kMfgIdCount;
 
 // First-match-wins lookups. Precedence per DESIGN.md §6.2.
-DetectionType lookupOui(const uint8_t* mac);
+// Yields the matched entry's own confidence through `conf` when given one.
+// Callers that do not care keep the old one-argument form.
+DetectionType lookupOui(const uint8_t* mac, Confidence* conf = nullptr);
 DetectionType lookupUuid(uint16_t uuid16);
 DetectionType lookupBtName(const char* name);
 DetectionType lookupSsid(const char* ssid);   // case-insensitive prefix
@@ -62,7 +78,7 @@ bool isIBeacon(const uint8_t* mfg, uint8_t len);
 // Note: plain LOW/MEDIUM/HIGH collide with Arduino core's LOW/HIGH
 // pin-state macros via textual substitution (enum class scoping
 // doesn't protect against the preprocessor), hence the _CONF suffix.
-enum class Confidence : uint8_t { LOW_CONF, MED_CONF, HIGH_CONF };
+// Confidence itself now lives in state.h -- see the note there.
 Confidence  confidenceFor(DetectionType t);
 const char* confidenceLabel(Confidence c);     // "HIGH CONF" / "MED CONF" / "LOW CONF"
 uint8_t     confidencePercent(Confidence c);   // ~90 / ~60 / ~30 — an honest approximation, not a measured stat

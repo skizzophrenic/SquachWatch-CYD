@@ -23,13 +23,14 @@ CXX      ?= g++
 CXXFLAGS := -std=c++17 -O1 -g -Wall -Wextra -Wno-unused-parameter \
             -I$(SIM) -I$(INC)
 
-TESTS := remote_id_test ibeacon_test emitter_roundtrip_test
+TESTS := remote_id_test ibeacon_test signatures_test emitter_roundtrip_test
 
 # Only the units under test get linked in. Pulling the whole firmware
 # would drag in TFT_eSPI, NimBLE and the UI, and a test that needs a
 # display driver to check a coordinate is not a test anybody runs.
 remote_id_test_SRCS          := $(SRC)/remote_id.cpp
 ibeacon_test_SRCS            := $(SRC)/signatures.cpp
+signatures_test_SRCS         := $(SRC)/signatures.cpp
 emitter_roundtrip_test_SRCS  := $(SRC)/remote_id.cpp
 
 .PHONY: all clean

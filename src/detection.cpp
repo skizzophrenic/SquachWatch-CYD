@@ -170,6 +170,10 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             det.type = lookupBtName(det.name);
         }
         if (det.type == DetectionType::UNKNOWN) return;
+        // BLE matches on service UUIDs, company IDs and device names --
+        // none of those tables has a per-row grade, so the type's own
+        // grade stands. Only the OUI table needed splitting.
+        det.conf = confidenceFor(det.type);
         // A Remote ID advert carries far more than the fact that it exists.
         // Decode it before the entry is posted so the log row can be named
         // after the actual aircraft rather than after a service UUID.
@@ -480,6 +484,7 @@ void DetectionEngine::processDeauthQ() {
             d.rssi    = e.rssi;
             d.channel = e.channel;
             d.type    = DetectionType::DEAUTH;
+            d.conf    = confidenceFor(DetectionType::DEAUTH);
             strncpy(d.vendor, "Deauth", sizeof(d.vendor) - 1);
             d.firstSeen = d.lastSeen = now;
             // hits doubles as "how many frames triggered this" here,
@@ -878,6 +883,11 @@ void DetectionEngine::processWiFiQ() {
         // an SSID (see the promiscuous callback), so this is naturally
         // limited to them.
         DetectionType t = DetectionType::UNKNOWN;
+        // Seeded from the type and then overwritten by whichever row
+        // actually matched, if that row has its own grade. An OUI hit off a
+        // module vendor and an OUI hit off the product's own registration
+        // are the same DetectionType and very different claims.
+        Confidence conf = Confidence::HIGH_CONF;
         bool matchedBySsid = false;
         bool evilTwin = e.ssid[0] && noteApBeacon(e.mac, e.ssid, e.encrypted);
         if (evilTwin) {
@@ -887,10 +897,13 @@ void DetectionEngine::processWiFiQ() {
             // to the SSID prefix (e.g. an Axon/Flock unit in pairing
             // mode, broadcasting from a WiFi module OUI we don't
             // otherwise know) if the OUI itself didn't match anything.
-            t = lookupOui(e.mac);
+            t = lookupOui(e.mac, &conf);
             if (t == DetectionType::UNKNOWN && e.ssid[0]) {
                 t = lookupSsid(e.ssid);
                 matchedBySsid = (t != DetectionType::UNKNOWN);
+                // The SSID tables have no per-row grade, so an SSID match
+                // falls back to what the type is worth.
+                if (matchedBySsid) conf = confidenceFor(t);
             }
         }
         if (t == DetectionType::UNKNOWN) continue;
@@ -931,6 +944,7 @@ void DetectionEngine::processWiFiQ() {
         d.rssi    = e.rssi;
         d.channel = e.channel;
         d.type    = t;
+        d.conf    = (t == DetectionType::EVILTWIN) ? confidenceFor(t) : conf;
         // Vendor label: from the SSID-prefix table if that's what
         // matched, otherwise from the OUI table. An evil twin gets
         // neither -- what matters is which network is being

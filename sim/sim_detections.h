@@ -19,6 +19,7 @@
 #include <cstring>
 #include <cstdint>
 #include "state.h"
+#include "signatures.h"
 
 struct SimDetectionProfile {
     DetectionType type;
@@ -89,6 +90,9 @@ inline bool simMakeDetection(Detection& d, DetectionType type, uint32_t now,
     d.rssi      = (int8_t)(rssi != 0 ? rssi : p->rssi);
     d.channel   = (type == DetectionType::DEAUTH) ? (uint8_t)(1 + (serial % 11)) : 0;
     d.type      = type;
+    // Without this a memset leaves conf at 0, which is LOW -- and every
+    // synthetic sighting would render as a shaky match.
+    d.conf      = confidenceFor(type);
     snprintf(d.vendor, sizeof(d.vendor), "%s", p->vendor);
     snprintf(d.name,   sizeof(d.name),   "%s", p->name);
     d.firstSeen = now;

@@ -10,41 +10,45 @@
 // so Flock entries for the same prefix must appear before generic ESP32.
 const OuiEntry kOuiTable[] = {
     // ---- Axon / Taser (priority: highest) ----
-    {{0x00, 0x25, 0xDF}, "Axon",       DetectionType::AXON},
-    {{0xE4, 0x05, 0x40}, "Axon-Body",  DetectionType::AXON},
-    {{0x28, 0x24, 0xFF}, "Axon-Signal", DetectionType::AXON},
+    {{0x00, 0x25, 0xDF}, "Axon",         DetectionType::AXON,       Confidence::HIGH_CONF},
+    {{0xE4, 0x05, 0x40}, "Axon-Body",    DetectionType::AXON,       Confidence::LOW_CONF},
+    {{0x28, 0x24, 0xFF}, "Axon-Signal",  DetectionType::AXON,       Confidence::LOW_CONF},
 
     // ---- Flock Safety (ESP32 modules + LTE backhaul) ----
     // Source: colonelpanichacks/flock-you, @NitekryDPaul, DeFlockJoplin
-    {{0x24, 0x0A, 0xC4}, "Flock-ESP32",  DetectionType::FLOCK},
-    {{0x30, 0xAE, 0xA4}, "Flock-ESP32",  DetectionType::FLOCK},
-    {{0x24, 0x6F, 0x28}, "Flock-ESP32",  DetectionType::FLOCK},
-    {{0xCC, 0x50, 0xE3}, "Flock-ESP32",  DetectionType::FLOCK},
-    {{0xDC, 0x54, 0x75}, "Flock-ESP32",  DetectionType::FLOCK},
-    {{0xE8, 0x9F, 0x6D}, "Flock-ESP32",  DetectionType::FLOCK},
-    {{0x8C, 0xAA, 0xB5}, "Flock-ESP-S3", DetectionType::FLOCK},
-    {{0x34, 0x85, 0x18}, "Flock-ESP-S3", DetectionType::FLOCK},
-    {{0xB4, 0x1E, 0x52}, "Flock-MA-L",   DetectionType::FLOCK},
-    {{0xD4, 0xAD, 0xFC}, "Flock-ESP32",  DetectionType::FLOCK},
-    {{0xAC, 0x67, 0xB2}, "Flock-ESP32",  DetectionType::FLOCK},
-    {{0x84, 0xF3, 0xEB}, "Flock-ESP-S3", DetectionType::FLOCK},
-    {{0xB4, 0xE6, 0x2D}, "Flock-ESP32",  DetectionType::FLOCK},
-    {{0xCC, 0xDB, 0xA7}, "Flock-ESP32",  DetectionType::FLOCK},
-    {{0x94, 0xB9, 0x7E}, "Flock-ESP32",  DetectionType::FLOCK},
-    {{0xA4, 0xCF, 0x12}, "Flock-ESP-S2", DetectionType::FLOCK},
-    {{0xC0, 0x49, 0xEF}, "Flock-ESP-C6", DetectionType::FLOCK},
-    {{0x24, 0xB2, 0xB9}, "Flock-Liteon", DetectionType::FLOCK},
-    {{0xD0, 0x39, 0x57}, "Flock",        DetectionType::FLOCK},
-    {{0x00, 0xF4, 0x8D}, "Flock",        DetectionType::FLOCK},
-    {{0x14, 0x5A, 0xFC}, "Flock",        DetectionType::FLOCK},
-    {{0x80, 0x30, 0x49}, "Flock",        DetectionType::FLOCK},
-    {{0xE0, 0x0A, 0xF6}, "Flock",        DetectionType::FLOCK},
-    {{0x70, 0xC9, 0x4E}, "Flock",        DetectionType::FLOCK},
-    {{0x3C, 0x91, 0x80}, "Flock",        DetectionType::FLOCK},
-    {{0xD8, 0xF3, 0xBC}, "Flock",        DetectionType::FLOCK},
-    {{0xB8, 0x35, 0x32}, "Flock",        DetectionType::FLOCK},
-    {{0x82, 0x6B, 0xF2}, "Flock-DeFlk",  DetectionType::FLOCK},
-    {{0x00, 0xA0, 0xD8}, "Flock-Sierra", DetectionType::FLOCK},
+    {{0x24, 0x0A, 0xC4}, "Flock-ESP32",  DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0x30, 0xAE, 0xA4}, "Flock-ESP32",  DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0x24, 0x6F, 0x28}, "Flock-ESP32",  DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0xCC, 0x50, 0xE3}, "Flock-ESP32",  DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0xDC, 0x54, 0x75}, "Flock-ESP32",  DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0xE8, 0x9F, 0x6D}, "Flock-ESP32",  DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0x8C, 0xAA, 0xB5}, "Flok-ESP-S3", DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0x34, 0x85, 0x18}, "Flok-ESP-S3", DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0xB4, 0x1E, 0x52}, "Flock-MA-L",   DetectionType::FLOCK,      Confidence::HIGH_CONF},
+    {{0xD4, 0xAD, 0xFC}, "Flock-ESP32",  DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0xAC, 0x67, 0xB2}, "Flock-ESP32",  DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0x84, 0xF3, 0xEB}, "Flok-ESP-S3", DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0xB4, 0xE6, 0x2D}, "Flock-ESP32",  DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0xCC, 0xDB, 0xA7}, "Flock-ESP32",  DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0x94, 0xB9, 0x7E}, "Flock-ESP32",  DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0xA4, 0xCF, 0x12}, "Flok-ESP-S2", DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0xC0, 0x49, 0xEF}, "Flok-ESP-C6", DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0x24, 0xB2, 0xB9}, "Flock-Liteo", DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0xD0, 0x39, 0x57}, "Flock",        DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0x00, 0xF4, 0x8D}, "Flock",        DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0x14, 0x5A, 0xFC}, "Flock",        DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0x80, 0x30, 0x49}, "Flock",        DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0xE0, 0x0A, 0xF6}, "Flock",        DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0x70, 0xC9, 0x4E}, "Flock",        DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0x3C, 0x91, 0x80}, "Flock",        DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0xD8, 0xF3, 0xBC}, "Flock",        DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0xB8, 0x35, 0x32}, "Flock",        DetectionType::FLOCK,      Confidence::LOW_CONF},
+    {{0x82, 0x6B, 0xF2}, "Flock-DeFlk",  DetectionType::FLOCK,      Confidence::LOW_CONF},
+    // Labelled as Sierra Wireless, the LTE modem in a Flock camera. The
+    // registry says SPECTRA - TEK, which is neither Sierra nor Flock. The
+    // prefix may still turn up on Flock hardware, so it stays -- as the
+    // Low-confidence guess it always was.
+    {{0x00, 0xA0, 0xD8}, "Flock-OEM",    DetectionType::FLOCK,      Confidence::LOW_CONF},
 
     // ---- ALPR and fixed surveillance camera vendors ----
     //
@@ -59,65 +63,69 @@ const OuiEntry kOuiTable[] = {
     // copied from another detector, after the one above turned out to be
     // wrong. Motorola Solutions absorbed Vigilant, so its blocks are the
     // nearest honest thing to the entry they replace.
-    {{0x00, 0x04, 0x7D}, "ALPR-Mtrla",   DetectionType::ALPR},
-    {{0x00, 0x18, 0x85}, "ALPR-Mtrla",   DetectionType::ALPR},
-    {{0x00, 0x1F, 0x92}, "ALPR-Mtrla",   DetectionType::ALPR},
-    {{0x4C, 0xCC, 0x34}, "ALPR-Mtrla",   DetectionType::ALPR},
+    {{0x00, 0x04, 0x7D}, "ALPR-Mtrla",   DetectionType::ALPR,       Confidence::HIGH_CONF},
+    {{0x00, 0x18, 0x85}, "ALPR-Mtrla",   DetectionType::ALPR,       Confidence::HIGH_CONF},
+    {{0x00, 0x1F, 0x92}, "ALPR-Mtrla",   DetectionType::ALPR,       Confidence::HIGH_CONF},
+    {{0x4C, 0xCC, 0x34}, "ALPR-Mtrla",   DetectionType::ALPR,       Confidence::HIGH_CONF},
     // Genetec's AutoVu is an LPR platform, so these sit with the ALPR set.
-    {{0x00, 0xBF, 0x15}, "ALPR-Gentec",  DetectionType::ALPR},
-    {{0x0C, 0xBF, 0x15}, "ALPR-Gentec",  DetectionType::ALPR},
+    {{0x00, 0xBF, 0x15}, "ALPR-Gentec",  DetectionType::ALPR,       Confidence::HIGH_CONF},
+    {{0x0C, 0xBF, 0x15}, "ALPR-Gentec",  DetectionType::ALPR,       Confidence::HIGH_CONF},
     // Verkada sells LPR too but is mostly general-purpose surveillance, so
     // it is filed as a camera rather than overstated as a plate reader.
-    {{0xE0, 0xA7, 0x00}, "Cam-Verkada",  DetectionType::CAMERA},
 
     // ---- Skimmer OUIs (BT Classic module prefixes) ----
-    {{0x20, 0x13, 0x00}, "Skim-Linvor",  DetectionType::SKIMMER},
-    {{0x98, 0xD3, 0x00}, "Skim-SPP",     DetectionType::SKIMMER},
-    {{0x00, 0x1A, 0x7D}, "Skim-CSR",     DetectionType::SKIMMER},
+    {{0x20, 0x13, 0x00}, "Skim-Linvor",  DetectionType::SKIMMER,    Confidence::LOW_CONF},
+    {{0x98, 0xD3, 0x00}, "Skim-SPP",     DetectionType::SKIMMER,    Confidence::LOW_CONF},
+    {{0x00, 0x1A, 0x7D}, "Skim-CSR",     DetectionType::SKIMMER,    Confidence::LOW_CONF},
 
     // ---- Specific camera vendors ----
-    {{0x2C, 0xAA, 0x8E}, "Wyze",         DetectionType::CAMERA},
-    {{0xD0, 0x3F, 0x27}, "Wyze",         DetectionType::CAMERA},
-    {{0x7C, 0x78, 0xB2}, "Wyze",         DetectionType::CAMERA},
-    {{0xB8, 0xD7, 0xAF}, "Wyze-Mod",     DetectionType::CAMERA},
-    {{0x34, 0xD2, 0x70}, "Amazon",       DetectionType::CAMERA},
-    {{0xF0, 0x27, 0x2D}, "Hikvision",    DetectionType::CAMERA},
-    {{0xC0, 0x56, 0xE3}, "Hikvision",    DetectionType::CAMERA},
-    {{0x44, 0x19, 0xB6}, "Hikvision",    DetectionType::CAMERA},
-    {{0x28, 0x57, 0xBE}, "Reolink",      DetectionType::CAMERA},
-    {{0x00, 0xE0, 0x4C}, "Realtek",      DetectionType::CAMERA},
-    {{0xBC, 0xDD, 0xC2}, "Arlo",         DetectionType::CAMERA},
-    {{0x4C, 0x69, 0x05}, "Blink",        DetectionType::CAMERA},
-    {{0xA4, 0xC1, 0x38}, "Tuya",         DetectionType::CAMERA},
+    {{0x2C, 0xAA, 0x8E}, "Wyze",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    {{0xD0, 0x3F, 0x27}, "Wyze",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    {{0x7C, 0x78, 0xB2}, "Wyze",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    {{0xB8, 0xD7, 0xAF}, "Wyze-Mod",     DetectionType::CAMERA,     Confidence::LOW_CONF},
+    {{0x34, 0xD2, 0x70}, "Amazon",       DetectionType::CAMERA,     Confidence::MED_CONF},
+    // Labelled Hikvision for a long time. The registry says AMAZON
+    // TECHNOLOGIES, which is a different company entirely -- and a much
+    // broader one, hence Medium rather than High.
+    {{0xF0, 0x27, 0x2D}, "Amazon",       DetectionType::CAMERA,     Confidence::MED_CONF},
+    {{0xC0, 0x56, 0xE3}, "Hikvision",    DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    {{0x44, 0x19, 0xB6}, "Hikvision",    DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    // Labelled Reolink; registered to Hikvision. Both make cameras, so the
+    // detection stood up while the attribution did not.
+    {{0x28, 0x57, 0xBE}, "Hikvision",    DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    {{0x00, 0xE0, 0x4C}, "Realtek",      DetectionType::CAMERA,     Confidence::LOW_CONF},
+    {{0xBC, 0xDD, 0xC2}, "Arlo",         DetectionType::CAMERA,     Confidence::LOW_CONF},
+    {{0x4C, 0x69, 0x05}, "Blink",        DetectionType::CAMERA,     Confidence::LOW_CONF},
+    {{0xA4, 0xC1, 0x38}, "Tuya",         DetectionType::CAMERA,     Confidence::LOW_CONF},
 
     // ---- Ring (own type, not generic CAMERA) ----
     // FC:65:DE and 68:37:E9 were already here under CAMERA; the rest
     // are Ring LLC's full registered MA-L block. Source: IEEE MA-L
     // registry, cross-checked via netify.ai and maclookup.app (both
     // list the same 13 prefixes for "Ring LLC", registered 2019-03-01).
-    {{0xFC, 0x65, 0xDE}, "Ring",         DetectionType::RING},
-    {{0x68, 0x37, 0xE9}, "Ring",         DetectionType::RING},
-    {{0xAC, 0x9F, 0xC3}, "Ring",         DetectionType::RING},
-    {{0x18, 0x7F, 0x88}, "Ring",         DetectionType::RING},
-    {{0x34, 0x3E, 0xA4}, "Ring",         DetectionType::RING},
-    {{0x54, 0xE0, 0x19}, "Ring",         DetectionType::RING},
-    {{0x5C, 0x47, 0x5E}, "Ring",         DetectionType::RING},
-    {{0x64, 0x9A, 0x63}, "Ring",         DetectionType::RING},
-    {{0x90, 0x48, 0x6C}, "Ring",         DetectionType::RING},
-    {{0x9C, 0x76, 0x13}, "Ring",         DetectionType::RING},
-    {{0xCC, 0x3B, 0xFB}, "Ring",         DetectionType::RING},
-    {{0xC4, 0xDB, 0xAD}, "Ring",         DetectionType::RING},
-    {{0x24, 0x2B, 0xD6}, "Ring",         DetectionType::RING},
-    {{0x00, 0xB4, 0x63}, "Ring",         DetectionType::RING},
-    {{0x50, 0xE4, 0x67}, "Ring",         DetectionType::RING},
+    {{0xFC, 0x65, 0xDE}, "Ring",         DetectionType::RING,       Confidence::MED_CONF},
+    {{0x68, 0x37, 0xE9}, "Ring",         DetectionType::RING,       Confidence::MED_CONF},
+    {{0xAC, 0x9F, 0xC3}, "Ring",         DetectionType::RING,       Confidence::HIGH_CONF},
+    {{0x18, 0x7F, 0x88}, "Ring",         DetectionType::RING,       Confidence::HIGH_CONF},
+    {{0x34, 0x3E, 0xA4}, "Ring",         DetectionType::RING,       Confidence::HIGH_CONF},
+    {{0x54, 0xE0, 0x19}, "Ring",         DetectionType::RING,       Confidence::HIGH_CONF},
+    {{0x5C, 0x47, 0x5E}, "Ring",         DetectionType::RING,       Confidence::HIGH_CONF},
+    {{0x64, 0x9A, 0x63}, "Ring",         DetectionType::RING,       Confidence::HIGH_CONF},
+    {{0x90, 0x48, 0x6C}, "Ring",         DetectionType::RING,       Confidence::HIGH_CONF},
+    {{0x9C, 0x76, 0x13}, "Ring",         DetectionType::RING,       Confidence::HIGH_CONF},
+    {{0xCC, 0x3B, 0xFB}, "Ring",         DetectionType::RING,       Confidence::HIGH_CONF},
+    {{0xC4, 0xDB, 0xAD}, "Ring",         DetectionType::RING,       Confidence::HIGH_CONF},
+    {{0x24, 0x2B, 0xD6}, "Ring",         DetectionType::RING,       Confidence::HIGH_CONF},
+    {{0x00, 0xB4, 0x63}, "Ring",         DetectionType::RING,       Confidence::HIGH_CONF},
+    {{0x50, 0xE4, 0x67}, "Ring",         DetectionType::RING,       Confidence::HIGH_CONF},
 
     // ---- Commercial / institutional camera vendors ----
     // Source: public IEEE MA-L registry (maclookup.app), cross-checked
     // per-vendor registration records.
-    {{0xE0, 0xA7, 0x00}, "Verkada",      DetectionType::CAMERA},  // registered 2016-09-22
-    {{0x70, 0x1A, 0xD5}, "Avigilon",     DetectionType::CAMERA},  // Avigilon Alta, registered 2021-04-27
-    {{0x00, 0x40, 0x8C}, "Axis",         DetectionType::CAMERA},  // Axis Communications, registered 1998
-    {{0xB8, 0xA4, 0x4F}, "Axis",         DetectionType::CAMERA},
+    {{0xE0, 0xA7, 0x00}, "Verkada",      DetectionType::CAMERA,     Confidence::HIGH_CONF},  // registered 2016-09-22
+    {{0x70, 0x1A, 0xD5}, "Avigilon",     DetectionType::CAMERA,     Confidence::HIGH_CONF},  // Avigilon Alta, registered 2021-04-27
+    {{0x00, 0x40, 0x8C}, "Axis",         DetectionType::CAMERA,     Confidence::HIGH_CONF},  // Axis Communications, registered 1998
+    {{0xB8, 0xA4, 0x4F}, "Axis",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
 };
 const uint16_t kOuiCount = sizeof(kOuiTable) / sizeof(kOuiTable[0]);
 
@@ -209,15 +217,18 @@ bool isIBeacon(const uint8_t* mfg, uint8_t len) {
 
 // --- lookups ---
 
-DetectionType lookupOui(const uint8_t* mac) {
+DetectionType lookupOui(const uint8_t* mac, Confidence* conf) {
     if (!mac) return DetectionType::UNKNOWN;
     for (uint16_t i = 0; i < kOuiCount; i++) {
         if (mac[0] == kOuiTable[i].b[0] &&
             mac[1] == kOuiTable[i].b[1] &&
             mac[2] == kOuiTable[i].b[2]) {
+            if (conf) *conf = kOuiTable[i].conf;
             return kOuiTable[i].type;
         }
     }
+    // Left alone rather than zeroed on a miss: the caller seeds it with the
+    // type-level default before asking, so a non-OUI match keeps that.
     return DetectionType::UNKNOWN;
 }
 

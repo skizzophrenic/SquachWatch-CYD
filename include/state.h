@@ -46,6 +46,18 @@ inline const char* detectionTypeName(DetectionType t) {
     }
 }
 
+// How sure we are that a match is what it claims to be.
+//
+// Moved here from signatures.h because it is now a property of the
+// SIGHTING rather than of the type. A FLOCK hit off Flock Safety's own
+// registered OUI and a FLOCK hit off a generic Espressif module block are
+// the same DetectionType and are not remotely the same claim.
+//
+// Note: plain LOW/MEDIUM/HIGH collide with the Arduino core's pin-state
+// macros through the preprocessor, which enum class scoping does not
+// protect against -- hence the _CONF suffix.
+enum class Confidence : uint8_t { LOW_CONF, MED_CONF, HIGH_CONF };
+
 struct Detection {
     uint8_t        mac[6];
     int8_t         rssi;
@@ -56,6 +68,9 @@ struct Detection {
     uint32_t       firstSeen;
     uint32_t       lastSeen;
     uint16_t       hits;
+    // The grade of the signature that actually matched, not the grade of
+    // the type. See lookupOui().
+    Confidence     conf;
     bool           active;
 };
 

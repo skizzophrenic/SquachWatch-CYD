@@ -866,7 +866,7 @@ static void ensurePrefsLoaded() {
 static void startOnboardingInternal();
 
 void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal, uint32_t hitCount,
-             int8_t rssi) {
+             int8_t rssi, Confidence conf) {
     uint32_t now = millis();
     lastInteraction = now;
     switch (evt) {
@@ -958,7 +958,9 @@ void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal, uint32_t hitCo
                 // to hedge on something we're actually sure about. Med
                 // /Low get an honest number tacked on so a shakier
                 // match doesn't read as equally certain.
-                Confidence conf = confidenceFor(dt);
+                // Passed in from the sighting rather than looked up from the
+                // type: the number he says out loud has to be about the
+                // signature that actually matched.
                 if (conf == Confidence::HIGH_CONF) {
                     say(base, 4500);
                 } else {
