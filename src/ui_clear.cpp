@@ -116,25 +116,49 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
     const int lineH          = 14;
     const int countersTop    = bar.y - counterRows * lineH - 6;
-    const int countersBottom = bar.y - 4;
-    // The counter rows alone sit 3px lower than countersTop, and nothing
-    // else does. Measured off a rendered landscape frame: the headline's
-    // ink ended at row 172, the two counter rows ran 180-186 and 194-200,
-    // and the button bar started at 214 -- so the block sat 7px under the
-    // headline and 13px above the buttons, hugging the text above it. The
-    // 20px of slack splits 10/10 with the rows 3px lower.
+    // bar.y - 1, not bar.y - 4. Those three rows were a real seam rather
+    // than spare margin: the animation repainted down to 209 and the button
+    // bar starts at 214, so 210-213 were painted once at boot and never
+    // touched again. On DIGITAL RAIN a flat black strip sat under the
+    // falling glyphs; on TERMINAL LOG the text stopped a few rows short of
+    // the buttons. Nothing draws there, so the animation may as well.
+    //
+    // It is also what lets the counter rows sit as low as they now do --
+    // see counterTextTop. They have to land inside the repainted region or
+    // they smear, and 209 was the wall.
+    const int countersBottom = bar.y - 1;
+    // The counter rows alone sit 9px lower than countersTop, and nothing
+    // else does. Measured off a rendered landscape frame before any of
+    // this: the headline's ink ended at row 172, the two counter rows ran
+    // 180-186 and 194-200, and the button bar started at 214 -- so the
+    // block sat 7px under the headline and 13px above the buttons, hugging
+    // the text above it.
+    //
+    // Centring it in that slack was the first attempt and it was the wrong
+    // one: 10px above and 10px below is balanced, and reads as belonging to
+    // neither the headline nor the buttons. Low is better. The counters are
+    // chrome, the same as the buttons are, so grouping the two into one
+    // footer and leaving the headline up with Squachy says what goes with
+    // what. 9 puts the last row's ink 4px off the button bar.
+    //
+    // Not further: 13 would touch the buttons. The real ceiling was lower
+    // still until a moment ago -- the rows have to land inside the
+    // background's repaint or they smear, and that wall sat at 209, which
+    // is why countersBottom above had to move first.
     //
     // Deliberately NOT folded into countersTop, which would look like the
     // tidier fix. That value is the floor of everything above it: the
     // headline is bottom-aligned to it, Squachy sizes himself against it,
     // the pet takes it as its band, and the background repaints to it.
     // Moving it would slide the headline down with the rows (leaving the
-    // gap exactly as lopsided as before) and hand Squachy three more
-    // pixels of height he did not ask for.
+    // grouping exactly as muddled as before) and hand Squachy nine more
+    // pixels of height -- which he cannot take: his waving arm already
+    // reaches row 4, and growing him walks the hand off the top edge.
     //
-    // Safe in portrait too, where the block is four rows rather than two:
-    // the last row then ends at bar.y - 10, still clear of countersBottom.
-    const int counterTextTop = countersTop + 3;
+    // Orientation-independent by construction. The last row's ink lands at
+    // bar.y - 14 + this whatever counterRows is, so portrait's four rows
+    // clear the buttons by the same 4px landscape's two do.
+    const int counterTextTop = countersTop + 9;
 
     // statusH: height of the ALL CLEAR / DETECTIONS LOGGED text row,
     // sized to fit the Bangers MD font's glyph box (ascent 27 +
