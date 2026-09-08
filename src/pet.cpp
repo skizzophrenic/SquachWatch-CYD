@@ -55,7 +55,7 @@ static const uint32_t PERCH_MS = 3200;      // long enough to read the line
 // pixels above his skull, and a 40-tall sprite had to either lose a third
 // of itself behind the bar or sink its feet to his eyes. The bar is gone,
 // those rows are the background's, and he fits at full size.
-static const int      SCALE    = 4;
+static const int      SCALE    = 3;
 static const int      SPR      = LILGUY_W * SCALE;   // 40 across and tall
 static const float    RUN_PXMS = 0.075f;    // 75 px a second, a trot
 
@@ -123,13 +123,35 @@ void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom) {
     const float crown  = (float)Squachy::crownY();                 // top of his head
     // Feet exactly on the crown. No fudge needed now that this is the real
     // drawn head rather than a hit box: his crest spikes rise either side.
-    float       headY  = crown - (float)SPR;
-    // Deliberately allowed above the band. At this size he is 40 tall and
-    // Squachy's head top is only about 26 below the title bar, so clamping
-    // him into the band is what put his feet in Squachy's eyes. The title
-    // bar is drawn after him and crops whatever pokes up, which reads as
-    // him leaning over it rather than as a bug.
-    if (headY < 0.0f) headY = 0.0f;
+    // Feet a little INTO the fur, not balanced on the skull line.
+    //
+    // crownY() is the top of the head BOX. Squachy's cowlick rises another
+    // seven of his units above that, which at his current size is about
+    // twenty pixels -- so standing exactly on the crown put the pet in a
+    // trough with the tufts either side of him, looking like he had fallen
+    // in rather than climbed up. Sinking him three of Squachy's units puts
+    // his boots in the fur with the cowlick beside his shoulders.
+    //
+    // Three of SQUACHY's units, not three pixels: halfW is 24 of them, so
+    // this tracks him through every scale change and every costume that
+    // resizes him, the same way the rest of this file hangs off
+    // lastFootprint rather than off constants.
+    const float sqScale = (float)halfW / 24.0f;
+    float       headY   = crown + 3.0f * sqScale - (float)SPR;
+
+    // No clamp. There used to be one holding headY at 0 so he could not go
+    // above the band, and it was the whole bug: Squachy has grown enough
+    // that his crown sits about 26 rows down, a 40-tall pet could never
+    // reach it, and the clamp quietly parked the pet 14 rows inside his
+    // skull instead. Worse, it re-clamped every frame as Squachy bobbed, so
+    // the pet sank and rose independently of the head he was standing on --
+    // which is exactly the not-attached look.
+    //
+    // He is 30 tall now rather than 40 for the same reason. There is only
+    // so much sky above a character this size, and a sprite that cannot fit
+    // in it has to either shrink or be cropped. At 30 with the sink above he
+    // is fully on screen at rest and loses a few rows of hair at the top of
+    // a bounce, which is the same bargain Squachy's own tall hats take.
 
     switch (s_phase) {
     case Phase::AWAY: {

@@ -6387,12 +6387,34 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
                 if (s_cEnd == ChaseEnd::WINDED && age > 2600u) { s_cSt = ChaseSt::RESOLVE; s_cAt = now; }
                 else if (!tg.live || s_yX > (float)w + 34.0f) { s_cSt = ChaseSt::LEAVE; s_cAt = now; }
                 else if (fast && s_yX > tg.x - 13.0f) {
-                    if (s_cEnd == ChaseEnd::EAT) {
-                        tg.live = false;
-                        tg.next = now + (uint32_t)random(9000, 20000);
-                        s_eatAt = now;
+                    // ...but not while he is behind Squachy.
+                    //
+                    // The catch is the payoff of the whole chase, and it is
+                    // one beat long. Squachy is the widest opaque thing on
+                    // this screen and he is drawn after the background, so a
+                    // catch that lands in his x range happens entirely out of
+                    // sight -- the yeti goes in one side and comes out the
+                    // other holding somebody, with nothing in between.
+                    //
+                    // Deferring rather than cancelling: the condition above
+                    // stays true, so the moment he clears Squachy it fires on
+                    // the very next frame. He keeps closing in the meantime,
+                    // which reads as him hanging on rather than as a pause.
+                    // If the rider makes it off screen first the chase ends
+                    // the way it always did, one branch up.
+                    int sqCx = 0, sqHalf = 0, sqTop = 0, sqBot = 0;
+                    const bool behindHim =
+                        Squachy::lastFootprint(sqCx, sqHalf, sqTop, sqBot) &&
+                        s_yX > (float)(sqCx - sqHalf - 34) &&
+                        s_yX < (float)(sqCx + sqHalf);
+                    if (!behindHim) {
+                        if (s_cEnd == ChaseEnd::EAT) {
+                            tg.live = false;
+                            tg.next = now + (uint32_t)random(9000, 20000);
+                            s_eatAt = now;
+                        }
+                        s_cSt = ChaseSt::RESOLVE; s_cAt = now;
                     }
-                    s_cSt = ChaseSt::RESOLVE; s_cAt = now;
                 }
                 break;
             }
