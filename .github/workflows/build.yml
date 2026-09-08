@@ -61,6 +61,17 @@ jobs:
       - name: Build
         run: pio run
 
+  tests:
+    # The decoders are pure arithmetic over byte buffers, so they run on a
+    # desktop with no board and no display. Worth a job of their own: the
+    # failure mode they cover is a wrong offset producing a plausible
+    # coordinate rather than a crash, which no amount of compiling catches.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run host tests
+        run: make -C test
+
   emulator:
     # Cheap, and it catches the failure mode the merge introduced: the
     # emulator compiles the firmware's own sources against its shims, so a
