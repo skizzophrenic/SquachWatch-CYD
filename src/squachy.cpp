@@ -3164,24 +3164,43 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     t.fillRoundRect(cx2 - S(12), hh + S(2), S(24), S(19), S(5), furMain);
     t.fillRoundRect(cx2 - S(9),  hh + S(7), S(18), S(11), S(4), SKIN_TAN);
 
-    // Sagittal crest (the pronounced skull peak real bigfoot sightings
-    // always mention) plus a couple of smaller shaggy fringe tufts.
+    // A cowlick, plus a couple of smaller shaggy fringe tufts either side.
     //
-    // The crest is skipped for BLUE BLUR, the same way the top hat just
-    // below is skipped for UNICORN and for the same reason: that outfit
-    // already puts its own quills across this exact spot. In brown fur
-    // the crest reads as hair, but BLUE BLUR recolours him blue, so it
-    // stops reading as a skull peak and starts reading as a third quill
-    // standing straight up between two swept-back ones -- the one shape
-    // in that silhouette that doesn't belong. Every other outfit, and
-    // plain Squachy, still get it.
-    // PARKA joins BLUE BLUR in skipping the crest, for a plainer reason: it
-    // is under a hood. The side tufts go with it -- they reach as high as the
-    // crest does and would poke through the fur trim.
+    // This used to be ONE symmetrical triangle 14 units tall -- a sagittal
+    // crest, the pronounced skull peak real bigfoot sightings always mention.
+    // Anatomically the better reference, and the wrong shape: a single tall
+    // point centred over his face read as a spear tip or a party hat, and at
+    // his current size the tip was clipping off the top of the screen.
+    //
+    // Two spikes now, and the asymmetry is the whole point. A short one on
+    // the left and a taller one leaning right reads as hair that slept
+    // funny rather than as a bone ridge, which is both friendlier and more
+    // animal. Nothing here is centred, deliberately: the lean is what stops
+    // it looking like a shape and starts it looking like a cowlick.
+    //
+    // 9 units at the tallest against the old 14. It costs him no size --
+    // CREST_REACH guarantees the 4-unit side tufts, not this -- but it does
+    // mean his silhouette no longer runs off the top at rest.
+    //
+    // Skipped for BLUE BLUR, the same way the top hat just below is skipped
+    // for UNICORN and for the same reason: that outfit already puts its own
+    // quills across this exact spot. In brown fur this reads as hair, but
+    // BLUE BLUR recolours him blue, so it stops reading as fur and starts
+    // reading as a stray quill among the swept-back ones -- the one shape in
+    // that silhouette that doesn't belong. Every other outfit, and plain
+    // Squachy, still get it.
+    // PARKA joins BLUE BLUR in skipping it, for a plainer reason: it is under
+    // a hood. The side tufts go with it -- they reach as high as this does
+    // and would poke through the fur trim.
     if (outfitNow != OutfitId::PARKA) {
     if (currentOutfit() != OutfitId::BLUEBLUR) {
-        keyT(cx2 - S(6), hh + S(2), cx2, hh - S(14), cx2 + S(6), hh + S(2));
-        t.fillTriangle(cx2 - S(6), hh + S(2), cx2, hh - S(14), cx2 + S(6), hh + S(2), furLight);
+        // The short one, upright.
+        keyT(cx2 - S(7), hh + S(2), cx2 - S(4), hh - S(5), cx2 - S(1), hh + S(2));
+        t.fillTriangle(cx2 - S(7), hh + S(2), cx2 - S(4), hh - S(5), cx2 - S(1), hh + S(2), furLight);
+        // The tall one, apex pushed out over its own right base corner so
+        // the whole tuft leans instead of standing to attention.
+        keyT(cx2 - S(2), hh + S(2), cx2 + S(6), hh - S(9), cx2 + S(6), hh + S(2));
+        t.fillTriangle(cx2 - S(2), hh + S(2), cx2 + S(6), hh - S(9), cx2 + S(6), hh + S(2), furLight);
     }
         keyT(cx2 - S(13), hh + S(3), cx2 - S(9), hh - S(4), cx2 - S(5), hh + S(3));
         t.fillTriangle(cx2 - S(13), hh + S(3), cx2 - S(9), hh - S(4), cx2 - S(5), hh + S(3), furLight);
@@ -3189,15 +3208,20 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         t.fillTriangle(cx2 + S(5),  hh + S(3), cx2 + S(9), hh - S(4), cx2 + S(13),hh + S(3), furLight);
     }
 
-    // A tiny top hat, unlocked once he reaches Legend stage — perched
-    // just above the crest peak (hh - S(14)). Skipped for the Unicorn
-    // outfit specifically: its horn already occupies that exact spot,
-    // and the two stacked together read as clutter rather than two
-    // readable accessories.
+    // A tiny top hat, unlocked once he reaches Legend stage. Skipped for the
+    // Unicorn outfit specifically: its horn already occupies that exact spot,
+    // and the two stacked together read as clutter rather than two readable
+    // accessories.
+    //
+    // Dropped 5 units when the crest became a cowlick. It was seated to clear
+    // a 14-unit spike, with its brim five units of air above that tip; the
+    // tallest tuft is 9 now, so holding the same gap means 22 -> 17 here and
+    // the same 5 off the crown and the band. Left where it was it would have
+    // floated a third of a head above him.
     if (currentStage() == GrowthStage::LEGEND && currentOutfit() != OutfitId::UNICORN) {
-        t.fillRoundRect(cx2 - S(9), hh - S(22), S(18), S(3), 1, BLACK);
-        t.fillRect(cx2 - S(5), hh - S(30), S(10), S(9), BLACK);
-        t.fillRect(cx2 - S(5), hh - S(24), S(10), S(2), VAPOR_PINK);
+        t.fillRoundRect(cx2 - S(9), hh - S(17), S(18), S(3), 1, BLACK);
+        t.fillRect(cx2 - S(5), hh - S(25), S(10), S(9), BLACK);
+        t.fillRect(cx2 - S(5), hh - S(19), S(10), S(2), VAPOR_PINK);
     }
 
     // Ears — small and tucked close, like a real Sasquach rather than
