@@ -2464,26 +2464,25 @@ static const int BASE_HEIGHT_NOSHADOW = 56;
 // about 16 (measured: arm top at row 3 with the anchor at 37 at scale
 // 2.206, so 15.4 rounded up).
 //
-// Neither is what we reserve for. There is a third number: his SIDE TUFTS,
-// the two small shaggy triangles either side of the big centre spike, and
-// they only reach 4 (apex at hh - S(4), against the spike's hh - S(14)).
+// Neither is what we reserve for now that the centre spike is gone. The
+// cowlick's tall tuft is the highest thing he draws, at 80% of nine units,
+// so 7.2 -- and 8 here rounds that up rather than down, because a guarantee
+// that is a fraction short is not a guarantee.
 //
-// So the guarantee is the tufts, and the spike and the hand are both free to
-// run off the top. Reserving for either of them costs him size permanently
-// to protect a few rows of one pointed thing, and he is worth more big. What
-// this still protects is the part that reads as his head -- the skull, the
-// face, the shades, and the fringe either side of the spike.
+// This was 4 for a while, back when a 14-unit spike stood over everything
+// and reserving for it was hopeless, so the rule was to protect only the
+// small side tufts and let the spike run off the top. With the spike gone
+// there is nothing left worth sacrificing: 8 covers his whole silhouette,
+// and it costs almost nothing because the top is no longer where he runs
+// out of room.
 //
-// At CLEAR's band that lands the spike's tip flush on row 0 at rest, so it
-// is not so much clipped as exactly used up, and the bob takes it over the
-// edge from there. Not new behaviour at the extreme either: a BOUNCE apex
-// has always put the spike above row 0 at every scale this screen has used,
-// because the hop is 9 units on top of wherever he is standing.
+// Still not the waving hand at 16. That one stays free to clip -- it is a
+// gesture, not the character, and reserving for it costs real size.
 //
-// With this at 4 the top has stopped being the binding constraint at all on
-// CLEAR -- his size now comes off the band bottom and the bubble row above
-// him. The bubble row is what to spend next if he needs to be bigger again.
-static const int CREST_REACH = 4;
+// The bob is on top of all of this and always has been: a BOUNCE apex lifts
+// him 9 units, so his tufts leave the screen at the top of a hop at every
+// scale this screen has ever used.
+static const int CREST_REACH = 8;
 static const int TOP_MARGIN  = 2;   // rows of air we insist on above the tufts
 
 // Draws Squachy at an already-animated anchor (hy = head-top Y for this
@@ -3849,7 +3848,28 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     // it reserves more of that room and he renders correspondingly
     // smaller for the duration — reading the explanation matters more
     // than his size right then.
-    const int bubbleRowH = s_onboardActive ? ONBOARD_BUBBLE_H : 16;
+    // One row, not sixteen, and the bubble is why.
+    //
+    // This reserves space BELOW topY for a speech bubble to sit in. It was
+    // sixteen because that is what a one-liner needs. But the one-liner
+    // rises now (see risenBubbleTop): it climbs into the rows the title bar
+    // used to own and lands at rows 1..15, which ends one row ABOVE topY.
+    // It stopped needing anything down here and nobody moved this, so
+    // sixteen rows sat empty under it and Squachy was pushed down past
+    // them. One row of air is all that is left to keep.
+    //
+    // The walkthrough is the exception and keeps its full reserve. That
+    // bubble is 52 tall and never rises -- it is far too wide to clear the
+    // corner buttons -- so it genuinely does sit below topY, and he
+    // genuinely does have to stand under it.
+    //
+    // The honest cost: a one-liner that CANNOT rise still draws at topY,
+    // and now overlaps the top few rows of his skull instead of stopping
+    // above them. That is the wrapped bubbles and the ones beside a corner
+    // button, drawn after him either way, over a part of his head with
+    // nothing on it -- his face sits well below.
+    static const int BUBBLE_ROW_RISEN = 1;
+    const int bubbleRowH = s_onboardActive ? ONBOARD_BUBBLE_H : BUBBLE_ROW_RISEN;
     // The floor below normally keeps him from going below scale 1.0 --
     // minScale lets a specific call site (the mini-scan-screen cameo)
     // opt into a smaller floor without changing anyone else's default.
