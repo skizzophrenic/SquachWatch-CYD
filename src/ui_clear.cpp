@@ -160,13 +160,39 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // clear the buttons by the same 4px landscape's two do.
     const int counterTextTop = countersTop + 9;
 
-    // statusH: height of the ALL CLEAR / DETECTIONS LOGGED text row,
-    // sized to fit the Bangers MD font's glyph box (ascent 27 +
-    // descent 6, same font as the ALERT screen's "!! DETECTION !!").
-    // Squachy's own region now runs past this (see his tick() call
-    // below) so his feet land on top of it instead of stopping above.
+    // The headline hangs off the counter block now, not off countersTop.
+    //
+    // Measured off a render: ty puts the Bangers ink 4 rows lower and it
+    // runs 23 rows, with the 24-pass outline adding 2 more each way. So the
+    // whole painted band is ty+2 .. ty+28, and sitting it HEADLINE_PAD above
+    // the counters is that arithmetic run backwards.
+    //
+    // It used to bottom-align to countersTop, which put it at row 146 --
+    // floating across his shins in the middle of otherwise empty space,
+    // with 17 rows of nothing between it and the numbers it belongs to.
+    static const int HEADLINE_H   = 28;
+    static const int HEADLINE_PAD = 5;
+    const int headlineTop = counterTextTop - HEADLINE_PAD - HEADLINE_H;
+
+    // ...which frees the rows it used to sit in, and Squachy takes them.
+    //
+    // His floor was countersTop, a number that stopped meaning anything to
+    // him once the counters moved down into the footer: it is neither where
+    // the text starts nor where the screen runs out. Two rows above the
+    // counter ink is the real bottom of the space he has.
+    //
+    // He is sized from the band he is handed -- scale = charAvail /
+    // BASE_HEIGHT -- so this is the whole of "make him bigger", and it is
+    // bigger everywhere rather than per costume. His feet land on the new
+    // floor for free; nothing else needs moving.
+    //
+    // The ceiling on this is his WAVING ARM, not his head. It reaches about
+    // two rows above his crest scaled, and the crest is only 8 rows off the
+    // top today, so there is far less room up there than the empty-looking
+    // rows suggest. See the measurement in the commit that added this.
+    const int squachyBottom = counterTextTop - 2;
+
     const int titleBottom  = 16;
-    const int statusH      = 34;
     // The animation runs all the way down to just above the button
     // bar, covering Squachy's region, the text row, and the counters —
     // everything below the title bar erases and repaints together
@@ -182,7 +208,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // feet land. Cameos still stand level with him at countersTop; the
     // backgrounds that fill a bright ground band keep filling to where the
     // numbers actually begin, instead of stopping nine pixels short of them.
-    Theme::setBackgroundFloor(countersTop, counterTextTop);
+    Theme::setBackgroundFloor(squachyBottom, counterTextTop);
     // From the very top of the screen, not from titleBottom. The title bar
     // used to own rows 0-15 and paint them every frame; with it gone they
     // belonged to nobody and kept whatever the previous frame left there.
@@ -216,13 +242,13 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // just leaves it as animated negative space — no layout changes
     // needed anywhere else on this screen.
     if (!Settings::boringMode()) {
-        Squachy::tick(t, w / 2, titleBottom, countersTop - titleBottom, now, advance);
+        Squachy::tick(t, w / 2, titleBottom, squachyBottom - titleBottom, now, advance);
     }
 
     // The pet, after Squachy and before the flourishes: he perches on
     // top of him, so he has to be drawn on top of him. Does nothing at all
     // unless one is unlocked and switched on.
-    if (!Settings::boringMode()) Pet::tick(t, now, w, titleBottom, countersTop);
+    if (!Settings::boringMode()) Pet::tick(t, now, w, titleBottom, squachyBottom);
 
     // Rare decorative flourishes (UFO/sparkle/critter/glitch-line) --
     // see idle_events.h. Skipped for the same reasons Squachy's own
@@ -230,7 +256,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // the walkthrough's own bubble (onboarding) -- a UFO flying past
     // mid-lesson would be more distraction than delight.
     if (!Settings::boringMode() && !Squachy::onboardingActive()) {
-        IdleEvents::tick(t, now, 0, titleBottom, w, countersTop, advance);
+        IdleEvents::tick(t, now, 0, titleBottom, w, squachyBottom, advance);
     }
 
     // Whatever the background wants on top of the mascot. Right now
@@ -246,9 +272,15 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
 
     // ALL CLEAR (only flash if there are NO active detections). Same
     // Bangers headline font as the ALERT screen's "!! DETECTION !!" —
-    // sits right above the counter lines, bottom-aligned to
-    // countersTop (see statusH above). Drawn AFTER Squachy so it stays
-    // readable on top of him rather than getting covered by his feet.
+    // now sitting directly on top of the counter block it labels, rather
+    // than floating in the middle of the empty space above it. See
+    // headlineTop.
+    //
+    // Still drawn AFTER Squachy, and that stays deliberate. Drawing it
+    // first would let his shadow and feet fall across it, which sounds
+    // better than it is: he is about 60px wide at the ankles against a
+    // 185px headline, and a word with its middle punched out is not a
+    // word. The 24-pass black outline is what keeps it legible over him.
     bool anyActive = false;
     for (uint8_t i = 0; i < (uint8_t)DetectionType::COUNT; i++) {
         if (eng.countByType((DetectionType)i) > 0) { anyActive = true; break; }
@@ -286,7 +318,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
             {-2, 2},{-1, 2},{0, 2},{1, 2},{2, 2},
         };
         int tw = Theme::bangersTextWidth(msg, Theme::BangersSize::MD);
-        int ty = countersTop - statusH;
+        int ty = headlineTop;
         if (tw <= w - 8) {
             int tx = (w - tw) / 2;
             for (uint8_t i = 0; i < 24; i++) {
@@ -302,7 +334,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
             // than clip.
             t.setTextSize(2);
             int sw = t.textWidth(msg);
-            int sx = (w - sw) / 2, sy = countersTop - t.fontHeight(2);
+            int sx = (w - sw) / 2, sy = counterTextTop - HEADLINE_PAD - t.fontHeight(2);
             t.setTextColor(Theme::BLACK, Theme::BG);
             for (uint8_t i = 0; i < 24; i++) {
                 t.setCursor(sx + OUTLINE_OFS[i][0], sy + OUTLINE_OFS[i][1]);
