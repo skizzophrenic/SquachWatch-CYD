@@ -337,8 +337,32 @@ static void drawHeader(TFT_eSPI& t, int w, int y, int hgt, RowGroupId g) {
 // instead, so it gets a single right chevron -- the same grammar the rest of
 // the UI uses for "this opens something". Showing a left arrow on a row that
 // cannot go left would be a lie told in pixels.
+// A solid card behind every option, and a hairline around it.
+//
+// Rows used to rely on each print() giving its own glyph cells an opaque
+// backing, so the live background showed through everywhere between the
+// letters. That reads fine over the digital rain and badly over anything
+// with big bright shapes -- the synthwave sun and the fire both come
+// straight through the gaps in a word.
+//
+// Filling the row first costs nothing (the dimmed background behind this
+// screen already repaints the whole body every frame, so there is no
+// erase problem either way) and the 1px edge does the job the old bottom
+// hairline was doing, while also closing the row off as an object.
+//
+// Two pixels short of the row height leaves a gap between neighbours so
+// the edges read as separate cards rather than one long grid, and the
+// right inset clears the scrollbar at w-4, which draws later and would
+// otherwise sit on top of the border.
+static void rowPanel(TFT_eSPI& t, int w, int y, int hgt) {
+    const int x0 = 3, ww = w - 10, hh = hgt - 2;
+    if (ww <= 0 || hh <= 0) return;
+    t.fillRect(x0, y, ww, hh, Theme::BG);
+    t.drawRect(x0, y, ww, hh, Theme::PURPLE);
+}
 static void drawTwoLineRow(TFT_eSPI& t, int w, int y, int hgt, const char* label,
                            const char* value, uint16_t labelColor, bool cycles) {
+    rowPanel(t, w, y, hgt);
     t.setTextSize(1);
     t.setTextColor(labelColor, Theme::BG);
     t.setCursor(8, y + 2);
@@ -365,20 +389,15 @@ static void drawTwoLineRow(TFT_eSPI& t, int w, int y, int hgt, const char* label
     t.print(">");
 
     t.setTextSize(1);
-    t.drawFastHLine(4, y + hgt - 1, w - 8, Theme::PURPLE);
 }
 
 static void drawRow(TFT_eSPI& t, int w, int y, int hgt, const char* label,
                     const char* value, bool danger, uint16_t labelColor,
                     bool compact) {
-    // No full-row fillRect here anymore -- the dimmed background
-    // effect behind this screen (see uiSettingsTick()) already
-    // repaints the whole body region every frame, the same "let the
-    // background do the erasing" pattern CLEAR's own counter row
-    // relies on. Each print() call still gives its own glyph cells an
-    // opaque BG backing (via the bg color param below) so text stays
-    // crisp against a moving backdrop, without needing a full-row
-    // fill that would just hide the effect entirely.
+    // The full-row fill is back, as a card -- see rowPanel. The glyph-cell
+    // backing below stays anyway: it costs nothing now and it is what keeps
+    // text crisp if a row is ever drawn without a panel behind it.
+    rowPanel(t, w, y, hgt);
     t.setTextSize(compact ? 1 : 2);
     t.setTextColor(danger ? Theme::RED : labelColor, Theme::BG);
     t.setCursor(8, y + (hgt - t.fontHeight()) / 2);
@@ -392,7 +411,6 @@ static void drawRow(TFT_eSPI& t, int w, int y, int hgt, const char* label,
         t.setCursor(w - 18 - vw, y + (hgt - t.fontHeight()) / 2);
         t.print(value);
     }
-    t.drawFastHLine(4, y + hgt - 1, w - 8, Theme::PURPLE);
 }
 
 // Fills in what a row actually shows. valBuf is scratch space for

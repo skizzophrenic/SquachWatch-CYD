@@ -2434,26 +2434,57 @@ static const int BASE_HEIGHT = 68;
 // of 37 at scale 2.206, which is 53.0 units exactly. The shadow's own bottom
 // edge sits at 66, and that is what the remaining reserve was buying.
 //
-// 60, though, and not 54. Standing still is not his lowest pose: the DUCK
-// adds 6 units (hy += 6.0f * scale, see the crouch in tick), and reclaiming
-// down to his resting soles put his boots at row 194 mid-duck -- behind the
-// counter text, brown blocks showing through cyan numbers. 53 + 6 + 1 of air
-// is the honest floor.
+// 56, which is his 53 plus three of the six the DUCK needs -- so the crouch
+// is deliberately allowed to overrun, and it is worth being explicit about
+// what that buys and what it costs.
+//
+// His size on any screen reduces to one identity:
+//     scale = (bandBottom - TOP_MARGIN) / (this + CREST_REACH)
+// Everything else -- bubble row, headroom, per-outfit drops -- trades
+// against itself and cancels. So there are exactly three places another
+// percent can come from, and two of them are bad: crowding his crest
+// off the top, or pushing the band down into the counter text full time.
+//
+// This is the third. Reserving the whole crouch cost 5% of him ALL the time
+// to protect a pose that lasts 900ms, cannot repeat for 30 seconds (see the
+// cooldown by s_duckUntil), and only fires when a flying toaster passes his
+// head -- one background out of eleven. Mid-crouch his soles now reach about
+// six rows into the first counter line, behind cyan text that is drawn after
+// him and covers it. That is a fair price for a tenth of him at rest.
 //
 // Dividing by this instead of BASE_HEIGHT is the whole of "he got bigger".
 // Nothing else changed: he is still sized from the band he is handed, his
 // feet still land on the bottom of it, and every screen gets it at once.
-static const int BASE_HEIGHT_NOSHADOW = 60;
+static const int BASE_HEIGHT_NOSHADOW = 56;
 
-// What actually stops him growing, and it is not his head.
+// How much of him above the head anchor is GUARANTEED to be on screen.
 //
-// His raised WAVING HAND reaches about 16 units above the head anchor --
-// measured the same way, arm top at row 3 with the anchor at 37 and scale
-// 2.206, so 15.4 rounded up. His crest only reaches 14. Size him off the
-// crest and the hand walks off the top of the screen on the first wave,
-// which is exactly what reclaiming those 15 units would have done.
-static const int ARM_REACH  = 16;
-static const int TOP_MARGIN = 2;    // rows of air we insist on above the hand
+// Two numbers are in play and they are deliberately not the same one. His
+// crest reaches 14 units above the anchor; his raised waving HAND reaches
+// about 16 (measured: arm top at row 3 with the anchor at 37 at scale
+// 2.206, so 15.4 rounded up).
+//
+// Neither is what we reserve for. There is a third number: his SIDE TUFTS,
+// the two small shaggy triangles either side of the big centre spike, and
+// they only reach 4 (apex at hh - S(4), against the spike's hh - S(14)).
+//
+// So the guarantee is the tufts, and the spike and the hand are both free to
+// run off the top. Reserving for either of them costs him size permanently
+// to protect a few rows of one pointed thing, and he is worth more big. What
+// this still protects is the part that reads as his head -- the skull, the
+// face, the shades, and the fringe either side of the spike.
+//
+// At CLEAR's band that lands the spike's tip flush on row 0 at rest, so it
+// is not so much clipped as exactly used up, and the bob takes it over the
+// edge from there. Not new behaviour at the extreme either: a BOUNCE apex
+// has always put the spike above row 0 at every scale this screen has used,
+// because the hop is 9 units on top of wherever he is standing.
+//
+// With this at 4 the top has stopped being the binding constraint at all on
+// CLEAR -- his size now comes off the band bottom and the bubble row above
+// him. The bubble row is what to spend next if he needs to be bigger again.
+static const int CREST_REACH = 4;
+static const int TOP_MARGIN  = 2;   // rows of air we insist on above the tufts
 
 // Draws Squachy at an already-animated anchor (hy = head-top Y for this
 // exact frame). Bob is computed once in tick() so it can also drive the
@@ -3836,15 +3867,15 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
 
     const int baseH = SQUACHY_SHADOW ? BASE_HEIGHT : BASE_HEIGHT_NOSHADOW;
 
-    // The smallest drop that keeps his waving hand on screen, in closed form
+    // The smallest drop that keeps his crest on screen, in closed form
     // rather than as a loop that nudges and re-checks.
     //
     // Both sides move when headroom does, which is why this is worth writing
-    // out: a pixel of drop pushes the hand down a pixel AND shrinks him,
-    // which pulls the hand down again by ARM_REACH/baseH more. Solving
-    //     (topY + bubbleRowH + h) - ARM_REACH * (A - h) / baseH >= TOP_MARGIN
+    // out: a pixel of drop pushes his head down a pixel AND shrinks him,
+    // which pulls it down again by CREST_REACH/baseH more. Solving
+    //     (topY + bubbleRowH + h) - CREST_REACH * (A - h) / baseH >= TOP_MARGIN
     // for h gives the line below. Rounded UP, because one row short here is
-    // a clipped hand every time he waves.
+    // a flat-topped head.
     //
     // It only ever raises headroom, never lowers it, so the per-outfit drops
     // above still win where they are larger, and every screen whose band is
@@ -3852,8 +3883,8 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     {
         const int A    = availHeight - bubbleRowH;
         const int Cy   = topY + bubbleRowH;
-        const int num  = baseH * (TOP_MARGIN - Cy) + ARM_REACH * A;
-        const int den  = baseH + ARM_REACH;
+        const int num  = baseH * (TOP_MARGIN - Cy) + CREST_REACH * A;
+        const int den  = baseH + CREST_REACH;
         if (num > 0) {
             const int need = (num + den - 1) / den;
             if (headroom < need) headroom = need;
