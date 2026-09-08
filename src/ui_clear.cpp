@@ -245,10 +245,6 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         Squachy::tick(t, w / 2, titleBottom, squachyBottom - titleBottom, now, advance);
     }
 
-    // The pet, after Squachy and before the flourishes: he perches on
-    // top of him, so he has to be drawn on top of him. Does nothing at all
-    // unless one is unlocked and switched on.
-    if (!Settings::boringMode()) Pet::tick(t, now, w, titleBottom, squachyBottom);
 
     // Rare decorative flourishes (UFO/sparkle/critter/glitch-line) --
     // see idle_events.h. Skipped for the same reasons Squachy's own
@@ -345,6 +341,23 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
             t.print(msg);
         }
     }
+
+    // The pet, after Squachy AND after the headline.
+    //
+    // After Squachy because he perches on top of him. After the headline
+    // because he spends most of his visits on the ground, and the ground on
+    // this screen is the same rows the headline occupies -- drawn before it
+    // he stood there for three seconds with his legs behind ACTIVE
+    // DETECTIONS, which is a poor showing for the only other character on
+    // the device.
+    //
+    // Squachy stays behind the headline on purpose and this does not change
+    // that: he is 130px of opaque brown and the text has to survive him. The
+    // pet is thirty pixels wide and moving, so passing in front reads as
+    // depth rather than as an obstruction.
+    //
+    // Still before the counters, which he never reaches.
+    if (!Settings::boringMode()) Pet::tick(t, now, w, titleBottom, squachyBottom);
 
     // Counter lines above the buttons — all 13 detection types, split
     // across counterRows (2 in landscape, capped at 4/row in portrait

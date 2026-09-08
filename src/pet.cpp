@@ -50,6 +50,11 @@ static const uint8_t QUIPS_N = sizeof(QUIPS) / sizeof(QUIPS[0]);
 // read as a leap rather than a float.
 static const float    G        = 0.0018f;
 static const uint32_t PERCH_MS = 3200;      // long enough to read the line
+// One visit in four ends up on his head. The climb is the best thing he
+// does and it was happening every single time, which is the fastest way to
+// make a good gag ordinary -- by the third viewing it is a cutscene. The
+// other three visits he just walks on, insults him, and leaves.
+static const int      PERCH_ODDS = 4;
 // Four now, which is what was wanted all along. It was three while the
 // title bar existed: standing on Squachy's crown there were only about 28
 // pixels above his skull, and a 40-tall sprite had to either lose a third
@@ -59,11 +64,18 @@ static const int      SCALE    = 3;
 static const int      SPR      = LILGUY_W * SCALE;   // 40 across and tall
 static const float    RUN_PXMS = 0.075f;    // 75 px a second, a trot
 
-enum class Phase : uint8_t { AWAY, RUN_IN, UP, PERCH, DOWN, RUN_OUT };
+// HECKLE is the common visit and PERCH is the rare one. He turns up, stops
+// beside Squachy, says his piece and carries on; only occasionally does he
+// bother climbing. Nothing about the jump changed -- it just stopped being
+// the only thing he does, which is what made it stop reading as a routine.
+enum class Phase : uint8_t { AWAY, RUN_IN, HECKLE, UP, PERCH, DOWN, RUN_OUT };
 
 static Phase     s_phase   = Phase::AWAY;
 static uint32_t  s_nextAt  = 0;             // when he next turns up
 static uint32_t  s_at      = 0;             // when the current phase began
+// Decided once, on arrival, so every phase after it agrees about where this
+// visit is going.
+static bool      s_willPerch = false;
 static bool      s_fromLeft= true;
 static uint8_t   s_quip    = 0;
 static float     s_x       = -100.0f;
@@ -160,6 +172,7 @@ void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom) {
         // Random side every time, so he is not a metronome.
         s_fromLeft = (random(0, 2) == 0);
         s_quip     = (uint8_t)random(0, QUIPS_N);
+        s_willPerch = (random(0, PERCH_ODDS) == 0);
         s_x        = s_fromLeft ? -(float)SPR : (float)screenW;
         s_y        = ground;
         s_phase    = Phase::RUN_IN;
@@ -176,6 +189,8 @@ void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom) {
         s_y  = ground;
         if ((s_fromLeft && s_x >= target) || (!s_fromLeft && s_x <= target)) {
             s_x = target;
+            // Most visits stop here and talk from the floor.
+            if (!s_willPerch) { s_phase = Phase::HECKLE; s_at = now; break; }
             // Lock the flight in now. Apex height and half-time come out of
             // G, so the two halves are the same parabola by construction.
             s_launchX = s_x;
@@ -187,6 +202,14 @@ void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom) {
             s_phase   = Phase::UP;
             s_at      = now;
         }
+        break;
+    }
+    case Phase::HECKLE: {
+        // Standing still beside him, on the ground he ran in on. He holds
+        // the same beat the perch does, so the line gets the same time to be
+        // read whichever way he delivered it.
+        s_y = ground;
+        if (now - s_at >= PERCH_MS) { s_phase = Phase::RUN_OUT; s_at = now; }
         break;
     }
     case Phase::UP: {
@@ -263,18 +286,26 @@ void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom) {
     // the band goes, so a bubble over his head lands behind the title bar --
     // which is where the whole joke went the first time. Level with him, and
     // on whichever side has the room.
-    if (s_phase == Phase::PERCH) {
+    if (s_phase == Phase::PERCH || s_phase == Phase::HECKLE) {
         t.setTextSize(1);
         const int bw = t.textWidth(QUIPS[s_quip]) + 8;
         const int bx = ((int)s_x + SPR + 4 + bw <= screenW - 2)
                        ? (int)s_x + SPR + 4
                        : (int)s_x - bw - 4;
-        // Clear of the corner buttons, not just of the band. Perched on the
-        // crown he is high enough that an unclamped bubble used to land
-        // behind the old title bar; now that the bar is gone it slides under
-        // the settings icon instead, which is a 20-tall box in the top-left.
-        // Below both is the only place that is always safe.
-        int by = (int)s_y + 6;
+        // Beside him on the head, ABOVE him on the ground.
+        //
+        // Perched on the crown he is already as high as the band goes, so a
+        // bubble over his head lands behind the corner buttons -- which is
+        // where the whole joke went the first time this was wired up. Level
+        // with him is the only place that is always safe up there.
+        //
+        // On the floor the opposite is true: level with him puts the bubble
+        // straight through the ACTIVE DETECTIONS headline, which is drawn
+        // after the pet and would paint over the line he came to say. Above
+        // his head there is nothing but Squachy, and a speech bubble in
+        // front of him reads exactly as intended.
+        int by = (s_phase == Phase::PERCH) ? (int)s_y + 6
+                                           : (int)s_y - 18;
         if (by < 22) by = 22;
         (void)bandTop;
         bubble(t, bx, by, screenW, QUIPS[s_quip]);
