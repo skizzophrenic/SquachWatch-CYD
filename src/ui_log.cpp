@@ -1,5 +1,6 @@
 // SquachWatch-CYD — log screen implementation
 #include "ui_log.h"
+#include "clock.h"
 #include "theme.h"
 #include "settings.h"
 #include <Arduino.h>
@@ -178,6 +179,8 @@ switch (Settings::background()) {
         case Settings::Background::SPECTRUM:   Theme::drawGibson(t, now, bgTop, bodyBottom, eng); break;
         case Settings::Background::TUNNEL:     Theme::drawWireframeTunnel(t, now, bgTop, bodyBottom); break;
         case Settings::Background::SYNTHWAVE: Theme::drawSynthwave(t, now, bgTop, bodyBottom); break;
+        // Fills rather than skips -- see the note in drawActiveBackground.
+        case Settings::Background::BLACK:      t.fillRect(0, bgTop, t.width(), bodyBottom - bgTop, Theme::BG); break;
         default:                               Theme::drawDigitalRain(t, now, bgTop, bodyBottom, true); break;
     }
     Theme::restorePalette(saved);
@@ -269,10 +272,12 @@ switch (Settings::background()) {
         t.printf("x%u", d->hits);
 
         // Timestamp (right edge)
-        uint32_t ms = d->firstSeen;
-        uint32_t sec = ms / 1000;
+        // Wall-clock once somebody has set it, minutes-since-boot until
+        // then -- which is what this column always was. A row reading
+        // "71581:47" was 71581 minutes of uptime, technically an ordering
+        // and nothing more.
         char ts[12];
-        snprintf(ts, sizeof(ts), "%02lu:%02lu", (unsigned long)(sec / 60), (unsigned long)(sec % 60));
+        Clock::formatStamp(d->firstSeen, ts, sizeof(ts));
         int tw = t.textWidth(ts);
         t.setTextColor(Theme::VAPOR_PINK, Theme::BG);
         t.setCursor(w - tw - 14, y + topPad);

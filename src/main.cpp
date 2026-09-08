@@ -13,6 +13,7 @@
 #include "state.h"
 #include "theme.h"
 #include "detection.h"
+#include "clock.h"
 #include "ui_boot.h"
 #include "ui_clear.h"
 #include "ui_alert.h"
@@ -1397,6 +1398,9 @@ static inline uint32_t emaUpdate(uint32_t avg, uint32_t sample) {
 }
 
 void loop() {
+    // Cheap and unconditional: available() is a register read, and this
+    // is the only way in for the one serial command the firmware takes.
+    Clock::pollSerial();
     uint32_t frameStartUs = micros();
     s_pushAccumUs = 0;
     uint32_t now = millis();
@@ -2511,7 +2515,7 @@ void loop() {
             break;
         }
         case AppState::DETECTION_FILTER: {
-            uiDetFilterTick(*canvas, now);
+            uiDetFilterTick(*canvas, now, engine);
             // Same drag-to-scroll / tap-on-release-to-toggle gesture
             // the Settings screen above uses, and for the same reason:
             // committing on press would make a swipe that starts on a
@@ -2546,7 +2550,7 @@ void loop() {
             break;
         }
         case AppState::POWER_SAVER: {
-            uiPowerTick(*canvas, now);
+            uiPowerTick(*canvas, now, engine);
             // Same drag-to-scroll, commit-on-release gesture the Settings and
             // type-filter lists use, and for the same reason: committing on
             // press turns a swipe that happens to start on a row into a

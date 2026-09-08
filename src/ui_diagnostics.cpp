@@ -1,5 +1,6 @@
 // SquachWatch-CYD — on-device diagnostics screen implementation
 #include "ui_diagnostics.h"
+#include "clock.h"
 #include "theme.h"
 #include <Arduino.h>
 #include <stdarg.h>
@@ -56,6 +57,17 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
     y = drawLine(t, y, Theme::CYAN, "BOARD:", "%s (%s)", info.boardName,
                  info.usingCapTouch ? "capacitive" : "resistive");
     y = drawLine(t, y, Theme::CYAN, "RESET:", "%s", info.resetReason);
+    // Uptime next to the reset reason on purpose: together they answer
+    // "did this thing restart on me", which is one question and not two.
+    {
+        char up[24];
+        Clock::formatUptime(up, sizeof(up));
+        y = drawLine(t, y, Theme::CYAN, "UPTIME:", "%s", up);
+        char clk[32];
+        Clock::formatClock(clk, sizeof(clk));
+        y = drawLine(t, y, Theme::CYAN, "CLOCK:", "%s%s", clk,
+                     Clock::isSet() ? "" : "  (TIME <epoch> over serial)");
+    }
     y = drawLine(t, y, Theme::CYAN, "HEAP:", "%lu free / %lu largest",
                  (unsigned long)info.freeHeap, (unsigned long)info.largestBlock);
     y += 4;
