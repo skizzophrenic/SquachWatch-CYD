@@ -3647,7 +3647,8 @@ static void drawPartyFx(TFT_eSPI& t, uint32_t now, int topY, int availHeight, bo
 }
 
 void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
-          bool advance, float minScale, bool scanningFx, int wanderRangePx) {
+          bool advance, float minScale, bool scanningFx, int wanderRangePx,
+          uint8_t sizePct) {
     s_topLimit = topY;
     // A property of the caller's screen, not of his mood -- see the arm
     // chain in drawBody(). Assigned on every call, band calls included,
@@ -3996,6 +3997,31 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     if (scale > 3.0f) scale = 3.0f;
 
     int headTopY = topY + bubbleRowH + headroom;
+
+    // The SIZE row in Settings, applied last, and only when it is not 100.
+    //
+    // Anchored from the BOTTOM rather than the top, which is the whole
+    // trick. Every other line in this block works downward from topY and
+    // relies on headTopY + charAvail landing exactly on the band floor;
+    // shrinking him without re-deriving the anchor would leave his soles
+    // hanging in the air above the counters, which is the one thing this
+    // must not do. Subtracting the new height from the floor keeps his
+    // feet planted and takes the difference off the top, which is also
+    // what makes it safe:
+    //
+    // both guards above -- the crest one and the per-costume one -- are
+    // closed-form solutions for the FULL size, and every value here is
+    // smaller than what they solved for, so their guarantees hold with
+    // room to spare rather than needing to be recomputed. That is why the
+    // setting only goes down.
+    if (sizePct < 100) {
+        int shrunk = (charAvail * (int)sizePct) / 100;
+        if (shrunk < charAvailFloor) shrunk = charAvailFloor;
+        float s2 = (float)shrunk / (float)baseH;
+        if (s2 < minScale) s2 = minScale;
+        scale    = s2;
+        headTopY = topY + availHeight - shrunk;
+    }
 
     // A little wander away from center during Mood::WALK. bodyCx (not
     // cx) drives everything about where he's actually drawn; the

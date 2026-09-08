@@ -22,7 +22,8 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::RGB_SWAP, SettingsRow::ROTATION_LOCK,
     SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE, SettingsRow::DETECTION_FILTER,
     SettingsRow::IGNORED_DEVICES,
-    SettingsRow::NICKNAME, SettingsRow::SHADES_COLOR, SettingsRow::OUTFIT, SettingsRow::PET,
+    SettingsRow::NICKNAME, SettingsRow::SHADES_COLOR, SettingsRow::SQUACHY_SIZE,
+    SettingsRow::OUTFIT, SettingsRow::PET,
     SettingsRow::REPLAY_INTRO, SettingsRow::SHOW_OFF, SettingsRow::VIEW_DIARY,
     SettingsRow::POWER_SAVER,
     SettingsRow::CALIBRATE, SettingsRow::CHECK_COLORS, SettingsRow::DIAGNOSTICS, SettingsRow::RESET_STATS, SettingsRow::BACK,
@@ -32,7 +33,8 @@ static const uint8_t ALL_ROWS_N = sizeof(ALL_ROWS) / sizeof(ALL_ROWS[0]);
 static bool isSquachyOnlyRow(SettingsRow r) {
     return r == SettingsRow::REPLAY_INTRO || r == SettingsRow::SHOW_OFF ||
            r == SettingsRow::NICKNAME ||
-           r == SettingsRow::SHADES_COLOR || r == SettingsRow::OUTFIT ||
+           r == SettingsRow::SHADES_COLOR || r == SettingsRow::SQUACHY_SIZE ||
+           r == SettingsRow::OUTFIT ||
            r == SettingsRow::PET;
 }
 
@@ -55,6 +57,7 @@ static RowGroupId groupFor(SettingsRow r) {
             return RowGroupId::BEHAVIOR;
         case SettingsRow::NICKNAME:
         case SettingsRow::SHADES_COLOR:
+        case SettingsRow::SQUACHY_SIZE:
         case SettingsRow::OUTFIT:
         case SettingsRow::PET:
         case SettingsRow::REPLAY_INTRO:
@@ -494,6 +497,12 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             break;
         case SettingsRow::SHADES_COLOR:
             label = "SHADES COLOR"; value = Squachy::shadesColorName();
+            break;
+        // "SIZE" rather than "SQUACHY SIZE": this row is already under the
+        // SQUACHY heading, and the longer label plus "MEDIUM" overruns a
+        // 240px portrait row by two pixels at text size 2.
+        case SettingsRow::SQUACHY_SIZE:
+            label = "SIZE"; value = Settings::squachySizeLabel();
             break;
         case SettingsRow::OUTFIT:
             label = "OUTFIT";

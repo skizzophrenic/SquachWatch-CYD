@@ -243,7 +243,12 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // just leaves it as animated negative space — no layout changes
     // needed anywhere else on this screen.
     if (!Settings::boringMode()) {
-        Squachy::tick(t, w / 2, titleBottom, squachyBottom - titleBottom, now, advance);
+        // The last argument is the SIZE row in Settings. CLEAR is the only
+        // screen that passes it: everywhere else he is a cameo in a box
+        // somebody sized deliberately, and shrinking him there would just
+        // leave a hole.
+        Squachy::tick(t, w / 2, titleBottom, squachyBottom - titleBottom, now, advance,
+                      1.0f, false, -1, Settings::squachySizePct());
     }
 
 

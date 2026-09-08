@@ -2490,6 +2490,7 @@ void loop() {
                             break;
                         case SettingsRow::NICKNAME:     Squachy::cycleNickname(); break;
                         case SettingsRow::SHADES_COLOR: Squachy::cycleShadesColor(); break;
+                        case SettingsRow::SQUACHY_SIZE: Settings::cycleSquachySize(); break;
                         case SettingsRow::OUTFIT:       enterOutfit(); break;
                         case SettingsRow::PET:          Squachy::togglePet(); break;
                         case SettingsRow::VIEW_DIARY:   enterDiary(); break;

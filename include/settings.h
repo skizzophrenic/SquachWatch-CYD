@@ -172,6 +172,19 @@ namespace Settings {
     // included -- it's the "matched a signature but not a specific
     // brand" fallback, not a type someone would want to blanket-mute.
     bool     typeEnabled(DetectionType t);
+
+    // How big Squachy is drawn, as a percentage of the size the layout
+    // would otherwise give him. SMALL 70, MEDIUM 85, LARGE 100.
+    //
+    // Only ever at or below 100. The two guards that size him -- one
+    // keeping his crest on screen, one keeping a tall costume's overflow
+    // inside a tenth of his height -- are closed-form solutions for the
+    // full-size case, and every value below it is strictly more
+    // conservative than what they solved for. Above 100 would invalidate
+    // both, which is a different and much larger job.
+    uint8_t     squachySizePct();
+    const char* squachySizeLabel();
+    void        cycleSquachySize();
     void     toggleType(DetectionType t);
     uint8_t  enabledTypeCount();   // for a Settings-row "12/14" summary
 }

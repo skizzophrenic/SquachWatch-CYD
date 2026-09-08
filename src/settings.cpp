@@ -35,6 +35,7 @@ static const uint32_t DEFAULT_OFF = (1u << (uint8_t)DetectionType::IBEACON);
 // last type silently loses its switch. NVS has always stored this through
 // putUInt/getUInt, so the saved format is unchanged and nothing migrates.
 static uint32_t    s_typeMask = 0;
+static uint8_t     s_sqSizeIx = 2;    // LARGE, i.e. unchanged from before this existed
 static uint8_t     s_brightness = 255;
 static Confidence  s_minConf    = Confidence::LOW_CONF;
 static bool        s_boringMode = false;
@@ -176,6 +177,9 @@ void load() {
     // was written against; anything above that is a type the user has
     // never had the chance to express an opinion about, so it defaults
     // on like it would for a fresh install.
+    s_sqSizeIx = (uint8_t)s_prefs.getUInt("sqsize", 2);
+    if (s_sqSizeIx > 2) s_sqSizeIx = 2;
+
     uint8_t savedCount = (uint8_t)s_prefs.getUInt("typecount", 0);
     if (savedCount && savedCount < (uint8_t)DetectionType::COUNT) {
         for (uint8_t t = savedCount; t < (uint8_t)DetectionType::COUNT; t++) {
@@ -291,6 +295,23 @@ const char* minConfidenceLabel() {
         case Confidence::HIGH_CONF: return "HIGH ONLY";
         default:                    return "?";
     }
+}
+
+// SMALL / MEDIUM / LARGE. LARGE is 100 and is the default, so a board that
+// has never been told otherwise draws him exactly as it always did.
+static const uint8_t     SQ_SIZE_PCT[3]   = { 70, 85, 100 };
+static const char* const SQ_SIZE_LABEL[3] = { "SMALL", "MEDIUM", "LARGE" };
+static const uint8_t     SQ_SIZE_N        = 3;
+
+uint8_t squachySizePct() {
+    return SQ_SIZE_PCT[s_sqSizeIx < SQ_SIZE_N ? s_sqSizeIx : (uint8_t)(SQ_SIZE_N - 1)];
+}
+const char* squachySizeLabel() {
+    return SQ_SIZE_LABEL[s_sqSizeIx < SQ_SIZE_N ? s_sqSizeIx : (uint8_t)(SQ_SIZE_N - 1)];
+}
+void cycleSquachySize() {
+    s_sqSizeIx = (uint8_t)((s_sqSizeIx + 1) % SQ_SIZE_N);
+    s_prefs.putUInt("sqsize", s_sqSizeIx);
 }
 
 bool typeEnabled(DetectionType t) {

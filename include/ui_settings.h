@@ -24,6 +24,7 @@ enum class SettingsRow : uint8_t {
     SHOW_OFF,
     NICKNAME,
     SHADES_COLOR,
+    SQUACHY_SIZE,
     OUTFIT,
     PET,
     VIEW_DIARY,

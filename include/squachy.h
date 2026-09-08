@@ -239,9 +239,13 @@ namespace Squachy {
     // which SHOCKED then uses to dart back and forth within that box
     // instead of standing still while he flails. Doesn't affect WALK's
     // own full-screen wander; that's unrelated to this screen's ask.
+    // sizePct shrinks him to a percentage of the size this screen's
+    // geometry would otherwise give him, for the SIZE row in Settings. 100
+    // is exactly the old behaviour, byte for byte, so every caller that
+    // does not pass it is unaffected -- only CLEAR does.
     void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
               bool advance = true, float minScale = 1.0f, bool scanningFx = false,
-              int wanderRangePx = -1);
+              int wanderRangePx = -1, uint8_t sizePct = 100);
 
     // Themed one-liner reactions for the raw-scan screen (see
     // ui_rawscan.cpp), pulled from their own flavor pool instead of
