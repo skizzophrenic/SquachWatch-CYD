@@ -178,7 +178,11 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // The counters get drawn over the band further down, so tell the
     // background where its usable floor really is before it places
     // anything that stands on the ground.
-    Theme::setBackgroundFloor(countersTop);
+    // Two arguments now, because the counters no longer start where Squachy's
+    // feet land. Cameos still stand level with him at countersTop; the
+    // backgrounds that fill a bright ground band keep filling to where the
+    // numbers actually begin, instead of stopping nine pixels short of them.
+    Theme::setBackgroundFloor(countersTop, counterTextTop);
     // From the very top of the screen, not from titleBottom. The title bar
     // used to own rows 0-15 and paint them every frame; with it gone they
     // belonged to nobody and kept whatever the previous frame left there.

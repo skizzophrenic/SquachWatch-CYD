@@ -281,7 +281,16 @@ namespace Theme {
     //
     // Reset it rather than leaving it set: the value is only right for the
     // screen that computed it, and the layout changes with rotation.
-    void setBackgroundFloor(int y);
+    // Two different lines, which used to be one number.
+    //
+    // `y` is what things STAND on -- the row a walking cameo's feet land
+    // on, level with Squachy's own. `textTop` is the first row of unoutlined
+    // text below the band, which is how far down a background may keep
+    // painting before it starts eating characters. On CLEAR these were the
+    // same row until the counters were dropped into the footer; they are 9px
+    // apart now. Omit textTop and it follows y, which is what every caller
+    // outside CLEAR wants.
+    void setBackgroundFloor(int y, int textTop = -1);
     void clearBackgroundFloor();
 
     // Draws whatever the active background needs placed ON TOP of the

@@ -13,7 +13,10 @@ namespace Theme {
 // owns the layout. -1 means nobody said, so backgrounds fall back to
 // their own yEnd. Declared up here because drawFlyingToasters() reads
 // it and sits well above the setters.
-static int s_bgFloor = -1;
+static int s_bgFloor   = -1;
+// Where the text starts, as opposed to where the ground is. See
+// setBackgroundFloor's comment in theme.h for why these are two values.
+static int s_bgTextTop = -1;
 
 // Default-initialized to the original SquachWare vaporwave values —
 // applyPalette(0) (VAPRW4VE) reproduces these exactly.
@@ -3345,9 +3348,11 @@ static void ffGlow(TFT_eSPI& t, int x, int y, int r, uint16_t col, uint16_t bg,
 
 void drawFireflies(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     const int w = t.width();
-    // Same floor rule as SNOWFALL: stop a pixel short of the counters,
-    // which are plain text with no outline.
-    const int yBot  = ((s_bgFloor > yStart + 40 && s_bgFloor <= yEnd) ? s_bgFloor : yEnd) - 1;
+    // Same floor rule as SNOWFALL, and for the same reason: stop a pixel
+    // short of the counters, which are plain text with no outline. Also
+    // s_bgTextTop rather than s_bgFloor for the same reason -- the soil band
+    // is the thing being stopped, and nothing in this scene stands on it.
+    const int yBot  = ((s_bgTextTop > yStart + 40 && s_bgTextTop <= yEnd) ? s_bgTextTop : yEnd) - 1;
     const int bandH = yBot - yStart;
     if (bandH < 40) return;
     const int horizon  = yStart + (bandH * 58) / 100;   // treeline stands here
@@ -3745,8 +3750,11 @@ void drawToast(TFT_eSPI& t, uint32_t now) {
     }
 }
 
-void setBackgroundFloor(int y)  { s_bgFloor = y; }
-void clearBackgroundFloor()     { s_bgFloor = -1; }
+void setBackgroundFloor(int y, int textTop) {
+    s_bgFloor   = y;
+    s_bgTextTop = (textTop >= 0) ? textTop : y;
+}
+void clearBackgroundFloor()     { s_bgFloor = -1; s_bgTextTop = -1; }
 
 // Cost of the last background draw, exponentially smoothed. Measured
 // HERE rather than in loop(), because loop()'s own frame average is
@@ -5827,7 +5835,13 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // butt straight into the counter numbers below, which are a plain
     // t.print with no outline at all: cyan on white snow is the one
     // combination here that genuinely cannot be read.
-    const int yBot  = ((s_bgFloor > yStart + 40 && s_bgFloor <= yEnd) ? s_bgFloor : yEnd) - 1;
+    //
+    // s_bgTextTop, not s_bgFloor. This line was only ever about the text,
+    // and the two stopped being the same row when the counters moved down
+    // into the footer -- which left the whole hill ending nine pixels above
+    // them with a black shelf in between. Nothing stands on this: the slope
+    // riders stand on groundAt(), which is measured up from here.
+    const int yBot  = ((s_bgTextTop > yStart + 40 && s_bgTextTop <= yEnd) ? s_bgTextTop : yEnd) - 1;
     const int bandH = yBot - yStart;
     if (bandH < 50) return;
     const int ridgeY = yStart + (bandH * 52) / 100;      // where the far plane stands
@@ -6638,10 +6652,15 @@ void drawGibson(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
 
     // CLEAR paints its counter block on top of this band afterwards, so
     // anything laid out against yEnd ends up underneath the numbers -- the same
-    // trap that had Mowin' Man mowing under the readout. s_bgFloor is where the
-    // drawable area really stops; the band is still FILLED to yEnd so nothing
-    // shows through beside the counters.
-    const int yBot = (s_bgFloor > yStart + 40 && s_bgFloor <= yEnd) ? s_bgFloor : yEnd;
+    // trap that had Mowin' Man mowing under the readout. The band is still
+    // FILLED to yEnd so nothing shows through beside the counters.
+    //
+    // s_bgTextTop, not s_bgFloor: the two were the same row when this was
+    // written and are not any more. Mowin' Man's trap is about where feet
+    // land and this is about where text begins, and it is the second one
+    // that stops the grid -- so keying it to the floor left the horizon grid
+    // fading out nine pixels early with a black shelf under it.
+    const int yBot = (s_bgTextTop > yStart + 40 && s_bgTextTop <= yEnd) ? s_bgTextTop : yEnd;
     const int bandH = yBot - yStart;
     if (bandH < 48) return;
 
