@@ -17,6 +17,15 @@ static const char* KEY     = "dev";    // 7-byte records
 static const char* KEY_OLD = "macs";   // pre-type format, 6-byte MACs
 
 static void save() {
+    if (s_count == 0) {
+        // Preferences::putBytes returns early on a zero-length value without
+        // touching NVS, so saving an empty list is a silent no-op and the old
+        // blob survives. Removing the last device therefore left it on disk
+        // and it came back on the next boot. Emptying the list has to delete
+        // the key instead.
+        s_prefs.remove(KEY);
+        return;
+    }
     s_prefs.putBytes(KEY, s_rec, (size_t)s_count * REC);
 }
 

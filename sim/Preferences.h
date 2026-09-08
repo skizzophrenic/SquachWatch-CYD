@@ -114,6 +114,13 @@ public:
     // rides the same localStorage save/load path as everything else
     // instead of needing a second serialisation format.
     size_t putBytes(const char* k, const void* v, size_t len) {
+        // The real Preferences::putBytes rejects a zero-length value and
+        // returns without touching NVS, leaving whatever was stored under
+        // the key intact. Reproduced here rather than "fixed", because a
+        // shim that is more forgiving than the hardware hides exactly the
+        // bugs the emulator exists to find -- this one shipped for eleven
+        // releases because emptying the ignore list worked in the sim.
+        if (!k || !v || !len) return 0;
         static const char* HEX = "0123456789abcdef";
         const uint8_t* p = (const uint8_t*)v;
         std::string out;
