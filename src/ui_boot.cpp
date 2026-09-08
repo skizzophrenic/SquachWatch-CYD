@@ -180,7 +180,24 @@ void uiBootTick(TFT_eSPI& t, uint32_t now) {
     // of the boot splash (wordmark, subtitle, INITIALIZING...) is
     // unaffected, this only cuts the mascot cameo.
     if (!Settings::boringMode()) {
-        Squachy::drawWaving(t, w / 2, yHoriz + 50, now, 1.6f, BOOT_LINES[s_bootLineIdx]);
+        // 2.0, up from 1.6, standing on h-19 rather than yHoriz+50.
+        //
+        // Measured off a render: the subtitle's ink ends at row 67 and
+        // INITIALIZING starts at 224, so there are about 150 usable rows and
+        // he was only occupying 94 of them. The rest was air above his head.
+        //
+        // Both numbers had to move together. drawWaving puts his speech
+        // bubble a fixed 34px above the head anchor, and the anchor is
+        // baseY - 58*scale, so growing him alone drives the bubble up into
+        // the subtitle -- at 1.6 it already sat only six rows clear. Lowering
+        // where he stands buys that back. His feet barely move either way,
+        // since they land at baseY - 5*scale.
+        //
+        // 2.06 is the hard ceiling with the bubble above him: 150 rows has to
+        // hold a 14px bubble, his 60 base units, and air at each end. 2.0 hits
+        // it exactly and leaves 2px top and bottom, which is a rounding error
+        // away from touching. 1.95 gives 4px at both ends instead.
+        Squachy::drawWaving(t, w / 2, h - 21, now, 1.95f, BOOT_LINES[s_bootLineIdx]);
     }
 
     // INITIALIZING...  vX.Y.Z -- version tacked onto this line rather
