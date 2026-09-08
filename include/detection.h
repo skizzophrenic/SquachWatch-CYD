@@ -2,6 +2,7 @@
 #pragma once
 #include "state.h"
 #include "sd_log.h"
+#include "remote_id.h"
 #include <Preferences.h>
 
 // A single unfiltered BLE sighting from the manual raw scanner (see
@@ -63,6 +64,21 @@ public:
 
     // Called from the BLE scan callback when a hit is found.
     void postBle(Detection d);
+
+    // ---- Remote ID ---------------------------------------------------
+    // Feeds one raw advertisement through the ASTM F3411 decoder. Safe to
+    // call for every advert; it returns immediately for anything that is
+    // not a Remote ID message.
+    //
+    // Only ONE aircraft is kept, the most recent, and it resets whenever a
+    // different MAC starts talking. A drone sends Basic ID, Location and
+    // System as separate adverts, so a single accumulating record is what
+    // turns three partial messages into one useful answer -- and one
+    // record is the right number for a screen this size, where the
+    // question is "what is that thing" rather than "catalogue the sky".
+    void mergeRemoteId(const uint8_t* mac, const uint8_t* payload, uint8_t len);
+    const RemoteId::Info& remoteId() const { return _rid; }
+    const uint8_t*        remoteIdMac() const { return _ridMac; }
 
     // Called from the BT Classic inquiry callback when a name match hits.
     void postBtClassic(Detection d);
@@ -300,6 +316,10 @@ private:
     uint32_t  _huntRssiLastMs = 0;
     void checkHuntWifi(const uint8_t* mac, int8_t rssi);
     void recordHuntRssi(int8_t rssi);
+
+    // The most recently decoded Remote ID broadcast, and whose it is.
+    RemoteId::Info _rid;
+    uint8_t        _ridMac[6] = {0, 0, 0, 0, 0, 0};
 
     // Detection log
     Detection  _log[LOG_CAP];

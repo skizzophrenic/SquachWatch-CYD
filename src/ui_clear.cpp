@@ -18,7 +18,8 @@ static const char* counterLabel(DetectionType t) {
     switch (t) {
         case DetectionType::FLOCK:       return "FLOCK";
         case DetectionType::AXON:        return "AXON";
-        case DetectionType::META:        return "META";
+        // Not just Meta any more -- Snap Spectacles and Luxottica land here too.
+        case DetectionType::META:        return "GLASS";
         case DetectionType::SKIMMER:     return "SKIM";
         // AIRTAG doubles as the combined "TRACKER" bucket here -- see
         // counterCount() below. GOOGLE_TAG/TILE/SAMSUNG_TAG keep their

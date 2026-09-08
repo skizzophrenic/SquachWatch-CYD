@@ -53,16 +53,31 @@ on the camera being powered on and transmitting).
 
 ---
 
-## Meta Ray-Ban Smart Glasses — `META` — **High confidence**
+## Camera glasses — `META` (shown as `GLASS`) — **Medium confidence**
 
-**Why it works:** The Meta Ray-Ban smart glasses advertise a custom
-BLE service with UUID `0xFD5F`.
+**Why it works:** Two independent signatures.
 
-**Source:** [Eye Spy project](https://simeononsecurity.com/articles/eye-spy-passive-surveillance-detector-esp32-2026/)
-+ the [HN "glasses to detect smart-glasses" project](https://news.ycombinator.com/item?id=46075882).
+The specific one is BLE service UUID `0xFD5F`, which Ray-Ban Meta
+glasses advertise. That one is High on its own.
 
-**Confidence in v1.0:** **High** for the UUID match. Detection
-works when the glasses are in pairing / first-power-on mode.
+The broad one is the Bluetooth SIG company IDs that the dedicated
+glasses-spotting apps key on: `0x01AB` Meta Platforms, `0x058E` Meta
+Platforms Technologies, `0x0D53` Luxottica (who make Ray-Ban), and
+`0x03C2` Snap, for Spectacles. This is what turns a one-product
+detection into a category one.
+
+**Source:** [Eye Spy project](https://simeononsecurity.com/articles/eye-spy-passive-surveillance-detector-esp32-2026/),
+the [HN "glasses to detect smart-glasses" project](https://news.ycombinator.com/item?id=46075882),
+[banrays](https://github.com/NullPxl/banrays), and the company-ID list
+reported for the Nearby Glasses / AntiZuck apps
+([VR.org](https://vr.org/articles/smart-glasses-bluetooth-detection-apps-antizuck-2026)).
+
+**Confidence:** **Medium**, and it was High before the company IDs
+were added. Meta puts those same IDs on their other Bluetooth
+products, Quest headsets included, so a match means a Meta radio is
+nearby rather than a camera necessarily pointed at you. Graded down
+deliberately: this file's rule is that a type carrying signatures of
+mixed quality reports the lower one.
 
 ---
 
@@ -144,21 +159,52 @@ the service UUID `0xFFFA`.
 **Source:** [ASTM F3411 spec](https://www.astm.org/f3411-22.html) +
 [Eye Spy](https://simeononsecurity.com/articles/eye-spy-passive-surveillance-detector-esp32-2026/).
 
-**Confidence in v1.0:** **Medium**. Compliance is rolling out so
-detection is opportunistic. Note: we don't decode the actual drone
-location payload, just flag the presence.
+**What it reports:** the payload is decoded now, not just flagged.
+An ASTM F3411 advert carries a 25-byte message, and three of the types
+are worth reading: Basic ID gives the aircraft serial and airframe
+type, Location gives its position and altitude, and System gives the
+**operator's** position — where the pilot is standing. A drone sends
+those as separate adverts, so the decoder accumulates them per MAC.
+Offsets and scaling taken from
+[opendroneid-core-c](https://github.com/opendroneid/opendroneid-core-c);
+coordinates are degrees x 10^7, altitude is half-metres offset by 1000.
+
+**What it cannot reach:** the Bluetooth *Legacy* form only. Bluetooth 5
+Long Range is out of scope permanently on this board — the ESP32-WROOM
+is BLE 4.2 and Espressif document no hardware support for Coded PHY or
+extended advertising. The WiFi Beacon form, which packs several
+messages into one frame, would need the promiscuous path rather than
+the NimBLE one and is not implemented.
+
+**Confidence:** **Medium**. Compliance is rolling out so detection is
+opportunistic, and half the transport is unreachable per above.
 
 ---
 
-## Motorola / Vigilant ALPR — `ALPR` — **Medium confidence**
+## Motorola / Genetec ALPR — `ALPR` — **Medium confidence**
 
-**Why it works:** Vigilant Solutions (now owned by Motorola
-Solutions) uses OUI `00:0E:58` for some of its hardware.
+**Correction, and the reason this section was rewritten.** Until
+v1.5.20 the only prefix here was `00:0E:58`, documented above as
+Vigilant hardware. It is not Vigilant hardware. The IEEE registry
+assigns that block to **Sonos, Inc.** of Goleta, California, in
+February 2004, and still does — so every Sonos speaker within range
+was being logged as a licence-plate reader. It has been removed
+rather than corrected, because there was nothing to correct it to.
 
-**Source:** [Eye Spy](https://simeononsecurity.com/articles/eye-spy-passive-surveillance-detector-esp32-2026/).
+**Why it works:** IEEE MA-L blocks registered to the vendors who
+actually sell these systems. Motorola Solutions, who absorbed
+Vigilant: `00:04:7D`, `00:18:85`, `00:1F:92`, `4C:CC:34`. Genetec,
+whose AutoVu line is an LPR platform: `00:BF:15`, `0C:BF:15`.
 
-**Confidence in v1.0:** **Medium**. Limited OUI coverage — only
-the one prefix.
+**Source:** the IEEE registry itself, read per vendor rather than
+copied from another detector — which is how the Sonos entry got in.
+Vendor list cross-checked against
+[FlipDeFlock](https://github.com/ReconGrunt/FlipDeFlock).
+
+**Confidence:** **Medium**. The blocks are certain; what is not
+certain is that a given device on one is a plate reader rather than
+some other product from a large vendor. That is the same caveat
+`CAMERA` carries, and it is why this is not High.
 
 ---
 

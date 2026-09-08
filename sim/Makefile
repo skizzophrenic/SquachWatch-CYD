@@ -38,6 +38,7 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/squachy.cpp \
             $(SRC)/settings.cpp \
             $(SRC)/signatures.cpp \
+            $(SRC)/remote_id.cpp \
             $(SRC)/detection_info.cpp \
             $(SRC)/idle_events.cpp \
             $(SRC)/ui_clear.cpp \

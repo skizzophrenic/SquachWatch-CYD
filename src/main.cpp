@@ -2030,6 +2030,42 @@ void loop() {
         case AppState::LOG: {
             const char* infoText = s_infoShowingPrimer ? DetectionInfo::rssiConfidencePrimer()
                                                         : DetectionInfo::explain(s_confirmType);
+
+            // A drone is the one detection that tells us something instead of
+            // just being something. Everything else here is a fingerprint --
+            // this OUI belongs to that vendor -- but a Remote ID broadcast
+            // carries the aircraft's serial, its position, and the position
+            // of whoever is flying it. When we have decoded any of that,
+            // showing it beats showing the generic paragraph about what
+            // Remote ID is.
+            //
+            // Replaces rather than appends because wrapText() caps at 320
+            // characters and the stock explanation already spends 185 of
+            // them. Only the parts actually received are printed: a drone
+            // sends Basic ID, Location and System separately, and 0,0 is a
+            // real place off Africa rather than a safe stand-in for unknown.
+            static char droneInfo[320];
+            if (!s_infoShowingPrimer && s_confirmType == DetectionType::DRONE) {
+                const RemoteId::Info& rid = engine.remoteId();
+                if (rid.haveBasic || rid.haveLoc || rid.haveOperator) {
+                    int n = 0;
+                    if (rid.haveBasic)
+                        n += snprintf(droneInfo + n, sizeof(droneInfo) - n,
+                                      "ID %s, a %s. ", rid.serial,
+                                      RemoteId::uaTypeName(rid.uaType));
+                    if (rid.haveLoc && n < (int)sizeof(droneInfo))
+                        n += snprintf(droneInfo + n, sizeof(droneInfo) - n,
+                                      "AIRCRAFT %.5f, %.5f at %dm. ",
+                                      (double)rid.lat, (double)rid.lon, (int)rid.altM);
+                    if (rid.haveOperator && n < (int)sizeof(droneInfo))
+                        n += snprintf(droneInfo + n, sizeof(droneInfo) - n,
+                                      "OPERATOR %.5f, %.5f -- that is where the "
+                                      "pilot is standing.",
+                                      (double)rid.opLat, (double)rid.opLon);
+                    droneInfo[sizeof(droneInfo) - 1] = '\0';
+                    infoText = droneInfo;
+                }
+            }
             // No heading during the primer page -- it's about RSSI/
             // confidence in general, not any one detection type.
             const char* infoTypeName = s_infoShowingPrimer ? nullptr : detectionTypeName(s_confirmType);

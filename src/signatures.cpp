@@ -46,8 +46,29 @@ const OuiEntry kOuiTable[] = {
     {{0x82, 0x6B, 0xF2}, "Flock-DeFlk",  DetectionType::FLOCK},
     {{0x00, 0xA0, 0xD8}, "Flock-Sierra", DetectionType::FLOCK},
 
-    // ---- Motorola / Vigilant ALPR ----
-    {{0x00, 0x0E, 0x58}, "ALPR-Viglnt",  DetectionType::ALPR},
+    // ---- ALPR and fixed surveillance camera vendors ----
+    //
+    // 00:0E:58 used to be the only entry here, labelled Vigilant. It is not
+    // Vigilant. The IEEE registry gives that block to SONOS, INC. of Goleta
+    // CA, assigned in February 2004, and it is still theirs -- so every
+    // Sonos speaker in earshot was being logged as an ALPR camera. Removed
+    // rather than corrected, because there is nothing to correct it to:
+    // Motorola's own blocks are below.
+    //
+    // All seven of these were read out of the IEEE registry rather than
+    // copied from another detector, after the one above turned out to be
+    // wrong. Motorola Solutions absorbed Vigilant, so its blocks are the
+    // nearest honest thing to the entry they replace.
+    {{0x00, 0x04, 0x7D}, "ALPR-Mtrla",   DetectionType::ALPR},
+    {{0x00, 0x18, 0x85}, "ALPR-Mtrla",   DetectionType::ALPR},
+    {{0x00, 0x1F, 0x92}, "ALPR-Mtrla",   DetectionType::ALPR},
+    {{0x4C, 0xCC, 0x34}, "ALPR-Mtrla",   DetectionType::ALPR},
+    // Genetec's AutoVu is an LPR platform, so these sit with the ALPR set.
+    {{0x00, 0xBF, 0x15}, "ALPR-Gentec",  DetectionType::ALPR},
+    {{0x0C, 0xBF, 0x15}, "ALPR-Gentec",  DetectionType::ALPR},
+    // Verkada sells LPR too but is mostly general-purpose surveillance, so
+    // it is filed as a camera rather than overstated as a plate reader.
+    {{0xE0, 0xA7, 0x00}, "Cam-Verkada",  DetectionType::CAMERA},
 
     // ---- Skimmer OUIs (BT Classic module prefixes) ----
     {{0x20, 0x13, 0x00}, "Skim-Linvor",  DetectionType::SKIMMER},
@@ -146,6 +167,22 @@ const uint16_t kSsidCount = sizeof(kSsidPrefixes) / sizeof(kSsidPrefixes[0]);
 const MfgIdEntry kMfgIdTable[] = {
     {0x004C, "Apple",      DetectionType::AIRTAG},    // AirTag / FindMy
     {0x09C8, "XUNTONG",    DetectionType::FLOCK},     // Flock BLE radio supplier
+
+    // ---- Camera glasses -------------------------------------------------
+    // Service UUID 0xFD5F caught Ray-Ban Meta and nothing else. These are
+    // the Bluetooth SIG company IDs the dedicated glasses-spotting apps
+    // actually key on, which is what widens this from one product to the
+    // category.
+    //
+    // The catch, and the reason META is no longer graded High: Meta uses
+    // these same company IDs across their other Bluetooth products, Quest
+    // headsets included. A hit here means a Meta radio nearby, not
+    // necessarily a camera pointed at you. The 0xFD5F match remains the
+    // specific one.
+    {0x01AB, "Meta",       DetectionType::META},      // Meta Platforms
+    {0x058E, "Meta-Tech",  DetectionType::META},      // Meta Platforms Technologies
+    {0x0D53, "Luxottica",  DetectionType::META},      // Ray-Ban's manufacturer
+    {0x03C2, "Snap",       DetectionType::META},      // Snap Spectacles
 };
 const uint16_t kMfgIdCount = sizeof(kMfgIdTable) / sizeof(kMfgIdTable[0]);
 
@@ -273,7 +310,6 @@ Confidence confidenceFor(DetectionType t) {
     switch (t) {
         case DetectionType::FLOCK:
         case DetectionType::AXON:
-        case DetectionType::META:
         case DetectionType::SKIMMER:
         case DetectionType::CAMERA:
         case DetectionType::SAMSUNG_TAG:
@@ -287,6 +323,12 @@ Confidence confidenceFor(DetectionType t) {
         // security. High.
         case DetectionType::EVILTWIN:
             return Confidence::HIGH_CONF;
+        // Was High when it was only Ray-Ban Meta's 0xFD5F service UUID, which
+        // is specific to the glasses. Broadening it to the Meta, Luxottica and
+        // Snap company IDs catches the rest of the category and costs that
+        // precision: Meta puts the same IDs on Quest headsets. Medium is the
+        // conservative grade the rule at the top of this function asks for.
+        case DetectionType::META:
         case DetectionType::RAVEN:
         case DetectionType::AIRTAG:
         case DetectionType::DRONE:

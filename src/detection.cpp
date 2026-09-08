@@ -146,6 +146,18 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             det.type = lookupBtName(det.name);
         }
         if (det.type == DetectionType::UNKNOWN) return;
+        // A Remote ID advert carries far more than the fact that it exists.
+        // Decode it before the entry is posted so the log row can be named
+        // after the actual aircraft rather than after a service UUID.
+        if (det.type == DetectionType::DRONE) {
+            g_engine->mergeRemoteId(mac, adv->getPayload(),
+                                    (uint8_t)adv->getPayloadLength());
+            const RemoteId::Info& rid = g_engine->remoteId();
+            if (rid.haveBasic && rid.serial[0]) {
+                strncpy(det.name, rid.serial, sizeof(det.name) - 1);
+                det.name[sizeof(det.name) - 1] = '\0';
+            }
+        }
         // Set vendor label based on the matched table entry.
         if (det.type == DetectionType::AIRTAG) {
             strncpy(det.vendor, "Apple", sizeof(det.vendor) - 1);
@@ -454,6 +466,19 @@ void DetectionEngine::processDeauthQ() {
             pushLog(d);
         }
     }
+}
+
+void DetectionEngine::mergeRemoteId(const uint8_t* mac, const uint8_t* payload,
+                                    uint8_t len) {
+    if (!mac || !payload) return;
+    // A different aircraft means the accumulated record is no longer about
+    // the same object, and half of one drone merged onto half of another
+    // would read as a plausible aircraft that does not exist.
+    if (memcmp(mac, _ridMac, 6) != 0) {
+        RemoteId::reset(_rid);
+        memcpy(_ridMac, mac, 6);
+    }
+    RemoteId::merge(payload, len, _rid, millis());
 }
 
 void DetectionEngine::postBle(Detection d) {
