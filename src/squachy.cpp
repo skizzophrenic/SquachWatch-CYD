@@ -2501,6 +2501,36 @@ static const int BASE_HEIGHT_NOSHADOW = 56;
 static const int CREST_REACH = 8;
 static const int TOP_MARGIN  = 2;   // rows of air we insist on above the tufts
 
+// And how far above the anchor each COSTUME reaches, in the same units.
+//
+// Several of them are far taller than he is. The wolf's ears and the
+// unicorn's horn are more than three times his own cowlick, and at the size
+// he is drawn now they ran a long way off the top of the screen.
+//
+// Read off the drawing code rather than guessed: WOLFPELT's ear tips are at
+// hy - S(26), UNICORN's horn tip at hy - S(24), TINFOIL's cone and CAPTAIN's
+// tricorn both at hy - S(16), PARKA's hood shell at hy + S(8) - S(23) which
+// is 15 plus its two-pixel rim, and SPACE's helmet at hy + S(10) - S(19).
+// Everything else tops out at his own cowlick, which is what the default is.
+static int outfitReach(OutfitId o) {
+    switch (o) {
+        case OutfitId::WOLFPELT: return 26;
+        case OutfitId::UNICORN:  return 24;
+        case OutfitId::TINFOIL:  return 16;
+        case OutfitId::CAPTAIN:  return 16;
+        case OutfitId::PARKA:    return 16;
+        case OutfitId::SPACE:    return  9;
+        default:                 return CREST_REACH;
+    }
+}
+
+// How far past the top edge a costume is allowed to go, as a percentage of
+// his drawn height. Not zero: seating the horn and the ears completely
+// would cost a third of his size on those two outfits and he would visibly
+// shrink whenever you put a hat on him. A tenth is enough that they read as
+// running past the edge rather than as being chopped off.
+static const int OVERFLOW_PCT = 10;
+
 // Draws Squachy at an already-animated anchor (hy = head-top Y for this
 // exact frame). Bob is computed once in tick() so it can also drive the
 // dirty-rect clear that runs before this is called.
@@ -3895,43 +3925,12 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     // scale clamp just below was already forcing the same end result
     // through regardless (any charAvail under BASE_HEIGHT still landed
     // on scale 1.0), so nothing about today's on-screen sizes changes.
-    // Two of the hats reach well above the head anchor -- the wolf ears 26px
-    // and the unicorn horn 24px -- against the 16px of bubble row that is all
-    // the headroom there is. At CLEAR's ~1.8x scale that puts their tips above
-    // topY, where the title bar paints over them a few lines later: they are
-    // not clipped so much as buried.
-    //
-    // Rather than reshape either costume, the whole character drops a few
-    // pixels while one of them is on, and gives up the same few from his
-    // height so his feet stay inside the band. Both halves pull the same way:
-    // the drop adds headroom directly, and the slightly smaller scale means
-    // the hat needs less of it, since its reach is scale-multiplied.
-    //
-    // This does not clear them completely and is not meant to. Fully seating
-    // the horn would take roughly a 27px drop plus a 15% shrink, which is a
-    // different character standing in a different place.
-    //
-    // Fixed pixels rather than scaled, to match bubbleRowH itself, which is
-    // also a flat 16 however large he happens to be drawn.
     // Everyone sits a little lower than the bubble row alone would put them.
-    // Same coupling as the per-outfit headroom below: the drop comes out of
-    // charAvail too, so he loses the same few pixels off his height and his
-    // feet stay inside the band instead of sliding under whatever draws next.
+    // The drop comes out of charAvail too, so he loses the same few pixels
+    // off his height and his feet stay exactly where the caller put them --
+    // which is the property the whole of this block depends on.
     static const int BASE_DROP = 5;
     int headroom = BASE_DROP;
-    switch (currentOutfit()) {
-        // The wolf gets more than the unicorn. Its ears are LENGTH-clamped
-        // against the top of the region (see the WOLFPELT case in
-        // drawOutfit) and that clamp was already maxed out -- the tips sit
-        // one pixel under topY, so there was no way to raise them by
-        // moving them. Headroom is the only thing that actually buys ear:
-        // every pixel he drops is a pixel the clamp can afford to give
-        // back, one for one. The horn does not have that problem, so it
-        // keeps the smaller value rather than dropping him for nothing.
-        case OutfitId::WOLFPELT: headroom += 14; break;
-        case OutfitId::UNICORN:  headroom += 8;  break;
-        default:                 break;
-    }
 
     const int baseH = SQUACHY_SHADOW ? BASE_HEIGHT : BASE_HEIGHT_NOSHADOW;
 
@@ -3954,6 +3953,35 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
         const int num  = baseH * (TOP_MARGIN - Cy) + CREST_REACH * A;
         const int den  = baseH + CREST_REACH;
         if (num > 0) {
+            const int need = (num + den - 1) / den;
+            if (headroom < need) headroom = need;
+        }
+    }
+
+    // And the same again for whatever he is WEARING, against a looser line:
+    // the costume may run past the top edge by OVERFLOW_PCT of his height
+    // rather than having to stay under it.
+    //
+    // Same shape of solve as above, with the allowance itself depending on h
+    // because his height does. Writing the condition out --
+    //     Cy + h - R*(A-h)/baseH >= -(A-h)*PCT/100
+    // -- and clearing the denominators gives
+    //     h * ((100-PCT)*baseH + 100*R) >= A*(100*R - PCT*baseH) - 100*baseH*Cy
+    // which is the line below, rounded up for the same reason as before.
+    //
+    // This only ever raises headroom, and headroom is the one thing that
+    // moves his top WITHOUT moving his feet: it pushes his head down and
+    // takes the same pixels off his height, so his soles stay on the band
+    // bottom. A costume too tall for the screen therefore shrinks from the
+    // top and stays anchored on the detection bar, which is the only way
+    // this could be done without him bouncing up and down as outfits change.
+    {
+        const int R    = outfitReach(currentOutfit());
+        const int A    = availHeight - bubbleRowH;
+        const int Cy   = topY + bubbleRowH;
+        const int num  = A * (100 * R - OVERFLOW_PCT * baseH) - 100 * baseH * Cy;
+        const int den  = (100 - OVERFLOW_PCT) * baseH + 100 * R;
+        if (num > 0 && den > 0) {
             const int need = (num + den - 1) / den;
             if (headroom < need) headroom = need;
         }
