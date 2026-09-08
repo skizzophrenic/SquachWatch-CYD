@@ -14,6 +14,11 @@ namespace Squachy {
 // not an archaeology exercise across the draw order.
 static const bool SQUACHY_KEYLINE = true;
 
+// Squachy's ground shadow. See the block in drawBody for why it is off, and
+// for what turning it back on costs -- it is not a free toggle, because his
+// scale is derived from whether it is there.
+static const bool SQUACHY_SHADOW = false;
+
 enum class Mood : uint8_t { IDLE, WAVE, SHOCKED, BOUNCE, SLEEPY, WALK, DANCE, WINK,
                             STRETCH,   // waking out of a nap -- see the nap-exit branch
                             GUM,       // blowing a bubble, rare idle flourish
@@ -2424,6 +2429,32 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
 // Squachy's base design is ~68px tall (crest to shadow) at scale 1.0.
 static const int BASE_HEIGHT = 68;
 
+// ...and only 53 of those 68 units are HIM. Measured, not guessed: with the
+// shadow off, his lowest painted row on CLEAR was 154 against a head anchor
+// of 37 at scale 2.206, which is 53.0 units exactly. The shadow's own bottom
+// edge sits at 66, and that is what the remaining reserve was buying.
+//
+// 60, though, and not 54. Standing still is not his lowest pose: the DUCK
+// adds 6 units (hy += 6.0f * scale, see the crouch in tick), and reclaiming
+// down to his resting soles put his boots at row 194 mid-duck -- behind the
+// counter text, brown blocks showing through cyan numbers. 53 + 6 + 1 of air
+// is the honest floor.
+//
+// Dividing by this instead of BASE_HEIGHT is the whole of "he got bigger".
+// Nothing else changed: he is still sized from the band he is handed, his
+// feet still land on the bottom of it, and every screen gets it at once.
+static const int BASE_HEIGHT_NOSHADOW = 60;
+
+// What actually stops him growing, and it is not his head.
+//
+// His raised WAVING HAND reaches about 16 units above the head anchor --
+// measured the same way, arm top at row 3 with the anchor at 37 and scale
+// 2.206, so 15.4 rounded up. His crest only reaches 14. Size him off the
+// crest and the hand walks off the top of the screen on the first wave,
+// which is exactly what reclaiming those 15 units would have done.
+static const int ARM_REACH  = 16;
+static const int TOP_MARGIN = 2;    // rows of air we insist on above the hand
+
 // Draws Squachy at an already-animated anchor (hy = head-top Y for this
 // exact frame). Bob is computed once in tick() so it can also drive the
 // dirty-rect clear that runs before this is called.
@@ -2694,6 +2725,19 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     }
 
     // ---- shadow ------------------------------------------------------
+    // OFF, deliberately, and the whole block is kept rather than deleted.
+    //
+    // It sits at 82% of his height, which is exactly where a headline
+    // pinned above the counter block wants to be, so the two compete for
+    // the same rows at every size he can be drawn at -- a marker render put
+    // 21 of its pixels in the clear. Getting it out from under the text
+    // would need him about 11% SMALLER, and he is worth more big than he is
+    // with a shadow nobody can see.
+    //
+    // Turning it off is not just hiding it: BASE_HEIGHT reserves sixteen of
+    // his sixty-eight base units for it, and with it gone those units are
+    // his. See BASE_HEIGHT_NOSHADOW.
+    if (SQUACHY_SHADOW) {
     // Deliberately outside the head-group offset below, and anchored to
     // headTopY rather than hy: the shadow belongs to the ground, not to
     // him. It stays put while he bobs, hops, is carried and falls.
@@ -2754,6 +2798,7 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
                     t.drawPixel(xx, yy, sc);
             }
         }
+    }
     }
 
     // Legs + big bigfoot feet — a simple alternating step lift while
@@ -3789,11 +3834,37 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
         default:                 break;
     }
 
-    int charAvailFloor = (int)(BASE_HEIGHT * minScale);
+    const int baseH = SQUACHY_SHADOW ? BASE_HEIGHT : BASE_HEIGHT_NOSHADOW;
+
+    // The smallest drop that keeps his waving hand on screen, in closed form
+    // rather than as a loop that nudges and re-checks.
+    //
+    // Both sides move when headroom does, which is why this is worth writing
+    // out: a pixel of drop pushes the hand down a pixel AND shrinks him,
+    // which pulls the hand down again by ARM_REACH/baseH more. Solving
+    //     (topY + bubbleRowH + h) - ARM_REACH * (A - h) / baseH >= TOP_MARGIN
+    // for h gives the line below. Rounded UP, because one row short here is
+    // a clipped hand every time he waves.
+    //
+    // It only ever raises headroom, never lowers it, so the per-outfit drops
+    // above still win where they are larger, and every screen whose band is
+    // too small for this to bite is left exactly as it was.
+    {
+        const int A    = availHeight - bubbleRowH;
+        const int Cy   = topY + bubbleRowH;
+        const int num  = baseH * (TOP_MARGIN - Cy) + ARM_REACH * A;
+        const int den  = baseH + ARM_REACH;
+        if (num > 0) {
+            const int need = (num + den - 1) / den;
+            if (headroom < need) headroom = need;
+        }
+    }
+
+    int charAvailFloor = (int)(baseH * minScale);
     if (charAvailFloor < 8) charAvailFloor = 8;   // keep the division sane at extreme minScale
     int charAvail = availHeight - bubbleRowH - headroom;
     if (charAvail < charAvailFloor) charAvail = charAvailFloor;
-    float scale = (float)charAvail / (float)BASE_HEIGHT;
+    float scale = (float)charAvail / (float)baseH;
     if (scale < minScale) scale = minScale;
     if (scale > 3.0f) scale = 3.0f;
 
