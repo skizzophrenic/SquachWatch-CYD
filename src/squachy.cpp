@@ -1034,12 +1034,28 @@ void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal, uint32_t hitCo
 
 int crownY() { return s_lastCrownY; }
 
+// The bottom of him, for hit-testing and for anything that stands beside
+// him. 62 units is where his SHADOW is drawn -- the ground plane -- and 53
+// is the soles of his boots, which is where he actually ends.
+//
+// With the shadow drawn, the ground plane is the right answer: a cameo
+// walking past should plant its feet level with his shadow, not with his
+// soles, because the shadow is what says where the floor is.
+//
+// With it off there is no floor to stand on and 62 is just nine units of
+// empty air. Left at 62 after the shadow came off, this reached 26px below
+// his boots at his current size -- far enough that a tap on the first
+// counter line landed inside his hit box and petted him, and far enough
+// that the pet stood in the headline rather than beside him.
+static int footBottom() {
+    return s_lastHeadTopY + (int)((SQUACHY_SHADOW ? 62.0f : 53.0f) * s_lastScale);
+}
 bool lastFootprint(int& cx, int& halfW, int& top, int& bot) {
     if (s_lastCx < -5000) return false;
     cx    = s_lastCx;
     halfW = (int)(24 * s_lastScale);
     top   = s_lastHeadTopY - (int)(20 * s_lastScale);
-    bot   = s_lastHeadTopY + (int)(62 * s_lastScale);
+    bot   = footBottom();
     return true;
 }
 
@@ -1113,7 +1129,7 @@ bool hitTest(int x, int y) {
     if (s_lastCx < -5000) return false;
     int halfW = (int)(24 * s_lastScale);
     int top   = s_lastHeadTopY - (int)(20 * s_lastScale);
-    int bot   = s_lastHeadTopY + (int)(62 * s_lastScale);
+    int bot   = footBottom();
     return x >= s_lastCx - halfW && x <= s_lastCx + halfW && y >= top && y <= bot;
 }
 
