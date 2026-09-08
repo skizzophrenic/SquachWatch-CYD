@@ -20,7 +20,8 @@ enum class DetectionType : uint8_t {
     RING    = 13,  // Ring doorbell/camera (was previously bucketed under CAMERA)
     DEAUTH  = 14,  // WiFi deauth/disassoc flood -- rate-detected, not a signature match (see DetectionEngine)
     EVILTWIN = 15, // One SSID beaconing from a second BSSID whose OUI differs -- rogue/spoofed AP (see DetectionEngine)
-    COUNT   = 16
+    IBEACON = 16,  // Apple iBeacon proximity beacon -- retail/venue tracking, not police kit
+    COUNT   = 17
 };
 
 inline const char* detectionTypeName(DetectionType t) {
@@ -40,6 +41,7 @@ inline const char* detectionTypeName(DetectionType t) {
         case DetectionType::RING:        return "RING";
         case DetectionType::DEAUTH:      return "DEAUTH";
         case DetectionType::EVILTWIN:    return "EVIL TWIN";
+        case DetectionType::IBEACON:     return "IBEACON";
         default:                         return "UNKNOWN";
     }
 }

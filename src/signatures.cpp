@@ -186,6 +186,27 @@ const MfgIdEntry kMfgIdTable[] = {
 };
 const uint16_t kMfgIdCount = sizeof(kMfgIdTable) / sizeof(kMfgIdTable[0]);
 
+// Apple's iBeacon, which is a fixed 25-byte manufacturer-data block:
+//
+//   4C 00   Apple's company ID, little endian
+//   02      beacon type
+//   15      remaining length, 21 bytes
+//   ...     16-byte proximity UUID  (which deployment)
+//   ...     2-byte major            (which site)
+//   ...     2-byte minor            (which unit)
+//   ...     1-byte measured power   (RSSI at one metre)
+//
+// Every one of those is fixed, so this is an exact match and not the kind
+// of judgement call isAirTagPayload has to make. The length check is the
+// whole test: 0x02 0x15 at that offset with 25 bytes behind it is an
+// iBeacon, and an Apple device that is not one cannot accidentally look
+// like one.
+bool isIBeacon(const uint8_t* mfg, uint8_t len) {
+    if (!mfg || len < 25) return false;
+    if (mfg[0] != 0x4C || mfg[1] != 0x00) return false;   // Apple, little endian
+    return mfg[2] == 0x02 && mfg[3] == 0x15;
+}
+
 // --- lookups ---
 
 DetectionType lookupOui(const uint8_t* mac) {
@@ -321,6 +342,10 @@ Confidence confidenceFor(DetectionType t) {
         // the obvious false positive, and the thing that sank the
         // earlier vendor-only test -- never disagrees with itself about
         // security. High.
+        // Exact: the whole iBeacon header is fixed by Apple's format and the
+        // block is a fixed length, so a match cannot be a coincidence. What
+        // it is NOT is a claim about intent -- see the docs.
+        case DetectionType::IBEACON:
         case DetectionType::EVILTWIN:
             return Confidence::HIGH_CONF;
         // Was High when it was only Ray-Ban Meta's 0xFD5F service UUID, which

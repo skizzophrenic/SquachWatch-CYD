@@ -309,6 +309,46 @@ registry OUI matches) as the generic `CAMERA` type.
 
 ---
 
+## Apple iBeacon — `IBEACON` — **High confidence**, off by default
+
+**Why it works:** the format is fixed by Apple and every byte of the
+header is specified, so this is an exact match rather than a judgement
+call. Manufacturer data of `4C 00 02 15`, then a 16-byte proximity
+UUID, a 2-byte major, a 2-byte minor and a measured-power byte — 25
+bytes exactly.
+
+Before this existed these were being thrown away. Apple's company ID
+matched the AirTag rule, the AirTag payload check then correctly said
+"not a tag", and the advert was dropped — so the most numerous
+tracking transmitter most people walk past all day was the one thing
+the detector deliberately ignored.
+
+**What the log shows:** six hex digits of the proximity UUID, then
+`major.minor`. The UUID is the *deployment* — every beacon a chain
+owns shares it — so the same first half in two different places is the
+same operator, which is the part worth seeing. Major and minor are
+big-endian inside the block even though the company ID two bytes
+earlier is little-endian; that is Apple's format, not a bug.
+
+**Off by default,** and it is the only type that is. This is about
+volume rather than importance: one shop can put more beacons in range
+than this device would otherwise see all week, and the ALERT screen is
+gated on confidence rather than type — so an exact-match signature
+would mean every shelf in a supermarket taking over the display. It is
+one tap away in DETECTION FILTER.
+
+**Not the same thing as a tracker.** A beacon does not follow you. It
+shouts an identifier, and an app you already installed decides to care.
+The tracking is real; the beacon is only half of it.
+
+**Source:** Apple's iBeacon specification, cross-checked against the
+layout used by every open-source beacon library.
+
+**Confidence:** **High** for "this is an iBeacon". That is all it
+claims.
+
+---
+
 ## License / attribution
 
 | Source | License | Used for |

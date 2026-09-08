@@ -44,6 +44,14 @@ DetectionType lookupMfgId(uint16_t mfgId);
 // precision for actually catching a tag that has just been powered on.
 bool isAirTagPayload(const uint8_t* payload, uint8_t len);
 
+// iBeacon check, run against the PARSED manufacturer-data field (company
+// ID included, i.e. what NimBLE's getManufacturerData() returns).
+//
+// Unlike the AirTag test above this one is exact rather than heuristic:
+// Apple's format fixes every byte of the header and the total length, so
+// there is nothing to trade away. See the implementation.
+bool isIBeacon(const uint8_t* mfg, uint8_t len);
+
 // How sure we are that a match is really what it claims to be — mirrors
 // the per-signature grading in docs/DETECTIONS.md, collapsed to one
 // value per DetectionType. Where a type bundles signatures of differing

@@ -22,6 +22,7 @@ static const char* targetLabel(DetectionType t) {
         case DetectionType::TILE:        return "TILE";
         case DetectionType::RING:        return "RING CAM";
         case DetectionType::EVILTWIN:    return "EVIL TWIN AP";
+        case DetectionType::IBEACON:     return "PROXIMITY BEACON";
         default:                     return "UNKNOWN";
     }
 }

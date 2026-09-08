@@ -16,10 +16,25 @@ static bool        s_rotationLocked = false;
 static uint8_t     s_rotation = 1;
 static bool        s_backgroundLocked = false;
 // Bit N = DetectionType N enabled. UNKNOWN (0) is never included -- see
+// Types that arrive switched OFF, on a fresh install and on upgrade alike.
+//
+// Only IBEACON so far, and it is not a judgement about how interesting they
+// are -- it is about how MANY. Proximity beacons are bolted to shelves in
+// their dozens; one shop can put more of them in range than this device
+// would otherwise see all week, and the ALERT screen is gated on confidence
+// rather than on type, so with an exact-match signature every one of them
+// would take over the display. Off by default, one tap away in DETECTION
+// FILTER, and everything about the detection itself is honest either way.
+static const uint32_t DEFAULT_OFF = (1u << (uint8_t)DetectionType::IBEACON);
+
 // typeEnabled()'s comment. Default has bits 1..(COUNT-1) set (every real
 // type on), computed once at namespace-init time rather than a hand-
 // maintained literal so it can never drift out of sync with COUNT.
-static uint16_t    s_typeMask = 0;
+// 32-bit, not 16. DetectionType::COUNT reached 17 when IBEACON was added,
+// and bit 16 does not exist in a uint16_t -- the shift is undefined and the
+// last type silently loses its switch. NVS has always stored this through
+// putUInt/getUInt, so the saved format is unchanged and nothing migrates.
+static uint32_t    s_typeMask = 0;
 static uint8_t     s_brightness = 255;
 static Confidence  s_minConf    = Confidence::LOW_CONF;
 static bool        s_boringMode = false;
@@ -148,9 +163,11 @@ void load() {
     if (s_cpuIx        >= CPU_MHZ_N)         s_cpuIx        = 0;
     if (s_dimLevel     > 128)                s_dimLevel     = 16;
 
-    uint16_t allTypesOn = 0;
-    for (uint8_t t = 1; t < (uint8_t)DetectionType::COUNT; t++) allTypesOn |= (uint16_t)(1u << t);
-    s_typeMask = (uint16_t)s_prefs.getUInt("typemask", allTypesOn);
+    // Every real type defaults ON except the ones in DEFAULT_OFF below.
+    uint32_t allTypesOn = 0;
+    for (uint8_t t = 1; t < (uint8_t)DetectionType::COUNT; t++) allTypesOn |= (1u << t);
+    allTypesOn &= ~DEFAULT_OFF;
+    s_typeMask = s_prefs.getUInt("typemask", allTypesOn);
     // A mask saved by an older build only has bits for the types that
     // existed then, so every type added since would come back OFF for
     // anyone who had ever touched the TYPE FILTER screen -- a new
@@ -162,7 +179,8 @@ void load() {
     uint8_t savedCount = (uint8_t)s_prefs.getUInt("typecount", 0);
     if (savedCount && savedCount < (uint8_t)DetectionType::COUNT) {
         for (uint8_t t = savedCount; t < (uint8_t)DetectionType::COUNT; t++) {
-            s_typeMask |= (uint16_t)(1u << t);
+            if (DEFAULT_OFF & (1u << t)) continue;   // arrives off, like a fresh install
+            s_typeMask |= (1u << t);
         }
         s_prefs.putUInt("typemask", s_typeMask);
         s_prefs.putUInt("typecount", (uint32_t)DetectionType::COUNT);
@@ -278,13 +296,13 @@ const char* minConfidenceLabel() {
 bool typeEnabled(DetectionType t) {
     uint8_t idx = (uint8_t)t;
     if (idx == 0 || idx >= (uint8_t)DetectionType::COUNT) return true;  // UNKNOWN, or out of range -- never gated
-    return (s_typeMask & (uint16_t)(1u << idx)) != 0;
+    return (s_typeMask & (1u << idx)) != 0;
 }
 
 void toggleType(DetectionType t) {
     uint8_t idx = (uint8_t)t;
     if (idx == 0 || idx >= (uint8_t)DetectionType::COUNT) return;
-    s_typeMask ^= (uint16_t)(1u << idx);
+    s_typeMask ^= (1u << idx);
     s_prefs.putUInt("typemask", s_typeMask);
     // Stamped alongside the mask so a later firmware can tell which
     // types this mask was written against -- see load()'s upgrade path.
@@ -294,7 +312,7 @@ void toggleType(DetectionType t) {
 uint8_t enabledTypeCount() {
     uint8_t n = 0;
     for (uint8_t t = 1; t < (uint8_t)DetectionType::COUNT; t++) {
-        if (s_typeMask & (uint16_t)(1u << t)) n++;
+        if (s_typeMask & (1u << t)) n++;
     }
     return n;
 }

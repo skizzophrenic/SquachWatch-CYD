@@ -97,6 +97,30 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
                     if (!isAirTagPayload(adv->getPayload(),
                                          (uint8_t)adv->getPayloadLength())) {
                         det.type = DetectionType::UNKNOWN;
+                        // Apple's company ID is also how an iBeacon announces
+                        // itself, so this is where they used to die: not an
+                        // AirTag, therefore nothing, therefore dropped. They
+                        // are probably the most numerous tracking transmitter
+                        // most people walk past in a day.
+                        const uint8_t* b = (const uint8_t*)mfg.data();
+                        if (isIBeacon(b, (uint8_t)mfg.size())) {
+                            det.type = DetectionType::IBEACON;
+                            // Major and minor are BIG endian here, unlike the
+                            // company ID two bytes earlier -- Apple's format
+                            // is network order inside the block and Bluetooth
+                            // order outside it.
+                            const unsigned major = (unsigned)((b[20] << 8) | b[21]);
+                            const unsigned minor = (unsigned)((b[22] << 8) | b[23]);
+                            // Six hex of the proximity UUID plus major.minor.
+                            // The UUID is the DEPLOYMENT -- every beacon a
+                            // chain owns shares it -- so two sightings with
+                            // the same first half are the same operator in two
+                            // places, which is the part worth seeing. Six and
+                            // not eight so the unit number cannot be truncated
+                            // off the end of a 20-byte field.
+                            snprintf(det.name, sizeof(det.name), "%02X%02X%02X %u.%u",
+                                     b[4], b[5], b[6], major, minor);
+                        }
                     }
                 }
             }
@@ -175,6 +199,8 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             strncpy(det.vendor, "Google", sizeof(det.vendor) - 1);
         } else if (det.type == DetectionType::TILE) {
             strncpy(det.vendor, "Tile", sizeof(det.vendor) - 1);
+        } else if (det.type == DetectionType::IBEACON) {
+            strncpy(det.vendor, "iBeacon", sizeof(det.vendor) - 1);
         } else {
             strncpy(det.vendor, "BLE", sizeof(det.vendor) - 1);
         }

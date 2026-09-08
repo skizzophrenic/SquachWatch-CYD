@@ -96,6 +96,10 @@ uint16_t colorFor(DetectionType t) {
         case DetectionType::SAMSUNG_TAG:
         case DetectionType::GOOGLE_TAG:
         case DetectionType::TILE:
+        // Filed with the trackers rather than left on the default. It is not
+        // following YOU the way a tag in your coat is, but it exists to know
+        // when you walk past, which is the same colour of problem.
+        case DetectionType::IBEACON:
             return VAPOR_PURPLE;
         case DetectionType::CAMERA:
         case DetectionType::RING:
