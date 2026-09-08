@@ -3199,8 +3199,16 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         t.fillTriangle(cx2 - S(7), hh + S(2), cx2 - S(4), hh - S(5), cx2 - S(1), hh + S(2), furLight);
         // The tall one, apex pushed out over its own right base corner so
         // the whole tuft leans instead of standing to attention.
-        keyT(cx2 - S(2), hh + S(2), cx2 + S(6), hh - S(9), cx2 + S(6), hh + S(2));
-        t.fillTriangle(cx2 - S(2), hh + S(2), cx2 + S(6), hh - S(9), cx2 + S(6), hh + S(2), furLight);
+        //
+        // 80% of nine units, written as the scaled fraction rather than
+        // rounded to S(7): one base unit is under three pixels at CLEAR's
+        // scale, so rounding to whole units here is a 3% step and there is
+        // no reason to take it. Picked off eight rendered heights rather
+        // than by eye -- at nine it read as a horn, and this is the point
+        // where it goes back to reading as hair.
+        const int tallApex = hh - (S(9) * 80) / 100;
+        keyT(cx2 - S(2), hh + S(2), cx2 + S(6), tallApex, cx2 + S(6), hh + S(2));
+        t.fillTriangle(cx2 - S(2), hh + S(2), cx2 + S(6), tallApex, cx2 + S(6), hh + S(2), furLight);
     }
         keyT(cx2 - S(13), hh + S(3), cx2 - S(9), hh - S(4), cx2 - S(5), hh + S(3));
         t.fillTriangle(cx2 - S(13), hh + S(3), cx2 - S(9), hh - S(4), cx2 - S(5), hh + S(3), furLight);
@@ -3213,15 +3221,15 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     // and the two stacked together read as clutter rather than two readable
     // accessories.
     //
-    // Dropped 5 units when the crest became a cowlick. It was seated to clear
-    // a 14-unit spike, with its brim five units of air above that tip; the
-    // tallest tuft is 9 now, so holding the same gap means 22 -> 17 here and
-    // the same 5 off the crown and the band. Left where it was it would have
-    // floated a third of a head above him.
+    // Seated five units of air above the tallest tuft, which is where it has
+    // always sat -- it just keeps having to follow the tuft down. Originally
+    // 22, against a 14-unit spike. Then 17, when the crest became a 9-unit
+    // cowlick. Now 15, with that tuft at 80% of nine. Same rule each time,
+    // and left alone at any step it floats above his head instead of on it.
     if (currentStage() == GrowthStage::LEGEND && currentOutfit() != OutfitId::UNICORN) {
-        t.fillRoundRect(cx2 - S(9), hh - S(17), S(18), S(3), 1, BLACK);
-        t.fillRect(cx2 - S(5), hh - S(25), S(10), S(9), BLACK);
-        t.fillRect(cx2 - S(5), hh - S(19), S(10), S(2), VAPOR_PINK);
+        t.fillRoundRect(cx2 - S(9), hh - S(15), S(18), S(3), 1, BLACK);
+        t.fillRect(cx2 - S(5), hh - S(23), S(10), S(9), BLACK);
+        t.fillRect(cx2 - S(5), hh - S(17), S(10), S(2), VAPOR_PINK);
     }
 
     // Ears — small and tucked close, like a real Sasquach rather than
