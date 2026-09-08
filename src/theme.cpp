@@ -4254,12 +4254,31 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // smooth-arc primitive. Drawn before the flames, so a tall tongue
     // reaching it occludes it naturally.
     {
-        // Pulled in from w-22. The right tenth of the screen is the
-        // CLEAR gesture that cycles the background, and at w-22 the
-        // whole moon sat inside it -- so tapping the moon changed the
-        // scene out from under you, which is fatal for an egg that
-        // needs ten taps in a row.
-        const int mx = w - 46, my = yStart + 16, mr = 9;
+        // Placed to dodge two different things that will eat its taps, and
+        // derived rather than hardcoded so neither can silently reclaim it.
+        //
+        // First was the CLEAR gesture that cycles the background on the
+        // right tenth of the screen. At its original w-22 the whole moon sat
+        // inside that, so tapping it changed the scene out from under you.
+        //
+        // Second, and the reason for this second move: the ROTATE BUTTON.
+        // Losing the title bar put that button in this corner as a floating
+        // 55x50 target, and loop() tests it long before it ever reaches
+        // backgroundTap() -- so an overlap here is not a tie, it is a loss.
+        // Two changes closed the gap at once. The button grew a quarter
+        // wider, taking its left edge from w-44 to w-55, and the CLEAR
+        // background started drawing from row 0 instead of row 16, which
+        // slid the moon 16px UP into the middle of it. At w-46 the moon's
+        // whole disc sat inside the button and five taps just rotated the
+        // screen five times.
+        //
+        // So: sit the tap circle entirely left of ROTATE_HIT_W with a few
+        // pixels to spare, and hang it below the icon row rather than
+        // level with it. Written off ROTATE_HIT_W so that growing the
+        // button again moves the moon instead of burying it.
+        const int mr = 9;
+        const int mx = w - ROTATE_HIT_W - (mr + 7) - 4;   // +7 = the hit margin
+        const int my = yStart + 24;                       // under the 20px icon box
         s_moonX = mx; s_moonY = my; s_moonR = mr; s_moonAt = now;
 
         // The crescent is a full disc with a background disc bitten out

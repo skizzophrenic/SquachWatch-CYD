@@ -405,11 +405,17 @@ static uint8_t s_cfcol[CONFETTI_N];
 //             makes it read as a neck compressing rather than as the
 //             whole character sliding.
 // s_shadowAdj the shadow spreads as he gets closer to it. Same source
-//             number as the bob, so the two can never disagree.
+//             number as the bob, so the two can never disagree. Positive
+//             means CONTACT (spread and flatten), negative means DISTANCE
+//             (close in on both axes) -- the shadow reads those two apart,
+//             because a landing squash and a hop are not the same shape.
+// s_shadowCov how much of the shadow actually gets painted, 0-16, which is
+//             the only opacity this panel has. See the dither in drawBody.
 // s_shadeDrop double-take: the shades slip down his nose so he is
 //             looking over the top of them.
 static int     s_headDrop  = 0;
 static int     s_shadowAdj = 0;
+static uint8_t s_shadowCov = 16;
 static uint8_t s_shadeDrop = 0;
 // When the current double-take started, or 0. See the DT_ constants
 // and the offset computed in tick().
@@ -1183,8 +1189,15 @@ static const int CORNER_W    = 30;   // icon box plus a pixel of air
 static const int CORNER_H    = 20;   // ICON_BOX_H over in theme.cpp
 
 static int risenBubbleTop(int topY, int bx, int bw, int screenW) {
-    const int ry = topY - BUBBLE_RISE;
-    if (ry < 0)          return topY;   // never off the top
+    // Clamped to row 1, not rejected below it. Every screen hands Squachy
+    // topY = 16 and BUBBLE_RISE is 16, so ry is exactly 0 everywhere -- a
+    // `< 1` test would fail on all of them and quietly switch the rise off
+    // rather than move it a pixel. The second line is the other half: it
+    // must never push a bubble DOWN, which is what a bare clamp would do on
+    // a screen whose band started at 0.
+    int ry = topY - BUBBLE_RISE;
+    if (ry < 1)          ry = 1;        // always a pixel of air at the top
+    if (ry >= topY)      return topY;   // no room to rise; never sink
     if (ry >= CORNER_H)  return ry;     // starts below the buttons anyway
     if (bx < CORNER_W || bx + bw > screenW - CORNER_W) return topY;
     return ry;
@@ -2680,10 +2693,68 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         t.fillRoundRect(cx2 - S(16), hy + S(22), S(32), S(20), S(6), keyCol);
     }
 
-    // Widens as he drops toward it and narrows as he rises -- see
-    // s_shadowAdj. Deliberately outside the head-group offset below:
-    // the shadow belongs to his feet, not his head.
-    t.fillEllipse(cx2, headTopY + S(62), S(18) + s_shadowAdj, S(4), blend(BG, FUR_DARK, 70));
+    // ---- shadow ------------------------------------------------------
+    // Deliberately outside the head-group offset below, and anchored to
+    // headTopY rather than hy: the shadow belongs to the ground, not to
+    // him. It stays put while he bobs, hops, is carried and falls.
+    //
+    // Three things move now, where only the width used to.
+    //
+    // SHAPE. s_shadowAdj is signed and the two signs mean different things.
+    // Positive is contact -- he is landing, so it spreads AND flattens, the
+    // product of the two axes held roughly constant, which is what a soft
+    // body hitting the floor looks like. Negative is distance -- he is off
+    // the ground, so it closes in on both axes together instead, because a
+    // shadow that got taller as it got narrower would read as a hole.
+    //
+    // COVERAGE. There is no alpha here. fillEllipse writes opaque pixels, so
+    // the old solid ellipse did not darken the background, it REPLACED it --
+    // a brown decal punched through the digital rain. Painting only the
+    // pixels that pass a 4x4 Bayer threshold gives us the opacity channel the
+    // panel does not have: density IS alpha. It also buys a soft edge for
+    // free, since coverage falls off toward the rim.
+    //
+    // The Bayer cell is indexed by ABSOLUTE screen x/y, never by a running
+    // counter. drawBody() runs more than once per logical frame on banded
+    // boards, and a counter-driven pattern would land differently in each
+    // band and crawl along the seam.
+    {
+        static const uint8_t BAYER4[16] = {  0,  8,  2, 10,
+                                            12,  4, 14,  6,
+                                             3, 11,  1,  9,
+                                            15,  7, 13,  5 };
+        const int rx0 = S(18), ry0 = S(4);
+        int rx = rx0 + s_shadowAdj;
+        int ry;
+        if (s_shadowAdj >= 0) {
+            ry = (rx > 0) ? (ry0 * rx0 + rx / 2) / rx : ry0;   // spread, flatten
+        } else {
+            ry = (rx0 > 0) ? (ry0 * rx + rx0 / 2) / rx0 : ry0; // close in, both axes
+        }
+        if (rx < 4) rx = 4;
+        if (ry < 2) ry = 2;
+        const int sy   = headTopY + S(62);
+        const int rx2  = rx * rx, ry2 = ry * ry;
+        const int cov0 = (int)s_shadowCov;
+        const uint16_t sc = blend(BG, FUR_DARK, 70);
+        for (int dy = -ry; dy <= ry; dy++) {
+            const int yy = sy + dy;
+            const int qy = (dy * dy * 256) / ry2;
+            if (qy > 256) continue;
+            // One sqrt a row, not one a pixel: the row's half-width.
+            const int dxm = (int)(rx * sqrtf(1.0f - (float)qy / 256.0f));
+            for (int dx = -dxm; dx <= dxm; dx++) {
+                const int q = qy + (dx * dx * 256) / rx2;
+                if (q > 256) continue;
+                // Full in the core, a quarter at the rim. 16 always paints;
+                // the cell it is tested against runs 0-15.
+                const int cov = (cov0 * (256 - (q * 3) / 4)) >> 8;
+                const int xx  = cx2 + dx;
+                if (cov > (int)BAYER4[((yy & 3) << 2) | (xx & 3)])
+                    t.drawPixel(xx, yy, sc);
+            }
+        }
+    }
 
     // Legs + big bigfoot feet — a simple alternating step lift while
     // walking (TFT_eSPI has no canvas-style transforms to pivot a real
@@ -3314,7 +3385,7 @@ void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const
     // The cameo has no mood machine driving the pose channels, so clear
     // them rather than letting whatever CLEAR left behind leak into the
     // boot splash.
-    s_headDrop = 0; s_shadowAdj = 0; s_shadeDrop = 0; s_binoc = false;
+    s_headDrop = 0; s_shadowAdj = 0; s_shadowCov = 16; s_shadeDrop = 0; s_binoc = false;
     s_dangle = false;
     // Same idle bob as tick()'s WAVE mood, just without the quip/mood
     // state machine — a self-contained cameo for the boot splash.
@@ -3860,6 +3931,14 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
         s_headDrop  = (int)(-u * 0.16f * bobAmt);
         s_shadowAdj = (int)(bob * 0.20f);
     }
+    // Coverage rides the same number. u is already how high he is through
+    // the bob, and it is clamped here rather than at its source because the
+    // idle bob swings BELOW the rest line too, where u goes negative and the
+    // shadow should simply stay solid rather than overshoot past full.
+    {
+        float ua = (u < 0.0f) ? 0.0f : (u > 1.0f ? 1.0f : u);
+        s_shadowCov = (uint8_t)(16.0f - ua * 6.0f);
+    }
 
     // ---- carry and drop --------------------------------------------
     // A finger holding him overrides every other position: the mood
@@ -3898,6 +3977,26 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
         }
     } else {
         s_dangle = false;
+    }
+
+    // Off the ground, so the shadow stops pretending he is standing on it.
+    //
+    // s_dangle is true exactly while a finger holds him or he is falling
+    // back, which is the whole of "not in contact" -- and it is false during
+    // the landing squash, so this never fights the spread that fires there.
+    //
+    // Distance is measured from the REST head line in either direction. The
+    // carry clamp lets him be dragged about 46px below his resting position
+    // and only a few above it, and down is the direction that actually looks
+    // wrong today: his feet end up well past a shadow still sitting at the
+    // line he left. Shrinking and thinning it with the gap gets it out of
+    // the way instead of leaving a decal parked under his knees.
+    if (s_dangle) {
+        const int away = (hy > headTopY) ? (hy - headTopY) : (headTopY - hy);
+        float af = (float)away / (26.0f * scale);
+        if (af > 1.0f) af = 1.0f;
+        s_shadowAdj -= (int)(af * 9.0f * scale);
+        s_shadowCov  = (uint8_t)((float)s_shadowCov * (1.0f - 0.60f * af));
     }
 
     // A duck is a whole-body crouch, not just an arm pose -- see the

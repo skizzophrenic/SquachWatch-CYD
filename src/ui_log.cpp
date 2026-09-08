@@ -148,10 +148,6 @@ void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int scroll
     const int bodyBottom = bar.y - 4;
     const int bodyH      = bodyBottom - bodyTop;
 
-    // Title bar
-    char title[32];
-    snprintf(title, sizeof(title), ">> LOG  (%u) <<", (unsigned)eng.logCount());
-    Theme::drawTitleBar(t, title);
 
     // Body -- whatever background style CLEAR is showing, drawn at
     // reduced strength behind the list, same treatment Settings' body
@@ -161,20 +157,34 @@ void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int scroll
     // calls, which already erase their own glyph cells against
     // Theme::BG), so this drops in with no further changes needed.
     Theme::Palette saved = Theme::dimPaletteForOverlay(179);
-    switch (Settings::background()) {
-        case Settings::Background::STARFIELD: Theme::drawStarfield(t, now, bodyTop, bodyBottom); break;
-        case Settings::Background::TOASTERS:   Theme::drawFlyingToasters(t, now, bodyTop, bodyBottom); break;
-        case Settings::Background::AQUARIUM:   Theme::drawAquarium(t, now, bodyTop, bodyBottom); break;
-        case Settings::Background::TERMINAL:   Theme::drawTerminalLog(t, now, bodyTop, bodyBottom); break;
-        case Settings::Background::FIREFLIES:  Theme::drawFireflies(t, now, bodyTop, bodyBottom); break;
-        case Settings::Background::FIRE:       Theme::drawFire(t, now, bodyTop, bodyBottom); break;
-        case Settings::Background::SNOWFALL:   Theme::drawSnowfall(t, now, bodyTop, bodyBottom); break;
-        case Settings::Background::SPECTRUM:   Theme::drawGibson(t, now, bodyTop, bodyBottom, eng); break;
-        case Settings::Background::TUNNEL:     Theme::drawWireframeTunnel(t, now, bodyTop, bodyBottom); break;
-        case Settings::Background::SYNTHWAVE: Theme::drawSynthwave(t, now, bodyTop, bodyBottom); break;
-        default:                               Theme::drawDigitalRain(t, now, bodyTop, bodyBottom, true); break;
+        // The background starts at the TOP OF THE SCREEN, not at the body's own
+    // top. Those first sixteen rows used to be the title bar's; nothing owns
+    // them now except the two corner buttons, which draw their own opaque
+    // boxes over whatever is behind them. Leaving the animation to start
+    // below them left a flat dead strip across the top of this screen --
+    // the same relic CLEAR had, and the same fix.
+    //
+    // Only the BACKGROUND moves. Everything else on this screen still
+    // begins where it did, so no content shifts.
+    const int bgTop = 0;
+switch (Settings::background()) {
+        case Settings::Background::STARFIELD: Theme::drawStarfield(t, now, bgTop, bodyBottom); break;
+        case Settings::Background::TOASTERS:   Theme::drawFlyingToasters(t, now, bgTop, bodyBottom); break;
+        case Settings::Background::AQUARIUM:   Theme::drawAquarium(t, now, bgTop, bodyBottom); break;
+        case Settings::Background::TERMINAL:   Theme::drawTerminalLog(t, now, bgTop, bodyBottom); break;
+        case Settings::Background::FIREFLIES:  Theme::drawFireflies(t, now, bgTop, bodyBottom); break;
+        case Settings::Background::FIRE:       Theme::drawFire(t, now, bgTop, bodyBottom); break;
+        case Settings::Background::SNOWFALL:   Theme::drawSnowfall(t, now, bgTop, bodyBottom); break;
+        case Settings::Background::SPECTRUM:   Theme::drawGibson(t, now, bgTop, bodyBottom, eng); break;
+        case Settings::Background::TUNNEL:     Theme::drawWireframeTunnel(t, now, bgTop, bodyBottom); break;
+        case Settings::Background::SYNTHWAVE: Theme::drawSynthwave(t, now, bgTop, bodyBottom); break;
+        default:                               Theme::drawDigitalRain(t, now, bgTop, bodyBottom, true); break;
     }
     Theme::restorePalette(saved);
+    // Title bar
+    char title[32];
+    snprintf(title, sizeof(title), ">> LOG  (%u) <<", (unsigned)eng.logCount());
+    Theme::drawTitleBar(t, title);
 
     uint8_t count = eng.logCount();
 

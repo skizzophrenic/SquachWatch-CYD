@@ -29,7 +29,17 @@ void uiOutfitTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     // (Mowin' Man) uses that rather than the bottom of the screen.
     t.fillRect(0, footerTop, w, h - footerTop, Theme::BG);
     Theme::setBackgroundFloor(footerTop);
-    Theme::drawActiveBackground(t, now, titleBottom, footerTop, eng);
+    // The background starts at the TOP OF THE SCREEN, not at the body's own
+    // top. Those first sixteen rows used to be the title bar's; nothing owns
+    // them now except the two corner buttons, which draw their own opaque
+    // boxes over whatever is behind them. Leaving the animation to start
+    // below them left a flat dead strip across the top of this screen --
+    // the same relic CLEAR had, and the same fix.
+    //
+    // Only the BACKGROUND moves. Everything else on this screen still
+    // begins where it did, so no content shifts.
+    const int bgTop = 0;
+    Theme::drawActiveBackground(t, now, bgTop, footerTop, eng);
     Theme::clearBackgroundFloor();
 
     // Live preview -- same call the CLEAR screen makes, just with no
