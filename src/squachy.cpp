@@ -1949,8 +1949,26 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
             break;
         }
         case OutfitId::VOIDEYE: {
-            const int er = S(14);              // his head box is 30x24, so this
-            const int ey = hy + S(11);         // reads big without needing headroom
+            // 16, not the 14 this shipped with. That number was chosen while
+            // the title bar still owned the top sixteen rows of the screen, so
+            // it was sized to read big WITHOUT asking for headroom -- his head
+            // box is only 30x24 and anything taller went behind the bar.
+            //
+            // Measured off rendered frames now that the bar is gone: every
+            // other costume's silhouette tops out around row 8 (that is his
+            // own crest, not the costume), and this one stopped at row 28.
+            // Twenty rows of empty sky that nothing else was using.
+            //
+            // 16 and not more: at 17 the sphere starts to outgrow its own
+            // socket, and the violet ring that reads as an eye SET IN
+            // something becomes a crescent hanging under a loose ball.
+            //
+            // Only the radius moves. ey stays at S(11) so the sphere grows
+            // around its centre instead of climbing out of the socket, and
+            // every socket ellipse below is expressed in er, so they grow
+            // with it and the proportions hold.
+            const int er = S(16);
+            const int ey = hy + S(11);
             // SOCKET, drawn BEHIND the sphere so it shows only as a violet ring
             // at the sides and under the chin. Over the top it would cover the
             // sky, which is the part of this costume worth having.

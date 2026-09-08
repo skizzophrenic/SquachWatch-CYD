@@ -117,6 +117,24 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     const int lineH          = 14;
     const int countersTop    = bar.y - counterRows * lineH - 6;
     const int countersBottom = bar.y - 4;
+    // The counter rows alone sit 3px lower than countersTop, and nothing
+    // else does. Measured off a rendered landscape frame: the headline's
+    // ink ended at row 172, the two counter rows ran 180-186 and 194-200,
+    // and the button bar started at 214 -- so the block sat 7px under the
+    // headline and 13px above the buttons, hugging the text above it. The
+    // 20px of slack splits 10/10 with the rows 3px lower.
+    //
+    // Deliberately NOT folded into countersTop, which would look like the
+    // tidier fix. That value is the floor of everything above it: the
+    // headline is bottom-aligned to it, Squachy sizes himself against it,
+    // the pet takes it as its band, and the background repaints to it.
+    // Moving it would slide the headline down with the rows (leaving the
+    // gap exactly as lopsided as before) and hand Squachy three more
+    // pixels of height he did not ask for.
+    //
+    // Safe in portrait too, where the block is four rows rather than two:
+    // the last row then ends at bar.y - 10, still clear of countersBottom.
+    const int counterTextTop = countersTop + 3;
 
     // statusH: height of the ALL CLEAR / DETECTIONS LOGGED text row,
     // sized to fit the Bangers MD font's glyph box (ascent 27 +
@@ -291,7 +309,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     uint8_t start = 0;
     for (uint8_t row = 0; row < counterRows; row++) {
         uint8_t n = base + (row < remainder ? 1 : 0);
-        drawCounterLine(t, w, countersTop + row * lineH, eng, ALL_COUNTER_TYPES + start, n);
+        drawCounterLine(t, w, counterTextTop + row * lineH, eng, ALL_COUNTER_TYPES + start, n);
         start += n;
     }
 
