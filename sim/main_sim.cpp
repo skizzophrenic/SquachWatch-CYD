@@ -140,6 +140,7 @@ static void usage() {
         "  --bg N            background style 0..9 (see Settings::Background)\n"
         "  --theme N         palette index\n"
         "  --alert N         DetectionType the ALERT screen fires on\n"
+        "  --noseed          no detections at all -- CLEAR's idle state\n"
         "  --frames N        animation warm-up frames before capture (default 90)\n"
         "  --onboard         let Squachy's first-boot walkthrough run\n"
         "  --sequence N      capture N consecutive frames instead of one\n"
@@ -166,6 +167,11 @@ int main(int argc, char** argv) {
     // was a DRONE, and the other types' headlines, colours and
     // confidence rows were never looked at.
     int alertType = -1;
+    // --noseed leaves the engine empty. The CLEAR screen has two states
+    // now -- the headline only draws when something is actually live --
+    // and with detections always seeded the emulator could not render
+    // the idle one at all. Same gap --alert filled from the other side.
+    bool noSeed = false;
     std::string rawPath;
     for (int i = 2; i < argc; i++) {
         std::string a = argv[i];
@@ -181,6 +187,7 @@ int main(int argc, char** argv) {
         else if (a == "--confirm" && i + 1 < argc) confirmRow = atoi(argv[++i]);
         else if (a == "--info" && i + 1 < argc) infoType = atoi(argv[++i]);
         else if (a == "--alert" && i + 1 < argc) alertType = atoi(argv[++i]);
+        else if (a == "--noseed") noSeed = true;
         else if (a == "--scroll" && i + 1 < argc) scrollBy = atoi(argv[++i]);
     }
     if (sequence < 1) sequence = 1;
@@ -230,7 +237,7 @@ int main(int argc, char** argv) {
 
     DetectionEngine engine;
     engine.init();
-    seedDetections(engine);
+    if (!noSeed) seedDetections(engine);
 
     if (onboard) Squachy::trigger(Squachy::Event::BOOTED);
     // Runs every pose he has back to back, which is the only way to see

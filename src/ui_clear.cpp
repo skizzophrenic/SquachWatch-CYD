@@ -298,17 +298,44 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // better than it is: he is about 60px wide at the ankles against a
     // 185px headline, and a word with its middle punched out is not a
     // word. The 24-pass black outline is what keeps it legible over him.
-    {
-        // One headline now, not two. ALL CLEAR is gone: it was a second
-        // state to keep in sync, it stole the row the counters already
-        // answer more precisely (a screen of zeroes IS all clear), and the
-        // reassurance it carried belongs to Squachy, who now says it out
-        // loud every thirty seconds -- see WATCHING_LINES in squachy.cpp.
-        //
-        // What it does NOT lose is the rainbow: the hue cycle was the good
-        // part and it was wasted on the state you see least. ACTIVE
-        // DETECTIONS gets it, so the row is alive whatever is on screen.
-        // Same hue-wash technique as Squachy's party-mode confetti.
+    // Is anything actually live right now? Not lifetime -- a camera seen an
+    // hour ago is not something happening, and the counters decay for the
+    // same reason.
+    bool anyActive = false;
+    for (uint8_t i = 0; i < (uint8_t)DetectionType::COUNT; i++) {
+        if (eng.countByType((DetectionType)i) > 0) { anyActive = true; break; }
+    }
+    // Its ARRIVAL is the event, so the glitch fires on the edge rather than
+    // on the state -- once, when the screen goes from nothing to something,
+    // not again when a second detection joins the first. Level 3 is where
+    // the shared burst adds a full-screen tear on top of the jitter and
+    // dropout, which is the point: the headline does not fade in, it cuts
+    // in badly, the way a signal does.
+    //
+    // triggerGlitchBurst drives the same burst drawBangersText already reads
+    // from, so the headline glitches on its own with nothing else wired up.
+    static bool s_wasActive = false;
+    if (anyActive && !s_wasActive) Theme::triggerGlitchBurst(3);
+    s_wasActive = anyActive;
+
+    // Nothing on the row while nothing is happening. ALL CLEAR is gone and
+    // ACTIVE DETECTIONS does not replace it: a permanent label asserting
+    // "active" over a screen of zeroes is just untrue, and the counters
+    // underneath already say the same thing more precisely.
+    //
+    // Blank is not a compromise here, it is the better screen. Squachy's
+    // geometry hangs off counterTextTop rather than this row, so he does not
+    // move -- he is simply no longer painted over by a 25-pass headline that
+    // exists to be legible ON TOP of him. The pet and the Mowin' Man stop
+    // running in behind it. And the 24 outline passes plus the fill come off
+    // the frame the device spends nearly all its time rendering.
+    //
+    // Nothing needs erasing: the background repaints this whole band every
+    // frame, so a headline that stops being drawn is simply gone next frame.
+    if (anyActive) {
+        // The rainbow ALL CLEAR used to own. It was the good part and it was
+        // wasted on the state you see least; now it runs on the state that
+        // actually matters. Same hue-wash as Squachy's party-mode confetti.
         static const uint16_t RAINBOW[6] = {
             Theme::RED, Theme::AMBER, Theme::GREEN,
             Theme::CYAN, Theme::VAPOR_PURPLE, Theme::PINK
