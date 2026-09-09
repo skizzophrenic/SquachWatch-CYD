@@ -10,6 +10,8 @@
 #include <NimBLEScan.h>
 #if SQUACH_MESH
 #include "squachmesh.h"
+#include "squachy.h"
+#include "settings.h"
 #endif
 #include <esp_bt.h>
 #include <esp_gap_bt_api.h>
@@ -57,6 +59,15 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
         // Counted before anything can return early. The measurement is of
         // what the RADIO heard, not of what the signature tables liked.
         MeshProbe::noteAdvert();
+        // A peer is handled here and RETURNS, so it never reaches the
+        // signature tables and can never become a Detection. Getting that
+        // wrong would have two SquachWatches alarming at each other -- the
+        // exact failure the HACKER bucket was shaped to avoid.
+        if (adv->haveManufacturerData()) {
+            const std::string md = adv->getManufacturerData();
+            if (Mesh::onManufacturerData((const uint8_t*)md.data(), md.size(),
+                                         adv->getAddress().getNative(), millis())) return;
+        }
 #endif
         if (!g_engine) return;
         const uint8_t* mac = adv->getAddress().getNative();
@@ -482,6 +493,115 @@ Stats stats() {
 }
 
 } // namespace MeshProbe
+#endif
+
+#if SQUACH_MESH
+namespace Mesh {
+
+// One visitor at a time -- decided deliberately, and for screen space rather
+// than memory: 320x240 already holds Squachy, a pet, twelve counters and
+// three buttons. A second arrival while somebody is here is dropped rather
+// than queued, because a visit is a moment and not a message that has to be
+// delivered.
+static SquachMesh::Peer s_peer{};
+static uint8_t          s_peerMac[6] = {0};
+static uint32_t         s_peerSeen   = 0;
+static bool             s_havePeer   = false;
+static bool             s_advOn      = false;
+static uint32_t         s_advAt      = 0;
+
+// How long a peer survives without being heard from again. Adverts go out
+// every 1500ms, so this is roughly eight missed ones -- long enough that a
+// pocket or a passing wall does not end a visit, short enough that somebody
+// who actually left stops standing on your screen.
+static const uint32_t PEER_STALE_MS = 12000;
+static const uint16_t ADV_MS        = 1500;
+
+bool advertising() { return s_advOn; }
+
+const SquachMesh::Peer* peer() {
+    return s_havePeer ? &s_peer : nullptr;
+}
+const uint8_t* peerMac() { return s_peerMac; }
+
+// What we look like, read fresh each time rather than cached: the outfit and
+// the name can both change while this is running, and a peer drawing a stale
+// version of us is a bug nobody would think to look for.
+static size_t buildSelf(uint8_t* out) {
+    SquachMesh::Peer me{};
+    me.nick   = Squachy::nicknameIndex();
+    me.outfit = Squachy::outfitIndex();
+    me.shade  = Squachy::shadesIndex();
+    const char* cn = Squachy::customName();
+    me.custom = (cn && cn[0]);
+    me.name[0] = '\0';
+    if (me.custom) {
+        size_t i = 0;
+        for (; i < SquachMesh::NAME_LEN && cn[i]; i++) me.name[i] = cn[i];
+        me.name[i] = '\0';
+    }
+    return SquachMesh::encode(me, out);
+}
+
+static void setAdvertising(bool on) {
+    NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+    if (!adv) return;
+    if (!on) { if (s_advOn) adv->stop(); s_advOn = false; return; }
+
+    uint8_t buf[SquachMesh::LEN_MAX];
+    const size_t n = buildSelf(buf);
+
+    std::string md;
+    md.push_back((char)(SquachMesh::COMPANY_ID & 0xFF));
+    md.push_back((char)(SquachMesh::COMPANY_ID >> 8));
+    md.append((const char*)buf, n);
+
+    NimBLEAdvertisementData d;
+    d.setManufacturerData(md);
+    adv->setAdvertisementData(d);
+    adv->setMinInterval((uint16_t)(ADV_MS * 8 / 5));
+    adv->setMaxInterval((uint16_t)(ADV_MS * 8 / 5 + 16));
+    adv->start();
+    s_advOn = true;
+}
+
+void begin() { s_havePeer = false; s_advOn = false; }
+
+bool onManufacturerData(const uint8_t* d, size_t len, const uint8_t* mac, uint32_t now) {
+    // Company ID first, little-endian, then the payload.
+    if (len < 2 + SquachMesh::LEN_INDEXED) return false;
+    const uint16_t cid = (uint16_t)(d[0] | ((uint16_t)d[1] << 8));
+    if (cid != SquachMesh::COMPANY_ID) return false;
+
+    SquachMesh::Peer p;
+    if (!SquachMesh::decode(d + 2, len - 2, p)) return false;
+
+    // Ours. Keep the one we already have unless this IS the one we already
+    // have -- a second SquachWatch arriving mid-visit does not get to shove
+    // the first one off the screen.
+    if (s_havePeer && memcmp(mac, s_peerMac, 6) != 0) return true;
+
+    s_peer = p;
+    memcpy(s_peerMac, mac, 6);
+    s_peerSeen = now;
+    s_havePeer = true;
+    return true;
+}
+
+void tick(uint32_t now) {
+    const bool want = Settings::meshEnabled();
+    // Re-advertised periodically rather than once, so a change of outfit or
+    // name reaches everybody without waiting for a reboot.
+    if (want && (!s_advOn || (now - s_advAt) > 10000)) { setAdvertising(true); s_advAt = now; }
+    if (!want && s_advOn) setAdvertising(false);
+
+    // Listening does NOT depend on the setting. Turning SquachMesh off means
+    // "do not announce me", which is the privacy-relevant half; refusing to
+    // see somebody else's Squachy would just be worse for no gain.
+    if (s_havePeer && (now - s_peerSeen) > PEER_STALE_MS) s_havePeer = false;
+}
+
+} // namespace Mesh
 #endif
 
 void DetectionEngine::loop() {

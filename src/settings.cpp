@@ -11,6 +11,11 @@ static Background  s_background = Background::DIGITAL;
 static bool        s_inverted   = false;
 static bool        s_rgbSwapped = false;
 static bool        s_colorChecked = false;
+#if SQUACH_MESH
+// Declared with the other flags: load() reads it long before the accessors
+// below are defined.
+static bool        s_mesh       = false;
+#endif
 static bool        s_infoPrimerShown = false;
 static bool        s_rotationLocked = false;
 static uint8_t     s_rotation = 1;
@@ -144,6 +149,9 @@ void load() {
     s_inverted   = s_prefs.getBool("inv", false);
     s_rgbSwapped = s_prefs.getBool("rgbswap", false);
     s_colorChecked = s_prefs.getBool("colorchk", false);
+#if SQUACH_MESH
+    s_mesh       = s_prefs.getBool("mesh", false);   // off unless asked for
+#endif
     s_infoPrimerShown = s_prefs.getBool("infoprimer", false);
     s_rotationLocked = s_prefs.getBool("rotlock", false);
     s_rotation = s_prefs.getUChar("rot", 1);
@@ -340,6 +348,15 @@ const char* minConfidenceLabel() {
 static const uint8_t     SQ_SIZE_PCT[3]   = { 70, 85, 100 };
 static const char* const SQ_SIZE_LABEL[3] = { "SMALL", "MEDIUM", "LARGE" };
 static const uint8_t     SQ_SIZE_N        = 3;
+
+#if SQUACH_MESH
+bool meshEnabled() { return s_mesh; }
+const char* meshLabel() { return s_mesh ? "ON" : "OFF"; }
+void cycleMesh() {
+    s_mesh = !s_mesh;
+    s_prefs.putBool("mesh", s_mesh);
+}
+#endif
 
 uint8_t squachySizePct() {
     return SQ_SIZE_PCT[s_sqSizeIx < SQ_SIZE_N ? s_sqSizeIx : (uint8_t)(SQ_SIZE_N - 1)];

@@ -1449,6 +1449,7 @@ void loop() {
     engine.loop();
 #if SQUACH_MESH
     MeshProbe::tick(now);
+    Mesh::tick(now);
 #endif
 
     // Rotate button lives in the title bar's top-right corner, shown on
@@ -2454,6 +2455,7 @@ void loop() {
                         case SettingsRow::IGNORED_DEVICES:  enterIgnoreList(); break;
 #if SQUACH_MESH
                         case SettingsRow::SQUACHY_NAME:     enterPhone(); break;
+                        case SettingsRow::SQUACHMESH:       Settings::cycleMesh(); break;
 #endif
                         // These ask first -- see the confirm panel over in
                         // ui_settings. A row earns one when tapping it a

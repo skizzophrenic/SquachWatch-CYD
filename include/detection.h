@@ -1,5 +1,8 @@
 // SquachWatch-CYD — DetectionEngine public API
 #pragma once
+#if SQUACH_MESH
+#include "squachmesh.h"
+#endif
 #include "state.h"
 #include "sd_log.h"
 #include "remote_id.h"
@@ -49,6 +52,25 @@ namespace MeshProbe {
     void  tick(uint32_t now);
     void  noteAdvert();        // called from the BLE scan callback
     Stats stats();
+}
+
+// The radio half. Advertises who we are and listens for somebody else doing
+// the same. Deliberately separate from the detection pipeline: a peer must
+// never become a Detection -- the HACKER work kept bare Espressif out of the
+// signature tables precisely so SquachWatches would not flag each other, and
+// this would reintroduce that from the other side.
+namespace Mesh {
+    void begin();
+    void tick(uint32_t now);
+
+    // Called from the BLE scan callback with the raw manufacturer-data blob.
+    // Returns true if it was one of ours, so the caller can stop looking.
+    bool onManufacturerData(const uint8_t* d, size_t len, const uint8_t* mac, uint32_t now);
+
+    // The visitor, or nullptr. Goes stale on its own if the peer walks away.
+    const SquachMesh::Peer* peer();
+    const uint8_t*          peerMac();
+    bool                    advertising();
 }
 #endif
 

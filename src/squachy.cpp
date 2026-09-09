@@ -1820,6 +1820,10 @@ void visitReaction(VisitMoment m) {
     }
 }
 
+uint8_t nicknameIndex() { ensurePrefsLoaded(); return s_nickIdx; }
+uint8_t outfitIndex()   { ensurePrefsLoaded(); return s_outfitIdx; }
+uint8_t shadesIndex()   { ensurePrefsLoaded(); return s_shadeIdx; }
+
 const char* customName() {
     ensurePrefsLoaded();
     return s_customName[0] ? s_customName : nullptr;

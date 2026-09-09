@@ -192,6 +192,21 @@ namespace Settings {
     // full-size case, and every value below it is strictly more
     // conservative than what they solved for. Above 100 would invalidate
     // both, which is a different and much larger job.
+#if SQUACH_MESH
+    // Whether we ANNOUNCE ourselves. Off by default and deliberately so:
+    // this device otherwise never transmits, which is written up as a
+    // feature. Turning it on makes it visible to anyone else's scanner and
+    // gives it a persistent identity, and that should be a choice somebody
+    // made rather than a default they inherited.
+    //
+    // Only advertising is gated. Listening always runs -- refusing to see
+    // somebody else's Squachy would cost privacy nothing and cost the
+    // feature everything.
+    bool        meshEnabled();
+    const char* meshLabel();
+    void        cycleMesh();
+#endif
+
     uint8_t     squachySizePct();
     const char* squachySizeLabel();
     void        cycleSquachySize();

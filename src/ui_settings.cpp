@@ -25,6 +25,7 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::NICKNAME,
 #if SQUACH_MESH
     SettingsRow::SQUACHY_NAME,
+    SettingsRow::SQUACHMESH,
 #endif
     SettingsRow::SHADES_COLOR, SettingsRow::SQUACHY_SIZE,
     SettingsRow::OUTFIT, SettingsRow::PET,
@@ -37,6 +38,7 @@ static const uint8_t ALL_ROWS_N = sizeof(ALL_ROWS) / sizeof(ALL_ROWS[0]);
 static bool isSquachyOnlyRow(SettingsRow r) {
     return r == SettingsRow::REPLAY_INTRO || r == SettingsRow::SHOW_OFF ||
            r == SettingsRow::NICKNAME || r == SettingsRow::SQUACHY_NAME ||
+           r == SettingsRow::SQUACHMESH ||
            r == SettingsRow::SHADES_COLOR || r == SettingsRow::SQUACHY_SIZE ||
            r == SettingsRow::OUTFIT ||
            r == SettingsRow::PET;
@@ -61,6 +63,7 @@ static RowGroupId groupFor(SettingsRow r) {
             return RowGroupId::BEHAVIOR;
         case SettingsRow::NICKNAME:
         case SettingsRow::SQUACHY_NAME:
+        case SettingsRow::SQUACHMESH:
         case SettingsRow::SHADES_COLOR:
         case SettingsRow::SQUACHY_SIZE:
         case SettingsRow::OUTFIT:
@@ -519,6 +522,10 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             value = cn ? cn : "TAP TO TYPE";
             break;
         }
+        case SettingsRow::SQUACHMESH:
+            label = "SQUACHMESH";
+            value = Settings::meshLabel();
+            break;
 #endif
         case SettingsRow::OUTFIT:
             label = "OUTFIT";

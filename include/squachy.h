@@ -253,6 +253,12 @@ namespace Squachy {
 
     // nullptr or "" clears it and the curated nickname comes back. Anything
     // else is stored and becomes what nickname() reports.
+    // The raw indices, for the advert. Both devices ship the same tables,
+    // which is the whole reason four bits was enough to send an outfit.
+    uint8_t nicknameIndex();
+    uint8_t outfitIndex();
+    uint8_t shadesIndex();
+
     const char* customName();
     void        setCustomName(const char* n);
 #endif

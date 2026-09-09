@@ -3,6 +3,7 @@
 #if SQUACH_MESH
 #include "squachmesh.h"
 #include "squachy.h"
+#include "detection.h"
 
 // A peer supplied from outside -- the emulator's --peer flag today, the radio
 // eventually. Always wins over the demo below.
@@ -149,8 +150,12 @@ static void visitTick(uint32_t now, const SquachMesh::Peer* guest) {
 }
 
 const SquachMesh::Peer* uiClearGuest() {
-    if (s_guest) return s_guest;
+    if (s_guest) return s_guest;          // the emulator's --peer, when set
+    if (const SquachMesh::Peer* p = Mesh::peer()) return p;
 #if SQUACH_MESH_DEMO
+    // The synthetic visitor is now a FALLBACK, not the feature. It only
+    // appears when no real peer is in range, so a lab build still has
+    // something to show in an empty room without ever standing in for one.
     if (s_demoUp) return &s_demo;
 #endif
     return nullptr;
