@@ -23,7 +23,7 @@ CXX      ?= g++
 CXXFLAGS := -std=c++17 -O1 -g -Wall -Wextra -Wno-unused-parameter \
             -I$(SIM) -I$(INC)
 
-TESTS := remote_id_test ibeacon_test signatures_test emitter_roundtrip_test ignore_list_test hacker_test pwnagotchi_test shim_fidelity_test
+TESTS := remote_id_test ibeacon_test signatures_test emitter_roundtrip_test ignore_list_test hacker_test pwnagotchi_test shim_fidelity_test squachmesh_test
 
 # Only the units under test get linked in. Pulling the whole firmware
 # would drag in TFT_eSPI, NimBLE and the UI, and a test that needs a
@@ -35,6 +35,10 @@ emitter_roundtrip_test_SRCS  := $(SRC)/remote_id.cpp
 ignore_list_test_SRCS        := $(SRC)/ignore_list.cpp
 hacker_test_SRCS             := $(SRC)/signatures.cpp
 pwnagotchi_test_SRCS         := $(SRC)/signatures.cpp
+squachmesh_test_SRCS         := $(SRC)/squachmesh.cpp
+# The codec is #if SQUACH_MESH so it stays out of every shipping board.
+# The test is the one place that wants it compiled regardless of build env.
+squachmesh_test_FLAGS        := -DSQUACH_MESH=1
 # Header-only: the shim under test IS sim/TFT_eSPI.h.
 shim_fidelity_test_SRCS      :=
 
@@ -46,7 +50,7 @@ $(OUT):
 
 define TEST_rule
 $(OUT)/$(1): $(1).cpp $$($(1)_SRCS) | $(OUT)
-	@$$(CXX) $$(CXXFLAGS) -o $$@ $$< $$($(1)_SRCS)
+	@$$(CXX) $$(CXXFLAGS) $$($(1)_FLAGS) -o $$@ $$< $$($(1)_SRCS)
 
 .PHONY: run-$(1)
 run-$(1): $(OUT)/$(1)
