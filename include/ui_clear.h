@@ -15,3 +15,12 @@ void uiClearInit(TFT_eSPI& t);
 // interprets a tap on the relabeled slots differently.
 void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
                   bool advance = true, bool scanMenu = false);
+
+#if SQUACH_MESH
+// SPIKE: the peer currently visiting, or nullptr. Owned by whatever discovers
+// peers -- for now that is only the emulator's --peer flag, so the CLEAR screen
+// can be built and looked at before any radio exists.
+namespace SquachMesh { struct Peer; }
+const SquachMesh::Peer* uiClearGuest();
+void uiClearSetGuest(const SquachMesh::Peer* p);
+#endif

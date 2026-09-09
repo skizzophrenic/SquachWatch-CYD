@@ -1,5 +1,11 @@
 // SquachWatch-CYD — clear (idle) screen implementation
 #include "ui_clear.h"
+#if SQUACH_MESH
+#include "squachmesh.h"
+static const SquachMesh::Peer* s_guest = nullptr;
+const SquachMesh::Peer* uiClearGuest() { return s_guest; }
+void uiClearSetGuest(const SquachMesh::Peer* p) { s_guest = p; }
+#endif
 #include "theme.h"
 #include "squachy.h"
 #include "pet.h"
@@ -274,6 +280,42 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         // screen that passes it: everywhere else he is a cameo in a box
         // somebody sized deliberately, and shrinking him there would just
         // leave a hole.
+#if SQUACH_MESH
+        // SquachMesh: when a peer is visiting, BOTH Squachys drop to SMALL and
+        // stand apart. Small is not a courtesy to the guest, it is what makes
+        // two of them fit at all -- at the default size he is already most of
+        // the usable height, and two of those would overlap before either had
+        // room to stand.
+        //
+        // The host keeps the left. A visitor arriving on the right is the
+        // reading order and it means the resident does not appear to move
+        // aside for a stranger.
+        const SquachMesh::Peer* guest = uiClearGuest();
+        if (guest) {
+            const int SMALL_PCT = 70;
+            const int gap = w / 4;
+            Squachy::tick(t, w / 2 - gap, titleBottom, squachyBottom - titleBottom,
+                          now, advance, 1.0f, false, 0, SMALL_PCT);
+
+            // The visitor is drawn, not ticked: tick() owns mood, quip timers
+            // and the walk state, all of which are file-static singletons
+            // describing OUR Squachy. Calling it twice would have the guest
+            // driving the host's animation. drawWaving is the same body with
+            // none of that -- it is what the alert screen's cameo already uses.
+            //
+            // setOutfitPreview is the existing override the unlock popup uses
+            // to show a costume nobody owns yet. Set it, draw, clear it: left
+            // set it would silently redress our own Squachy everywhere.
+            Squachy::setOutfitPreview((int8_t)guest->outfit);
+            // The scale tick() actually used, not SMALL_PCT again: tick
+            // derives its scale from the height it was given, so the two
+            // numbers are different units and passing 0.7 here drew a
+            // visitor less than half the host's size.
+            Squachy::drawWaving(t, w / 2 + gap, squachyBottom, now,
+                                Squachy::lastScale(), nullptr, false, 0);
+            Squachy::setOutfitPreview(-1);
+        } else
+#endif
         Squachy::tick(t, w / 2, titleBottom, squachyBottom - titleBottom, now, advance,
                       1.0f, false, -1, Settings::squachySizePct());
     }

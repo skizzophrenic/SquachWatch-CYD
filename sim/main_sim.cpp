@@ -32,6 +32,7 @@
 #include "ui_diary.h"
 #include "ui_hunt.h"
 #include "ui_rawscan.h"
+#include "squachmesh.h"
 #include "ui_watchalert.h"
 #include "ui_colorcheck.h"
 #include "ui_diagnostics.h"
@@ -172,6 +173,10 @@ int main(int argc, char** argv) {
     // and with detections always seeded the emulator could not render
     // the idle one at all. Same gap --alert filled from the other side.
     bool noSeed = false;
+    // SPIKE: --peer N draws a visiting Squachy in outfit N beside our own,
+    // both at SMALL. No radio involved -- the point is to find out whether
+    // two of him fit and whether the renderer survives being called twice.
+    int peerOutfit = -1;
     std::string rawPath;
     for (int i = 2; i < argc; i++) {
         std::string a = argv[i];
@@ -188,6 +193,7 @@ int main(int argc, char** argv) {
         else if (a == "--info" && i + 1 < argc) infoType = atoi(argv[++i]);
         else if (a == "--alert" && i + 1 < argc) alertType = atoi(argv[++i]);
         else if (a == "--noseed") noSeed = true;
+        else if (a == "--peer" && i + 1 < argc) peerOutfit = atoi(argv[++i]);
         else if (a == "--scroll" && i + 1 < argc) scrollBy = atoi(argv[++i]);
     }
     if (sequence < 1) sequence = 1;
@@ -233,6 +239,13 @@ int main(int argc, char** argv) {
     if (outfitIdx >= 0) {
         Squachy::unlockAllOutfits();
         for (int k = 0; k < outfitIdx; k++) Squachy::cycleOutfit();
+    }
+
+    SquachMesh::Peer guest{};
+    if (peerOutfit >= 0) {
+        guest.nick = 4; guest.outfit = (uint8_t)peerOutfit; guest.shade = 1;
+        guest.custom = false; guest.name[0] = 0;
+        uiClearSetGuest(&guest);
     }
 
     DetectionEngine engine;

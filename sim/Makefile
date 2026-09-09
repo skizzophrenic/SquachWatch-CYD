@@ -32,10 +32,11 @@ CXX      ?= g++
 # makes <TFT_eSPI.h>, <Arduino.h> and <Preferences.h> resolve to the
 # shims here rather than to an ESP32 core that isn't installed.
 CXXFLAGS := -std=c++17 -O1 -g -Wall -Wno-unused-parameter \
-            -I$(SIM_DIR) -I$(INC)
+            -I$(SIM_DIR) -I$(INC) -DSQUACH_MESH=1
 
 UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/squachy.cpp \
+            $(SRC)/squachmesh.cpp \
             $(SRC)/settings.cpp \
             $(SRC)/signatures.cpp \
             $(SRC)/remote_id.cpp \
