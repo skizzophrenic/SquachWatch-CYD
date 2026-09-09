@@ -10,6 +10,54 @@
 #include <Preferences.h>  // AWOK's own per-rotation touch-cal storage; see the AWOK block below pollTouch()'s globals
 #include <esp_heap_caps.h>   // heap_caps_get_largest_free_block() -- diagnostics screen
 #include <esp_system.h>      // esp_reset_reason() -- diagnostics screen
+#include <esp_heap_caps.h>
+#include "ui_diagnostics.h"   // CrashReport, used by the breadcrumb below
+
+// Written every second, read once on the next boot. RTC_NOINIT_ATTR is the
+// point: it survives a software reset WITHOUT being zeroed on the way back
+// up, which is exactly what a post-mortem needs and what a normal static
+// cannot do. The magic is how we tell a real breadcrumb from whatever was in
+// RTC RAM after a cold boot.
+static const uint32_t CRUMB_MAGIC = 0x5175A0FEu;
+RTC_NOINIT_ATTR static struct {
+    uint32_t magic;
+    uint32_t uptimeMs;
+    uint32_t heapFree;
+    uint32_t heapBlock;
+    uint32_t lifetime;
+    uint8_t  screen;
+} g_crumb;
+
+// Snapshotted at boot, before the live breadcrumb starts overwriting it.
+static CrashReport g_lastCrash = {};
+
+static void crashReportInit() {
+    const esp_reset_reason_t r = esp_reset_reason();
+    const bool panicked = (r == ESP_RST_PANIC || r == ESP_RST_INT_WDT ||
+                           r == ESP_RST_TASK_WDT || r == ESP_RST_WDT);
+    if (panicked && g_crumb.magic == CRUMB_MAGIC) {
+        g_lastCrash.valid     = true;
+        g_lastCrash.uptimeMs  = g_crumb.uptimeMs;
+        g_lastCrash.heapFree  = g_crumb.heapFree;
+        g_lastCrash.heapBlock = g_crumb.heapBlock;
+        g_lastCrash.lifetime  = g_crumb.lifetime;
+        g_lastCrash.screen    = g_crumb.screen;
+    }
+    g_crumb.magic = CRUMB_MAGIC;
+}
+
+// Once a second is plenty: this is for telling a slow heap death from a
+// sudden one, and a second's resolution answers that.
+static void crashCrumbTick(uint32_t now, uint32_t lifetime, uint8_t screen) {
+    static uint32_t last = 0;
+    if (now - last < 1000) return;
+    last = now;
+    g_crumb.uptimeMs  = now;
+    g_crumb.heapFree  = ESP.getFreeHeap();
+    g_crumb.heapBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    g_crumb.lifetime  = lifetime;
+    g_crumb.screen    = screen;
+}
 #include "state.h"
 #include "theme.h"
 #include "detection.h"
@@ -1141,6 +1189,9 @@ static void printBootBanner() {
 
 // ---- Arduino setup / loop ----
 void setup() {
+    // Before anything else can allocate: the breadcrumb has to be read out
+    // while it is still the previous life's, not this one's.
+    crashReportInit();
     Serial.begin(SERIAL_BAUD);
     delay(200);
     Serial.println();
@@ -1447,6 +1498,7 @@ void loop() {
         touchJustUp = false;
     }
     engine.loop();
+    crashCrumbTick(now, engine.lifetimeTotal(), (uint8_t)state);
 #if SQUACH_MESH
     MeshProbe::tick(now);
     Mesh::tick(now);
@@ -2689,6 +2741,7 @@ void loop() {
             info.touchValid = tp.valid;
             info.mappedX = tp.x;
             info.mappedY = tp.y;
+            info.crash   = g_lastCrash;
             info.pushUs  = s_pushUsAvg;
             info.frameUs = s_frameUsAvg;
             info.bgUs    = Theme::backgroundUs();

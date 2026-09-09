@@ -58,6 +58,17 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
     y = drawLine(t, y, Theme::CYAN, "BOARD:", "%s (%s)", info.boardName,
                  info.usingCapTouch ? "capacitive" : "resistive");
     y = drawLine(t, y, Theme::CYAN, "RESET:", "%s", info.resetReason);
+    // Only after an actual panic, and only when the breadcrumb survived. A
+    // blank line here means a clean boot, not a missing feature.
+    if (info.crash.valid) {
+        y = drawLine(t, y, Theme::RED, "LAST CRASH:", "%lum%lus up, %lu free, %lu block",
+                     (unsigned long)(info.crash.uptimeMs / 60000),
+                     (unsigned long)((info.crash.uptimeMs / 1000) % 60),
+                     (unsigned long)info.crash.heapFree,
+                     (unsigned long)info.crash.heapBlock);
+        y = drawLine(t, y, Theme::RED, "  ON:", "screen %u, %lu detections",
+                     (unsigned)info.crash.screen, (unsigned long)info.crash.lifetime);
+    }
     // Uptime next to the reset reason on purpose: together they answer
     // "did this thing restart on me", which is one question and not two.
     {

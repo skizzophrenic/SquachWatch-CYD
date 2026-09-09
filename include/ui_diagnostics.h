@@ -13,7 +13,31 @@
 // touching board-specific globals (which raw touch reader, which
 // calibration storage) that only main.cpp already has in scope --
 // this file just formats and draws whatever it's handed.
+// What the board was doing the last time it died.
+//
+// A panic reset tells you THAT it crashed and nothing else, which is what
+// made the first one useless: it happened during a drive, on a build with no
+// SquachMesh in it, and the only thing recoverable afterwards was the word
+// PANIC. Whether the heap was exhausted, which screen was up, how long it had
+// been running -- all gone.
+//
+// RTC memory survives a software reset (a panic is one) but not a power
+// cycle, so a breadcrumb written there each second costs no flash wear and is
+// readable on the next boot. It is not a backtrace, but "died at 41 minutes
+// with 900 bytes of largest block, on CLEAR" and "died at 3 minutes with a
+// healthy heap" are different bugs, and this tells them apart.
+struct CrashReport {
+    bool     valid;        // a panic boot AND a breadcrumb that looks sane
+    uint32_t uptimeMs;     // how long it had been up
+    uint32_t heapFree;
+    uint32_t heapBlock;    // largest contiguous -- the fragmentation canary
+    uint32_t lifetime;     // detections seen, as a proxy for RF churn
+    uint8_t  screen;       // AppState it was on
+};
+
 struct DiagnosticsInfo {
+    CrashReport crash;
+
     // Live touch, straight from the touch chip -- not run through
     // calibration. hasRaw is false on boards whose touch path only
     // ever hands back already-calibrated coordinates (AWOK/cyd35's

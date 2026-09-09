@@ -6,3 +6,15 @@ typedef enum {
     ESP_RST_DEEPSLEEP, ESP_RST_BROWNOUT, ESP_RST_SDIO,
 } esp_reset_reason_t;
 inline esp_reset_reason_t esp_reset_reason() { return ESP_RST_POWERON; }
+
+// RTC memory attributes. On the ESP32 these place a variable in RTC RAM so it
+// survives a software reset; on a host there is no such thing and no reset to
+// survive, so they are no-ops and the variable is an ordinary static. Defined
+// here because main.cpp uses them for the crash breadcrumb, and the live sim
+// compiles main.cpp.
+#ifndef RTC_NOINIT_ATTR
+#define RTC_NOINIT_ATTR
+#endif
+#ifndef RTC_DATA_ATTR
+#define RTC_DATA_ATTR
+#endif
