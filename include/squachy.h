@@ -75,6 +75,13 @@ namespace Squachy {
     // and far cheaper than reordering the draw.
     bool lastFootprint(int& cx, int& halfW, int& top, int& bot);
 
+    // The scale tick() last drew him at. tick() DERIVES its scale from the
+    // height it was given and the SIZE percentage, while drawWaving() takes
+    // an absolute one -- the two are different units, and passing the same
+    // number to both draws two Squachys of visibly different sizes. Anything
+    // that has to stand beside him reads this instead of recomputing it.
+    float lastScale();
+
     // Runs every pose he has, back to back, naming each one in his own
     // speech bubble as it plays -- wired to Settings' "SHOW OFF" row.
     // Most of what he does is gated behind a random idle roll, a real

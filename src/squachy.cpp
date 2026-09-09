@@ -1085,6 +1085,8 @@ int crownY() { return s_lastCrownY; }
 static int footBottom() {
     return s_lastHeadTopY + (int)((SQUACHY_SHADOW ? 62.0f : 53.0f) * s_lastScale);
 }
+float lastScale() { return s_lastScale; }
+
 bool lastFootprint(int& cx, int& halfW, int& top, int& bot) {
     if (s_lastCx < -5000) return false;
     cx    = s_lastCx;
