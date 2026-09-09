@@ -43,6 +43,111 @@ static void demoTick(uint32_t now) {
 }
 #endif // SQUACH_MESH_DEMO
 
+// ---- the visit ------------------------------------------------------
+// A visit has a shape: somebody turns up, they say hello, they stand around
+// a while, somebody leaves. Modelling it as phases rather than "a guest is
+// present" is what lets the arrival be an event and the hanging-around be a
+// state -- the two things that were decided separately and have to coexist.
+enum class VisitPhase : uint8_t { ARRIVING, MEETING, HANGING, LEAVING, GONE };
+static VisitPhase   s_vp       = VisitPhase::GONE;
+static uint32_t     s_vpAt     = 0;          // when this phase started
+static uint32_t     s_beatAt   = 0;          // when the current line went up
+static uint32_t     s_beatNo   = 0;          // advances once per line
+static bool         s_guestTurn = false;
+static const char*  s_visitGuestLine = nullptr;
+
+static const uint32_t WALK_MS  = 1800;       // across the gap, either way
+static const uint32_t BEAT_MS  = 4600;       // one line's time on screen
+static const uint32_t HANG_MS  = 46000;      // before he thinks about leaving
+
+// True while he should have a walk cycle under him.
+static bool visitWalking() {
+    return s_vp == VisitPhase::ARRIVING || s_vp == VisitPhase::LEAVING;
+}
+
+// Eased so he settles rather than stopping dead. Same shape both ways, with
+// the endpoints swapped -- a departure that accelerated away would read as
+// fleeing, and he is only going home.
+static int visitGuestX(uint32_t now, int homeX, int offX) {
+    if (s_vp == VisitPhase::ARRIVING || s_vp == VisitPhase::LEAVING) {
+        float k = (float)(now - s_vpAt) / (float)WALK_MS;
+        if (k < 0) k = 0; if (k > 1) k = 1;
+        k = k * k * (3.0f - 2.0f * k);                 // smoothstep
+        const float from = (s_vp == VisitPhase::ARRIVING) ? (float)offX : (float)homeX;
+        const float to   = (s_vp == VisitPhase::ARRIVING) ? (float)homeX : (float)offX;
+        return (int)(from + (to - from) * k);
+    }
+    return homeX;
+}
+
+static void visitBeat(uint32_t now, Squachy::VisitMoment m) {
+    s_beatAt = now;
+    s_beatNo++;
+    s_guestTurn = !s_guestTurn;
+    if (s_guestTurn) {
+        // The guest's line is held, not re-rolled: his bubble is redrawn
+        // every frame it is up, and picking again each time would flicker
+        // through the pool instead of saying one thing.
+        s_visitGuestLine = Squachy::visitGuestLine(m, s_beatNo);
+    } else {
+        s_visitGuestLine = nullptr;
+        Squachy::visitReaction(m);          // the host says it himself
+    }
+}
+
+static void visitTick(uint32_t now, const SquachMesh::Peer* guest) {
+    if (!guest) { s_vp = VisitPhase::GONE; s_visitGuestLine = nullptr; return; }
+    if (s_vp == VisitPhase::GONE) {         // he just turned up
+        s_vp = VisitPhase::ARRIVING; s_vpAt = now;
+        s_guestTurn = true;                 // so the HOST speaks first
+        s_visitGuestLine = nullptr;
+        return;
+    }
+    switch (s_vp) {
+        case VisitPhase::ARRIVING:
+            // Nobody talks while he is still walking. A greeting delivered
+            // to somebody's back is a worse joke than no greeting.
+            if (now - s_vpAt >= WALK_MS) {
+                s_vp = VisitPhase::MEETING; s_vpAt = now;
+                visitBeat(now, Squachy::VisitMoment::MEET);
+            }
+            break;
+        case VisitPhase::MEETING:
+            if (now - s_beatAt >= BEAT_MS) {
+                if (s_guestTurn) {          // guest has answered; hello is done
+                    s_vp = VisitPhase::HANGING; s_vpAt = now;
+                    s_visitGuestLine = nullptr;
+                    s_beatAt = now;
+                } else {
+                    visitBeat(now, Squachy::VisitMoment::MEET);
+                }
+            }
+            break;
+        case VisitPhase::HANGING:
+            // Gaps between lines, not a wall of them. Standing together in
+            // silence is most of the point.
+            if (now - s_beatAt >= BEAT_MS * 2) {
+                if (s_visitGuestLine) { s_visitGuestLine = nullptr; s_beatAt = now; }
+                else visitBeat(now, Squachy::VisitMoment::HANGOUT);
+            }
+            if (now - s_vpAt >= HANG_MS) {
+                s_vp = VisitPhase::LEAVING; s_vpAt = now;
+                visitBeat(now, Squachy::VisitMoment::PART);
+                // Goodbyes happen before he moves, so the walk-off is the
+                // last thing rather than something talked over.
+                s_vpAt = now + BEAT_MS;
+            }
+            break;
+        case VisitPhase::LEAVING:
+            if ((int32_t)(now - s_vpAt) >= (int32_t)WALK_MS) {
+                s_vp = VisitPhase::GONE;
+                s_visitGuestLine = nullptr;
+            }
+            break;
+        default: break;
+    }
+}
+
 const SquachMesh::Peer* uiClearGuest() {
     if (s_guest) return s_guest;
 #if SQUACH_MESH_DEMO
@@ -341,7 +446,12 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         const SquachMesh::Peer* guest = uiClearGuest();
         if (guest) {
             const int SMALL_PCT = 70;
-            const int gap = w / 4;
+            const int gap  = w / 4;
+            const int homeX = w / 2 + gap;     // where the guest stands
+            const int offX  = w + 40;          // off the right edge
+
+            visitTick(now, guest);
+
             Squachy::tick(t, w / 2 - gap, titleBottom, squachyBottom - titleBottom,
                           now, advance, 1.0f, false, 0, SMALL_PCT);
 
@@ -351,17 +461,46 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
             // driving the host's animation. drawWaving is the same body with
             // none of that -- it is what the alert screen's cameo already uses.
             //
-            // setOutfitPreview is the existing override the unlock popup uses
-            // to show a costume nobody owns yet. Set it, draw, clear it: left
-            // set it would silently redress our own Squachy everywhere.
+            // Both previews are the existing overrides the unlock popup uses
+            // to show a costume nobody owns yet. Set them, draw, clear them:
+            // left set they would silently redress our own Squachy everywhere.
             Squachy::setOutfitPreview((int8_t)guest->outfit);
+            Squachy::setShadesPreview((int8_t)guest->shade);
             // The scale tick() actually used, not SMALL_PCT again: tick
             // derives its scale from the height it was given, so the two
             // numbers are different units and passing 0.7 here drew a
             // visitor less than half the host's size.
-            Squachy::drawWaving(t, w / 2 + gap, squachyBottom, now,
-                                Squachy::lastScale(), nullptr, false, 0);
+            const float gs = Squachy::lastScale();
+            const int   gx = visitGuestX(now, homeX, offX);
+            // wanderRangePx is what animates his legs. Walking in with it at 0
+            // slid him across the floor like furniture; a couple of pixels of
+            // wander is enough to put a walk cycle under the movement without
+            // reading as a stagger.
+            Squachy::drawWaving(t, gx, squachyBottom, now, gs,
+                                s_visitGuestLine, s_visitGuestLine != nullptr,
+                                visitWalking() ? 2 : 0);
+            Squachy::setShadesPreview(-1);
             Squachy::setOutfitPreview(-1);
+
+            // Nameplate, under his feet rather than over his head: above is
+            // where his speech bubble goes, and a name there would be hidden
+            // for exactly the moments he is worth identifying.
+            {
+                const char* nm = (guest->custom && guest->name[0])
+                                   ? guest->name
+                                   : Squachy::nicknameAt(guest->nick);
+                t.setTextSize(1);
+                t.setTextWrap(false);
+                const int nw = t.textWidth(nm);
+                const int nx = gx - nw / 2;
+                const int ny = squachyBottom + 2;
+                // Only if it actually fits between his feet and the counters.
+                if (ny + 8 <= counterTextTop - 2 && nx > 2 && nx + nw < w - 2) {
+                    t.setTextColor(Theme::CYAN, Theme::BG);
+                    t.setCursor(nx, ny);
+                    t.print(nm);
+                }
+            }
         } else
 #endif
         Squachy::tick(t, w / 2, titleBottom, squachyBottom - titleBottom, now, advance,

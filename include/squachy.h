@@ -218,6 +218,32 @@ namespace Squachy {
     // silently take over every other screen.
     void setOutfitPreview(int8_t idx);
 
+    // The same override for the shades tint, and it exists for the same
+    // reason setOutfitPreview does: a visiting Squachy has to arrive in his
+    // own colours. Without it a guest wears the host's shades, which reads
+    // as a reflection rather than as somebody else. -1 clears it.
+    void setShadesPreview(int8_t idx);
+
+#if SQUACH_MESH
+    // Which beat of a visit a line is wanted for. The pools live in
+    // squachy.cpp with every other pool rather than out with the visit
+    // logic -- dialogue belongs where the dialogue is.
+    enum class VisitMoment : uint8_t { MEET, HANGOUT, PART };
+
+    // Host's side of the conversation: picks a line and says it, exactly the
+    // way watchAlertReaction() and the scan reactions do.
+    void visitReaction(VisitMoment m);
+
+    // The guest's side. Returns a line to hand drawWaving() rather than
+    // saying it, because the guest has no mood machine to say it with.
+    const char* visitGuestLine(VisitMoment m, uint32_t seed);
+
+    // A nickname by index. nickname() only ever reports our own, and a guest
+    // arrives carrying somebody else's -- both devices ship the same table,
+    // which is the whole reason four bits was enough to send it.
+    const char* nicknameAt(uint8_t idx);
+#endif
+
     // Draws Squachy and his speech bubble, and advances his idle
     // animation/quip timers. Call every tick from the CLEAR screen.
     // cx = horizontal center. topY = where the bubble row starts (just
