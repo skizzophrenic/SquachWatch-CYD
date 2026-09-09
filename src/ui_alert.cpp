@@ -117,10 +117,16 @@ static void huntBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, int
     by = screenH - bh - 4;
 }
 
-// IGNORE sits in the top-right. The bottom two corners are taken by HUNT
-// and MORE INFO, and the top-left is where the "!! DETECTION !!" headline
-// starts, so this is the remaining corner that stays clear on the narrow
-// rotations as well as the wide ones.
+// Height of the coloured header strip the detection type is named in. File
+// scope rather than a local in the draw function because the IGNORE button
+// sits inside this strip and is centred in it -- a number two things have to
+// agree on is not one either of them should own privately.
+static const int STRIP_H = 42;
+
+// IGNORE sits in the header strip, at its right-hand end. The bottom two
+// corners are taken by HUNT and MORE INFO, and the strip's left-hand end is
+// where the detection type is named, so this is the remaining spot that
+// stays clear on the narrow rotations as well as the wide ones.
 static void ignoreBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, int& bh) {
     (void)screenH;
     // Deliberately smaller than HUNT and MORE INFO, which are 70x48 down
@@ -129,20 +135,33 @@ static void ignoreBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, i
     // this rect (see the STRIP_H block), so every pixel taken here is a
     // pixel taken from the longest type names.
     //
-    // 54x20 rather than the old 50x24, which was square-ish and squat: a
-    // Win95 push button is a wide, shallow thing (75x23 dialog units, about
-    // 3.3:1) and reading as one is the point. "IGNORE" is 36px at size 1,
-    // so inside the 2px bevel that leaves 7px of air each side against 4
-    // above and below -- horizontal padding exceeding vertical, which is
-    // the proportion that actually makes it look like a button. The 4px it
-    // costs the label budget changes no label's outcome: the two that
-    // overflow ("PROXIMITY BEACON" at 188px, "HACKER HARDWARE" at 187px)
-    // were already over the 168px portrait budget and already step down to
-    // the built-in font, and the longest that fits is 151px.
-    bw = 54;
-    bh = 20;
+    // 62x28. Thicker than the 54x20 it replaced, and WIDER in step with it
+    // rather than just taller: "IGNORE" is 36px at size 1, so inside the 2px
+    // bevel 62x28 leaves 11px of air each side against 8 above and below.
+    // Horizontal padding exceeding vertical is the proportion that makes a
+    // push button look like one, and growing the height alone would have
+    // inverted it -- a Win95 button is a wide, shallow thing (75x23 dialog
+    // units, about 3.3:1), so getting chunkier has to mean getting bigger,
+    // not getting squarer.
+    //
+    // The width is capped by the header label beside it, whose budget is
+    // measured off this rect: on the 240px rotation that budget is 218-bw,
+    // and every type name was measured in Bangers MD to find the real
+    // ceiling. The longest that still fits the face is "CARD SKIMMER" at
+    // 151px, so bw can reach 67 before it would push that one into the
+    // built-in font. 62 leaves 5px of margin. The only two names over the
+    // line -- "PROXIMITY BEACON" at 188 and "HACKER HARDWARE" at 187 --
+    // were already stepping down at any width.
+    bw = 62;
+    bh = 28;
     bx = screenW - bw - 4;
-    by = 4;
+    // Centred in the strip rather than pinned 4px below its top edge, which
+    // left 18 rows of dead colour underneath and made the button read as
+    // stuck to the ceiling instead of sitting in a title bar. The strip is
+    // the only thing behind it, so centring on the strip IS centring on
+    // everything it overlaps -- and it is derived, so if STRIP_H ever moves
+    // the button moves with it.
+    by = (STRIP_H - bh) / 2;
 }
 
 bool uiAlertHitIgnore(int x, int y, int screenW, int screenH) {
@@ -219,7 +238,6 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
     //
     // 42 rows because Bangers MD is a 33px cell and it has to sit inside.
     const uint16_t typeCol = Theme::colorFor(s_last.type);
-    const int STRIP_H = 42;
     t.fillRect(0, 0, w, STRIP_H, typeCol);
 
     // The label in Bangers MD rather than LG: MD is narrower per glyph, and
@@ -230,10 +248,11 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
     {
         const char* tgt = targetLabel(s_last.type);
         // The budget is the space left of the IGNORE button, NOT the screen
-        // width. IGNORE sits at (w-54, 4) and is drawn over this strip, so
+        // width. The button is drawn over this strip's right-hand end, so
         // measuring against w put "PROXIMITY BEACON" straight through it on
         // the 240px rotation -- which is exactly the sort of thing that only
-        // shows up on the narrow board.
+        // shows up on the narrow board. Read from ignoreBtnRect rather than
+        // restated, so the two cannot drift when the button is resized.
         int ibx, iby, ibw, ibh;
         ignoreBtnRect(w, h, ibx, iby, ibw, ibh);
         const int avail = ibx - 10 - 8;
