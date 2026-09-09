@@ -347,15 +347,22 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
     // Distance is honest -- RSSI really does map to a ring -- so that is what
     // the rings show, with the object at the centre of its own field.
     {
+        // The band the gauge actually owns: below the header strip, above
+        // the buttons. Centring it on the PLATE instead put its well three
+        // pixels into the strip -- the plate starts 12 rows below the strip,
+        // so a circle centred on the plate is not centred on the gap.
+        const int ceilY  = STRIP_H + 4;
+        const int floorY = h - 56;
         const int gx = wide ? (PLATE_X + PLATE_W + (w - PLATE_X - PLATE_W) / 2)
                             : (w / 2);
-        const int gy = wide ? (PLATE_Y + PLATE_H / 2)
+        const int gy = wide ? ((ceilY + floorY) / 2)
                             : (PLATE_Y + PLATE_H + 30);
-        // Bounded by whichever runs out first: the space beside the plate,
-        // or the room between the plate and the buttons.
+        // Bounded by whichever runs out first: the width beside the plate,
+        // or the height of the band -- and the well is 4px larger than the
+        // radius on every side, so that is what has to fit, not the circle.
         int gr = wide ? ((w - PLATE_X - PLATE_W) / 2 - 6) : 26;
-        const int floorY = h - 56;
-        if (gy + gr > floorY) gr = floorY - gy;
+        if (gy - gr - 4 < ceilY)  gr = gy - ceilY - 4;
+        if (gy + gr + 4 > floorY) gr = floorY - gy - 4;
         if (gr > 60) gr = 60;
         if (gr > 8) {
             t.fillRect(gx - gr - 4, gy - gr - 4, (gr + 4) * 2, (gr + 4) * 2, Theme::BG);
