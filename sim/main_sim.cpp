@@ -139,6 +139,7 @@ static void usage() {
         "  --portrait        render 240x320 instead of 320x240\n"
         "  --bg N            background style 0..9 (see Settings::Background)\n"
         "  --theme N         palette index\n"
+        "  --alert N         DetectionType the ALERT screen fires on\n"
         "  --frames N        animation warm-up frames before capture (default 90)\n"
         "  --onboard         let Squachy's first-boot walkthrough run\n"
         "  --sequence N      capture N consecutive frames instead of one\n"
@@ -159,6 +160,12 @@ int main(int argc, char** argv) {
     // is a real layout with real wrapped text and it was previously only
     // reachable on hardware, which is how two of its paragraphs went stale.
     int infoType = -1;
+    // --alert N picks WHICH seeded detection the ALERT screen fires on,
+    // by DetectionType. Without it the screen always alerted on logAt(0)
+    // -- whatever was seeded last -- so every alert frame ever rendered
+    // was a DRONE, and the other types' headlines, colours and
+    // confidence rows were never looked at.
+    int alertType = -1;
     std::string rawPath;
     for (int i = 2; i < argc; i++) {
         std::string a = argv[i];
@@ -173,6 +180,7 @@ int main(int argc, char** argv) {
         else if (a == "--showoff") showoff = true;
         else if (a == "--confirm" && i + 1 < argc) confirmRow = atoi(argv[++i]);
         else if (a == "--info" && i + 1 < argc) infoType = atoi(argv[++i]);
+        else if (a == "--alert" && i + 1 < argc) alertType = atoi(argv[++i]);
         else if (a == "--scroll" && i + 1 < argc) scrollBy = atoi(argv[++i]);
     }
     if (sequence < 1) sequence = 1;
@@ -298,7 +306,20 @@ int main(int argc, char** argv) {
     else if (screen == "boot")       uiBootInit(frame);
     else if (screen == "hunt")       { engine.huntBle((const uint8_t*)"\x11\x22\x33\x44\x55\x66", "AirTag"); }
     else if (screen == "alert")      {
-        const Detection* d = engine.logAt(0);
+        const Detection* d = nullptr;
+        if (alertType >= 0) {
+            for (uint16_t i = 0; i < engine.logCount(); i++) {
+                const Detection* c = engine.logAt(i);
+                if (c && (int)c->type == alertType) { d = c; break; }
+            }
+            if (!d) {
+                fprintf(stderr, "no seeded detection of type %d -- see seedDetections()\n",
+                        alertType);
+                return 1;
+            }
+        } else {
+            d = engine.logAt(0);
+        }
         if (!d) { fprintf(stderr, "no seeded detection to alert on\n"); return 1; }
         uiAlertInit(frame, *d);
     }
