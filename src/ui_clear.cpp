@@ -44,6 +44,11 @@ static void demoTick(uint32_t now) {
 }
 #endif // SQUACH_MESH_DEMO
 
+// Defined below with the rest of the guest resolution, which reads more
+// naturally next to the demo it falls back to than it would hoisted up here.
+static const SquachMesh::Peer* rawGuest(uint32_t now);
+static uint32_t                rawGuestId(uint32_t now);
+
 // ---- the visit ------------------------------------------------------
 // A visit has a shape: somebody turns up, they say hello, they stand around
 // a while, somebody leaves. Modelling it as phases rather than "a guest is
@@ -96,12 +101,52 @@ static void visitBeat(uint32_t now, Squachy::VisitMoment m) {
     }
 }
 
-static void visitTick(uint32_t now, const SquachMesh::Peer* guest) {
-    if (!guest) { s_vp = VisitPhase::GONE; s_visitGuestLine = nullptr; return; }
-    if (s_vp == VisitPhase::GONE) {         // he just turned up
+// The guest being drawn, held as a COPY rather than a pointer.
+//
+// Two things go wrong without this. A peer whose advert changes mid-visit
+// would morph on screen -- outfit and colours swapping on a Squachy standing
+// still, which reads as a glitch rather than as anything. And the visitor has
+// to keep being drawn through LEAVING after the peer is already gone, which a
+// pointer to a slot that has been cleared cannot do.
+static SquachMesh::Peer s_hosting{};
+static uint32_t         s_hostingId = 0;
+
+// What the screen should actually draw: the copy, for as long as the visit
+// lasts, and nothing once it is over.
+static const SquachMesh::Peer* visitHosting() {
+    return (s_vp == VisitPhase::GONE) ? nullptr : &s_hosting;
+}
+
+// Public answer to "who is visiting": the hosted copy, not the raw radio
+// state. Anything asking should see the same visitor the screen does,
+// including while he is still walking out after the peer has gone.
+const SquachMesh::Peer* uiClearGuest() { return visitHosting(); }
+
+static void visitTick(uint32_t now) {
+    const uint32_t id = rawGuestId(now);
+
+    if (s_vp == VisitPhase::GONE) {
+        if (!id) return;
+        const SquachMesh::Peer* g = rawGuest(now);
+        if (!g) return;
+        s_hosting   = *g;                   // copied once, on arrival
+        s_hostingId = id;
         s_vp = VisitPhase::ARRIVING; s_vpAt = now;
         s_guestTurn = true;                 // so the HOST speaks first
         s_visitGuestLine = nullptr;
+        return;
+    }
+
+    // A DIFFERENT guest, or none. Either way the one being hosted has to
+    // leave properly rather than being quietly replaced -- which is exactly
+    // what used to happen: the synthetic visitor took the slot from a real
+    // one and the guest appeared to change outfit instead of walking off.
+    // The same handover applies to two real peers, one arriving as another
+    // goes.
+    if (id != s_hostingId && s_vp != VisitPhase::LEAVING) {
+        s_vp = VisitPhase::LEAVING;
+        visitBeat(now, Squachy::VisitMoment::PART);
+        s_vpAt = now + BEAT_MS;             // goodbye first, then the walk
         return;
     }
     switch (s_vp) {
@@ -131,7 +176,7 @@ static void visitTick(uint32_t now, const SquachMesh::Peer* guest) {
                 if (s_visitGuestLine) { s_visitGuestLine = nullptr; s_beatAt = now; }
                 else visitBeat(now, Squachy::VisitMoment::HANGOUT);
             }
-            if (now - s_vpAt >= HANG_MS) {
+            if (now - s_vpAt >= HANG_MS) {   // he has been here a while
                 s_vp = VisitPhase::LEAVING; s_vpAt = now;
                 visitBeat(now, Squachy::VisitMoment::PART);
                 // Goodbyes happen before he moves, so the walk-off is the
@@ -149,16 +194,45 @@ static void visitTick(uint32_t now, const SquachMesh::Peer* guest) {
     }
 }
 
-const SquachMesh::Peer* uiClearGuest() {
+// When a real peer was last in range, so the demo does not pounce on the
+// slot the instant one walks away. Without this, unplugging the other device
+// swapped the synthetic visitor straight in and the guest appeared to change
+// outfit rather than to leave.
+static uint32_t s_realSeenAt = 0;
+static const uint32_t DEMO_COOLDOWN_MS = 15000;
+
+// Whoever WOULD be visiting right now, before the visit machine has decided
+// what to do about it. Not what gets drawn -- see visitHosting().
+static const SquachMesh::Peer* rawGuest(uint32_t now) {
     if (s_guest) return s_guest;          // the emulator's --peer, when set
-    if (const SquachMesh::Peer* p = Mesh::peer()) return p;
+    if (const SquachMesh::Peer* p = Mesh::peer()) { s_realSeenAt = now; return p; }
 #if SQUACH_MESH_DEMO
-    // The synthetic visitor is now a FALLBACK, not the feature. It only
-    // appears when no real peer is in range, so a lab build still has
-    // something to show in an empty room without ever standing in for one.
-    if (s_demoUp) return &s_demo;
+    // The synthetic visitor is a FALLBACK, not the feature: it fills an empty
+    // room in a lab build and stands aside for anybody real. The cooldown is
+    // what stops it treading on a real guest's exit.
+    if (s_demoUp && (s_realSeenAt == 0 || now - s_realSeenAt > DEMO_COOLDOWN_MS))
+        return &s_demo;
 #endif
     return nullptr;
+}
+
+// Who that is, as a value the visit machine can compare against last frame.
+// A real peer is its MAC folded down; the emulator's and the demo's are
+// constants, because there is only ever one of each.
+static uint32_t rawGuestId(uint32_t now) {
+    if (s_guest) return 0x5111u;
+    if (Mesh::peer()) {
+        const uint8_t* m = Mesh::peerMac();
+        uint32_t h = 2166136261u;                  // FNV-1a, plenty for six bytes
+        for (int i = 0; i < 6; i++) { h ^= m[i]; h *= 16777619u; }
+        return h ? h : 1u;                         // 0 means "nobody"
+    }
+#if SQUACH_MESH_DEMO
+    if (s_demoUp && (s_realSeenAt == 0 || now - s_realSeenAt > DEMO_COOLDOWN_MS))
+        return 0xDE1140u;
+#endif
+    (void)now;
+    return 0;
 }
 #endif
 #include "theme.h"
@@ -448,14 +522,16 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         // The host keeps the left. A visitor arriving on the right is the
         // reading order and it means the resident does not appear to move
         // aside for a stranger.
-        const SquachMesh::Peer* guest = uiClearGuest();
+        visitTick(now);
+        // The hosted COPY, not whoever the radio is hearing right now. That
+        // is what keeps a visitor from morphing mid-visit and what lets him
+        // still be drawn while he walks out after the peer has gone.
+        const SquachMesh::Peer* guest = visitHosting();
         if (guest) {
             const int SMALL_PCT = 70;
             const int gap  = w / 4;
             const int homeX = w / 2 + gap;     // where the guest stands
             const int offX  = w + 40;          // off the right edge
-
-            visitTick(now, guest);
 
             Squachy::tick(t, w / 2 - gap, titleBottom, squachyBottom - titleBottom,
                           now, advance, 1.0f, false, 0, SMALL_PCT);
