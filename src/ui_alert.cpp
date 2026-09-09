@@ -31,6 +31,74 @@ static const char* targetLabel(DetectionType t) {
 static Detection s_last;
 static bool s_touched = false;
 
+// Six saturated stops blended pairwise. The same construction the CLEAR
+// headline's rainbow uses, and for the same reason: RGB332 has 8 levels of
+// red and green but only FOUR of blue, so a computed HSV sweep bands badly
+// while a walk between colours known to survive the downconvert does not.
+static uint16_t hue6(float pos) {
+    static const uint16_t STOPS[6] = {
+        Theme::RED, Theme::AMBER, Theme::GREEN,
+        Theme::CYAN, Theme::VAPOR_PURPLE, Theme::PINK
+    };
+    pos = fmodf(pos, 6.0f);
+    if (pos < 0) pos += 6.0f;
+    const int i0 = (int)pos, i1 = (i0 + 1) % 6;
+    return Theme::blend(STOPS[i0], STOPS[i1], (uint16_t)((pos - i0) * 255));
+}
+
+static uint16_t lighten(uint16_t c, uint16_t amt) { return Theme::blend(c, Theme::WHITE, amt); }
+static uint16_t darken (uint16_t c, uint16_t amt) { return Theme::blend(c, Theme::BLACK, amt); }
+
+// The RGB frame. One full spectrum wrapped exactly once around the
+// perimeter, rotating -- so every hue is on screen at all times and the
+// border never goes dark or reads as switched off.
+//
+// The walk is what makes that possible: d is the distance travelled around
+// the outer rectangle, continuous from 0 back to P, so the hue at the last
+// pixel of the left edge meets the hue at the first pixel of the top. Each
+// step paints BORDER_W pixels inward, which means the four corners are
+// painted twice -- they agree, because both visits carry the same d.
+static const int   BORDER_W  = 2;
+static const float BORDER_MS = 400.0f;  // ms per sixth of the spectrum
+
+static void drawRgbBorder(TFT_eSPI& t, int w, int h, uint32_t now) {
+    const float P = (float)(2 * (w + h));
+    const float phase = (float)now / BORDER_MS;
+    for (int x = 0; x < w; x++) {
+        t.drawFastVLine(x, 0, BORDER_W, hue6((float)x / P * 6.0f + phase));
+        t.drawFastVLine(x, h - BORDER_W, BORDER_W,
+                        hue6((float)(w + h + (w - 1 - x)) / P * 6.0f + phase));
+    }
+    for (int y = 0; y < h; y++) {
+        t.drawFastHLine(w - BORDER_W, y, BORDER_W,
+                        hue6((float)(w + y) / P * 6.0f + phase));
+        t.drawFastHLine(0, y, BORDER_W,
+                        hue6((float)(2 * w + h + (h - 1 - y)) / P * 6.0f + phase));
+    }
+}
+
+// The header strip's bevel, built from the strip's OWN colour rather than
+// Win95 grey: the strip is a coloured title bar, and grey chrome around it
+// would read as a second, unrelated widget sitting behind the type name.
+//
+// Pushed harder than the IGNORE button's bevel. That one has five distinct
+// greys to build from; a bevel made out of a single colour has only what
+// lightening and darkening can reach from that colour, and on a mid purple
+// through RGB332 the gentle version came back as almost nothing.
+static void stripBevel(TFT_eSPI& t, int x, int y, int w, int stripH, uint16_t c) {
+    const uint16_t lit = lighten(c, 170), litSoft = lighten(c, 75);
+    const uint16_t shd = darken(c, 170),  shdSoft = darken(c, 75);
+    const int R = x + w - 1, Bm = y + stripH - 1;
+    t.drawFastHLine(x, y, w, lit);
+    t.drawFastHLine(x, y + 1, w, litSoft);
+    t.drawFastHLine(x, Bm - 1, w, shdSoft);
+    t.drawFastHLine(x, Bm, w, shd);
+    t.drawFastVLine(x, y, stripH, lit);
+    t.drawFastVLine(x + 1, y, stripH, litSoft);
+    t.drawFastVLine(R - 1, y, stripH, shdSoft);
+    t.drawFastVLine(R, y, stripH, shd);
+}
+
 // Whether the player's selected background animates behind the alert.
 // Kept as a named constant rather than inlined so it is one edit to take
 // back out, and 0..255 of dim so it can be tuned without touching the
@@ -154,7 +222,11 @@ static void ignoreBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, i
     // were already stepping down at any width.
     bw = 62;
     bh = 28;
-    bx = screenW - bw - 4;
+    // 8 from the edge rather than 4. The margin has to clear the BORDER, not
+    // the screen: with a 3px frame drawn over the outermost columns, a 4px
+    // margin left the button one pixel off it, which reads as a collision
+    // rather than a gap. 8 leaves 5 clear of the widest frame.
+    bx = screenW - bw - 8;
     // Centred in the strip rather than pinned 4px below its top edge, which
     // left 18 rows of dead colour underneath and made the button read as
     // stuck to the ceiling instead of sitting in a title bar. The strip is
@@ -240,6 +312,12 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
     const uint16_t typeCol = Theme::colorFor(s_last.type);
     t.fillRect(0, 0, w, STRIP_H, typeCol);
 
+    // Inset by the border width. The frame draws last and would otherwise
+    // paint straight over the strip's lit top edge and both its side edges,
+    // leaving only the bottom shadow -- which is not a bevel. The strip sits
+    // INSIDE the frame, so its bevel has to as well.
+    stripBevel(t, BORDER_W, BORDER_W, w - 2 * BORDER_W, STRIP_H - BORDER_W, typeCol);
+
     // The label in Bangers MD rather than LG: MD is narrower per glyph, and
     // the longest labels here ("PROXIMITY BEACON", "HACKER HARDWARE") are
     // longer than the "CARD SKIMMER" the LG sizing note was written for.
@@ -255,7 +333,12 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
         // restated, so the two cannot drift when the button is resized.
         int ibx, iby, ibw, ibh;
         ignoreBtnRect(w, h, ibx, iby, ibw, ibh);
-        const int avail = ibx - 10 - 8;
+        // The 6 is the gap between this label and the button, down from 8 to
+        // pay for the button's new edge margin without shrinking the button
+        // or pushing "CARD SKIMMER" -- the longest name that still fits the
+        // Bangers face, at 151px -- into the built-in fallback. On the 240px
+        // rotation the budget is now 154, so it clears by 3.
+        const int avail = ibx - 10 - 6;
         const int tw = Theme::bangersTextWidth(tgt, Theme::BangersSize::MD);
         if (tw <= avail) {
             Theme::drawBangersText(t, 10, 4, tgt, Theme::BG, Theme::BangersSize::MD);
@@ -490,6 +573,11 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
     // briefly obscuring the readout mid-burst reads as "interference"
     // rather than a bug, which fits an alert about surveillance gear.
     Theme::drawGlitchStatic(t, 0, 0, w, h);
+
+    // The RGB frame, after the static so the chrome stays clean: the static
+    // is meant to read as interference in the CONTENT, and a frame that
+    // breaks up along with it stops reading as a frame at all.
+    drawRgbBorder(t, w, h, now);
 
     // Info panel drawn last, opaquely on top of everything above
     // (including the static) -- same "modal drawn every tick on top of
