@@ -298,28 +298,26 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // better than it is: he is about 60px wide at the ankles against a
     // 185px headline, and a word with its middle punched out is not a
     // word. The 24-pass black outline is what keeps it legible over him.
-    bool anyActive = false;
-    for (uint8_t i = 0; i < (uint8_t)DetectionType::COUNT; i++) {
-        if (eng.countByType((DetectionType)i) > 0) { anyActive = true; break; }
-    }
     {
-        uint16_t col;
-        const char* msg;
-        if (!anyActive) {
-            // Full rainbow cycle instead of a two-color pulse — same
-            // hue-wash technique as Squachy's party-mode confetti wash.
-            static const uint16_t RAINBOW[6] = {
-                Theme::RED, Theme::AMBER, Theme::GREEN,
-                Theme::CYAN, Theme::VAPOR_PURPLE, Theme::PINK
-            };
-            float huePos = fmodf((float)now / 900.0f, 6.0f);
-            int i0 = (int)huePos % 6, i1 = (i0 + 1) % 6;
-            col = Theme::blend(RAINBOW[i0], RAINBOW[i1], (uint16_t)((huePos - (int)huePos) * 255));
-            msg = "ALL CLEAR";
-        } else {
-            col = Theme::PINK;
-            msg = "ACTIVE DETECTIONS";
-        }
+        // One headline now, not two. ALL CLEAR is gone: it was a second
+        // state to keep in sync, it stole the row the counters already
+        // answer more precisely (a screen of zeroes IS all clear), and the
+        // reassurance it carried belongs to Squachy, who now says it out
+        // loud every thirty seconds -- see WATCHING_LINES in squachy.cpp.
+        //
+        // What it does NOT lose is the rainbow: the hue cycle was the good
+        // part and it was wasted on the state you see least. ACTIVE
+        // DETECTIONS gets it, so the row is alive whatever is on screen.
+        // Same hue-wash technique as Squachy's party-mode confetti.
+        static const uint16_t RAINBOW[6] = {
+            Theme::RED, Theme::AMBER, Theme::GREEN,
+            Theme::CYAN, Theme::VAPOR_PURPLE, Theme::PINK
+        };
+        const float huePos = fmodf((float)now / 900.0f, 6.0f);
+        const int i0 = (int)huePos % 6, i1 = (i0 + 1) % 6;
+        const uint16_t col =
+            Theme::blend(RAINBOW[i0], RAINBOW[i1], (uint16_t)((huePos - (int)huePos) * 255));
+        const char* msg = "ACTIVE DETECTIONS";
         // 2px black outline: draw the same text at every offset in a
         // 5x5 grid around the real position (minus the center) in
         // black first, then the real color on top. A full grid, not

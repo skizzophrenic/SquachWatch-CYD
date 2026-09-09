@@ -160,14 +160,16 @@ namespace Theme {
     void drawScrollbar(TFT_eSPI& t, int x, int y, int h,
                        int totalItems, int visibleItems, int scrollOffset);
 
-    // The ALERT screen's ambient background — a small animated scene
-    // themed to whatever was actually detected (an apple for AirTag, a
-    // camera+shutter for FLOCK/AXON/ALPR/CAMERA, sunglasses for META,
-    // etc.) instead of one generic effect for every type. Fully
-    // repaints the w x h region every call, same discipline as the
-    // CLEAR-screen backgrounds, so nothing trails between frames.
-    void drawAlertFx(TFT_eSPI& t, DetectionType type, uint32_t now, int w, int h,
-                     bool clearFirst = true);
+    // The detected thing, drawn at any centre and size. Replaces
+    // drawAlertFx, which anchored its art at a fixed (w/2, h-46) and
+    // repainted the whole panel -- fine when the icon was scenery at the
+    // bottom of the ALERT screen, useless once it had to sit inside a
+    // gauge.
+    //
+    // `s` is a half-size: the art occupies roughly 2s by 2s around
+    // (cx, cy). It is drawn opaquely over whatever is already there and
+    // erases nothing, so the caller owns the background.
+    void drawTypeIcon(TFT_eSPI& t, DetectionType type, int cx, int cy, int s);
 
     // Animated pulsing border (call once per frame from a ui tick).
     void drawPulsingBorder(TFT_eSPI& t, uint32_t now, uint16_t a, uint16_t b,

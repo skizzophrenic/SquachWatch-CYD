@@ -187,9 +187,8 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
         Theme::drawActiveBackground(t, now, 0, h, eng);
         Theme::restorePalette(saved);
         Theme::dimRegion(t, 0, 0, w, h, ALERT_BACKGROUND_DIM);
-        Theme::drawAlertFx(t, s_last.type, now, w, h, false);
     } else {
-        Theme::drawAlertFx(t, s_last.type, now, w, h);
+        t.fillRect(0, 0, w, h, Theme::BG);
     }
 
     // ---- header strip ------------------------------------------------
@@ -246,9 +245,14 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
     // still runs behind and around it, so the screen keeps its character,
     // but six-pixel text stops competing with a sunset gradient -- which
     // was the single worst thing about the old layout.
-    const int PLATE_X = 14, PLATE_Y = STRIP_H + 12;
-    const int PLATE_W = w - 28;
-    const int PLATE_H = 100;
+    // Two columns when there is width for them: identity on the left,
+    // the gauge on the right. The 240px rotation cannot hold both, so it
+    // keeps the full-width plate and puts a smaller gauge underneath.
+    const bool wide = (w >= 300);
+    const int PLATE_X = wide ? 12 : 14;
+    const int PLATE_Y = STRIP_H + 12;
+    const int PLATE_W = wide ? 168 : (w - 28);
+    const int PLATE_H = 98;
     t.fillRect(PLATE_X, PLATE_Y, PLATE_W, PLATE_H, Theme::BG);
     t.drawRect(PLATE_X, PLATE_Y, PLATE_W, PLATE_H, typeCol);
 
@@ -267,12 +271,12 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
         up[i] = '\0';
         const int vw = Theme::bangersTextWidth(up, Theme::BangersSize::MD);
         if (vw > 0 && vw <= PLATE_W - 8) {
-            Theme::drawBangersText(t, (w - vw) / 2, PLATE_Y + 4, up,
+            Theme::drawBangersText(t, PLATE_X + (PLATE_W - vw) / 2, PLATE_Y + 2, up,
                                    Theme::CYAN, Theme::BangersSize::MD);
         } else {
             t.setTextSize(2);
             t.setTextColor(Theme::CYAN, Theme::BG);
-            t.setCursor((w - t.textWidth(s_last.vendor)) / 2, PLATE_Y + 10);
+            t.setCursor(PLATE_X + (PLATE_W - t.textWidth(s_last.vendor)) / 2, PLATE_Y + 10);
             t.print(s_last.vendor);
         }
     }
@@ -283,7 +287,7 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
     t.setTextSize(1);
     t.setTextColor(Theme::WHITE, Theme::BG);
     if (s_last.name[0]) {
-        t.setCursor((w - t.textWidth(s_last.name)) / 2, PLATE_Y + 40);
+        t.setCursor(PLATE_X + (PLATE_W - t.textWidth(s_last.name)) / 2, PLATE_Y + 38);
         t.print(s_last.name);
     }
 
@@ -291,17 +295,27 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
     snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
              s_last.mac[0], s_last.mac[1], s_last.mac[2],
              s_last.mac[3], s_last.mac[4], s_last.mac[5]);
-    t.setCursor((w - t.textWidth(mac)) / 2, PLATE_Y + 56);
+    t.setCursor(PLATE_X + (PLATE_W - t.textWidth(mac)) / 2, PLATE_Y + 50);
     t.print(mac);
 
     // Signal as a bar as well as a number: -90 dBm empty, -40 full. The
     // number is for the log; the bar is what reads from across a room.
     {
-        const int BAR_X = PLATE_X + 60, BAR_Y = PLATE_Y + 72;
-        const int BAR_W = PLATE_W - 74, BAR_H = 10;
+        const int BAR_X = PLATE_X + 8, BAR_Y = PLATE_Y + 72;
+        const int BAR_W = PLATE_W - 16, BAR_H = 12;
         t.setTextColor(Theme::CYAN, Theme::BG);
-        t.setCursor(PLATE_X + 10, BAR_Y + 1);
+        // Label above the bar rather than beside it: the two-column layout
+        // leaves the plate 168 wide, and a label plus a usable meter do not
+        // both fit on one line at that width. The grade shares that row,
+        // right-aligned -- which is also what takes it out of the readout
+        // line below, where the four fields together ran 174px into a 168px
+        // plate and pushed the sighting count off the edge.
+        t.setCursor(PLATE_X + 8, BAR_Y - 12);
         t.print("SIGNAL");
+        t.setTextColor(confColor, Theme::BG);
+        const char* cl = confidenceLabel(conf);
+        t.setCursor(PLATE_X + PLATE_W - 8 - t.textWidth(cl), BAR_Y - 12);
+        t.print(cl);
         int v = s_last.rssi;
         if (v < -90) v = -90;
         if (v > -40) v = -40;
@@ -310,24 +324,55 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
         if (fill > 0) t.fillRect(BAR_X + 1, BAR_Y + 1, fill, BAR_H - 2, Theme::CYAN);
     }
 
-    // Grade, signal, channel, sightings -- one line, already drawn in the
-    // grade's own colour. It used to sit in the strip, where it collided
-    // with both the title and the IGNORE button on a narrow rotation, and
-    // it belongs with the numbers anyway.
-    char info[56];
-    snprintf(info, sizeof(info), "%s   %d dBm   CH %u   x%u",
-             confidenceLabel(conf), s_last.rssi, s_last.channel,
-             (unsigned)s_last.hits);
+    // The numbers, without the grade -- that moved up to the SIGNAL row so
+    // this line fits the narrower plate.
+    char info[40];
+    snprintf(info, sizeof(info), "%d dBm   CH %u   x%u",
+             s_last.rssi, s_last.channel, (unsigned)s_last.hits);
     t.setTextColor(confColor, Theme::BG);
-    t.setCursor((w - t.textWidth(info)) / 2, PLATE_Y + PLATE_H - 12);
+    t.setCursor(PLATE_X + (PLATE_W - t.textWidth(info)) / 2, PLATE_Y + PLATE_H - 11);
     t.print(info);
 
-    // Signal radar: bearing is derived from the MAC so it stays put for
-    // the duration of this alert instead of jittering every frame;
-    // distance from centre reflects RSSI (closer = stronger signal).
-    float bearing = (float)((s_last.mac[4] ^ (s_last.mac[5] << 3)) & 0xFF)
-                    / 255.0f * 6.2831853f;
-    Theme::drawSignalRadar(t, w / 2, PLATE_Y + PLATE_H + 26, 20, now, s_last.rssi, bearing);
+    // ---- the gauge -----------------------------------------------------
+    // The detected thing, drawn large with the instrument grid over the top
+    // of it. The old screen had a 22px radar tucked under the readout and a
+    // separate icon at the bottom of the panel, and the two never met -- one
+    // said "a contact is out there", the other said "this is what it is".
+    // One object, one gauge.
+    //
+    // Deliberately NOT viewer-centred with the icon riding a bearing: the
+    // bearing is derived from the MAC so it holds still during an alert, and
+    // it is otherwise arbitrary. One antenna cannot do direction finding, and
+    // putting a recognisable object at a compass position would claim it can.
+    // Distance is honest -- RSSI really does map to a ring -- so that is what
+    // the rings show, with the object at the centre of its own field.
+    {
+        const int gx = wide ? (PLATE_X + PLATE_W + (w - PLATE_X - PLATE_W) / 2)
+                            : (w / 2);
+        const int gy = wide ? (PLATE_Y + PLATE_H / 2)
+                            : (PLATE_Y + PLATE_H + 30);
+        // Bounded by whichever runs out first: the space beside the plate,
+        // or the room between the plate and the buttons.
+        int gr = wide ? ((w - PLATE_X - PLATE_W) / 2 - 6) : 26;
+        const int floorY = h - 56;
+        if (gy + gr > floorY) gr = floorY - gy;
+        if (gr > 60) gr = 60;
+        if (gr > 8) {
+            t.fillRect(gx - gr - 4, gy - gr - 4, (gr + 4) * 2, (gr + 4) * 2, Theme::BG);
+            t.drawRect(gx - gr - 4, gy - gr - 4, (gr + 4) * 2, (gr + 4) * 2, typeCol);
+            Theme::drawTypeIcon(t, s_last.type, gx, gy, gr / 2);
+            // Grid over the object, not under it.
+            t.drawCircle(gx, gy, gr,         t.color565(0, 90, 86));
+            t.drawCircle(gx, gy, gr * 2 / 3, t.color565(0, 64, 60));
+            t.drawCircle(gx, gy, gr / 3,     t.color565(0, 48, 45));
+            t.drawFastHLine(gx - gr, gy, 2 * gr, t.color565(0, 40, 38));
+            t.drawFastVLine(gx, gy - gr, 2 * gr, t.color565(0, 40, 38));
+            const float sweep = (float)(now % 2000) / 2000.0f * 6.2831853f;
+            t.drawLine(gx, gy, gx + (int)(sinf(sweep) * gr),
+                       gy - (int)(cosf(sweep) * gr), Theme::GREEN);
+            t.drawCircle(gx, gy, gr, Theme::VAPOR_PINK);
+        }
+    }
 
     // MORE INFO -- opens the same explanation panel LOG's long-press
     // menu does (see uiAlertHitMoreInfo()), so a fresh detection can be

@@ -152,7 +152,7 @@ static const char* const ONBOARD_LINES[] = {
     "Hey! First boot -- I'm Squachy. Two minutes, then I'll let you go.",
     "SquachWatch listens for surveillance nearby -- cameras, plate readers, trackers like AirTags.",
     "No magic. Just WiFi and Bluetooth, matching known hardware as it passes by.",
-    "ALL CLEAR means nothing's around. It flips to a big flashing ALERT the second something matches.",
+    "All zeroes down there means nothing's around. It flips to a big flashing ALERT the second something matches.",
     "Down there: SCAN rescans, LOG shows history, CLR wipes it.",
 #if defined(AWOK)
     "Up top left: Settings. The far left/right edges of the screen swap backgrounds, one swap per tap.",
@@ -232,6 +232,27 @@ static const char* PETTING_LINES[] = {
 // A yawn/nap moment for when nothing's happened in a long while — a
 // visual state, not just another line bank (see the SLEEPY mood in
 // drawBody).
+// Said on a fixed thirty-second beat, not on the random idle roll. This is
+// the job ALL CLEAR used to do: with that headline gone, something still has
+// to tell you the thing is awake and looking, and a mascot saying so is
+// worth more than a label that only appeared when nothing was happening.
+//
+// Deliberately more lines than the other pools. A reassurance you see twice
+// a minute for hours has to not wear out, and four would.
+static const char* WATCHING_LINES[] = {
+    "Still watching. Nothing's snuck past.",
+    "Eyes open. You're covered.",
+    "Sweeping the airwaves. All quiet so far.",
+    "I'm on it. Go about your business.",
+    "Listening. Nothing worth telling you about.",
+    "Two point four gigahertz of nothing. Good.",
+    "Nobody's looking at you but me.",
+    "Watching the watchers. Nothing yet.",
+    "Radio's quiet. I'll shout if it isn't.",
+    "Keeping an eye out. Same as always.",
+};
+static const uint8_t WATCHING_N = sizeof(WATCHING_LINES) / sizeof(WATCHING_LINES[0]);
+
 static const char* SLEEPY_LINES[] = {
     "*yawn* ...still here.",
     "Cryptid power-nap. Don't tell anyone.",
@@ -308,6 +329,11 @@ static uint32_t      bubbleUntil     = 0;
 // forward from the start, not backward from the expiry.
 static uint32_t      bubbleStart     = 0;
 static uint32_t      nextIdleAt      = 4000;
+// The reassurance beat. First one lands a few seconds after boot rather
+// than at t=30s, so a device that has just been switched on says something
+// reassuring while somebody is still looking at it.
+static const uint32_t WATCH_EVERY_MS = 30000;
+static uint32_t      s_nextWatchAt   = 6000;
 static uint32_t      lastInteraction = 0;
 static DetectionType s_reactType     = DetectionType::UNKNOWN;
 static uint32_t      s_lastMilestone = 0;
@@ -2911,12 +2937,23 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         float legPhase = s_walkBeat ? 0.0f : (float)(now % 400) / 400.0f * 6.2831853f;
         int legL = (int)(sinf(legPhase) * S(3));
         int legR = (int)(sinf(legPhase + 3.14159265f) * S(3));
-        keyR(cx2 - S(10), hy + S(40) + legL, S(8), S(10) - legL);
-        keyR(cx2 + S(2),  hy + S(40) + legR, S(8), S(10) - legR);
+        // The HIP stays put and the leg changes length; it used to be the
+        // other way round -- the top moved down by legL while the torso did
+        // not follow, so on the half of the cycle where legL is positive the
+        // leg detached from the body and left a gap at the hip. The torso
+        // bottom sits at S(23)+S(18) and the leg top at S(40), which overlap
+        // by about two pixels at any scale, so a swing of up to S(3) opened a
+        // five-or-six pixel hole. Visible at every size, not just MEDIUM --
+        // that is just where it was spotted.
+        //
+        // Pinning the top is also what a leg does: the hip is a joint, the
+        // foot is what travels.
+        keyR(cx2 - S(10), hy + S(40), S(8), S(10) + legL);
+        keyR(cx2 + S(2),  hy + S(40), S(8), S(10) + legR);
         keyRR(cx2 - S(13), hy + S(49) + legL, S(12), S(6), 2);
         keyRR(cx2 + S(1),  hy + S(49) + legR, S(12), S(6), 2);
-        t.fillRect(cx2 - S(10), hy + S(40) + legL, S(8), S(10) - legL, furMain);
-        t.fillRect(cx2 + S(2),  hy + S(40) + legR, S(8), S(10) - legR, furMain);
+        t.fillRect(cx2 - S(10), hy + S(40), S(8), S(10) + legL, furMain);
+        t.fillRect(cx2 + S(2),  hy + S(40), S(8), S(10) + legR, furMain);
         s_footLx = cx2 - S(13); s_footLy = hy + S(49) + legL;
         s_footRx = cx2 + S(1);  s_footRy = hy + S(49) + legR;
         t.fillRoundRect(s_footLx, s_footLy, S(12), S(6), 2, furLight);
@@ -3758,6 +3795,21 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     // Random idle fun: bounce/wave + a quip, only when nothing else
     // triggered a reaction recently, and never while the walkthrough
     // above is running.
+    // The thirty-second reassurance. Checked BEFORE the idle roll below,
+    // because that roll re-arms itself anywhere from 9 to 32 seconds out --
+    // a beat that has to be dependable cannot be one of its outcomes.
+    // Skipped while he is mid-anything (onboarding, showing off, asleep,
+    // already talking) rather than interrupting: a scripted line landing on
+    // top of a nap reads as a bug, and the next beat is only 30s away.
+    if (!s_onboardActive && !s_showOff && mood == Mood::IDLE &&
+        now >= s_nextWatchAt && now >= bubbleUntil) {
+        say(pick(WATCHING_LINES, WATCHING_N), 4000);
+        s_nextWatchAt = now + WATCH_EVERY_MS;
+        // Hold the random idle roll off so the two do not stack into one
+        // bubble replacing another mid-read.
+        if (nextIdleAt < now + 8000) nextIdleAt = now + 8000;
+    }
+
     if (!s_onboardActive && !s_showOff && mood == Mood::IDLE && now >= nextIdleAt) {
         uint32_t idleFor = now - lastInteraction;
         bool longIdle  = idleFor > 90000;

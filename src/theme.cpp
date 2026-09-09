@@ -327,150 +327,236 @@ void drawScrollbar(TFT_eSPI& t, int x, int y, int h,
     t.fillRect(x - 1, thumbY, 3, thumbH, CYAN);
 }
 
-// Shared by a few of drawAlertFx's cases below: expanding rings from a
-// center point that fade as they grow, like a location/acoustic ping.
-// Three staggered so there's always at least one on screen instead of
-// a single ring popping in and out.
-static void alertFxPing(TFT_eSPI& t, int cx, int cy, uint32_t now, uint16_t col,
-                        uint32_t periodMs, int maxR) {
-    for (uint8_t i = 0; i < 3; i++) {
-        uint32_t phase = (now + i * (periodMs / 3)) % periodMs;
-        float p = (float)phase / (float)periodMs;
-        int r = (int)(p * maxR);
-        if (r < 1) continue;
-        uint16_t c = blend(BG, col, (uint16_t)((1.0f - p) * 220.0f));
-        t.drawCircle(cx, cy, r, c);
-    }
+// The per-type artwork. Positionable, because the ALERT screen now draws it
+// inside a gauge rather than at a fixed anchor near the bottom of the panel.
+//
+// One rule runs through all of it, and it is the one the redesign paid for:
+// nothing is drawn in a value close to the ground. BG is (10,0,15), so
+// anything below roughly (70,70,80) disappears into it -- which is how a set
+// of sunglasses, a raven and a camera dome all came out as holes the first
+// time. A black object at forty pixels is a MID tone with dark accents and a
+// lit edge, the same way film lights a black cat.
+//
+// The two helpers below are what make the five cameras read as a family of
+// related products rather than five unrelated drawings, while staying
+// individually tellable -- which the old art was not: one camera glyph
+// served FLOCK, AXON, ALPR, CAMERA and RING, and one pebble served the three
+// trackers.
+static uint16_t SHELL, SHELL_HI, SHELL_LO, ICO_INK, ICO_GLASS, ICO_LENS, ICO_METAL,
+                ICO_METAL2, ICO_WARN, ICO_LED, ICO_APPLE, ICO_APPLE_HI,
+                ICO_APPLE_LO, ICO_STEM, ICO_LEAF, ICO_SHEEN, ICO_PLASTIC;
+static bool s_icoPalReady = false;
+
+static void icoPalette(TFT_eSPI& t) {
+    if (s_icoPalReady) return;
+    SHELL       = t.color565(104,110,132); SHELL_HI    = t.color565(158,166,192);
+    SHELL_LO    = t.color565(58,62,80);    ICO_INK     = t.color565(26,26,38);
+    ICO_GLASS   = t.color565(36,104,132); ICO_LENS    = t.color565(0,210,220);
+    ICO_METAL   = t.color565(150,150,160); ICO_METAL2  = t.color565(214,214,224);
+    ICO_WARN    = t.color565(255,60,40);   ICO_LED     = t.color565(255,220,60);
+    ICO_APPLE   = t.color565(226,44,40);   ICO_APPLE_HI= t.color565(255,124,98);
+    ICO_APPLE_LO= t.color565(148,20,24);   ICO_STEM    = t.color565(126,84,42);
+    ICO_LEAF    = t.color565(60,192,80);   ICO_SHEEN   = 0xFFFF;
+    ICO_PLASTIC = t.color565(232,228,214);
+    s_icoPalReady = true;
 }
 
-void drawAlertFx(TFT_eSPI& t, DetectionType type, uint32_t now, int w, int h,
-                 bool clearFirst) {
-    // Full repaint every call — the old single scanline this replaced
-    // never erased its own trail, so it just accumulated into a wash
-    // across the screen the longer an alert stayed up. Same "always
-    // fully repaint" discipline the CLEAR-screen backgrounds already
-    // use, for the same reason.
-    //
-    // clearFirst=false is for a caller that has already painted
-    // something it wants kept -- ALERT drawing the live background
-    // behind these icons. The icons themselves are all opaque fills, so
-    // they read fine over a busy backdrop; it is only the erase that has
-    // to be skipped, and that caller takes on the job of repainting the
-    // region itself (which the animated backgrounds all do anyway).
-    if (clearFirst) t.fillRect(0, 0, w, h, BG);
-    int cx = w / 2;
-    // The rest of this screen's text layout is dense (title, target
-    // type, confidence, vendor, MAC, RSSI, radar all stacked between
-    // y=4 and y=220 at fixed pixel positions) — centering a new icon
-    // at h/2 would sit right on top of the RSSI line and the radar
-    // widget. Anchoring to the bottom of whatever height this rotation
-    // actually has, with icons kept small, gives it real clearance on
-    // the common portrait rotation without needing to redo the whole
-    // screen's layout for this.
-    int cy = h - 46;
+// A housing: mid shell, lit top edge, dark underside. Used by everything
+// that is a box, so they all catch the light from the same direction.
+static void housing(TFT_eSPI& t,int x,int y,int w,int h){
+    t.fillRect(x,y,w,h,SHELL);
+    t.fillRect(x,y,w,(h/6)?h/6:1,SHELL_HI);
+    t.fillRect(x,y+h-((h/8)?h/8:1),w,(h/8)?h/8:1,SHELL_LO);
+}
+// A lens: dark socket, glass, catchlight. Every camera in the set uses it,
+// which is what makes them a family rather than five unrelated drawings.
+static void lens(TFT_eSPI& t,int cx,int cy,int r){
+    t.fillCircle(cx,cy,r,ICO_INK);
+    t.fillCircle(cx,cy,(r*2)/3,ICO_GLASS);
+    t.fillCircle(cx-r/3,cy-r/3,(r/4)?r/4:1,ICO_SHEEN);
+}
 
-    switch (type) {
-        case DetectionType::AIRTAG: {
-            // An apple — not the corporate logo, just a plain apple —
-            // since that's the one everyone already associates with
-            // AirTag/FindMy.
-            float bob = sinf((float)(now % 2000) / 2000.0f * 6.2831853f) * 3.0f;
-            int ay = cy + (int)bob;
-            int r = 16;
-            t.fillCircle(cx - 6, ay, r, RED);
-            t.fillCircle(cx + 6, ay, r, RED);
-            t.fillRect(cx - 6, ay - r, 12, r + 5, RED);
-            t.fillCircle(cx + r - 3, ay - r + 5, 5, BG);           // bite notch
-            t.fillRect(cx - 1, ay - r - 6, 2, 7, AMBER);           // stem
-            t.fillTriangle(cx, ay - r - 3, cx + 10, ay - r - 8, cx + 6, ay - r - 1, GREEN); // leaf
-            alertFxPing(t, cx, ay, now, VAPOR_PURPLE, 2200, 42);
-            break;
+void drawTypeIcon(TFT_eSPI& t, DetectionType type, int cx, int cy, int s) {
+    icoPalette(t);
+    const DetectionType tt = type;
+
+    switch (tt) {
+    case DetectionType::FLOCK:
+        t.fillRect(cx-3, cy-s/4, 6, s*5/4, SHELL_LO);                 // pole
+        t.fillRect(cx-3, cy-s/4, 2, s*5/4, SHELL);
+        housing(t, cx-s, cy-s*3/4, s*2, s);
+        lens(t, cx-s/2, cy-s/4, s/3);
+        for(int i=0;i<3;i++) t.fillCircle(cx+s/4+i*s/4, cy-s/4, s/10, ICO_WARN);
+        t.fillRect(cx-s-2, cy-s*3/4-s/3, s*2+4, s/4, ICO_METAL);          // solar
+        t.fillRect(cx-s-2, cy-s*3/4-s/3, s*2+4, s/12, ICO_METAL2);
+        break;
+    case DetectionType::AXON:
+        housing(t, cx-s*2/3, cy-s*3/4, s*4/3, s*3/2);
+        lens(t, cx, cy-s/4, s/2);
+        t.fillRect(cx-s/3, cy+s/3, s*2/3, s/6, ICO_INK);                  // speaker
+        t.fillCircle(cx+s/3, cy+s*2/3, s/8, ICO_WARN);                    // REC
+        t.fillRect(cx-s/2, cy-s*3/4-s/4, s, s/4, ICO_METAL);              // clip
+        t.fillRect(cx-s/2, cy-s*3/4-s/4, s, s/12, ICO_METAL2);
+        break;
+    case DetectionType::META:
+        t.fillRect(cx-s*3/2, cy-s/2, s*3, s/4, SHELL_HI);             // brow
+        t.fillRect(cx-s*3/2, cy-s/2, s*3, s/12, ICO_SHEEN);
+        t.fillRect(cx-s*3/2, cy-s/4, s*5/4, s*5/9, SHELL);
+        t.fillRect(cx+s/4,   cy-s/4, s*5/4, s*5/9, SHELL);
+        t.fillRect(cx-s*3/2+2, cy-s/4+2, s*5/4-4, s*5/9-4, ICO_INK);
+        t.fillRect(cx+s/4+2,   cy-s/4+2, s*5/4-4, s*5/9-4, ICO_INK);
+        t.drawLine(cx-s*5/4, cy+s/6, cx-s*3/4, cy-s/8, SHELL_HI);
+        t.drawLine(cx-s,     cy+s/6, cx-s*2/3, cy,     SHELL_HI);
+        t.drawLine(cx+s/2,   cy+s/6, cx+s,     cy-s/8, SHELL_HI);
+        t.drawLine(cx+s*3/4, cy+s/6, cx+s*13/12, cy,   SHELL_HI);
+        t.fillRect(cx-s/4, cy-s/4, s/2, s/5, SHELL_HI);               // bridge
+        t.fillRect(cx-s*7/4, cy-s/2, s/3, s/5, SHELL);                // temples
+        t.fillRect(cx+s*3/2-2, cy-s/2, s/3, s/5, SHELL);
+        t.fillCircle(cx-s*3/2+s/5, cy, s/7, ICO_WARN);
+        t.fillCircle(cx-s*3/2+s/5, cy, s/14, ICO_LED);
+        break;
+    case DetectionType::SKIMMER:
+        t.fillRect(cx-s/2, cy-s*5/4, s*3/2, s*2/3, ICO_LED);              // card
+        t.fillRect(cx-s/2, cy-s*5/4, s*3/2, s/8, ICO_SHEEN);
+        t.fillRect(cx-s/2, cy-s*5/4+s/3, s*3/2, s/6, ICO_INK);            // magstripe
+        housing(t, cx-s, cy-s/2, s*2, s);
+        t.fillRect(cx-s+4, cy-s/4, s*2-8, s/4, ICO_INK);                  // the slot
+        break;
+    case DetectionType::RAVEN: {
+        // Heavier head, shorter bill, hunched. The wading bird pass 6 drew
+        // came from a long neck and a small head -- a raven is mostly head
+        // and shoulders with the bill buried in the profile, not held out.
+        t.fillTriangle(cx+s/2, cy+s/4, cx+s*7/5, cy+s, cx+s/3, cy+s*4/5, SHELL_LO);
+        t.fillEllipse(cx+s/6, cy+s/4, s*7/10, s*3/5, SHELL);          // body
+        t.fillEllipse(cx+s/6, cy+s/8, s*7/10, s*2/5, SHELL_HI);       // lit back
+        t.fillEllipse(cx+s/4, cy+s/3, s*2/5, s*2/5, SHELL_LO);        // wing
+        t.fillCircle(cx-s/2, cy-s/3, s/2, SHELL);                     // big head
+        t.fillCircle(cx-s/2, cy-s/2, s/3, SHELL_HI);                  // lit crown
+        t.fillTriangle(cx-s*9/10, cy-s*2/5, cx-s*8/5, cy-s/5,
+                       cx-s*9/10, cy,       SHELL_LO);                // short bill
+        t.fillTriangle(cx-s*9/10, cy-s*2/5, cx-s*8/5, cy-s/5,
+                       cx-s*9/10, cy-s/5,   SHELL);                   // lit edge
+        t.fillTriangle(cx-s/2, cy, cx+s/8, cy+s/3, cx-s*3/5, cy+s/3, SHELL_LO); // hackle
+        t.fillCircle(cx-s*3/5, cy-s*2/5, s/8, ICO_SHEEN);
+        t.fillCircle(cx-s*3/5, cy-s*2/5, s/16, ICO_INK);
+        t.fillRect(cx,      cy+s*3/4, 3, s/3, SHELL_LO);
+        t.fillRect(cx+s/3,  cy+s*3/4, 3, s/3, SHELL_LO);
+        break;
+    }
+    case DetectionType::AIRTAG:
+        t.fillCircle(cx-s/3, cy+s/6, s, ICO_APPLE);
+        t.fillCircle(cx+s/3, cy+s/6, s, ICO_APPLE);
+        t.fillRect(cx-s/3, cy-s*2/3, s*2/3, s, ICO_APPLE);
+        t.fillCircle(cx+s/2, cy+s/2, s/2, ICO_APPLE_LO);
+        t.fillCircle(cx-s/2, cy-s/6, s/3, ICO_APPLE_HI);
+        t.fillCircle(cx-s*7/12, cy-s/4, s/8, ICO_SHEEN);
+        t.fillCircle(cx+s*11/12, cy-s/3, s/2, BG);             // bite
+        t.fillCircle(cx+s/2,  cy-s*5/6, s/6, BG);
+        t.fillCircle(cx+s*7/6, cy+s/12, s/6, BG);
+        t.fillRect(cx-2, cy-s-s/3, 4, s/2, ICO_STEM);
+        t.fillTriangle(cx+2, cy-s-s/6, cx+s, cy-s-s/2, cx+s/2, cy-s+2, ICO_LEAF);
+        break;
+    case DetectionType::DRONE:
+        for(int k=0;k<4;k++){
+            const int dx=(k&1)?s:-s, dy=(k&2)?s:-s;
+            t.drawLine(cx,cy,cx+dx,cy+dy,SHELL_LO);
+            t.fillEllipse(cx+dx,cy+dy,s/2,s/6,ICO_METAL2);
+            t.fillCircle(cx+dx,cy+dy,s/8,SHELL);
         }
-        case DetectionType::SAMSUNG_TAG:
-        case DetectionType::GOOGLE_TAG:
-        case DetectionType::TILE: {
-            // Generic keyring tracker tag (not either company's real
-            // logo) — same location-ping language as AirTag above, so
-            // the tracker family reads as a family, minus the fruit.
-            t.fillRoundRect(cx - 13, cy - 9, 26, 18, 5, VAPOR_PURPLE);
-            t.fillCircle(cx - 8, cy, 3, BG);
-            alertFxPing(t, cx, cy, now, VAPOR_PURPLE, 2200, 42);
-            break;
+        t.fillEllipse(cx,cy,s*2/3,s/2,SHELL);
+        t.fillEllipse(cx-s/5,cy-s/6,s/4,s/6,SHELL_HI);
+        lens(t,cx,cy+s/3,s/4);
+        break;
+    case DetectionType::ALPR:
+        housing(t, cx-s, cy-s, s*2, s*3/4);
+        lens(t, cx-s/2, cy-s*5/8, s/4);
+        for(int i=0;i<3;i++) t.fillCircle(cx+s/4+i*s/4, cy-s*5/8, s/12, ICO_WARN);
+        t.fillRect(cx-s, cy+s/6, s*2, s*3/4, ICO_PLASTIC);                // the plate
+        t.fillRect(cx-s, cy+s/6, s*2, s/12, ICO_SHEEN);
+        t.drawRect(cx-s, cy+s/6, s*2, s*3/4, ICO_INK);
+        for(int i=0;i<5;i++) t.fillRect(cx-s+5+i*(s*2-10)/5, cy+s/3, 3, s*2/5, ICO_INK);
+        break;
+    case DetectionType::CAMERA: {
+        const int py=cy-s*2/3;
+        t.fillCircle(cx,cy,s,SHELL);
+        t.fillRect(cx-s-1,cy-s-1,s*2+2,(cy-py),BG);            // top half off
+        t.fillCircle(cx-s/2,cy+s/6,s/3,SHELL_HI);                     // glass sheen
+        lens(t,cx+s/5,cy+s/12,s*2/5);
+        t.fillRect(cx-s*5/4,py,s*5/2,s/4,ICO_METAL);                      // ceiling plate
+        t.fillRect(cx-s*5/4,py,s*5/2,s/12,ICO_METAL2);
+        break;
+    }
+    case DetectionType::SAMSUNG_TAG:
+        t.fillEllipse(cx,cy,s*3/4,s,ICO_PLASTIC);
+        t.fillEllipse(cx-s/4,cy-s/3,s/4,s/3,ICO_SHEEN);
+        t.fillCircle(cx,cy-s*2/3,s/5,BG);                      // keyring hole
+        t.fillRect(cx-s/3,cy+s/6,s*2/3,s/4,ICO_GLASS);
+        break;
+    case DetectionType::GOOGLE_TAG:
+        t.fillCircle(cx,cy-s/4,s*3/4,ICO_LEAF);
+        t.fillTriangle(cx-s*5/8,cy+s/8,cx+s*5/8,cy+s/8,cx,cy+s,ICO_LEAF);
+        t.fillCircle(cx-s/4,cy-s/2,s/5,tt == DetectionType::GOOGLE_TAG?ICO_SHEEN:ICO_LEAF);
+        t.fillCircle(cx,cy-s/4,s/3,BG);
+        break;
+    case DetectionType::TILE:
+        t.fillRect(cx-s*3/4,cy-s*3/4,s*3/2,s*3/2,ICO_PLASTIC);
+        t.fillRect(cx-s*3/4,cy-s*3/4,s*3/2,s/6,ICO_SHEEN);
+        t.fillCircle(cx+s/2,cy-s/2,s/5,BG);
+        t.fillRect(cx-s/4,cy-s/8,s/2,s/4,ICO_GLASS);
+        t.drawRect(cx-s*3/4,cy-s*3/4,s*3/2,s*3/2,SHELL_LO);
+        break;
+    case DetectionType::RING:
+        housing(t, cx-s*2/3, cy-s, s*4/3, s*2);
+        lens(t, cx, cy-s/2, s/2);
+        t.fillCircle(cx,cy+s/2,s/2,ICO_INK);
+        t.fillCircle(cx,cy+s/2,s/3,ICO_LENS);
+        t.fillCircle(cx,cy+s/2,s/5,ICO_INK);                              // lit ring
+        break;
+    case DetectionType::DEAUTH:
+        t.fillRect(cx-s/6,cy-s/4,s/3,s*5/4,ICO_METAL);
+        t.fillRect(cx-s/6,cy-s/4,s/8,s*5/4,ICO_METAL2);
+        t.fillTriangle(cx+s/4,cy-s,cx+s*3/4,cy-s/2,cx+s/2,cy-s/4,ICO_METAL); // snapped top
+        for(int i=1;i<=3;i++) t.drawCircle(cx-s/12,cy-s/3,i*s/3,ICO_WARN);
+        t.fillTriangle(cx-s/2,cy-s/2,cx-s/6,cy-s,cx-s/8,cy-s/3,ICO_LED);
+        t.fillTriangle(cx-s/3,cy-s/3,cx,cy-s*3/4,cx+s/12,cy-s/6,ICO_LED);
+        break;
+    case DetectionType::EVILTWIN:
+        // Simplified from the crowded pass 2: one solid box, one hollow
+        // copy, and a single shared nameplate under both.
+        housing(t, cx-s, cy-s/2, s*5/6, s/2);
+        t.drawRect(cx+s/6, cy-s/2, s*5/6, s/2, ICO_WARN);
+        t.drawRect(cx+s/6+2, cy-s/2+2, s*5/6-4, s/2-4, ICO_WARN);
+        for(int i=1;i<=2;i++){
+            t.drawCircle(cx-s*7/12, cy-s/2, i*s/3, ICO_LENS);
+            t.drawCircle(cx+s*7/12, cy-s/2, i*s/3, ICO_WARN);
         }
-        case DetectionType::FLOCK:
-        case DetectionType::AXON:
-        case DetectionType::ALPR:
-        case DetectionType::CAMERA:
-        case DetectionType::RING: {
-            // Camera body + lens, a blinking REC dot, and a real
-            // shutter flash every couple seconds.
-            uint16_t tint = colorFor(type);
-            uint32_t fc = now % 2400;
-            if (fc < 120) {
-                float f = 1.0f - (float)fc / 120.0f;
-                t.fillRect(0, 0, w, h, blend(BG, WHITE, (uint16_t)(f * 200.0f)));
-            }
-            t.fillRoundRect(cx - 20, cy - 13, 40, 26, 5, blend(BG, tint, 70));
-            t.drawCircle(cx, cy, 11, tint);
-            t.drawCircle(cx, cy, 6, tint);
-            if ((now / 500) % 2 == 0) t.fillCircle(cx + 15, cy - 8, 2, RED);
-            break;
-        }
-        case DetectionType::META: {
-            // Sunglasses — matches Squachy's own look — with a glint
-            // sweeping across the lenses.
-            uint16_t tint = colorFor(type);
-            t.fillRoundRect(cx - 20, cy - 5, 15, 11, 3, BLACK);
-            t.fillRoundRect(cx + 5,  cy - 5, 15, 11, 3, BLACK);
-            t.fillRect(cx - 5, cy - 1, 10, 2, BLACK);
-            t.fillRoundRect(cx - 18, cy - 4, 11, 8, 2, blend(BLACK, tint, 60));
-            t.fillRoundRect(cx + 7,  cy - 4, 11, 8, 2, blend(BLACK, tint, 60));
-            float sweep = (float)(now % 1800) / 1800.0f;
-            int gx = cx - 18 + (int)(sweep * 39);
-            t.drawFastVLine(gx, cy - 4, 8, WHITE);
-            break;
-        }
-        case DetectionType::SKIMMER: {
-            // Card shape with a scanning line — something's wrong with
-            // this one.
-            t.fillRoundRect(cx - 21, cy - 13, 42, 26, 4, blend(BG, VAPOR_YELLOW, 60));
-            t.drawRoundRect(cx - 21, cy - 13, 42, 26, 4, VAPOR_YELLOW);
-            t.fillRect(cx - 21, cy - 6, 42, 4, BLACK);
-            float sweep = (float)(now % 1200) / 1200.0f;
-            int sy = cy - 13 + (int)(sweep * 26);
-            t.drawFastHLine(cx - 21, sy, 42, RED);
-            break;
-        }
-        case DetectionType::RAVEN: {
-            // An acoustic event, not an object — concentric rings from
-            // a burst point rather than any kind of icon.
-            alertFxPing(t, cx, cy, now, RED, 1400, 46);
-            alertFxPing(t, cx, cy, now, AMBER, 1400, 30);
-            break;
-        }
-        case DetectionType::DRONE: {
-            // Quadcopter silhouette, hovering, with alternating rotor
-            // rings standing in for motion blur.
-            float bob = sinf((float)(now % 1600) / 1600.0f * 6.2831853f) * 4.0f;
-            int dy = cy + (int)bob;
-            t.fillRoundRect(cx - 7, dy - 4, 14, 8, 2, VAPOR_PURPLE);
-            int arm = 17;
-            bool rotorPhase = ((now / 120) % 2) == 0;
-            static const int8_t ox[4] = { -1, 1, -1, 1 };
-            static const int8_t oy[4] = { -1, -1, 1, 1 };
-            for (uint8_t i = 0; i < 4; i++) {
-                int rx = cx + ox[i] * arm, ry = dy + oy[i] * (arm / 2);
-                t.drawLine(cx, dy, rx, ry, VAPOR_PURPLE);
-                t.drawCircle(rx, ry, rotorPhase ? 6 : 4, blend(BG, VAPOR_PURPLE, 150));
-            }
-            break;
-        }
-        default:
-            // UNKNOWN and anything else — no specific icon makes sense,
-            // so keep the plain sweep, just properly erased each frame
-            // now instead of trailing.
-            t.drawFastHLine(0, (int)(now / 90) % h, w, VAPOR_PURPLE);
-            break;
+        t.fillRect(cx-s, cy+s/2, s*2, s/3, ICO_PLASTIC);                  // one SSID
+        t.fillRect(cx-s+3, cy+s/2+3, s*2-6, s/8, SHELL_LO);
+        break;
+    case DetectionType::IBEACON:
+        t.fillRect(cx-s,cy+s/2,s*2,s/3,ICO_METAL);                        // shelf
+        t.fillRect(cx-s,cy+s/2,s*2,s/12,ICO_METAL2);
+        t.fillEllipse(cx,cy+s/4,s*2/3,s/3,SHELL);
+        t.fillEllipse(cx,cy+s/6,s*2/3,s/3,ICO_PLASTIC);                   // puck
+        t.fillEllipse(cx,cy+s/6,s/3,s/6,ICO_GLASS);
+        for(int i=1;i<=3;i++) t.drawCircle(cx,cy+s/6,s/2+i*s/3,ICO_LENS);
+        break;
+    case DetectionType::HACKER:
+        // Untouched. It was right.
+        t.fillRect(cx-s,cy-s*2/3,s*2,s*4/3,ICO_LED);
+        t.fillRect(cx-s,cy-s*2/3,s*2,s/6,tt == DetectionType::HACKER?ICO_SHEEN:ICO_LED);
+        t.fillRect(cx-s+3,cy-s/2,s+4,s*3/4,ICO_INK);
+        t.fillRect(cx-s+5,cy-s/2+2,s,s/4,ICO_LEAF);
+        t.fillCircle(cx+s/2,cy+s/4,s/3,ICO_STEM);
+        t.fillRect(cx+s/2-s/5,cy+s/4-3,s*2/5,6,ICO_INK);
+        t.fillRect(cx+s/2-3,cy+s/4-s/5,6,s*2/5,ICO_INK);
+        break;
+    default:
+        t.drawCircle(cx,cy,s,ICO_METAL);
+        t.drawCircle(cx,cy,s-1,ICO_METAL);
+        t.setTextSize(3); t.setTextColor(ICO_METAL2,BG);
+        t.setCursor(cx-8,cy-12); t.print("?");
+        break;
     }
 }
 
