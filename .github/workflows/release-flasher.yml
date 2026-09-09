@@ -28,8 +28,18 @@ on:
       # Pages deploy, but no release notes and no public Release -- it exists
       # so an unfinished feature can be flashed from a machine that is not
       # the one it was built on. See the `is_lab` output below.
+      #
+      # NOTE: this trigger needs a "lab-*" tag policy on the github-pages
+      # environment, which by default allows only `master` and `v*`. Without
+      # it the run is rejected before it starts. The dispatch input below runs
+      # from master and needs no such change, so it is the working path today.
       - "lab-*"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      lab:
+        description: "Lab build: publish the unlisted mesh firmware, skip notes and Release"
+        type: boolean
+        default: false
 
 permissions:
   contents: write   # create the GitHub Release
@@ -51,13 +61,29 @@ jobs:
         run: |
           TAG="${GITHUB_REF_NAME}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          if [ "${{ inputs.lab }}" = "true" ]; then
+            # A manual lab run has no tag -- REF_NAME is the branch. Stamping
+            # the manifests "master" would put that in the flasher's version
+            # line, so lab builds are stamped with the commit they came from,
+            # which is the only thing that identifies one.
+            echo "version=lab-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          fi
           # Everything downstream keys off this rather than re-testing the
           # tag shape, so there is one definition of what a lab build is.
-          case "$TAG" in
-            lab-*) echo "is_lab=true"  >> "$GITHUB_OUTPUT" ;;
-            *)     echo "is_lab=false" >> "$GITHUB_OUTPUT" ;;
-          esac
+          # Either a lab-* tag, or a manual run with the lab box ticked. The
+          # dispatch path exists because the github-pages environment only
+          # permits deploys from master and v* -- a lab-* tag is rejected
+          # before the job starts unless that policy is widened.
+          if [ "${{ inputs.lab }}" = "true" ]; then
+            echo "is_lab=true" >> "$GITHUB_OUTPUT"
+          else
+            case "$TAG" in
+              lab-*) echo "is_lab=true"  >> "$GITHUB_OUTPUT" ;;
+              *)     echo "is_lab=false" >> "$GITHUB_OUTPUT" ;;
+            esac
+          fi
 
       - name: Require release notes
         # Skipped for lab builds, which are not releases and have no notes to
