@@ -42,6 +42,35 @@ namespace Theme {
     constexpr uint16_t SKIN_TAN     = 0xF60F;  // #f4c07a face patch
     constexpr uint16_t SKIN_DARK    = 0xCB88;  // #c87040 ear inner
 
+    // Windows 95/98 system chrome.
+    //
+    // These are NOT the authentic hex values, and that is the whole point.
+    // Written first as the real ones (#c0c0c0 face, #dfdfdf inner lit edge)
+    // the bevel came out lavender with its inner lit ring missing entirely,
+    // because the panel does not round 565 down to RGB332, it TRUNCATES:
+    // R332 = R565 >> 2, G332 = G565 >> 3, B332 = B565 >> 3. #c0c0c0 and
+    // #dfdfdf both truncate to level (6,6,3) -- the same colour -- and (6,6,3)
+    // with only four blue levels is (219,219,255), which is a pale lilac.
+    //
+    // So the ramp is built from levels the framebuffer can actually reach,
+    // and each constant is the 565 value that truncates onto the one wanted:
+    //   HILITE   (7,7,3) = 255,255,255
+    //   LIGHT    (6,6,3) = 219,219,255
+    //   FACE     (5,5,2) = 182,182,170  <- the closest thing to silver here
+    //   SHADOW   (4,4,2) = 146,146,170
+    //   DKSHADOW (0,0,0) = black
+    // Five distinct steps, so all four bevel edges survive the downconvert.
+    //
+    // Fixed like the fur above rather than part of the swappable palette:
+    // silver is silver in every theme, and the whole point of a system
+    // button is that it looks borrowed from a different operating system
+    // than the one it is sitting on.
+    constexpr uint16_t W95_FACE     = 0xB5B6;  // (5,5,2) button face
+    constexpr uint16_t W95_HILITE   = 0xFFFF;  // (7,7,3) outer lit edge
+    constexpr uint16_t W95_LIGHT    = 0xDEFB;  // (6,6,3) inner lit edge
+    constexpr uint16_t W95_SHADOW   = 0x8410;  // (4,4,2) inner shaded edge
+    constexpr uint16_t W95_DKSHADOW = 0x0000;  // (0,0,0) outer shaded edge
+
     // A full color-theme preset. name is shown in the settings menu.
     struct Palette {
         const char* name;
@@ -122,6 +151,17 @@ namespace Theme {
 
     void drawButton(TFT_eSPI& t, int x, int y, int w, int h,
                     const char* label, bool pressed, uint8_t textSize = 1);
+
+    // A real Windows 95/98 push button: silver face, two-pixel bevel, black
+    // system-font label. `sunken` inverts the bevel and nudges the label a
+    // pixel down and right, which is what Win95 itself did and is the whole
+    // reason a pressed button reads as pressed rather than as recoloured.
+    //
+    // Distinct from drawButton() above, which is the vaporwave chrome the
+    // rest of the device uses. Both exist on purpose: this one is for the
+    // controls that are meant to feel like they came out of a system dialog.
+    void drawWin95Button(TFT_eSPI& t, int x, int y, int w, int h,
+                         const char* label, bool sunken);
 
     // Bottom [SCAN][LOG][CLR] button bar, laid out from the current
     // screen width/height so it adapts to any rotation (landscape or

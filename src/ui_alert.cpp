@@ -124,13 +124,23 @@ static void huntBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, int
 static void ignoreBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, int& bh) {
     (void)screenH;
     // Deliberately smaller than HUNT and MORE INFO, which are 70x48 down
-    // in the corners where nothing else goes. Up here it shares a row with
-    // the "!! DETECTION !!" headline: that is ~166px of Bangers LG, centred,
-    // so on the 240px rotation it runs to x=203 and a 70px button starting
-    // at x=166 sits right on top of it. At 50x24 with size-1 text the
-    // button starts at x=186 and the headline clears it.
-    bw = 50;
-    bh = 24;
+    // in the corners where nothing else goes. Up here it shares the header
+    // strip with the target label, and the label's budget is measured off
+    // this rect (see the STRIP_H block), so every pixel taken here is a
+    // pixel taken from the longest type names.
+    //
+    // 54x20 rather than the old 50x24, which was square-ish and squat: a
+    // Win95 push button is a wide, shallow thing (75x23 dialog units, about
+    // 3.3:1) and reading as one is the point. "IGNORE" is 36px at size 1,
+    // so inside the 2px bevel that leaves 7px of air each side against 4
+    // above and below -- horizontal padding exceeding vertical, which is
+    // the proportion that actually makes it look like a button. The 4px it
+    // costs the label budget changes no label's outcome: the two that
+    // overflow ("PROXIMITY BEACON" at 188px, "HACKER HARDWARE" at 187px)
+    // were already over the 168px portrait budget and already step down to
+    // the built-in font, and the longest that fits is 151px.
+    bw = 54;
+    bh = 20;
     bx = screenW - bw - 4;
     by = 4;
 }
@@ -138,7 +148,15 @@ static void ignoreBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, i
 bool uiAlertHitIgnore(int x, int y, int screenW, int screenH) {
     int bx, by, bw, bh;
     ignoreBtnRect(screenW, screenH, bx, by, bw, bh);
-    return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
+    // Padded outward. The button lost 4 rows becoming the right shape, and
+    // a correctly proportioned button is no use if a resistive panel and a
+    // fingertip cannot land on it -- so the drawn rect shrank and the
+    // target grew. Nothing else is up here to steal a near miss from: the
+    // slop runs into the screen edge on two sides and into the header
+    // strip's own dead space on the others.
+    const int SLOP = 6;
+    return x >= bx - SLOP && x <= bx + bw + SLOP &&
+           y >= by - SLOP && y <= by + bh + SLOP;
 }
 
 bool uiAlertHitHunt(int x, int y, int screenW, int screenH) {
@@ -393,15 +411,18 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
         int bx, by, bw, bh;
         ignoreBtnRect(w, h, bx, by, bw, bh);
         const bool already = IgnoreList::contains(s_last.mac);
-        Theme::drawButton(t, bx, by, bw, bh, "", false);
-        // One line at size 1 now it is short enough to fit: "IGNORE" is
-        // 36px at this size inside a 50px button, so it no longer needs
-        // hyphenating across two rows the way the 70px version did.
-        t.setTextSize(1);
-        t.setTextColor(already ? Theme::GREEN : Theme::AMBER);
-        const char* lbl = already ? "MUTED" : "IGNORE";
-        t.setCursor(bx + (bw - t.textWidth(lbl)) / 2, by + 9);
-        t.print(lbl);
+        // A real system button rather than the vaporwave chrome the rest of
+        // the device wears. It is the one control on this screen that is not
+        // about the detection -- it changes what the firmware will do from
+        // now on -- and looking like it was lifted out of a system dialog is
+        // how that reads at a glance.
+        //
+        // MUTED is the SAME button held down, not a differently coloured
+        // one. Win95 had a word for a button that stays in after you let go
+        // and this is it, so the state costs no new colour, no legend and
+        // nothing to learn: the thing is pushed in, and pushed in means done.
+        Theme::drawWin95Button(t, bx, by, bw, bh,
+                               already ? "MUTED" : "IGNORE", already);
     }
 
     {

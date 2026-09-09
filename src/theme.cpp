@@ -270,6 +270,49 @@ void drawButton(TFT_eSPI& t, int x, int y, int w, int h,
     t.print(label);
 }
 
+void drawWin95Button(TFT_eSPI& t, int x, int y, int w, int h,
+                     const char* label, bool sunken) {
+    // Face first, inset by the two bevel rings so the edges below draw over
+    // nothing they need to keep.
+    t.fillRect(x + 2, y + 2, w - 4, h - 4, W95_FACE);
+
+    // Raised: outer ring lit from the top-left, shaded at the bottom-right,
+    // and the inner ring the same way one step softer. Sunken swaps which
+    // side is lit -- that swap IS the press, so the two branches are the
+    // same four calls with the colour pairs exchanged rather than a
+    // separate drawing routine that could drift out of step with this one.
+    const uint16_t outerTL = sunken ? W95_DKSHADOW : W95_HILITE;
+    const uint16_t outerBR = sunken ? W95_HILITE   : W95_DKSHADOW;
+    const uint16_t innerTL = sunken ? W95_SHADOW   : W95_LIGHT;
+    const uint16_t innerBR = sunken ? W95_LIGHT    : W95_SHADOW;
+
+    t.drawFastHLine(x, y, w, outerTL);
+    t.drawFastVLine(x, y, h, outerTL);
+    t.drawFastHLine(x, y + h - 1, w, outerBR);
+    t.drawFastVLine(x + w - 1, y, h, outerBR);
+
+    t.drawFastHLine(x + 1, y + 1, w - 2, innerTL);
+    t.drawFastVLine(x + 1, y + 1, h - 2, innerTL);
+    t.drawFastHLine(x + 1, y + h - 2, w - 2, innerBR);
+    t.drawFastVLine(x + w - 2, y + 1, h - 2, innerBR);
+
+    if (!label || !*label) return;
+
+    // Black on silver, no exceptions: a coloured label on a system button is
+    // the tell that it is a costume. Centred on the FACE rather than on the
+    // whole rect, so the bevel does not pull the text off-centre, then the
+    // one-pixel press offset on top.
+    t.setTextSize(1);
+    t.setTextWrap(false);
+    t.setTextColor(BLACK, W95_FACE);
+    const int tw = t.textWidth(label);
+    const int th = t.fontHeight();
+    const int ox = sunken ? 1 : 0;
+    t.setCursor(x + 2 + (w - 4 - tw) / 2 + ox,
+                y + 2 + (h - 4 - th) / 2 + ox);
+    t.print(label);
+}
+
 ButtonBarGeom computeButtonBar(int screenW, int screenH) {
     ButtonBarGeom g;
     // Half of the original 40px (which was sized to comfortably clear
@@ -5979,7 +6022,7 @@ void drawBackgroundOverlay(TFT_eSPI& t, uint32_t now) {
 void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     const int w = t.width();
     // One pixel of air above the counters. The bank already runs down
-    // OVER the "ACTIVE DETECTIONS" row -- that text sits at
+    // OVER the headline row -- that text sits at
     // countersTop - 34 and survives on any background because it is
     // drawn with a 24-pass black outline first. What it must not do is
     // butt straight into the counter numbers below, which are a plain
