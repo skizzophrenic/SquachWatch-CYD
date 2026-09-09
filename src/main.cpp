@@ -1447,6 +1447,9 @@ void loop() {
         touchJustUp = false;
     }
     engine.loop();
+#if SQUACH_MESH
+    MeshProbe::tick(now);
+#endif
 
     // Rotate button lives in the title bar's top-right corner, shown on
     // the CLEAR, LOG, SETTINGS and OUTFIT screens (drawTitleBar always

@@ -8,6 +8,9 @@
 #include <NimBLEDevice.h>
 #include <NimBLEAdvertisedDevice.h>
 #include <NimBLEScan.h>
+#if SQUACH_MESH
+#include "squachmesh.h"
+#endif
 #include <esp_bt.h>
 #include <esp_gap_bt_api.h>
 #include <string.h>
@@ -50,6 +53,11 @@ static void formatMac(char* dst, size_t dstSize, const uint8_t* mac) {
 // restart needed.
 class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
     void onResult(NimBLEAdvertisedDevice* adv) override {
+#if SQUACH_MESH
+        // Counted before anything can return early. The measurement is of
+        // what the RADIO heard, not of what the signature tables liked.
+        MeshProbe::noteAdvert();
+#endif
         if (!g_engine) return;
         const uint8_t* mac = adv->getAddress().getNative();
         // Checked regardless of raw-scan mode -- a watched/hunted
@@ -384,6 +392,97 @@ bool DetectionEngine::init() {
 
     return true;
 }
+
+#if SQUACH_MESH
+namespace MeshProbe {
+
+// 30s arms. Long enough that a passing bus is a fraction of one, short
+// enough that a ten-minute run is ten samples of each rather than one.
+static const uint32_t ARM_MS = 30000;
+// What a visit actually needs. Peer discovery for a mascot walking on screen
+// does not want sub-second latency, and the whole point of measuring is that
+// a slower advert should cost less scan time.
+static const uint16_t ADV_MS = 1500;
+
+static uint32_t s_armAt   = 0;
+static bool     s_advOn   = false;
+static bool     s_started = false;
+static uint32_t s_armSeen = 0;
+static uint32_t s_offSeen = 0, s_onSeen = 0;
+static uint32_t s_offMs   = 0, s_onMs  = 0;
+static uint16_t s_cycles  = 0;
+
+void noteAdvert() { s_armSeen++; }
+
+static void setAdvertising(bool on) {
+    NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+    if (!adv) return;
+    if (!on) { adv->stop(); return; }
+
+    // The real payload, so the measurement is of the thing that will ship
+    // rather than of an empty advert that costs less to send.
+    SquachMesh::Peer me{};
+    me.nick   = 0;
+    me.outfit = 0;
+    me.shade  = 0;
+    me.custom = false;
+    me.name[0] = '\0';
+    uint8_t buf[SquachMesh::LEN_MAX];
+    const size_t n = SquachMesh::encode(me, buf);
+
+    NimBLEAdvertisementData d;
+    // Company ID first, little-endian, then our magic -- see squachmesh.h
+    // for why 0xFFFF and why the magic is not optional with it.
+    std::string md;
+    md.push_back((char)(SquachMesh::COMPANY_ID & 0xFF));
+    md.push_back((char)(SquachMesh::COMPANY_ID >> 8));
+    md.append((const char*)buf, n);
+    d.setManufacturerData(md);
+    adv->setAdvertisementData(d);
+    // NimBLE takes intervals in 0.625ms units.
+    adv->setMinInterval((uint16_t)(ADV_MS * 8 / 5));
+    adv->setMaxInterval((uint16_t)(ADV_MS * 8 / 5 + 16));
+    adv->start();
+}
+
+void begin() {
+    s_started = false;
+    s_armSeen = s_offSeen = s_onSeen = 0;
+    s_offMs = s_onMs = 0;
+    s_cycles = 0;
+    s_advOn = false;
+}
+
+void tick(uint32_t now) {
+    if (!s_started) { s_started = true; s_armAt = now; setAdvertising(false); return; }
+    if (now - s_armAt < ARM_MS) return;
+
+    const uint32_t dur = now - s_armAt;
+    if (s_advOn) { s_onSeen  += s_armSeen; s_onMs  += dur; s_cycles++; }
+    else         { s_offSeen += s_armSeen; s_offMs += dur; }
+
+    s_armSeen = 0;
+    s_advOn = !s_advOn;
+    setAdvertising(s_advOn);
+    s_armAt = now;
+}
+
+Stats stats() {
+    Stats st{};
+    st.offRate = s_offMs ? (uint16_t)((uint64_t)s_offSeen * 10000ull / s_offMs) : 0;
+    st.onRate  = s_onMs  ? (uint16_t)((uint64_t)s_onSeen  * 10000ull / s_onMs)  : 0;
+    st.deltaPct = (st.offRate && st.onRate)
+                    ? (int16_t)(((int32_t)st.onRate - st.offRate) * 100 / st.offRate) : 0;
+    st.cycles = s_cycles;
+    st.advOn  = s_advOn;
+    st.advMs  = ADV_MS;
+    st.heapFreeKb  = ESP.getFreeHeap() / 1024;
+    st.heapBlockKb = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024;
+    return st;
+}
+
+} // namespace MeshProbe
+#endif
 
 void DetectionEngine::loop() {
     if (g_rawMode != RawScanMode::NONE) {

@@ -2,6 +2,7 @@
 #include "ui_diagnostics.h"
 #include "clock.h"
 #include "theme.h"
+#include "detection.h"
 #include <Arduino.h>
 #include <stdarg.h>
 
@@ -112,6 +113,33 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
 
     y = drawLine(t, y, Theme::GREEN, "LOG:", "%u entries, %lu lifetime",
                  (unsigned)eng.logCount(), (unsigned long)eng.lifetimeTotal());
+
+#if SQUACH_MESH
+    // Phase 0, read without a computer. The device alternates advertising on
+    // and off in 30s arms and pools each separately, so leaving it somewhere
+    // for ten minutes gives ten samples of each rather than one of a good
+    // moment and one of a bad one.
+    {
+        y += 4;
+        const MeshProbe::Stats ms = MeshProbe::stats();
+        y = drawLine(t, y, Theme::CYAN, "ADV OFF:", "%u.%u /s",
+                     (unsigned)(ms.offRate / 10), (unsigned)(ms.offRate % 10));
+        y = drawLine(t, y, Theme::CYAN, "ADV ON:", "%u.%u /s  @%ums",
+                     (unsigned)(ms.onRate / 10), (unsigned)(ms.onRate % 10),
+                     (unsigned)ms.advMs);
+        // Sample size next to the answer, because a delta from one cycle is
+        // not an answer and should not be able to look like one.
+        y = drawLine(t, y, ms.cycles >= 4 ? Theme::GREEN : Theme::AMBER,
+                     "DELTA:", "%d%%  (n=%u, now %s)",
+                     (int)ms.deltaPct, (unsigned)ms.cycles, ms.advOn ? "ON" : "OFF");
+        // The other half of phase 0. The broadcaster role was compiled out
+        // because its overhead made the CLEAR screen's framebuffer realloc on
+        // rotate fail; this build turns it back on, so the largest contiguous
+        // block is the canary for that bug returning.
+        y = drawLine(t, y, Theme::VAPOR_PINK, "HEAP:", "%lu KB free, %lu KB block",
+                     (unsigned long)ms.heapFreeKb, (unsigned long)ms.heapBlockKb);
+    }
+#endif
 
     int bx, by, bw, bh;
     backButtonRect(w, h, bx, by, bw, bh);

@@ -15,6 +15,43 @@ struct RawBleResult {
     char    name[24];   // empty if the device didn't advertise one
 };
 
+#if SQUACH_MESH
+// Phase 0: does advertising cost anything worth caring about?
+//
+// TWO questions, not one, and the second only turned up on reading
+// platformio.ini. The obvious one is duty cycle -- the BLE scan runs at a 99%
+// window, so a transmitter has to steal listening time. The one underneath it
+// is heap: the broadcaster role was compiled OUT because its overhead made
+// the CLEAR screen's frame-buffer realloc on rotate fail, and turning it back
+// on may bring that with it.
+//
+// The measurement counts ADVERTS SEEN, not detections. Detections are rare
+// and depend on what happens to walk past; adverts are thousands a minute
+// anywhere populated, so the number is stable in seconds rather than hours.
+//
+// And the two arms ALTERNATE on a short cycle rather than running once each.
+// The RF environment changes minute to minute -- a phone goes by, a bus
+// passes -- so measuring off for five minutes and then on for five compares
+// two environments, not two configurations. Alternating makes drift hit both
+// arms equally.
+namespace MeshProbe {
+    struct Stats {
+        uint16_t offRate;      // adverts/sec x10, advertising off
+        uint16_t onRate;       // adverts/sec x10, advertising on
+        int16_t  deltaPct;     // (on - off) / off, percent
+        uint16_t cycles;       // completed on-arms; the sample size
+        bool     advOn;        // which arm is running right now
+        uint16_t advMs;        // the interval being measured
+        uint32_t heapFreeKb;
+        uint32_t heapBlockKb;  // largest contiguous -- the rotate-realloc canary
+    };
+    void  begin();
+    void  tick(uint32_t now);
+    void  noteAdvert();        // called from the BLE scan callback
+    Stats stats();
+}
+#endif
+
 class DetectionEngine {
 public:
     bool     init();

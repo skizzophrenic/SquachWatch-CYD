@@ -26,6 +26,17 @@ void SdLog::tick() {}
 void SdLog::openDaily() {}
 
 // ---- DetectionEngine -------------------------------------------------
+#if SQUACH_MESH
+// The emulator has no radio, so the probe has nothing to count. Stubs keep
+// the diagnostics screen renderable there without an #if around every row.
+namespace MeshProbe {
+    void  begin() {}
+    void  tick(uint32_t) {}
+    void  noteAdvert() {}
+    Stats stats() { return Stats{}; }
+}
+#endif
+
 bool DetectionEngine::init() { return true; }
 void DetectionEngine::loop() {}
 
