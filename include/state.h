@@ -21,7 +21,19 @@ enum class DetectionType : uint8_t {
     DEAUTH  = 14,  // WiFi deauth/disassoc flood -- rate-detected, not a signature match (see DetectionEngine)
     EVILTWIN = 15, // One SSID beaconing from a second BSSID whose OUI differs -- rogue/spoofed AP (see DetectionEngine)
     IBEACON = 16,  // Apple iBeacon proximity beacon -- retail/venue tracking, not police kit
-    COUNT   = 17
+    // Pentest and wireless-audit hardware: Flipper Zero, Pwnagotchi, WiFi
+    // Pineapple, ESP deauthers. One bucket rather than four types because
+    // what matters to somebody reading the screen is that a tool for
+    // attacking radios is in the room, not which model it is -- the
+    // specific device goes in the vendor label and, where it announces
+    // one, its own name goes in the name field.
+    //
+    // Deliberately NOT in this bucket: bare Espressif and other generic
+    // silicon. A nyanBOX, an ESP32 Marauder and a SquachWatch are the same
+    // chip, and sixteen Espressif prefixes already sit under FLOCK. HACKER
+    // takes exact signatures only, which is what keeps it worth alerting on.
+    HACKER  = 17,
+    COUNT   = 18
 };
 
 inline const char* detectionTypeName(DetectionType t) {
@@ -42,6 +54,7 @@ inline const char* detectionTypeName(DetectionType t) {
         case DetectionType::DEAUTH:      return "DEAUTH";
         case DetectionType::EVILTWIN:    return "EVIL TWIN";
         case DetectionType::IBEACON:     return "IBEACON";
+        case DetectionType::HACKER:      return "HACKER";
         default:                         return "UNKNOWN";
     }
 }

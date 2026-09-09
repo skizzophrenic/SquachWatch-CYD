@@ -126,6 +126,30 @@ const OuiEntry kOuiTable[] = {
     {{0x70, 0x1A, 0xD5}, "Avigilon",     DetectionType::CAMERA,     Confidence::HIGH_CONF},  // Avigilon Alta, registered 2021-04-27
     {{0x00, 0x40, 0x8C}, "Axis",         DetectionType::CAMERA,     Confidence::HIGH_CONF},  // Axis Communications, registered 1998
     {{0xB8, 0xA4, 0x4F}, "Axis",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
+
+    // ---- Pentest hardware ------------------------------------------
+    // Flipper Devices' own MA-L block, verified in the IEEE registry
+    // (FLIPPER DEVICES INC, Claymont DE). This is the only Flipper prefix
+    // that is actually registered to them.
+    //
+    // Two others circulate widely -- 80:E1:26 and 80:E1:27, copied from
+    // detector to detector -- and neither appears in the IEEE registry at
+    // all. That is how 00:0E:58 spent eleven releases here as "Vigilant"
+    // while belonging to Sonos, so they are left out rather than shipped
+    // at LOW. Flipper has three other signatures below; it does not need
+    // a prefix nobody can source.
+    {{0x0C,0xFA,0x22}, "Flipper",    DetectionType::HACKER, Confidence::HIGH_CONF},
+
+    // Hak5's WiFi Pineapple. Hak5 hold NO IEEE registration -- the whole
+    // 40,000-row registry has no entry for them -- because their gear is
+    // OpenWRT on ODM boards. What they do use is these two locally
+    // administered addresses, which is a real habit and a real hint, but
+    // bit 1 of the first octet is set on both: by construction they
+    // identify no vendor and anybody can set them. LOW, and the test
+    // suite enforces that no locally-administered row is ever graded
+    // higher.
+    {{0x02,0xC0,0xCA}, "Hak5-LA",    DetectionType::HACKER, Confidence::LOW_CONF},
+    {{0x02,0x13,0x37}, "Hak5-LA",    DetectionType::HACKER, Confidence::LOW_CONF},
 };
 const uint16_t kOuiCount = sizeof(kOuiTable) / sizeof(kOuiTable[0]);
 
@@ -145,6 +169,15 @@ const UuidEntry kUuidTable[] = {
     {0xFFFA, "DroneID",    DetectionType::DRONE},     // OpenDroneID
     {0xFD5A, "SmartTag",   DetectionType::SAMSUNG_TAG}, // Samsung's own SIG-assigned UUID for SmartTag discovery
     {0xFEAA, "FindMyDev",  DetectionType::GOOGLE_TAG},  // Google "Eddystone" service UUID, also used by the Find My Device network
+
+    // Flipper Zero. It advertises one of three 16-bit service UUIDs, one
+    // per case variant -- which is also how the desktop detectors tell a
+    // white one from a black one. For our purposes the colour does not
+    // matter; that there are exactly three fixed values does, because it
+    // makes this an exact match rather than a guess.
+    {0x3081, "Flipper",    DetectionType::HACKER},
+    {0x3082, "Flipper",    DetectionType::HACKER},
+    {0x3083, "Flipper",    DetectionType::HACKER},
 };
 const uint16_t kUuidCount = sizeof(kUuidTable) / sizeof(kUuidTable[0]);
 
@@ -168,6 +201,19 @@ const SsidEntry kSsidPrefixes[] = {
     {"AXON-",   "Axon-Field",   DetectionType::AXON},
     {"flock-",  "Flock-Setup",  DetectionType::FLOCK},
     {"FLOCK-",  "Flock-Setup",  DetectionType::FLOCK},
+
+    // Hak5 WiFi Pineapple management AP. The documented default is
+    // Pineapple_XXXX, the X being the last four of its MAC. It is the
+    // setup network, so it is up on a fresh unit and on one somebody has
+    // not renamed -- which is most of them, and none of the careful ones.
+    {"Pineapple_", "Pineapple",  DetectionType::HACKER},
+
+    // The ESP8266/ESP32 deauther family (DSTIKE and the many clones) puts
+    // up its own control AP, default SSID "pwned", password "deauther".
+    // A prefix rather than an exact match because the forks vary the
+    // suffix; MED at best, since somebody can also just name their home
+    // network this as a joke.
+    {"pwned",   "Deauther",     DetectionType::HACKER},
 };
 const uint16_t kSsidCount = sizeof(kSsidPrefixes) / sizeof(kSsidPrefixes[0]);
 
@@ -191,6 +237,16 @@ const MfgIdEntry kMfgIdTable[] = {
     {0x058E, "Meta-Tech",  DetectionType::META},      // Meta Platforms Technologies
     {0x0D53, "Luxottica",  DetectionType::META},      // Ray-Ban's manufacturer
     {0x03C2, "Snap",       DetectionType::META},      // Snap Spectacles
+
+    // ---- Pentest hardware -----------------------------------------------
+    // Flipper Devices Inc., from the Bluetooth SIG company identifier list.
+    //
+    // Worth stating because the wrong value is widespread: ESP32 Marauder
+    // comments its Flipper company ID as 0x0FBA, and every project that
+    // copied that constant inherited it. 0x0FBA is Cosonic Intelligent
+    // Technologies, who make headsets. Flipper is 0x0E29. Checked against
+    // the SIG registry, the same way the OUI rows are checked against IEEE.
+    {0x0E29, "Flipper",    DetectionType::HACKER},
 };
 const uint16_t kMfgIdCount = sizeof(kMfgIdTable) / sizeof(kMfgIdTable[0]);
 
@@ -251,6 +307,12 @@ DetectionType lookupBtName(const char* name) {
     if (strcasestr(name, "Penguin"))  return DetectionType::FLOCK;
     if (strcasestr(name, "Pigvision"))return DetectionType::FLOCK;
     if (strcasestr(name, "Axon"))     return DetectionType::AXON;
+    // A Flipper advertises "Flipper " followed by the unit's name. The
+    // owner can change it, which is exactly why a name match is graded
+    // down where it is used -- it is a string, not a signature. Left in
+    // because the default is what most of them are still called, and it
+    // costs nothing next to three exact signatures that cannot be typed.
+    if (strcasestr(name, "Flipper"))  return DetectionType::HACKER;
     return DetectionType::UNKNOWN;
 }
 
@@ -375,6 +437,15 @@ Confidence confidenceFor(DetectionType t) {
         // but the threshold/window are still heuristic, so Medium
         // rather than High.
         case DetectionType::DEAUTH:
+        // The BASE grade only, and it is the one the weakest members of
+        // this bucket deserve: an SSID beginning "pwned" or a BLE name
+        // beginning "Flipper" is a string anybody can type. The exact
+        // signatures -- the three Flipper service UUIDs, Flipper's SIG
+        // company ID, a Pwnagotchi announcing its own handshake count --
+        // set HIGH explicitly at their match sites, and the OUI rows carry
+        // their own. This is the value a caller gets when nothing more
+        // specific was established.
+        case DetectionType::HACKER:
             return Confidence::MED_CONF;
         default:
             return Confidence::LOW_CONF;
@@ -395,4 +466,66 @@ uint8_t confidencePercent(Confidence c) {
         case Confidence::MED_CONF: return 60;
         default:                 return 30;
     }
+}
+
+// A pwnagotchi finds other pwnagotchis by stuffing a JSON blob into a
+// vendor information element in its own beacon frames -- a private
+// protocol riding inside a standard frame. It is not obfuscated in any
+// way: the blob is plain ASCII and carries the unit's name, version,
+// uptime, handshake count and whether deauth is switched on.
+//
+// So this does not parse JSON. Pulling in a parser to run inside the
+// promiscuous callback would cost heap and time on every beacon in the
+// air, and there are two things worth having: whether the blob is there,
+// and the name. Both are byte scans.
+//
+// "pwnd_tot" is the key that makes this a pwnagotchi rather than any
+// other JSON-in-a-beacon: it is the handshake counter, and nothing else
+// advertises one. Requiring it means a beacon that merely contains a
+// brace cannot match.
+//
+// Returns false and leaves `out` untouched unless both are found.
+bool pwnagotchiName(const uint8_t* frame, uint32_t len,
+                           char* out, size_t outSz) {
+    if (!frame || !out || outSz < 2) return false;
+    // 24-byte header plus the 12 fixed beacon parameters; the information
+    // elements, and so anything a pwnagotchi added, start after that.
+    const uint32_t start = 36;
+    if (len <= start) return false;
+    // Cap the scan. A beacon has no business being longer than this, and a
+    // malformed sig_len must not walk this loop off the end of the buffer.
+    if (len > 512) len = 512;
+    const char* body = (const char*)frame;
+
+    bool haveTot = false;
+    static const char KEY_TOT[] = "pwnd_tot";
+    const uint32_t totLen = sizeof(KEY_TOT) - 1;
+    for (uint32_t i = start; i + totLen <= len; i++) {
+        if (memcmp(body + i, KEY_TOT, totLen) == 0) { haveTot = true; break; }
+    }
+    if (!haveTot) return false;
+
+    // Then the name, which is a quoted string value: "name":"foo". The
+    // spacing varies between pwnagotchi versions, so this walks to the
+    // colon and then to the opening quote rather than assuming a layout.
+    static const char KEY_NAME[] = "\"name\"";
+    const uint32_t nameLen = sizeof(KEY_NAME) - 1;
+    for (uint32_t i = start; i + nameLen <= len; i++) {
+        if (memcmp(body + i, KEY_NAME, nameLen) != 0) continue;
+        uint32_t j = i + nameLen;
+        while (j < len && (body[j] == ' ' || body[j] == ':')) j++;
+        if (j >= len || body[j] != '"') return false;
+        j++;
+        size_t o = 0;
+        while (j < len && body[j] != '"' && o + 1 < outSz) {
+            // Printable ASCII only. This string is attacker-controlled and
+            // lands in a field the log renders; a control character in it
+            // would be somebody else deciding what our screen does.
+            if (body[j] < 0x20 || body[j] > 0x7E) return false;
+            out[o++] = body[j++];
+        }
+        out[o] = '\0';
+        return o > 0;
+    }
+    return false;
 }

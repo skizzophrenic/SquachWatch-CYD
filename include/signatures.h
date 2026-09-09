@@ -2,6 +2,7 @@
 // Sources per docs/DETECTIONS.md and docs/DESIGN.md §6.
 #pragma once
 #include "state.h"
+#include <stddef.h>   // size_t, for pwnagotchiName()
 
 // Every OUI carries its own confidence, because the registrant matters as
 // much as the prefix. Roughly:
@@ -67,6 +68,21 @@ bool isAirTagPayload(const uint8_t* payload, uint8_t len);
 // Apple's format fixes every byte of the header and the total length, so
 // there is nothing to trade away. See the implementation.
 bool isIBeacon(const uint8_t* mfg, uint8_t len);
+
+// Pwnagotchi check, run against a whole received 802.11 BEACON frame
+// (header included -- pass the frame and its length straight from the
+// promiscuous callback).
+//
+// Unlike everything else in this file it matches on a payload a device
+// wrote about itself rather than on an identifier somebody assigned it,
+// which is what makes it the strongest signature here: a pwnagotchi is
+// broadcasting its name and its handshake count on purpose, to be found
+// by other pwnagotchis.
+//
+// On a match, `out` receives the unit's name. Returns false and leaves
+// `out` untouched otherwise. See the implementation for why this does not
+// parse JSON and what it refuses to copy out.
+bool pwnagotchiName(const uint8_t* frame, uint32_t len, char* out, size_t outSz);
 
 // How sure we are that a match is really what it claims to be — mirrors
 // the per-signature grading in docs/DETECTIONS.md, collapsed to one

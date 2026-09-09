@@ -50,8 +50,13 @@ public:
     // matched against the SSID-prefix table as a fallback when the OUI
     // itself doesn't match anything (e.g. an Axon/Flock unit in pairing
     // mode, running on a WiFi module OUI we don't otherwise recognize).
+    // `pwnagotchi` says the SSID field is carrying a pwnagotchi's own name
+    // rather than a network name -- see pwnagotchiName(). It travels as a
+    // flag instead of being re-derived in processWiFiQ() because the JSON
+    // it came from is in the frame, and the frame is gone by then.
     void IRAM_ATTR postWiFi(const uint8_t* mac, int8_t rssi, uint8_t channel,
-                            const char* ssid = nullptr, bool encrypted = false);
+                            const char* ssid = nullptr, bool encrypted = false,
+                            bool pwnagotchi = false);
 
     // Called from the promiscuous WiFi Rx callback (IRAM_ATTR context)
     // when a deauthentication management frame is seen. A single
@@ -215,6 +220,7 @@ private:
         uint8_t channel;
         char    ssid[33];  // empty string if none (see postWiFi)
         bool    encrypted; // beacon Privacy bit; meaningless without an ssid
+        bool    pwnagotchi;// ssid holds a pwnagotchi's name, not a network's
     };
 
     // WiFi mailbox (filled in IRAM, drained in loop)

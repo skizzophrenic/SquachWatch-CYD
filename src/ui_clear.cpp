@@ -37,6 +37,11 @@ static const char* counterLabel(DetectionType t) {
         case DetectionType::RING:        return "RING";
         case DetectionType::DEAUTH:      return "DEAUTH";
         case DetectionType::EVILTWIN:    return "EVIL";
+        // Four letters, not "HACKER": this row is packed six-across in
+        // landscape and four-across on a 240px portrait panel. EVILTWIN
+        // keeps its own label everywhere else -- it just does not get its
+        // own column here, because its count is inside this one.
+        case DetectionType::HACKER:      return "HACK";
         default:                         return "?";
     }
 }
@@ -51,13 +56,23 @@ static const char* counterLabel(DetectionType t) {
 // SAMSUNG_TAG joined the fold when EVILTWIN was added: they're all
 // "something is quietly tracking you" and read fine as one number,
 // whereas a rogue AP is a different kind of problem and had nowhere to
-// go. Keeps the row at 12 columns, so the layout is unchanged.
+// go. It has somewhere to go now -- HACKER, below. Row stays at 12
+// columns either way, so the layout has never moved.
 static uint16_t counterCount(const DetectionEngine& eng, DetectionType t) {
     uint16_t n = eng.countByType(t);
     if (t == DetectionType::AIRTAG) {
         n += eng.countByType(DetectionType::GOOGLE_TAG)
            + eng.countByType(DetectionType::TILE)
            + eng.countByType(DetectionType::SAMSUNG_TAG);
+    }
+    // EVILTWIN folds into HACKER the same way, and for a better reason than
+    // saving a column: a rogue AP is not a category of hardware, it is a
+    // thing pentest hardware DOES. A Pineapple running PineAP karma is an
+    // evil twin -- the same box, seen by its behaviour instead of by its
+    // signature. Counting them apart would split one device across two
+    // columns and read as two problems.
+    if (t == DetectionType::HACKER) {
+        n += eng.countByType(DetectionType::EVILTWIN);
     }
     return n;
 }
@@ -73,7 +88,7 @@ static uint16_t counterCount(const DetectionEngine& eng, DetectionType t) {
 static const DetectionType ALL_COUNTER_TYPES[] = {
     DetectionType::FLOCK,   DetectionType::AXON,     DetectionType::META,   DetectionType::SKIMMER,
     DetectionType::RAVEN,   DetectionType::AIRTAG,   DetectionType::DRONE,  DetectionType::ALPR,
-    DetectionType::CAMERA,  DetectionType::EVILTWIN, DetectionType::RING,   DetectionType::DEAUTH,
+    DetectionType::CAMERA,  DetectionType::HACKER,   DetectionType::RING,   DetectionType::DEAUTH,
 };
 static const uint8_t ALL_COUNTER_TYPES_N = sizeof(ALL_COUNTER_TYPES) / sizeof(ALL_COUNTER_TYPES[0]);
 // Portrait (narrow) caps at 4 per row -- see the comment above. Landscape

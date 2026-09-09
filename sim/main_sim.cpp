@@ -55,6 +55,7 @@ static void seedDetections(DetectionEngine& eng) {
         // The name is what the detector writes for a real one: six hex of
         // the proximity UUID, then major.minor.
         { DetectionType::IBEACON, "iBeacon", "B9407F 10.42",  -59, 9 },
+        { DetectionType::HACKER,  "Flipper", "Flipper Ozzyx", -49, 6 },
         // Named after the aircraft rather than after a service UUID, which
         // is what the decoder buys. See the Remote ID seed below.
         { DetectionType::DRONE,   "DroneID", "SIMDRONE-0001", -71, 2 },

@@ -30,12 +30,16 @@ static const uint32_t DEFAULT_OFF = (1u << (uint8_t)DetectionType::IBEACON);
 // typeEnabled()'s comment. Default has bits 1..(COUNT-1) set (every real
 // type on), computed once at namespace-init time rather than a hand-
 // maintained literal so it can never drift out of sync with COUNT.
-// 32-bit, not 16. DetectionType::COUNT reached 17 when IBEACON was added,
+// 32-bit, not 16. DetectionType::COUNT reached 17 when IBEACON was added
+// (and 18 with HACKER),
 // and bit 16 does not exist in a uint16_t -- the shift is undefined and the
 // last type silently loses its switch. NVS has always stored this through
 // putUInt/getUInt, so the saved format is unchanged and nothing migrates.
 static uint32_t    s_typeMask = 0;
-static uint8_t     s_sqSizeIx = 2;    // LARGE, i.e. unchanged from before this existed
+// MEDIUM (85%). Only ever consulted on a board that has never been told
+// otherwise -- anyone who has touched the SIZE row has a stored value and
+// keeps it, which is why changing this default is safe.
+static uint8_t     s_sqSizeIx = 1;
 static uint8_t     s_brightness = 255;
 static Confidence  s_minConf    = Confidence::LOW_CONF;
 static bool        s_boringMode = false;
@@ -185,7 +189,7 @@ void load() {
     // was written against; anything above that is a type the user has
     // never had the chance to express an opinion about, so it defaults
     // on like it would for a fresh install.
-    s_sqSizeIx = (uint8_t)s_prefs.getUInt("sqsize", 2);
+    s_sqSizeIx = (uint8_t)s_prefs.getUInt("sqsize", 1);
     if (s_sqSizeIx > 2) s_sqSizeIx = 2;
 
     uint8_t savedCount = (uint8_t)s_prefs.getUInt("typecount", 0);

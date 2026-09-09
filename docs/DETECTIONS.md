@@ -372,6 +372,115 @@ claims.
 
 ---
 
+## Pentest hardware — `HACKER` — **graded per signature**
+
+One type covering Flipper Zero, Pwnagotchi, WiFi Pineapple and the ESP
+deauther family. Four products in one bucket because the useful statement
+is "there is a tool for attacking radios in this room", not which model it
+is — the model goes in the vendor label, and where the device announces a
+name, that name goes in the log row.
+
+Everything else this device finds is equipment that *watches*. This is
+equipment that transmits at other radios, which is why it shares the red
+of `DEAUTH` and `EVILTWIN` rather than the cyan of the cameras.
+
+### Flipper Zero — four signatures, three of them exact
+
+| Signature | Value | Grade |
+|---|---|---|
+| BLE service UUID | `0x3081` / `0x3082` / `0x3083` — one per case colour | **High** |
+| BLE company ID | `0x0E29`, Flipper Devices Inc. | **High** |
+| MAC OUI | `0C:FA:22`, FLIPPER DEVICES INC | **High** |
+| Advertised name | begins `Flipper ` | **Medium** — the owner can change it |
+
+**Two constants the ecosystem gets wrong, and we do not.**
+
+ESP32 Marauder's source comments Flipper's BLE company ID as `0x0FBA`.
+`0x0FBA` is registered to **Cosonic Intelligent Technologies**, who make
+headsets; Flipper Devices is `0x0E29` in the Bluetooth SIG list. Every
+project that copied that constant inherited the error.
+
+Wall-of-Flippers checks MAC prefixes `80:E1:26` and `80:E1:27`. Neither
+appears anywhere in the IEEE registry — not under Flipper, not under
+anybody. Only `0C:FA:22` is really theirs.
+
+Both are the same failure as the `00:0E:58` entry that sat here for eleven
+releases labelled "Vigilant" while belonging to Sonos: a plausible constant
+copied between detectors until it reads as fact. Neither is shipped, and
+`test/hacker_test.cpp` pins both so a future re-import turns red.
+
+### Pwnagotchi — the strongest signature here, because it volunteers
+
+A pwnagotchi finds other pwnagotchis by putting a JSON blob into a vendor
+information element in its own beacon frames. It is not obfuscated: the
+blob is plain ASCII carrying the unit's **name, version, uptime, handshake
+count and whether deauth is enabled**.
+
+We do not parse JSON — pulling a parser into the promiscuous callback would
+cost heap and time on every beacon in the air. Two byte scans do the job:
+the key `pwnd_tot` is what makes this a pwnagotchi rather than any other
+device with a brace in its beacon, and the `name` value is what the log
+row shows. The name is attacker-controlled and lands in a rendered field,
+so anything outside printable ASCII rejects it outright.
+
+This posts the transmitter address rather than the BSSID, and skips the
+evil-twin tracker: the SSID on these frames is throwaway, and feeding it in
+as a network somebody might be impersonating would be wrong twice over.
+
+**Confidence: High.** Nothing else on this device is a self-declaration.
+
+### WiFi Pineapple and the deauthers — circumstantial
+
+| Signature | Value | Grade |
+|---|---|---|
+| Pineapple management AP | SSID prefix `Pineapple_` | **Medium** |
+| Deauther control AP | SSID prefix `pwned` | **Medium** |
+| Hak5 MACs | `02:C0:CA`, `02:13:37` | **Low** |
+
+**Hak5 hold no IEEE registration.** The whole 40,000-row registry has no
+entry for them, because their hardware is OpenWRT on ODM boards — anything
+claiming a "Hak5 OUI" is naming a contract manufacturer. What they do use
+are those two locally administered addresses, which is a real habit and a
+real hint; but bit 1 of the first octet is set on both, so by construction
+they identify no vendor and anyone can set them. The test suite enforces
+that no locally-administered row is ever graded above Low.
+
+### What is deliberately NOT in this bucket
+
+**Bare Espressif and other generic silicon.** A nyanBOX, an ESP32 Marauder,
+an M5Stack and a SquachWatch are the same chip. Sixteen Espressif prefixes
+already sit under `FLOCK`; adding them here as well would have the two
+types fight over the same evidence and make every SquachWatch flag every
+other one. HACKER takes exact signatures only, and that is what makes it
+worth alerting on.
+
+**Receive-only and wired gear**, which no firmware change can reach:
+HackRF, Ubertooth One, RTL-SDR, Proxmark3, Wi-Fi Coconut, any Alfa card in
+monitor mode; Bash Bunny, Rubber Ducky, Key Croc, Shark Jack, LAN Turtle,
+Packet Squirrel; and the O.MG cable except while its AP is up.
+
+**The Pineapple Pager**, for now. It does 2.4/5/6 GHz plus BT/BLE and very
+likely leaks more than the Mark VII, but no signature for it has been
+published and a guess is exactly how the Sonos entry happened.
+
+**nyanBOX**, for now — with a caveat, because it has a genuine hook. Its
+"Device Networking" feature broadcasts the unit's level and version so that
+other nyanBOXes can discover it, which is the Pwnagotchi situation exactly.
+The format is not published, so it needs one capture from real hardware
+before anything ships.
+
+### On the counter row
+
+`EVILTWIN` has no column of its own; its count is folded into `HACK`. A
+rogue AP is not a category of hardware, it is a thing this hardware *does* —
+a Pineapple running PineAP karma is an evil twin, the same box seen by its
+behaviour instead of its signature. Counting them apart would split one
+device across two columns and read as two problems. `DEAUTH` keeps its own
+column for the same reason in reverse: a deauth flood is a burst rate, and
+plenty of things that are not a Pineapple produce one.
+
+---
+
 ## License / attribution
 
 | Source | License | Used for |

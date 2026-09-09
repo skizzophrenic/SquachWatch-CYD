@@ -23,6 +23,7 @@ static const char* targetLabel(DetectionType t) {
         case DetectionType::RING:        return "RING CAM";
         case DetectionType::EVILTWIN:    return "EVIL TWIN AP";
         case DetectionType::IBEACON:     return "PROXIMITY BEACON";
+        case DetectionType::HACKER:      return "PENTEST HARDWARE";
         default:                     return "UNKNOWN";
     }
 }

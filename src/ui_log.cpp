@@ -5,6 +5,7 @@
 #include "settings.h"
 #include <Arduino.h>
 #include <ctype.h>
+#include <string.h>
 
 static int g_scroll = 0;
 
@@ -248,6 +249,7 @@ switch (Settings::background()) {
         t.setTextColor(Theme::colorFor(d->type), Theme::BG);
         t.setCursor(4, y + topPad);
         t.print(detectionTypeName(d->type));
+        const int labelEnd = 4 + t.textWidth(detectionTypeName(d->type));
 
         // MAC + RSSI line
         t.setTextSize(1);
@@ -282,6 +284,35 @@ switch (Settings::background()) {
         t.setTextColor(Theme::VAPOR_PINK, Theme::BG);
         t.setCursor(w - tw - 14, y + topPad);
         t.print(ts);
+
+        // The device's own name, in the gap between the type label and the
+        // timestamp. Detection has carried this field all along and nothing
+        // ever drew it, so a Flipper called "Ozzyx", a Pwnagotchi's name,
+        // an iBeacon's deployment and a drone's serial were all being
+        // captured and then thrown away at the last step.
+        //
+        // Truncated to whatever actually fits rather than clipped by the
+        // driver: the timestamp is drawn already and text written past it
+        // would land on top of it. Two characters of margin at each end
+        // keep the columns visibly separate at a glance.
+        if (d->name[0]) {
+            const int nameX   = labelEnd + 8;
+            const int nameMax = (w - tw - 14) - 6 - nameX;
+            if (nameMax > 0) {
+                char nm[sizeof(d->name)];
+                strncpy(nm, d->name, sizeof(nm) - 1);
+                nm[sizeof(nm) - 1] = '\0';
+                while (nm[0] && t.textWidth(nm) > nameMax) nm[strlen(nm) - 1] = '\0';
+                if (nm[0]) {
+                    // Centred against the size-2 type label beside it.
+                    // Sharing its top edge would leave the small text
+                    // hanging off the cap height of the big text.
+                    t.setTextColor(Theme::WHITE, Theme::BG);
+                    t.setCursor(nameX, y + topPad + (nameH - detailH) / 2);
+                    t.print(nm);
+                }
+            }
+        }
 
         y += rowH;
     }

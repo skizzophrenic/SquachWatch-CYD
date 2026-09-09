@@ -154,6 +154,7 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
                         0xFFFA,  // OpenDroneID
                         0xFD5A,  // Samsung SmartTag
                         0xFEAA,  // Google Find My Device Network (Eddystone)
+                        0x3081, 0x3082, 0x3083,  // Flipper Zero, one per case colour
                     };
                     for (uint16_t k : kKnown16) {
                         if (u.equals(NimBLEUUID((uint16_t)k))) {
@@ -166,14 +167,25 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             }
         }
         // Name fallback
+        bool matchedByName = false;
         if (det.type == DetectionType::UNKNOWN && det.name[0]) {
             det.type = lookupBtName(det.name);
+            matchedByName = (det.type != DetectionType::UNKNOWN);
         }
         if (det.type == DetectionType::UNKNOWN) return;
         // BLE matches on service UUIDs, company IDs and device names --
         // none of those tables has a per-row grade, so the type's own
         // grade stands. Only the OUI table needed splitting.
         det.conf = confidenceFor(det.type);
+        // ...except HACKER, which is the one type deliberately holding
+        // signatures of very different strength. Reaching here on anything
+        // but the name means one of the exact ones matched: a service UUID
+        // that exists on no other product, or Flipper's own SIG company ID.
+        // Arriving on the name alone means somebody's BLE device is called
+        // "Flipper", which is a string, not a signature.
+        if (det.type == DetectionType::HACKER) {
+            det.conf = matchedByName ? Confidence::MED_CONF : Confidence::HIGH_CONF;
+        }
         // A Remote ID advert carries far more than the fact that it exists.
         // Decode it before the entry is posted so the log row can be named
         // after the actual aircraft rather than after a service UUID.
@@ -205,6 +217,12 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             strncpy(det.vendor, "Tile", sizeof(det.vendor) - 1);
         } else if (det.type == DetectionType::IBEACON) {
             strncpy(det.vendor, "iBeacon", sizeof(det.vendor) - 1);
+        } else if (det.type == DetectionType::HACKER) {
+            // Everything that reaches HACKER over BLE is a Flipper: the
+            // three service UUIDs, the company ID and the name prefix are
+            // all theirs. The Pineapple and the deauther arrive over WiFi
+            // and are labelled in processWiFiQ().
+            strncpy(det.vendor, "Flipper", sizeof(det.vendor) - 1);
         } else {
             strncpy(det.vendor, "BLE", sizeof(det.vendor) - 1);
         }
@@ -303,7 +321,18 @@ bool DetectionEngine::init() {
             // encryption. That one bit is what separates a mesh node
             // from an evil twin -- see noteApBeacon().
             bool enc = (sigLen > 35) && ((frame[34] & 0x10) != 0);
-            g_engine->postWiFi(frame + 16, pkt->rx_ctrl.rssi, pkt->rx_ctrl.channel, ssid, enc);
+            // A pwnagotchi's beacon is checked before it is treated as an
+            // ordinary AP, and posts addr2 rather than the BSSID: this is a
+            // device announcing itself to its own kind, not an access point
+            // offering a network, and its SSID is throwaway. Its name goes
+            // where the SSID would have.
+            char pwnName[33];
+            if (pwnagotchiName(frame, sigLen, pwnName, sizeof(pwnName))) {
+                g_engine->postWiFi(frame + 10, pkt->rx_ctrl.rssi,
+                                   pkt->rx_ctrl.channel, pwnName, false, true);
+            } else {
+                g_engine->postWiFi(frame + 16, pkt->rx_ctrl.rssi, pkt->rx_ctrl.channel, ssid, enc);
+            }
         } else if (type == 0 && subtype == 12) {
             // Deauthentication: addr2 (transmitter -- the attacker, or
             // a spoofed AP address) at the same offset probe requests
@@ -407,7 +436,8 @@ void DetectionEngine::clearLog() {
 }
 
 void IRAM_ATTR DetectionEngine::postWiFi(const uint8_t* mac, int8_t rssi, uint8_t channel,
-                                         const char* ssid, bool encrypted) {
+                                         const char* ssid, bool encrypted,
+                                         bool pwnagotchi) {
     if (!mac) return;
     // Group-addressed (broadcast/multicast) destinations can never be a
     // real device: bit 0 of byte 0 is the I/G bit, and every OUI in
@@ -437,6 +467,7 @@ void IRAM_ATTR DetectionEngine::postWiFi(const uint8_t* mac, int8_t rssi, uint8_
         e.ssid[0] = 0;
     }
     e.encrypted = encrypted;
+    e.pwnagotchi = pwnagotchi;
     _wifiQHead = next;
 }
 
@@ -889,8 +920,16 @@ void DetectionEngine::processWiFiQ() {
         // are the same DetectionType and very different claims.
         Confidence conf = Confidence::HIGH_CONF;
         bool matchedBySsid = false;
-        bool evilTwin = e.ssid[0] && noteApBeacon(e.mac, e.ssid, e.encrypted);
-        if (evilTwin) {
+        // Ahead of everything, including the evil-twin check: a pwnagotchi
+        // told us what it is, in its own words, along with how many
+        // handshakes it has taken. No inference beats that, and its
+        // throwaway SSID must not be fed to the AP tracker as if it were a
+        // network somebody might be impersonating.
+        bool evilTwin = false;
+        if (e.pwnagotchi) {
+            t = DetectionType::HACKER;
+            conf = Confidence::HIGH_CONF;
+        } else if ((evilTwin = (e.ssid[0] && noteApBeacon(e.mac, e.ssid, e.encrypted)))) {
             t = DetectionType::EVILTWIN;
         } else {
             // Check OUI first (per DESIGN.md §6.2 precedence); fall back
@@ -951,6 +990,9 @@ void DetectionEngine::processWiFiQ() {
         // impersonated, so the SSID goes in as the name.
         if (t == DetectionType::EVILTWIN) {
             strncpy(d.vendor, "EvilTwin", sizeof(d.vendor) - 1);
+            strncpy(d.name, e.ssid, sizeof(d.name) - 1);
+        } else if (e.pwnagotchi) {
+            strncpy(d.vendor, "Pwnagotchi", sizeof(d.vendor) - 1);
             strncpy(d.name, e.ssid, sizeof(d.name) - 1);
         } else if (matchedBySsid) {
             const char* name = ssidVendorName(e.ssid);

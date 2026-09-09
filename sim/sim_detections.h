@@ -59,6 +59,11 @@ inline const SimDetectionProfile kSimProfiles[] = {
     // The name field is what the detector puts there for a real one: six
     // hex of the proximity UUID, then major.minor.
     { DetectionType::IBEACON,     {0x02, 0x00, 0x4C}, "iBeacon",     "B9407F 10.42",    -59 },
+    // Flipper Devices' own IEEE block, and the name a Flipper actually
+    // advertises -- the unit's name with "Flipper " in front of it. This is
+    // the profile that exercises the new LOG name column: without a name in
+    // the field there is nothing to see there.
+    { DetectionType::HACKER,      {0x0C, 0xFA, 0x22}, "Flipper",     "Flipper Ozzyx",   -49 },
 };
 inline const size_t kSimProfileCount = sizeof(kSimProfiles) / sizeof(kSimProfiles[0]);
 

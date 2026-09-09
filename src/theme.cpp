@@ -106,6 +106,12 @@ uint16_t colorFor(DetectionType t) {
             return CYAN;
         case DetectionType::DEAUTH:
         case DetectionType::EVILTWIN:
+        // Filed with the two attack detections rather than with the
+        // cameras. Everything else on this screen is equipment that
+        // watches; this is equipment that reaches out and does something
+        // to a radio, which is the same colour of problem as a deauth
+        // flood or a rogue AP -- and often literally the box producing one.
+        case DetectionType::HACKER:
             return RED;
         default:
             return GREEN;
