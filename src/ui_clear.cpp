@@ -2,9 +2,54 @@
 #include "ui_clear.h"
 #if SQUACH_MESH
 #include "squachmesh.h"
+#include "squachy.h"
+
+// A peer supplied from outside -- the emulator's --peer flag today, the radio
+// eventually. Always wins over the demo below.
 static const SquachMesh::Peer* s_guest = nullptr;
-const SquachMesh::Peer* uiClearGuest() { return s_guest; }
 void uiClearSetGuest(const SquachMesh::Peer* p) { s_guest = p; }
+
+#if SQUACH_MESH_DEMO
+// LAB BUILDS ONLY. There is no radio yet, so a mesh build on real hardware
+// would look identical to a normal one and there would be nothing to flash it
+// for. This synthesises a visitor on a timer instead: he is absent for the
+// first stretch so the screen can be compared against itself, then arrives and
+// stays, wearing a different outfit on every cycle so one flash exercises the
+// whole wardrobe rather than one costume.
+//
+// Deliberately NOT defined for the emulator, which builds SQUACH_MESH without
+// this. A guest appearing unbidden in every sim render of the CLEAR screen
+// would corrupt the instrument that every other visual decision is measured
+// with -- the exact mistake the shim audit existed to undo.
+static SquachMesh::Peer s_demo;
+static bool     s_demoUp   = false;
+static uint32_t s_demoSeen = 0xFFFFFFFFu;
+
+static void demoTick(uint32_t now) {
+    const uint32_t PERIOD = 20000;   // one full alone-then-visited cycle
+    const uint32_t ALONE  = 6000;    // long enough to read the screen without him
+    const uint32_t cycle  = now / PERIOD;
+    if ((now % PERIOD) < ALONE) { s_demoUp = false; return; }
+    if (s_demoUp && cycle == s_demoSeen) return;
+
+    const uint8_t outfits = Squachy::outfitCount();
+    s_demo.outfit = outfits ? (uint8_t)(cycle % outfits) : 0;
+    s_demo.nick   = (uint8_t)(cycle % 10);
+    s_demo.shade  = (uint8_t)(cycle % 4);
+    s_demo.custom = false;
+    s_demo.name[0] = '\0';
+    s_demoUp   = true;
+    s_demoSeen = cycle;
+}
+#endif // SQUACH_MESH_DEMO
+
+const SquachMesh::Peer* uiClearGuest() {
+    if (s_guest) return s_guest;
+#if SQUACH_MESH_DEMO
+    if (s_demoUp) return &s_demo;
+#endif
+    return nullptr;
+}
 #endif
 #include "theme.h"
 #include "squachy.h"
@@ -281,6 +326,9 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         // somebody sized deliberately, and shrinking him there would just
         // leave a hole.
 #if SQUACH_MESH
+#if SQUACH_MESH_DEMO
+        demoTick(now);
+#endif
         // SquachMesh: when a peer is visiting, BOTH Squachys drop to SMALL and
         // stand apart. Small is not a courtesy to the guest, it is what makes
         // two of them fit at all -- at the default size he is already most of
