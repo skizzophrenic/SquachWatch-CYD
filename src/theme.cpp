@@ -4799,8 +4799,15 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
                 ? SCARED[((now - s_wolfAt) / 1400) % (sizeof(SCARED) / sizeof(SCARED[0]))]
                 : QUIPS[((now / CYCLE) * 5 + 2) % NQUIP];
             t.setTextSize(1);
-            const int bw = t.textWidth(q) + 7;
-            const int bh = 11;
+            const int bw = t.textWidth(q) + 8;
+            // Derived, not the hard-coded 11 this used to be. Squachy's
+            // bubbles and the pet's both size themselves off fontHeight();
+            // this one guessed, and guessed a row short -- the GLCD cell is
+            // 8 rows, so at 11 with 2px of top padding the text had a single
+            // pixel of clearance at the bottom and nowhere for a descender.
+            // Same construction as pet.cpp's bubble() now, so the owl speaks
+            // in the same voice as everything else on the screen.
+            const int bh = t.fontHeight() + 5;
             // Placement has to dodge the mascot. drawFire is the
             // BACKGROUND: ui_clear draws Squachy on top of it afterwards,
             // so anything of ours reaching into the middle third gets
@@ -4835,7 +4842,7 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             t.drawFastHLine(tailX, by + bh + 1, 2, paper);
             t.drawPixel(tailX - 1, by + bh, ink);
             t.setTextColor(ink, paper);
-            t.setCursor(bx + 4, by + 2);
+            t.setCursor(bx + 4, by + 3);
             t.print(q);
         }
     }
