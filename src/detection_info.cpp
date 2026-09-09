@@ -9,9 +9,9 @@ namespace DetectionInfo {
 // in state.h (UNKNOWN..DEAUTH), one entry per value up to COUNT.
 static const char* const EXPLAIN_TEXT[] = {
     // UNKNOWN
-    "This matched a known surveillance-hardware fingerprint, but not a specific brand I recognize. Still worth knowing it's there.",
+    "Nothing in the signature tables matched this one. It is the fallback the panel falls back TO, so if you are reading it about a real sighting, that sighting got logged under a type with no explanation of its own -- which is a bug worth reporting.",
     // FLOCK
-    "Flock Safety makes automated license-plate-reader cameras, usually mounted on poles at neighborhood entrances. They log every plate that passes, suspect or not.",
+    "Flock Safety makes automated license-plate-reader cameras, usually mounted on poles at neighborhood entrances. They log every plate that passes, suspect or not. Check the confidence: of the 29 hardware prefixes filed here exactly ONE is registered to Flock, and the rest are the generic Espressif and Liteon parts they build on -- shared with every dev board and smart plug on earth. A LOW reading here means a radio Flock might use, not a Flock camera.",
     // AXON
     "Axon makes body cameras and TASERs for law enforcement. This picks up a body cam's own wireless signal, not necessarily an officer's exact location.",
     // META
@@ -19,11 +19,11 @@ static const char* const EXPLAIN_TEXT[] = {
     // SKIMMER
     "A Bluetooth card skimmer, usually wired into an ATM or gas pump reader. It quietly exfiltrates stolen card data over BLE instead of needing physical pickup.",
     // RAVEN
-    "A Raven/ShotSpotter-style gunshot-detection sensor, usually mounted on a streetlight or rooftop. It listens constantly, not just after something happens.",
+    "A Raven gunshot-detection sensor, usually mounted on a streetlight or rooftop. It listens constantly, not just after something happens. Matched on Raven's own Bluetooth service IDs, which have not been checked against real hardware -- hence the middling confidence. NOT ShotSpotter: those hold no registered hardware ID at all and backhaul over cellular rather than broadcasting, so nothing here can see one.",
     // AIRTAG
     "An Apple AirTag, riding Apple's Find My network. Legitimate for keys and luggage -- also a known method for tracking a person or vehicle without consent.",
     // DRONE
-    "A drone broadcasting Remote ID, the wireless 'license plate' the FAA requires most drones to transmit. It is decoded, not just spotted: where the aircraft is, and often where the person flying it is standing. Not its camera feed -- that stays private, which is rather the point of the complaint.",
+    "A drone broadcasting Remote ID, the wireless 'license plate' the FAA requires most drones to transmit. It is decoded, not just spotted: where the aircraft is, and often where the person flying it is standing. Not its camera feed -- that stays private, which is rather the point of the complaint. Bluetooth Legacy only: this chip is BLE 4.2, so a drone using the Bluetooth 5 long-range form is invisible to it and always will be.",
     // ALPR
     "An automated license-plate reader from a vendor other than Flock. Same idea: logs every plate that passes, usually feeding a shared database.",
     // CAMERA
@@ -41,7 +41,7 @@ static const char* const EXPLAIN_TEXT[] = {
     // EVILTWIN
     "Two different boxes are broadcasting the same network name, and they disagree about security -- one wants a password, the other is wide open. That's how a fake hotspot lures you on. A mesh system never argues with itself about encryption, which is what separates this from your own router.",
     // IBEACON
-    "A proximity beacon, the kind bolted inside shops, stadiums and airports. It does not track you by itself -- it shouts an ID, and an app you already installed notices and reports where you are. The number shown is which deployment and which unit, so the same first half in two places is the same operator.",
+    "A proximity beacon, the kind bolted inside shops, stadiums and airports. It does not track you by itself -- it shouts an ID, and an app you already installed notices and reports where you are. The number shown is which deployment and which unit, so the same first half in two places is the same operator. This is the one detection that ships switched OFF, and about volume rather than importance: one shop can put more beacons in range than this device would otherwise see all week. Turn it on in DETECTION FILTER.",
     // HACKER
     "Wireless testing hardware: a Flipper Zero, a Pwnagotchi, a WiFi Pineapple or an ESP deauther. These are legitimate tools and most owners are hobbyists or people paid to break things -- but unlike everything else here, this is gear that transmits at other radios rather than just watching. A Pwnagotchi reports its own name and how many WiFi handshakes it has captured, because it is trying to be seen by others like it. Nothing here flags a bare ESP32 dev board: that would flag half the electronics in the room, and this detector too.",
 };

@@ -5,8 +5,8 @@
 
 SquachWatch-CYD sniffs the 2.4 GHz airwaves for known wireless signatures
 of Flock Safety cameras, Axon body cameras, recording glasses, card
-skimmers, AirTags, drones, and more. It runs standalone on a bare CYD board
-— no PC, no extras, just plug it into USB.
+skimmers, AirTags, drones, proximity beacons and pentest hardware. It runs
+standalone on a bare CYD board — no PC, no extras, just plug it into USB.
 
 The UI is a vaporwave-themed take on the **SquachWare** aesthetic: matrix
 digital rain, Squachy the mascot, full-screen dramatic ALERT overlays, and
@@ -30,19 +30,43 @@ the glitchy SquachWatch wordmark.
 
 | Type | What | How |
 |---|---|---|
-| `FLOCK` | Flock Safety ALPR / Raven sensors | WiFi OUI (28 prefixes) + BLE name + manufacturer ID |
-| `AXON` | Axon body cameras, tasers, LE equipment | WiFi OUI (3 prefixes) + SSID prefix `AB2-`/`AB3-`/`AB4-`/`AXON-` |
-| `META` | Ray-Ban Meta smart glasses | BLE service UUID `0xFD5F` |
-| `SKIMMER` | Bluetooth card skimmers (HC-05/06/03, RN42, BT04-A) | BT Classic name match + SPP UUID `0x1101` |
-| `RAVEN` | Raven gunshot detector | Custom service UUIDs `0x3100`–`0x3500` |
-| `AIRTAG` | Apple AirTag / FindMy trackers | Manufacturer ID `0x004C` + subtype `0x12`/`0x1E` |
-| `DRONE` | OpenDroneID-compliant drones | BLE service UUID `0xFFFA` |
-| `ALPR` | Motorola / Vigilant ALPR | WiFi OUI `00:0E:58` |
-| `CAMERA` | Generic / covert IP cameras | WiFi OUI list (Wyze, Hikvision, Reolink, Arlo, Blink, Tuya, Verkada, Avigilon, Axis, etc.) |
+| `FLOCK` | Flock Safety ALPR cameras | 29 WiFi OUI prefixes + BLE name + company ID `0x09C8` |
+| `AXON` | Axon body cameras, TASERs, LE equipment | 3 WiFi OUI + SSID prefixes `AB2-`/`AB3-`/`AB4-`/`AXON-` |
+| `META` | Camera glasses — Ray-Ban Meta, Snap Spectacles | BLE service UUID `0xFD5F` + Meta / Luxottica / Snap company IDs |
+| `SKIMMER` | Bluetooth card skimmers (HC-05/06/03, RN42, BT04-A) | BT Classic name match + SPP UUID `0x1101` + 3 OUI |
+| `RAVEN` | Raven gunshot detector | Service UUIDs `0x3100`–`0x3500` |
+| `AIRTAG` | Apple AirTag / Find My trackers | Company ID `0x004C` + Find My payload check |
+| `DRONE` | Remote ID drones | Service UUID `0xFFFA`, then the ASTM F3411 message **decoded** — aircraft position, altitude, serial, and the operator's location |
+| `ALPR` | Motorola Solutions / Genetec plate readers | 6 WiFi OUI |
+| `CAMERA` | Generic / covert IP cameras | 17 WiFi OUI (Wyze, Amazon, Tuya, Verkada, Avigilon, Axis, …) |
 | `SAMSUNG_TAG` | Samsung Galaxy SmartTag / SmartTag+ | BLE service UUID `0xFD5A` |
-| `GOOGLE_TAG` | Google Find My Device Network trackers (Chipolo, Pebblebee, Moto Tag) | BLE service UUID `0xFEAA` |
+| `GOOGLE_TAG` | Google Find My Device trackers (Chipolo, Pebblebee, Moto Tag) | BLE service UUID `0xFEAA` |
 | `TILE` | Tile BLE trackers | BLE service UUID `0xFEED` / `0xFEEC` |
-| `RING` | Ring doorbells / cameras | WiFi OUI (15 prefixes, Ring LLC's full registered block) |
+| `RING` | Ring doorbells / cameras | 15 WiFi OUI (Ring LLC's registered block + Amazon's) |
+| `DEAUTH` | WiFi deauthentication floods | Rate-detected burst, not a signature |
+| `EVILTWIN` | Rogue / spoofed access points | One SSID beaconing from two BSSIDs that disagree about encryption |
+| `IBEACON` | Retail proximity beacons | Exact Apple header `4C 00 02 15` — **off by default**, see below |
+| `HACKER` | Flipper Zero, Pwnagotchi, WiFi Pineapple, ESP deauthers | Flipper's service UUIDs `0x3081`–`0x3083`, company ID `0x0E29` and OUI `0C:FA:22`; the Pwnagotchi's own beacon payload; `Pineapple_` and `pwned` SSIDs |
+
+### Confidence is per signature, not per type
+
+Every hardware prefix in the firmware was checked against the IEEE registry
+rather than against other detectors. Of 76 rows: **32 High, 4 Medium, 40
+Low**.
+
+That grading matters most on `FLOCK`, where exactly **one** of 29 prefixes is
+registered to Flock Safety and the rest are the generic Espressif and Liteon
+parts they build on — real evidence, shared with every dev board on earth.
+`ALERT FILTER` is a minimum-confidence gate, so setting it to High keeps a
+passing ESP32 in the log without taking over the screen.
+
+The audit also removed `00:0E:58`, which sat here for eleven releases
+labelled "Vigilant" and is registered to **Sonos**. Every speaker in range
+was being logged as a plate reader.
+
+`IBEACON` ships switched off — not a judgement about importance, one about
+volume. One shop can put more beacons in range than this device would
+otherwise see all week. It is one tap away in `DETECTION FILTER`.
 
 ## Hardware
 
@@ -58,7 +82,7 @@ whole device.
 No build tools, no IDE, no cloning anything — flash a board straight
 from your browser:
 
-**[https://skizzophrenic.github.io/SquachWatch-CYD/](https://skizzophrenic.github.io/SquachWatch-CYD/)**
+**[https://squachwatch.com/](https://squachwatch.com/)**
 
 Works in Firefox, Chrome, Edge, or Brave on desktop. Pick your board (2.8" CYD
 or AWOK 2.4"), plug in, click Connect & Install, done.
@@ -86,22 +110,26 @@ A full beginner-friendly walkthrough is in [docs/BUILD.md](docs/BUILD.md).
 ## Usage
 
 1. Plug the CYD into USB-C.
-2. The `SQUACHWATCH v1.0` splash runs for 1.5 seconds.
-3. The clear screen appears: matrix rain, ghost avatar, live counters.
+2. The splash runs for a second and a half, stamped with the build's own
+   version (from `git describe`, so a working-tree build says so).
+3. The main screen appears: your chosen background, Squachy, and live
+   per-type counters. He says something reassuring every thirty seconds.
 4. The three soft buttons at the bottom:
-   - **`[ SCAN ]`** — return to the clear (idle) screen.
-   - **`[ LOG ]`** — open the rolling 32-entry detection log.
-   - **`[ CLR ]`** — wipe the log and return to clear.
-5. When something is detected, the device **flashes a full-screen
-   ALERT** — pulsing vapor-pink border, target type, confidence,
-   MAC, RSSI, channel, a signal radar, and the glitchy `SQUACHWATCH`
-   wordmark. Tap anywhere to dismiss early, or it clears itself after
-   60 seconds.
+   - **`[ SCAN ]`** — return to the main (idle) screen.
+   - **`[ LOG ]`** — open the rolling 200-entry detection log.
+   - **`[ CLR ]`** — wipe the log and return.
+5. When something is detected, the device **flashes a full-screen ALERT**:
+   a header strip in the detection's own colour with the type in the
+   Bangers face, a data plate with the vendor, the device's own name where
+   it broadcasts one, its MAC and a signal meter, and a gauge showing what
+   was found with the instrument grid over it. Tap anywhere to dismiss
+   early, or it clears itself after 60 seconds.
 
 If a microSD card is present, every detection is also appended to
 `squachwatch-<day>.log` (CSV: `ts,type,rssi,mac,channel,vendor,ssid`).
-No GPS, so logs are local-timeline only — but they're useful for
-documenting incident history.
+There is no GPS and no network sync — the clock is set over serial with a
+single `TIME <epoch>` line at 2,000,000 baud, and until it is, timestamps
+count from boot.
 
 ## Every outfit
 
@@ -135,20 +163,31 @@ SquachWatch-CYD/
 │   ├── DETECTIONS.md             (per-signature provenance)
 │   └── SQUACHWARE-AESTHETIC.md   (CSS → RGB565 mapping)
 ├── include/
-│   ├── state.h
-│   ├── theme.h
-│   ├── signatures.h
+│   ├── state.h                   (DetectionType, Detection, Confidence)
+│   ├── theme.h                   (palette, backgrounds, icons, chrome)
+│   ├── signatures.h              (the tables and their lookups)
 │   ├── detection.h
-│   ├── sd_log.h
+│   ├── remote_id.h               (ASTM F3411 decoder)
+│   ├── clock.h                   (wall clock, set over serial)
+│   ├── ignore_list.h             (per-device alert suppression)
+│   ├── settings.h
+│   ├── squachy.h                 (the mascot)
+│   ├── bangers_font.h            (generated 1bpp display face)
 │   ├── cyd_user_setup.h          (TFT_eSPI config for the CYD)
 │   └── ui_*.h
 ├── src/
-│   ├── main.cpp
-│   ├── theme.cpp
+│   ├── main.cpp                  (setup/loop, state machine, touch)
+│   ├── theme.cpp                 (backgrounds, per-type icons, chrome)
+│   ├── squachy.cpp               (the mascot, his outfits and his lines)
 │   ├── signatures.cpp
-│   ├── detection.cpp
+│   ├── detection.cpp             (WiFi promiscuous + NimBLE scan)
+│   ├── remote_id.cpp
+│   ├── clock.cpp
+│   ├── ignore_list.cpp
+│   ├── pet.cpp
 │   ├── sd_log.cpp
 │   └── ui_*.cpp
+├── test/                         (host tests -- `make -C test`, no framework)
 └── sim/                          (PC emulator — compiles src/ natively)
     ├── Makefile                  (`make` for the CLI, `make wasm` for the web build)
     ├── *.h                       (Arduino/TFT_eSPI/NVS shims)
@@ -186,11 +225,17 @@ SquachWatch-CYD/
 
 ## Status
 
-**v1.0 — first release.** Detection is reliable for the high-priority
-targets (Flock, Axon, skimmer, Meta). AirTag and Raven are best-effort.
-Drone and generic ALPR are flags for further investigation — see
-[docs/DETECTIONS.md](docs/DETECTIONS.md) for per-target confidence.
+**Shipping.** Releases are cut by pushing a `v*.*.*` tag; the flasher above
+is rebuilt and redeployed by the same CI run, so the web flasher always
+matches the newest release.
 
-A verified-flashing build on real hardware is the v1.0 exit criterion.
-No real-hardware verification has been done yet — open an issue if
-you test it and find bugs.
+Detection is reliable for the high-priority targets (Flock, Axon, skimmer,
+camera glasses). Remote ID and iBeacon are exact-format matches. Raven,
+generic ALPR and the Google tracker network are best-effort — see
+[docs/DETECTIONS.md](docs/DETECTIONS.md) for per-signature provenance and
+the confidence each one earns.
+
+Verified on real hardware. There is also a PC emulator in `sim/` that
+compiles the actual `src/` against shims, and a host test suite in `test/`
+(`make -C test`) covering the decoders, the signature tables and the
+emulator's own fidelity to the display library.
