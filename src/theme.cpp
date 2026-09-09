@@ -203,6 +203,9 @@ bool settingsButtonHit(int x, int y) {
 }
 
 static bool s_rotateIconVisible = true;
+// Whether the icon is currently ON the glass, so hiding it can erase what
+// it left behind once rather than every frame. See drawTitleBar().
+static bool s_rotateIconDrawn = false;
 
 void setRotateIconVisible(bool visible) {
     s_rotateIconVisible = visible;
@@ -231,7 +234,26 @@ void drawTitleBar(TFT_eSPI& t, const char* title) {
     (void)title;
     int w = t.width();
     drawSettingsIcon(t, ICON_BOX_H);
-    if (s_rotateIconVisible) drawRotateIcon(t, w, ICON_BOX_H);
+    // Gone when rotation is locked, not just on AWOK. It used to keep
+    // drawing while locked, on the reasoning that leaving the control
+    // visible shows the switch exists -- but the tap handler has always
+    // been gated on the same flag, so what it actually showed was a button
+    // that does nothing. A visible inert control reads as a bug, not as a
+    // setting; the switch is in SETTINGS > ROTATION LOCK, which is where it
+    // was turned on in the first place.
+    const bool show = s_rotateIconVisible && !Settings::rotationLocked();
+    if (show) {
+        drawRotateIcon(t, w, ICON_BOX_H);
+        s_rotateIconDrawn = true;
+    } else if (s_rotateIconDrawn) {
+        // Clear exactly once, on the transition. Doing it unconditionally
+        // would stamp a BG rectangle into the top-right corner on AWOK,
+        // where the icon has never been drawn and the background currently
+        // shows through -- a regression on the one board that already had
+        // this right.
+        t.fillRect(w - ROTATE_ICON_W, 0, ROTATE_ICON_W, ICON_BOX_H, BG);
+        s_rotateIconDrawn = false;
+    }
 }
 
 void drawButton(TFT_eSPI& t, int x, int y, int w, int h,

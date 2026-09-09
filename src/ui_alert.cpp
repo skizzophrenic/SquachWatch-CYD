@@ -192,90 +192,142 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
         Theme::drawAlertFx(t, s_last.type, now, w, h);
     }
 
-    // Pulsing border (6 px, PINK <-> VAPOR_PINK)
-    Theme::drawPulsingBorder(t, now, Theme::VAPOR_PINK, Theme::PINK, 6);
+    // ---- header strip ------------------------------------------------
+    // Replaces the pulsing border and the "!! DETECTION !!" headline with
+    // one solid bar in the detection's own colour. Three things fall out of
+    // that. The category is readable before any word is: HACKER and the
+    // attack types come up red, cameras cyan, trackers purple. The border's
+    // six pixels come back on all four sides. And "!! DETECTION !!" stops
+    // spending the best row on the screen restating what the screen is.
+    //
+    // 42 rows because Bangers MD is a 33px cell and it has to sit inside.
+    const uint16_t typeCol = Theme::colorFor(s_last.type);
+    const int STRIP_H = 42;
+    t.fillRect(0, 0, w, STRIP_H, typeCol);
 
-    // !! DETECTION !! (blink at 200ms on / 200ms off) — Bangers comic-
-    // impact font, the bigger of the two baked-in sizes (same one the
-    // boot splash uses). ~166px wide at this size, comfortably under
-    // the narrowest (240px) screen width, so unlike the target-label
-    // line below this one never needs a fallback/shrink path. The
-    // region is cleared every frame (not just re-drawn when "on")
-    // since the sparse glyph renderer only paints ink pixels, not a
-    // full opaque cell the way t.print() does — without an explicit
-    // clear the "off" half of the blink would never actually go away.
+    // The label in Bangers MD rather than LG: MD is narrower per glyph, and
+    // the longest labels here ("PROXIMITY BEACON", "HACKER HARDWARE") are
+    // longer than the "CARD SKIMMER" the LG sizing note was written for.
+    // Measured anyway, with a fallback, because a label that runs off the
+    // side of a 240px rotation is not something to find out on hardware.
     {
-        const char* title = "!! DETECTION !!";
-        int tw = Theme::bangersTextWidth(title, Theme::BangersSize::LG);
-        int tx = (w - tw) / 2;
-        t.fillRect(tx - 2, 6, tw + 4, 38, Theme::BG);
-        if (((now / 200) % 2) == 0) {
-            Theme::drawBangersText(t, tx, 8, title, Theme::PINK, Theme::BangersSize::LG);
+        const char* tgt = targetLabel(s_last.type);
+        // The budget is the space left of the IGNORE button, NOT the screen
+        // width. IGNORE sits at (w-54, 4) and is drawn over this strip, so
+        // measuring against w put "PROXIMITY BEACON" straight through it on
+        // the 240px rotation -- which is exactly the sort of thing that only
+        // shows up on the narrow board.
+        int ibx, iby, ibw, ibh;
+        ignoreBtnRect(w, h, ibx, iby, ibw, ibh);
+        const int avail = ibx - 10 - 8;
+        const int tw = Theme::bangersTextWidth(tgt, Theme::BangersSize::MD);
+        if (tw <= avail) {
+            Theme::drawBangersText(t, 10, 4, tgt, Theme::BG, Theme::BangersSize::MD);
+        } else {
+            // No smaller Bangers exists, so step down through the built-in
+            // font rather than clip.
+            t.setTextSize(2);
+            if (t.textWidth(tgt) > avail) t.setTextSize(1);
+            t.setTextColor(Theme::BG, typeCol);
+            t.setCursor(10, (STRIP_H - t.fontHeight()) / 2);
+            t.print(tgt);
         }
     }
 
-    // Target type — same Bangers LG face as "!! DETECTION !!" above,
-    // so the two headline lines on this screen read as one voice
-    // instead of one comic-impact line over one library-default line.
-    // Widest label ("CARD SKIMMER") is ~173px at this size, still well
-    // under the narrowest (240px) screen width, so no shrink fallback
-    // needed here either.
-    {
-        const char* tgt = targetLabel(s_last.type);
-        int tw2 = Theme::bangersTextWidth(tgt, Theme::BangersSize::LG);
-        Theme::drawBangersText(t, (w - tw2) / 2, 50, tgt, Theme::VAPOR_PINK, Theme::BangersSize::LG);
-    }
-
-    // How sure we actually are — see docs/DETECTIONS.md. This is the
-    // whole point of showing it here: a Medium/Low reading should look
-    // visibly less certain than a High one, not get the same treatment.
+    // Just the grade, not the old "~60%": that was a number invented to
+    // sound precise, and the grade is what the ALERT FILTER gates on.
     Confidence conf = s_last.conf;
     uint16_t confColor = (conf == Confidence::HIGH_CONF) ? Theme::GREEN
                         : (conf == Confidence::MED_CONF) ? Theme::AMBER
                         : Theme::RED;
-    char confBuf[32];
-    snprintf(confBuf, sizeof(confBuf), "%s  ~%u%%",
-             confidenceLabel(conf), confidencePercent(conf));
-    t.setTextSize(1);
-    t.setTextColor(confColor, Theme::BG);
-    int ccw = t.textWidth(confBuf);
-    t.setCursor((w - ccw) / 2, 94);
-    t.print(confBuf);
 
-    // Vendor
-    t.setTextSize(2);
-    t.setTextColor(Theme::CYAN, Theme::BG);
-    int vw = t.textWidth(s_last.vendor);
-    t.setCursor((w - vw) / 2, 110);
-    t.print(s_last.vendor);
+    // ---- data plate ----------------------------------------------------
+    // A solid ground with a hairline in the type's colour. The background
+    // still runs behind and around it, so the screen keeps its character,
+    // but six-pixel text stops competing with a sunset gradient -- which
+    // was the single worst thing about the old layout.
+    const int PLATE_X = 14, PLATE_Y = STRIP_H + 12;
+    const int PLATE_W = w - 28;
+    const int PLATE_H = 100;
+    t.fillRect(PLATE_X, PLATE_Y, PLATE_W, PLATE_H, Theme::BG);
+    t.drawRect(PLATE_X, PLATE_Y, PLATE_W, PLATE_H, typeCol);
 
-    // MAC
+    // Vendor in Bangers, upper-cased. Bangers carries A-Z, 0-9, space, '!'
+    // and (since the hyphen was added for exactly this) '-'. Anything else
+    // is SKIPPED by drawBangersText with no advance, so "DroneID" would
+    // come out "DID" -- upper-casing is what makes the vendor strings in
+    // signatures.cpp renderable at all.
+    {
+        char up[sizeof(s_last.vendor)];
+        size_t i = 0;
+        for (; s_last.vendor[i] && i + 1 < sizeof(up); i++) {
+            const char c = s_last.vendor[i];
+            up[i] = (c >= 'a' && c <= 'z') ? (char)(c - 32) : c;
+        }
+        up[i] = '\0';
+        const int vw = Theme::bangersTextWidth(up, Theme::BangersSize::MD);
+        if (vw > 0 && vw <= PLATE_W - 8) {
+            Theme::drawBangersText(t, (w - vw) / 2, PLATE_Y + 4, up,
+                                   Theme::CYAN, Theme::BangersSize::MD);
+        } else {
+            t.setTextSize(2);
+            t.setTextColor(Theme::CYAN, Theme::BG);
+            t.setCursor((w - t.textWidth(s_last.vendor)) / 2, PLATE_Y + 10);
+            t.print(s_last.vendor);
+        }
+    }
+
+    // The device's own name, where it has one -- a Flipper's nickname, a
+    // Pwnagotchi's, a drone's serial, an iBeacon's deployment. Carried in
+    // Detection all along and never drawn on this screen.
     t.setTextSize(1);
     t.setTextColor(Theme::WHITE, Theme::BG);
+    if (s_last.name[0]) {
+        t.setCursor((w - t.textWidth(s_last.name)) / 2, PLATE_Y + 40);
+        t.print(s_last.name);
+    }
+
     char mac[24];
-    snprintf(mac, sizeof(mac), "MAC: %02X:%02X:%02X:%02X:%02X:%02X",
+    snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
              s_last.mac[0], s_last.mac[1], s_last.mac[2],
              s_last.mac[3], s_last.mac[4], s_last.mac[5]);
-    int mw = t.textWidth(mac);
-    t.setCursor((w - mw) / 2, 140);
+    t.setCursor((w - t.textWidth(mac)) / 2, PLATE_Y + 56);
     t.print(mac);
 
-    // RSSI / channel
-    char info[32];
-    snprintf(info, sizeof(info), "RSSI: %d dBm   CH: %u", s_last.rssi, s_last.channel);
-    int iw = t.textWidth(info);
-    t.setCursor((w - iw) / 2, 160);
+    // Signal as a bar as well as a number: -90 dBm empty, -40 full. The
+    // number is for the log; the bar is what reads from across a room.
+    {
+        const int BAR_X = PLATE_X + 60, BAR_Y = PLATE_Y + 72;
+        const int BAR_W = PLATE_W - 74, BAR_H = 10;
+        t.setTextColor(Theme::CYAN, Theme::BG);
+        t.setCursor(PLATE_X + 10, BAR_Y + 1);
+        t.print("SIGNAL");
+        int v = s_last.rssi;
+        if (v < -90) v = -90;
+        if (v > -40) v = -40;
+        const int fill = (v + 90) * (BAR_W - 2) / 50;
+        t.drawRect(BAR_X, BAR_Y, BAR_W, BAR_H, Theme::CYAN);
+        if (fill > 0) t.fillRect(BAR_X + 1, BAR_Y + 1, fill, BAR_H - 2, Theme::CYAN);
+    }
+
+    // Grade, signal, channel, sightings -- one line, already drawn in the
+    // grade's own colour. It used to sit in the strip, where it collided
+    // with both the title and the IGNORE button on a narrow rotation, and
+    // it belongs with the numbers anyway.
+    char info[56];
+    snprintf(info, sizeof(info), "%s   %d dBm   CH %u   x%u",
+             confidenceLabel(conf), s_last.rssi, s_last.channel,
+             (unsigned)s_last.hits);
+    t.setTextColor(confColor, Theme::BG);
+    t.setCursor((w - t.textWidth(info)) / 2, PLATE_Y + PLATE_H - 12);
     t.print(info);
 
-    // Signal radar: bearing is derived from the MAC so it stays put
-    // for the duration of this alert instead of jittering every frame;
-    // distance from center reflects RSSI (closer = stronger signal).
+    // Signal radar: bearing is derived from the MAC so it stays put for
+    // the duration of this alert instead of jittering every frame;
+    // distance from centre reflects RSSI (closer = stronger signal).
     float bearing = (float)((s_last.mac[4] ^ (s_last.mac[5] << 3)) & 0xFF)
                     / 255.0f * 6.2831853f;
-    Theme::drawSignalRadar(t, w / 2, 192, 22, now, s_last.rssi, bearing);
-
-    // Glitchy wordmark
-    Theme::drawGlitchText(t, 220, "SQUACHWATCH", Theme::VAPOR_PINK, now);
+    Theme::drawSignalRadar(t, w / 2, PLATE_Y + PLATE_H + 26, 20, now, s_last.rssi, bearing);
 
     // MORE INFO -- opens the same explanation panel LOG's long-press
     // menu does (see uiAlertHitMoreInfo()), so a fresh detection can be

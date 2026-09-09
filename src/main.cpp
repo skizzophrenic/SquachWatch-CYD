@@ -1446,9 +1446,9 @@ void loop() {
     // orientation (portrait), so rotation was pure unused complexity
     // there — see Theme::setRotateIconVisible(false) in setup(), which
     // also hides the icon itself, not just this handler. When
-    // Settings::rotationLocked() is on, the icon still draws (it's a
-    // user-facing OFF switch, not a hardware constraint like AWOK's) but
-    // the tap does nothing — avoids an accidental rotation mid-scan.
+    // Settings::rotationLocked() is on, the icon is not drawn either (see
+    // drawTitleBar) and this handler is skipped — so there is no control
+    // on screen that looks live and does nothing.
 #if !defined(AWOK)
     if (tp.valid && !Settings::rotationLocked() &&
         (state == AppState::CLEAR || state == AppState::LOG ||
