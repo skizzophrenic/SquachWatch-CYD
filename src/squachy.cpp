@@ -774,6 +774,15 @@ static void refreshOutfitUnlocks() {
 // outfit is consulted from several places in the draw, and duplicating
 // that path would leave two versions to keep in step.
 static int8_t s_outfitOverride = -1;
+static int8_t s_shadeOverride  = -1;
+
+// Every read of the shade tint goes through this so an override cannot be
+// half-applied -- the lens and the frame are drawn in different places and
+// two of them disagreeing would be worse than no override at all.
+static uint8_t activeShadeIdx() {
+    if (s_shadeOverride >= 0) return (uint8_t)s_shadeOverride;
+    return s_shadeIdx;
+}
 
 static OutfitId currentOutfit() {
     if (s_outfitOverride >= 0 && s_outfitOverride < (int8_t)OUTFITS_N)
@@ -1203,8 +1212,15 @@ static const uint8_t BUBBLE_MAX_LINES = 2;
 // both of them.
 static const uint32_t BUBBLE_POP_MS = 220;
 
-static bool bubblePop(TFT_eSPI& t, int bx, int topY, int bw, int bh) {
-    const uint32_t now = millis();
+static bool bubblePop(TFT_eSPI& t, int bx, int topY, int bw, int bh, uint32_t now) {
+    // `now` is passed in rather than read from millis(). This was the one
+    // animation in the file reading a different clock than everything else,
+    // and it cost the emulator every speech bubble it ever rendered: the
+    // one-shot renderer drives `now` as virtual time but leaves millis() on
+    // the wall clock, and it draws far more than 220ms of frames in under
+    // 220ms of real time -- so the pop never completed and every bubble came
+    // out a flat sliver. Hardware was always fine, which is exactly what
+    // makes it the kind of instrument fault worth hunting.
     if (now < bubbleStart) return false;
     const uint32_t e = now - bubbleStart;
     if (e >= BUBBLE_POP_MS) return false;
@@ -1261,7 +1277,7 @@ static int risenBubbleTop(int topY, int bx, int bw, int screenW) {
     return ry;
 }
 static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text,
-                       bool mayRise = false) {
+                       uint32_t now, bool mayRise = false) {
     t.setTextSize(1);
     t.setTextWrap(false);
     int screenW = t.width();
@@ -1276,7 +1292,7 @@ static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text,
         if (bx + bw > screenW - 2) bx = screenW - 2 - bw;
         if (bx < 2) bx = 2;
         const int by = mayRise ? risenBubbleTop(topY, bx, bw, screenW) : topY;
-        if (bubblePop(t, bx, by, bw, bh)) return;
+        if (bubblePop(t, bx, by, bw, bh, now)) return;
         t.fillRoundRect(bx, by, bw, bh, 3, Theme::BG);
         t.drawRoundRect(bx, by, bw, bh, 3, Theme::VAPOR_PINK);
         t.setTextColor(Theme::WHITE, Theme::BG);
@@ -1307,7 +1323,7 @@ static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text,
     // Written as the same call rather than a hardcoded topY so that if the
     // wrap width ever narrows, this starts rising on its own.
     const int by = mayRise ? risenBubbleTop(topY, bx, bw, screenW) : topY;
-    if (bubblePop(t, bx, by, bw, bh)) return;
+    if (bubblePop(t, bx, by, bw, bh, now)) return;
     t.fillRoundRect(bx, by, bw, bh, 3, Theme::BG);
     t.drawRoundRect(bx, by, bw, bh, 3, Theme::VAPOR_PINK);
     t.setTextColor(Theme::WHITE, Theme::BG);
@@ -1525,6 +1541,10 @@ void setOutfitPreview(int8_t idx) {
     s_outfitOverride = idx;
 }
 
+void setShadesPreview(int8_t idx) {
+    s_shadeOverride = idx;
+}
+
 void unlockPet() {
     ensurePrefsLoaded();
     if (s_petUnlocked) return;                  // already had him; stay quiet
@@ -1680,6 +1700,123 @@ static const char* const WINK_LINES[] = {
     "*wink* Just between us.",
     "Still here. Still watching.",
 };
+
+#if SQUACH_MESH
+// ---- SquachMesh: the conversation two Squachys have -------------------
+//
+// Four beats, because a visit has a shape: somebody turns up, somebody
+// answers, they stand around, somebody leaves. Split into host and guest
+// pools rather than one shared bank so the two never say the same kind of
+// thing at each other -- the host is at home and the guest is passing
+// through, and the lines should not be interchangeable.
+//
+// Only ever ONE bubble on screen at a time, alternating. Two Squachys with
+// two speech bubbles on a 240px-tall screen is not a conversation, it is a
+// pile-up; taking turns is what makes it read as talking.
+static const char* const MEET_HOST_LINES[] = {
+    "Oh -- company.",
+    "Well. Look who found us.",
+    "Huh. Same shades and everything.",
+    "Didn't think there were more of me.",
+    "Company. The good kind.",
+    "Someone else is watching too.",
+    "Two of us now. Better odds.",
+    "Look at that. Reinforcements.",
+    "Hey. You're one of mine.",
+    "Wasn't expecting that.",
+    "Another one. Hey.",
+    "Now there's a sight.",
+};
+static const char* const MEET_GUEST_LINES[] = {
+    "Heard there was someone watching.",
+    "Room for one more?",
+    "Saw your signal. Had to say hi.",
+    "Nice setup you've got.",
+    "Same job, different pocket.",
+    "Just passing through.",
+    "Figured I'd check in.",
+    "Been walking a while.",
+    "Good spot for it.",
+    "You get many visitors?",
+    "Quiet round here?",
+    "Don't mind me.",
+};
+static const char* const HANG_HOST_LINES[] = {
+    "Four eyes are better than two.",
+    "You take that side.",
+    "Nothing yet. Between us.",
+    "This is nice, actually.",
+    "Split the watch?",
+    "Standing here beats standing here alone.",
+    "Two of us and it's still quiet.",
+    "Comfortable silence. My favourite kind.",
+    "I'll take the left.",
+    "Somebody's got to keep watch.",
+    "We should do this more.",
+    "Don't let me keep you.",
+};
+static const char* const HANG_GUEST_LINES[] = {
+    "You seeing what I'm seeing?",
+    "Nope. Still nothing.",
+    "Quiet shift.",
+    "Your sunset's better than mine.",
+    "I'd have brought snacks.",
+    "Not a bad view from here.",
+    "Long as nobody's looking at us.",
+    "I could stand here a while.",
+    "You always this quiet?",
+    "Nothing on my end either.",
+    "Beats the walk over.",
+    "Yeah. All clear my side.",
+};
+static const char* const PART_HOST_LINES[] = {
+    "Take it easy out there.",
+    "Stay sharp.",
+    "Come back sometime.",
+    "See you around.",
+    "That was nice.",
+    "Watch yourself.",
+};
+static const char* const PART_GUEST_LINES[] = {
+    "Back to it, then.",
+    "Keep your eyes open.",
+    "Been good. Later.",
+    "Same time next signal.",
+    "Don't get followed.",
+    "Later, big guy.",
+};
+#define POOL_N(a) (uint8_t)(sizeof(a) / sizeof((a)[0]))
+
+void visitReaction(VisitMoment m) {
+    switch (m) {
+        case VisitMoment::MEET:
+            say(pick(MEET_HOST_LINES, POOL_N(MEET_HOST_LINES)), 4200); break;
+        case VisitMoment::HANGOUT:
+            say(pick(HANG_HOST_LINES, POOL_N(HANG_HOST_LINES)), 4200); break;
+        case VisitMoment::PART:
+            say(pick(PART_HOST_LINES, POOL_N(PART_HOST_LINES)), 3600); break;
+    }
+}
+
+const char* nicknameAt(uint8_t idx) {
+    return NICKNAMES[idx % NICKNAMES_N];
+}
+
+const char* visitGuestLine(VisitMoment m, uint32_t seed) {
+    // Indexed rather than random: the guest's bubble is redrawn every frame
+    // it is up, and a fresh roll per frame would flicker through the whole
+    // pool instead of saying one thing. The caller supplies a value that
+    // changes once per line.
+    switch (m) {
+        case VisitMoment::MEET:
+            return MEET_GUEST_LINES[seed % POOL_N(MEET_GUEST_LINES)];
+        case VisitMoment::HANGOUT:
+            return HANG_GUEST_LINES[seed % POOL_N(HANG_GUEST_LINES)];
+        default:
+            return PART_GUEST_LINES[seed % POOL_N(PART_GUEST_LINES)];
+    }
+}
+#endif // SQUACH_MESH
 
 // Flavor pool for watchAlertReaction() -- fires once when a watched
 // target reappears. No teaching line here (see squachy.h) since
@@ -3414,7 +3551,7 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         // Lens tint is a player-chosen cosmetic (Settings > SHADES
         // COLOR) rather than always cyan — see cycleShadesColor().
         static const uint16_t SHADE_TINTS[4] = { CYAN, VAPOR_PINK, GREEN, VAPOR_PURPLE };
-        uint16_t shadeTint = SHADE_TINTS[s_shadeIdx % 4];
+        uint16_t shadeTint = SHADE_TINTS[activeShadeIdx() % 4];
         // His blink used to be ((now / 2200) % 40) < 3 -- a perfect
         // metronome, both eyes, identical duration, forever. Regularity
         // at that scale is most of what makes a face read as a machine
@@ -3621,7 +3758,7 @@ void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const
     // under the "TALKING SASQUACH" subtitle above, in the extra room
     // this bigger boot-splash scale leaves between his head and the
     // subtitle.
-    if (line) drawBubble(t, cx, headTopY - 34, line);
+    if (line) drawBubble(t, cx, headTopY - 34, line, now);
 }
 
 // Small filled heart, used by the tap-to-pet flourish.
@@ -4332,7 +4469,7 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     }
     if (showBubble) {
         if (s_onboardActive) drawOnboardBubble(t, cx, topY, bubbleText, s_onboardStep, ONBOARD_N);
-        else                 drawBubble(t, cx, topY, bubbleText, true);
+        else                 drawBubble(t, cx, topY, bubbleText, now, true);
     }
     // Gated: hadBubble tracks "did we draw a bubble last FRAME" for the
     // erase above. drawBubble()/drawOnboardBubble() compute identical
