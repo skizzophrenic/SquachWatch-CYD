@@ -172,8 +172,11 @@ static const char* LOG_OPEN_LINES[] = {
 
 static const char* LOG_CLEAR_LINES[] = {
     "Log wiped. Fresh start, cryptid style.",
-    "Evidence? Never heard of her.",
 };
+// Counted rather than hard-coded at the call site. pick() indexes with
+// random(0, n), so a literal that outlives an edit to the list above walks
+// off the end -- which removing a line from this pool would have done.
+static const uint8_t LOG_CLEAR_N = sizeof(LOG_CLEAR_LINES) / sizeof(LOG_CLEAR_LINES[0]);
 
 static const char* ROTATE_LINES[] = {
     "Whoa, easy on the spins.",
@@ -1001,7 +1004,7 @@ void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal, uint32_t hitCo
             say(pick(LOG_OPEN_LINES, 2), MIN_BUBBLE_MS);
             break;
         case Event::LOG_CLEARED:
-            say(pick(LOG_CLEAR_LINES, 2), MIN_BUBBLE_MS);
+            say(pick(LOG_CLEAR_LINES, LOG_CLEAR_N), MIN_BUBBLE_MS);
             break;
         case Event::ROTATED:
             say(pick(ROTATE_LINES, 3), MIN_BUBBLE_MS);
