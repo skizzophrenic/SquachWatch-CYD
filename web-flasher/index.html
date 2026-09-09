@@ -1416,6 +1416,32 @@
     var ocDesc = document.getElementById('overclockDesc');
     if (!select || !installBtn) return;
 
+    // ---- Unlisted lab build ---------------------------------------------
+    // squachwatch.com/?lab=1 adds a development build to the picker. It is
+    // UNLISTED, not secret: this repo and this Pages site are both public,
+    // so anyone who knows the parameter can flash it. That is fine -- the
+    // point is that nobody arrives at an unfinished feature by accident,
+    // not that nobody can reach it.
+    //
+    // The option is only added when the manifest is actually deployed. A
+    // real release ships a site without it, so ?lab=1 after v1.5.22 finds
+    // nothing and silently leaves the picker alone rather than offering a
+    // button that 404s.
+    try {
+      if (/(?:^|[?&])lab=1(?:&|$)/.test(window.location.search)) {
+        fetch('./manifest-cyd-fast-mesh.json', { cache: 'no-store' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (m) {
+            if (!m) return;
+            var o = document.createElement('option');
+            o.value = './manifest-cyd-fast-mesh.json';
+            o.textContent = 'LAB — ' + (m.name || 'development build');
+            select.appendChild(o);
+          })
+          .catch(function () { /* no lab build deployed; nothing to add */ });
+      }
+    } catch (e) { /* location unavailable in some embeddings */ }
+
     var WHITE_SCREEN_LINE =
       "White screen after flashing? Your CYD's probably got the other display driver — try the other 2.8\" option in that dropdown.";
 

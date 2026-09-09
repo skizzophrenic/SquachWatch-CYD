@@ -1,0 +1,25 @@
+{
+  "name": "SquachWatch-CYD LAB (SquachMesh, 2.8\" CYD 80MHz)",
+  "version": "0.0.0",
+  "funding_url": "https://talkingsasquach.com",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        {
+          "path": "esp32-bootloader.bin",
+          "offset": 4096
+        },
+        {
+          "path": "esp32-partitions.bin",
+          "offset": 32768
+        },
+        {
+          "path": "cyd-fast-mesh-firmware.bin",
+          "offset": 65536
+        }
+      ]
+    }
+  ]
+}

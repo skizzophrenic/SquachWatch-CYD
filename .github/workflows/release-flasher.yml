@@ -22,7 +22,13 @@ name: Build and release firmware
 on:
   push:
     tags:
+      # v*.*.* is a real release: notes required, GitHub Release created.
       - "v*.*.*"
+      # lab-* is a development build. Same firmware pipeline and the same
+      # Pages deploy, but no release notes and no public Release -- it exists
+      # so an unfinished feature can be flashed from a machine that is not
+      # the one it was built on. See the `is_lab` output below.
+      - "lab-*"
   workflow_dispatch: {}
 
 permissions:
@@ -46,8 +52,19 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          # Everything downstream keys off this rather than re-testing the
+          # tag shape, so there is one definition of what a lab build is.
+          case "$TAG" in
+            lab-*) echo "is_lab=true"  >> "$GITHUB_OUTPUT" ;;
+            *)     echo "is_lab=false" >> "$GITHUB_OUTPUT" ;;
+          esac
 
       - name: Require release notes
+        # Skipped for lab builds, which are not releases and have no notes to
+        # write. The gate itself is NOT relaxed for real tags: it exists
+        # because v1.5.5 and v1.5.6 both shipped with an auto-generated body
+        # containing nothing but a changelog link.
+        if: steps.ver.outputs.is_lab != 'true'
         # Fails in seconds, before the ~4 minute firmware build, because a
         # release with no notes is not a finished release and finding that
         # out afterwards means the tag is already public.
@@ -84,7 +101,12 @@ jobs:
         # platformio.ini now but isn't public-release-ready yet (it boot
         # loops on real hardware -- see platformio.ini) -- the rest are
         # and get built/published together below.
-        run: pio run -e cyd -e cyd-ili9341 -e awok -e cyd-fast -e cyd-ili9341-fast
+        run: |
+          pio run -e cyd -e cyd-ili9341 -e awok -e cyd-fast -e cyd-ili9341-fast
+          # The lab variant is built on every tag, not just lab-* ones, so a
+          # real release proves it still compiles. It is only PUBLISHED on a
+          # lab tag -- see the Pages step.
+          pio run -e cyd-fast-mesh
 
       - name: Merge into one flashable image (per board)
         run: |
@@ -130,7 +152,7 @@ jobs:
           # board that looks bricked.
           for f in bootloader partitions; do
             ref="$(sha256sum ".pio/build/cyd/$f.bin" | cut -d' ' -f1)"
-            for v in cyd cyd-ili9341 awok cyd-fast cyd-ili9341-fast; do
+            for v in cyd cyd-ili9341 awok cyd-fast cyd-ili9341-fast cyd-fast-mesh; do
               got="$(sha256sum ".pio/build/$v/$f.bin" | cut -d' ' -f1)"
               if [ "$got" != "$ref" ]; then
                 echo "::error::$v/$f.bin differs from cyd/$f.bin."
@@ -142,7 +164,7 @@ jobs:
               fi
             done
             cp ".pio/build/cyd/$f.bin" "esp32-$f.bin"
-            echo "esp32-$f.bin is identical across all five builds ($ref)"
+            echo "esp32-$f.bin is identical across all six builds ($ref)"
           done
           # The app, which is the only part that actually differs. cyd-fast
           # and cyd-ili9341-fast are the 80MHz display-overclock variants
@@ -151,7 +173,7 @@ jobs:
           # merged image for those on purpose: the merged blob is a
           # manual-recovery artifact, and recovery should land you on the
           # spec-compliant build rather than the overclocked one.
-          for v in cyd cyd-ili9341 awok cyd-fast cyd-ili9341-fast; do
+          for v in cyd cyd-ili9341 awok cyd-fast cyd-ili9341-fast cyd-fast-mesh; do
             cp ".pio/build/$v/firmware.bin" "$v-firmware.bin"
           done
 
@@ -161,7 +183,8 @@ jobs:
           import json
           for p in ("web-flasher/manifest-cyd.json", "web-flasher/manifest-cyd-ili9341.json",
                     "web-flasher/manifest-awok.json", "web-flasher/manifest-cyd-fast.json",
-                    "web-flasher/manifest-cyd-ili9341-fast.json"):
+                    "web-flasher/manifest-cyd-ili9341-fast.json",
+                    "web-flasher/manifest-cyd-fast-mesh.json"):
               m = json.load(open(p))
               m["version"] = "${{ steps.ver.outputs.version }}"
               json.dump(m, open(p, "w"), indent=2)
@@ -181,6 +204,10 @@ jobs:
           cp web-flasher/manifest-cyd-ili9341-fast.json manifest-cyd-ili9341-fast.json
 
       - name: Create GitHub Release with build artifacts
+        # A lab tag publishes a flashable build and nothing else. Creating a
+        # Release for one would put an unfinished feature in the download list
+        # next to the real firmware, which is the opposite of unlisted.
+        if: steps.ver.outputs.is_lab != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -228,6 +255,15 @@ jobs:
           cp web-flasher/manifest-awok.json _site/manifest-awok.json
           cp web-flasher/manifest-cyd-fast.json _site/manifest-cyd-fast.json
           cp web-flasher/manifest-cyd-ili9341-fast.json _site/manifest-cyd-ili9341-fast.json
+          # The lab manifest and its app ship ONLY from a lab tag. A real
+          # release deploys a site without them, so cutting v1.5.22 quietly
+          # retires whatever lab build was up -- which is the behaviour we
+          # want: the unlisted entry should not outlive the work it was for.
+          if [ "${{ steps.ver.outputs.is_lab }}" = "true" ]; then
+            cp web-flasher/manifest-cyd-fast-mesh.json _site/manifest-cyd-fast-mesh.json
+            cp cyd-fast-mesh-firmware.bin _site/cyd-fast-mesh-firmware.bin
+            echo "lab build published: cyd-fast-mesh"
+          fi
           # One shared bootloader and partition table (see the build step
           # for why that is safe and how it is enforced), then one app per
           # variant. Every manifest points at the same two shared files.
@@ -256,6 +292,9 @@ jobs:
           cp web-flasher/emulator/squachsim.wasm _site/emulator/squachsim.wasm
 
       - name: Keep the previous two releases flashable
+        # Lab tags are not releases, so there is no history to preserve and
+        # nothing here would find one.
+        if: steps.ver.outputs.is_lab != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.ver.outputs.tag }}
