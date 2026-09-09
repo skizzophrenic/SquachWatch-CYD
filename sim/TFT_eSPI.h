@@ -43,7 +43,18 @@
 #include <algorithm>
 #include "glcdfont_data.h"
 
-static const int GLCD_W = 5, GLCD_H = 7, GLCD_ADVANCE = 6;
+// The GLCD font's cell, matching the real library exactly. Five glyph
+// columns plus one blank spacer column (6 across), and EIGHT rows, not
+// seven: TFT_eSPI's fontdata[1].height is 8 and its drawChar opens a
+// window of setWindow(x, y, x+5, y+7).
+//
+// This was 7 here, and it was wrong twice over. Row eight of the glyph
+// is where the descenders of g, j, p, q and y live, so the emulator was
+// clipping them off every lowercase word it drew. And fontHeight() feeds
+// the row arithmetic on the LOG screen, so every emulator frame packed
+// its rows tighter than the hardware ever would -- 24 pixels a row
+// against the device's 27, which is a whole extra row per screen.
+static const int GLCD_W = 5, GLCD_H = 8, GLCD_ADVANCE = 6;
 
 // Standard TFT_eSPI colour constants (RGB565). Only the handful the
 // project actually reaches for outside of Theme's own palette.
@@ -109,8 +120,15 @@ public:
     // ---- text glyphs (also virtual upstream, for the same reason) --
     virtual int16_t drawChar(uint16_t c, int32_t x, int32_t y, uint8_t /*font*/ = 1) {
         if (c > 255) return GLCD_ADVANCE * textsize;
-        for (int col = 0; col < GLCD_W; col++) {
-            uint8_t bits = font[(size_t)c * GLCD_W + col];
+        // GLCD_ADVANCE columns, not GLCD_W. The sixth is always blank and
+        // exists to be painted in the background colour: real TFT_eSPI writes
+        // it (`if (i == 5) line = 0x0;`), so opaque text on hardware sits in
+        // an unbroken box. Stopping at five left a one-pixel bar of whatever
+        // was underneath showing between every pair of characters -- which on
+        // this project's backgrounds is a sunset, and is precisely the kind of
+        // thing somebody would then "fix" in the firmware.
+        for (int col = 0; col < GLCD_ADVANCE; col++) {
+            uint8_t bits = (col >= GLCD_W) ? 0x00 : font[(size_t)c * GLCD_W + col];
             for (int row = 0; row < GLCD_H; row++) {
                 bool on = (bits >> row) & 1;
                 uint16_t col565 = on ? textcolor : textbgcolor;
@@ -190,14 +208,20 @@ public:
             drawFastHLine(x0 - dx, y0 + y, 2 * dx + 1, color);
         }
     }
+    // rx or ry below 2 draws NOTHING, which looks like an off-by-one and is
+    // not: real TFT_eSPI opens with `if (rx<2) return; if (ry<2) return;`.
+    // The shim used to accept 1 and draw a stripe, so a scaled-down sprite
+    // could show detail in the emulator that the hardware never renders --
+    // and this project sizes Squachy by measuring emulator frames.
     void fillEllipse(int32_t x0, int32_t y0, int32_t rx, int32_t ry, uint32_t color) {
-        if (rx < 1 || ry < 1) return;
+        if (rx < 2 || ry < 2) return;
         for (int32_t y = -ry; y <= ry; y++) {
             int32_t dx = (int32_t)((double)rx * std::sqrt(1.0 - (double)(y * y) / (double)(ry * ry)));
             drawFastHLine(x0 - dx, y0 + y, 2 * dx + 1, color);
         }
     }
     void drawEllipse(int32_t x0, int32_t y0, int32_t rx, int32_t ry, uint32_t color) {
+        if (rx < 2 || ry < 2) return;   // same guard as the real library
         const int steps = 180;
         for (int i = 0; i < steps; i++) {
             double a0 = 2 * M_PI * i / steps, a1 = 2 * M_PI * (i + 1) / steps;
@@ -232,10 +256,12 @@ public:
         drawFastHLine(x + r, y + h - 1, w - 2 * r, color);
         drawFastVLine(x, y + r, h - 2 * r, color);
         drawFastVLine(x + w - 1, y + r, h - 2 * r, color);
-        drawCircleQuadrants(x + r, y + r, r, color, false);
-        drawCircleQuadrants(x + w - 1 - r, y + r, r, color, false);
-        drawCircleQuadrants(x + r, y + h - 1 - r, r, color, false);
-        drawCircleQuadrants(x + w - 1 - r, y + h - 1 - r, r, color, false);
+        // One quadrant per corner. The bitmask matches the real library's:
+        // 1 = top-left, 2 = top-right, 4 = bottom-right, 8 = bottom-left.
+        drawCircleHelper(x + r,         y + r,         r, 1, color);
+        drawCircleHelper(x + w - 1 - r, y + r,         r, 2, color);
+        drawCircleHelper(x + w - 1 - r, y + h - 1 - r, r, 4, color);
+        drawCircleHelper(x + r,         y + h - 1 - r, r, 8, color);
     }
     void fillRoundRect(int32_t x, int32_t y, int32_t w, int32_t h, int32_t r, uint32_t color) {
         fillRect(x + r, y, w - 2 * r, h, color);
@@ -273,7 +299,7 @@ public:
     // (not "helpfully" treating the argument as a size) is deliberate:
     // it's what would surface a real latent bug in the caller instead
     // of hiding it.
-    int16_t fontHeight(int font) const { return font == 1 ? GLCD_H * textsize : 0; }
+    int16_t fontHeight(int font) const { return font == 1 ? GLCD_H * textsize : 0; }  // 8 * size, per fontdata[1].height
     int16_t fontHeight() const { return GLCD_H * textsize; }
     int16_t textWidth(const char* s) const {
         int16_t w = 0;
@@ -324,16 +350,48 @@ protected:
     bool transparent = false;
 
 private:
-    // Quarter-circle outline helper for drawRoundRect -- draws whichever
-    // 90-degree arc the caller needs by brute-force angle sweep rather
-    // than the classic 4-way Bresenham symmetry trick, since round-rect
-    // only ever wants one specific quadrant at each corner and this
-    // stays simpler to read than threading a quadrant mask through the
-    // symmetric version above.
-    void drawCircleQuadrants(int32_t cx, int32_t cy, int32_t r, uint32_t color, bool) {
-        for (int a = 0; a < 360; a++) {
-            double rad = a * M_PI / 180.0;
-            drawPixel((int32_t)(cx + r * cos(rad)), (int32_t)(cy + r * sin(rad)), color);
+    // Quarter-circle outline helper for drawRoundRect, with the same corner
+    // bitmask the real library takes: 1 top-left, 2 top-right, 4
+    // bottom-right, 8 bottom-left.
+    //
+    // What was here before swept a FULL 360 degrees at each corner, despite
+    // its name, its comment, and an unnamed trailing bool that was plainly
+    // meant to pick the quadrant and was never read. So every drawRoundRect
+    // stamped four complete circles inset from the corners, and because
+    // every caller fills and then outlines, three quarters of each circle
+    // landed on top of the fill. On a 160x80 rect with r=20 that was 352
+    // outline pixels drawn inside the shape. The toasters and the speech
+    // bubbles wore them.
+    //
+    // Midpoint Bresenham now, emitting only the octants the mask asks for --
+    // which is also what removes the two lesser faults of the sweep: 360
+    // fixed samples both wasted work at r=3 (360 drawPixel calls for a dozen
+    // pixels) and left gaps past r=57, where the circumference needs more
+    // pixels than the loop had samples.
+    void drawCircleHelper(int32_t x0, int32_t y0, int32_t r, uint8_t corner, uint32_t color) {
+        if (r <= 0) return;
+        int32_t f = 1 - r, ddF_x = 1, ddF_y = -2 * r, x = 0, y = r;
+        while (x < y) {
+            if (f >= 0) { y--; ddF_y += 2; f += ddF_y; }
+            x++;
+            ddF_x += 2;
+            f += ddF_x;
+            if (corner & 0x4) {   // bottom right
+                drawPixel(x0 + x, y0 + y, color);
+                drawPixel(x0 + y, y0 + x, color);
+            }
+            if (corner & 0x2) {   // top right
+                drawPixel(x0 + x, y0 - y, color);
+                drawPixel(x0 + y, y0 - x, color);
+            }
+            if (corner & 0x8) {   // bottom left
+                drawPixel(x0 - y, y0 + x, color);
+                drawPixel(x0 - x, y0 + y, color);
+            }
+            if (corner & 0x1) {   // top left
+                drawPixel(x0 - y, y0 - x, color);
+                drawPixel(x0 - x, y0 - y, color);
+            }
         }
     }
 };
