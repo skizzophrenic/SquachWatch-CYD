@@ -319,9 +319,9 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     s_wasActive = anyActive;
 
     // Nothing on the row while nothing is happening. ALL CLEAR is gone and
-    // ACTIVE DETECTIONS does not replace it: a permanent label asserting
-    // "active" over a screen of zeroes is just untrue, and the counters
-    // underneath already say the same thing more precisely.
+    // the headline does not replace it: a permanent label asserting anything
+    // over a screen of zeroes is just untrue, and the counters underneath
+    // already say the same thing more precisely.
     //
     // Blank is not a compromise here, it is the better screen. Squachy's
     // geometry hangs off counterTextTop rather than this row, so he does not
@@ -344,7 +344,16 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         const int i0 = (int)huePos % 6, i1 = (i0 + 1) % 6;
         const uint16_t col =
             Theme::blend(RAINBOW[i0], RAINBOW[i1], (uint16_t)((huePos - (int)huePos) * 255));
-        const char* msg = "ACTIVE DETECTIONS";
+        // Not a status label any more. This row now appears BECAUSE an
+        // event happened, so it reads as the event: what the device just
+        // noticed, in the voice it would use if it could talk. The counters
+        // underneath carry the type and the count, which is the job a label
+        // like ACTIVE DETECTIONS was doing twice and less precisely.
+        //
+        // The apostrophe is a real glyph, hand-cut for this -- see
+        // g_MD_APOS_bits. Without it the renderer would drop the character
+        // silently and the screen would say SOMETHINGS NEARBY.
+        const char* msg = "SOMETHING'S NEARBY";
         // 2px black outline: draw the same text at every offset in a
         // 5x5 grid around the real position (minus the center) in
         // black first, then the real color on top. A full grid, not
@@ -369,11 +378,12 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
             }
             Theme::drawBangersText(t, tx, ty, msg, col, Theme::BangersSize::MD);
         } else {
-            // "ACTIVE DETECTIONS" is long enough to overflow the
-            // narrowest (240px portrait) rotation at this font's fixed
-            // size — Bangers has no smaller step to fall back to like
-            // the built-in font does, so drop to that instead rather
-            // than clip.
+            // Kept as a guard, not because the current headline needs
+            // it: SOMETHING'S NEARBY measures 216px against the 232 a
+            // 240px portrait screen leaves, so it clears by 16. Bangers
+            // has no smaller step to fall back to the way the built-in
+            // font does, so any future headline that outgrows the narrow
+            // rotation drops to the built-in face rather than clipping.
             t.setTextSize(2);
             int sw = t.textWidth(msg);
             int sx = (w - sw) / 2, sy = counterTextTop - HEADLINE_PAD - t.fontHeight(2);

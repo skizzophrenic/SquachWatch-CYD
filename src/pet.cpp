@@ -300,7 +300,7 @@ void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom) {
         // with him is the only place that is always safe up there.
         //
         // On the floor the opposite is true: level with him puts the bubble
-        // straight through the ACTIVE DETECTIONS headline, which is drawn
+        // straight through the SOMETHING'S NEARBY headline, which is drawn
         // after the pet and would paint over the line he came to say. Above
         // his head there is nothing but Squachy, and a speech bubble in
         // front of him reads exactly as intended.
