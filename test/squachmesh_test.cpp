@@ -206,5 +206,45 @@ int main() {
            probe.shade == keep.shade && probe.custom == keep.custom);
     }
 
+    suite("SquachEmit's hand-built payload decodes");
+    {
+        // Byte-for-byte what SquachEmit lays out in fireSquachMesh(), typed
+        // out again rather than shared. That duplication IS the test: two
+        // independent implementations agreeing about a format neither owns
+        // proves something, whereas one implementation called from both
+        // sides proves only that it equals itself.
+        //
+        // The company ID prefix is stripped by the receive hook before
+        // decode() sees it, so this starts at the magic.
+        const uint8_t nick = 7, outfit = 12, shade = 2;
+        uint8_t e[20];
+        e[0] = 'S'; e[1] = 'Q'; e[2] = 'M'; e[3] = '1';
+        e[4] = 1;
+        uint16_t w = (uint16_t)((nick & 0x0F) << 12) |
+                     (uint16_t)((outfit & 0x0F) << 8) |
+                     (uint16_t)((shade & 0x03) << 6);
+        w |= (uint16_t)(1u << 5);                 // custom-name bit
+        e[5] = (uint8_t)(w & 0xFF);
+        e[6] = (uint8_t)(w >> 8);
+        e[7] = 0;
+        const char* nm = "ZERO COOL";
+        for (size_t i = 0; i < 12; i++) e[8 + i] = (i < strlen(nm)) ? (uint8_t)nm[i] : 0;
+
+        ck("it decodes", decode(e, 20, p));
+        ck("nickname agrees", p.nick == nick);
+        ck("outfit agrees",   p.outfit == outfit);
+        ck("shades agree",    p.shade == shade);
+        ck("it is custom",    p.custom);
+        ck("the name agrees", strcmp(p.name, "ZERO COOL") == 0);
+
+        // And the indexed form, which is what a device with no typed name
+        // sends -- ten bytes on the wire once the company prefix is off.
+        uint8_t f[8];
+        memcpy(f, e, 8);
+        f[5] = (uint8_t)(f[5] & ~(1u << 5));      // clear the custom bit
+        ck("the indexed form decodes", decode(f, 8, p));
+        ck("and reports no name", !p.custom && p.name[0] == 0);
+    }
+
     return report();
 }
