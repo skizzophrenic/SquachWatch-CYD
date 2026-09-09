@@ -255,6 +255,8 @@ jobs:
             firmware-awok-merged.bin             manifest-cyd.json             manifest-cyd-ili9341.json             manifest-awok.json             manifest-cyd-fast.json             manifest-cyd-ili9341-fast.json
 
       - name: Assemble Pages site
+        env:
+          GH_TOKEN: ${{ github.token }}
         # The flasher ships each board's three raw regions rather than
         # the single merged image, and the manifests place them at their
         # real offsets (0x1000/0x8000/0x10000). That matters: `esptool
@@ -281,14 +283,30 @@ jobs:
           cp web-flasher/manifest-awok.json _site/manifest-awok.json
           cp web-flasher/manifest-cyd-fast.json _site/manifest-cyd-fast.json
           cp web-flasher/manifest-cyd-ili9341-fast.json _site/manifest-cyd-ili9341-fast.json
-          # The lab manifest and its app ship ONLY from a lab tag. A real
-          # release deploys a site without them, so cutting v1.5.22 quietly
-          # retires whatever lab build was up -- which is the behaviour we
-          # want: the unlisted entry should not outlive the work it was for.
+          # A LAB RUN MUST NOT CHANGE WHAT THE PUBLIC PAGE SERVES.
+          #
+          # A Pages deploy is wholesale -- there is no partial update -- so a
+          # lab run republishes the entire site whether it means to or not.
+          # The first one shipped this build's normal-board binaries, which
+          # are master HEAD rather than the release, and stamped every
+          # manifest lab-<sha>. Somebody arriving for the released firmware
+          # got an unreleased build labelled with a commit.
+          #
+          # So the root site is restored from the latest release first, and
+          # only then does the lab build get added alongside it. The lab
+          # firmware is the sole thing this run contributes.
           if [ "${{ steps.ver.outputs.is_lab }}" = "true" ]; then
+            LATEST="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
+            if [ -z "$LATEST" ]; then
+              echo "::error::No release to restore the root site from."
+              exit 1
+            fi
+            echo "Restoring root site from $LATEST"
+            gh release download "$LATEST" -D _site --clobber \
+              -p '*-firmware.bin' -p 'manifest-*.json' -p 'esp32-*.bin'
             cp web-flasher/manifest-cyd-fast-mesh.json _site/manifest-cyd-fast-mesh.json
             cp cyd-fast-mesh-firmware.bin _site/cyd-fast-mesh-firmware.bin
-            echo "lab build published: cyd-fast-mesh"
+            echo "lab build published alongside $LATEST: cyd-fast-mesh"
           fi
           # One shared bootloader and partition table (see the build step
           # for why that is safe and how it is enforced), then one app per
@@ -318,9 +336,11 @@ jobs:
           cp web-flasher/emulator/squachsim.wasm _site/emulator/squachsim.wasm
 
       - name: Keep the previous two releases flashable
-        # Lab tags are not releases, so there is no history to preserve and
-        # nothing here would find one.
-        if: steps.ver.outputs.is_lab != 'true'
+        # Runs on lab builds too. Skipping it was a mistake with a live
+        # consequence: this step is what writes versions.json and the
+        # per-release directories the flasher's version dropdown reads, and
+        # a lab deploy without it 404'd both. The history here belongs to the
+        # RELEASES -- it has nothing to do with what triggered the run.
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.ver.outputs.tag }}
