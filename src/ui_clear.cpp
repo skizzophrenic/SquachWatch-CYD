@@ -186,7 +186,19 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // It used to bottom-align to countersTop, which put it at row 146 --
     // floating across his shins in the middle of otherwise empty space,
     // with 17 rows of nothing between it and the numbers it belongs to.
-    static const int HEADLINE_H   = 28;
+    // LG, not MD. The size is a consequence of the word: at 90px LG the
+    // headline uses under a third of a 320px row, where the old 17-character
+    // one needed MD just to fit and still ran 216px. Short text does not
+    // want the same face at a smaller size, it wants the bigger face -- and
+    // this row is a burst that cuts in for a moment, so it has to land.
+    static const Theme::BangersSize HEADLINE_SIZE = Theme::BangersSize::LG;
+    // Measured off a render at HEADLINE_SIZE by diffing a seeded frame
+    // against a --noseed one, which isolates the headline from a background
+    // that repaints every row of this band: the painted result runs ty+4 to
+    // ty+32, so 29 rows of which the 24-pass outline is the outer 2 each
+    // way. 33 is what puts that last painted row exactly HEADLINE_PAD above
+    // the counter text.
+    static const int HEADLINE_H   = 33;
     static const int HEADLINE_PAD = 5;
     const int headlineTop = counterTextTop - HEADLINE_PAD - HEADLINE_H;
 
@@ -345,15 +357,15 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         const uint16_t col =
             Theme::blend(RAINBOW[i0], RAINBOW[i1], (uint16_t)((huePos - (int)huePos) * 255));
         // Not a status label any more. This row now appears BECAUSE an
-        // event happened, so it reads as the event: what the device just
-        // noticed, in the voice it would use if it could talk. The counters
-        // underneath carry the type and the count, which is the job a label
-        // like ACTIVE DETECTIONS was doing twice and less precisely.
+        // event happened, so it reads as the event rather than describing
+        // the screen's state -- the job a label like ACTIVE DETECTIONS was
+        // doing twice, and less precisely than the counters underneath.
         //
-        // The apostrophe is a real glyph, hand-cut for this -- see
-        // g_MD_APOS_bits. Without it the renderer would drop the character
-        // silently and the screen would say SOMETHINGS NEARBY.
-        const char* msg = "SOMETHING'S NEARBY";
+        // One word because the subject was the vague half. SOMETHING'S
+        // NEARBY said nothing the counters do not say better; NEARBY is the
+        // half that carries the meaning, and dropping the other one is what
+        // buys the bigger face above.
+        const char* msg = "NEARBY";
         // 2px black outline: draw the same text at every offset in a
         // 5x5 grid around the real position (minus the center) in
         // black first, then the real color on top. A full grid, not
@@ -368,22 +380,22 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
             {-2, 1},{-1, 1},{0, 1},{1, 1},{2, 1},
             {-2, 2},{-1, 2},{0, 2},{1, 2},{2, 2},
         };
-        int tw = Theme::bangersTextWidth(msg, Theme::BangersSize::MD);
+        int tw = Theme::bangersTextWidth(msg, HEADLINE_SIZE);
         int ty = headlineTop;
         if (tw <= w - 8) {
             int tx = (w - tw) / 2;
             for (uint8_t i = 0; i < 24; i++) {
                 Theme::drawBangersText(t, tx + OUTLINE_OFS[i][0], ty + OUTLINE_OFS[i][1],
-                                        msg, Theme::BLACK, Theme::BangersSize::MD);
+                                        msg, Theme::BLACK, HEADLINE_SIZE);
             }
-            Theme::drawBangersText(t, tx, ty, msg, col, Theme::BangersSize::MD);
+            Theme::drawBangersText(t, tx, ty, msg, col, HEADLINE_SIZE);
         } else {
-            // Kept as a guard, not because the current headline needs
-            // it: SOMETHING'S NEARBY measures 216px against the 232 a
-            // 240px portrait screen leaves, so it clears by 16. Bangers
-            // has no smaller step to fall back to the way the built-in
-            // font does, so any future headline that outgrows the narrow
-            // rotation drops to the built-in face rather than clipping.
+            // Kept as a guard, not because the current headline needs it:
+            // NEARBY measures 90px in LG against the 232 a 240px portrait
+            // screen leaves, so it clears by a factor of two and a half.
+            // Bangers has no step below MD to fall back to the way the
+            // built-in font does, so any future headline that outgrows the
+            // narrow rotation drops to the built-in face rather than clip.
             t.setTextSize(2);
             int sw = t.textWidth(msg);
             int sx = (w - sw) / 2, sy = counterTextTop - HEADLINE_PAD - t.fontHeight(2);
