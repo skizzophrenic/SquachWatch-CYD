@@ -34,6 +34,7 @@ namespace MeshProbe {
     void  tick(uint32_t) {}
     void  noteAdvert() {}
     Stats stats() { return Stats{}; }
+    bool  concluded() { return false; }
 }
 
 // No radio here either. The emulator supplies a guest through --peer, which

@@ -131,7 +131,8 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
         // not an answer and should not be able to look like one.
         y = drawLine(t, y, ms.cycles >= 4 ? Theme::GREEN : Theme::AMBER,
                      "DELTA:", "%d%%  (n=%u, now %s)",
-                     (int)ms.deltaPct, (unsigned)ms.cycles, ms.advOn ? "ON" : "OFF");
+                     (int)ms.deltaPct, (unsigned)ms.cycles,
+                     MeshProbe::concluded() ? "done" : (ms.advOn ? "ON" : "OFF"));
         // The other half of phase 0. The broadcaster role was compiled out
         // because its overhead made the CLEAR screen's framebuffer realloc on
         // rotate fail; this build turns it back on, so the largest contiguous

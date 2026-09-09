@@ -425,34 +425,42 @@ static uint16_t s_cycles  = 0;
 
 void noteAdvert() { s_armSeen++; }
 
+static bool s_advBuilt = false;
+
 static void setAdvertising(bool on) {
     NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
     if (!adv) return;
     if (!on) { adv->stop(); return; }
 
-    // The real payload, so the measurement is of the thing that will ship
-    // rather than of an empty advert that costs less to send.
-    SquachMesh::Peer me{};
-    me.nick   = 0;
-    me.outfit = 0;
-    me.shade  = 0;
-    me.custom = false;
-    me.name[0] = '\0';
-    uint8_t buf[SquachMesh::LEN_MAX];
-    const size_t n = SquachMesh::encode(me, buf);
+    // Built ONCE. The probe flips arms every thirty seconds by design, and
+    // rebuilding the advert on each flip was 120 allocation cycles an hour
+    // for a payload that never changes -- the measurement does not need a
+    // fresh string, it needs the radio on.
+    if (!s_advBuilt) {
+        // The real payload, so the measurement is of the thing that will
+        // ship rather than of an empty advert that costs less to send.
+        SquachMesh::Peer me{};
+        me.nick = 0; me.outfit = 0; me.shade = 0;
+        me.custom = false; me.name[0] = '\0';
+        uint8_t buf[SquachMesh::LEN_MAX];
+        const size_t n = SquachMesh::encode(me, buf);
 
-    NimBLEAdvertisementData d;
-    // Company ID first, little-endian, then our magic -- see squachmesh.h
-    // for why 0xFFFF and why the magic is not optional with it.
-    std::string md;
-    md.push_back((char)(SquachMesh::COMPANY_ID & 0xFF));
-    md.push_back((char)(SquachMesh::COMPANY_ID >> 8));
-    md.append((const char*)buf, n);
-    d.setManufacturerData(md);
-    adv->setAdvertisementData(d);
-    // NimBLE takes intervals in 0.625ms units.
-    adv->setMinInterval((uint16_t)(ADV_MS * 8 / 5));
-    adv->setMaxInterval((uint16_t)(ADV_MS * 8 / 5 + 16));
+        // Company ID first, little-endian, then our magic -- see
+        // squachmesh.h for why 0xFFFF and why the magic is not optional.
+        std::string md;
+        md.reserve(n + 2);
+        md.push_back((char)(SquachMesh::COMPANY_ID & 0xFF));
+        md.push_back((char)(SquachMesh::COMPANY_ID >> 8));
+        md.append((const char*)buf, n);
+
+        NimBLEAdvertisementData d;
+        d.setManufacturerData(md);
+        adv->setAdvertisementData(d);
+        // NimBLE takes intervals in 0.625ms units.
+        adv->setMinInterval((uint16_t)(ADV_MS * 8 / 5));
+        adv->setMaxInterval((uint16_t)(ADV_MS * 8 / 5 + 16));
+        s_advBuilt = true;
+    }
     adv->start();
 }
 
@@ -464,8 +472,17 @@ void begin() {
     s_advOn = false;
 }
 
+// The experiment stops once it has an answer. Twenty arms of each is far
+// more than enough to see a duty-cycle effect, and continuing to flip the
+// radio afterwards is 120 start/stop cycles an hour buying nothing -- into
+// the same heap this was partly measuring. The pooled result keeps being
+// reported; it just stops being added to.
+static const uint16_t ENOUGH_CYCLES = 20;
+bool concluded() { return s_cycles >= ENOUGH_CYCLES; }
+
 void tick(uint32_t now) {
     if (!s_started) { s_started = true; s_armAt = now; setAdvertising(false); return; }
+    if (concluded()) return;
     if (now - s_armAt < ARM_MS) return;
 
     const uint32_t dur = now - s_armAt;
@@ -543,6 +560,11 @@ static size_t buildSelf(uint8_t* out) {
     return SquachMesh::encode(me, out);
 }
 
+// The payload we last handed the stack, so an unchanged one is never handed
+// over twice.
+static uint8_t s_lastAdv[SquachMesh::LEN_MAX];
+static size_t  s_lastAdvLen = 0;
+
 static void setAdvertising(bool on) {
     NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
     if (!adv) return;
@@ -551,17 +573,38 @@ static void setAdvertising(bool on) {
     uint8_t buf[SquachMesh::LEN_MAX];
     const size_t n = buildSelf(buf);
 
+    // Only touch the stack when the advert actually differs.
+    //
+    // This was every ten seconds unconditionally, and each pass built a
+    // std::string and a NimBLEAdvertisementData and pushed them into NimBLE
+    // -- roughly 360 allocation cycles an hour, into a heap that a one-hour
+    // soak showed dropping from a 17 KB largest free block to 1.4 KB. That
+    // is the fragmentation the broadcaster role was disabled to avoid in the
+    // first place, arriving by a route this file created.
+    //
+    // The point of re-advertising was that a changed outfit or name should
+    // propagate without a reboot. Comparing gets that for one memcmp and
+    // no allocation at all on the pass where nothing changed, which is
+    // every pass but the rare one.
+    const bool same = (n == s_lastAdvLen) && (memcmp(buf, s_lastAdv, n) == 0);
+    if (same && s_advOn) return;
+
     std::string md;
+    md.reserve(n + 2);
     md.push_back((char)(SquachMesh::COMPANY_ID & 0xFF));
     md.push_back((char)(SquachMesh::COMPANY_ID >> 8));
     md.append((const char*)buf, n);
 
     NimBLEAdvertisementData d;
     d.setManufacturerData(md);
+    if (s_advOn) adv->stop();
     adv->setAdvertisementData(d);
     adv->setMinInterval((uint16_t)(ADV_MS * 8 / 5));
     adv->setMaxInterval((uint16_t)(ADV_MS * 8 / 5 + 16));
     adv->start();
+
+    memcpy(s_lastAdv, buf, n);
+    s_lastAdvLen = n;
     s_advOn = true;
 }
 
@@ -590,8 +633,9 @@ bool onManufacturerData(const uint8_t* d, size_t len, const uint8_t* mac, uint32
 
 void tick(uint32_t now) {
     const bool want = Settings::meshEnabled();
-    // Re-advertised periodically rather than once, so a change of outfit or
-    // name reaches everybody without waiting for a reboot.
+    // Polled rather than event-driven, but setAdvertising() now returns on a
+    // memcmp when nothing changed, so this costs one comparison every ten
+    // seconds instead of rebuilding the advert 360 times an hour.
     if (want && (!s_advOn || (now - s_advAt) > 10000)) { setAdvertising(true); s_advAt = now; }
     if (!want && s_advOn) setAdvertising(false);
 

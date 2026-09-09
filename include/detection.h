@@ -52,6 +52,8 @@ namespace MeshProbe {
     void  tick(uint32_t now);
     void  noteAdvert();        // called from the BLE scan callback
     Stats stats();
+    // True once the measurement has enough arms and has stopped flipping.
+    bool  concluded();
 }
 
 // The radio half. Advertises who we are and listens for somebody else doing
