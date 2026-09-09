@@ -29,6 +29,7 @@ enum class SettingsRow : uint8_t {
     PET,
     VIEW_DIARY,
     RESET_STATS,
+    SQUACHY_NAME,   // opens the payphone; SquachMesh builds only
     BACK,
     COUNT,
     NONE = 255

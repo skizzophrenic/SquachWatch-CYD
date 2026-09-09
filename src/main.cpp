@@ -29,6 +29,9 @@
 #include "ui_outfit.h"
 #include "ui_outfit_unlock.h"
 #include "ui_ignorelist.h"
+#if SQUACH_MESH
+#include "ui_phone.h"
+#endif
 #include "ignore_list.h"
 #include "ignore_list.h"
 #include "ui_detfilter.h"
@@ -1049,6 +1052,14 @@ static void enterIgnoreList() {
     transitionStart = millis();
     uiIgnoreListInit(*canvas);
 }
+
+#if SQUACH_MESH
+static void enterPhone() {
+    state = AppState::PHONE;
+    transitionStart = millis();
+    uiPhoneInit(*canvas);
+}
+#endif
 
 static void enterDetFilter() {
     state = AppState::DETECTION_FILTER;
@@ -2438,6 +2449,9 @@ void loop() {
                         case SettingsRow::DETECTION_FILTER: enterDetFilter(); break;
                         case SettingsRow::POWER_SAVER: enterPower(); break;
                         case SettingsRow::IGNORED_DEVICES:  enterIgnoreList(); break;
+#if SQUACH_MESH
+                        case SettingsRow::SQUACHY_NAME:     enterPhone(); break;
+#endif
                         // These ask first -- see the confirm panel over in
                         // ui_settings. A row earns one when tapping it a
                         // second time does not put things back: calibration
@@ -2479,6 +2493,17 @@ void loop() {
             }
             break;
         }
+#if SQUACH_MESH
+        case AppState::PHONE: {
+            uiPhoneTick(*canvas, now, engine);
+            // Act on press, not release. A keypad is the one place where
+            // waiting for the finger to come up makes typing feel broken --
+            // and there is no drag gesture here to be confused with.
+            if (touchJustDown) uiPhoneTouch(tp.x, tp.y, now);
+            if (uiPhoneDone()) enterSettings();
+            break;
+        }
+#endif
         case AppState::IGNORE_LIST: {
             uiIgnoreListTick(*canvas, now);
             // Same drag-to-scroll / act-on-release gesture the detection

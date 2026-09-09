@@ -375,6 +375,18 @@ static uint32_t s_bestClearMs      = 0;  // longest-ever gap between detections
 static uint32_t s_bestSessionCount = 0;  // most detections seen in one boot
 static uint8_t  s_firstType        = (uint8_t)DetectionType::UNKNOWN;
 static uint8_t  s_shadeIdx         = 0;
+#if SQUACH_MESH
+// Declared here with the other persisted prefs rather than beside its
+// accessors: ensurePrefsLoaded() reads it far earlier in the file.
+//
+// Gated with the rest of the feature. The plan says a typed name stands on
+// its own merits whether or not SquachMesh ever ships -- and it does -- but
+// nothing in a non-mesh build can SET one, so shipping the storage there
+// would be dead weight AND would break the guarantee that a shipping binary
+// is untouched by this work. Promoting it out of the flag is one deliberate
+// edit on the day that becomes true.
+static char     s_customName[CUSTOM_NAME_MAX + 1] = {0};
+#endif
 static uint8_t  s_nickIdx          = 0;
 static uint8_t  s_outfitIdx        = 0;
 static bool     s_allOutfitsUnlocked = false;  // hidden button-sequence easter egg
@@ -883,6 +895,9 @@ static void ensurePrefsLoaded() {
     s_bestSessionCount = s_petPrefs.getUInt("bestSess", 0);
     s_firstType       = s_petPrefs.getUChar("firstType", (uint8_t)DetectionType::UNKNOWN);
     s_shadeIdx        = s_petPrefs.getUChar("shadeIdx", 0);
+#if SQUACH_MESH
+    s_petPrefs.getString("cname", s_customName, sizeof(s_customName));
+#endif
     s_nickIdx         = s_petPrefs.getUChar("nick", 0);
     s_outfitIdx       = s_petPrefs.getUChar("outfitIdx", 0);
     s_allOutfitsUnlocked = s_petPrefs.getBool("allOutfits", false);
@@ -1459,6 +1474,13 @@ DetectionType firstDetectionType() {
 
 // ---- Cosmetics ----
 const char* nickname() {
+#if SQUACH_MESH
+    // A typed name wins over the curated list. Everything that shows a name
+    // -- the settings row, the nameplate, a peer's advert -- goes through
+    // here, so there is one answer to "what is he called".
+    ensurePrefsLoaded();
+    if (s_customName[0]) return s_customName;
+#endif
     ensurePrefsLoaded();
     return NICKNAMES[s_nickIdx % NICKNAMES_N];
 }
@@ -1795,6 +1817,27 @@ void visitReaction(VisitMoment m) {
             say(pick(HANG_HOST_LINES, POOL_N(HANG_HOST_LINES)), 4200); break;
         case VisitMoment::PART:
             say(pick(PART_HOST_LINES, POOL_N(PART_HOST_LINES)), 3600); break;
+    }
+}
+
+const char* customName() {
+    ensurePrefsLoaded();
+    return s_customName[0] ? s_customName : nullptr;
+}
+
+void setCustomName(const char* n) {
+    ensurePrefsLoaded();
+    uint8_t len = 0;
+    if (n) while (len < CUSTOM_NAME_MAX && n[len]) { s_customName[len] = n[len]; len++; }
+    s_customName[len] = '\0';
+    if (len == 0) {
+        // Preferences::putString on an empty value is the same trap
+        // putBytes had: it does not write, so the OLD name survives the
+        // reboot and a cleared name comes back. Remove the key instead --
+        // exactly the ignore-list fix from v1.5.20.
+        s_petPrefs.remove("cname");
+    } else {
+        s_petPrefs.putString("cname", s_customName);
     }
 }
 

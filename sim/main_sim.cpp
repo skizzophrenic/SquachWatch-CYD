@@ -33,6 +33,7 @@
 #include "ui_hunt.h"
 #include "ui_rawscan.h"
 #include "squachmesh.h"
+#include "ui_phone.h"
 #include "ui_watchalert.h"
 #include "ui_colorcheck.h"
 #include "ui_diagnostics.h"
@@ -136,7 +137,7 @@ static std::vector<uint8_t> toRgb888(const std::vector<uint16_t>& src) {
 static void usage() {
     fprintf(stderr,
         "usage: squachsim <screen> [out.png] [options]\n"
-        "  screens: clear log alert settings detfilter power diary hunt rawscan watchalert colorcheck boot\n"
+        "  screens: clear log alert settings detfilter power diary hunt rawscan watchalert colorcheck boot phone\n"
         "  --portrait        render 240x320 instead of 320x240\n"
         "  --bg N            background style 0..9 (see Settings::Background)\n"
         "  --theme N         palette index\n"
@@ -177,6 +178,10 @@ int main(int argc, char** argv) {
     // both at SMALL. No radio involved -- the point is to find out whether
     // two of him fit and whether the renderer survives being called twice.
     int peerOutfit = -1;
+    // --type feeds the payphone a tap sequence: digits are key presses,
+    // "." waits past the multi-tap window. Typing is the feature; a screen
+    // that only renders proves nothing about it.
+    std::string typeSeq;
     std::string rawPath;
     for (int i = 2; i < argc; i++) {
         std::string a = argv[i];
@@ -194,6 +199,7 @@ int main(int argc, char** argv) {
         else if (a == "--alert" && i + 1 < argc) alertType = atoi(argv[++i]);
         else if (a == "--noseed") noSeed = true;
         else if (a == "--peer" && i + 1 < argc) peerOutfit = atoi(argv[++i]);
+        else if (a == "--type" && i + 1 < argc) typeSeq = argv[++i];
         else if (a == "--scroll" && i + 1 < argc) scrollBy = atoi(argv[++i]);
     }
     if (sequence < 1) sequence = 1;
@@ -281,6 +287,7 @@ int main(int argc, char** argv) {
         else if (screen == "diary")    uiDiaryTick(frame, t, engine);
         else if (screen == "hunt")     uiHuntTick(frame, t, engine);
         else if (screen == "rawscan")  uiRawScanTick(frame, t, engine, true, true, false, "");
+        else if (screen == "phone")    uiPhoneTick(frame, t, engine);
         else if (screen == "watchalert") uiWatchAlertTick(frame, t, engine, true);
         else if (screen == "colorcheck") uiColorCheckTick(frame, t);
         else if (screen == "diagnostics") {
@@ -324,6 +331,20 @@ int main(int argc, char** argv) {
     else if (screen == "diagnostics") uiDiagnosticsInit(frame);
     else if (screen == "colorcheck") uiColorCheckInit(frame);
     else if (screen == "boot")       uiBootInit(frame);
+    else if (screen == "phone")      {
+        uiPhoneInit(frame);
+        uint32_t tnow = now;
+        // Key centres, computed the same way ui_phone.cpp lays them out.
+        for (size_t i = 0; i < typeSeq.size(); i++) {
+            if (typeSeq[i] == '.') { tnow += 900; continue; }
+            const int k = typeSeq[i] - '0';
+            if (k < 0 || k > 11) continue;
+            const int kx = 78 + (164 - (48 * 3 + 3 * 2)) / 2 + (k % 3) * 51 + 24;
+            const int ky = 8 + 60 + (k / 3) * 33 + 15;
+            uiPhoneTouch(kx, ky, tnow);
+            tnow += 120;
+        }
+    }
     else if (screen == "hunt")       { engine.huntBle((const uint8_t*)"\x11\x22\x33\x44\x55\x66", "AirTag"); }
     else if (screen == "alert")      {
         const Detection* d = nullptr;

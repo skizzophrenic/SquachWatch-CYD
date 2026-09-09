@@ -22,7 +22,11 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::RGB_SWAP, SettingsRow::ROTATION_LOCK,
     SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE, SettingsRow::DETECTION_FILTER,
     SettingsRow::IGNORED_DEVICES,
-    SettingsRow::NICKNAME, SettingsRow::SHADES_COLOR, SettingsRow::SQUACHY_SIZE,
+    SettingsRow::NICKNAME,
+#if SQUACH_MESH
+    SettingsRow::SQUACHY_NAME,
+#endif
+    SettingsRow::SHADES_COLOR, SettingsRow::SQUACHY_SIZE,
     SettingsRow::OUTFIT, SettingsRow::PET,
     SettingsRow::REPLAY_INTRO, SettingsRow::SHOW_OFF, SettingsRow::VIEW_DIARY,
     SettingsRow::POWER_SAVER,
@@ -32,7 +36,7 @@ static const uint8_t ALL_ROWS_N = sizeof(ALL_ROWS) / sizeof(ALL_ROWS[0]);
 
 static bool isSquachyOnlyRow(SettingsRow r) {
     return r == SettingsRow::REPLAY_INTRO || r == SettingsRow::SHOW_OFF ||
-           r == SettingsRow::NICKNAME ||
+           r == SettingsRow::NICKNAME || r == SettingsRow::SQUACHY_NAME ||
            r == SettingsRow::SHADES_COLOR || r == SettingsRow::SQUACHY_SIZE ||
            r == SettingsRow::OUTFIT ||
            r == SettingsRow::PET;
@@ -56,6 +60,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::IGNORED_DEVICES:
             return RowGroupId::BEHAVIOR;
         case SettingsRow::NICKNAME:
+        case SettingsRow::SQUACHY_NAME:
         case SettingsRow::SHADES_COLOR:
         case SettingsRow::SQUACHY_SIZE:
         case SettingsRow::OUTFIT:
@@ -504,6 +509,17 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
         case SettingsRow::SQUACHY_SIZE:
             label = "SIZE"; value = Settings::squachySizeLabel();
             break;
+#if SQUACH_MESH
+        case SettingsRow::SQUACHY_NAME: {
+            // Shows what he is actually called, which is the typed name when
+            // there is one -- Squachy::nickname() already resolves that, so
+            // this row cannot disagree with the nameplate.
+            label = "NAME";
+            const char* cn = Squachy::customName();
+            value = cn ? cn : "TAP TO TYPE";
+            break;
+        }
+#endif
         case SettingsRow::OUTFIT:
             label = "OUTFIT";
             snprintf(valBuf, valBufN, "%s (%u/%u)", Squachy::outfitName(),

@@ -110,8 +110,12 @@ enum class AppState : uint8_t {
                             // costume; returns to CLEAR when dismissed
     IGNORE_LIST      = 14, // muted devices, reached via Settings'
                             // "IGNORED DEVICES" row
-    POWER_SAVER      = 15  // battery settings, reached via Settings'
+    POWER_SAVER      = 15, // battery settings, reached via Settings'
                             // "POWER SAVER" row
+    PHONE            = 16  // the payphone: type a name for Squachy. Reached
+                            // via Settings' "NAME" row. Only ever entered on
+                            // a SquachMesh build -- the row is not offered
+                            // otherwise -- but the state costs nothing.
 };
 
 enum class ButtonId : uint8_t {

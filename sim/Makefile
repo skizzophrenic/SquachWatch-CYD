@@ -37,6 +37,7 @@ CXXFLAGS := -std=c++17 -O1 -g -Wall -Wno-unused-parameter \
 UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/squachy.cpp \
             $(SRC)/squachmesh.cpp \
+            $(SRC)/ui_phone.cpp \
             $(SRC)/settings.cpp \
             $(SRC)/signatures.cpp \
             $(SRC)/remote_id.cpp \

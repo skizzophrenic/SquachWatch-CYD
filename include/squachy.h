@@ -242,6 +242,19 @@ namespace Squachy {
     // arrives carrying somebody else's -- both devices ship the same table,
     // which is the whole reason four bits was enough to send it.
     const char* nicknameAt(uint8_t idx);
+
+    // The typed name, if there is one. Twelve is a RENDERING budget, not a
+    // storage one: the name has to fit a nameplate under a Squachy drawn at
+    // SMALL, which is tighter than the settings row it lives in.
+    // NOT called NAME_MAX: that is a POSIX macro out of <limits.h>, so the
+    // declaration expanded to `static const uint8_t 255 = 12;` and every
+    // translation unit that included this header failed at once.
+    static const uint8_t CUSTOM_NAME_MAX = 12;
+
+    // nullptr or "" clears it and the curated nickname comes back. Anything
+    // else is stored and becomes what nickname() reports.
+    const char* customName();
+    void        setCustomName(const char* n);
 #endif
 
     // Draws Squachy and his speech bubble, and advances his idle
