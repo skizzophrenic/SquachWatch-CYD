@@ -133,17 +133,10 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
     {
         y += 4;
         const MeshProbe::Stats ms = MeshProbe::stats();
-        y = drawLine(t, y, Theme::CYAN, "ADV OFF:", "%u.%u /s",
+        y = drawLine(t, y, Theme::CYAN, "BLE SEEN:", "%u.%u /s",
                      (unsigned)(ms.offRate / 10), (unsigned)(ms.offRate % 10));
-        y = drawLine(t, y, Theme::CYAN, "ADV ON:", "%u.%u /s  @%ums",
-                     (unsigned)(ms.onRate / 10), (unsigned)(ms.onRate % 10),
-                     (unsigned)ms.advMs);
-        // Sample size next to the answer, because a delta from one cycle is
-        // not an answer and should not be able to look like one.
-        y = drawLine(t, y, ms.cycles >= 4 ? Theme::GREEN : Theme::AMBER,
-                     "DELTA:", "%d%%  (n=%u, now %s)",
-                     (int)ms.deltaPct, (unsigned)ms.cycles,
-                     MeshProbe::concluded() ? "done" : (ms.advOn ? "ON" : "OFF"));
+        y = drawLine(t, y, ms.advOn ? Theme::GREEN : Theme::VAPOR_PINK,
+                     "ADVERTISING:", "%s", ms.advOn ? "yes" : "no");
         // The other half of phase 0. The broadcaster role was compiled out
         // because its overhead made the CLEAR screen's framebuffer realloc on
         // rotate fail; this build turns it back on, so the largest contiguous

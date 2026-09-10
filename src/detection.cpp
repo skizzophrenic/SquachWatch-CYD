@@ -407,103 +407,55 @@ bool DetectionEngine::init() {
 #if SQUACH_MESH
 namespace MeshProbe {
 
-// 30s arms. Long enough that a passing bus is a fraction of one, short
-// enough that a ten-minute run is ten samples of each rather than one.
-static const uint32_t ARM_MS = 30000;
-// What a visit actually needs. Peer discovery for a mascot walking on screen
-// does not want sub-second latency, and the whole point of measuring is that
-// a slower advert should cost less scan time.
-static const uint16_t ADV_MS = 1500;
+// THE EXPERIMENT IS OVER, and this is what is left of it.
+//
+// It alternated advertising on and off in thirty-second arms to find out
+// whether transmitting costs the scanner anything. Answer, measured on
+// hardware over sixty-two arms: 68.7 adverts/sec with advertising off
+// against 68.6 with it on at a 1500ms interval. Nothing.
+//
+// It had to be torn out rather than left running, because it advertised
+// WITHOUT ASKING. Only Mesh::tick consulted Settings::meshEnabled(); the
+// probe drove the same NimBLE advertising singleton straight past it, so a
+// device told not to announce itself announced itself every other arm. On a
+// tool whose whole premise is that it does not transmit unless asked, that
+// is not a measurement artefact, it is the thing the setting exists to
+// prevent.
+//
+// It also fought Mesh for the same singleton the rest of the time, switching
+// advertising off for thirty seconds at a stretch while a peer was trying to
+// find us.
+//
+// What stays is the counter, which costs one increment per advert and
+// answers "is the radio actually hearing anything" -- worth having when a
+// peer does not turn up and the question is whether the scanner is alive.
+static uint32_t s_seen    = 0;
+static uint32_t s_windowAt = 0;
+static uint16_t s_rate     = 0;   // adverts/sec x10
 
-static uint32_t s_armAt   = 0;
-static bool     s_advOn   = false;
-static bool     s_started = false;
-static uint32_t s_armSeen = 0;
-static uint32_t s_offSeen = 0, s_onSeen = 0;
-static uint32_t s_offMs   = 0, s_onMs  = 0;
-static uint16_t s_cycles  = 0;
+void noteAdvert() { s_seen++; }
 
-void noteAdvert() { s_armSeen++; }
-
-static bool s_advBuilt = false;
-
-static void setAdvertising(bool on) {
-    NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
-    if (!adv) return;
-    if (!on) { adv->stop(); return; }
-
-    // Built ONCE. The probe flips arms every thirty seconds by design, and
-    // rebuilding the advert on each flip was 120 allocation cycles an hour
-    // for a payload that never changes -- the measurement does not need a
-    // fresh string, it needs the radio on.
-    if (!s_advBuilt) {
-        // The real payload, so the measurement is of the thing that will
-        // ship rather than of an empty advert that costs less to send.
-        SquachMesh::Peer me{};
-        me.nick = 0; me.outfit = 0; me.shade = 0;
-        me.custom = false; me.name[0] = '\0';
-        uint8_t buf[SquachMesh::LEN_MAX];
-        const size_t n = SquachMesh::encode(me, buf);
-
-        // Company ID first, little-endian, then our magic -- see
-        // squachmesh.h for why 0xFFFF and why the magic is not optional.
-        std::string md;
-        md.reserve(n + 2);
-        md.push_back((char)(SquachMesh::COMPANY_ID & 0xFF));
-        md.push_back((char)(SquachMesh::COMPANY_ID >> 8));
-        md.append((const char*)buf, n);
-
-        NimBLEAdvertisementData d;
-        d.setManufacturerData(md);
-        adv->setAdvertisementData(d);
-        // NimBLE takes intervals in 0.625ms units.
-        adv->setMinInterval((uint16_t)(ADV_MS * 8 / 5));
-        adv->setMaxInterval((uint16_t)(ADV_MS * 8 / 5 + 16));
-        s_advBuilt = true;
-    }
-    adv->start();
-}
-
-void begin() {
-    s_started = false;
-    s_armSeen = s_offSeen = s_onSeen = 0;
-    s_offMs = s_onMs = 0;
-    s_cycles = 0;
-    s_advOn = false;
-}
-
-// The experiment stops once it has an answer. Twenty arms of each is far
-// more than enough to see a duty-cycle effect, and continuing to flip the
-// radio afterwards is 120 start/stop cycles an hour buying nothing -- into
-// the same heap this was partly measuring. The pooled result keeps being
-// reported; it just stops being added to.
-static const uint16_t ENOUGH_CYCLES = 20;
-bool concluded() { return s_cycles >= ENOUGH_CYCLES; }
+void begin() { s_seen = 0; s_windowAt = 0; s_rate = 0; }
 
 void tick(uint32_t now) {
-    if (!s_started) { s_started = true; s_armAt = now; setAdvertising(false); return; }
-    if (concluded()) return;
-    if (now - s_armAt < ARM_MS) return;
-
-    const uint32_t dur = now - s_armAt;
-    if (s_advOn) { s_onSeen  += s_armSeen; s_onMs  += dur; s_cycles++; }
-    else         { s_offSeen += s_armSeen; s_offMs += dur; }
-
-    s_armSeen = 0;
-    s_advOn = !s_advOn;
-    setAdvertising(s_advOn);
-    s_armAt = now;
+    if (!s_windowAt) { s_windowAt = now; return; }
+    const uint32_t dur = now - s_windowAt;
+    if (dur < 5000) return;                       // a five-second window
+    s_rate = (uint16_t)((uint64_t)s_seen * 10000ull / dur);
+    s_seen = 0;
+    s_windowAt = now;
 }
+
+bool concluded() { return true; }                 // it did; see above
 
 Stats stats() {
     Stats st{};
-    st.offRate = s_offMs ? (uint16_t)((uint64_t)s_offSeen * 10000ull / s_offMs) : 0;
-    st.onRate  = s_onMs  ? (uint16_t)((uint64_t)s_onSeen  * 10000ull / s_onMs)  : 0;
-    st.deltaPct = (st.offRate && st.onRate)
-                    ? (int16_t)(((int32_t)st.onRate - st.offRate) * 100 / st.offRate) : 0;
-    st.cycles = s_cycles;
-    st.advOn  = s_advOn;
-    st.advMs  = ADV_MS;
+    st.offRate = s_rate;                          // the live rate now
+    st.onRate  = 0;
+    st.deltaPct = 0;
+    st.cycles = 0;
+    st.advOn  = Mesh::advertising();
+    st.advMs  = 1500;
     st.heapFreeKb  = ESP.getFreeHeap() / 1024;
     st.heapBlockKb = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024;
     return st;
