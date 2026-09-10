@@ -23,7 +23,7 @@ CXX      ?= g++
 CXXFLAGS := -std=c++17 -O1 -g -Wall -Wextra -Wno-unused-parameter \
             -I$(SIM) -I$(INC)
 
-TESTS := remote_id_test ibeacon_test signatures_test emitter_roundtrip_test ignore_list_test hacker_test pwnagotchi_test shim_fidelity_test squachmesh_test qwerty_test
+TESTS := remote_id_test ibeacon_test signatures_test emitter_roundtrip_test ignore_list_test hacker_test pwnagotchi_test shim_fidelity_test squachmesh_test qwerty_test meshmsg_test
 
 # Only the units under test get linked in. Pulling the whole firmware
 # would drag in TFT_eSPI, NimBLE and the UI, and a test that needs a
@@ -41,6 +41,9 @@ squachmesh_test_SRCS         := $(SRC)/squachmesh.cpp
 squachmesh_test_FLAGS        := -DSQUACH_MESH=1
 qwerty_test_SRCS             := $(SRC)/qwerty.cpp
 qwerty_test_FLAGS            := -DSQUACH_MESH=1
+# The protocol without the cipher -- see the top of meshmsg_test.cpp.
+meshmsg_test_SRCS            := $(SRC)/meshmsg.cpp $(SRC)/meshwords.cpp
+meshmsg_test_FLAGS           := -DSQUACH_MESH=1
 # Header-only: the shim under test IS sim/TFT_eSPI.h.
 shim_fidelity_test_SRCS      :=
 
