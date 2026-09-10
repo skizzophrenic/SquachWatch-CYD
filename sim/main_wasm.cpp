@@ -51,6 +51,7 @@ EM_JS(void, squachsim_nvs_write, (const char* key, const char* val), {
 #include "detection.h"
 #include "sim_touch.h"
 #include "sim_detections.h"
+#include "meshsim.h"
 
 // Defined by the firmware's main.cpp, which this target compiles.
 void setup();
@@ -163,6 +164,13 @@ EMSCRIPTEN_KEEPALIVE int sw_detect(int type, int rssi) {
     engine.postBle(d);
     return 1;
 }
+
+// The virtual SquachMesh peer (meshsim.h). The same command language the
+// native harness's P line takes, so the two emulators cannot disagree about
+// what "outfit 12" means. Strings in, JSON out.
+EMSCRIPTEN_KEEPALIVE int         sw_mesh(const char* cmd) { return MeshSim::command(cmd) ? 1 : 0; }
+EMSCRIPTEN_KEEPALIVE const char* sw_mesh_status()        { return MeshSim::status(); }
+EMSCRIPTEN_KEEPALIVE const char* sw_mesh_catalog()       { return MeshSim::catalog(); }
 
 EMSCRIPTEN_KEEPALIVE int sw_state()    { return (int)state; }
 EMSCRIPTEN_KEEPALIVE int sw_rotation() { return (int)screenRotation; }

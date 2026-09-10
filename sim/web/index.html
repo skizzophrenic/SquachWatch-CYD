@@ -136,6 +136,14 @@
   select,button{font:inherit;font-size:13px;border-radius:6px}
   select{background:#0d0616;color:var(--ink-loud);border:1px solid var(--rule);padding:7px 9px;width:100%}
   .btns{display:flex;gap:8px;flex-wrap:wrap}
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+  input[type=text]{font:inherit;font-size:13px;border-radius:6px;background:#0d0616;color:var(--ink-loud);
+    border:1px solid var(--rule);padding:7px 9px;width:100%;box-sizing:border-box;text-transform:uppercase}
+  label.tick{flex-direction:row;align-items:center;gap:6px;margin:0;text-transform:none;
+    letter-spacing:0;font-size:13px;color:var(--ink)}
+  .mesh-status{margin:14px 0 10px;font-size:13px;color:var(--cyan);min-height:2.8em;line-height:1.45}
+  .card p.fine{font-size:12px;color:var(--mute)}
+  button:disabled{opacity:.4;cursor:default}
   button{
     background:linear-gradient(90deg,var(--purple),var(--pink));color:#fff;border:0;
     padding:8px 14px;cursor:pointer;letter-spacing:.05em;
@@ -214,6 +222,34 @@
     </div>
 
     <div class="card">
+      <h2>A SquachWatch nearby</h2>
+      <p>A second SquachWatch that only exists in this page. It sends real SquachMesh adverts into the real firmware, so it turns up exactly when a board nearby would &mdash; and it answers what you send it.</p>
+      <div class="btns" style="margin-bottom:14px">
+        <button id="meshHere">Bring it nearby</button>
+        <button id="meshSetup" class="ghost">Set up SquachMesh</button>
+      </div>
+      <div class="pair">
+        <label>Outfit <select id="meshOutfit"></select></label>
+        <label>Shades <select id="meshShade"></select></label>
+        <label>Nickname <select id="meshNick"></select></label>
+        <label>Custom name <input type="text" id="meshName" maxlength="12" placeholder="none"></label>
+      </div>
+      <label>Message <select id="meshLine"></select></label>
+      <div class="btns" style="align-items:center">
+        <button id="meshSay" class="ghost">Make it say</button>
+        <label class="tick"><input type="checkbox" id="meshShares" checked> Same phrase as you</label>
+        <label class="tick"><input type="checkbox" id="meshReply" checked> Answers back</label>
+      </div>
+      <div class="mesh-status" id="meshStatus" aria-live="polite"></div>
+      <p class="fine">
+        On a real board SquachMesh starts behind a warning you have to accept, then a phrase you
+        pick. Set up skips both &mdash; you can still walk through them yourself under Settings.
+        Its look is copied once, when it arrives, just as a board does: to see a new outfit or name,
+        send it away, let it leave, and bring it back.
+      </p>
+    </div>
+
+    <div class="card">
       <h2>Getting around</h2>
       <ul>
         <li>First boot runs a colour check and Squachy's walkthrough — tap through them.</li>
@@ -231,8 +267,9 @@
         hardware rather than better than it.
       </p>
       <p>
-        Not real: the radios. Detections come from the Trigger button, and the shape layer
-        isn't pixel-exact against the display library.
+        Not real: the radios. Detections come from the Trigger button, the nearby SquachWatch
+        is simulated, messages use a stand-in cipher rather than the device's AES, and the
+        shape layer isn't pixel-exact against the display library.
       </p>
       <p>
         The frame rate is capped to 33fps to match what the hardware actually manages once
@@ -358,6 +395,68 @@ $('wipe').onclick = () => {
   } catch (e) { /* private mode: nothing was persisted to begin with */ }
   queue.length = 0; held = false; setup(); lastW = 0;
 };
+
+// Which switch decides what happens, in the order a person would hit them.
+// The firmware does the deciding; this only says why.
+function meshHint(s) {
+  if (!s.present) return ['Nobody nearby. Bring it nearby to start a visit.'];
+  if (!s.detect) return ['It is in range, but your DETECT is off, so your Squachy cannot see it.',
+                         'Settings > SQUACHMESH > DETECT, or Set up.'];
+  if (!s.visiting) return ['In range. It turns up with its next advert.'];
+  const out = ['Visiting your main screen.'];
+  if (s.sending) {
+    const why = !s.messages ? 'your MESSAGES is off'
+              : !s.phrase   ? 'you have no phrase set'
+              : !s.shares   ? 'it is using a different phrase' : '';
+    out.push('It is sending "' + s.said + '"' + (why ? ' -- you will not see it: ' + why + '.' : '.'));
+  } else if (!s.messages) {
+    out.push('Your MESSAGES is off, so anything it sends is ignored.');
+  }
+  if (!s.transmit) out.push('Your TRANSMIT is off: it cannot see you or hear what you send.');
+  else if (s.heard) out.push(s.shares ? 'It heard you say "' + s.heard + '"' + (s.replyIn >= 0 ? ' and is answering.' : '.')
+                                      : 'It picked up your message but cannot read it: different phrase.');
+  return out;
+}
+function meshLines(el, lines) {
+  el.replaceChildren(...lines.map(t => Object.assign(document.createElement('div'), {textContent: t})));
+}
+
+// ---- SquachMesh: a second SquachWatch that lives in this page ------------------
+// sim/meshsim.cpp. Commands go straight in between frames -- one thread, so
+// nothing lands halfway through a loop().
+const meshCmd     = M.cwrap('sw_mesh','number',['string']);
+const meshStatus  = M.cwrap('sw_mesh_status','string',[]);
+const meshCatalog = M.cwrap('sw_mesh_catalog','string',[]);
+{
+  const cat = JSON.parse(meshCatalog());
+  for (const [id, list] of [['meshOutfit', cat.outfits], ['meshShade', cat.shades],
+                            ['meshNick', cat.nicks], ['meshLine', cat.lines]])
+    list.forEach((n, i) => $(id).add(new Option(n, i)));
+}
+let mesh = {};
+function meshShow() {
+  try { mesh = JSON.parse(meshStatus()); } catch (e) { return; }
+  $('meshHere').textContent = mesh.present ? 'Send it away' : 'Bring it nearby';
+  $('meshSay').disabled = !mesh.present;
+  for (const [id, v] of [['meshOutfit', mesh.outfit], ['meshShade', mesh.shade],
+                         ['meshNick', mesh.nick], ['meshName', mesh.name]])
+    if (document.activeElement !== $(id)) $(id).value = v;
+  $('meshShares').checked = !!mesh.shares;
+  $('meshReply').checked = !!mesh.reply;
+  meshLines($('meshStatus'), meshHint(mesh));
+}
+const meshDo = c => { meshCmd(c); meshShow(); };
+$('meshSetup').onclick = () => meshDo('setup');
+$('meshHere').onclick  = () => meshDo(mesh.present ? 'off' : 'on');
+$('meshSay').onclick   = () => meshDo('say ' + $('meshLine').value);
+$('meshOutfit').onchange = e => meshDo('outfit ' + e.target.value);
+$('meshShade').onchange  = e => meshDo('shade ' + e.target.value);
+$('meshNick').onchange   = e => meshDo('nick ' + e.target.value);
+$('meshName').onchange   = e => meshDo('name ' + e.target.value);
+$('meshShares').onchange = e => meshDo('phrase ' + (e.target.checked ? 'same' : 'other'));
+$('meshReply').onchange  = e => meshDo('reply ' + (e.target.checked ? 'on' : 'off'));
+setInterval(meshShow, 400);
+meshShow();
 
 // The device is the reference, not the host. On the CYD the whole
 // loop -- render plus the SPI push to the panel -- lands at ~33fps, so

@@ -73,6 +73,11 @@ namespace Mesh {
     const SquachMesh::Peer* peer();
     const uint8_t*          peerMac();
     bool                    advertising();
+    // Our own advert payload, as the radio should send it (src/mesh.cpp).
+    size_t                  buildSelf(uint8_t* out);
+    // The radio half, called from tick(): detection.cpp on the device,
+    // sim/meshsim.cpp in the emulator.
+    void                    radioTick(uint32_t now);
 }
 #endif
 

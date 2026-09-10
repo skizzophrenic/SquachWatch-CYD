@@ -37,17 +37,8 @@ namespace MeshProbe {
     bool  concluded() { return false; }
 }
 
-// No radio here either. The emulator supplies a guest through --peer, which
-// goes in via uiClearSetGuest and takes priority over this anyway.
-namespace Mesh {
-    static const uint8_t s_noMac[6] = {0};
-    void begin() {}
-    void tick(uint32_t) {}
-    bool onManufacturerData(const uint8_t*, size_t, const uint8_t*, uint32_t) { return false; }
-    const SquachMesh::Peer* peer() { return nullptr; }
-    const uint8_t* peerMac() { return s_noMac; }
-    bool advertising() { return false; }
-}
+// Mesh itself is no longer stubbed: src/mesh.cpp is compiled as-is, and
+// sim/meshsim.cpp stands in for the radio underneath it.
 #endif
 
 bool DetectionEngine::init() { return true; }

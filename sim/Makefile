@@ -37,10 +37,12 @@ CXXFLAGS := -std=c++17 -O1 -g -Wall -Wno-unused-parameter \
 UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/squachy.cpp \
             $(SRC)/squachmesh.cpp \
+            $(SRC)/mesh.cpp \
             $(SRC)/meshmsg.cpp \
             $(SRC)/meshwords.cpp \
             $(SRC)/meshtalk.cpp \
             $(SIM_DIR)/meshcrypto_sim.cpp \
+            $(SIM_DIR)/meshsim.cpp \
             $(SRC)/ui_phone.cpp \
             $(SRC)/qwerty.cpp \
             $(SRC)/ui_meshmenu.cpp \
@@ -120,7 +122,10 @@ WASM_OUT  := $(WASM_DIR)/squachsim.js
 # time, so nothing in the page runs and it silently sits on its
 # "booting" placeholder with a black canvas. If you add -sEXPORT_ES6=1,
 # change index.html back to an import in the same commit.
-WASM_FLAGS := -std=c++17 -Os -I$(SIM_DIR) -I$(INC) \
+# -DSQUACH_MESH=1 as the native build has it. It was missing, so the web
+# emulator compiled every SquachMesh screen out and never showed the feature
+# that every shipping board has had since v1.5.23.
+WASM_FLAGS := -std=c++17 -Os -I$(SIM_DIR) -I$(INC) -DSQUACH_MESH=1 \
               -Wno-unused-parameter \
               -include $(SIM_DIR)/Arduino.h \
               -include $(INC)/cyd_user_setup.h \

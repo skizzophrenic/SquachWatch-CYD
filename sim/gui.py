@@ -162,6 +162,7 @@ class LiveDevice:
         self.log = collections.deque(maxlen=500)
         self.log_seq = 0          # total lines ever produced, for /live/log
         self.generation = 0       # bumped per start, so a stale drain thread exits
+        self.mesh = "{}"          # the virtual peer's status, off the last frame
 
     def start(self, wipe=False):
         with self.lock:
@@ -215,6 +216,18 @@ class LiveDevice:
             buf += chunk
         return bytes(buf)
 
+    def catalog(self):
+        """The virtual peer's pickers, from the firmware's own tables."""
+        with self.lock:
+            if not self.proc or self.proc.poll() is not None:
+                self.start()
+            self.proc.stdin.write(b"K\n")
+            self.proc.stdin.flush()
+            line = self.proc.stdout.readline().decode("utf-8", "replace")
+            if not line.startswith("CAT "):
+                raise RuntimeError(f"bad catalog reply {line!r}")
+            return line[4:].strip()
+
     def exchange(self, cmds):
         """Send commands, return (w, h, state, raw) for the LAST frame.
 
@@ -236,10 +249,13 @@ class LiveDevice:
                 header = self.proc.stdout.readline()
                 if not header:
                     raise RuntimeError("emulator exited: " + " | ".join(list(self.log)[-3:]))
-                parts = header.decode("ascii", "replace").split()
+                # At most six fields: the last is the mesh status, which is
+                # JSON and may carry spaces.
+                parts = header.decode("ascii", "replace").rstrip("\r\n").split(None, 5)
                 if len(parts) < 5 or parts[0] != "FRM":
                     raise RuntimeError(f"bad frame header {header!r}")
                 w, h, nbytes, state = int(parts[1]), int(parts[2]), int(parts[3]), parts[4]
+                self.mesh = parts[5] if len(parts) > 5 else "{}"
                 result = (w, h, state, self._readexact(nbytes))
             return result
 
@@ -285,6 +301,11 @@ def live_step(params):
     if trig != "":
         rssi = params.get("rssi", [""])[0]
         cmds.append("T %d %d" % (int(trig), int(rssi) if rssi else 0))
+    # The virtual SquachMesh peer: one command per request, as its panel
+    # sends them. See sim/meshsim.h for the language.
+    mesh = params.get("mesh", [""])[0]
+    if mesh:
+        cmds.append("P " + " ".join(mesh.split())[:100])
     ev = params.get("ev", [""])[0]
     if ev in ("down", "move"):
         x = int(params.get("x", ["0"])[0])
@@ -324,7 +345,7 @@ PAGE = """<!doctype html>
   .panel { display:flex; flex-direction:column; gap:12px; min-width:230px; }
   label { display:flex; flex-direction:column; gap:4px;
           font-size:.72rem; letter-spacing:.08em; color:#8fd; text-transform:uppercase; }
-  select, input[type=number] { background:#150022; color:#fff;
+  select, input[type=number], input[type=text] { background:#150022; color:#fff;
           border:1px solid #b400ff66; border-radius:5px; padding:6px 8px; font:inherit; }
   .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
   button { background:linear-gradient(90deg,#b400ff,#ff71ce); color:#fff; border:0;
@@ -341,6 +362,7 @@ PAGE = """<!doctype html>
             font-size:.7rem; line-height:1.45; color:#7fd9a0; white-space:pre-wrap; }
   .hint { font-size:.7rem; color:#6d5c88; line-height:1.6; }
   .hide { display:none; }
+  button:disabled { opacity:.4; cursor:default; }
 </style>
 
 <header>
@@ -381,6 +403,34 @@ PAGE = """<!doctype html>
              min="-110" max="-20" step="1">
       <button id="trigBtn">Trigger</button>
     </div>
+    <label>A SquachWatch nearby</label>
+    <div class="row">
+      <button id="meshHere">Bring it nearby</button>
+      <button id="meshSetup" class="ghost" title="Emulator only: accepts the warning, turns DETECT, TRANSMIT and MESSAGES on and sets a phrase">Set up SquachMesh</button>
+    </div>
+    <div class="row">
+      <select id="meshOutfit" title="Outfit"></select>
+      <select id="meshShade" title="Shades"></select>
+      <select id="meshNick" title="Nickname"></select>
+      <input type="text" id="meshName" maxlength="12" placeholder="custom name" style="width:120px">
+    </div>
+    <div class="row">
+      <select id="meshLine" style="flex:1"></select>
+      <button id="meshSay" class="ghost">Make it say</button>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="meshShares" checked> same phrase as you</label>
+      <label class="check"><input type="checkbox" id="meshReply" checked> answers back</label>
+    </div>
+    <div id="meshStatus" class="hint"></div>
+    <p class="hint">
+      A second SquachWatch that only exists in the emulator (sim/meshsim.cpp).
+      It feeds real SquachMesh adverts and message frames into the firmware's
+      own Mesh code, so it turns up exactly when a board would. Its look is
+      copied once, on arrival, as on a board: to see a new outfit or name,
+      send it away, let it leave, and bring it back. Set up is emulator-only
+      &mdash; it skips the consent warning and the phrase screen.
+    </p>
     <label>Serial monitor</label>
     <div id="serial"></div>
     <p class="hint">
@@ -520,7 +570,9 @@ async function liveTick() {
   try {
     const q = new URLSearchParams({n: '1'});
     const ev = pending.shift();
-    if (ev && ev.trig !== undefined) {
+    if (ev && ev.mesh !== undefined) {
+      q.set('mesh', ev.mesh);
+    } else if (ev && ev.trig !== undefined) {
       q.set('trig', ev.trig);
       if (ev.rssi) q.set('rssi', ev.rssi);
     } else if (ev) {
@@ -534,6 +586,7 @@ async function liveTick() {
     if (lc.width !== w || lc.height !== h) { lc.width = w; lc.height = h; liveZoom(); }
     lctx.putImageData(toImage(lctx, w, h, buf, 0), 0, 0);
     $('stateOut').textContent = res.headers.get('X-State') || '?';
+    meshShow(res.headers.get('X-Mesh'));
     $('liveStatus').className = '';
     $('liveStatus').textContent = w + 'x' + h;
   } catch (e) {
@@ -630,6 +683,74 @@ $('detType').value = 6;   // AIRTAG, the one worth reaching for first
 $('trigBtn').onclick = () => {
   pending.push({trig: $('detType').value, rssi: $('detRssi').value});
 };
+
+// Which switch decides what happens, in the order a person would hit them.
+// The firmware does the deciding; this only says why.
+function meshHint(s) {
+  if (!s.present) return ['Nobody nearby. Bring it nearby to start a visit.'];
+  if (!s.detect) return ['It is in range, but your DETECT is off, so your Squachy cannot see it.',
+                         'Settings > SQUACHMESH > DETECT, or Set up.'];
+  if (!s.visiting) return ['In range. It turns up with its next advert.'];
+  const out = ['Visiting your main screen.'];
+  if (s.sending) {
+    const why = !s.messages ? 'your MESSAGES is off'
+              : !s.phrase   ? 'you have no phrase set'
+              : !s.shares   ? 'it is using a different phrase' : '';
+    out.push('It is sending "' + s.said + '"' + (why ? ' -- you will not see it: ' + why + '.' : '.'));
+  } else if (!s.messages) {
+    out.push('Your MESSAGES is off, so anything it sends is ignored.');
+  }
+  if (!s.transmit) out.push('Your TRANSMIT is off: it cannot see you or hear what you send.');
+  else if (s.heard) out.push(s.shares ? 'It heard you say "' + s.heard + '"' + (s.replyIn >= 0 ? ' and is answering.' : '.')
+                                      : 'It picked up your message but cannot read it: different phrase.');
+  return out;
+}
+function meshLines(el, lines) {
+  el.replaceChildren(...lines.map(t => Object.assign(document.createElement('div'), {textContent: t})));
+}
+
+/* --------------------------- SquachMesh ---------------------------- */
+// The virtual peer in sim/meshsim.cpp. Commands ride the same queue as a
+// touch, so each lands between two loop() iterations like everything else,
+// and its status comes back on every frame in X-Mesh.
+let mesh = {}, meshCat = false, meshCatBusy = false;
+function meshCmd(c) { pending.push({mesh: c}); }
+async function loadMeshCat() {
+  meshCatBusy = true;
+  try {
+    const cat = await (await fetch('/live/meshcat')).json();
+    for (const [id, list] of [['meshOutfit', cat.outfits], ['meshShade', cat.shades],
+                              ['meshNick', cat.nicks], ['meshLine', cat.lines]]) {
+      $(id).length = 0;
+      list.forEach((n, i) => $(id).add(new Option(n, i)));
+    }
+    meshCat = true;
+  } catch (e) { /* not up yet; tried again on a later frame */ }
+  meshCatBusy = false;
+}
+function meshShow(h) {
+  if (!h) return;
+  try { mesh = JSON.parse(h); } catch (e) { return; }
+  if (!meshCat && !meshCatBusy) loadMeshCat();
+  $('meshHere').textContent = mesh.present ? 'Send it away' : 'Bring it nearby';
+  $('meshSay').disabled = !mesh.present;
+  for (const [id, v] of [['meshOutfit', mesh.outfit], ['meshShade', mesh.shade],
+                         ['meshNick', mesh.nick], ['meshName', mesh.name]])
+    if (document.activeElement !== $(id)) $(id).value = v;
+  $('meshShares').checked = !!mesh.shares;
+  $('meshReply').checked = !!mesh.reply;
+  meshLines($('meshStatus'), meshHint(mesh));
+}
+$('meshSetup').onclick = () => meshCmd('setup');
+$('meshHere').onclick  = () => meshCmd(mesh.present ? 'off' : 'on');
+$('meshSay').onclick   = () => meshCmd('say ' + $('meshLine').value);
+$('meshOutfit').onchange = e => meshCmd('outfit ' + e.target.value);
+$('meshShade').onchange  = e => meshCmd('shade ' + e.target.value);
+$('meshNick').onchange   = e => meshCmd('nick ' + e.target.value);
+$('meshName').onchange   = e => meshCmd('name ' + e.target.value);
+$('meshShares').onchange = e => meshCmd('phrase ' + (e.target.checked ? 'same' : 'other'));
+$('meshReply').onchange  = e => meshCmd('reply ' + (e.target.checked ? 'on' : 'off'));
+loadMeshCat();
 liveZoom();
 
 /* ---------------------------- gallery ----------------------------- */
@@ -792,7 +913,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self._fail(e)
             return self._send(200, "application/octet-stream", raw,
                               [("X-Width", str(w)), ("X-Height", str(h)),
-                               ("X-State", state)])
+                               ("X-State", state), ("X-Mesh", DEVICE.mesh)])
+
+        if parsed.path == "/live/meshcat":
+            try:
+                body = DEVICE.catalog().encode()
+            except Exception as e:
+                return self._fail(e)
+            return self._send(200, "application/json", body)
 
         if parsed.path == "/live/log":
             since = int(params.get("since", ["0"])[0])
