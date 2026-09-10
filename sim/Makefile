@@ -45,6 +45,8 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/qwerty.cpp \
             $(SRC)/ui_meshmenu.cpp \
             $(SRC)/ui_meshwarn.cpp \
+            $(SRC)/ui_meshphrase.cpp \
+            $(SRC)/ui_meshcompose.cpp \
             $(SRC)/settings.cpp \
             $(SRC)/signatures.cpp \
             $(SRC)/remote_id.cpp \

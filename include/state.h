@@ -117,11 +117,13 @@ enum class AppState : uint8_t {
                             // a SquachMesh build -- the row is not offered
                             // otherwise -- but the state costs nothing.
     MESH_MENU        = 17, // SquachMesh's own screen: detect, transmit, name
-    MESH_WARN        = 18  // the consent gate in front of it. Stands before
+    MESH_WARN        = 18, // the consent gate in front of it. Stands before
                             // the MENU rather than before the TRANSMIT row:
                             // a warning read next to a switch reads as an
                             // obstacle, one read before there is anything to
                             // click reads as information.
+    MESH_PHRASE      = 19, // roll, show or enter the five-word phrase
+    MESH_COMPOSE     = 20  // send a message; opened from CLEAR's little bubble
 };
 
 enum class ButtonId : uint8_t {

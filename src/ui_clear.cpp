@@ -1,5 +1,10 @@
 // SquachWatch-CYD — clear (idle) screen implementation
 #include "ui_clear.h"
+// Needed this early: the message helpers sit up with the visit machine,
+// above where the rest of this file pulls these in.
+#include "theme.h"
+#include "settings.h"
+#include "meshtalk.h"
 #if SQUACH_MESH
 #include "squachmesh.h"
 #include "squachy.h"
@@ -257,6 +262,104 @@ static const SquachMesh::Peer* visitHosting() {
 // state. Anything asking should see the same visitor the screen does,
 // including while he is still walking out after the peer has gone.
 const SquachMesh::Peer* uiClearGuest() { return visitHosting(); }
+
+// ---- messages ---------------------------------------------------------------
+// A received message is drawn in RED, filled, so it can never be mistaken for
+// the scripted banter two Squachys trade on their own. That is pink and black,
+// and it is the device talking to itself; red means a person sent it.
+static const uint32_t MSG_SHOW_MS = 8000;
+
+static bool    s_msgGuestOn = false;      // a visitor is on screen this frame
+static int     s_msgGx = 0, s_msgHeadTop = 0;
+static bool    s_bubbleOn = false;        // the tap target, filled by the draw
+static int16_t s_bubX = 0, s_bubY = 0, s_bubW = 0, s_bubH = 0;
+
+static bool messageShowing(uint32_t now) {
+    const MeshTalk::Message& m = MeshTalk::inbox();
+    return MeshTalk::ready() && m.have && (uint32_t)(now - m.at) < MSG_SHOW_MS;
+}
+
+// Who, then what, over the speaker's head, with a tail aimed at him. The name
+// is always in it, so even when the sender is not the one standing there the
+// bubble cannot misattribute.
+static void drawRedBubble(TFT_eSPI& t, int cx, int headTop, const char* from, const char* line) {
+    t.setTextSize(1);
+    t.setTextWrap(false);
+    const int w = t.width();
+    int bw = t.textWidth(line);
+    const int fw = t.textWidth(from);
+    if (fw > bw) bw = fw;
+    bw += 12;
+    if (bw > w - 8) bw = w - 8;
+    const int bh = 26;
+    int bx = cx - bw / 2;
+    if (bx < 4) bx = 4;
+    if (bx + bw > w - 4) bx = w - 4 - bw;
+    int by = headTop - bh - 6;
+    if (by < 18) by = 18;                     // clear of the corner icons
+    t.fillRoundRect(bx, by, bw, bh, 4, Theme::RED);
+    int tx = cx;
+    if (tx < bx + 6) tx = bx + 6;
+    if (tx > bx + bw - 7) tx = bx + bw - 7;
+    t.fillTriangle(tx - 4, by + bh - 1, tx + 4, by + bh - 1, tx, by + bh + 4, Theme::RED);
+    t.setTextColor(Theme::W95_LIGHT, Theme::RED);
+    t.setCursor(bx + 6, by + 3);
+    t.print(from);
+    t.setTextColor(Theme::WHITE, Theme::RED);
+    t.setCursor(bx + 6, by + 14);
+    t.print(line);
+}
+
+// The little bubble. Cyan dots when there is nothing new; the dots take turns
+// while a message of ours is on the air, like somebody typing; and it goes red
+// with a "!" when one has arrived and not been read.
+static void drawMessageIcon(TFT_eSPI& t, int x, int y, bool unread, bool sending, uint32_t now) {
+    const int iw = 20, ih = 13;
+    const uint16_t edge = unread ? Theme::RED : Theme::CYAN;
+    t.fillRoundRect(x, y, iw, ih, 3, unread ? Theme::RED : Theme::BG);
+    t.drawRoundRect(x, y, iw, ih, 3, edge);
+    t.fillTriangle(x + 3, y + ih - 1, x + 8, y + ih - 1, x + 3, y + ih + 3, edge);
+    if (unread) {
+        t.setTextSize(1);
+        t.setTextColor(Theme::WHITE, Theme::RED);
+        t.setCursor(x + (iw - 6) / 2 + 1, y + 3);
+        t.print("!");
+    } else {
+        for (int i = 0; i < 3; i++) {
+            const bool lit = !sending || (int)((now / 250) % 3) == i;
+            t.fillRect(x + 5 + i * 4, y + 6, 2, 2, lit ? Theme::CYAN : Theme::W95_SHADOW);
+        }
+    }
+    // A finger-sized target around a thumbnail-sized icon.
+    s_bubX = (int16_t)(x - 8);
+    s_bubY = (int16_t)(y - 8);
+    s_bubW = (int16_t)(iw + 16);
+    s_bubH = (int16_t)(ih + 16);
+    s_bubbleOn = true;
+}
+
+static void drawMessageUi(TFT_eSPI& t, uint32_t now, int titleBottom, int squachyBottom) {
+    s_bubbleOn = false;
+    if (!MeshTalk::ready()) return;
+    const MeshTalk::Message& m = MeshTalk::inbox();
+    const int w = t.width();
+    // Where the visitor is, or where he would stand if there were one.
+    const int gx   = s_msgGuestOn ? s_msgGx : w / 2 + w / 4;
+    const int head = s_msgGuestOn ? s_msgHeadTop
+                                  : titleBottom + (squachyBottom - titleBottom) / 3;
+    if (messageShowing(now)) drawRedBubble(t, gx, head, m.from, MeshTalk::lineText(m));
+    // Only with somebody around -- or something unread from somebody who was.
+    if (s_msgGuestOn || m.unread) {
+        int ix = gx + 26;
+        if (ix + 20 > w - 4) ix = w - 24;
+        drawMessageIcon(t, ix, head + 4, m.unread, MeshTalk::sending(now), now);
+    }
+}
+
+bool uiClearBubbleHit(int x, int y) {
+    return s_bubbleOn && !Settings::boringMode() &&
+           x >= s_bubX && x < s_bubX + s_bubW && y >= s_bubY && y < s_bubY + s_bubH;
+}
 
 static void visitTick(uint32_t now) {
     const uint32_t id = rawGuestId(now);
@@ -683,6 +786,10 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         // is what keeps a visitor from morphing mid-visit and what lets him
         // still be drawn while he walks out after the peer has gone.
         const SquachMesh::Peer* guest = visitHosting();
+        // A message in the air replaces his scripted line and his nameplate
+        // while it is up -- it carries the sender's name itself, in red.
+        const bool msgFresh = messageShowing(now);
+        s_msgGuestOn = false;
         if (guest) {
             const int SMALL_PCT = 70;
             const int gap  = w / 4;
@@ -724,7 +831,9 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
                                         s_vp == VisitPhase::MEETING ||
                                         s_vp == VisitPhase::LEAVING);
             Squachy::drawWaving(t, gx, squachyBottom, now, gs,
-                                s_visitGuestLine, s_visitGuestLine != nullptr,
+                                msgFresh ? nullptr : s_visitGuestLine,
+                                // Mouthing it while the red bubble is up.
+                                msgFresh || s_visitGuestLine != nullptr,
                                 visitWalking() ? 2 : 0, stillGreeting,
                                 // Just above his own head, not the boot
                                 // splash's 34 -- that lands in the host's
@@ -760,7 +869,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
             // silent for most of a visit, so the name is up most of the time
             // and gone only while he is saying something -- at which point
             // which of the two is speaking is not in question anyway.
-            if (!s_visitGuestLine) {
+            if (!s_visitGuestLine && !msgFresh) {
                 const char* nm = (guest->custom && guest->name[0])
                                    ? guest->name
                                    : Squachy::nicknameAt(guest->nick);
@@ -779,10 +888,17 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
                 t.setCursor(nx, ny);
                 t.print(nm);
             }
+            // Where he is this frame, for the message bubble and its button.
+            s_msgGuestOn = true;
+            s_msgGx      = gx;
+            s_msgHeadTop = squachyBottom - (int)(58.0f * gs);
         } else
 #endif
         Squachy::tick(t, w / 2, titleBottom, squachyBottom - titleBottom, now, advance,
                       1.0f, false, -1, Settings::squachySizePct());
+#if SQUACH_MESH
+        drawMessageUi(t, now, titleBottom, squachyBottom);
+#endif
     }
 
 

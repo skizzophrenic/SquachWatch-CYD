@@ -37,6 +37,11 @@
 #include "qwerty.h"
 #include "ui_meshmenu.h"
 #include "ui_meshwarn.h"
+#include "ui_meshphrase.h"
+#include "ui_meshcompose.h"
+#include "meshtalk.h"
+#include "meshmsg.h"
+#include "meshcrypto.h"
 #include "ui_watchalert.h"
 #include "ui_colorcheck.h"
 #include "ui_diagnostics.h"
@@ -143,6 +148,9 @@ static void usage() {
         "  screens: clear log alert settings detfilter power diary hunt rawscan watchalert colorcheck boot phone meshmenu meshwarn\n"
         "  --portrait        render 240x320 instead of 320x240\n"
         "  --qwerty          phone screen: the QWERTY board, not the keypad\n"
+        "  --msgs            messages on, with a phrase set\n"
+        "  --inbox N         ...and canned line N just arrived from the visitor\n"
+        "  --phrase-mode N   phrase screen: 0 show, 1 rolled, 2 picking\n"
         "  --bg N            background style 0..9 (see Settings::Background)\n"
         "  --theme N         palette index\n"
         "  --alert N         DetectionType the ALERT screen fires on\n"
@@ -162,6 +170,10 @@ int main(int argc, char** argv) {
     std::string outPath = (argc > 2 && argv[2][0] != '-') ? argv[2] : "squachsim.png";
 
     bool portrait = false, onboard = false, showoff = false, qwerty = false;
+    // Messages: --msgs switches them on with a phrase set; --inbox N also
+    // delivers canned line N from the visitor, through the real receive path.
+    bool msgs = false;
+    int inboxLine = -1, phraseMode = -1;
     int confirmRow = -1;   // settings screen: put a confirm panel up
     int scrollBy = 0;      // settings screen: scroll down N rows first
     int bg = -1, themeIdx = -1, frames = 90, sequence = 1, outfitIdx = -1;
@@ -197,6 +209,9 @@ int main(int argc, char** argv) {
         std::string a = argv[i];
         if (a == "--portrait") portrait = true;
         else if (a == "--qwerty") qwerty = true;
+        else if (a == "--msgs") msgs = true;
+        else if (a == "--inbox" && i + 1 < argc) inboxLine = atoi(argv[++i]);
+        else if (a == "--phrase-mode" && i + 1 < argc) phraseMode = atoi(argv[++i]);
         else if (a == "--onboard") onboard = true;
         else if (a == "--bg" && i + 1 < argc) bg = atoi(argv[++i]);
         else if (a == "--theme" && i + 1 < argc) themeIdx = atoi(argv[++i]);
@@ -267,6 +282,24 @@ int main(int argc, char** argv) {
         uiClearSetGuest(&guest);
     }
 
+    // Messages go through the real runtime and the real receive path; only
+    // the cipher is a stand-in (sim/meshcrypto_sim.cpp). Set, not toggled,
+    // because the NVS shim may remember a previous run.
+    MeshTalk::begin();
+    {
+        const bool want = msgs || inboxLine >= 0;
+        if (Settings::messagesOn() != want) Settings::toggleMessages();
+        if (want) MeshTalk::setPhrase("GIBSON MOTHMAN PHREAK NESSIE ZEROCOOL");
+    }
+    if (inboxLine >= 0) {
+        const uint8_t from[6] = { 0x24, 0x0A, 0xC4, 0xBF, 0x00, 0x7E };
+        uint8_t f[MeshMsg::CANNED_FRAME_LEN];
+        const size_t n = MeshMsg::sealCanned(MeshCrypto::impl(), from, 1,
+                                             (uint8_t)inboxLine, f, sizeof f);
+        MeshTalk::onFrame(from, f, n, peerName.empty() ? "BIGFOOT" : peerName.c_str());
+        MeshTalk::tick(millis());
+    }
+
     DetectionEngine engine;
     engine.init();
     if (!noSeed) seedDetections(engine);
@@ -323,6 +356,8 @@ int main(int argc, char** argv) {
         else if (screen == "phone")    uiPhoneTick(frame, t, engine);
         else if (screen == "meshmenu") uiMeshMenuTick(frame, t, engine);
         else if (screen == "meshwarn") uiMeshWarnTick(frame, t, engine);
+        else if (screen == "phrase")   uiMeshPhraseTick(frame, t, engine);
+        else if (screen == "compose")  uiMeshComposeTick(frame, t, engine);
         else if (screen == "watchalert") uiWatchAlertTick(frame, t, engine, true);
         else if (screen == "colorcheck") uiColorCheckTick(frame, t);
         else if (screen == "diagnostics") {
@@ -367,6 +402,11 @@ int main(int argc, char** argv) {
     else if (screen == "colorcheck") uiColorCheckInit(frame);
     else if (screen == "boot")       uiBootInit(frame);
     else if (screen == "meshmenu")   uiMeshMenuInit(frame);
+    else if (screen == "phrase")     {
+        uiMeshPhraseInit(frame);
+        if (phraseMode >= 0) uiMeshPhraseDemo((uint8_t)phraseMode);
+    }
+    else if (screen == "compose")    uiMeshComposeInit(frame);
     else if (screen == "phone")      {
         // Set rather than toggled: the NVS shim may remember a previous run.
         if (Settings::phoneQwerty() != qwerty) Settings::togglePhoneQwerty();

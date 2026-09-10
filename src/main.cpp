@@ -82,6 +82,8 @@ static void crashCrumbTick(uint32_t now, uint32_t lifetime, uint8_t screen) {
 #include "ui_meshmenu.h"
 #include "ui_meshwarn.h"
 #include "meshtalk.h"
+#include "ui_meshphrase.h"
+#include "ui_meshcompose.h"
 #endif
 #include "ignore_list.h"
 #include "ignore_list.h"
@@ -1105,6 +1107,18 @@ static void enterIgnoreList() {
 }
 
 #if SQUACH_MESH
+static void enterMeshPhrase() {
+    state = AppState::MESH_PHRASE;
+    transitionStart = millis();
+    uiMeshPhraseInit(*canvas);
+}
+
+static void enterMeshCompose() {
+    state = AppState::MESH_COMPOSE;
+    transitionStart = millis();
+    uiMeshComposeInit(*canvas);
+}
+
 static void enterMeshWarn() {
     state = AppState::MESH_WARN;
     transitionStart = millis();
@@ -1869,6 +1883,16 @@ void loop() {
             } else if (!boring && Squachy::onboardingActive() && tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
                 Squachy::onboardingTapAdvance(tp.x, tp.y)) {
                 lastTouch = now;
+#if SQUACH_MESH
+            } else if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
+                       uiClearBubbleHit(tp.x, tp.y)) {
+                // The message bubble. Ahead of the background and the edge
+                // zones: it can sit over the right-hand one, and a tap on it
+                // must never cycle the scene on the way to the message.
+                lastTouch = now;
+                sqActive  = false;
+                enterMeshCompose();
+#endif
             } else if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
                        Theme::backgroundTap(tp.x, tp.y, now)) {
                 // Something tappable in the background itself claimed
@@ -2579,6 +2603,20 @@ void loop() {
             break;
         }
 #if SQUACH_MESH
+        case AppState::MESH_PHRASE: {
+            uiMeshPhraseTick(*canvas, now, engine);
+            if (touchJustDown) uiMeshPhraseTouch(tp.x, tp.y);
+            if (uiMeshPhraseDone()) enterMeshMenu();
+            break;
+        }
+        case AppState::MESH_COMPOSE: {
+            uiMeshComposeTick(*canvas, now, engine);
+            // Sent or not, back to the main screen -- that is where the
+            // bubble's dots show it going out.
+            if (touchJustDown && uiMeshComposeTouch(tp.x, tp.y, now) != ComposeHit::NONE)
+                enterClear();
+            break;
+        }
         case AppState::MESH_WARN: {
             uiMeshWarnTick(*canvas, now, engine);
             if (touchJustDown) {
@@ -2602,6 +2640,8 @@ void loop() {
                                           canvas->width(), canvas->height())) {
                     case MeshMenuRow::DETECT:   Settings::cycleMeshDetect();   break;
                     case MeshMenuRow::TRANSMIT: Settings::cycleMeshTransmit(); break;
+                    case MeshMenuRow::MESSAGES: Settings::toggleMessages();    break;
+                    case MeshMenuRow::PHRASE:   enterMeshPhrase();             break;
                     case MeshMenuRow::NAME:     enterPhone();                  break;
                     case MeshMenuRow::BACK:     enterSettings();               break;
                     default: break;

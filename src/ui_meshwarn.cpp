@@ -19,12 +19,18 @@ namespace {
 // it stays stable because ignoring a specific peer needs something stable to
 // key on); the name and appearance are literally what the payload carries.
 // If any of those change, this text is wrong and has to change with them.
+//
+// Messages added one line, and the rest got shorter to make room for it. A
+// message's words are encrypted; the fact of sending one is not -- the frame
+// rides in a scan response anyone can see for thirty seconds (SEND_MS in
+// meshtalk.cpp). That is a real disclosure and it goes on this screen, not in
+// a menu note somebody may never read.
 const char* const PARAS[] = {
-    "TRANSMIT makes this device broadcast a Bluetooth advert every 1.5 seconds.",
-    "Each one carries a fixed address that never changes, plus your Squachy's name and outfit.",
-    "Anyone nearby running a scanner can log that address with a time and a place. Because it never changes, separate sightings join up into a record of where you have been, and a custom name is a label on it.",
-    "That is the same trick this device warns you about when somebody else's hardware does it.",
-    "DETECT only listens. It broadcasts nothing and cannot be tracked.",
+    "TRANSMIT broadcasts a Bluetooth advert every 1.5 seconds, carrying a fixed address that never changes and your Squachy's name and outfit.",
+    "Anyone nearby with a scanner can log that address with a time and a place. Because it never changes, those sightings join up into a record of where you have been.",
+    "The same trick this device warns you about.",
+    "Messages are encrypted. That you sent one is not.",
+    "DETECT only listens. It broadcasts nothing.",
 };
 const uint8_t PARA_N = sizeof(PARAS) / sizeof(PARAS[0]);
 

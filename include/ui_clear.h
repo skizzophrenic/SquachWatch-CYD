@@ -23,4 +23,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
 namespace SquachMesh { struct Peer; }
 const SquachMesh::Peer* uiClearGuest();
 void uiClearSetGuest(const SquachMesh::Peer* p);
+// The little speech bubble beside a visitor, which opens the message screen.
+// Its rectangle is filled in by the draw; this reads it.
+bool uiClearBubbleHit(int x, int y);
 #endif

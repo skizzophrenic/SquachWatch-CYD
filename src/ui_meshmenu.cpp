@@ -7,12 +7,13 @@
 #include "settings.h"
 #include "squachy.h"
 #include "detection.h"
+#include "meshtalk.h"
 #include <Arduino.h>
 
 namespace {
 
 const int TOP_MARGIN = 34;   // room for the heading
-const uint8_t ROW_N = 4;
+const uint8_t ROW_N = 6;
 
 // Row height from live font metrics, shared by drawing and hit-testing so
 // the two cannot drift -- the same reason every other row list in this
@@ -73,8 +74,19 @@ void uiMeshMenuTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
         Settings::meshDetect() ? Theme::GREEN : Theme::W95_SHADOW);
     row(t, w, top + 1 * rowH, rowH, "TRANSMIT", Settings::meshTransmitLabel(),
         Settings::meshTransmit() ? Theme::AMBER : Theme::W95_SHADOW);
-    row(t, w, top + 2 * rowH, rowH, "NAME",     nm, Theme::VAPOR_YELLOW);
-    row(t, w, top + 3 * rowH, rowH, "[ BACK ]", nullptr, Theme::CYAN);
+    // MESSAGES says ERR rather than OFF when the crypto self-test failed at
+    // boot: a switch that cannot be turned on should not look like one that
+    // merely isn't.
+    const bool st = MeshTalk::selfTestOk();
+    row(t, w, top + 2 * rowH, rowH, "MESSAGES",
+        !st ? "ERR" : (Settings::messagesOn() ? "ON" : "OFF"),
+        !st ? Theme::RED : (Settings::messagesOn() ? Theme::GREEN : Theme::W95_SHADOW));
+    // Never the phrase itself. This screen is looked at over shoulders.
+    row(t, w, top + 3 * rowH, rowH, "PHRASE",
+        MeshTalk::havePhrase() ? "SET >" : "NONE >",
+        MeshTalk::havePhrase() ? Theme::VAPOR_YELLOW : Theme::W95_SHADOW);
+    row(t, w, top + 4 * rowH, rowH, "NAME",     nm, Theme::VAPOR_YELLOW);
+    row(t, w, top + 5 * rowH, rowH, "[ BACK ]", nullptr, Theme::CYAN);
 
     // One line saying what the two switches actually mean together, because
     // "DETECT off, TRANSMIT on" is not self-evidently "they can see you but
@@ -88,6 +100,20 @@ void uiMeshMenuTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     t.setTextColor(Theme::W95_LIGHT, Theme::BG);
     t.setCursor(8, top + ROW_N * rowH + 6);
     t.print(note);
+
+    // And one for messages, which need both halves: DETECT to hear one,
+    // TRANSMIT to answer.
+    const char* mnote =
+        !MeshTalk::selfTestOk()      ? "Messages off: crypto self-test failed."
+      : !Settings::messagesOn()      ? nullptr
+      : !MeshTalk::havePhrase()      ? "Messages need a phrase to share first."
+      : !Settings::meshDetect()      ? "Messages need DETECT on to be heard."
+      : !Settings::meshTransmit()    ? "Messages: you can read, not reply."
+                                     : "Messages: reading and replying.";
+    if (mnote) {
+        t.setCursor(8, top + ROW_N * rowH + 6 + t.fontHeight() + 3);
+        t.print(mnote);
+    }
 }
 
 MeshMenuRow uiMeshMenuHitTest(TFT_eSPI& t, int x, int y, int screenW, int screenH) {
