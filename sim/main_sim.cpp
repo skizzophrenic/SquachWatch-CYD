@@ -34,6 +34,7 @@
 #include "ui_rawscan.h"
 #include "squachmesh.h"
 #include "ui_phone.h"
+#include "ui_meshmenu.h"
 #include "ui_watchalert.h"
 #include "ui_colorcheck.h"
 #include "ui_diagnostics.h"
@@ -288,6 +289,7 @@ int main(int argc, char** argv) {
         else if (screen == "hunt")     uiHuntTick(frame, t, engine);
         else if (screen == "rawscan")  uiRawScanTick(frame, t, engine, true, true, false, "");
         else if (screen == "phone")    uiPhoneTick(frame, t, engine);
+        else if (screen == "meshmenu") uiMeshMenuTick(frame, t, engine);
         else if (screen == "watchalert") uiWatchAlertTick(frame, t, engine, true);
         else if (screen == "colorcheck") uiColorCheckTick(frame, t);
         else if (screen == "diagnostics") {
@@ -331,6 +333,7 @@ int main(int argc, char** argv) {
     else if (screen == "diagnostics") uiDiagnosticsInit(frame);
     else if (screen == "colorcheck") uiColorCheckInit(frame);
     else if (screen == "boot")       uiBootInit(frame);
+    else if (screen == "meshmenu")   uiMeshMenuInit(frame);
     else if (screen == "phone")      {
         uiPhoneInit(frame);
         uint32_t tnow = now;

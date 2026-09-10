@@ -38,6 +38,7 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/squachy.cpp \
             $(SRC)/squachmesh.cpp \
             $(SRC)/ui_phone.cpp \
+            $(SRC)/ui_meshmenu.cpp \
             $(SRC)/settings.cpp \
             $(SRC)/signatures.cpp \
             $(SRC)/remote_id.cpp \

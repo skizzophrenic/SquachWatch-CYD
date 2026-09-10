@@ -193,19 +193,28 @@ namespace Settings {
     // conservative than what they solved for. Above 100 would invalidate
     // both, which is a different and much larger job.
 #if SQUACH_MESH
-    // Whether we ANNOUNCE ourselves. Off by default and deliberately so:
-    // this device otherwise never transmits, which is written up as a
-    // feature. Turning it on makes it visible to anyone else's scanner and
-    // gives it a persistent identity, and that should be a choice somebody
-    // made rather than a default they inherited.
+    // The two halves of SquachMesh, separately switchable, because they are
+    // genuinely different things to consent to.
     //
-    // Off means off: no advertising AND no visitors. It gated only
-    // advertising at first, which was defensible and still wrong -- a
-    // setting whose label says the feature is off while the feature keeps
-    // happening is a setting that lies.
-    bool        meshEnabled();
-    const char* meshLabel();
-    void        cycleMesh();
+    // TRANSMIT is the privacy-relevant one and defaults OFF. This device
+    // otherwise never transmits, which is written up as a feature; turning
+    // it on makes it visible to anybody else's scanner and gives it an
+    // identity that follows it around. That should be chosen, not inherited.
+    //
+    // DETECT also defaults off, so the feature as a whole does nothing until
+    // it is asked to. One earlier attempt gated only transmit and left
+    // detect always on, which was defensible and still wrong: a setting
+    // whose label says off while Squachys keep arriving is a setting that
+    // lies. Splitting them is the honest version of that argument -- somebody
+    // who wants to watch without being seen can now say so.
+    bool        meshDetect();
+    bool        meshTransmit();
+    const char* meshDetectLabel();
+    const char* meshTransmitLabel();
+    void        cycleMeshDetect();
+    void        cycleMeshTransmit();
+    // For the one-line summary on the Settings row that opens the menu.
+    const char* meshSummary();
 #endif
 
     uint8_t     squachySizePct();

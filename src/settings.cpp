@@ -12,9 +12,10 @@ static bool        s_inverted   = false;
 static bool        s_rgbSwapped = false;
 static bool        s_colorChecked = false;
 #if SQUACH_MESH
-// Declared with the other flags: load() reads it long before the accessors
+// Declared with the other flags: load() reads them long before the accessors
 // below are defined.
-static bool        s_mesh       = false;
+static bool        s_meshDetect   = false;
+static bool        s_meshTransmit = false;
 #endif
 static bool        s_infoPrimerShown = false;
 static bool        s_rotationLocked = false;
@@ -150,7 +151,9 @@ void load() {
     s_rgbSwapped = s_prefs.getBool("rgbswap", false);
     s_colorChecked = s_prefs.getBool("colorchk", false);
 #if SQUACH_MESH
-    s_mesh       = s_prefs.getBool("mesh", false);   // off unless asked for
+    // Both off unless asked for. See the note in settings.h.
+    s_meshDetect   = s_prefs.getBool("meshrx", false);
+    s_meshTransmit = s_prefs.getBool("meshtx", false);
 #endif
     s_infoPrimerShown = s_prefs.getBool("infoprimer", false);
     s_rotationLocked = s_prefs.getBool("rotlock", false);
@@ -350,11 +353,18 @@ static const char* const SQ_SIZE_LABEL[3] = { "SMALL", "MEDIUM", "LARGE" };
 static const uint8_t     SQ_SIZE_N        = 3;
 
 #if SQUACH_MESH
-bool meshEnabled() { return s_mesh; }
-const char* meshLabel() { return s_mesh ? "ON" : "OFF"; }
-void cycleMesh() {
-    s_mesh = !s_mesh;
-    s_prefs.putBool("mesh", s_mesh);
+bool meshDetect()   { return s_meshDetect; }
+bool meshTransmit() { return s_meshTransmit; }
+const char* meshDetectLabel()   { return s_meshDetect   ? "ON" : "OFF"; }
+const char* meshTransmitLabel() { return s_meshTransmit ? "ON" : "OFF"; }
+void cycleMeshDetect()   { s_meshDetect   = !s_meshDetect;   s_prefs.putBool("meshrx", s_meshDetect); }
+void cycleMeshTransmit() { s_meshTransmit = !s_meshTransmit; s_prefs.putBool("meshtx", s_meshTransmit); }
+
+const char* meshSummary() {
+    if (s_meshDetect && s_meshTransmit) return "ON";
+    if (s_meshDetect)                   return "DETECT";
+    if (s_meshTransmit)                 return "SEND";
+    return "OFF";
 }
 #endif
 

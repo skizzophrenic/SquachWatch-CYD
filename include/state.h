@@ -112,10 +112,11 @@ enum class AppState : uint8_t {
                             // "IGNORED DEVICES" row
     POWER_SAVER      = 15, // battery settings, reached via Settings'
                             // "POWER SAVER" row
-    PHONE            = 16  // the payphone: type a name for Squachy. Reached
-                            // via Settings' "NAME" row. Only ever entered on
+    PHONE            = 16, // the payphone: type a name for Squachy. Reached
+                            // from the SquachMesh menu. Only ever entered on
                             // a SquachMesh build -- the row is not offered
                             // otherwise -- but the state costs nothing.
+    MESH_MENU        = 17  // SquachMesh's own screen: detect, transmit, name
 };
 
 enum class ButtonId : uint8_t {

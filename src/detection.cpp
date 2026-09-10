@@ -563,6 +563,9 @@ static void setAdvertising(bool on) {
 void begin() { s_havePeer = false; s_advOn = false; }
 
 bool onManufacturerData(const uint8_t* d, size_t len, const uint8_t* mac, uint32_t now) {
+    // Refused at the door when detection is off, so a peer cannot be latched
+    // between the setting changing and the next tick.
+    if (!Settings::meshDetect()) return false;
     // Company ID first, little-endian, then the payload.
     if (len < 2 + SquachMesh::LEN_INDEXED) return false;
     const uint16_t cid = (uint16_t)(d[0] | ((uint16_t)d[1] << 8));
@@ -584,25 +587,17 @@ bool onManufacturerData(const uint8_t* d, size_t len, const uint8_t* mac, uint32
 }
 
 void tick(uint32_t now) {
-    const bool want = Settings::meshEnabled();
+    const bool want = Settings::meshTransmit();
     // Polled rather than event-driven, but setAdvertising() now returns on a
     // memcmp when nothing changed, so this costs one comparison every ten
     // seconds instead of rebuilding the advert 360 times an hour.
     if (want && (!s_advOn || (now - s_advAt) > 10000)) { setAdvertising(true); s_advAt = now; }
     if (!want && s_advOn) setAdvertising(false);
 
-    // OFF MEANS OFF, both halves.
-    //
-    // This used to gate only advertising, on the reasoning that the
-    // privacy-relevant half is transmitting and that refusing to SEE another
-    // Squachy costs privacy nothing. That reasoning served the feature, not
-    // the person using it: a setting called SQUACHMESH that is switched off
-    // while Squachys keep arriving is a setting that lies about what it does,
-    // and it was reported as broken twice before this changed.
-    //
-    // The privacy property is unaffected -- the device still transmits only
-    // when asked. What is gained is that the label is now true.
-    if (!want) { s_havePeer = false; return; }
+    // Detecting is its own switch now, and off means no visitor at all --
+    // not "advertise less". A peer already on screen is dropped rather than
+    // frozen there.
+    if (!Settings::meshDetect()) { s_havePeer = false; return; }
 
     if (s_havePeer && (now - s_peerSeen) > PEER_STALE_MS) s_havePeer = false;
 }

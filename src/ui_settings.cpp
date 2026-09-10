@@ -24,7 +24,9 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::IGNORED_DEVICES,
     SettingsRow::NICKNAME,
 #if SQUACH_MESH
-    SettingsRow::SQUACHY_NAME,
+    // One row, not two: NAME moved inside the SquachMesh menu, which is a
+    // row back on a list carrying twenty-five with three colliding in
+    // portrait.
     SettingsRow::SQUACHMESH,
 #endif
     SettingsRow::SHADES_COLOR, SettingsRow::SQUACHY_SIZE,
@@ -524,7 +526,7 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
         }
         case SettingsRow::SQUACHMESH:
             label = "SQUACHMESH";
-            value = Settings::meshLabel();
+            value = Settings::meshSummary();
             break;
 #endif
         case SettingsRow::OUTFIT:

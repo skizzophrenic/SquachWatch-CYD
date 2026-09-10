@@ -79,6 +79,7 @@ static void crashCrumbTick(uint32_t now, uint32_t lifetime, uint8_t screen) {
 #include "ui_ignorelist.h"
 #if SQUACH_MESH
 #include "ui_phone.h"
+#include "ui_meshmenu.h"
 #endif
 #include "ignore_list.h"
 #include "ignore_list.h"
@@ -1102,6 +1103,12 @@ static void enterIgnoreList() {
 }
 
 #if SQUACH_MESH
+static void enterMeshMenu() {
+    state = AppState::MESH_MENU;
+    transitionStart = millis();
+    uiMeshMenuInit(*canvas);
+}
+
 static void enterPhone() {
     state = AppState::PHONE;
     transitionStart = millis();
@@ -2506,8 +2513,7 @@ void loop() {
                         case SettingsRow::POWER_SAVER: enterPower(); break;
                         case SettingsRow::IGNORED_DEVICES:  enterIgnoreList(); break;
 #if SQUACH_MESH
-                        case SettingsRow::SQUACHY_NAME:     enterPhone(); break;
-                        case SettingsRow::SQUACHMESH:       Settings::cycleMesh(); break;
+                        case SettingsRow::SQUACHMESH:       enterMeshMenu(); break;
 #endif
                         // These ask first -- see the confirm panel over in
                         // ui_settings. A row earns one when tapping it a
@@ -2551,13 +2557,28 @@ void loop() {
             break;
         }
 #if SQUACH_MESH
+        case AppState::MESH_MENU: {
+            uiMeshMenuTick(*canvas, now, engine);
+            if (touchJustDown) {
+                switch (uiMeshMenuHitTest(*canvas, tp.x, tp.y,
+                                          canvas->width(), canvas->height())) {
+                    case MeshMenuRow::DETECT:   Settings::cycleMeshDetect();   break;
+                    case MeshMenuRow::TRANSMIT: Settings::cycleMeshTransmit(); break;
+                    case MeshMenuRow::NAME:     enterPhone();                  break;
+                    case MeshMenuRow::BACK:     enterSettings();               break;
+                    default: break;
+                }
+            }
+            break;
+        }
         case AppState::PHONE: {
             uiPhoneTick(*canvas, now, engine);
             // Act on press, not release. A keypad is the one place where
             // waiting for the finger to come up makes typing feel broken --
             // and there is no drag gesture here to be confused with.
             if (touchJustDown) uiPhoneTouch(tp.x, tp.y, now);
-            if (uiPhoneDone()) enterSettings();
+            // Back to where it was opened from, not to Settings.
+            if (uiPhoneDone()) enterMeshMenu();
             break;
         }
 #endif
