@@ -58,9 +58,12 @@ constexpr size_t  KEY_LEN = 16;
 // How many PBKDF2 rounds the phrase goes through on its way to a key.
 //
 // FROZEN AT RELEASE. The key depends on this number, so changing it after a
-// release changes every group's key and they stop reading each other. It is a
-// first guess at "about a second on the device" and MUST be measured on
-// hardware before release -- the serial log prints the time on every derive.
+// release changes every group's key and they stop reading each other.
+//
+// Measured 2026-09-10 on an ESP32 (ST7789 CYD): 2753 ms. Kept rather than
+// cut to about a second, because the cost lands only when a phrase is set --
+// the derived key is stored and loaded at boot, never re-stretched -- while
+// every offline guess at a phrase pays it every time.
 constexpr uint32_t ITERS = 20000;
 
 // ---- the cipher, injected -----------------------------------------------------

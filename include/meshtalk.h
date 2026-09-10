@@ -23,7 +23,7 @@ void tick(uint32_t now);
 bool        selfTestOk();
 bool        havePhrase();
 const char* phrase();                  // "" when none is set
-// Stretches the phrase into a key and stores both. BLOCKS for about a second
+// Stretches the phrase into a key and stores both. BLOCKS for about 2.75 s
 // (see MeshMsg::ITERS) -- the caller should get a "stretching" frame on screen
 // first -- and logs how long it took, which is how ITERS gets tuned.
 bool        setPhrase(const char* text);

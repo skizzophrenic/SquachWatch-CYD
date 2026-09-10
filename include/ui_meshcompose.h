@@ -15,7 +15,8 @@
 
 class DetectionEngine;
 
-enum class ComposeHit : uint8_t { NONE, SENT, BACK };
+// HELP: the "?" -- replay the messages tutorial (see meshtutor.h).
+enum class ComposeHit : uint8_t { NONE, SENT, BACK, HELP };
 
 void       uiMeshComposeInit(TFT_eSPI& t);
 void       uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng);

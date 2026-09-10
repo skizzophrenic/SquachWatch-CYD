@@ -275,8 +275,13 @@ void pickBack() {
 
 void drawStretch(TFT_eSPI& t) {
     title(t, "STRETCHING");
-    para(t, 34, "Turning five words into a key. It takes about a second on purpose: "
-                "every guess an attacker makes has to take that long too.", Theme::W95_LIGHT);
+    // Measured: 2.75 s at MeshMsg::ITERS on an ESP32. Said plainly, because
+    // the screen does not move while it runs and a frozen screen with no
+    // warning looks like a crash.
+    const int y = para(t, 34, "Turning five words into a key. This takes about three seconds, "
+                              "and the screen will freeze until it is done.", Theme::W95_LIGHT);
+    para(t, y + 6, "That is on purpose: every guess an attacker makes has to take "
+                "that long too. It only happens when you set a phrase.", Theme::W95_LIGHT);
 }
 
 void startStretch() {

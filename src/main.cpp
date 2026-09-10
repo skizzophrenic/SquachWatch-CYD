@@ -84,6 +84,7 @@ static void crashCrumbTick(uint32_t now, uint32_t lifetime, uint8_t screen) {
 #include "meshtalk.h"
 #include "ui_meshphrase.h"
 #include "ui_meshcompose.h"
+#include "meshtutor.h"
 #endif
 #include "ignore_list.h"
 #include "ignore_list.h"
@@ -1763,7 +1764,11 @@ void loop() {
             // is deliberately NOT called in that branch since it's
             // consumed on read; leaving it untouched means it stays
             // pending and still fires for real once onboarding ends.
-            if (Squachy::onboardingActive()) {
+            if (Squachy::onboardingActive()
+#if SQUACH_MESH
+                || MeshTutor::active()     // same courtesy for the messages tutorial
+#endif
+               ) {
                 // deliberately no-op
             } else if (engine.watchHitPending()) {
                 enterWatchAlert();
@@ -1880,6 +1885,27 @@ void loop() {
                 Squachy::stopShowOff();
                 lastTouch = now;
                 sqActive  = false;
+#if SQUACH_MESH
+            } else if (MeshTutor::active() && tp.valid) {
+                // The messages tutorial owns the screen while it runs: every
+                // touch goes to it, so nobody pets Squachy, cycles the scene
+                // or clears the log halfway through a sentence. The whole
+                // gesture is claimed, and the CLR long-press disarmed with it.
+                sqActive      = false;
+                clrHoldActive = false;
+                if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                    lastTouch = now;
+                    if (MeshTutor::cardTap(tp.x, tp.y) == MeshTutor::Tap::SKIP) {
+                        MeshTutor::stop();
+                    } else if (MeshTutor::step() == MeshTutor::Step::TAP_ICON) {
+                        // Only the bubble moves this step on: it is the one
+                        // thing the step is teaching.
+                        if (uiClearBubbleHit(tp.x, tp.y)) { MeshTutor::next(); enterMeshCompose(); }
+                    } else if (MeshTutor::waitsForTap()) {
+                        MeshTutor::next();
+                    }
+                }
+#endif
             } else if (!boring && Squachy::onboardingActive() && tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
                 Squachy::onboardingTapAdvance(tp.x, tp.y)) {
                 lastTouch = now;
@@ -2613,8 +2639,12 @@ void loop() {
             uiMeshComposeTick(*canvas, now, engine);
             // Sent or not, back to the main screen -- that is where the
             // bubble's dots show it going out.
-            if (touchJustDown && uiMeshComposeTouch(tp.x, tp.y, now) != ComposeHit::NONE)
-                enterClear();
+            if (touchJustDown) {
+                const ComposeHit hit = uiMeshComposeTouch(tp.x, tp.y, now);
+                // "?" replays the tutorial, which runs on the main screen.
+                if (hit == ComposeHit::HELP) MeshTutor::start();
+                if (hit != ComposeHit::NONE) enterClear();
+            }
             break;
         }
         case AppState::MESH_WARN: {
@@ -2640,7 +2670,19 @@ void loop() {
                                           canvas->width(), canvas->height())) {
                     case MeshMenuRow::DETECT:   Settings::cycleMeshDetect();   break;
                     case MeshMenuRow::TRANSMIT: Settings::cycleMeshTransmit(); break;
-                    case MeshMenuRow::MESSAGES: Settings::toggleMessages();    break;
+                    case MeshMenuRow::MESSAGES:
+                        Settings::toggleMessages();
+                        // The first time they go on, the tutorial runs. It is
+                        // marked seen as it STARTS, so skipping it counts; the
+                        // "?" on the message screen replays it. Not in boring
+                        // mode, which has no Squachy to visit.
+                        if (Settings::messagesOn() && !Settings::meshTutorSeen() &&
+                            !Settings::boringMode()) {
+                            Settings::setMeshTutorSeen();
+                            MeshTutor::start();
+                            enterClear();
+                        }
+                        break;
                     case MeshMenuRow::PHRASE:   enterMeshPhrase();             break;
                     case MeshMenuRow::NAME:     enterPhone();                  break;
                     case MeshMenuRow::BACK:     enterSettings();               break;

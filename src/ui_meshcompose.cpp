@@ -5,6 +5,7 @@
 #include "theme.h"
 #include "meshtalk.h"
 #include "meshmsg.h"
+#include "meshtutor.h"
 #include "settings.h"
 #include "detection.h"
 #include <stdio.h>
@@ -24,6 +25,7 @@ uint8_t     s_lineIdx[12];
 uint8_t     s_lineN = 0;
 Rect        s_back = { 0, 0, 0, 0 }, s_prev = { 0, 0, 0, 0 }, s_next = { 0, 0, 0, 0 };
 Rect        s_send = { 0, 0, 0, 0 };
+Rect        s_help = { 0, 0, 0, 0 };
 const char* s_status = nullptr;
 uint16_t    s_statusCol = 0;
 // The line waiting to be confirmed, or -1. A tap on a line only chooses it;
@@ -42,6 +44,35 @@ const char* const TRANSMIT_OFF = "TRANSMIT off: can read, not reply.";
 const char* const SENDING      = "Sending, for thirty seconds.";
 const char* const SEND_FAILED  = "Could not send. Try again.";
 
+// The tutorial's rules for this screen: only the step's target does anything,
+// and nothing is ever sent. SEND moves the lesson on and goes back to the main
+// screen for the pretend reply; MeshTalk is never called.
+ComposeHit tutorTouch(int x, int y) {
+    if (MeshTutor::cardTap(x, y) == MeshTutor::Tap::SKIP) {
+        MeshTutor::stop();
+        s_sel = -1;
+        return ComposeHit::NONE;       // the screen is theirs again, as it is
+    }
+    const MeshTutor::Step st = MeshTutor::step();
+    if (st == MeshTutor::Step::PRESS_SEND) {
+        if (inRect(s_send, x, y)) { s_sel = -1; MeshTutor::next(); return ComposeHit::SENT; }
+        if (inRect(s_back, x, y)) {    // CANCEL: back a step, as it would be
+            s_sel = -1;
+            MeshTutor::setStep(MeshTutor::Step::PICK_LINE);
+            return ComposeHit::NONE;
+        }
+    }
+    if (st == MeshTutor::Step::PICK_LINE || st == MeshTutor::Step::PRESS_SEND) {
+        for (uint8_t i = 0; i < s_lineN; i++) {
+            if (!inRect(s_lineRect[i], x, y)) continue;
+            s_sel = (int8_t)s_lineIdx[i];
+            if (st == MeshTutor::Step::PICK_LINE) MeshTutor::next();
+            return ComposeHit::NONE;
+        }
+    }
+    return ComposeHit::NONE;
+}
+
 } // namespace
 
 void uiMeshComposeInit(TFT_eSPI& t) {
@@ -57,6 +88,7 @@ void uiMeshComposeInit(TFT_eSPI& t) {
 void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     const int w = t.width(), h = t.height();
     const bool port = h > w;
+    const bool tut = MeshTutor::active();
 
     Theme::Palette saved = Theme::dimPaletteForOverlay(150);
     Theme::drawActiveBackground(t, now, 0, h, eng);
@@ -122,7 +154,9 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
         snprintf(s_confirm, sizeof s_confirm, "Send \"%s\"?", MeshMsg::CANNED[s_sel]);
         st = s_confirm;
         sc = Theme::VAPOR_YELLOW;
-    } else if (!st) {
+    } else if (!st && !tut) {
+        // Not during the tutorial, which runs before there is a phrase and
+        // would otherwise open with a warning about not having one.
         if (!MeshTalk::ready())             { st = NEED_PHRASE;  sc = Theme::AMBER; }
         else if (!Settings::meshTransmit()) { st = TRANSMIT_OFF; sc = Theme::AMBER; }
         else if (MeshTalk::sending(now))    { st = SENDING;      sc = Theme::GREEN; }
@@ -139,28 +173,52 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     // and the page arrows go, so the choice cannot scroll out of sight.
     s_back = { 4, (int16_t)(h - BH - 6), BW, BH };
     s_send = { 0, 0, 0, 0 };
+    s_help = { 0, 0, 0, 0 };
     if (s_sel >= 0) {
         s_send = { (int16_t)(w - 4 - BW), (int16_t)(h - BH - 6), BW, BH };
         Theme::drawButton(t, s_back.x, s_back.y, s_back.w, s_back.h, "[ CANCEL ]", false);
         Theme::drawButton(t, s_send.x, s_send.y, s_send.w, s_send.h, "[ SEND ]", false);
-        return;
+    } else {
+        Theme::drawButton(t, s_back.x, s_back.y, s_back.w, s_back.h, "[ BACK ]", false);
+        if (s_pages > 1) {
+            s_prev = { (int16_t)(w - 4 - 2 * AW - 6), (int16_t)(h - BH - 6), AW, BH };
+            s_next = { (int16_t)(w - 4 - AW),         (int16_t)(h - BH - 6), AW, BH };
+            Theme::drawButton(t, s_prev.x, s_prev.y, s_prev.w, s_prev.h, "<", false);
+            Theme::drawButton(t, s_next.x, s_next.y, s_next.w, s_next.h, ">", false);
+            char pg[8];
+            snprintf(pg, sizeof pg, "%u/%u", (unsigned)(s_page + 1), (unsigned)s_pages);
+            t.setTextColor(Theme::W95_LIGHT, Theme::BG);
+            const int mid = (s_back.x + s_back.w + s_prev.x) / 2;
+            t.setCursor(mid - t.textWidth(pg) / 2, s_back.y + (BH - 8) / 2);
+            t.print(pg);
+        }
+        // "?" replays the tutorial. Top right, level with the title, where
+        // nothing else on this screen can be reached for by mistake.
+        if (!tut) {
+            s_help = { (int16_t)(w - 4 - 30), 2, 30, 20 };
+            Theme::drawButton(t, s_help.x, s_help.y, s_help.w, s_help.h, "?", false);
+        }
     }
-    Theme::drawButton(t, s_back.x, s_back.y, s_back.w, s_back.h, "[ BACK ]", false);
-    if (s_pages > 1) {
-        s_prev = { (int16_t)(w - 4 - 2 * AW - 6), (int16_t)(h - BH - 6), AW, BH };
-        s_next = { (int16_t)(w - 4 - AW),         (int16_t)(h - BH - 6), AW, BH };
-        Theme::drawButton(t, s_prev.x, s_prev.y, s_prev.w, s_prev.h, "<", false);
-        Theme::drawButton(t, s_next.x, s_next.y, s_next.w, s_next.h, ">", false);
-        char pg[8];
-        snprintf(pg, sizeof pg, "%u/%u", (unsigned)(s_page + 1), (unsigned)s_pages);
-        t.setTextColor(Theme::W95_LIGHT, Theme::BG);
-        const int mid = (s_back.x + s_back.w + s_prev.x) / 2;
-        t.setCursor(mid - t.textWidth(pg) / 2, s_back.y + (BH - 8) / 2);
-        t.print(pg);
+
+    // ---- the tutorial, over everything ------------------------------------
+    if (tut) {
+        const MeshTutor::Step ts = MeshTutor::step();
+        if (ts == MeshTutor::Step::PICK_LINE && s_lineN) {
+            // The first line, with the arrow inside its own box so it lands
+            // on nothing else in either rotation.
+            const Rect& r = s_lineRect[0];
+            MeshTutor::drawFrame(t, now, r.x, r.y, r.w, r.h);
+            MeshTutor::drawArrow(t, now, r.x + r.w - 28, r.y + r.h / 2, MeshTutor::Dir::LEFT);
+        } else if (ts == MeshTutor::Step::PRESS_SEND && s_sel >= 0) {
+            MeshTutor::drawFrame(t, now, s_send.x, s_send.y, s_send.w, s_send.h);
+            MeshTutor::drawArrow(t, now, s_send.x - 4, s_send.y + s_send.h / 2, MeshTutor::Dir::RIGHT);
+        }
+        MeshTutor::drawCard(t, true);
     }
 }
 
 ComposeHit uiMeshComposeTouch(int x, int y, uint32_t now) {
+    if (MeshTutor::active()) return tutorTouch(x, y);
     if (s_sel >= 0) {
         if (inRect(s_back, x, y)) { s_sel = -1; return ComposeHit::NONE; }
         if (inRect(s_send, x, y)) {
@@ -176,6 +234,7 @@ ComposeHit uiMeshComposeTouch(int x, int y, uint32_t now) {
         }
         // Anything else falls through: another line changes the choice.
     } else {
+        if (inRect(s_help, x, y)) return ComposeHit::HELP;
         if (inRect(s_back, x, y)) return ComposeHit::BACK;
         if (s_pages > 1 && inRect(s_prev, x, y)) {
             s_page = (uint8_t)((s_page + s_pages - 1) % s_pages);

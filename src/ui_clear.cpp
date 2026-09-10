@@ -7,6 +7,7 @@
 #include "meshtalk.h"
 #if SQUACH_MESH
 #include "squachmesh.h"
+#include "meshtutor.h"
 #include "squachy.h"
 #include "detection.h"
 
@@ -278,6 +279,11 @@ static bool messageShowing(uint32_t now) {
     return MeshTalk::ready() && m.have && (uint32_t)(now - m.at) < MSG_SHOW_MS;
 }
 
+// The tutorial's pretend reply, painted where a real one would be.
+static bool tutorReply() {
+    return MeshTutor::active() && MeshTutor::step() == MeshTutor::Step::REPLY;
+}
+
 // Who, then what, over the speaker's head, with a tail aimed at him. The name
 // is always in it, so even when the sender is not the one standing there the
 // bubble cannot misattribute.
@@ -344,22 +350,29 @@ static void drawMessageIcon(TFT_eSPI& t, int x, int y, bool unread, bool sending
 
 static void drawMessageUi(TFT_eSPI& t, uint32_t now, int titleBottom, int squachyBottom) {
     s_bubbleOn = false;
-    if (!MeshTalk::ready()) return;
+    // The tutorial runs before anybody has a phrase, so it shows the bubble
+    // regardless -- finding it is the thing it teaches.
+    const bool tut = MeshTutor::active();
+    if (!MeshTalk::ready() && !tut) return;
     const MeshTalk::Message& m = MeshTalk::inbox();
     const int w = t.width();
     // Where the visitor is, or where he would stand if there were one.
     const int gx   = s_msgGuestOn ? s_msgGx : w / 2 + w / 4;
     const int head = s_msgGuestOn ? s_msgHeadTop
                                   : titleBottom + (squachyBottom - titleBottom) / 3;
-    if (messageShowing(now)) drawRedBubble(t, gx, head, m.from, MeshTalk::lineText(m));
+    const bool showing = tut ? tutorReply() : messageShowing(now);
+    if (showing) {
+        if (tut) drawRedBubble(t, gx, head, MeshTutor::DEMO_NAME, MeshTutor::DEMO_REPLY);
+        else     drawRedBubble(t, gx, head, m.from, MeshTalk::lineText(m));
+    }
     // Only with somebody around -- or something unread from somebody who was.
-    if (s_msgGuestOn || m.unread) {
+    if (s_msgGuestOn || (m.unread && !tut)) {
         int ix = gx + 26;
         if (ix + MSG_ICON_W > w - 4) ix = w - 4 - MSG_ICON_W;
         // Dropped clear of the red bubble while one is up: at the larger
         // size the two overlapped at the corner and, both red, read as one.
-        drawMessageIcon(t, ix, head + 4 + (messageShowing(now) ? 8 : 0),
-                        m.unread, MeshTalk::sending(now), now);
+        drawMessageIcon(t, ix, head + 4 + (showing ? 8 : 0),
+                        tut ? showing : m.unread, tut ? false : MeshTalk::sending(now), now);
     }
 }
 
@@ -462,6 +475,9 @@ static const uint32_t DEMO_COOLDOWN_MS = 15000;
 // Whoever WOULD be visiting right now, before the visit machine has decided
 // what to do about it. Not what gets drawn -- see visitHosting().
 static const SquachMesh::Peer* rawGuest(uint32_t now) {
+    // The tutorial's DEMO visitor comes first: while it runs, it is the
+    // lesson, and a real peer turning up must not walk onto the stage.
+    if (const SquachMesh::Peer* d = MeshTutor::guest()) return d;
     if (s_guest) return s_guest;          // the emulator's --peer, when set
     if (const SquachMesh::Peer* p = Mesh::peer()) { s_realSeenAt = now; return p; }
 #if SQUACH_MESH_DEMO
@@ -478,6 +494,7 @@ static const SquachMesh::Peer* rawGuest(uint32_t now) {
 // A real peer is its MAC folded down; the emulator's and the demo's are
 // constants, because there is only ever one of each.
 static uint32_t rawGuestId(uint32_t now) {
+    if (MeshTutor::guest()) return 0x7070u;
     if (s_guest) return 0x5111u;
     if (Mesh::peer()) {
         const uint8_t* m = Mesh::peerMac();
@@ -787,7 +804,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         const SquachMesh::Peer* guest = visitHosting();
         // A message in the air replaces his scripted line and his nameplate
         // while it is up -- it carries the sender's name itself, in red.
-        const bool msgFresh = messageShowing(now);
+        const bool msgFresh = messageShowing(now) || tutorReply();
         s_msgGuestOn = false;
         if (guest) {
             const int SMALL_PCT = 70;
@@ -1088,4 +1105,18 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     t.fillRect(0, countersBottom, w, h - countersBottom, Theme::BG);
     Theme::drawButtonBar(t, ButtonId::NONE,
                          scanMenu ? Theme::ButtonBarMode::SCAN_PICKER : Theme::ButtonBarMode::MAIN);
+#if SQUACH_MESH
+    // Last, so it sits over the counters and the buttons -- which it has
+    // taken over for as long as it runs; main.cpp routes every tap to it.
+    if (MeshTutor::active()) {
+        if (MeshTutor::step() == MeshTutor::Step::TAP_ICON && s_bubbleOn) {
+            const int ix = s_bubX + 8, iy = s_bubY + 8;
+            MeshTutor::drawFrame(t, now, ix, iy, MSG_ICON_W, MSG_ICON_H);
+            // From below: above it is where the visitor's lines go.
+            MeshTutor::drawArrow(t, now, ix + MSG_ICON_W / 2, iy + MSG_ICON_H + 7,
+                                 MeshTutor::Dir::UP);
+        }
+        MeshTutor::drawCard(t, false);
+    }
+#endif
 }

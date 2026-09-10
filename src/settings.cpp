@@ -19,6 +19,7 @@ static bool        s_meshTransmit = false;
 static bool        s_meshConsent  = false;
 static bool        s_phoneQwerty  = false;
 static bool        s_messagesOn   = false;
+static bool        s_msgTutor     = false;
 #endif
 static bool        s_infoPrimerShown = false;
 static bool        s_rotationLocked = false;
@@ -160,6 +161,7 @@ void load() {
     s_meshConsent  = s_prefs.getBool("meshok", false);
     s_phoneQwerty  = s_prefs.getBool("qwerty", false);
     s_messagesOn   = s_prefs.getBool("msgon", false);
+    s_msgTutor     = s_prefs.getBool("msgtut", false);
 #endif
     s_infoPrimerShown = s_prefs.getBool("infoprimer", false);
     s_rotationLocked = s_prefs.getBool("rotlock", false);
@@ -402,6 +404,8 @@ void toggleMessages() {
     s_messagesOn = !s_messagesOn;
     s_prefs.putBool("msgon", s_messagesOn);
 }
+bool meshTutorSeen()    { return s_msgTutor; }
+void setMeshTutorSeen() { s_msgTutor = true; s_prefs.putBool("msgtut", true); }
 #endif
 
 uint8_t squachySizePct() {

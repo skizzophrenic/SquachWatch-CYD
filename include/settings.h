@@ -232,6 +232,10 @@ namespace Settings {
     // sits behind the same consent gate.
     bool        messagesOn();
     void        toggleMessages();
+    // Whether the messages tutorial has run. Set when it STARTS, so a
+    // skipped tutorial counts as seen; "?" on the message screen replays it.
+    bool        meshTutorSeen();
+    void        setMeshTutorSeen();
 #endif
 
     uint8_t     squachySizePct();

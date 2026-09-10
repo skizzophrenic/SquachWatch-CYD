@@ -41,6 +41,7 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/meshmsg.cpp \
             $(SRC)/meshwords.cpp \
             $(SRC)/meshtalk.cpp \
+            $(SRC)/meshtutor.cpp \
             $(SIM_DIR)/meshcrypto_sim.cpp \
             $(SIM_DIR)/meshsim.cpp \
             $(SRC)/ui_phone.cpp \
