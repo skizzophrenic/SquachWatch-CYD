@@ -3777,7 +3777,7 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
 }
 
 void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const char* line,
-                bool talking, int wanderRangePx, bool waving) {
+                bool talking, int wanderRangePx, bool waving, int bubbleGap) {
     // This cameo is placed by callers that have already reserved room, so
     // there is no region to clamp against.
     s_topLimit = -10000;
@@ -3823,7 +3823,17 @@ void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const
     // under the "TALKING SASQUACH" subtitle above, in the extra room
     // this bigger boot-splash scale leaves between his head and the
     // subtitle.
-    if (line) drawBubble(t, cx, headTopY - 34, line, now);
+    // bubbleGap defaults to 34, which is the BOOT SPLASH's number -- it was
+    // chosen to tuck under the "TALKING SASQUACH" subtitle in the room that
+    // screen leaves above his head.
+    //
+    // On CLEAR with a visitor, 34 put his bubble at the very top of the
+    // screen, in the same row tick() draws the HOST's bubble in. The two
+    // then overlapped and painted over each other, which is what "it cannot
+    // render two speech bubbles" looked like from outside. A visitor passes
+    // a smaller gap so his bubble sits just above his own head and is
+    // visibly his.
+    if (line) drawBubble(t, cx, headTopY - bubbleGap, line, now);
 }
 
 // Small filled heart, used by the tap-to-pet flourish.

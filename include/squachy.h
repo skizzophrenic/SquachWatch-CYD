@@ -366,5 +366,5 @@ namespace Squachy {
     // wave stops reading as a greeting and starts reading as a stuck frame.
     void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale = 1.0f,
                     const char* line = nullptr, bool talking = false, int wanderRangePx = 0,
-                    bool waving = true);
+                    bool waving = true, int bubbleGap = 34);
 }

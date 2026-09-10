@@ -569,7 +569,12 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
                                         s_vp == VisitPhase::LEAVING);
             Squachy::drawWaving(t, gx, squachyBottom, now, gs,
                                 s_visitGuestLine, s_visitGuestLine != nullptr,
-                                visitWalking() ? 2 : 0, stillGreeting);
+                                visitWalking() ? 2 : 0, stillGreeting,
+                                // Just above his own head, not the boot
+                                // splash's 34 -- that lands in the host's
+                                // bubble row and the two paint over each
+                                // other.
+                                20);
             Squachy::setShadesPreview(-1);
             Squachy::setOutfitPreview(-1);
 
