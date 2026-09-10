@@ -1794,62 +1794,82 @@ static const char* const MEET_GUEST_LINES[] = {
 //
 // The host speaks first and the guest replies from the SAME entry, so the
 // reply has something to reply to.
-struct Exchange { const char* host; const char* guest; };
+//
+// The third column is the topper: a short something the host throws back
+// after the answer. Two-line exchanges are correct and a bit stiff -- real
+// company is one of them getting the last word and both of them enjoying it.
+// nullptr where the pair is better off ending on the reply, so the rhythm
+// varies instead of thudding into a punchline every time.
+struct Exchange { const char* host; const char* guest; const char* topper; };
 static const Exchange HANG_EXCHANGES[] = {
-    { "Quiet out here.",                "Suits me fine."                      },
-    { "You come far?",                  "Farther than I meant to."            },
-    { "Nothing on my end.",             "Nor mine. Good."                     },
-    { "You always this chatty?",        "You started it."                     },
-    { "Nice night for it.",             "Every night's a night for it."       },
-    { "Seen anything worth reporting?", "Not since Tuesday."                  },
-    { "I like the hat.",                "I like that you noticed."            },
-    { "Long way from the woods.",       "The woods moved."                    },
-    { "Two of us. Better odds.",        "Better company, anyway."             },
-    { "How's the signal your side?",    "Loud. Nothing useful."               },
-    { "You get used to the waiting.",   "I never did."                        },
-    { "Don't let me keep you.",         "You're not."                         },
-    { "Rough patch of airwaves.",       "Tell me about it."                   },
-    { "Anybody following you?",         "Not that I noticed. Now I'll worry." },
-    { "Standing around's underrated.",  "It really is."                       },
-    { "Do you sleep?",                  "Define sleep."                       },
-    { "Somebody's got to watch.",       "Might as well be us."                },
-    { "You hear that?",                 "No. And that's the problem."         },
-    { "Good spot, this.",               "Better with two."                    },
-    { "I'd offer you something.",       "You've got nothing."                 },
-    { "Comfortable silence?",           "My favourite kind."                  },
-    { "Four eyes beat two.",            "That's the theory."                  },
+    { "Quiet out here.",                "Suits me fine.",
+      "Yeah. Me too."                        },
+    { "You come far?",                  "Farther than I meant to.",
+      "It does that."                        },
+    { "Nothing on my end.",             "Nor mine. Good.",
+      nullptr                                },
+    { "You always this chatty?",        "You started it.",
+      "I did, didn't I."                     },
+    { "Nice night for it.",             "Every night's a night for it.",
+      "Ha. Fair."                            },
+    { "Seen anything worth reporting?", "Not since Tuesday.",
+      "Tuesday's like that."                 },
+    { "I like the hat.",                "I like that you noticed.",
+      "I notice everything."                 },
+    { "Long way from the woods.",       "The woods moved.",
+      "They do that."                        },
+    { "Two of us. Better odds.",        "Better company, anyway.",
+      nullptr                                },
+    { "How's the signal your side?",    "Loud. Nothing useful.",
+      "Sounds about right."                  },
+    { "You get used to the waiting.",   "I never did.",
+      "Honestly? Me either."                 },
+    { "Don't let me keep you.",         "You're not.",
+      "Good."                                },
+    { "Rough patch of airwaves.",       "Tell me about it.",
+      "I just did."                          },
+    { "Anybody following you?",         "Not that I noticed. Now I'll worry.",
+      "Sorry. Sort of."                      },
+    { "Standing around's underrated.",  "It really is.",
+      nullptr                                },
+    { "Do you sleep?",                  "Define sleep.",
+      "That's a no, then."                   },
+    { "Somebody's got to watch.",       "Might as well be us.",
+      "Might as well."                       },
+    { "You hear that?",                 "No. And that's the problem.",
+      "See, you get it."                     },
+    { "Good spot, this.",               "Better with two.",
+      nullptr                                },
+    { "I'd offer you something.",       "You've got nothing.",
+      "It's the thought."                    },
+    { "Comfortable silence?",           "My favourite kind.",
+      "We're terrible at it."                },
+    { "Four eyes beat two.",            "That's the theory.",
+      "Let's test it."                       },
+    { "Bet you've got stories.",        "One or two.",
+      "Keep them. I'll ask later."           },
+    { "You ever get spotted?",          "Once. Ran.",
+      "Smart."                               },
+    { "This your usual route?",         "It is now.",
+      nullptr                                },
+    { "How's the reception?",           "Better since you turned up.",
+      "Now you're just being nice."          },
+    { "Left or right? Pick.",           "Whichever's quieter.",
+      "They're both quiet."                  },
+    { "We look ridiculous.",            "Speak for yourself.",
+      "Ha. Fair."                            },
+    { "Nobody's watching us, right?",   "That's the joke, isn't it.",
+      "Ha. Yeah."                            },
+    { "Think there's more of us?",      "Has to be.",
+      "Has to be."                           },
 };
 static const uint8_t HANG_EXCHANGES_N =
     sizeof(HANG_EXCHANGES) / sizeof(HANG_EXCHANGES[0]);
 
-static const char* const HANG_HOST_LINES[] = {
-    "Four eyes are better than two.",
-    "You take that side.",
-    "Nothing yet. Between us.",
-    "This is nice, actually.",
-    "Split the watch?",
-    "Standing here beats standing here alone.",
-    "Two of us and it's still quiet.",
-    "Comfortable silence. My favourite kind.",
-    "I'll take the left.",
-    "Somebody's got to keep watch.",
-    "We should do this more.",
-    "Don't let me keep you.",
-};
-static const char* const HANG_GUEST_LINES[] = {
-    "You seeing what I'm seeing?",
-    "Nope. Still nothing.",
-    "Quiet shift.",
-    "Your sunset's better than mine.",
-    "I'd have brought snacks.",
-    "Not a bad view from here.",
-    "Long as nobody's looking at us.",
-    "I could stand here a while.",
-    "You always this quiet?",
-    "Nothing on my end either.",
-    "Beats the walk over.",
-    "Yeah. All clear my side.",
-};
+// The standalone HANGOUT pools that used to sit here are gone. Both sides
+// drawing from their own bank independently is precisely the thing the
+// paired table above replaced, and leaving the old pools in as a fallback
+// would only mean a path that can still produce it.
 static const char* const PART_HOST_LINES[] = {
     "Take it easy out there.",
     "Stay sharp.",
@@ -1876,21 +1896,49 @@ static const char* const PART_GUEST_LINES[] = {
 };
 #define POOL_N(a) (uint8_t)(sizeof(a) / sizeof((a)[0]))
 
-void visitHangHost(uint32_t seed) {
-    say(HANG_EXCHANGES[seed % HANG_EXCHANGES_N].host, 4200);
+// Reading time, not a metronome. 4600 ms flat gave "Good." the same beat as
+// a full sentence, and the leftover seconds were the dead air that made a
+// conversation look like two statues taking turns.
+uint32_t lineMs(const char* line) {
+    uint32_t n = 0;
+    while (line && line[n]) n++;
+    uint32_t ms = 1200 + n * 65;
+    if (ms < 1800) ms = 1800;
+    if (ms > 4000) ms = 4000;
+    return ms;
+}
+
+uint32_t visitSay(const char* line) {
+    const uint32_t ms = lineMs(line);
+    say(line, ms);
+    return ms;
+}
+
+void visitLaugh(uint32_t now) {
+    mood      = Mood::BOUNCE;   // 9px at 220ms -- the idle flourish's bounce
+    moodUntil = now + 1500;
+}
+
+uint32_t visitHangHost(uint32_t seed) {
+    return visitSay(HANG_EXCHANGES[seed % HANG_EXCHANGES_N].host);
 }
 const char* visitHangGuest(uint32_t seed) {
     return HANG_EXCHANGES[seed % HANG_EXCHANGES_N].guest;
 }
+const char* visitHangTopper(uint32_t seed) {
+    return HANG_EXCHANGES[seed % HANG_EXCHANGES_N].topper;
+}
 
-void visitReaction(VisitMoment m) {
+uint32_t visitReaction(VisitMoment m) {
     switch (m) {
         case VisitMoment::MEET:
-            say(pick(MEET_HOST_LINES, POOL_N(MEET_HOST_LINES)), 4200); break;
+            return visitSay(pick(MEET_HOST_LINES, POOL_N(MEET_HOST_LINES)));
         case VisitMoment::HANGOUT:
-            say(pick(HANG_HOST_LINES, POOL_N(HANG_HOST_LINES)), 4200); break;
-        case VisitMoment::PART:
-            say(pick(PART_HOST_LINES, POOL_N(PART_HOST_LINES)), 3600); break;
+            // Not reachable -- the hangout goes through the paired table
+            // above. Kept total rather than falling off the end.
+            return visitHangHost((uint32_t)random(0, HANG_EXCHANGES_N));
+        default:
+            return visitSay(pick(PART_HOST_LINES, POOL_N(PART_HOST_LINES)));
     }
 }
 
@@ -1932,7 +1980,7 @@ const char* visitGuestLine(VisitMoment m, uint32_t seed) {
         case VisitMoment::MEET:
             return MEET_GUEST_LINES[seed % POOL_N(MEET_GUEST_LINES)];
         case VisitMoment::HANGOUT:
-            return HANG_GUEST_LINES[seed % POOL_N(HANG_GUEST_LINES)];
+            return visitHangGuest(seed);
         default:
             return PART_GUEST_LINES[seed % POOL_N(PART_GUEST_LINES)];
     }
@@ -3837,7 +3885,7 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
 }
 
 void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const char* line,
-                bool talking, int wanderRangePx, bool waving, int bubbleGap) {
+                bool talking, int wanderRangePx, bool waving, int bubbleGap, bool laughing) {
     // This cameo is placed by callers that have already reserved room, so
     // there is no region to clamp against.
     s_topLimit = -10000;
@@ -3848,8 +3896,14 @@ void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const
     s_dangle = false;
     // Same idle bob as tick()'s WAVE mood, just without the quip/mood
     // state machine — a self-contained cameo for the boot splash.
-    float bobAmt = 6.0f * scale;
-    float bob = sinf((float)(now % 900) / 900.0f * 6.2831853f) * bobAmt;
+    // Laughing is the same trick tick() plays for Mood::BOUNCE -- taller and
+    // much faster -- because that is the whole visible difference between
+    // standing there and cracking up, and this cameo has no mood machine to
+    // ask for it. 7 rather than tick()'s 9: the guest is drawn small and the
+    // full amplitude put his ear tips through the title bar.
+    float bobAmt = (laughing ? 7.0f : 6.0f) * scale;
+    const uint32_t bobPeriod = laughing ? 240u : 900u;
+    float bob = sinf((float)(now % bobPeriod) / (float)bobPeriod * 6.2831853f) * bobAmt;
     int headTopY = baseY - (int)(58.0f * scale);
     // Deliberately the idle amplitude rather than this mood's own bobAmt.
     // Using the live value made the ear length constant within a mood but step

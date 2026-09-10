@@ -272,7 +272,27 @@ int main(int argc, char** argv) {
     const uint32_t STEP_MS = 33;   // ~30fps, close to the device's real loop rate
     uint32_t now = millis();
 
+    // Virtual time, in the ONE-SHOT renderer too, not just the interactive
+    // emulator.
+    //
+    // This screen is ticked with a synthetic `now` that runs at 33 ms a
+    // frame while millis() was still answering with wall-clock -- and the
+    // firmware reads both. Anything that stamped a deadline with millis()
+    // and was then tested against `now` compared two different clocks that
+    // were seconds apart within a few frames: Squachy::say() sets
+    // bubbleUntil = millis() + ms, and tick() shows the bubble while
+    // now < bubbleUntil, so by frame 100 the host's speech bubble could not
+    // render at all here. That is not a rendering difference, it is the
+    // emulator disagreeing with the device about what time it is, and it is
+    // the sixth fidelity bug found in this shim.
+    //
+    // Pinning millis() to the frame's own timestamp makes the two clocks the
+    // same clock, which is what they are on the device.
+    SimClock::virtualTime = true;
+    SimClock::nowMs       = now;
+
     auto tick = [&](uint32_t t) {
+        SimClock::nowMs = t;
         if      (screen == "clear")    uiClearTick(frame, t, engine, true, false);
         else if (screen == "log") {
             const bool info = (infoType >= 0);

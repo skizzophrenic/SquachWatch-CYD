@@ -61,11 +61,22 @@ static uint32_t     s_beatAt   = 0;          // when the current line went up
 static uint32_t     s_beatNo   = 0;          // advances once per line
 static bool         s_guestTurn = false;
 static const char*  s_visitGuestLine = nullptr;
+static uint32_t     s_beatMs   = 2400;       // how long THIS line stays up
+static uint8_t      s_hangStep = 0;          // 0 ask, 1 answer, 2 topper
+static uint32_t     s_guestLaughUntil = 0;   // the guest's half of the laugh
 
 static const uint32_t WALK_MS  = 1800;       // across the gap, either way
-static const uint32_t BEAT_MS  = 4600;       // one line's time on screen
-static const uint32_t REPLY_GAP_MS = 700;    // question to answer
-static const uint32_t THINK_MS     = 3200;   // answer to the next question
+// The whole gap between one bubble going down and the next coming up. It is
+// deliberately tiny.
+//
+// This used to be a fixed 4600 ms beat plus a further 700 or 3200 ms of
+// nothing, and the result was two Squachys who each said a true thing and
+// then stood there. Lines are timed by their own length now (Squachy::lineMs)
+// and the next one lands almost on top of the last, which is what people
+// actually sound like when they are enjoying each other's company. The pause
+// was never the problem being solved -- it was the pacing of a status
+// readout applied to a conversation.
+static const uint32_t TURN_GAP_MS = 220;
 static const uint32_t HANG_MS  = 60000;      // before he thinks about leaving
 
 // True while he should have a walk cycle under him.
@@ -108,25 +119,53 @@ static uint32_t s_exchange = 0;
 static void visitBeat(uint32_t now, Squachy::VisitMoment m) {
     s_beatAt = now;
     s_beatNo++;
-    s_guestTurn = !s_guestTurn;
     if (m == Squachy::VisitMoment::HANGOUT) {
-        if (s_guestTurn) {
-            s_visitGuestLine = Squachy::visitHangGuest(s_exchange);
-        } else {
-            s_visitGuestLine = nullptr;
-            s_exchange++;                       // a new exchange starts here
-            Squachy::visitHangHost(s_exchange);
+        // Three beats, not two: question, answer, and the host getting the
+        // last word. The strict two-beat alternation was correct dialogue
+        // and still read as correspondence rather than company.
+        switch (s_hangStep) {
+            case 0:                                 // the host asks
+                s_guestTurn      = false;
+                s_visitGuestLine = nullptr;
+                s_beatMs         = Squachy::visitHangHost(s_exchange);
+                s_hangStep       = 1;
+                break;
+            case 1:                                 // the guest answers
+                s_guestTurn      = true;
+                s_visitGuestLine = Squachy::visitHangGuest(s_exchange);
+                s_beatMs         = Squachy::lineMs(s_visitGuestLine);
+                // The host has no bubble this beat, so his reaction is the
+                // only thing of his on screen -- which is exactly why he
+                // gets one. He hears the answer land and cracks up.
+                Squachy::visitLaugh(now);
+                // Only advance past the pair once it is actually finished.
+                s_hangStep = Squachy::visitHangTopper(s_exchange) ? 2 : 0;
+                if (s_hangStep == 0) s_exchange++;
+                break;
+            default:                                // the host's topper
+                s_guestTurn       = false;
+                s_visitGuestLine  = nullptr;
+                s_beatMs          = Squachy::visitSay(
+                                        Squachy::visitHangTopper(s_exchange));
+                s_guestLaughUntil = now + 1500;     // and now the guest goes
+                s_hangStep        = 0;
+                s_exchange++;
+                break;
         }
         return;
     }
+    s_guestTurn = !s_guestTurn;
     if (s_guestTurn) {
         // The guest's line is held, not re-rolled: his bubble is redrawn
         // every frame it is up, and picking again each time would flicker
         // through the pool instead of saying one thing.
         s_visitGuestLine = Squachy::visitGuestLine(m, s_beatNo);
+        s_beatMs         = Squachy::lineMs(s_visitGuestLine);
+        // Pleased to see him. Not on the goodbye, obviously.
+        if (m == Squachy::VisitMoment::MEET) Squachy::visitLaugh(now);
     } else {
         s_visitGuestLine = nullptr;
-        Squachy::visitReaction(m);          // the host says it himself
+        s_beatMs = Squachy::visitReaction(m);   // the host says it himself
     }
 }
 
@@ -166,7 +205,9 @@ static void visitTick(uint32_t now) {
         s_hostingId = id;
         s_vp = VisitPhase::ARRIVING; s_vpAt = now;
         s_guestTurn = true;                 // so the HOST speaks first
-        s_visitGuestLine = nullptr;
+        s_hangStep  = 0;                    // and asks the first question
+        s_guestLaughUntil = 0;              // no laughter carried in from
+        s_visitGuestLine = nullptr;         // whoever was here before
         return;
     }
 
@@ -179,7 +220,7 @@ static void visitTick(uint32_t now) {
     if (id != s_hostingId && s_vp != VisitPhase::LEAVING) {
         s_vp = VisitPhase::LEAVING;
         visitBeat(now, Squachy::VisitMoment::PART);
-        s_vpAt = now + BEAT_MS;             // goodbye first, then the walk
+        s_vpAt = now + s_beatMs;            // goodbye first, then the walk
         return;
     }
     switch (s_vp) {
@@ -192,38 +233,39 @@ static void visitTick(uint32_t now) {
             }
             break;
         case VisitPhase::MEETING:
-            if (now - s_beatAt >= BEAT_MS) {
+            if (now - s_beatAt >= s_beatMs + TURN_GAP_MS) {
                 if (s_guestTurn) {          // guest has answered; hello is done
                     s_vp = VisitPhase::HANGING; s_vpAt = now;
                     s_visitGuestLine = nullptr;
                     s_beatAt = now;
+                    s_hangStep = 0;
+                    s_beatMs = 500;         // half a breath, then straight in
                 } else {
                     visitBeat(now, Squachy::VisitMoment::MEET);
                 }
             }
             break;
         case VisitPhase::HANGING:
-            // Gaps between lines, not a wall of them. Standing together in
-            // silence is most of the point.
-            // A reply follows its question closely; the PAUSE goes after the
-            // exchange, not inside it. Trailing the answer by nine seconds
-            // was what made two lines read as two unrelated remarks even
-            // before they were unrelated.
-            {
-                // s_guestTurn is the state AFTER the last beat. Guest just
-                // replied -> the host needs a new question, which is the
-                // longer pause. Host just asked -> the answer should follow
-                // close behind, which is the whole point of pairing them.
-                const uint32_t due = s_guestTurn ? (BEAT_MS + THINK_MS)
-                                                 : (BEAT_MS + REPLY_GAP_MS);
-                if (now - s_beatAt >= due) visitBeat(now, Squachy::VisitMoment::HANGOUT);
-            }
-            if (now - s_vpAt >= HANG_MS) {   // he has been here a while
-                s_vp = VisitPhase::LEAVING; s_vpAt = now;
-                visitBeat(now, Squachy::VisitMoment::PART);
-                // Goodbyes happen before he moves, so the walk-off is the
-                // last thing rather than something talked over.
-                s_vpAt = now + BEAT_MS;
+            // One line down, the next one up. Every beat is timed by the
+            // line it is showing, so the rhythm comes from what is being
+            // said rather than from a constant that has to suit both "Good."
+            // and a full sentence.
+            if (now - s_beatAt >= s_beatMs + TURN_GAP_MS) {
+                // He leaves BETWEEN exchanges, never inside one. Cutting in
+                // after a question leaves the answer unsaid, which reads as
+                // a dropped connection rather than as a goodbye -- and the
+                // decision belongs here, on a beat boundary, rather than as
+                // a separate test that has to catch the gap between beats
+                // before the next one starts.
+                if (s_hangStep == 0 && now - s_vpAt >= HANG_MS) {
+                    s_vp = VisitPhase::LEAVING; s_vpAt = now;
+                    visitBeat(now, Squachy::VisitMoment::PART);
+                    // Goodbyes happen before he moves, so the walk-off is
+                    // the last thing rather than something talked over.
+                    s_vpAt = now + s_beatMs;
+                } else {
+                    visitBeat(now, Squachy::VisitMoment::HANGOUT);
+                }
             }
             break;
         case VisitPhase::LEAVING:
@@ -612,7 +654,11 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
                                 // splash's 34 -- that lands in the host's
                                 // bubble row and the two paint over each
                                 // other.
-                                20);
+                                20,
+                                // Cracking up at whatever the host just said.
+                                // The host gets the same thing through his
+                                // mood machine; this cameo has none.
+                                now < s_guestLaughUntil);
             Squachy::setShadesPreview(-1);
             Squachy::setOutfitPreview(-1);
 

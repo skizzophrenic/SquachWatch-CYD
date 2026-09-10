@@ -231,8 +231,16 @@ namespace Squachy {
     enum class VisitMoment : uint8_t { MEET, HANGOUT, PART };
 
     // Host's side of the conversation: picks a line and says it, exactly the
-    // way watchAlertReaction() and the scan reactions do.
-    void visitReaction(VisitMoment m);
+    // way watchAlertReaction() and the scan reactions do. Returns how long
+    // the bubble will be up, so the caller can put the next line on screen
+    // as this one comes down instead of guessing at a fixed beat.
+    uint32_t visitReaction(VisitMoment m);
+
+    // How long a line of visit dialogue should stay up, from its length.
+    // A fixed beat gives a three-word answer the same nine seconds as a
+    // sentence, and that dead air is what made two Squachys reading their
+    // lines out look like two Squachys waiting for a bus.
+    uint32_t lineMs(const char* line);
 
     // True for as long as somebody is visiting. While it is set, his idle
     // chatter and his thirty-second watching beat both stand down.
@@ -252,8 +260,23 @@ namespace Squachy {
     // sides produced two Squachys talking past each other -- each line was
     // fine and none of them were answers. Same seed, same exchange, so the
     // reply actually replies.
-    void        visitHangHost(uint32_t seed);      // host says it himself
+    uint32_t    visitHangHost(uint32_t seed);      // host says it himself
     const char* visitHangGuest(uint32_t seed);     // the matching reply
+
+    // The third beat: a short something the host tosses back after the
+    // guest's reply. Not every exchange has one -- nullptr means this pair
+    // ends on the reply -- and the ones that do are the ones that read as
+    // two people enjoying themselves rather than two people exchanging
+    // information.
+    const char* visitHangTopper(uint32_t seed);
+
+    // Say an arbitrary visit line in the host's bubble. Returns its ms.
+    uint32_t visitSay(const char* line);
+
+    // The host cracks up: a short, fast bounce, the same one the idle
+    // flourish uses. Called when the OTHER one's line lands, which is what
+    // makes it read as a reaction rather than as a tic.
+    void visitLaugh(uint32_t now);
 
     // A nickname by index. nickname() only ever reports our own, and a guest
     // arrives carrying somebody else's -- both devices ship the same table,
@@ -371,7 +394,10 @@ namespace Squachy {
     // waving defaults true, which is the boot splash unchanged. Pass false
     // for anyone who is going to be on screen long enough that a permanent
     // wave stops reading as a greeting and starts reading as a stuck frame.
+    // laughing: a faster, taller bob for as long as it is set -- the guest's
+    // half of visitLaugh(), which the host gets through his mood machine and
+    // this cameo has no mood machine to get it through.
     void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale = 1.0f,
                     const char* line = nullptr, bool talking = false, int wanderRangePx = 0,
-                    bool waving = true, int bubbleGap = 34);
+                    bool waving = true, int bubbleGap = 34, bool laughing = false);
 }
