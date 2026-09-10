@@ -82,7 +82,6 @@ static const uint32_t WALK_MS  = 1800;       // across the gap, either way
 // was never the problem being solved -- it was the pacing of a status
 // readout applied to a conversation.
 static const uint32_t TURN_GAP_MS = 220;
-static const uint32_t HANG_MS  = 60000;      // before he thinks about leaving
 
 // True while he should have a walk cycle under him.
 static bool visitWalking() {
@@ -313,21 +312,26 @@ static void drawRedBubble(TFT_eSPI& t, int cx, int headTop, const char* from, co
 // The little bubble. Cyan dots when there is nothing new; the dots take turns
 // while a message of ours is on the air, like somebody typing; and it goes red
 // with a "!" when one has arrived and not been read.
+// Sized for a thumb, not for discretion. It is the only way into messages,
+// and at the first size, 20x13, it was hard to see and harder to hit.
+static const int MSG_ICON_W = 32, MSG_ICON_H = 22;
+
 static void drawMessageIcon(TFT_eSPI& t, int x, int y, bool unread, bool sending, uint32_t now) {
-    const int iw = 20, ih = 13;
+    const int iw = MSG_ICON_W, ih = MSG_ICON_H;
     const uint16_t edge = unread ? Theme::RED : Theme::CYAN;
-    t.fillRoundRect(x, y, iw, ih, 3, unread ? Theme::RED : Theme::BG);
-    t.drawRoundRect(x, y, iw, ih, 3, edge);
-    t.fillTriangle(x + 3, y + ih - 1, x + 8, y + ih - 1, x + 3, y + ih + 3, edge);
+    t.fillRoundRect(x, y, iw, ih, 5, unread ? Theme::RED : Theme::BG);
+    t.drawRoundRect(x, y, iw, ih, 5, edge);
+    t.fillTriangle(x + 4, y + ih - 1, x + 12, y + ih - 1, x + 4, y + ih + 5, edge);
     if (unread) {
-        t.setTextSize(1);
+        t.setTextSize(2);
         t.setTextColor(Theme::WHITE, Theme::RED);
-        t.setCursor(x + (iw - 6) / 2 + 1, y + 3);
+        t.setCursor(x + (iw - 12) / 2 + 1, y + (ih - 16) / 2 + 1);
         t.print("!");
+        t.setTextSize(1);
     } else {
         for (int i = 0; i < 3; i++) {
             const bool lit = !sending || (int)((now / 250) % 3) == i;
-            t.fillRect(x + 5 + i * 4, y + 6, 2, 2, lit ? Theme::CYAN : Theme::W95_SHADOW);
+            t.fillRect(x + 8 + i * 6, y + 9, 4, 4, lit ? Theme::CYAN : Theme::W95_SHADOW);
         }
     }
     // A finger-sized target around a thumbnail-sized icon.
@@ -351,8 +355,11 @@ static void drawMessageUi(TFT_eSPI& t, uint32_t now, int titleBottom, int squach
     // Only with somebody around -- or something unread from somebody who was.
     if (s_msgGuestOn || m.unread) {
         int ix = gx + 26;
-        if (ix + 20 > w - 4) ix = w - 24;
-        drawMessageIcon(t, ix, head + 4, m.unread, MeshTalk::sending(now), now);
+        if (ix + MSG_ICON_W > w - 4) ix = w - 4 - MSG_ICON_W;
+        // Dropped clear of the red bubble while one is up: at the larger
+        // size the two overlapped at the corner and, both red, read as one.
+        drawMessageIcon(t, ix, head + 4 + (messageShowing(now) ? 8 : 0),
+                        m.unread, MeshTalk::sending(now), now);
     }
 }
 
@@ -426,21 +433,13 @@ static void visitTick(uint32_t now) {
             // said rather than from a constant that has to suit both "Good."
             // and a full sentence.
             if (now - s_beatAt >= s_beatMs + TURN_GAP_MS) {
-                // He leaves BETWEEN exchanges, never inside one. Cutting in
-                // after a question leaves the answer unsaid, which reads as
-                // a dropped connection rather than as a goodbye -- and the
-                // decision belongs here, on a beat boundary, rather than as
-                // a separate test that has to catch the gap between beats
-                // before the next one starts.
-                if (s_hangStep == 0 && now - s_vpAt >= HANG_MS) {
-                    s_vp = VisitPhase::LEAVING; s_vpAt = now;
-                    visitBeat(now, Squachy::VisitMoment::PART);
-                    // Goodbyes happen before he moves, so the walk-off is
-                    // the last thing rather than something talked over.
-                    s_vpAt = now + s_beatMs;
-                } else {
-                    visitBeat(now, Squachy::VisitMoment::HANGOUT);
-                }
+                // No timed exit. He used to say goodbye after a minute and
+                // then -- with the other board still right there -- walk
+                // straight back in on the next frame, which on hardware read
+                // as a Squachy who kept trying to leave. He goes when the
+                // other one does: the id check above sends him off, with his
+                // goodbye, the moment the peer is gone.
+                visitBeat(now, Squachy::VisitMoment::HANGOUT);
             }
             break;
         case VisitPhase::LEAVING:

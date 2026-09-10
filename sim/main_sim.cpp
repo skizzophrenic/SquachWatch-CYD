@@ -150,7 +150,7 @@ static void usage() {
         "  --qwerty          phone screen: the QWERTY board, not the keypad\n"
         "  --msgs            messages on, with a phrase set\n"
         "  --inbox N         ...and canned line N just arrived from the visitor\n"
-        "  --phrase-mode N   phrase screen: 0 show, 1 rolled, 2 picking\n"
+        "  --phrase-mode N   phrase screen: 0 show, 1 rolled, 2 picking a word, 3 picking a letter\n"
         "  --bg N            background style 0..9 (see Settings::Background)\n"
         "  --theme N         palette index\n"
         "  --alert N         DetectionType the ALERT screen fires on\n"

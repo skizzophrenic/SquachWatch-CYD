@@ -24,7 +24,7 @@ bool        s_done = false;
 uint16_t    s_rolled[MeshMsg::PHRASE_WORDS];
 uint16_t    s_picked[MeshMsg::PHRASE_WORDS];
 uint8_t     s_pickN = 0;
-char        s_letter = 0;              // 0 = no letter chosen yet
+char        s_letter = 0;              // 0 = choosing a letter; else choosing its word
 char        s_pending[MeshMsg::PHRASE_TEXT_MAX];
 bool        s_stretchShown = false;
 const char* s_status = nullptr;
@@ -35,9 +35,15 @@ uint16_t    s_statusCol = 0;
 Rect     s_btn[3];
 bool     s_btnOn[3] = { false, false, false };
 Rect     s_letterRect[26];
+bool     s_letterOn[26] = { false };
 Rect     s_wordRect[18];
 uint16_t s_wordIdx[18];
 uint8_t  s_wordN = 0;
+
+// Which letters start at least one word. The list never changes, so this is
+// worked out once, the first time the picker opens.
+uint8_t  s_letterWords[26];
+bool     s_lettersCounted = false;
 
 const int BW = 68, BH = 26;
 
@@ -151,79 +157,120 @@ void drawRolled(TFT_eSPI& t) {
     chrome(t, "[ CANCEL ]", "[ AGAIN ]", "[ USE ]");
 }
 
+void countLetters() {
+    if (s_lettersCounted) return;
+    uint16_t tmp[18];
+    for (int i = 0; i < 26; i++)
+        s_letterWords[i] = MeshMsg::wordsStartingWith((char)('A' + i), tmp, 18);
+    s_lettersCounted = true;
+}
+
+// The phrase so far on one small line: the words already chosen, then the one
+// being chosen (its letter, once there is one), then a dash per word to go.
+// It is only there to say where you are, and every row it does not take goes
+// to the keys.
+void progress(TFT_eSPI& t, int y) {
+    t.setTextSize(1);
+    // One dark strip under the whole line. Each piece prints with the ground
+    // colour behind it, and over a bright background those separate little
+    // boxes read as blocks rather than as dashes.
+    t.fillRect(4, y - 2, t.width() - 8, t.fontHeight() + 4, Theme::BG);
+    int x = 8;
+    for (int i = 0; i < MeshMsg::PHRASE_WORDS; i++) {
+        char cur[3] = { s_letter ? s_letter : '_', s_letter ? '_' : '\0', '\0' };
+        const char* s = i < s_pickN ? MeshMsg::WORDS[s_picked[i]]
+                      : i == s_pickN ? cur : "-";
+        t.setTextColor(i < s_pickN ? Theme::CYAN : i == s_pickN ? Theme::VAPOR_PINK
+                                                                : Theme::W95_SHADOW, Theme::BG);
+        t.setCursor(x, y);
+        t.print(s);
+        x += t.textWidth(s) + 6;
+    }
+}
+
+// Picking is two steps, and only one of them is on screen at a time: the
+// alphabet, then that letter's words. The first version showed the five
+// slots, all 26 letters and up to eighteen words at once, which made every
+// one of them too small to hit reliably with a finger on a resistive panel.
+// Splitting them gives each step the whole screen.
 void drawPick(TFT_eSPI& t) {
     const int w = t.width(), h = t.height();
     const bool port = h > w;
-    const int M = 4, avail = w - 2 * M;
+    const int M = 4, G = 4, avail = w - 2 * M;
     char tb[20];
     snprintf(tb, sizeof tb, "WORD %u OF 5", (unsigned)(s_pickN + 1));
     title(t, tb);
+    progress(t, 28);
 
-    // The five slots: one row in landscape, three and two in portrait, where
-    // five across would leave an eight-letter word no room.
-    const int perRow = port ? 3 : 5;
-    const int sw = (avail - (perRow - 1) * 4) / perRow, sh = 18;
-    t.setTextSize(1);
-    for (int i = 0; i < MeshMsg::PHRASE_WORDS; i++) {
-        const int x = M + (i % perRow) * (sw + 4);
-        const int y = 28 + (i / perRow) * (sh + 4);
-        const bool filled = i < s_pickN, current = i == s_pickN;
-        t.fillRect(x, y, sw, sh, Theme::BG);
-        t.drawRect(x, y, sw, sh, current ? Theme::VAPOR_PINK
-                               : filled  ? Theme::CYAN : Theme::W95_SHADOW);
-        if (filled) {
-            const char* wd = MeshMsg::WORDS[s_picked[i]];
-            t.setTextColor(Theme::WHITE, Theme::BG);
-            t.setCursor(x + (sw - t.textWidth(wd)) / 2, y + (sh - 8) / 2);
-            t.print(wd);
-        }
-    }
-    const int slotRows = (MeshMsg::PHRASE_WORDS + perRow - 1) / perRow;
-
-    // The alphabet.
-    const int cols = port ? 9 : 13;
-    const int lw = (avail - (cols - 1) * 2) / cols, lh = port ? 22 : 20;
-    const int ly0 = 28 + slotRows * (sh + 4) + 2;
-    t.setTextSize(2);
-    for (int i = 0; i < 26; i++) {
-        const int x = M + (i % cols) * (lw + 2), y = ly0 + (i / cols) * (lh + 2);
-        s_letterRect[i] = { (int16_t)x, (int16_t)y, (int16_t)lw, (int16_t)lh };
-        const bool sel = s_letter == (char)('A' + i);
-        const uint16_t bg = sel ? Theme::PURPLE : Theme::BG;
-        t.fillRect(x, y, lw, lh, bg);
-        t.drawRect(x, y, lw, lh, sel ? Theme::VAPOR_PINK : Theme::W95_SHADOW);
-        const char s[2] = { (char)('A' + i), '\0' };
-        t.setTextColor(sel ? Theme::WHITE : Theme::CYAN, bg);
-        t.setCursor(x + (lw - t.textWidth(s)) / 2, y + (lh - t.fontHeight()) / 2);
-        t.print(s);
-    }
-    const int gy0 = ly0 + ((26 + cols - 1) / cols) * (lh + 2) + 4;
-
-    // That letter's words. At most 18 of them -- test/meshmsg_test.cpp holds
-    // the list to that -- which is exactly one screen of this grid at either
-    // rotation.
+    const int top = 42, bottom = h - BH - 6 - 6, gridH = bottom - top;
     s_wordN = 0;
+    for (bool& on : s_letterOn) on = false;
+
     if (!s_letter) {
-        t.setTextSize(1);
-        t.setTextColor(Theme::W95_LIGHT, Theme::BG);
-        t.setCursor(8, gy0 + 4);
-        t.print("Tap the first letter of the word.");
+        // The alphabet, as big as it will go. The short last row is centred,
+        // so Z does not sit alone in a corner.
+        countLetters();
+        const int cols = port ? 5 : 7, rows = (26 + cols - 1) / cols;
+        const int lw = (avail - (cols - 1) * G) / cols;
+        const int lh = (gridH - (rows - 1) * G) / rows;
+        t.setTextSize(3);
+        for (int i = 0; i < 26; i++) {
+            const int r = i / cols, c = i % cols;
+            const int inRow = (26 - r * cols) < cols ? 26 - r * cols : cols;
+            const int x = M + (cols - inRow) * (lw + G) / 2 + c * (lw + G);
+            const int y = top + r * (lh + G);
+            s_letterRect[i] = { (int16_t)x, (int16_t)y, (int16_t)lw, (int16_t)lh };
+            // A letter no word starts with is drawn, so the alphabet still
+            // reads as one, but cannot be pressed.
+            s_letterOn[i] = s_letterWords[i] > 0;
+            t.fillRect(x, y, lw, lh, Theme::BG);
+            t.drawRect(x, y, lw, lh, s_letterOn[i] ? Theme::CYAN : Theme::W95_SHADOW);
+            const char s[2] = { (char)('A' + i), '\0' };
+            t.setTextColor(s_letterOn[i] ? Theme::WHITE : Theme::W95_SHADOW, Theme::BG);
+            t.setCursor(x + (lw - t.textWidth(s)) / 2, y + (lh - t.fontHeight()) / 2);
+            t.print(s);
+        }
         return;
     }
-    const int gcols = port ? 3 : 4;
-    const int gw = (avail - (gcols - 1) * 4) / gcols, gh = port ? 19 : 18;
+
+    // That letter's words. At most 18 of them -- test/meshmsg_test.cpp holds
+    // the list to that -- which is six rows of three in landscape and nine of
+    // two in portrait, at twice the size the combined screen could afford.
+    // Fewer words get taller keys, up to a limit that keeps them looking like
+    // a list rather than a column of slabs.
     s_wordN = MeshMsg::wordsStartingWith(s_letter, s_wordIdx, 18);
-    t.setTextSize(1);
+    const int cols = port ? 2 : 3;
+    const int rows = (s_wordN + cols - 1) / cols;
+    const int gw = (avail - (cols - 1) * G) / cols;
+    int gh = rows ? (gridH - (rows - 1) * G) / rows : gridH;
+    if (gh > 34) gh = 34;
     for (uint8_t i = 0; i < s_wordN; i++) {
-        const int x = M + (i % gcols) * (gw + 4), y = gy0 + (i / gcols) * (gh + 3);
+        const int x = M + (i % cols) * (gw + G), y = top + (i / cols) * (gh + G);
         s_wordRect[i] = { (int16_t)x, (int16_t)y, (int16_t)gw, (int16_t)gh };
         t.fillRect(x, y, gw, gh, Theme::BG);
         t.drawRect(x, y, gw, gh, Theme::CYAN);
         const char* wd = MeshMsg::WORDS[s_wordIdx[i]];
+        // Eight letters at size 2 is 96 pixels, and the narrowest key is 101.
+        // Size 1 is only the fallback in case a longer word is ever added.
+        t.setTextSize(2);
+        if (t.textWidth(wd) > gw - 4) t.setTextSize(1);
         t.setTextColor(Theme::WHITE, Theme::BG);
-        t.setCursor(x + (gw - t.textWidth(wd)) / 2, y + (gh - 8) / 2);
+        t.setCursor(x + (gw - t.textWidth(wd)) / 2, y + (gh - t.fontHeight()) / 2);
         t.print(wd);
     }
+}
+
+// One step back, whatever the last step was: from a letter's words to the
+// alphabet; from the alphabet to the previous word's list, with that word
+// taken off; from the very start, out.
+void pickBack() {
+    if (s_letter) { s_letter = 0; return; }
+    if (s_pickN) {
+        s_pickN--;
+        s_letter = MeshMsg::WORDS[s_picked[s_pickN]][0];
+        return;
+    }
+    s_mode = Mode::SHOW;
 }
 
 void drawStretch(TFT_eSPI& t) {
@@ -279,7 +326,7 @@ void uiMeshPhraseTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     switch (s_mode) {
         case Mode::SHOW:    drawShow(t); break;
         case Mode::ROLLED:  drawRolled(t); break;
-        case Mode::PICK:    drawPick(t); chrome(t, "[ CANCEL ]", nullptr, "[ DEL ]"); break;
+        case Mode::PICK:    drawPick(t); chrome(t, "[ BACK ]", nullptr, "[ CANCEL ]"); break;
         case Mode::STRETCH: drawStretch(t); s_stretchShown = true; break;
     }
 }
@@ -300,14 +347,15 @@ void uiMeshPhraseTouch(int x, int y) {
             else if (b == 2 && MeshMsg::phraseText(s_rolled, s_pending, sizeof s_pending)) startStretch();
             break;
         case Mode::PICK:
-            if (b == 0) { s_mode = Mode::SHOW; return; }
-            if (b == 2) {                      // DEL: the letter first, then a word
-                if (s_letter) s_letter = 0;
-                else if (s_pickN) s_pickN--;
+            if (b == 0) { pickBack(); return; }
+            if (b == 2) { s_mode = Mode::SHOW; return; }
+            // Only the step on screen answers: its rects are the only ones
+            // this frame filled in.
+            if (!s_letter) {
+                for (int i = 0; i < 26; i++)
+                    if (s_letterOn[i] && inRect(s_letterRect[i], x, y)) { s_letter = (char)('A' + i); return; }
                 return;
             }
-            for (int i = 0; i < 26; i++)
-                if (inRect(s_letterRect[i], x, y)) { s_letter = (char)('A' + i); return; }
             for (uint8_t i = 0; i < s_wordN; i++) {
                 if (!inRect(s_wordRect[i], x, y)) continue;
                 s_picked[s_pickN++] = s_wordIdx[i];
@@ -326,11 +374,12 @@ void uiMeshPhraseDemo(uint8_t mode) {
     if (mode == 1) {
         MeshTalk::rollPhrase(s_rolled);
         s_mode = Mode::ROLLED;
-    } else if (mode == 2) {
+    } else if (mode == 2 || mode == 3) {
+        // 2 is the word step, 3 the letter step, both two words in.
         s_picked[0] = wordIndex("GIBSON");
         s_picked[1] = wordIndex("MOTHMAN");
         s_pickN  = 2;
-        s_letter = 'P';
+        s_letter = mode == 2 ? 'P' : 0;
         s_mode   = Mode::PICK;
     } else {
         s_mode = Mode::SHOW;
