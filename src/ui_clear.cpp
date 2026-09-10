@@ -76,8 +76,19 @@ static bool visitWalking() {
 // fleeing, and he is only going home.
 static int visitGuestX(uint32_t now, int homeX, int offX) {
     if (s_vp == VisitPhase::ARRIVING || s_vp == VisitPhase::LEAVING) {
-        float k = (float)(now - s_vpAt) / (float)WALK_MS;
-        if (k < 0) k = 0; if (k > 1) k = 1;
+        // SIGNED, and the guard matters. LEAVING deliberately sets s_vpAt
+        // into the FUTURE so the goodbye lands before he moves -- and both
+        // are uint32_t, so `now - s_vpAt` wrapped to about 4.29 billion for
+        // the whole length of that line. k clamped to 1, which is off-screen:
+        // he vanished the instant he said goodbye and reappeared when the
+        // bubble expired, then walked off.
+        //
+        // The identical hazard is already guarded in the LEAVING phase check
+        // below, with an (int32_t) cast. It was missed here.
+        const int32_t dt = (int32_t)(now - s_vpAt);
+        if (dt <= 0) return homeX;          // still saying goodbye; stand still
+        float k = (float)dt / (float)WALK_MS;
+        if (k > 1) k = 1;
         k = k * k * (3.0f - 2.0f * k);                 // smoothstep
         const float from = (s_vp == VisitPhase::ARRIVING) ? (float)offX : (float)homeX;
         const float to   = (s_vp == VisitPhase::ARRIVING) ? (float)homeX : (float)offX;
