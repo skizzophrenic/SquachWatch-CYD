@@ -44,6 +44,10 @@ const char* const KEY_L[12] = { "", "ABC","DEF","GHI","JKL","MNO",
                                 "PQRS","TUV","WXYZ","DEL","SPACE","OK" };
 
 char     s_buf[Squachy::CUSTOM_NAME_MAX + 1];
+// Filled by the draw, read by the hit test, so the two cannot disagree about
+// where the button is -- the same reason every other row list here computes
+// its geometry once.
+int      s_backY   = 0;
 uint8_t  s_len     = 0;
 int8_t   s_liveKey = -1;      // key whose letter is still being cycled
 uint8_t  s_tapIx   = 0;       // which letter of that key
@@ -74,6 +78,12 @@ void steel(TFT_eSPI& t, int x, int y, int w, int h, bool sunk = false) {
 
 } // namespace
 
+// The phone body occupies x 78..242, so the strip down the left of the screen
+// is free at any rotation. Bottom-left because that is where every other
+// screen in this firmware puts BACK.
+const int BX = 4, BW = 68, BH = 26;
+static int backY(int screenH) { return screenH - BH - 6; }
+
 void uiPhoneInit(TFT_eSPI& t) {
     (void)t;
     const char* cur = Squachy::customName();
@@ -90,6 +100,15 @@ void uiPhoneInit(TFT_eSPI& t) {
 bool uiPhoneDone() { return s_done; }
 
 void uiPhoneTouch(int x, int y, uint32_t now) {
+    // BACK leaves WITHOUT saving, which is the whole reason it exists: OK was
+    // the only way out, so backing away from a half-typed name meant
+    // committing it. Checked before the keypad, since it is outside the pad
+    // and cannot collide.
+    if (x >= BX && x <= BX + BW && y >= s_backY && y <= s_backY + BH) {
+        commitPending();
+        s_done = true;
+        return;
+    }
     for (int i = 0; i < 12; i++) {
         const int kx = KX + (i % 3) * (KW + KGAP);
         const int ky = KY + (i / 3) * (KH + KGAP);
@@ -197,6 +216,10 @@ void uiPhoneTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
             t.print(KEY_L[i]);
         }
     }
+
+    // ---- back ---------------------------------------------------------
+    s_backY = backY(h);
+    Theme::drawButton(t, BX, s_backY, BW, BH, "[ BACK ]", false);
 
     // ---- coin return and plate --------------------------------------
     const int pY = KY + 4 * (KH + KGAP) + 4;

@@ -361,10 +361,21 @@ void cycleMeshDetect()   { s_meshDetect   = !s_meshDetect;   s_prefs.putBool("me
 void cycleMeshTransmit() { s_meshTransmit = !s_meshTransmit; s_prefs.putBool("meshtx", s_meshTransmit); }
 
 const char* meshSummary() {
-    if (s_meshDetect && s_meshTransmit) return "ON";
-    if (s_meshDetect)                   return "DETECT";
-    if (s_meshTransmit)                 return "SEND";
-    return "OFF";
+    // Never bare "ON"/"OFF", and always with the arrow.
+    //
+    // The row opens a screen, but it looked like a switch: every toggle on
+    // that list says ON or OFF, so a row saying ON reads as one you tap to
+    // flip. The rows that DO open screens show data instead -- "14/14",
+    // "3" -- because a number cannot be mistaken for a toggle state.
+    //
+    // RX/TX rather than DETECT/SEND for width: "SQUACHMESH" plus
+    // "DETECT+SEND" collides with itself on the 240px portrait rotation at
+    // this row's size-2 text, which is the same trap already documented on
+    // TYPE FILTER and IGNORED.
+    if (s_meshDetect && s_meshTransmit) return "RX+TX >";
+    if (s_meshDetect)                   return "RX >";
+    if (s_meshTransmit)                 return "TX >";
+    return "OFF >";
 }
 #endif
 
