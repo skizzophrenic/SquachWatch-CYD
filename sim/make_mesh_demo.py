@@ -38,7 +38,13 @@ LEN  = 24     # frames per segment
 # One background for all of it, unlike make_demo.py's montage. That clip is a
 # tour of four unrelated things; this one is a single scene, and cutting the
 # sky between shots would read as cutting to a different device.
-COMMON = "--peer 3 --peername BIGFOOT --noseed --bg 8"
+#
+# The visitor wears VOID EYE (outfit 12), which is the right call for a clip
+# about somebody ARRIVING: the host is the familiar one and the stranger
+# should not look like him in a different hat. It also makes the point that
+# what crossed the air was an appearance, not a picture -- outfit 12 is drawn
+# from scratch by the receiving device out of four bits.
+COMMON = "--peer 12 --peername BIGFOOT --noseed --bg 8"
 
 # Frames are 33ms apart, so frame N is roughly N*33 ms into the visit.
 SEGMENTS = [
