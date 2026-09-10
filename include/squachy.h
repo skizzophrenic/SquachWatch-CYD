@@ -252,6 +252,11 @@ namespace Squachy {
     // the airwaves while there is somebody standing next to him.
     void setVisiting(bool v);
 
+    // True while the OTHER one is the one talking. It buys a slow nod, which
+    // is the difference between a Squachy standing near a conversation and a
+    // Squachy in one. Cleared with setVisiting(false)'s caller.
+    void setListening(bool v);
+
     // The guest's side. Returns a line to hand drawWaving() rather than
     // saying it, because the guest has no mood machine to say it with.
     const char* visitGuestLine(VisitMoment m, uint32_t seed);
@@ -397,7 +402,13 @@ namespace Squachy {
     // laughing: a faster, taller bob for as long as it is set -- the guest's
     // half of visitLaugh(), which the host gets through his mood machine and
     // this cameo has no mood machine to get it through.
+    // listening: the same nod setListening() gives the host, for the same
+    // reason -- this cameo has no mood machine either.
+    // bubbleTail: hang a little pointer off the bubble aimed at him. Off by
+    // default because a lone Squachy's bubble can only be his; it earns its
+    // keep when there are two of them and two bubbles taking turns.
     void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale = 1.0f,
                     const char* line = nullptr, bool talking = false, int wanderRangePx = 0,
-                    bool waving = true, int bubbleGap = 34, bool laughing = false);
+                    bool waving = true, int bubbleGap = 34, bool laughing = false,
+                    bool listening = false, bool bubbleTail = false);
 }

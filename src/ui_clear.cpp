@@ -110,6 +110,74 @@ static int visitGuestX(uint32_t now, int homeX, int offX) {
     return homeX;
 }
 
+// Leaning in.
+//
+// Two Squachys standing at fixed marks looked like two Squachys standing at
+// fixed marks, whatever they were saying to each other. This is the cheapest
+// honest fix: the one who is LISTENING closes the gap a little, and gives it
+// back when it is his turn. Nobody has to face anybody -- the bodies are
+// drawn front-on and there is no mirrored artwork to turn them with -- but a
+// weight shift that is driven by whose turn it is couples the two of them to
+// the same clock, which is most of what "they are talking to each other"
+// actually looks like.
+//
+// It is two movements, not one, and the second only became obviously
+// necessary once the first was on screen:
+//
+// CLOSE is both of them stepping in a little once the talking starts, and
+// staying there for the whole visit. It is what makes them a pair rather than
+// two occupants of the same picture.
+//
+// LEAN is the listener leaning in further, and giving it back when it is his
+// turn. On its own this had a flaw worth recording: the one who WAS listening
+// returns to neutral at the same time the other one starts leaning, so for
+// about half a second neither is leaning and the two of them visibly drift
+// apart -- a pulse outward on every single turn, which is the exact moment
+// they should look most connected. The constant close underneath means the
+// crossover only ever redistributes the lean; the gap never opens back up to
+// where it started.
+//
+// Small numbers on purpose: at this scale anything more stops being a lean
+// and becomes a step, and then he is walking during a conversation.
+static const int CLOSE_PX = 3;      // both, for the whole visit
+static const int LEAN_PX  = 4;      // the listener, on top of that
+static float     s_leanK  = 0.0f;   // -1 host leaning, 0 neutral, +1 guest
+static float     s_closeK = 0.0f;   // 0 apart, 1 stood in
+static uint32_t  s_leanAt = 0;
+
+static void leanTick(uint32_t now) {
+    const bool chatting = (s_vp == VisitPhase::MEETING ||
+                           s_vp == VisitPhase::HANGING);
+    // Nobody leans at somebody who is still walking, and nobody leans at
+    // somebody who is leaving.
+    const float target = !chatting ? 0.0f : (s_guestTurn ? -1.0f : 1.0f);
+
+    // Time-based rather than a per-frame fraction: this screen runs anywhere
+    // from 22 to 45 fps depending on the background, and a constant per-frame
+    // step would make the lean visibly faster on the cheap ones.
+    const uint32_t dt = (s_leanAt && now > s_leanAt) ? (now - s_leanAt) : 0;
+    s_leanAt = now;
+    float k = (float)dt / 450.0f;
+    if (k > 1.0f) k = 1.0f;
+    s_leanK  += (target - s_leanK) * k;
+    // Slower, because this one is posture rather than attention: closing in
+    // as fast as you glance at somebody looks like a flinch.
+    float ck = (float)dt / 900.0f;
+    if (ck > 1.0f) ck = 1.0f;
+    s_closeK += ((chatting ? 1.0f : 0.0f) - s_closeK) * ck;
+}
+
+// Positive is rightward. The host stands on the left, so he closes by moving
+// right and the guest by moving left.
+static int hostLeanPx() {
+    const float lean = (s_leanK < 0) ? -s_leanK : 0.0f;
+    return (int)(s_closeK * CLOSE_PX + lean * LEAN_PX);
+}
+static int guestLeanPx() {
+    const float lean = (s_leanK > 0) ? s_leanK : 0.0f;
+    return -(int)(s_closeK * CLOSE_PX + lean * LEAN_PX);
+}
+
 // Which standing-around exchange is running. Advanced only when the HOST
 // speaks, so his line and the guest's reply come from the same entry -- that
 // pairing is the whole point, and keying it off the beat counter would drift
@@ -194,8 +262,12 @@ static void visitTick(uint32_t now) {
     const uint32_t id = rawGuestId(now);
 
     // Told once per frame rather than on transitions, so it cannot get stuck
-    // set if a phase change is ever missed.
+    // set if a phase change is ever missed. The same goes for listening: it
+    // is a per-frame statement of who is quiet right now, not an event.
     Squachy::setVisiting(s_vp != VisitPhase::GONE);
+    Squachy::setListening((s_vp == VisitPhase::MEETING ||
+                           s_vp == VisitPhase::HANGING) && s_guestTurn);
+    leanTick(now);
 
     if (s_vp == VisitPhase::GONE) {
         if (!id) return;
@@ -617,7 +689,8 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
             const int homeX = w / 2 + gap;     // where the guest stands
             const int offX  = w + 40;          // off the right edge
 
-            Squachy::tick(t, w / 2 - gap, titleBottom, squachyBottom - titleBottom,
+            Squachy::tick(t, w / 2 - gap + hostLeanPx(), titleBottom,
+                          squachyBottom - titleBottom,
                           now, advance, 1.0f, false, 0, SMALL_PCT);
 
             // The visitor is drawn, not ticked: tick() owns mood, quip timers
@@ -636,7 +709,10 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
             // numbers are different units and passing 0.7 here drew a
             // visitor less than half the host's size.
             const float gs = Squachy::lastScale();
-            const int   gx = visitGuestX(now, homeX, offX);
+            // The lean rides on top of the walk rather than replacing it:
+            // visitGuestX returns homeX once he has arrived, and it is only
+            // then that the lean is non-zero.
+            const int   gx = visitGuestX(now, homeX, offX) + guestLeanPx();
             // wanderRangePx is what animates his legs. Walking in with it at 0
             // slid him across the floor like furniture; a couple of pixels of
             // wander is enough to put a walk cycle under the movement without
@@ -658,7 +734,12 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
                                 // Cracking up at whatever the host just said.
                                 // The host gets the same thing through his
                                 // mood machine; this cameo has none.
-                                now < s_guestLaughUntil);
+                                now < s_guestLaughUntil,
+                                // Nodding along while the host has the floor.
+                                !s_guestTurn && (s_vp == VisitPhase::MEETING ||
+                                                 s_vp == VisitPhase::HANGING),
+                                // And his bubble says so.
+                                true);
             Squachy::setShadesPreview(-1);
             Squachy::setOutfitPreview(-1);
 

@@ -304,6 +304,14 @@ static const uint8_t  PET_MILESTONES_N = sizeof(PET_MILESTONES) / sizeof(PET_MIL
 
 // ---- Runtime state ----
 static Mood          mood            = Mood::IDLE;
+// True while somebody is visiting, and true while somebody else is the one
+// talking -- see setVisiting()/setListening(). Both live out here rather than
+// with the visit code because tick() reads them and tick() is in every build,
+// mesh or not: s_visiting decides whether his speech bubble grows a tail, and
+// a static declared inside #if SQUACH_MESH does not exist to answer that in
+// the four shipping builds.
+static bool          s_visiting      = false;
+static bool          s_listening     = false;
 static uint32_t      moodUntil       = 0;
 
 // A little wander away from center and back — see tick()'s idle-quip
@@ -1302,8 +1310,38 @@ static int risenBubbleTop(int topY, int bx, int bw, int screenW) {
     if (bx < CORNER_W || bx + bw > screenW - CORNER_W) return topY;
     return ry;
 }
+// Hang a pointer off the bottom of a bubble, aimed at whoever said it.
+//
+// Position alone answers "who is talking" right up until there are two of
+// them and the bubbles alternate; then the eye has to re-solve it every
+// couple of seconds, and a conversation you have to keep decoding is not one
+// you enjoy watching. Four rows is enough -- it is a cue, not a cartoon.
+//
+// The caller adds the four rows to lastBubbleH so the erase covers them,
+// which is the only thing here that can leave a trail.
+static void drawBubbleTail(TFT_eSPI& t, int bx, int bw, int ybot, int tailX) {
+    int tx = tailX;
+    const int lo = bx + 5, hi = bx + bw - 6;
+    if (hi < lo) return;                 // bubble too narrow to carry one
+    if (tx < lo) tx = lo;
+    if (tx > hi) tx = hi;
+    // Open the bubble's bottom border under the mouth of the tail first,
+    // otherwise the pointer reads as a separate mark stuck below the box.
+    t.drawFastHLine(tx - 2, ybot, 5, Theme::BG);
+    for (int i = 0; i < 4; i++) {
+        const int y  = ybot + i;
+        const int hw = 3 - i;            // 3, 2, 1, 0 -- ends on a point
+        if (hw > 0) t.drawFastHLine(tx - hw + 1, y, 2 * hw - 1, Theme::BG);
+        t.drawPixel(tx - hw, y, Theme::VAPOR_PINK);
+        t.drawPixel(tx + hw, y, Theme::VAPOR_PINK);
+    }
+}
+
+// tailX: where the tail should point, or NO_TAIL for none.
+static const int NO_TAIL = -10000;
+
 static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text,
-                       uint32_t now, bool mayRise = false) {
+                       uint32_t now, bool mayRise = false, int tailX = NO_TAIL) {
     t.setTextSize(1);
     t.setTextWrap(false);
     int screenW = t.width();
@@ -1328,6 +1366,10 @@ static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text,
         lastBubbleY = by;
         lastBubbleW = bw;
         lastBubbleH = bh;
+        if (tailX != NO_TAIL) {
+            drawBubbleTail(t, bx, bw, by + bh - 1, tailX);
+            lastBubbleH = bh + 4;        // so the erase takes the tail too
+        }
         return;
     }
 
@@ -1362,6 +1404,10 @@ static void drawBubble(TFT_eSPI& t, int cx, int topY, const char* text,
     lastBubbleY = by;
     lastBubbleW = bw;
     lastBubbleH = bh;
+    if (tailX != NO_TAIL) {
+        drawBubbleTail(t, bx, bw, by + bh - 1, tailX);
+        lastBubbleH = bh + 4;
+    }
 }
 
 // Multi-line variant for the first-boot walkthrough — the compact
@@ -1746,8 +1792,8 @@ static const char* const WINK_LINES[] = {
 // Only ever ONE bubble on screen at a time, alternating. Two Squachys with
 // two speech bubbles on a 240px-tall screen is not a conversation, it is a
 // pile-up; taking turns is what makes it read as talking.
-static bool s_visiting = false;
 void setVisiting(bool v) { s_visiting = v; }
+void setListening(bool v) { s_listening = v; }
 
 static const char* const MEET_HOST_LINES[] = {
     "Oh -- company.",
@@ -1766,6 +1812,24 @@ static const char* const MEET_HOST_LINES[] = {
     "Look what the airwaves dragged in.",
     "Room for two up here.",
     "You're a long way from home.",
+    "Well I'll be.",
+    "Two shadows now.",
+    "You made good time.",
+    "Wondered when you'd show.",
+    "That's a familiar shape.",
+    "Hey. Nice of you.",
+    "I know that walk.",
+    "Come on up.",
+    "Wasn't sure you were real.",
+    "You brought weather with you.",
+    "Been a while since anybody came by.",
+    "Good. I was getting weird.",
+    "Somebody else with sense.",
+    "Stand where you like.",
+    "You look like the last one.",
+    "There goes the quiet.",
+    "Well. That's new.",
+    "Knew somebody was out there.",
 };
 static const char* const MEET_GUEST_LINES[] = {
     "Heard there was someone watching.",
@@ -1784,6 +1848,24 @@ static const char* const MEET_GUEST_LINES[] = {
     "Somebody said you were watching.",
     "Heard you from down the road.",
     "You've got a better sunset than me.",
+    "Followed the signal in.",
+    "You're hard to miss.",
+    "Thought I heard family.",
+    "Long walk. Worth it.",
+    "This the good side of the hill?",
+    "Nobody told me you were tall.",
+    "I'll only stay a minute.",
+    "Been looking for one of you.",
+    "Your porch light's on.",
+    "Sorry. Didn't knock.",
+    "You always stand out here?",
+    "I go where it's quiet.",
+    "That's a good pair of shades.",
+    "Made it before dark.",
+    "Somebody has to check on you.",
+    "I was in the neighbourhood.",
+    "You're further out than I thought.",
+    "Nice night to be nobody.",
 };
 // Standing-around banter, written as PAIRS.
 //
@@ -1862,6 +1944,42 @@ static const Exchange HANG_EXCHANGES[] = {
       "Ha. Yeah."                            },
     { "Think there's more of us?",      "Has to be.",
       "Has to be."                           },
+    { "You ever count them?",           "Every one.",
+      "Same."                                },
+    { "Whose sky is this?",             "Nobody's. That's the appeal.",
+      nullptr                                },
+    { "Ever want a day off?",           "And miss this?",
+      "Ha."                                  },
+    { "You take sugar?",                "In what?",
+      "Good point."                          },
+    { "What's your range?",             "Further than my patience.",
+      "Relatable."                           },
+    { "How do you pass the time?",      "Badly.",
+      "Honest."                              },
+    { "You from around here?",          "From further in.",
+      nullptr                                },
+    { "Reckon they know?",              "They never do.",
+      "Good."                                },
+    { "That your best hat?",            "It's my only hat.",
+      "It's a good hat."                     },
+    { "You get bored?",                 "Only when it's safe.",
+      "So, never."                           },
+    { "Anything ever happen?",          "Once. Enough.",
+      nullptr                                },
+    { "You talk to yourself?",          "Constantly.",
+      "Same. It helps."                      },
+    { "How's your battery?",            "Don't ask me that.",
+      "Sorry."                               },
+    { "You always this early?",         "I never left.",
+      "Ha. Fair."                            },
+    { "Want the good spot?",            "You're in it.",
+      "I know."                              },
+    { "Only two of us, you think?",     "Tonight, maybe.",
+      nullptr                                },
+    { "Do you ever wave back?",         "Only at you.",
+      "Careful now."                         },
+    { "Quiet's holding.",               "Long may it.",
+      "Long may it."                         },
 };
 static const uint8_t HANG_EXCHANGES_N =
     sizeof(HANG_EXCHANGES) / sizeof(HANG_EXCHANGES[0]);
@@ -1881,6 +1999,14 @@ static const char* const PART_HOST_LINES[] = {
     "Don't be a stranger.",
     "Go on then.",
     "Safe signals.",
+    "Don't get seen.",
+    "Go careful.",
+    "You know where I am.",
+    "Anytime. Seriously.",
+    "That went quick.",
+    "Take the low road.",
+    "Say hi to the others.",
+    "Right. Back to it.",
 };
 static const char* const PART_GUEST_LINES[] = {
     "Back to it, then.",
@@ -1893,6 +2019,14 @@ static const char* const PART_GUEST_LINES[] = {
     "I'll leave you to it.",
     "Good watching.",
     "Keep it quiet out there.",
+    "That was a good one.",
+    "I'll find my way.",
+    "Don't wait up.",
+    "Back into the dark, then.",
+    "You were good company.",
+    "Watch the sky for me.",
+    "Next time I'll stay longer.",
+    "See you on the airwaves.",
 };
 #define POOL_N(a) (uint8_t)(sizeof(a) / sizeof((a)[0]))
 
@@ -3885,7 +4019,8 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
 }
 
 void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const char* line,
-                bool talking, int wanderRangePx, bool waving, int bubbleGap, bool laughing) {
+                bool talking, int wanderRangePx, bool waving, int bubbleGap, bool laughing,
+                bool listening, bool bubbleTail) {
     // This cameo is placed by callers that have already reserved room, so
     // there is no region to clamp against.
     s_topLimit = -10000;
@@ -3904,6 +4039,14 @@ void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const
     float bobAmt = (laughing ? 7.0f : 6.0f) * scale;
     const uint32_t bobPeriod = laughing ? 240u : 900u;
     float bob = sinf((float)(now % bobPeriod) / (float)bobPeriod * 6.2831853f) * bobAmt;
+    // The same nod tick() gives the host, on the same curve and the same
+    // period, so the two of them read as one pair of manners rather than as
+    // two characters animated by different people.
+    if (listening && !laughing) {
+        const float nk  = (float)(now % 1700u) / 1700.0f;
+        const float dip = sinf(nk * 3.14159265f);
+        s_headDrop = (int)(dip * dip * 3.6f * scale);
+    }
     int headTopY = baseY - (int)(58.0f * scale);
     // Deliberately the idle amplitude rather than this mood's own bobAmt.
     // Using the live value made the ear length constant within a mood but step
@@ -3947,7 +4090,8 @@ void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const
     // render two speech bubbles" looked like from outside. A visitor passes
     // a smaller gap so his bubble sits just above his own head and is
     // visibly his.
-    if (line) drawBubble(t, cx, headTopY - bubbleGap, line, now);
+    if (line) drawBubble(t, cx, headTopY - bubbleGap, line, now, false,
+                         bubbleTail ? bodyCx : NO_TAIL);
 }
 
 // Small filled heart, used by the tap-to-pet flourish.
@@ -4560,6 +4704,19 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
         s_shadowCov = (uint8_t)(16.0f - ua * 6.0f);
     }
 
+    // Listening: a slow nod on top of whatever the bob is already doing.
+    //
+    // Squared so it goes down and comes back rather than swaying both ways --
+    // a nod has a direction, and a sine through the rest line reads as
+    // swaying, which is what somebody bored does. Only while the mood is
+    // IDLE, so it never fights the laugh: a Squachy nodding politely and
+    // cracking up at the same time is neither.
+    if (s_listening && mood == Mood::IDLE) {
+        const float nk  = (float)(now % 1700u) / 1700.0f;
+        const float dip = sinf(nk * 3.14159265f);
+        s_headDrop += (int)(dip * dip * 3.6f * scale);
+    }
+
     // ---- carry and drop --------------------------------------------
     // A finger holding him overrides every other position: the mood
     // machine keeps running underneath (he can be shocked while being
@@ -4665,7 +4822,12 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     }
     if (showBubble) {
         if (s_onboardActive) drawOnboardBubble(t, cx, topY, bubbleText, s_onboardStep, ONBOARD_N);
-        else                 drawBubble(t, cx, topY, bubbleText, now, true);
+        // Pointed at the BODY, not at cx: the two differ while he wanders,
+        // and a tail that stays put while he walks out from under it is
+        // worse than no tail. Only while there is a second Squachy to be
+        // confused with.
+        else                 drawBubble(t, cx, topY, bubbleText, now, true,
+                                        s_visiting ? bodyCx : NO_TAIL);
     }
     // Gated: hadBubble tracks "did we draw a bubble last FRAME" for the
     // erase above. drawBubble()/drawOnboardBubble() compute identical
