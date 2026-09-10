@@ -63,10 +63,21 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
         // signature tables and can never become a Detection. Getting that
         // wrong would have two SquachWatches alarming at each other -- the
         // exact failure the HACKER bucket was shaped to avoid.
+        // Every manufacturer-data block, not just the first. A peer sending a
+        // message carries TWO -- its advert's, then its scan response's (see
+        // include/meshmsg.h for why the message rides there) -- in that order,
+        // which is what lets the name from the first travel with the second.
+        // v1.5.23 and earlier only ever read the first, and that is exactly
+        // what keeps them seeing a peer that is in the middle of a message.
         if (adv->haveManufacturerData()) {
-            const std::string md = adv->getManufacturerData();
-            if (Mesh::onManufacturerData((const uint8_t*)md.data(), md.size(),
-                                         adv->getAddress().getNative(), millis())) return;
+            bool ours = false;
+            const uint8_t mdN = adv->getManufacturerDataCount();
+            for (uint8_t i = 0; i < mdN; i++) {
+                const std::string md = adv->getManufacturerData(i);
+                if (Mesh::onManufacturerData((const uint8_t*)md.data(), md.size(),
+                                             adv->getAddress().getNative(), millis())) ours = true;
+            }
+            if (ours) return;
         }
 #endif
         if (!g_engine) return;
@@ -465,6 +476,9 @@ Stats stats() {
 #endif
 
 #if SQUACH_MESH
+#include "meshmsg.h"
+#include "meshtalk.h"
+
 namespace Mesh {
 
 // One visitor at a time -- decided deliberately, and for screen space rather
@@ -478,6 +492,13 @@ static uint32_t         s_peerSeen   = 0;
 static bool             s_havePeer   = false;
 static bool             s_advOn      = false;
 static uint32_t         s_advAt      = 0;
+// A peer's name from its advert, kept for the message frame that arrives in
+// the same scan callback. Written and read only in the BLE task.
+static uint8_t          s_nameMac[6] = { 0 };
+static char             s_name[13]   = { 0 };
+// Which outgoing message the scan response carries right now; 0 is none.
+static uint32_t         s_srGen      = 0;
+static bool             s_macSet     = false;
 
 // How long a peer survives without being heard from again. Adverts go out
 // every 1500ms, so this is roughly eight missed ones -- long enough that a
@@ -517,7 +538,7 @@ static size_t buildSelf(uint8_t* out) {
 static uint8_t s_lastAdv[SquachMesh::LEN_MAX];
 static size_t  s_lastAdvLen = 0;
 
-static void setAdvertising(bool on) {
+static void setAdvertising(bool on, uint32_t now) {
     NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
     if (!adv) return;
     if (!on) { if (s_advOn) adv->stop(); s_advOn = false; return; }
@@ -538,7 +559,13 @@ static void setAdvertising(bool on) {
     // propagate without a reboot. Comparing gets that for one memcmp and
     // no allocation at all on the pass where nothing changed, which is
     // every pass but the rare one.
-    const bool same = (n == s_lastAdvLen) && (memcmp(buf, s_lastAdv, n) == 0);
+    // The scan response counts as part of "the advert" here: a message
+    // starting or expiring is a change, and nothing else is.
+    size_t   outLen = 0;
+    uint32_t outGen = 0;
+    const uint8_t* out = MeshTalk::outgoing(now, outLen, outGen);
+    const bool same = (n == s_lastAdvLen) && (memcmp(buf, s_lastAdv, n) == 0) &&
+                      outGen == s_srGen;
     if (same && s_advOn) return;
 
     std::string md;
@@ -551,6 +578,23 @@ static void setAdvertising(bool on) {
     d.setManufacturerData(md);
     if (s_advOn) adv->stop();
     adv->setAdvertisementData(d);
+    // A message goes in the scan response, and turning the scan response ON
+    // is also what makes the advert scannable at all: setScanResponseData()
+    // alone stores the bytes and leaves the advert non-scannable, so nobody
+    // would ever ask for them. Off again the moment the message expires.
+    if (out) {
+        std::string sm;
+        sm.reserve(outLen + 2);
+        sm.push_back((char)(SquachMesh::COMPANY_ID & 0xFF));
+        sm.push_back((char)(SquachMesh::COMPANY_ID >> 8));
+        sm.append((const char*)out, outLen);
+        NimBLEAdvertisementData r;
+        r.setManufacturerData(sm);
+        adv->setScanResponseData(r);
+        adv->setScanResponse(true);
+    } else {
+        adv->setScanResponse(false);
+    }
     adv->setMinInterval((uint16_t)(ADV_MS * 8 / 5));
     adv->setMaxInterval((uint16_t)(ADV_MS * 8 / 5 + 16));
     adv->start();
@@ -558,6 +602,7 @@ static void setAdvertising(bool on) {
     memcpy(s_lastAdv, buf, n);
     s_lastAdvLen = n;
     s_advOn = true;
+    s_srGen = outGen;
 }
 
 void begin() { s_havePeer = false; s_advOn = false; }
@@ -571,8 +616,29 @@ bool onManufacturerData(const uint8_t* d, size_t len, const uint8_t* mac, uint32
     const uint16_t cid = (uint16_t)(d[0] | ((uint16_t)d[1] << 8));
     if (cid != SquachMesh::COMPANY_ID) return false;
 
+    // A message frame rather than an advert. Queued raw for the loop task:
+    // this runs in the BLE host task and the cipher lives on the loop, so no
+    // key is ever used from two tasks at once. Consumed when messages are on,
+    // so a message can never reach the signature tables either.
+    if (MeshMsg::isFrame(d + 2, len - 2)) {
+        if (!Settings::messagesOn()) return false;
+        MeshTalk::onFrame(mac, d + 2, len - 2,
+                          memcmp(mac, s_nameMac, 6) == 0 ? s_name : "");
+        return true;
+    }
+
     SquachMesh::Peer p;
     if (!SquachMesh::decode(d + 2, len - 2, p)) return false;
+
+    // Remembered for a message frame later in this same callback: the name
+    // goes on the message, and the advert is the only place it travels.
+    {
+        memcpy(s_nameMac, mac, 6);
+        const char* nm = (p.custom && p.name[0]) ? p.name : Squachy::nicknameAt(p.nick);
+        size_t i = 0;
+        for (; i < sizeof s_name - 1 && nm[i]; i++) s_name[i] = nm[i];
+        s_name[i] = '\0';
+    }
 
     // Ours. Keep the one we already have unless this IS the one we already
     // have -- a second SquachWatch arriving mid-visit does not get to shove
@@ -587,12 +653,29 @@ bool onManufacturerData(const uint8_t* d, size_t len, const uint8_t* mac, uint32
 }
 
 void tick(uint32_t now) {
+    // Our own address goes into the nonce of every message we send, so the
+    // runtime needs it -- read once, after the stack is up, and copied out of
+    // a named NimBLEAddress rather than via getNative() on a temporary.
+    if (!s_macSet) {
+        const NimBLEAddress a = NimBLEDevice::getAddress();
+        MeshTalk::setOwnMac(a.getNative());
+        s_macSet = true;
+    }
+
     const bool want = Settings::meshTransmit();
     // Polled rather than event-driven, but setAdvertising() now returns on a
     // memcmp when nothing changed, so this costs one comparison every ten
-    // seconds instead of rebuilding the advert 360 times an hour.
-    if (want && (!s_advOn || (now - s_advAt) > 10000)) { setAdvertising(true); s_advAt = now; }
-    if (!want && s_advOn) setAdvertising(false);
+    // seconds instead of rebuilding the advert 360 times an hour. A message
+    // starting or expiring is checked every tick, though: nobody should wait
+    // ten seconds for "On my way." to go out.
+    size_t   ol = 0;
+    uint32_t og = 0;
+    MeshTalk::outgoing(now, ol, og);
+    if (want && (!s_advOn || (now - s_advAt) > 10000 || og != s_srGen)) {
+        setAdvertising(true, now);
+        s_advAt = now;
+    }
+    if (!want && s_advOn) setAdvertising(false, now);
 
     // Detecting is its own switch now, and off means no visitor at all --
     // not "advertise less". A peer already on screen is dropped rather than

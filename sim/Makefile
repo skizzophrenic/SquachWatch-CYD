@@ -37,6 +37,10 @@ CXXFLAGS := -std=c++17 -O1 -g -Wall -Wno-unused-parameter \
 UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/squachy.cpp \
             $(SRC)/squachmesh.cpp \
+            $(SRC)/meshmsg.cpp \
+            $(SRC)/meshwords.cpp \
+            $(SRC)/meshtalk.cpp \
+            $(SIM_DIR)/meshcrypto_sim.cpp \
             $(SRC)/ui_phone.cpp \
             $(SRC)/qwerty.cpp \
             $(SRC)/ui_meshmenu.cpp \

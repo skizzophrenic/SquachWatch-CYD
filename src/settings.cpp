@@ -18,6 +18,7 @@ static bool        s_meshDetect   = false;
 static bool        s_meshTransmit = false;
 static bool        s_meshConsent  = false;
 static bool        s_phoneQwerty  = false;
+static bool        s_messagesOn   = false;
 #endif
 static bool        s_infoPrimerShown = false;
 static bool        s_rotationLocked = false;
@@ -158,6 +159,7 @@ void load() {
     s_meshTransmit = s_prefs.getBool("meshtx", false);
     s_meshConsent  = s_prefs.getBool("meshok", false);
     s_phoneQwerty  = s_prefs.getBool("qwerty", false);
+    s_messagesOn   = s_prefs.getBool("msgon", false);
 #endif
     s_infoPrimerShown = s_prefs.getBool("infoprimer", false);
     s_rotationLocked = s_prefs.getBool("rotlock", false);
@@ -394,6 +396,11 @@ bool phoneQwerty() { return s_phoneQwerty; }
 void togglePhoneQwerty() {
     s_phoneQwerty = !s_phoneQwerty;
     s_prefs.putBool("qwerty", s_phoneQwerty);
+}
+bool messagesOn() { return s_messagesOn; }
+void toggleMessages() {
+    s_messagesOn = !s_messagesOn;
+    s_prefs.putBool("msgon", s_messagesOn);
 }
 #endif
 

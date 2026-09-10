@@ -81,6 +81,7 @@ static void crashCrumbTick(uint32_t now, uint32_t lifetime, uint8_t screen) {
 #include "ui_phone.h"
 #include "ui_meshmenu.h"
 #include "ui_meshwarn.h"
+#include "meshtalk.h"
 #endif
 #include "ignore_list.h"
 #include "ignore_list.h"
@@ -1446,6 +1447,12 @@ void setup() {
     randomSeed(analogRead(34));
 
     engine.init();
+#if SQUACH_MESH
+    // After the radio is up and before anything can ask whether messages are
+    // ready: this is where the crypto self-test runs, on the real cipher,
+    // against a frame built by an independent implementation.
+    MeshTalk::begin();
+#endif
     Squachy::trigger(Squachy::Event::BOOTED, DetectionType::UNKNOWN, engine.lifetimeTotal());
     enterBoot();
 }
@@ -1516,6 +1523,7 @@ void loop() {
 #if SQUACH_MESH
     MeshProbe::tick(now);
     Mesh::tick(now);
+    MeshTalk::tick(now);
 #endif
 
     // Rotate button lives in the title bar's top-right corner, shown on

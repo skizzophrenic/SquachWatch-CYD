@@ -18,3 +18,13 @@ inline esp_reset_reason_t esp_reset_reason() { return ESP_RST_POWERON; }
 #ifndef RTC_DATA_ATTR
 #define RTC_DATA_ATTR
 #endif
+
+// The ESP32's hardware random number generator. Deterministic here on
+// purpose: the emulator should render the same frame every run, so a phrase
+// rolled in it comes out the same too. Nothing in the emulator is secret.
+#include <stdint.h>
+inline uint32_t esp_random() {
+    static uint32_t s = 0x5A17C0DEu;
+    s = s * 1664525u + 1013904223u;
+    return s;
+}

@@ -227,6 +227,11 @@ namespace Settings {
     // is remembered because somebody who hates it hates it every time.
     bool        phoneQwerty();
     void        togglePhoneQwerty();
+    // Encrypted messages between SquachWatches that share a phrase. Off until
+    // asked for. Reading one needs DETECT; sending one needs TRANSMIT, and so
+    // sits behind the same consent gate.
+    bool        messagesOn();
+    void        toggleMessages();
 #endif
 
     uint8_t     squachySizePct();
