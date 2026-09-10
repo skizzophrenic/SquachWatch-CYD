@@ -199,9 +199,10 @@ namespace Settings {
     // gives it a persistent identity, and that should be a choice somebody
     // made rather than a default they inherited.
     //
-    // Only advertising is gated. Listening always runs -- refusing to see
-    // somebody else's Squachy would cost privacy nothing and cost the
-    // feature everything.
+    // Off means off: no advertising AND no visitors. It gated only
+    // advertising at first, which was defensible and still wrong -- a
+    // setting whose label says the feature is off while the feature keeps
+    // happening is a setting that lies.
     bool        meshEnabled();
     const char* meshLabel();
     void        cycleMesh();

@@ -591,9 +591,19 @@ void tick(uint32_t now) {
     if (want && (!s_advOn || (now - s_advAt) > 10000)) { setAdvertising(true); s_advAt = now; }
     if (!want && s_advOn) setAdvertising(false);
 
-    // Listening does NOT depend on the setting. Turning SquachMesh off means
-    // "do not announce me", which is the privacy-relevant half; refusing to
-    // see somebody else's Squachy would just be worse for no gain.
+    // OFF MEANS OFF, both halves.
+    //
+    // This used to gate only advertising, on the reasoning that the
+    // privacy-relevant half is transmitting and that refusing to SEE another
+    // Squachy costs privacy nothing. That reasoning served the feature, not
+    // the person using it: a setting called SQUACHMESH that is switched off
+    // while Squachys keep arriving is a setting that lies about what it does,
+    // and it was reported as broken twice before this changed.
+    //
+    // The privacy property is unaffected -- the device still transmits only
+    // when asked. What is gained is that the label is now true.
+    if (!want) { s_havePeer = false; return; }
+
     if (s_havePeer && (now - s_peerSeen) > PEER_STALE_MS) s_havePeer = false;
 }
 
