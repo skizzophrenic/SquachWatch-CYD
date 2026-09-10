@@ -1762,6 +1762,10 @@ static const char* const MEET_HOST_LINES[] = {
     "Wasn't expecting that.",
     "Another one. Hey.",
     "Now there's a sight.",
+    "Didn't hear you come up.",
+    "Look what the airwaves dragged in.",
+    "Room for two up here.",
+    "You're a long way from home.",
 };
 static const char* const MEET_GUEST_LINES[] = {
     "Heard there was someone watching.",
@@ -1776,7 +1780,48 @@ static const char* const MEET_GUEST_LINES[] = {
     "You get many visitors?",
     "Quiet round here?",
     "Don't mind me.",
+    "Mind if I stand here a bit?",
+    "Somebody said you were watching.",
+    "Heard you from down the road.",
+    "You've got a better sunset than me.",
 };
+// Standing-around banter, written as PAIRS.
+//
+// The two sides used to draw from separate pools independently, and it read
+// exactly like that: two Squachys taking turns saying unrelated true things.
+// Every line was fine on its own and not one of them was an answer, which is
+// the difference between dialogue and alternating monologue.
+//
+// The host speaks first and the guest replies from the SAME entry, so the
+// reply has something to reply to.
+struct Exchange { const char* host; const char* guest; };
+static const Exchange HANG_EXCHANGES[] = {
+    { "Quiet out here.",                "Suits me fine."                      },
+    { "You come far?",                  "Farther than I meant to."            },
+    { "Nothing on my end.",             "Nor mine. Good."                     },
+    { "You always this chatty?",        "You started it."                     },
+    { "Nice night for it.",             "Every night's a night for it."       },
+    { "Seen anything worth reporting?", "Not since Tuesday."                  },
+    { "I like the hat.",                "I like that you noticed."            },
+    { "Long way from the woods.",       "The woods moved."                    },
+    { "Two of us. Better odds.",        "Better company, anyway."             },
+    { "How's the signal your side?",    "Loud. Nothing useful."               },
+    { "You get used to the waiting.",   "I never did."                        },
+    { "Don't let me keep you.",         "You're not."                         },
+    { "Rough patch of airwaves.",       "Tell me about it."                   },
+    { "Anybody following you?",         "Not that I noticed. Now I'll worry." },
+    { "Standing around's underrated.",  "It really is."                       },
+    { "Do you sleep?",                  "Define sleep."                       },
+    { "Somebody's got to watch.",       "Might as well be us."                },
+    { "You hear that?",                 "No. And that's the problem."         },
+    { "Good spot, this.",               "Better with two."                    },
+    { "I'd offer you something.",       "You've got nothing."                 },
+    { "Comfortable silence?",           "My favourite kind."                  },
+    { "Four eyes beat two.",            "That's the theory."                  },
+};
+static const uint8_t HANG_EXCHANGES_N =
+    sizeof(HANG_EXCHANGES) / sizeof(HANG_EXCHANGES[0]);
+
 static const char* const HANG_HOST_LINES[] = {
     "Four eyes are better than two.",
     "You take that side.",
@@ -1812,6 +1857,10 @@ static const char* const PART_HOST_LINES[] = {
     "See you around.",
     "That was nice.",
     "Watch yourself.",
+    "Mind how you go.",
+    "Don't be a stranger.",
+    "Go on then.",
+    "Safe signals.",
 };
 static const char* const PART_GUEST_LINES[] = {
     "Back to it, then.",
@@ -1820,8 +1869,19 @@ static const char* const PART_GUEST_LINES[] = {
     "Same time next signal.",
     "Don't get followed.",
     "Later, big guy.",
+    "Thanks for the company.",
+    "I'll leave you to it.",
+    "Good watching.",
+    "Keep it quiet out there.",
 };
 #define POOL_N(a) (uint8_t)(sizeof(a) / sizeof((a)[0]))
+
+void visitHangHost(uint32_t seed) {
+    say(HANG_EXCHANGES[seed % HANG_EXCHANGES_N].host, 4200);
+}
+const char* visitHangGuest(uint32_t seed) {
+    return HANG_EXCHANGES[seed % HANG_EXCHANGES_N].guest;
+}
 
 void visitReaction(VisitMoment m) {
     switch (m) {

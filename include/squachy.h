@@ -248,6 +248,13 @@ namespace Squachy {
     // saying it, because the guest has no mood machine to say it with.
     const char* visitGuestLine(VisitMoment m, uint32_t seed);
 
+    // Standing-around banter, as matched PAIRS. Independent picks on both
+    // sides produced two Squachys talking past each other -- each line was
+    // fine and none of them were answers. Same seed, same exchange, so the
+    // reply actually replies.
+    void        visitHangHost(uint32_t seed);      // host says it himself
+    const char* visitHangGuest(uint32_t seed);     // the matching reply
+
     // A nickname by index. nickname() only ever reports our own, and a guest
     // arrives carrying somebody else's -- both devices ship the same table,
     // which is the whole reason four bits was enough to send it.

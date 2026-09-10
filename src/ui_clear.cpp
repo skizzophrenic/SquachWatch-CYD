@@ -64,7 +64,9 @@ static const char*  s_visitGuestLine = nullptr;
 
 static const uint32_t WALK_MS  = 1800;       // across the gap, either way
 static const uint32_t BEAT_MS  = 4600;       // one line's time on screen
-static const uint32_t HANG_MS  = 46000;      // before he thinks about leaving
+static const uint32_t REPLY_GAP_MS = 700;    // question to answer
+static const uint32_t THINK_MS     = 3200;   // answer to the next question
+static const uint32_t HANG_MS  = 60000;      // before he thinks about leaving
 
 // True while he should have a walk cycle under him.
 static bool visitWalking() {
@@ -97,10 +99,26 @@ static int visitGuestX(uint32_t now, int homeX, int offX) {
     return homeX;
 }
 
+// Which standing-around exchange is running. Advanced only when the HOST
+// speaks, so his line and the guest's reply come from the same entry -- that
+// pairing is the whole point, and keying it off the beat counter would drift
+// the moment a beat is skipped.
+static uint32_t s_exchange = 0;
+
 static void visitBeat(uint32_t now, Squachy::VisitMoment m) {
     s_beatAt = now;
     s_beatNo++;
     s_guestTurn = !s_guestTurn;
+    if (m == Squachy::VisitMoment::HANGOUT) {
+        if (s_guestTurn) {
+            s_visitGuestLine = Squachy::visitHangGuest(s_exchange);
+        } else {
+            s_visitGuestLine = nullptr;
+            s_exchange++;                       // a new exchange starts here
+            Squachy::visitHangHost(s_exchange);
+        }
+        return;
+    }
     if (s_guestTurn) {
         // The guest's line is held, not re-rolled: his bubble is redrawn
         // every frame it is up, and picking again each time would flicker
@@ -187,9 +205,18 @@ static void visitTick(uint32_t now) {
         case VisitPhase::HANGING:
             // Gaps between lines, not a wall of them. Standing together in
             // silence is most of the point.
-            if (now - s_beatAt >= BEAT_MS * 2) {
-                if (s_visitGuestLine) { s_visitGuestLine = nullptr; s_beatAt = now; }
-                else visitBeat(now, Squachy::VisitMoment::HANGOUT);
+            // A reply follows its question closely; the PAUSE goes after the
+            // exchange, not inside it. Trailing the answer by nine seconds
+            // was what made two lines read as two unrelated remarks even
+            // before they were unrelated.
+            {
+                // s_guestTurn is the state AFTER the last beat. Guest just
+                // replied -> the host needs a new question, which is the
+                // longer pause. Host just asked -> the answer should follow
+                // close behind, which is the whole point of pairing them.
+                const uint32_t due = s_guestTurn ? (BEAT_MS + THINK_MS)
+                                                 : (BEAT_MS + REPLY_GAP_MS);
+                if (now - s_beatAt >= due) visitBeat(now, Squachy::VisitMoment::HANGOUT);
             }
             if (now - s_vpAt >= HANG_MS) {   // he has been here a while
                 s_vp = VisitPhase::LEAVING; s_vpAt = now;
