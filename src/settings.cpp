@@ -17,6 +17,7 @@ static bool        s_colorChecked = false;
 static bool        s_meshDetect   = false;
 static bool        s_meshTransmit = false;
 static bool        s_meshConsent  = false;
+static bool        s_phoneQwerty  = false;
 #endif
 static bool        s_infoPrimerShown = false;
 static bool        s_rotationLocked = false;
@@ -156,6 +157,7 @@ void load() {
     s_meshDetect   = s_prefs.getBool("meshrx", false);
     s_meshTransmit = s_prefs.getBool("meshtx", false);
     s_meshConsent  = s_prefs.getBool("meshok", false);
+    s_phoneQwerty  = s_prefs.getBool("qwerty", false);
 #endif
     s_infoPrimerShown = s_prefs.getBool("infoprimer", false);
     s_rotationLocked = s_prefs.getBool("rotlock", false);
@@ -386,6 +388,12 @@ const char* meshSummary() {
     if (s_meshDetect)                   return "RX >";
     if (meshTransmit())                 return "TX >";
     return "OFF >";
+}
+
+bool phoneQwerty() { return s_phoneQwerty; }
+void togglePhoneQwerty() {
+    s_phoneQwerty = !s_phoneQwerty;
+    s_prefs.putBool("qwerty", s_phoneQwerty);
 }
 #endif
 

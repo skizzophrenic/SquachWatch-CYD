@@ -34,6 +34,7 @@
 #include "ui_rawscan.h"
 #include "squachmesh.h"
 #include "ui_phone.h"
+#include "qwerty.h"
 #include "ui_meshmenu.h"
 #include "ui_meshwarn.h"
 #include "ui_watchalert.h"
@@ -141,6 +142,7 @@ static void usage() {
         "usage: squachsim <screen> [out.png] [options]\n"
         "  screens: clear log alert settings detfilter power diary hunt rawscan watchalert colorcheck boot phone meshmenu meshwarn\n"
         "  --portrait        render 240x320 instead of 320x240\n"
+        "  --qwerty          phone screen: the QWERTY board, not the keypad\n"
         "  --bg N            background style 0..9 (see Settings::Background)\n"
         "  --theme N         palette index\n"
         "  --alert N         DetectionType the ALERT screen fires on\n"
@@ -159,7 +161,7 @@ int main(int argc, char** argv) {
     std::string screen  = argv[1];
     std::string outPath = (argc > 2 && argv[2][0] != '-') ? argv[2] : "squachsim.png";
 
-    bool portrait = false, onboard = false, showoff = false;
+    bool portrait = false, onboard = false, showoff = false, qwerty = false;
     int confirmRow = -1;   // settings screen: put a confirm panel up
     int scrollBy = 0;      // settings screen: scroll down N rows first
     int bg = -1, themeIdx = -1, frames = 90, sequence = 1, outfitIdx = -1;
@@ -194,6 +196,7 @@ int main(int argc, char** argv) {
     for (int i = 2; i < argc; i++) {
         std::string a = argv[i];
         if (a == "--portrait") portrait = true;
+        else if (a == "--qwerty") qwerty = true;
         else if (a == "--onboard") onboard = true;
         else if (a == "--bg" && i + 1 < argc) bg = atoi(argv[++i]);
         else if (a == "--theme" && i + 1 < argc) themeIdx = atoi(argv[++i]);
@@ -365,17 +368,45 @@ int main(int argc, char** argv) {
     else if (screen == "boot")       uiBootInit(frame);
     else if (screen == "meshmenu")   uiMeshMenuInit(frame);
     else if (screen == "phone")      {
+        // Set rather than toggled: the NVS shim may remember a previous run.
+        if (Settings::phoneQwerty() != qwerty) Settings::togglePhoneQwerty();
         uiPhoneInit(frame);
         uint32_t tnow = now;
-        // Key centres, computed the same way ui_phone.cpp lays them out.
-        for (size_t i = 0; i < typeSeq.size(); i++) {
-            if (typeSeq[i] == '.') { tnow += 900; continue; }
-            const int k = typeSeq[i] - '0';
-            if (k < 0 || k > 11) continue;
-            const int kx = 78 + (164 - (48 * 3 + 3 * 2)) / 2 + (k % 3) * 51 + 24;
-            const int ky = 8 + 60 + (k / 3) * 33 + 15;
-            uiPhoneTouch(kx, ky, tnow);
-            tnow += 120;
+        if (!qwerty) {
+            // Key centres, computed the same way ui_phone.cpp lays them out.
+            for (size_t i = 0; i < typeSeq.size(); i++) {
+                if (typeSeq[i] == '.') { tnow += 900; continue; }
+                const int k = typeSeq[i] - '0';
+                if (k < 0 || k > 11) continue;
+                const int kx = 78 + (164 - (48 * 3 + 3 * 2)) / 2 + (k % 3) * 51 + 24;
+                const int ky = 8 + 60 + (k / 3) * 33 + 15;
+                uiPhoneTouch(kx, ky, tnow, PhoneTouch::DOWN);
+                tnow += 120;
+            }
+        } else {
+            // Letters typed as real taps, press then release, at key centres
+            // from the same Qwerty::layout the screen draws. A '^' holds the
+            // NEXT key down without releasing it, so a frame can show the
+            // preview box and the armed key.
+            Qwerty::Key keys[Qwerty::KEY_N];
+            const uint8_t kn = Qwerty::layout(frame.width(), Qwerty::BAND_TOP,
+                                              frame.height() - Qwerty::BAND_BOTTOM_INSET, keys);
+            tick(tnow);                  // the screen lays its keys out on draw
+            bool hold = false;
+            for (size_t i = 0; i < typeSeq.size(); i++) {
+                char c = typeSeq[i];
+                if (c == '^') { hold = true; continue; }
+                if (c >= 'a' && c <= 'z') c = (char)(c - 32);
+                for (uint8_t k = 0; k < kn; k++) {
+                    if (keys[k].ch != c) continue;
+                    const int cx = keys[k].x + keys[k].w / 2, cy = keys[k].y + keys[k].h / 2;
+                    uiPhoneTouch(cx, cy, tnow, PhoneTouch::DOWN);
+                    if (!hold) uiPhoneTouch(cx, cy, tnow, PhoneTouch::UP);
+                    break;
+                }
+                hold = false;
+                tnow += 120;
+            }
         }
     }
     else if (screen == "hunt")       { engine.huntBle((const uint8_t*)"\x11\x22\x33\x44\x55\x66", "AirTag"); }

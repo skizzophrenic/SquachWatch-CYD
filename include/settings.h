@@ -222,6 +222,11 @@ namespace Settings {
     void        cycleMeshTransmit();
     // For the one-line summary on the Settings row that opens the menu.
     const char* meshSummary();
+    // Which board the payphone screen shows. The keypad is the default and
+    // the point; QWERTY is the bailout for people who hate multi-tap, and it
+    // is remembered because somebody who hates it hates it every time.
+    bool        phoneQwerty();
+    void        togglePhoneQwerty();
 #endif
 
     uint8_t     squachySizePct();

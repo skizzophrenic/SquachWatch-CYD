@@ -38,6 +38,7 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/squachy.cpp \
             $(SRC)/squachmesh.cpp \
             $(SRC)/ui_phone.cpp \
+            $(SRC)/qwerty.cpp \
             $(SRC)/ui_meshmenu.cpp \
             $(SRC)/ui_meshwarn.cpp \
             $(SRC)/settings.cpp \

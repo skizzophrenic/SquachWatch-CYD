@@ -2603,10 +2603,19 @@ void loop() {
         }
         case AppState::PHONE: {
             uiPhoneTick(*canvas, now, engine);
-            // Act on press, not release. A keypad is the one place where
-            // waiting for the finger to come up makes typing feel broken --
-            // and there is no drag gesture here to be confused with.
-            if (touchJustDown) uiPhoneTouch(tp.x, tp.y, now);
+            // All three edges of a touch, not just the press. The payphone
+            // keypad still acts on the press and ignores the rest; the
+            // QWERTY board previews on the press, follows the finger, and
+            // types on the release -- see ui_phone.h. Both come through here
+            // because the choice between them is a setting the screen reads,
+            // not a different screen.
+            //
+            // The wake-tap swallow near the top of loop() clears tp.valid and
+            // both edges for the whole gesture, so a touch that only woke the
+            // display reaches none of these.
+            if (touchJustDown)    uiPhoneTouch(tp.x, tp.y, now, PhoneTouch::DOWN);
+            else if (tp.valid)    uiPhoneTouch(tp.x, tp.y, now, PhoneTouch::MOVE);
+            else if (touchJustUp) uiPhoneTouch(tp.x, tp.y, now, PhoneTouch::UP);
             // Back to where it was opened from, not to Settings.
             if (uiPhoneDone()) enterMeshMenu();
             break;
