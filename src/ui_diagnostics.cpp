@@ -137,12 +137,16 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
                      (unsigned)(ms.offRate / 10), (unsigned)(ms.offRate % 10));
         y = drawLine(t, y, ms.advOn ? Theme::GREEN : Theme::VAPOR_PINK,
                      "ADVERTISING:", "%s", ms.advOn ? "yes" : "no");
-        // The other half of phase 0. The broadcaster role was compiled out
-        // because its overhead made the CLEAR screen's framebuffer realloc on
-        // rotate fail; this build turns it back on, so the largest contiguous
-        // block is the canary for that bug returning.
-        y = drawLine(t, y, Theme::VAPOR_PINK, "HEAP:", "%lu KB free, %lu KB block",
-                     (unsigned long)ms.heapFreeKb, (unsigned long)ms.heapBlockKb);
+        // What the once-a-minute scan restart gave back: the leak it closes,
+        // measured. This row used to repeat the HEAP line at the top, which
+        // already carries free and largest block. Kilobytes a restart in a busy
+        // room and a flat heap up top means the leak was NimBLE holding on to
+        // devices that never answered; zeros here and a falling heap mean it
+        // was not, and the search goes on.
+        const ScanFlushStats fs = scanFlushStats();
+        y = drawLine(t, y, Theme::VAPOR_PINK, "FLUSHED:", "%lu KB total, %lu B last (x%lu)",
+                     (unsigned long)(fs.totalFreed / 1024), (unsigned long)fs.lastFreed,
+                     (unsigned long)fs.count);
     }
 #endif
 

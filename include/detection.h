@@ -76,6 +76,17 @@ namespace Mesh {
 }
 #endif
 
+// The BLE scan is restarted once a minute, which is what frees NimBLE's record
+// of every device that never answered a scan request -- see scanFlushTick() in
+// detection.cpp for the leak that closes. These say what each restart gave
+// back, so the diagnostics screen can show whether it is doing anything.
+struct ScanFlushStats {
+    uint32_t count;        // restarts since boot
+    uint32_t lastFreed;    // heap bytes the last one gave back
+    uint32_t totalFreed;   // ...and all of them together
+};
+ScanFlushStats scanFlushStats();
+
 class DetectionEngine {
 public:
     bool     init();

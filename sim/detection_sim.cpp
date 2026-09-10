@@ -52,6 +52,8 @@ namespace Mesh {
 
 bool DetectionEngine::init() { return true; }
 void DetectionEngine::loop() {}
+// No radio, so nothing to restart and nothing freed.
+ScanFlushStats scanFlushStats() { return ScanFlushStats{ 0, 0, 0 }; }
 
 void DetectionEngine::clearLog() {
     _logCount = 0;

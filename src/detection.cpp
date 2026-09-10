@@ -688,6 +688,57 @@ void tick(uint32_t now) {
 } // namespace Mesh
 #endif
 
+// ---- the scan-result flush --------------------------------------------------
+// NimBLE keeps a record of every advertiser until that record's callback has
+// fired, and with setMaxResults(0) it deletes the record straight after. But
+// for a SCANNABLE advert under active scanning -- nearly every phone and
+// headset -- the callback waits for the device's scan response, and if that
+// response never arrives the record is never deleted. The only other cleanup
+// is at the end of a scan, and this scan never ends.
+//
+// So the list grows by one record for every device that did not answer before
+// it walked off or rotated its address. At the user's workplace, with
+// SquachMesh switched off, that was about 480 bytes a minute, until the heap
+// was 12 KB of 140-byte scraps and the next allocation failed -- twice, at 80
+// and 63 minutes. Fewer answers and more address churn both make it worse,
+// which is why it only ever crashed away from home. Every advert also does a
+// linear search of that list, so it cost CPU on the other core as it grew.
+//
+// NimBLE's own stop() clears the list when results are not retained, and
+// start() begins clean. Restarting through the library is the one way to clear
+// it without racing the host task, which appends to that list from the other
+// core -- a bare clearResults() from here would be deleting records it may be
+// halfway through reading. Nothing in this file keeps a result past its
+// callback; that is what setMaxResults(0) already said.
+static const uint32_t SCAN_FLUSH_MS = 60000;
+static uint32_t       s_lastFlush   = 0;
+static ScanFlushStats s_flush       = { 0, 0, 0 };
+
+ScanFlushStats scanFlushStats() { return s_flush; }
+
+static void scanFlushTick() {
+    const uint32_t now = millis();
+    if (now - s_lastFlush < SCAN_FLUSH_MS) return;
+    s_lastFlush = now;
+    NimBLEScan* scan = NimBLEDevice::getScan();
+    // Never restart a scan that is not running: that would be switching
+    // Bluetooth scanning back on behind whoever turned it off.
+    if (!scan || !scan->isScanning()) return;
+    // Measured across the stop alone -- start() may allocate, and that is not
+    // what this number is for.
+    const uint32_t before = ESP.getFreeHeap();
+    scan->stop();
+    const uint32_t after = ESP.getFreeHeap();
+    scan->start(0, nullptr, false);
+    const uint32_t freed = (after > before) ? after - before : 0;
+    s_flush.count++;
+    s_flush.lastFreed   = freed;
+    s_flush.totalFreed += freed;
+    Serial.printf("[scan] restart %lu freed %lu B (%lu total), heap %lu\n",
+                  (unsigned long)s_flush.count, (unsigned long)freed,
+                  (unsigned long)s_flush.totalFreed, (unsigned long)after);
+}
+
 void DetectionEngine::loop() {
     if (g_rawMode != RawScanMode::NONE) {
         // A raw scan owns the radio right now -- channel hopping here
@@ -698,6 +749,9 @@ void DetectionEngine::loop() {
         _sd.tick();
         return;
     }
+    // After the raw-scan return above, so a raw scan that owns the radio is
+    // never restarted out from under it.
+    scanFlushTick();
     hopChannel();
     processWiFiQ();
     processDeauthQ();
