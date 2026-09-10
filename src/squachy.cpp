@@ -3011,8 +3011,11 @@ static const int OVERFLOW_PCT = 10;
 // Draws Squachy at an already-animated anchor (hy = head-top Y for this
 // exact frame). Bob is computed once in tick() so it can also drive the
 // dirty-rect clear that runs before this is called.
+// ownsBubble: whether the ONE global speech bubble (bubbleText/bubbleUntil)
+// belongs to the body being drawn. True for our own Squachy, who is the only
+// one who can put a line in it. False for every cameo -- see drawWaving().
 static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mood m, float scale,
-                     bool forceTalking = false) {
+                     bool forceTalking = false, bool ownsBubble = true) {
     auto S = [scale](int v) { return (int)(v * scale); };
     int cx2 = cx;
 
@@ -3929,7 +3932,16 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
 
         // Mouth: resting smile most of the time, or an open/close
         // "talking" flap while a speech bubble is actually up.
-        bool talking = forceTalking || (bubbleText && now < bubbleUntil);
+        //
+        // ownsBubble is what keeps that second clause from applying to
+        // somebody else's line. bubbleText is a file static describing OUR
+        // Squachy, and drawBody draws every Squachy on screen -- so with two
+        // of them up, the host saying something flapped the GUEST's mouth
+        // too, and both of them chewed through every line either one said.
+        // Reported as "only the right one should be moving his mouth", and
+        // the fix is that a body which does not own the bubble does not get
+        // to read it.
+        bool talking = forceTalking || (ownsBubble && bubbleText && now < bubbleUntil);
         if (noMouth) {
             // nothing: this costume has no mouth in any mood
         } else if (m == Mood::GUM) {
@@ -4073,7 +4085,14 @@ void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const
     // two seconds and wrong for a guest standing around for forty-five --
     // reported from hardware as "the visitor continuously waves". He waves
     // hello, then settles.
-    drawBody(t, bodyCx, hy, headTopY, now, waving ? Mood::WAVE : Mood::IDLE, scale, talking);
+    // A cameo has no access to the global bubble, so its mouth is driven
+    // entirely by what IT was handed: the caller's explicit talking flag, or
+    // simply having a line to say. Before this, the boot splash's Squachy
+    // held a line up without moving his mouth unless our own Squachy happened
+    // to be mid-quip somewhere off-screen.
+    const bool cameoTalking = talking || (line != nullptr);
+    drawBody(t, bodyCx, hy, headTopY, now, waving ? Mood::WAVE : Mood::IDLE, scale,
+             cameoTalking, /*ownsBubble=*/false);
     // Fixed above his (pre-bob, pre-wander) head, same as tick()'s
     // bubble row — it shouldn't bounce or chase him around. Pulled up
     // further than tick()'s gap (18px) specifically so it sits right
