@@ -1236,8 +1236,19 @@ static bool bubblePop(TFT_eSPI& t, int bx, int topY, int bw, int bh, uint32_t no
     // 220ms of real time -- so the pop never completed and every bubble came
     // out a flat sliver. Hardware was always fine, which is exactly what
     // makes it the kind of instrument fault worth hunting.
-    if (now < bubbleStart) return false;
-    const uint32_t e = now - bubbleStart;
+    // CLAMPED, not bailed out of. say() timestamps with millis() and runs
+    // DURING the frame, while `now` was taken at the top of it -- so on the
+    // frame a bubble is born, bubbleStart is a few milliseconds in the
+    // future. Returning false there drew the bubble at FULL SIZE for one
+    // frame before the pop took over, so every bubble appeared, snapped to
+    // nothing, and grew back. Reported from hardware as a flicker.
+    //
+    // That was introduced by the fix that made this take `now` at all: the
+    // old version read millis() for both ends, so the two could never
+    // disagree. Fixing the emulator broke the device, which is the exact
+    // inverse of the fault being fixed, and is why this reads as a clamp
+    // rather than a guard.
+    const uint32_t e = (now >= bubbleStart) ? (now - bubbleStart) : 0;
     if (e >= BUBBLE_POP_MS) return false;
     const float u = (float)e / (float)BUBBLE_POP_MS;
     // Ease out past 1.0 and back: peaks at 1.12 three-quarters of the
