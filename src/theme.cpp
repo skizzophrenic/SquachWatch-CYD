@@ -7658,8 +7658,21 @@ void drawGibson(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
             t.print("_");
         }
     }
+    // Clear of the settings icon, which owns this corner.
+    //
+    // drawSettingsIcon() blanks a SETTINGS_ICON_W x ICON_BOX_H box at the
+    // top-left every frame, and it runs AFTER the background -- so this
+    // label lost its first four characters and read "ON // 2.4GHz" on the
+    // board. Those two corner icons are the last thing left of the old title
+    // bar: the bar went, the controls stayed, and the row they sit in became
+    // the background's, which is where this label had already put itself.
+    //
+    // It only dodges when it would actually collide. Drawn as a dimmed
+    // backdrop on the sub-screens this band can start further down, and then
+    // there is nothing up there to dodge.
     t.setTextColor(edge[0], BG);
-    t.setCursor(3, yStart + 1);
+    const int labelY = yStart + 1;
+    t.setCursor(labelY < ICON_BOX_H ? SETTINGS_ICON_W + 3 : 3, labelY);
     t.print("GIBSON // 2.4GHz");
 }
 
