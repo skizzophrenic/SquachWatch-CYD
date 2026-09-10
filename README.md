@@ -131,6 +131,43 @@ There is no GPS and no network sync — the clock is set over serial with a
 single `TIME <epoch>` line at 2,000,000 baud, and until it is, timestamps
 count from boot.
 
+## SquachMesh
+
+> **Work in progress.** It is in this release because it works — two boards
+> find each other and each draws the other's Squachy — but it has had days of
+> testing, not months. Both halves are **off** until you turn them on, and one
+> of them costs you something; the device asks before it lets you near the
+> switch.
+
+<p align="center">
+  <img src="docs/squachmesh.gif" width="640"
+       alt="Two SquachWatches in range of each other. One Squachy walks in, they greet each other, and the pair stand around talking.">
+</p>
+
+Two SquachWatches in range of each other notice, and each one draws the
+other's Squachy as a visitor. He walks in, they say hello, they stand around
+talking, and eventually he goes home. His outfit, his shades, his nickname and
+whatever name his owner typed on the payphone keypad all travelled over the
+air in a twenty-byte BLE advert.
+
+It is deliberately not a network. No pairing, no connection, no
+acknowledgement, no retry — a broadcast that says who is here, and anybody in
+earshot may or may not catch it. A peer is recognised inside the scan callback
+and returns before the signature tables ever see it, so two of these can never
+set each other off.
+
+**Settings → SQUACHMESH**, and it asks first. `DETECT` is receive-only: you
+see other people's Squachys and broadcast nothing at all. `TRANSMIT` is the
+half that makes you visible, and a full-screen warning stands in front of that
+menu spelling out what goes out, how often, and what somebody with a scanner
+can reconstruct from it — a fixed address that never changes is a trail of
+where you have been. Nothing is transmitted until you have read that and
+chosen YES.
+
+That warning is not a formality. Broadcasting a stable identifier at strangers
+is the exact behaviour this device exists to catch other people's hardware
+doing. Offering it is defensible; switching it on quietly would not be.
+
 ## Every outfit
 
 Squachy has fourteen costumes. Most are earned by detection count; four are
@@ -170,6 +207,7 @@ SquachWatch-CYD/
 │   ├── remote_id.h               (ASTM F3411 decoder)
 │   ├── clock.h                   (wall clock, set over serial)
 │   ├── ignore_list.h             (per-device alert suppression)
+│   ├── squachmesh.h              (the SquachMesh wire format -- read first)
 │   ├── settings.h
 │   ├── squachy.h                 (the mascot)
 │   ├── bangers_font.h            (generated 1bpp display face)
@@ -185,6 +223,7 @@ SquachWatch-CYD/
 │   ├── clock.cpp
 │   ├── ignore_list.cpp
 │   ├── pet.cpp
+│   ├── squachmesh.cpp            (SquachMesh encode/decode, no radio)
 │   ├── sd_log.cpp
 │   └── ui_*.cpp
 ├── test/                         (host tests -- `make -C test`, no framework)
@@ -192,6 +231,7 @@ SquachWatch-CYD/
     ├── Makefile                  (`make` for the CLI, `make wasm` for the web build)
     ├── *.h                       (Arduino/TFT_eSPI/NVS shims)
     ├── make_demo.py              (renders the animation at the top of this file)
+    ├── make_mesh_demo.py         (renders the SquachMesh clip above)
     ├── make_gallery.py           (renders the outfit sheet above)
     ├── make_social.py            (renders the repo's social preview card)
     └── web/                      (the browser build)

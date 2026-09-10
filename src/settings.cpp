@@ -16,6 +16,7 @@ static bool        s_colorChecked = false;
 // below are defined.
 static bool        s_meshDetect   = false;
 static bool        s_meshTransmit = false;
+static bool        s_meshConsent  = false;
 #endif
 static bool        s_infoPrimerShown = false;
 static bool        s_rotationLocked = false;
@@ -154,6 +155,7 @@ void load() {
     // Both off unless asked for. See the note in settings.h.
     s_meshDetect   = s_prefs.getBool("meshrx", false);
     s_meshTransmit = s_prefs.getBool("meshtx", false);
+    s_meshConsent  = s_prefs.getBool("meshok", false);
 #endif
     s_infoPrimerShown = s_prefs.getBool("infoprimer", false);
     s_rotationLocked = s_prefs.getBool("rotlock", false);
@@ -354,9 +356,17 @@ static const uint8_t     SQ_SIZE_N        = 3;
 
 #if SQUACH_MESH
 bool meshDetect()   { return s_meshDetect; }
-bool meshTransmit() { return s_meshTransmit; }
+bool meshTransmit() { return s_meshTransmit && s_meshConsent; }
+bool meshConsent()  { return s_meshConsent; }
+void setMeshConsent(bool v) {
+    s_meshConsent = v;
+    s_prefs.putBool("meshok", v);
+}
 const char* meshDetectLabel()   { return s_meshDetect   ? "ON" : "OFF"; }
-const char* meshTransmitLabel() { return s_meshTransmit ? "ON" : "OFF"; }
+// Reports what the RADIO is doing, not what the flag holds -- meshTransmit()
+// is the same answer the advertiser gets, so the row cannot say ON while
+// nothing is going out.
+const char* meshTransmitLabel() { return meshTransmit() ? "ON" : "OFF"; }
 void cycleMeshDetect()   { s_meshDetect   = !s_meshDetect;   s_prefs.putBool("meshrx", s_meshDetect); }
 void cycleMeshTransmit() { s_meshTransmit = !s_meshTransmit; s_prefs.putBool("meshtx", s_meshTransmit); }
 
@@ -372,9 +382,9 @@ const char* meshSummary() {
     // "DETECT+SEND" collides with itself on the 240px portrait rotation at
     // this row's size-2 text, which is the same trap already documented on
     // TYPE FILTER and IGNORED.
-    if (s_meshDetect && s_meshTransmit) return "RX+TX >";
+    if (s_meshDetect && meshTransmit()) return "RX+TX >";
     if (s_meshDetect)                   return "RX >";
-    if (s_meshTransmit)                 return "TX >";
+    if (meshTransmit())                 return "TX >";
     return "OFF >";
 }
 #endif

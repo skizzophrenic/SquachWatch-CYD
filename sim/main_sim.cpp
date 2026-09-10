@@ -35,6 +35,7 @@
 #include "squachmesh.h"
 #include "ui_phone.h"
 #include "ui_meshmenu.h"
+#include "ui_meshwarn.h"
 #include "ui_watchalert.h"
 #include "ui_colorcheck.h"
 #include "ui_diagnostics.h"
@@ -138,12 +139,14 @@ static std::vector<uint8_t> toRgb888(const std::vector<uint16_t>& src) {
 static void usage() {
     fprintf(stderr,
         "usage: squachsim <screen> [out.png] [options]\n"
-        "  screens: clear log alert settings detfilter power diary hunt rawscan watchalert colorcheck boot phone\n"
+        "  screens: clear log alert settings detfilter power diary hunt rawscan watchalert colorcheck boot phone meshmenu meshwarn\n"
         "  --portrait        render 240x320 instead of 320x240\n"
         "  --bg N            background style 0..9 (see Settings::Background)\n"
         "  --theme N         palette index\n"
         "  --alert N         DetectionType the ALERT screen fires on\n"
         "  --noseed          no detections at all -- CLEAR's idle state\n"
+        "  --peer N          draw a visiting SquachMesh peer in outfit N\n"
+        "  --peername NAME   give that visitor a custom name\n"
         "  --frames N        animation warm-up frames before capture (default 90)\n"
         "  --onboard         let Squachy's first-boot walkthrough run\n"
         "  --sequence N      capture N consecutive frames instead of one\n"
@@ -179,6 +182,10 @@ int main(int argc, char** argv) {
     // both at SMALL. No radio involved -- the point is to find out whether
     // two of him fit and whether the renderer survives being called twice.
     int peerOutfit = -1;
+    // A custom name for the visitor, so the nameplate under his feet shows
+    // the thing custom names exist for: a name that travelled here from
+    // somebody else's device.
+    std::string peerName;
     // --type feeds the payphone a tap sequence: digits are key presses,
     // "." waits past the multi-tap window. Typing is the feature; a screen
     // that only renders proves nothing about it.
@@ -200,6 +207,7 @@ int main(int argc, char** argv) {
         else if (a == "--alert" && i + 1 < argc) alertType = atoi(argv[++i]);
         else if (a == "--noseed") noSeed = true;
         else if (a == "--peer" && i + 1 < argc) peerOutfit = atoi(argv[++i]);
+        else if (a == "--peername" && i + 1 < argc) peerName = argv[++i];
         else if (a == "--type" && i + 1 < argc) typeSeq = argv[++i];
         else if (a == "--scroll" && i + 1 < argc) scrollBy = atoi(argv[++i]);
     }
@@ -251,7 +259,8 @@ int main(int argc, char** argv) {
     SquachMesh::Peer guest{};
     if (peerOutfit >= 0) {
         guest.nick = 4; guest.outfit = (uint8_t)peerOutfit; guest.shade = 1;
-        guest.custom = false; guest.name[0] = 0;
+        guest.custom = !peerName.empty();
+        snprintf(guest.name, sizeof(guest.name), "%s", peerName.c_str());
         uiClearSetGuest(&guest);
     }
 
@@ -310,6 +319,7 @@ int main(int argc, char** argv) {
         else if (screen == "rawscan")  uiRawScanTick(frame, t, engine, true, true, false, "");
         else if (screen == "phone")    uiPhoneTick(frame, t, engine);
         else if (screen == "meshmenu") uiMeshMenuTick(frame, t, engine);
+        else if (screen == "meshwarn") uiMeshWarnTick(frame, t, engine);
         else if (screen == "watchalert") uiWatchAlertTick(frame, t, engine, true);
         else if (screen == "colorcheck") uiColorCheckTick(frame, t);
         else if (screen == "diagnostics") {

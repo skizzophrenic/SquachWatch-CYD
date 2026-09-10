@@ -208,7 +208,14 @@ namespace Settings {
     // lies. Splitting them is the honest version of that argument -- somebody
     // who wants to watch without being seen can now say so.
     bool        meshDetect();
+    // FALSE until the warning screen has been accepted, whatever the stored
+    // TRANSMIT flag says. The masking lives in the getter rather than at the
+    // call sites so there is exactly one place that can be wrong, and so a
+    // preference left behind by an older build cannot start a radio the
+    // owner of this one never agreed to.
     bool        meshTransmit();
+    bool        meshConsent();
+    void        setMeshConsent(bool v);
     const char* meshDetectLabel();
     const char* meshTransmitLabel();
     void        cycleMeshDetect();

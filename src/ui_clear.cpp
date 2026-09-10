@@ -743,24 +743,41 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
             Squachy::setShadesPreview(-1);
             Squachy::setOutfitPreview(-1);
 
-            // Nameplate, under his feet rather than over his head: above is
-            // where his speech bubble goes, and a name there would be hidden
-            // for exactly the moments he is worth identifying.
-            {
+            // Nameplate. It goes in the row his speech bubble uses, and only
+            // on the beats when he is not using it.
+            //
+            // It used to sit under his feet, on the reasoning that above is
+            // where the bubble goes and a name up there would be hidden for
+            // exactly the moments he is worth identifying. Correct reasoning,
+            // impossible position: squachyBottom is counterTextTop - 2, so
+            // the fit test below it asked whether 8 <= -2 and the answer has
+            // always been no. The name has never been drawn, on any board, in
+            // any orientation -- which meant custom names travelled between
+            // devices, were decoded correctly, and were then shown to nobody.
+            //
+            // Taking turns with the bubble solves both halves. There is
+            // guaranteed room, because the bubble fits there; and he is
+            // silent for most of a visit, so the name is up most of the time
+            // and gone only while he is saying something -- at which point
+            // which of the two is speaking is not in question anyway.
+            if (!s_visitGuestLine) {
                 const char* nm = (guest->custom && guest->name[0])
                                    ? guest->name
                                    : Squachy::nicknameAt(guest->nick);
                 t.setTextSize(1);
                 t.setTextWrap(false);
                 const int nw = t.textWidth(nm);
-                const int nx = gx - nw / 2;
-                const int ny = squachyBottom + 2;
-                // Only if it actually fits between his feet and the counters.
-                if (ny + 8 <= counterTextTop - 2 && nx > 2 && nx + nw < w - 2) {
-                    t.setTextColor(Theme::CYAN, Theme::BG);
-                    t.setCursor(nx, ny);
-                    t.print(nm);
-                }
+                int nx = gx - nw / 2;
+                if (nx < 2) nx = 2;
+                if (nx + nw > w - 2) nx = w - 2 - nw;
+                // The same head-top drawWaving() computes from the same two
+                // numbers, then the bubble's own gap, then its height -- so
+                // the name sits on the baseline the bubble would have used.
+                const int headTopY = squachyBottom - (int)(58.0f * gs);
+                const int ny = headTopY - 20 + 3;
+                t.setTextColor(Theme::CYAN, Theme::BG);
+                t.setCursor(nx, ny);
+                t.print(nm);
             }
         } else
 #endif

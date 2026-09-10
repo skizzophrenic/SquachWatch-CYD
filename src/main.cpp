@@ -80,6 +80,7 @@ static void crashCrumbTick(uint32_t now, uint32_t lifetime, uint8_t screen) {
 #if SQUACH_MESH
 #include "ui_phone.h"
 #include "ui_meshmenu.h"
+#include "ui_meshwarn.h"
 #endif
 #include "ignore_list.h"
 #include "ignore_list.h"
@@ -1103,6 +1104,12 @@ static void enterIgnoreList() {
 }
 
 #if SQUACH_MESH
+static void enterMeshWarn() {
+    state = AppState::MESH_WARN;
+    transitionStart = millis();
+    uiMeshWarnInit(*canvas);
+}
+
 static void enterMeshMenu() {
     state = AppState::MESH_MENU;
     transitionStart = millis();
@@ -2513,7 +2520,14 @@ void loop() {
                         case SettingsRow::POWER_SAVER: enterPower(); break;
                         case SettingsRow::IGNORED_DEVICES:  enterIgnoreList(); break;
 #if SQUACH_MESH
-                        case SettingsRow::SQUACHMESH:       enterMeshMenu(); break;
+                        case SettingsRow::SQUACHMESH:
+                            // Asked once. After that the row opens the menu
+                            // directly -- re-consenting on every visit trains
+                            // people to dismiss the thing without reading it,
+                            // which is worse than not asking.
+                            if (Settings::meshConsent()) enterMeshMenu();
+                            else                        enterMeshWarn();
+                            break;
 #endif
                         // These ask first -- see the confirm panel over in
                         // ui_settings. A row earns one when tapping it a
@@ -2557,6 +2571,22 @@ void loop() {
             break;
         }
 #if SQUACH_MESH
+        case AppState::MESH_WARN: {
+            uiMeshWarnTick(*canvas, now, engine);
+            if (touchJustDown) {
+                switch (uiMeshWarnHitTest(*canvas, tp.x, tp.y)) {
+                    case MeshWarnHit::YES:
+                        Settings::setMeshConsent(true);
+                        enterMeshMenu();
+                        break;
+                    // Nothing is stored on NO. Declining is not a decision
+                    // worth remembering -- it just means not now.
+                    case MeshWarnHit::NO: enterSettings(); break;
+                    default: break;
+                }
+            }
+            break;
+        }
         case AppState::MESH_MENU: {
             uiMeshMenuTick(*canvas, now, engine);
             if (touchJustDown) {
