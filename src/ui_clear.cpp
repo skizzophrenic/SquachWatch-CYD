@@ -125,6 +125,10 @@ const SquachMesh::Peer* uiClearGuest() { return visitHosting(); }
 static void visitTick(uint32_t now) {
     const uint32_t id = rawGuestId(now);
 
+    // Told once per frame rather than on transitions, so it cannot get stuck
+    // set if a phase change is ever missed.
+    Squachy::setVisiting(s_vp != VisitPhase::GONE);
+
     if (s_vp == VisitPhase::GONE) {
         if (!id) return;
         const SquachMesh::Peer* g = rawGuest(now);
@@ -557,9 +561,15 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
             // slid him across the floor like furniture; a couple of pixels of
             // wander is enough to put a walk cycle under the movement without
             // reading as a stagger.
+            // Waves while walking in and through the hellos, then settles.
+            // A guest who never stops waving reads as a stuck frame rather
+            // than as a greeting once he has been there half a minute.
+            const bool stillGreeting = (s_vp == VisitPhase::ARRIVING ||
+                                        s_vp == VisitPhase::MEETING ||
+                                        s_vp == VisitPhase::LEAVING);
             Squachy::drawWaving(t, gx, squachyBottom, now, gs,
                                 s_visitGuestLine, s_visitGuestLine != nullptr,
-                                visitWalking() ? 2 : 0);
+                                visitWalking() ? 2 : 0, stillGreeting);
             Squachy::setShadesPreview(-1);
             Squachy::setOutfitPreview(-1);
 

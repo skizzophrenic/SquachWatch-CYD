@@ -1735,6 +1735,9 @@ static const char* const WINK_LINES[] = {
 // Only ever ONE bubble on screen at a time, alternating. Two Squachys with
 // two speech bubbles on a 240px-tall screen is not a conversation, it is a
 // pile-up; taking turns is what makes it read as talking.
+static bool s_visiting = false;
+void setVisiting(bool v) { s_visiting = v; }
+
 static const char* const MEET_HOST_LINES[] = {
     "Oh -- company.",
     "Well. Look who found us.",
@@ -3763,7 +3766,7 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
 }
 
 void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const char* line,
-                bool talking, int wanderRangePx) {
+                bool talking, int wanderRangePx, bool waving) {
     // This cameo is placed by callers that have already reserved room, so
     // there is no region to clamp against.
     s_topLimit = -10000;
@@ -3798,7 +3801,11 @@ void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const
         bodyCx = cx + (int)(sinf(wt) * wanderRangePx);
     }
 
-    drawBody(t, bodyCx, hy, headTopY, now, Mood::WAVE, scale, talking);
+    // WAVE is the boot splash's pose and it never stops, which is right for
+    // two seconds and wrong for a guest standing around for forty-five --
+    // reported from hardware as "the visitor continuously waves". He waves
+    // hello, then settles.
+    drawBody(t, bodyCx, hy, headTopY, now, waving ? Mood::WAVE : Mood::IDLE, scale, talking);
     // Fixed above his (pre-bob, pre-wander) head, same as tick()'s
     // bubble row — it shouldn't bounce or chase him around. Pulled up
     // further than tick()'s gap (18px) specifically so it sits right
@@ -3991,6 +3998,9 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     // already talking) rather than interrupting: a scripted line landing on
     // top of a nap reads as a bug, and the next beat is only 30s away.
     if (!s_onboardActive && !s_showOff && mood == Mood::IDLE &&
+#if SQUACH_MESH
+        !s_visiting &&                      // he is in the middle of a chat
+#endif
         now >= s_nextWatchAt && now >= bubbleUntil) {
         say(pick(WATCHING_LINES, WATCHING_N), 4000);
         s_nextWatchAt = now + WATCH_EVERY_MS;
@@ -3999,7 +4009,11 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
         if (nextIdleAt < now + 8000) nextIdleAt = now + 8000;
     }
 
-    if (!s_onboardActive && !s_showOff && mood == Mood::IDLE && now >= nextIdleAt) {
+    if (!s_onboardActive && !s_showOff && mood == Mood::IDLE &&
+#if SQUACH_MESH
+        !s_visiting &&
+#endif
+        now >= nextIdleAt) {
         uint32_t idleFor = now - lastInteraction;
         bool longIdle  = idleFor > 90000;
         // idleFor only ever grows while nothing happens, so without the

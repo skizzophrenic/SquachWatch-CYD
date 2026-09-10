@@ -234,6 +234,16 @@ namespace Squachy {
     // way watchAlertReaction() and the scan reactions do.
     void visitReaction(VisitMoment m);
 
+    // True for as long as somebody is visiting. While it is set, his idle
+    // chatter and his thirty-second watching beat both stand down.
+    //
+    // They share ONE speech bubble with the visit dialogue and neither knew
+    // about the other, so an idle line landing mid-conversation overwrote it
+    // and the next visit beat overwrote back -- which is what flickering
+    // looks like. It is also just wrong: he should not be muttering about
+    // the airwaves while there is somebody standing next to him.
+    void setVisiting(bool v);
+
     // The guest's side. Returns a line to hand drawWaving() rather than
     // saying it, because the guest has no mood machine to say it with.
     const char* visitGuestLine(VisitMoment m, uint32_t seed);
@@ -351,6 +361,10 @@ namespace Squachy {
     // px either side of cx, forever, at the same pace tick()'s
     // Mood::WALK uses. Default 0 leaves him standing still at cx,
     // unchanged behavior for every existing caller.
+    // waving defaults true, which is the boot splash unchanged. Pass false
+    // for anyone who is going to be on screen long enough that a permanent
+    // wave stops reading as a greeting and starts reading as a stuck frame.
     void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale = 1.0f,
-                    const char* line = nullptr, bool talking = false, int wanderRangePx = 0);
+                    const char* line = nullptr, bool talking = false, int wanderRangePx = 0,
+                    bool waving = true);
 }
