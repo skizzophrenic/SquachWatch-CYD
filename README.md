@@ -145,8 +145,10 @@ count from boot.
 </p>
 
 Two SquachWatches in range of each other notice, and each one draws the
-other's Squachy as a visitor. He walks in, they say hello, they stand around
-talking, and eventually he goes home. His outfit, his shades, his nickname and
+other's Squachy as a visitor. He walks in, they high five, they stand around
+talking — now and then breaking into a dance-off, a round of
+rock-paper-scissors or a nap — and he goes home when the other board does.
+His outfit, his shades, his nickname and
 whatever name his owner typed on the payphone keypad all travelled over the
 air in a twenty-byte BLE advert.
 
