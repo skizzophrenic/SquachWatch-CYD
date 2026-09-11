@@ -2,10 +2,46 @@
 #include "touch_cal.h"
 #include <Preferences.h>
 #include <Arduino.h>
+#include <math.h>
 
 namespace TouchCal {
 
 static const char* NS = "touchcal";
+
+// How far in from each screen edge the crosshairs are drawn -- as close to
+// the true corners as the crosshair graphic (+/-8px around its centre) can
+// render.
+//
+// pollTouch()'s map() calls treat the four stored values as the screen EDGES
+// (0 and w, 0 and h), and for a long time the values stored were the raw
+// readings AT the crosshairs. So the inset became a stretch away from the
+// centre of every touch afterward, by span / (span - 2 * MARGIN): 6% across a
+// 320-pixel screen and 8% down a 240-pixel one. A bigger inset (originally
+// 24px) was the first version of that bug; shrinking it to 9 only shrank it.
+// Measured on hardware, typing on the QWERTY board: presses landed at
+// 1.065 x the key's true position - 12.7, putting the outer keys a third of a
+// key off -- R typed as E, H as G.
+//
+// The fix is toEdges() below: each pair of readings is extended outward along
+// its own line to where the edges actually are, before it is stored.
+static const int MARGIN = 9;
+
+// Calibrations saved before toEdges() existed have no "v" key. They are
+// corrected once, on load, with the spans every board this runs on has in the
+// orientation calibration runs in -- raw "a" across the 240-pixel side, "b"
+// across the 320 -- and re-saved as version 2 so it never happens twice.
+static const uint8_t CAL_VERSION = 2;
+static const int     LEGACY_SPAN_A = 240, LEGACY_SPAN_B = 320;
+
+// Extends the raw readings taken MARGIN pixels in from each end of a span out
+// to the ends themselves. Works whichever of the two is larger.
+static void toEdges(int16_t& lo, int16_t& hi, int span) {
+    if (span <= 2 * MARGIN) return;
+    const float k = (float)MARGIN / (float)(span - 2 * MARGIN);
+    const float d = (float)hi - (float)lo;
+    lo = (int16_t)lroundf((float)lo - d * k);
+    hi = (int16_t)lroundf((float)hi + d * k);
+}
 
 // A stored (or freshly-sampled) calibration only counts as valid if it
 // also looks like real data, not just "present"/"in range" -- protects
@@ -21,9 +57,13 @@ static const char* NS = "touchcal";
 // see the header comment for why one universal threshold can't
 // correctly serve both capacitive (small legitimate range) and
 // resistive (much larger) touch at once.
+//
+// The bounds are a little wider than the ADC's 0..4095: a value extended out
+// to the screen edge by toEdges() can legitimately sit just past the range the
+// panel itself ever reports.
 static bool plausible(const Cal& c, int16_t minSpread) {
     auto ok = [minSpread](int16_t a, int16_t b) {
-        return a >= 0 && b >= 0 && a <= 4095 && b <= 4095 &&
+        return a >= -1024 && b >= -1024 && a <= 5119 && b <= 5119 &&
                abs((int)a - (int)b) >= minSpread;
     };
     return ok(c.aTop, c.aBottom) && ok(c.bLeft, c.bRight);
@@ -33,15 +73,26 @@ bool load(Cal& out, int16_t minSpread) {
     Preferences p;
     p.begin(NS, true);
     bool has = p.isKey("aTop");
+    bool legacy = false;
+    Cal c = out;
     if (has) {
-        out.aTop    = (int16_t)p.getShort("aTop", 0);
-        out.aBottom = (int16_t)p.getShort("aBottom", 0);
-        out.bLeft   = (int16_t)p.getShort("bLeft", 0);
-        out.bRight  = (int16_t)p.getShort("bRight", 0);
-        if (!plausible(out, minSpread)) has = false;
+        c.aTop    = (int16_t)p.getShort("aTop", 0);
+        c.aBottom = (int16_t)p.getShort("aBottom", 0);
+        c.bLeft   = (int16_t)p.getShort("bLeft", 0);
+        c.bRight  = (int16_t)p.getShort("bRight", 0);
+        legacy = p.getUChar("v", 1) < CAL_VERSION;
     }
     p.end();
-    return has;
+    if (!has) return false;
+    if (legacy) {
+        toEdges(c.aTop, c.aBottom, LEGACY_SPAN_A);
+        toEdges(c.bLeft, c.bRight, LEGACY_SPAN_B);
+    }
+    if (!plausible(c, minSpread)) return false;
+    // Written back already corrected, so the correction is applied once.
+    if (legacy) save(c);
+    out = c;
+    return true;
 }
 
 void save(const Cal& cal) {
@@ -51,6 +102,7 @@ void save(const Cal& cal) {
     p.putShort("aBottom", cal.aBottom);
     p.putShort("bLeft", cal.bLeft);
     p.putShort("bRight", cal.bRight);
+    p.putUChar("v", CAL_VERSION);
     p.end();
 }
 
@@ -123,15 +175,9 @@ bool runInteractive(TFT_eSPI& t, RawReader readRaw,
                     Cal& out, int16_t minSpread) {
     int w = t.width(), h = t.height();
 
-    // As close to the true corners as the crosshair graphic itself can
-    // render (it draws +/-8px from center) — pollTouch()'s map() calls
-    // treat these samples as the actual screen edges (0/w, 0/h), so
-    // any inset here becomes a direct, uncorrected offset in every
-    // touch afterward. A big inset (originally 24px) was exactly that
-    // bug.
-    int margin = 9;
-    int cx[4] = { margin, w - margin, margin,     w - margin };
-    int cy[4] = { margin, margin,     h - margin, h - margin };
+    // MARGIN in from each corner; toEdges() below takes the inset back out.
+    int cx[4] = { MARGIN, w - MARGIN, MARGIN,     w - MARGIN };
+    int cy[4] = { MARGIN, MARGIN,     h - MARGIN, h - MARGIN };
     const char* labels[4] = { "1/4", "2/4", "3/4", "4/4" };
 
     // Single pass -- an internal retry loop here (tried and reverted:
@@ -174,6 +220,9 @@ bool runInteractive(TFT_eSPI& t, RawReader readRaw,
     cal.aBottom = (int16_t)(((int)a[2] + a[3]) / 2);  // bottom-left, bottom-right
     cal.bLeft   = (int16_t)(((int)b[0] + b[2]) / 2);  // top-left, bottom-left
     cal.bRight  = (int16_t)(((int)b[1] + b[3]) / 2);  // top-right, bottom-right
+    // From the crosshairs out to the edges pollTouch() maps these onto.
+    toEdges(cal.aTop, cal.aBottom, h);
+    toEdges(cal.bLeft, cal.bRight, w);
 
     if (plausible(cal, minSpread)) {
         save(cal);

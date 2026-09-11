@@ -93,6 +93,19 @@ Qwerty::TouchFilter s_filter;
 // value, and it is traditional because it works.
 const uint32_t MULTITAP_MS = 800;
 
+// A resistive panel sometimes loses contact for a single frame in the middle
+// of a press, and that arrives here as a release and a fresh press on the
+// same spot. Measured typing on the QWERTY board: 35 ms apart, the exact same
+// pixel, and a doubled letter. Nobody taps the same key twice that fast -- a
+// real double letter is a tenth of a second or more -- so a press on the key
+// just released, inside this window, is the same touch and is absorbed. On
+// the keypad it matters more: there the second press would not double the
+// letter, it would cycle it, A to B.
+const uint32_t BOUNCE_MS = 60;
+uint32_t s_lastUpAt   = 0;
+int8_t   s_lastQwKey  = -1;     // what the last QWERTY release typed
+int8_t   s_lastPadKey = -1;     // the last keypad key pressed
+
 inline bool msg() { return s_mode == Mode::MESSAGE; }
 
 void commitPending() { s_liveKey = -1; s_tapIx = 0; }
@@ -196,15 +209,39 @@ static const char* padLabel(int i) {
     return KEY_L[i];
 }
 
-static void qwertyPress(int x, int y) {
+// QWERTY_TRACE: every press, every slide sample (raw, filtered, the filter's
+// agreement count, the key under it) and every release, over serial -- the
+// data the touch filter's three constants are tuned against. Off in every
+// shipping build; switched on for a bench session with
+//   PLATFORMIO_BUILD_FLAGS=-DQWERTY_TRACE pio run -e cyd-fast -t upload ...
+#ifdef QWERTY_TRACE
+#include <Arduino.h>
+static const char* traceKey(int k) { return k >= 0 ? keyLabel(s_keys[k].ch) : "-"; }
+#define QW_TRACE(...) Serial.printf(__VA_ARGS__)
+#else
+#define QW_TRACE(...) do {} while (0)
+#endif
+
+static void qwertyPress(int x, int y, uint32_t now) {
     s_filter.down(x, y);
     s_armed   = (int8_t)Qwerty::keyAt(s_keys, s_keyN, x, y, PRESS_REACH);
     s_sliding = (s_armed >= 0);
+    // The panel dropping out for a frame -- see BOUNCE_MS. Armed to
+    // nothing, so this press's own release types nothing.
+    if (s_armed >= 0 && s_armed == s_lastQwKey && now - s_lastUpAt < BOUNCE_MS) {
+        QW_TRACE("[qw] bounce absorbed on %s\n", traceKey(s_armed));
+        s_armed   = -1;
+        s_sliding = false;
+        return;
+    }
+    QW_TRACE("[qw] D %d,%d %lu key=%s\n", x, y, (unsigned long)millis(), traceKey(s_armed));
 }
 
 static void qwertyFollow(int x, int y) {
     s_filter.move(x, y);
     s_armed = (int8_t)Qwerty::keyAt(s_keys, s_keyN, s_filter.x, s_filter.y, SLIDE_REACH);
+    QW_TRACE("[qw] M %d,%d f=%d,%d cn=%u key=%s\n", x, y, s_filter.x, s_filter.y,
+             (unsigned)s_filter.cn, traceKey(s_armed));
 }
 
 static void qwertyRelease() {
@@ -214,6 +251,8 @@ static void qwertyRelease() {
     s_sliding = false;
     const int k = s_armed;
     s_armed = -1;
+    QW_TRACE("[qw] U %lu typed=%s\n", (unsigned long)millis(), traceKey(k));
+    s_lastQwKey = (int8_t)k;
     if (k < 0) return;
     const char c = s_keys[k].ch;
     if      (c == Qwerty::BKSP) deleteLast();
@@ -246,7 +285,11 @@ void uiPhoneTouch(int x, int y, uint32_t now, PhoneTouch phase) {
     // they have always been, and a gesture that starts on chrome never turns
     // into a letter however it moves afterwards.
     if (phase == PhoneTouch::MOVE) { if (s_sliding) qwertyFollow(x, y); return; }
-    if (phase == PhoneTouch::UP)   { if (s_sliding) qwertyRelease();    return; }
+    if (phase == PhoneTouch::UP) {
+        s_lastUpAt = now;
+        if (s_sliding) qwertyRelease();
+        return;
+    }
 
     // BACK leaves WITHOUT saving, which is the whole reason it exists: OK was
     // the only way out, so backing away from a half-typed name meant
@@ -268,12 +311,15 @@ void uiPhoneTouch(int x, int y, uint32_t now, PhoneTouch phase) {
         return;
     }
 
-    if (Settings::phoneQwerty()) { qwertyPress(x, y); return; }
+    if (Settings::phoneQwerty()) { qwertyPress(x, y, now); return; }
 
     for (int i = 0; i < 12; i++) {
         const int kx = KX + (i % 3) * (KW + KGAP);
         const int ky = KY + (i / 3) * (KH + KGAP);
         if (x < kx || x > kx + KW || y < ky || y > ky + KH) continue;
+        // The panel dropping out for a frame -- see BOUNCE_MS.
+        if (i == s_lastPadKey && now - s_lastUpAt < BOUNCE_MS) return;
+        s_lastPadKey = (int8_t)i;
 
         if (i == 9) {                                   // DEL
             commitPending();
