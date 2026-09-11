@@ -300,6 +300,13 @@ bool DetectionEngine::init() {
     }
 
     // 2. WiFi promiscuous mode for OUI/SSID detection
+    //
+    // Each radio start is announced -- and flushed, so the line is out before
+    // the step that might brown the board out -- because a brownout leaves no
+    // crash dump and the reset reason alone does not say which of the two it
+    // was. A board that boot-loops prints the last one it reached.
+    Serial.println("[boot] starting WiFi");
+    Serial.flush();
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     delay(50);
@@ -377,6 +384,11 @@ bool DetectionEngine::init() {
     // 3. NimBLE scan — onResult() fires live per-advertisement via
     // g_bleScanCallbacks (see above), not via a scan-complete callback
     // that would never fire on an indefinite (duration 0) scan.
+    // A breath between the two radios' start-up bursts, so the supply is not
+    // asked for both at once -- see the backlight note in main.cpp's setup().
+    delay(150);
+    Serial.println("[boot] starting Bluetooth");
+    Serial.flush();
     NimBLEDevice::init("");
     NimBLEScan* scan = NimBLEDevice::getScan();
     scan->setActiveScan(true);

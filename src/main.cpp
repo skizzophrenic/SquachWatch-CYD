@@ -1468,6 +1468,20 @@ void setup() {
     // on every boot. Analog read on a floating pin is plenty.
     randomSeed(analogRead(34));
 
+    // The backlight goes down while the radios come up, and back to your
+    // setting once they are running.
+    //
+    // WiFi calibrates its RF front end when it starts and Bluetooth does the
+    // same a moment later, and together they are the largest current the
+    // board ever draws. On top of a full-brightness backlight that was more
+    // than a weak USB port could hold: the JC2432W328C capacitive board
+    // browned out at exactly this point on every boot -- three seconds a
+    // cycle, forever -- off any supply short of a powered hub. The backlight
+    // is the one large load that nobody misses for a second at boot.
+    ledcWrite(BL_CH_ORIG, 24);
+    ledcWrite(BL_CH_CAP,  24);
+    ledcWrite(BL_CH_AWOK, 24);
+
     engine.init();
 #if SQUACH_MESH
     // After the radio is up and before anything can ask whether messages are
@@ -1475,6 +1489,7 @@ void setup() {
     // against a frame built by an independent implementation.
     MeshTalk::begin();
 #endif
+    applyBrightness();
     Squachy::trigger(Squachy::Event::BOOTED, DetectionType::UNKNOWN, engine.lifetimeTotal());
     enterBoot();
 }
