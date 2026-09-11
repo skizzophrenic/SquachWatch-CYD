@@ -7077,19 +7077,19 @@ void drawGibson(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
         // is most of what sells it as being far away rather than as a circle
         // stuck on the glass. It also gives the sky glow band something to be
         // the glow of.
-        {
-            const int mr = (hz - yStart) / 5;
-            const int mx = w * 3 / 4 + 6;
-            const int my = yStart + (hz - yStart) / 3;
-            if (mr >= 6 && my - mr - 2 >= yStart) {
-                const uint16_t disc   = blend(VAPOR_YELLOW, WHITE, 130);
-                const uint16_t crater = blend(disc, BG, 60);
-                t.fillCircle(mx, my, mr + 2, blend(BG, disc, 60));   // halo
-                t.fillCircle(mx, my, mr, disc);
-                t.fillCircle(mx + mr / 3, my - mr / 3, mr / 4, crater);
-                t.fillCircle(mx - mr / 3, my + mr / 5, mr / 3, crater);
-                t.fillCircle(mx + mr / 5, my + mr / 2, mr / 5, crater);
-            }
+        const int  mr = (hz - yStart) / 5;
+        const int  mx = w * 3 / 4 + 6;
+        const int  my = yStart + (hz - yStart) / 3;
+        const bool moonOn = (mr >= 6 && my - mr - 2 >= yStart);
+        const uint16_t disc   = blend(VAPOR_YELLOW, WHITE, 130);
+        const uint16_t crater = blend(disc, BG, 60);
+        const uint16_t halo   = blend(BG, disc, 60);
+        if (moonOn) {
+            t.fillCircle(mx, my, mr + 2, halo);
+            t.fillCircle(mx, my, mr, disc);
+            t.fillCircle(mx + mr / 3, my - mr / 3, mr / 4, crater);
+            t.fillCircle(mx - mr / 3, my + mr / 5, mr / 3, crater);
+            t.fillCircle(mx + mr / 5, my + mr / 2, mr / 5, crater);
         }
 
         // Two searchlights sweeping the sky. Drawn BEFORE the skyline on
@@ -7101,6 +7101,18 @@ void drawGibson(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
         // The length is clamped rather than fixed, because the band we are drawn
         // into does not start at the top of the panel: an unclamped beam paints
         // straight through the title bar.
+        //
+        // Over the moon, though, they are see-through. A solid beam used to
+        // blot out whatever part of the moon it swept across. There is still no
+        // alpha to spend on the whole sky -- reading pixels back is off limits
+        // for a background -- but the moon does not need it: every pixel of it
+        // is known from its own geometry. So each triangle is remembered as it
+        // is drawn, and afterwards the moon's pixels that fall inside one are
+        // repainted as the moon tinted by that beam, at the same strength the
+        // beam has against the sky. Under a thousand pixels, before the skyline,
+        // so the buildings still eclipse it as before.
+        int  tri[2][3][6];                       // [beam][level][x0,y0,x1,y1,x2,y2]
+        bool triOn[2] = { false, false };
         {
             const uint16_t beam[3] = { blend(BG, CYAN, 96),
                                        blend(BG, CYAN, 66),
@@ -7122,12 +7134,54 @@ void drawGibson(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
                 if (len < 8.0f) continue;
                 for (int q = 2; q >= 0; q--) {
                     const float sp = 0.055f * (float)(q + 1);
-                    t.fillTriangle(bx, by,
-                        bx + (int)(cosf(a - sp) * len), by - (int)(sinf(a - sp) * len),
-                        bx + (int)(cosf(a + sp) * len), by - (int)(sinf(a + sp) * len),
-                        beam[q]);
+                    int* v = tri[L][q];
+                    v[0] = bx;                                   v[1] = by;
+                    v[2] = bx + (int)(cosf(a - sp) * len);       v[3] = by - (int)(sinf(a - sp) * len);
+                    v[4] = bx + (int)(cosf(a + sp) * len);       v[5] = by - (int)(sinf(a + sp) * len);
+                    t.fillTriangle(v[0], v[1], v[2], v[3], v[4], v[5], beam[q]);
                 }
+                triOn[L] = true;
                 t.fillRect(bx - 1, by - 1, 3, 3, blend(CYAN, WHITE, 120));
+            }
+        }
+
+        // The moon, seen through the beams -- see the note above the beams.
+        // Every pixel of the halo disc is tested against the triangles exactly
+        // as fillTriangle() was handed them, so the tint stops precisely where
+        // the beam does, and the moon's own colour at each pixel is worked out
+        // from the same three craters it was drawn with.
+        if (moonOn && (triOn[0] || triOn[1])) {
+            static const uint8_t TINT[3] = { 96, 66, 44 };   // core, middle, edge
+            auto inside = [](const int* v, int px, int py) {
+                const long e0 = (long)(v[2] - v[0]) * (py - v[1]) - (long)(v[3] - v[1]) * (px - v[0]);
+                const long e1 = (long)(v[4] - v[2]) * (py - v[3]) - (long)(v[5] - v[3]) * (px - v[2]);
+                const long e2 = (long)(v[0] - v[4]) * (py - v[5]) - (long)(v[1] - v[5]) * (px - v[4]);
+                return (e0 >= 0 && e1 >= 0 && e2 >= 0) || (e0 <= 0 && e1 <= 0 && e2 <= 0);
+            };
+            auto inCircle = [](int dx, int dy, int r) { return dx * dx + dy * dy <= r * r; };
+            const int R = mr + 2;
+            for (int py = my - R; py <= my + R; py++) {
+                if (py < yStart) continue;
+                for (int px = mx - R; px <= mx + R; px++) {
+                    const int dx = px - mx, dy = py - my;
+                    if (!inCircle(dx, dy, R)) continue;
+                    // The innermost level of either beam over this pixel.
+                    int lvl = 3;
+                    for (uint8_t L = 0; L < 2; L++) {
+                        if (!triOn[L]) continue;
+                        for (int q = 0; q < 3 && q < lvl; q++)
+                            if (inside(tri[L][q], px, py)) { lvl = q; break; }
+                    }
+                    if (lvl > 2) continue;
+                    uint16_t base = halo;
+                    if (inCircle(dx, dy, mr)) {
+                        base = disc;
+                        if (inCircle(px - (mx + mr / 3), py - (my - mr / 3), mr / 4) ||
+                            inCircle(px - (mx - mr / 3), py - (my + mr / 5), mr / 3) ||
+                            inCircle(px - (mx + mr / 5), py - (my + mr / 2), mr / 5)) base = crater;
+                    }
+                    t.drawPixel(px, py, blend(base, CYAN, TINT[lvl]));
+                }
             }
         }
 
