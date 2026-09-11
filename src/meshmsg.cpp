@@ -122,14 +122,27 @@ static void writeHeader(uint32_t counter, uint8_t kind, uint8_t* out) {
     out[5] = (uint8_t)(counter >> 16);
 }
 
-size_t sealCanned(const Crypto& c, const uint8_t mac[6], uint32_t counter,
-                  uint8_t canned, uint8_t* out, size_t cap) {
-    if (cap < CANNED_FRAME_LEN || canned >= CANNED_N || counter > COUNTER_MAX) return 0;
-    writeHeader(counter, KIND_CANNED, out);
+// A canned line and an emote are the same frame: one sealed byte under its kind.
+static size_t sealByte(const Crypto& c, const uint8_t mac[6], uint32_t counter,
+                       uint8_t kind, uint8_t v, uint8_t* out, size_t cap) {
+    if (cap < CANNED_FRAME_LEN || counter > COUNTER_MAX) return 0;
+    writeHeader(counter, kind, out);
     uint8_t nonce[NONCE_LEN];
     nonceFor(mac, counter, nonce);
-    if (!c.seal(nonce, out, HDR_LEN, &canned, 1, out + HDR_LEN, out + HDR_LEN + 1)) return 0;
+    if (!c.seal(nonce, out, HDR_LEN, &v, 1, out + HDR_LEN, out + HDR_LEN + 1)) return 0;
     return CANNED_FRAME_LEN;
+}
+
+size_t sealCanned(const Crypto& c, const uint8_t mac[6], uint32_t counter,
+                  uint8_t canned, uint8_t* out, size_t cap) {
+    if (canned >= CANNED_N) return 0;
+    return sealByte(c, mac, counter, KIND_CANNED, canned, out, cap);
+}
+
+size_t sealEmote(const Crypto& c, const uint8_t mac[6], uint32_t counter,
+                 uint8_t emote, uint8_t* out, size_t cap) {
+    if ((emote >> 4) >= (uint8_t)Emote::COUNT) return 0;
+    return sealByte(c, mac, counter, KIND_EMOTE, emote, out, cap);
 }
 
 size_t sealTextPart(const Crypto& c, const uint8_t mac[6], uint32_t counter,
@@ -152,20 +165,38 @@ size_t sealTextPart(const Crypto& c, const uint8_t mac[6], uint32_t counter,
     return TEXT_FRAME_LEN;
 }
 
-Open openCanned(const Crypto& c, const uint8_t mac[6], const uint8_t* in, size_t len,
-                uint32_t& counter, uint8_t& canned) {
+static Open openByte(const Crypto& c, const uint8_t mac[6], const uint8_t* in, size_t len,
+                     uint8_t want, uint32_t& counter, uint8_t& v) {
     if (!isFrame(in, len)) return Open::NOT_OURS;
     uint8_t kind;
     if (!parseHeader(in, len, counter, kind)) return Open::BAD_FORMAT;
     // Exact length, not a minimum: bytes after the tag are bytes nothing
     // authenticated, and a format that tolerates them has somewhere to hide.
-    if (kind != KIND_CANNED || len != CANNED_FRAME_LEN) return Open::BAD_FORMAT;
+    if (kind != want || len != CANNED_FRAME_LEN) return Open::BAD_FORMAT;
     uint8_t nonce[NONCE_LEN];
     nonceFor(mac, counter, nonce);
     uint8_t pt = 0;
     if (!c.open(nonce, in, HDR_LEN, in + HDR_LEN, 1, in + HDR_LEN + 1, &pt)) return Open::BAD_TAG;
+    v = pt;
+    return Open::OK;
+}
+
+Open openCanned(const Crypto& c, const uint8_t mac[6], const uint8_t* in, size_t len,
+                uint32_t& counter, uint8_t& canned) {
+    uint8_t pt = 0;
+    const Open r = openByte(c, mac, in, len, KIND_CANNED, counter, pt);
+    if (r != Open::OK) return r;
     canned = pt;
     return (pt < CANNED_N) ? Open::OK : Open::UNKNOWN_LINE;
+}
+
+Open openEmote(const Crypto& c, const uint8_t mac[6], const uint8_t* in, size_t len,
+               uint32_t& counter, uint8_t& emote) {
+    uint8_t pt = 0;
+    const Open r = openByte(c, mac, in, len, KIND_EMOTE, counter, pt);
+    if (r != Open::OK) return r;
+    emote = pt;
+    return ((pt >> 4) < (uint8_t)Emote::COUNT) ? Open::OK : Open::UNKNOWN_LINE;
 }
 
 Open openTextPart(const Crypto& c, const uint8_t mac[6], const uint8_t* in, size_t len,
@@ -263,6 +294,44 @@ void Replay::record(const uint8_t mac[6], uint32_t counter) {
         e[slot].last = counter;
     }
     e[slot].used = stamp;
+}
+
+size_t Replay::save(uint8_t out[BYTES]) const {
+    // Oldest first, so load() can rebuild who was heard from least recently
+    // and a reboot does not change which sender is the next to be dropped.
+    uint8_t order[N];
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < N; i++) if (e[i].live) order[n++] = i;
+    for (uint8_t i = 1; i < n; i++)
+        for (uint8_t j = i; j > 0 && e[order[j - 1]].used > e[order[j]].used; j--) {
+            const uint8_t t = order[j]; order[j] = order[j - 1]; order[j - 1] = t;
+        }
+    memset(out, 0, BYTES);
+    out[0] = n;
+    for (uint8_t k = 0; k < n; k++) {
+        const E& s = e[order[k]];
+        uint8_t* p = out + 1 + k * 10;
+        memcpy(p, s.mac, 6);
+        p[6] = (uint8_t)s.last;
+        p[7] = (uint8_t)(s.last >> 8);
+        p[8] = (uint8_t)(s.last >> 16);
+        p[9] = (uint8_t)(s.last >> 24);
+    }
+    return BYTES;
+}
+
+bool Replay::load(const uint8_t* in, size_t len) {
+    *this = Replay();
+    if (!in || len != BYTES || in[0] > N) return false;
+    for (uint8_t k = 0; k < in[0]; k++) {
+        const uint8_t* p = in + 1 + k * 10;
+        E& s = e[k];
+        memcpy(s.mac, p, 6);
+        s.last = (uint32_t)p[6] | ((uint32_t)p[7] << 8) | ((uint32_t)p[8] << 16) | ((uint32_t)p[9] << 24);
+        s.live = true;
+        s.used = ++stamp;
+    }
+    return true;
 }
 
 uint32_t Counter::reserve(uint32_t stored) {

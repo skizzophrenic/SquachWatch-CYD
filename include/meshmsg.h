@@ -110,6 +110,7 @@ constexpr uint8_t  MAGIC[2]    = { 'S', 'T' };
 constexpr uint8_t  VERSION     = 2;
 constexpr uint8_t  KIND_CANNED = 1;
 constexpr uint8_t  KIND_TEXT   = 2;
+constexpr uint8_t  KIND_EMOTE  = 3;     // see "emotes" below
 constexpr size_t   HDR_LEN     = 6;
 // Three bytes of counter. At three counters a typed message that is sixteen
 // million sends: not a limit anybody meets, and a sender refuses rather than
@@ -146,6 +147,30 @@ bool    textChar(char c);
 // or holds a character outside TEXT_CHARSET.
 uint8_t textParts(const char* s);
 
+// ---- emotes -------------------------------------------------------------------
+// Something the two Squachys DO rather than something one of them says. Sent
+// from the message screen and acted out by both pairs at once: the sender's
+// own, and the one on the other board, where the sender is the visitor.
+//
+// One sealed byte, the same shape as a canned line, under kind 3 -- which
+// v1.5.25 and earlier do not read, so they drop an emote without a word rather
+// than show a message they cannot place. The emote is the high four bits; the
+// low four carry whatever both boards must agree on for the two performances
+// to match. Rock-paper-scissors is the one that needs it: left to themselves
+// the boards would each pick both throws, and two people standing side by side
+// would watch two different games.
+//
+// May be ADDED at the end once released, never reordered.
+enum class Emote : uint8_t { WAVE, HIGH_FIVE, DANCE, RPS, SNOWBALL, BOO, COUNT };
+constexpr size_t EMOTE_FRAME_LEN = CANNED_FRAME_LEN;
+// RPS's four bits: the sender's throw times three, plus the receiver's -- each
+// 0 rock, 1 paper, 2 scissors. No other emote uses them yet; they go as zero.
+constexpr uint8_t emoteByte(Emote e, uint8_t arg) {
+    return (uint8_t)(((uint8_t)e << 4) | (arg & 0x0F));
+}
+size_t sealEmote(const Crypto& c, const uint8_t mac[6], uint32_t counter,
+                 uint8_t emote, uint8_t* out, size_t cap);
+
 void   nonceFor(const uint8_t mac[6], uint32_t counter, uint8_t nonce[NONCE_LEN]);
 bool   isFrame(const uint8_t* in, size_t len);        // magic only: is it ours at all
 // Header only, no crypto: what a receiver checks BEFORE spending a decryption.
@@ -172,6 +197,10 @@ Open openCanned(const Crypto& c, const uint8_t mac[6], const uint8_t* in, size_t
 Open openTextPart(const Crypto& c, const uint8_t mac[6], const uint8_t* in, size_t len,
                   uint32_t& counter, uint8_t& part, uint8_t& total,
                   char chars[TEXT_PART_CHARS + 1]);
+// An emote's byte. UNKNOWN_LINE when it is authentic but newer than this
+// build: nothing here to act out, and nothing wrong either.
+Open openEmote(const Crypto& c, const uint8_t mac[6], const uint8_t* in, size_t len,
+               uint32_t& counter, uint8_t& emote);
 
 // ---- reassembly ----------------------------------------------------------------
 // Parts arrive in whatever order the scan catches them, and each is repeated
@@ -206,16 +235,24 @@ struct Assembly {
 // for good. A typed message records its LAST counter, so its own parts arriving
 // again afterwards are stale.
 //
-// Not kept across a reboot. A frame recorded by somebody else and replayed at
-// a freshly booted receiver will be shown once; with no shared clock there is
-// nothing to reject it on. Documented rather than pretended away.
+// Kept across a reboot: meshtalk.cpp writes the table to flash after every
+// message it records. It used to be RAM only, so a frame recorded by somebody
+// else and replayed at a freshly booted receiver was shown once more. What is
+// still true: the table holds four senders, and one pushed out by four newer
+// ones is forgotten, so its old frames count as new again.
 struct Replay {
     static constexpr uint8_t N = 4;
+    // A count, then each live sender, oldest first: address, last counter.
+    static constexpr size_t  BYTES = 1 + N * 10;
     struct E { uint8_t mac[6]; uint32_t last; uint32_t used; bool live; };
     E        e[N] = {};
     uint32_t stamp = 0;
     bool fresh(const uint8_t mac[6], uint32_t counter) const;
     void record(const uint8_t mac[6], uint32_t counter);
+    size_t save(uint8_t out[BYTES]) const;
+    // Anything that is not exactly what save() writes loads as an empty table
+    // and returns false: a table nobody wrote is not one to trust.
+    bool   load(const uint8_t* in, size_t len);
 };
 
 // ---- the counter ----------------------------------------------------------------

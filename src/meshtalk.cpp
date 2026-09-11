@@ -35,14 +35,27 @@ constexpr uint32_t SEND_MS = 30000;
 // on the air for at least one advert per turn; three parts come round every
 // 4.8 s, six times in the thirty.
 constexpr uint32_t PART_MS = 1600;
+constexpr uint32_t EMOTE_MS = 9000;
 uint8_t  s_out[MeshMsg::TEXT_PARTS_MAX][MeshMsg::FRAME_MAX];
 uint8_t  s_outLen[MeshMsg::TEXT_PARTS_MAX] = { 0 };
 uint8_t  s_outN     = 0;
 uint32_t s_outStart = 0;
 uint32_t s_outUntil = 0;
 uint32_t s_outGen   = 0;
+bool     s_outEmote = false;   // what is on the air is an emote, not a message
 
 Message  s_inbox = {};
+EmoteIn  s_emote = {};
+bool     s_emoteHave = false;
+
+// The replay table, to flash, after each message it records. Rare -- a few a
+// day is a lot -- so the wear is nothing, and it is what stops a frame somebody
+// recorded being shown again after a reboot.
+void saveReplay() {
+    uint8_t b[MeshMsg::Replay::BYTES];
+    s_replay.save(b);
+    s_prefs.putBytes("replay", b, sizeof b);
+}
 
 // BLE task -> loop task. Single producer, single consumer, so two indices and
 // acquire/release ordering are the whole synchronisation -- no lock, and
@@ -88,6 +101,7 @@ void deliver(const Slot& s, uint32_t now) {
         // stops a forger poisoning the replay table.
         if (r != MeshMsg::Open::OK && r != MeshMsg::Open::UNKNOWN_LINE) return;
         s_replay.record(s.mac, ctr);
+        saveReplay();
         s_inbox.text        = false;
         s_inbox.unknownLine = (r == MeshMsg::Open::UNKNOWN_LINE);
         s_inbox.canned      = line;
@@ -107,10 +121,28 @@ void deliver(const Slot& s, uint32_t now) {
         // its own parts coming round again are stale from then on.
         if (!s_asm.add(s.mac, ctr, part, total, chars, body, base)) return;
         s_replay.record(s.mac, base + total - 1);
+        saveReplay();
         s_inbox.text        = true;
         s_inbox.unknownLine = false;
         memcpy(s_inbox.body, body, sizeof s_inbox.body);
         arrived(s, now);
+        return;
+    }
+
+    if (kind == MeshMsg::KIND_EMOTE) {
+        uint8_t em = 0;
+        const MeshMsg::Open r = MeshMsg::openEmote(MeshCrypto::impl(), s.mac,
+                                                   s.data, s.len, ctr, em);
+        if (r != MeshMsg::Open::OK && r != MeshMsg::Open::UNKNOWN_LINE) return;
+        s_replay.record(s.mac, ctr);
+        saveReplay();
+        if (r != MeshMsg::Open::OK) return;      // a newer build's: nothing to act out
+        s_emote.emote = em;
+        memcpy(s_emote.mac, s.mac, 6);
+        s_emote.at    = now;
+        s_emoteHave   = true;
+        Serial.printf("[meshtalk] emote %u (setup %u) from %s\n", (unsigned)(em >> 4),
+                      (unsigned)(em & 0x0F), s.name[0] ? s.name : "SOMEONE");
     }
 }
 
@@ -142,10 +174,11 @@ Send checks() {
     return Send::OK;
 }
 
-void onAir(uint8_t n, uint32_t now) {
+void onAir(uint8_t n, uint32_t now, uint32_t ms = SEND_MS, bool emote = false) {
     s_outN     = n;
     s_outStart = now;
-    s_outUntil = now + SEND_MS;
+    s_outUntil = now + ms;
+    s_outEmote = emote;
     s_outGen++;
 }
 
@@ -168,6 +201,11 @@ void begin() {
     // has better things to do with them.
     s_havePhrase = s_selfTestOk && s_phrase[0] && kl == sizeof key &&
                    MeshCrypto::impl().setKey(key);
+    // What had already been delivered before the reboot is still delivered.
+    if (s_havePhrase && s_prefs.isKey("replay")) {
+        uint8_t b[MeshMsg::Replay::BYTES];
+        if (!s_replay.load(b, s_prefs.getBytes("replay", b, sizeof b))) s_prefs.remove("replay");
+    }
 }
 
 bool        selfTestOk()   { return s_selfTestOk; }
@@ -199,12 +237,15 @@ bool setPhrase(const char* text) {
     // mean nothing now.
     s_replay = MeshMsg::Replay();
     s_asm    = MeshMsg::Assembly();
+    s_prefs.remove("replay");
     return true;
 }
 
 void clearPhrase() {
     s_prefs.remove("phrase");
     s_prefs.remove("key");
+    s_prefs.remove("replay");
+    s_replay = MeshMsg::Replay();
     memset(s_phrase, 0, sizeof s_phrase);
     s_havePhrase = false;
     s_outN = 0;
@@ -248,6 +289,21 @@ Send sendText(const char* text, uint32_t now) {
     return Send::OK;
 }
 
+Send sendEmote(uint8_t emote, uint32_t now) {
+    const Send ok = checks();
+    if (ok != Send::OK) return ok;
+    uint32_t c = 0;
+    if (!takeCounters(1, c)) return Send::FAILED;
+    const size_t n = MeshMsg::sealEmote(MeshCrypto::impl(), s_ownMac, c, emote,
+                                        s_out[0], sizeof s_out[0]);
+    if (n == 0) return Send::FAILED;
+    s_outLen[0] = (uint8_t)n;
+    onAir(1, now, EMOTE_MS, true);
+    Serial.printf("[meshtalk] sending #%lu: emote %u (setup %u)\n", (unsigned long)c,
+                  (unsigned)(emote >> 4), (unsigned)(emote & 0x0F));
+    return Send::OK;
+}
+
 const uint8_t* outgoing(uint32_t now, size_t& len, uint32_t& gen) {
     if (s_outN && (int32_t)(now - s_outUntil) < 0) {
         const uint8_t p = (uint8_t)(((now - s_outStart) / PART_MS) % s_outN);
@@ -266,6 +322,15 @@ bool sending(uint32_t now) {
     size_t l;
     uint32_t g;
     return outgoing(now, l, g) != nullptr;
+}
+
+bool sendingMessage(uint32_t now) { return sending(now) && !s_outEmote; }
+
+bool takeEmote(EmoteIn& out) {
+    if (!s_emoteHave) return false;
+    s_emoteHave = false;
+    out = s_emote;
+    return true;
 }
 
 void setOwnMac(const uint8_t mac[6]) {
