@@ -8,6 +8,12 @@
 #include <NimBLEDevice.h>
 #include <NimBLEAdvertisedDevice.h>
 #include <NimBLEScan.h>
+// The host task's own event queue -- see the scan-result flush.
+#if defined(CONFIG_NIMBLE_CPP_IDF)
+#include "nimble/nimble_port.h"
+#else
+#include "nimble/porting/nimble/include/nimble/nimble_port.h"
+#endif
 #if SQUACH_MESH
 #include "squachmesh.h"
 #include "squachy.h"
@@ -624,25 +630,38 @@ void radioTick(uint32_t now) {
 // linear search of that list, so it cost CPU on the other core as it grew.
 //
 // NimBLE's own stop() clears the list when results are not retained, and
-// start() begins clean. Restarting through the library is the one way to clear
-// it without racing the host task, which appends to that list from the other
-// core -- a bare clearResults() from here would be deleting records it may be
-// halfway through reading. Nothing in this file keeps a result past its
+// start() begins clean. Nothing in this file keeps a result past its
 // callback; that is what setMaxResults(0) already said.
+//
+// Both have to run ON THE HOST TASK. That task appends to the list and hands
+// its records to onResult(), on the other core. v1.5.24 called stop() and
+// start() from here, in the loop task, and after 403 minutes a soak board
+// panicked with the host task inside onResult() -> getName() on a record
+// stop() had just deleted; the core dump has the loop task one frame deep in
+// the start() that followed. NimBLE's m_ignoreResults only turns away the NEXT
+// report, never the one already in flight.
+//
+// So the loop task only posts an event to the host's own queue, and the
+// restart runs there, between two advert reports rather than in the middle of
+// one. Blocking in stop()/start() on the host task is safe: the controller's
+// command-complete and command-status acks are taken straight off the
+// transport (ble_hs_hci_rx_evt in ble_hs_hci.c), never queued behind this
+// event, so its HCI commands cannot end up waiting on themselves.
 static const uint32_t SCAN_FLUSH_MS = 60000;
 static uint32_t       s_lastFlush   = 0;
-static ScanFlushStats s_flush       = { 0, 0, 0 };
+static ScanFlushStats s_flush       = { 0, 0, 0 };   // written on the host task
+static uint32_t       s_flushLogged = 0;
+static struct ble_npl_event s_flushEv;
+static bool           s_flushEvReady = false;
 
 ScanFlushStats scanFlushStats() { return s_flush; }
 
-static void scanFlushTick() {
-    const uint32_t now = millis();
-    if (now - s_lastFlush < SCAN_FLUSH_MS) return;
-    s_lastFlush = now;
+// Runs on the NimBLE host task.
+static void scanFlushOnHost(struct ble_npl_event*) {
     NimBLEScan* scan = NimBLEDevice::getScan();
-    // Never restart a scan that is not running: that would be switching
-    // Bluetooth scanning back on behind whoever turned it off.
-    if (!scan || !scan->isScanning()) return;
+    // Checked again here: a raw scan may have started, or scanning been
+    // switched off, between the post and now.
+    if (g_rawMode != RawScanMode::NONE || !scan || !scan->isScanning()) return;
     // Measured across the stop alone -- start() may allocate, and that is not
     // what this number is for.
     const uint32_t before = ESP.getFreeHeap();
@@ -650,12 +669,33 @@ static void scanFlushTick() {
     const uint32_t after = ESP.getFreeHeap();
     scan->start(0, nullptr, false);
     const uint32_t freed = (after > before) ? after - before : 0;
-    s_flush.count++;
     s_flush.lastFreed   = freed;
     s_flush.totalFreed += freed;
-    Serial.printf("[scan] restart %lu freed %lu B (%lu total), heap %lu\n",
-                  (unsigned long)s_flush.count, (unsigned long)freed,
-                  (unsigned long)s_flush.totalFreed, (unsigned long)after);
+    s_flush.count++;
+}
+
+static void scanFlushTick() {
+    // Printed from here rather than the host task, which should never be kept
+    // waiting on the UART.
+    if (s_flush.count != s_flushLogged) {
+        s_flushLogged = s_flush.count;
+        Serial.printf("[scan] restart %lu freed %lu B (%lu total), heap %lu\n",
+                      (unsigned long)s_flush.count, (unsigned long)s_flush.lastFreed,
+                      (unsigned long)s_flush.totalFreed, (unsigned long)ESP.getFreeHeap());
+    }
+    const uint32_t now = millis();
+    if (now - s_lastFlush < SCAN_FLUSH_MS) return;
+    s_lastFlush = now;
+    NimBLEScan* scan = NimBLEDevice::getScan();
+    // Never restart a scan that is not running: that would be switching
+    // Bluetooth scanning back on behind whoever turned it off.
+    if (!scan || !scan->isScanning()) return;
+    if (!s_flushEvReady) {
+        ble_npl_event_init(&s_flushEv, scanFlushOnHost, nullptr);
+        s_flushEvReady = true;
+    }
+    // A post while the last one is still queued is ignored by NimBLE's port.
+    ble_npl_eventq_put(nimble_port_get_dflt_eventq(), &s_flushEv);
 }
 
 void DetectionEngine::loop() {
