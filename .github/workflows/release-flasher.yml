@@ -331,9 +331,22 @@ jobs:
           # renderer needs nothing but g++ and the sources already here --
           # see sim/make_demo.py.
           mkdir -p _site/emulator
-          cp web-flasher/emulator/index.html     _site/emulator/index.html
-          cp web-flasher/emulator/squachsim.js   _site/emulator/squachsim.js
-          cp web-flasher/emulator/squachsim.wasm _site/emulator/squachsim.wasm
+          # A lab run serves the RELEASED emulator, for the same reason it
+          # serves the released firmware: master's is built from unreleased
+          # features, and the emulator is the public page's "try it". The
+          # files are committed rather than release assets, so they come out
+          # of the release tag's tree.
+          if [ "${{ steps.ver.outputs.is_lab }}" = "true" ]; then
+            git fetch --depth=1 origin "refs/tags/$LATEST:refs/tags/$LATEST"
+            for f in index.html squachsim.js squachsim.wasm; do
+              git show "$LATEST:web-flasher/emulator/$f" > "_site/emulator/$f"
+            done
+            echo "emulator restored from $LATEST"
+          else
+            cp web-flasher/emulator/index.html     _site/emulator/index.html
+            cp web-flasher/emulator/squachsim.js   _site/emulator/squachsim.js
+            cp web-flasher/emulator/squachsim.wasm _site/emulator/squachsim.wasm
+          fi
 
       - name: Keep the previous two releases flashable
         # Runs on lab builds too. Skipping it was a mistake with a live
