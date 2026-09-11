@@ -168,6 +168,32 @@ That warning is not a formality. Broadcasting a stable identifier at strangers
 is the exact behaviour this device exists to catch other people's hardware
 doing. Offering it is defensible; switching it on quietly would not be.
 
+### Messages
+
+<p align="center">
+  <img src="docs/squachmesh-messages.gif" width="640"
+       alt="A visiting Squachy sends a typed message that lands in a red speech bubble; a ready-made reply is chosen, confirmed and sent, the visitor answers, and the phrase picker shows its big alphabet and word list.">
+</p>
+
+Two SquachWatches that share a five-word phrase can message each other: one
+of 24 ready-made lines, or up to 48 characters typed on the payphone or the
+QWERTY board. A message arrives as a **red** bubble with the sender's name in
+it, so it is never mistaken for the Squachys' own chatter, and nothing is sent
+until you have confirmed it.
+
+**Settings → SQUACHMESH → MESSAGES**, then **PHRASE**: one of you ROLLs five
+words and reads them out, the other ENTERs the same five. Setting a phrase
+freezes the screen for about three seconds on purpose — it is 20,000 rounds of
+PBKDF2, which every guess at your phrase has to pay too. A seven-card tutorial
+runs the first time MESSAGES is switched on, and the **?** on the message
+screen replays it; it never transmits anything.
+
+Messages are AES-128-CCM, keyed from the phrase, with a nonce that cannot
+repeat even across a crash, and every board checks its cipher against frames
+made by an independent implementation at each boot. What stays visible is
+that you sent something, and when: the contents are encrypted, the fact of a
+message is not.
+
 ## Every outfit
 
 Squachy has fourteen costumes. Most are earned by detection count; four are
