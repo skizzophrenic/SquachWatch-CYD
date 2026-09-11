@@ -1,5 +1,6 @@
 // SquachWatch-CYD — wall-clock time. See clock.h.
 #include "clock.h"
+#include "security.h"   // a locked device takes no console commands
 #include <Arduino.h>
 #include <time.h>
 #include <sys/time.h>
@@ -101,6 +102,12 @@ void pollSerial() {
         line[len] = '\0';
         len = 0;
         if (line[0] == '\0') continue;
+        // Locked means locked here too -- otherwise the lock screen is a door
+        // with a USB cable propped against it.
+        if (Security::locked()) {
+            Serial.println("[security] locked -- unlock it on the screen first.");
+            continue;
+        }
 
         if (strncasecmp(line, "TIME ", 5) == 0) {
             const uint32_t e = (uint32_t)strtoul(line + 5, nullptr, 10);

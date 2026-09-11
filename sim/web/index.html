@@ -28,6 +28,9 @@
   .wrap{max-width:var(--page-max,1040px);margin:0 auto;padding:40px 22px 80px}
   header{border-bottom:1px solid var(--rule);padding-bottom:22px;margin-bottom:28px}
   .kicker{color:var(--cyan);letter-spacing:.22em;text-transform:uppercase;font-size:11px;margin:0 0 10px}
+  .kicker a{color:inherit;text-decoration:none;border-bottom:1px solid transparent}
+  .kicker a:hover{border-bottom-color:currentColor}
+  .kicker a:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
   h1{
     font-family:var(--display);font-weight:700;font-size:clamp(30px,6vw,48px);
     line-height:1.02;letter-spacing:-.02em;color:var(--ink-loud);margin:0;
@@ -163,7 +166,7 @@
 <div class="wrap">
 
 <header>
-  <p class="kicker">SquachWatch-CYD</p>
+  <p class="kicker"><a href="../" title="Back to the SquachWatch flasher">SquachWatch-CYD</a></p>
   <h1>Try it in your browser</h1>
   <p class="sub">
     This is the device's <strong>actual firmware</strong> — the same C++ that ships to the
@@ -306,21 +309,11 @@
 <script src="./squachsim.js"></script>
 <script type="module">
 
-// DetectionType from include/state.h, minus UNKNOWN and COUNT.
-const TYPES = [
-  [1,'Flock Safety camera'],[2,'Axon body camera'],[3,'Ray-Ban Meta glasses'],
-  [4,'Bluetooth skimmer'],[5,'Raven gunshot sensor'],[6,'Apple AirTag'],
-  [7,'Drone (OpenDroneID)'],[8,'Vigilant ALPR'],[9,'IP camera'],
-  [10,'Samsung SmartTag'],[11,'Google Find My Device'],[12,'Tile tracker'],
-  [13,'Ring doorbell'],[14,'WiFi deauth flood'],[15,'Evil twin AP'],
-];
 const STATES = ['BOOT','CLEAR','ALERT','LOG','SETTINGS','DIARY','OUTFIT','RAWSCAN',
                 'WATCH ALERT','DIAGNOSTICS','HUNT','COLOUR CHECK','TYPE FILTER'];
 
 const $ = id => document.getElementById(id);
 const cv = $('screen'), ctx = cv.getContext('2d', { alpha:false });
-TYPES.forEach(([v,n]) => $('type').add(new Option(n, v)));
-$('type').value = 6;                    // AirTag: the one people recognise
 
 const M = await SquachSim();
 const setup  = () => M.ccall('sw_setup', null, [], []);
@@ -328,6 +321,21 @@ const step   = M.cwrap('sw_step','null',['number']);
 const frame  = M.cwrap('sw_frame','number',[]);
 const touch  = M.cwrap('sw_touch','null',['number','number','number']);
 const detect = M.cwrap('sw_detect','number',['number','number']);
+// One entry per device the firmware can name, straight from its own table
+// (sim/sim_detections.h), grouped by detection type. A list kept by hand here
+// went stale and hid the Flipper Zero and iBeacons.
+{
+  const groups = {};
+  for (const [i, type, label] of JSON.parse(M.ccall('sw_det_catalog', 'string', [], []))) {
+    if (!groups[type]) {
+      groups[type] = document.createElement('optgroup');
+      groups[type].label = type;
+      $('type').add(groups[type]);
+    }
+    groups[type].appendChild(new Option(label, i));
+    if (label === 'Apple AirTag') $('type').value = i;   // the one people recognise
+  }
+}
 const stateOf= M.cwrap('sw_state','number',[]);
 const wOf    = M.cwrap('sw_width','number',[]);
 const hOf    = M.cwrap('sw_height','number',[]);

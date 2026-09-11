@@ -133,6 +133,14 @@ namespace Theme {
     // corner — mirrors rotateButtonHit's oversized tap target).
     bool settingsButtonHit(int x, int y);
 
+    // The padlock, drawn by drawTitleBar only while a PIN is set: it locks the
+    // device on a tap. It sits just left of the rotate icon, or in the rotate
+    // icon's own top-right corner when that one is hidden (AWOK, rotation
+    // locked). lockButtonHit is false when no PIN is set, so the two corner
+    // controls never fight for the same tap. Its oversized target matches the
+    // others'.
+    bool lockButtonHit(int x, int y, int w);
+
     // SquachWare-style soft button: cyan label, 1-px purple border,
     // BG fill; pressed = filled purple with white label. textSize
     // defaults to 1 (every existing caller's original look); a screen

@@ -23,6 +23,7 @@
 bool SdLog::begin() { _ready = false; return false; }
 void SdLog::logEvent(const Detection&) {}
 void SdLog::tick() {}
+void SdLog::wipe() {}
 void SdLog::openDaily() {}
 
 // ---- DetectionEngine -------------------------------------------------

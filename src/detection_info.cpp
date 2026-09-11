@@ -1,6 +1,7 @@
 // SquachWatch-CYD — detection type explanations
 #include "detection_info.h"
 #include "detection.h"
+#include "device_info.h"
 #include <stdio.h>
 
 namespace DetectionInfo {
@@ -85,6 +86,18 @@ const char* explainLive(DetectionType t, const DetectionEngine& eng) {
                       (double)rid.opLat, (double)rid.opLon);
     buf[sizeof(buf) - 1] = '\0';
     return buf;
+}
+
+const char* explainFor(DetectionType t, const char* vendor, const char* name,
+                       const DetectionEngine& eng) {
+    if (t == DetectionType::DRONE) return explainLive(t, eng);
+    const DeviceInfo::Device* d = DeviceInfo::find(t, vendor, name);
+    return d ? d->text : explain(t);
+}
+
+const char* titleFor(DetectionType t, const char* vendor, const char* name) {
+    const DeviceInfo::Device* d = DeviceInfo::find(t, vendor, name);
+    return d ? d->title : detectionTypeName(t);
 }
 
 const char* rssiConfidencePrimer() {

@@ -30,6 +30,8 @@ static const char* targetLabel(DetectionType t) {
 
 static Detection s_last;
 static bool s_touched = false;
+static bool s_redacted = false;
+void uiAlertSetRedacted(bool r) { s_redacted = r; }
 
 // Six saturated stops blended pairwise. The same construction the CLEAR
 // headline's rainbow uses, and for the same reason: RGB332 has 8 levels of
@@ -382,10 +384,11 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
     // come out "DID" -- upper-casing is what makes the vendor strings in
     // signatures.cpp renderable at all.
     {
+        const char* src = s_redacted ? "LOCKED" : s_last.vendor;
         char up[sizeof(s_last.vendor)];
         size_t i = 0;
-        for (; s_last.vendor[i] && i + 1 < sizeof(up); i++) {
-            const char c = s_last.vendor[i];
+        for (; src[i] && i + 1 < sizeof(up); i++) {
+            const char c = src[i];
             up[i] = (c >= 'a' && c <= 'z') ? (char)(c - 32) : c;
         }
         up[i] = '\0';
@@ -396,8 +399,8 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
         } else {
             t.setTextSize(2);
             t.setTextColor(Theme::CYAN, Theme::BG);
-            t.setCursor(PLATE_X + (PLATE_W - t.textWidth(s_last.vendor)) / 2, PLATE_Y + 10);
-            t.print(s_last.vendor);
+            t.setCursor(PLATE_X + (PLATE_W - t.textWidth(src)) / 2, PLATE_Y + 10);
+            t.print(src);
         }
     }
 
@@ -406,15 +409,18 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
     // Detection all along and never drawn on this screen.
     t.setTextSize(1);
     t.setTextColor(Theme::WHITE, Theme::BG);
-    if (s_last.name[0]) {
+    if (s_last.name[0] && !s_redacted) {
         t.setCursor(PLATE_X + (PLATE_W - t.textWidth(s_last.name)) / 2, PLATE_Y + 38);
         t.print(s_last.name);
     }
 
     char mac[24];
-    snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
-             s_last.mac[0], s_last.mac[1], s_last.mac[2],
-             s_last.mac[3], s_last.mac[4], s_last.mac[5]);
+    if (s_redacted)
+        snprintf(mac, sizeof(mac), "%s", "-- LOCKED --");
+    else
+        snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 s_last.mac[0], s_last.mac[1], s_last.mac[2],
+                 s_last.mac[3], s_last.mac[4], s_last.mac[5]);
     t.setCursor(PLATE_X + (PLATE_W - t.textWidth(mac)) / 2, PLATE_Y + 50);
     t.print(mac);
 

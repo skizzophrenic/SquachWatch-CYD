@@ -123,7 +123,13 @@ enum class AppState : uint8_t {
                             // obstacle, one read before there is anything to
                             // click reads as information.
     MESH_PHRASE      = 19, // roll, show or enter the five-word phrase
-    MESH_COMPOSE     = 20  // send a message; opened from CLEAR's little bubble
+    MESH_COMPOSE     = 20, // send a message; opened from CLEAR's little bubble
+    BEACON_WARN      = 21, // what switching iBeacons on means, asked from
+                            // DETECTION FILTER before it happens
+    SECURITY         = 22, // the SECURITY submenu (PIN lock + the rest)
+    LOCKED           = 23, // the lock screen: the payphone, digits only
+    PIN_ENTRY        = 24, // setting, changing or checking a PIN, from SECURITY
+    SQUAD            = 25  // every SquachWatch in range, and the inbox
 };
 
 enum class ButtonId : uint8_t {

@@ -160,7 +160,10 @@ const UuidEntry kUuidTable[] = {
     {0x1101, "Skim-SPP",   DetectionType::SKIMMER},   // Classic SPP
     {0xFEED, "Tile",       DetectionType::TILE},      // Tile, Inc. — Bluetooth SIG assigned
     {0xFEEC, "Tile",       DetectionType::TILE},      // Tile, Inc. — second SIG-assigned UUID
-    {0xFD5F, "Meta",       DetectionType::META},      // Ray-Ban Meta glasses
+    // Its own label, not "Meta": this UUID is the one signature specific to
+    // Ray-Ban Meta, and the company-ID rows below say Meta too -- which is
+    // any Meta radio, Quest headsets included. Two different pages.
+    {0xFD5F, "RayBanMeta", DetectionType::META},      // Ray-Ban Meta glasses
     {0x3100, "Raven",      DetectionType::RAVEN},     // Raven gunshot detector
     {0x3200, "Raven",      DetectionType::RAVEN},
     {0x3300, "Raven",      DetectionType::RAVEN},
@@ -325,6 +328,18 @@ DetectionType lookupSsid(const char* ssid) {
         }
     }
     return DetectionType::UNKNOWN;
+}
+
+const char* uuidName(uint16_t uuid16) {
+    for (uint16_t i = 0; i < kUuidCount; i++)
+        if (kUuidTable[i].uuid == uuid16) return kUuidTable[i].name;
+    return nullptr;
+}
+
+const char* mfgIdName(uint16_t mfgId) {
+    for (uint16_t i = 0; i < kMfgIdCount; i++)
+        if (kMfgIdTable[i].mfgId == mfgId) return kMfgIdTable[i].name;
+    return nullptr;
 }
 
 const char* ssidVendorName(const char* ssid) {

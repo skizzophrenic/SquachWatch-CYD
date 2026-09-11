@@ -45,6 +45,8 @@ uint32_t s_outGen   = 0;
 bool     s_outEmote = false;   // what is on the air is an emote, not a message
 
 Message  s_inbox = {};
+Message  s_hist[INBOX_N];      // a ring, newest at s_histHead - 1
+uint8_t  s_histN = 0, s_histHead = 0;
 EmoteIn  s_emote = {};
 bool     s_emoteHave = false;
 
@@ -82,6 +84,9 @@ void arrived(const Slot& s, uint32_t now) {
     for (; i < sizeof s_inbox.from - 1 && from[i]; i++) s_inbox.from[i] = from[i];
     s_inbox.from[i] = '\0';
     Serial.printf("[meshtalk] message from %s: %s\n", s_inbox.from, lineText(s_inbox));
+    s_hist[s_histHead] = s_inbox;
+    s_histHead = (uint8_t)((s_histHead + 1) % INBOX_N);
+    if (s_histN < INBOX_N) s_histN++;
 }
 
 void deliver(const Slot& s, uint32_t now) {
@@ -326,6 +331,20 @@ bool sending(uint32_t now) {
 
 bool sendingMessage(uint32_t now) { return sending(now) && !s_outEmote; }
 
+void forget() {
+    memset(s_phrase, 0, sizeof s_phrase);
+    s_havePhrase = false;
+    s_replay     = MeshMsg::Replay();
+    s_asm        = MeshMsg::Assembly();
+    s_ctr        = MeshMsg::Counter();
+    s_inbox      = Message{};
+    for (uint8_t i = 0; i < INBOX_N; i++) s_hist[i] = Message{};
+    s_histN = 0; s_histHead = 0;
+    s_emoteHave  = false;
+    s_outN       = 0;
+    s_outGen++;
+}
+
 bool takeEmote(EmoteIn& out) {
     if (!s_emoteHave) return false;
     s_emoteHave = false;
@@ -370,6 +389,11 @@ void tick(uint32_t now) {
 }
 
 const Message& inbox() { return s_inbox; }
+uint8_t        inboxCount() { return s_histN; }
+const Message& inboxAt(uint8_t i) {
+    if (i >= s_histN) return s_inbox;
+    return s_hist[(s_histHead + INBOX_N - 1 - i) % INBOX_N];
+}
 void markRead() { s_inbox.unread = false; }
 
 const char* lineText(const Message& m) {

@@ -12,6 +12,10 @@ public:
     bool ready() const { return _ready; }
     void logEvent(const Detection& d);
     void tick();               // flush / housekeeping (called from loop)
+    // Deletes every squachwatch log file on the card. For the security wipe --
+    // the phrase and the ignore list live in NVS, but the detection history a
+    // wipe must also erase is here. A no-op when no card is mounted.
+    void wipe();
 private:
     bool     _ready = false;
     uint32_t _lastFlush = 0;

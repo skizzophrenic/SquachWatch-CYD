@@ -7,6 +7,9 @@
 class DetectionEngine;
 
 void uiAlertInit(TFT_eSPI& t, const Detection& d);
+// While the device is locked with ALERTS WHEN LOCKED at TYPE ONLY: the type
+// and the signal still show, the device's name, label and address do not.
+void uiAlertSetRedacted(bool redacted);
 // infoPending/infoTypeName/infoText: drawn on top of the normal ALERT
 // screen (which keeps rendering underneath, same as LOG's confirm/info
 // panels over its list) via Theme::drawInfoPanel() -- see its own

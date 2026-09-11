@@ -292,6 +292,10 @@ void tick(uint32_t now) {
             o.custom = false;
             o.name[0] = '\0';
             o.nick = (uint8_t)((look.nick + i) % nickCount());
+            // Dressed differently, so the SQUAD screen's carousel shows three
+            // Squachys rather than one in three names.
+            o.outfit = (uint8_t)((look.outfit + i * 3) % Squachy::outfitCount());
+            o.shade  = (uint8_t)((look.shade + i) % 4);
             uint8_t ob[2 + SquachMesh::LEN_MAX];
             ob[0] = buf[0]; ob[1] = buf[1];
             const size_t on = SquachMesh::encode(o, ob + 2);

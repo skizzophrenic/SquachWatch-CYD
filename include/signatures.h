@@ -49,6 +49,11 @@ DetectionType lookupSsid(const char* ssid);   // case-insensitive prefix
 // signature, since other callers just want the DetectionType.
 const char* ssidVendorName(const char* ssid);
 DetectionType lookupMfgId(uint16_t mfgId);
+// The matched row's own label ("RayBanMeta", "Snap", "Skim-SPP"...), or
+// nullptr. For the types whose one DetectionType covers several devices,
+// this is what tells them apart -- and which MORE INFO page they get.
+const char* uuidName(uint16_t uuid16);
+const char* mfgIdName(uint16_t mfgId);
 
 // AirTag check, run against the RAW advertisement bytes rather than
 // NimBLE's parsed manufacturer-data field -- pass adv->getPayload() and

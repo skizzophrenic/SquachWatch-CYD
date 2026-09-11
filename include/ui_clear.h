@@ -26,6 +26,8 @@ void uiClearSetGuest(const SquachMesh::Peer* p);
 // The little speech bubble beside a visitor, which opens the message screen.
 // Its rectangle is filled in by the draw; this reads it.
 bool uiClearBubbleHit(int x, int y);
+// The "+N" squad badge beside a visitor, which opens the SQUAD screen.
+bool uiClearSquadHit(int x, int y);
 // An emote (MeshMsg::emoteByte): one this board just sent, or one from the
 // visitor's board (fromGuest). The two of them act it out at the next free
 // moment of the visit -- whoever sent it going first -- or not at all if none

@@ -105,6 +105,34 @@ void SdLog::logEvent(const Detection& d) {
     f.close();
 }
 
+void SdLog::wipe() {
+    if (!_ready) return;
+    // Walk the root and remove every file this firmware writes. Names are
+    // /squachwatch-YYYYMMDD.log; matching on the prefix takes them all rather
+    // than only today's, which is the whole point of a wipe.
+    File dir = SD.open("/");
+    if (!dir) return;
+    // Collect first, then remove: deleting while iterating openNextFile() is
+    // not something the FAT driver promises to survive.
+    char victims[16][32];
+    int  n = 0;
+    for (File f = dir.openNextFile(); f && n < 16; f = dir.openNextFile()) {
+        const char* nm = f.name();
+        // name() is with or without a leading slash depending on core version;
+        // match the basename either way.
+        const char* base = nm;
+        for (const char* p = nm; *p; p++) if (*p == '/') base = p + 1;
+        if (strncmp(base, "squachwatch-", 12) == 0) {
+            snprintf(victims[n], sizeof victims[n], "/%s", base);
+            n++;
+        }
+        f.close();
+    }
+    dir.close();
+    for (int i = 0; i < n; i++) SD.remove(victims[i]);
+    _filename[0] = '\0';       // force a fresh openDaily() on the next event
+}
+
 void SdLog::tick() {
     if (!_ready) return;
     uint32_t now = millis();

@@ -14,7 +14,9 @@
 //   M <x> <y>   move while held
 //   U           release
 //   S [n]       step n loop() iterations (default 1), then emit a frame
-//   T <type>    inject a synthetic detection (index 1..14, or its name)
+//   T <n|type>  inject a synthetic detection: a profile index from Y, or a
+//               type name for that type's first profile ("T AIRTAG")
+//   Y           every profile: one "DETS <json>" line on stdout
 //   R           report current AppState on stderr
 //   P <cmd>     the virtual SquachMesh peer -- see meshsim.h for <cmd>.
 //               (P for peer: M was already touch-move.)
@@ -104,6 +106,11 @@ static const char* stateName(AppState s) {
         case AppState::DETECTION_FILTER: return "DETECTION_FILTER";
         case AppState::MESH_MENU: return "MESH_MENU";
         case AppState::MESH_WARN: return "MESH_WARN";
+        case AppState::BEACON_WARN: return "BEACON_WARN";
+        case AppState::SECURITY: return "SECURITY";
+        case AppState::LOCKED: return "LOCKED";
+        case AppState::PIN_ENTRY: return "PIN_ENTRY";
+        case AppState::SQUAD: return "SQUAD";
         case AppState::MESH_PHRASE: return "MESH_PHRASE";
         case AppState::MESH_COMPOSE: return "MESH_COMPOSE";
         default: return "?";
@@ -133,23 +140,21 @@ static void emitFrame() {
     fflush(stdout);
 }
 
-// Accepts either a 1..14 index (what the GUI sends) or a type name as
-// the LOG screen spells it, so `T AIRTAG` works when driving this by
-// hand from a shell.
-static bool parseType(const char* s, DetectionType& out) {
+// A profile index (what the GUI sends -- see the Y command) or a type name as
+// the LOG screen spells it, which gets that type's first profile, so
+// `T AIRTAG` still works when driving this by hand from a shell.
+static const SimDetectionProfile* parseProfile(const char* s) {
     while (*s == ' ') s++;
-    if (!*s) return false;
+    if (!*s) return nullptr;
     if (*s >= '0' && *s <= '9') {
-        int n = atoi(s);
-        if (n <= 0 || n >= (int)DetectionType::COUNT) return false;
-        out = (DetectionType)n;
-        return true;
+        const int n = atoi(s);
+        return (n >= 0 && (size_t)n < kSimProfileCount) ? &kSimProfiles[n] : nullptr;
     }
     for (uint8_t i = 1; i < (uint8_t)DetectionType::COUNT; i++) {
         const char* nm = detectionTypeName((DetectionType)i);
-        if (nm && strcasecmp(nm, s) == 0) { out = (DetectionType)i; return true; }
+        if (nm && strcasecmp(nm, s) == 0) return simProfileFor((DetectionType)i);
     }
-    return false;
+    return nullptr;
 }
 
 // Firmware time advanced per step. 33ms ~= the device's real loop rate,
@@ -183,28 +188,29 @@ int main() {
             // the same door a real BLE hit would. (In this build that
             // door is a stub -- see sim_detections.h for what that
             // does and doesn't test.)
-            DetectionType type;
             char* arg = line + 1;
             while (*arg == ' ' || *arg == '\t') arg++;   // before splitting, not after
             char* sp = strpbrk(arg, " \t");
             int rssi = 0;
             if (sp) { *sp = 0; rssi = atoi(sp + 1); }
-            if (parseType(arg, type)) {
+            if (const SimDetectionProfile* p = parseProfile(arg)) {
                 static uint16_t serial = 0;
                 Detection d;
-                if (simMakeDetection(d, type, millis(), rssi, serial++)) {
-                    engine.postBle(d);
-                    fprintf(stderr, "[detect] %s %s %ddBm\n",
-                            detectionTypeName(type), d.name, d.rssi);
-                }
+                simMakeDetection(d, *p, millis(), rssi, serial++);
+                engine.postBle(d);
+                fprintf(stderr, "[detect] %s (%s) %s %ddBm\n",
+                        detectionTypeName(p->type), p->label, d.name, d.rssi);
             } else {
-                fprintf(stderr, "[detect] unknown type: %s\n", arg);
+                fprintf(stderr, "[detect] unknown profile: %s\n", arg);
             }
         } else if (cmd == 'P') {
             MeshSim::command(line + 1);
         } else if (cmd == 'K') {
             // Answered at once on stdout, so a caller reads it like a header.
             printf("CAT %s\n", MeshSim::catalog());
+            fflush(stdout);
+        } else if (cmd == 'Y') {
+            printf("DETS %s\n", simProfileCatalog());
             fflush(stdout);
         } else if (cmd == 'R') {
             fprintf(stderr, "[state] %s\n", stateName(state));

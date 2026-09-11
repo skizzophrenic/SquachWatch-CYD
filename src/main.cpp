@@ -19,6 +19,17 @@
 #else
 #define HAVE_COREDUMP_SUMMARY 0
 #endif
+// The whole NVS store, for a wipe that really erases -- see physicalNvsWipe().
+// The emulator has no flash and gets the logical wipe instead.
+#if __has_include(<nvs_flash.h>)
+#include <nvs_flash.h>
+#include <nvs.h>
+#include <string>
+#include <vector>
+#define HAVE_NVS_ERASE 1
+#else
+#define HAVE_NVS_ERASE 0
+#endif
 #include <esp_heap_caps.h>
 #include "ui_diagnostics.h"   // CrashReport, used by the breadcrumb below
 
@@ -40,6 +51,25 @@ RTC_NOINIT_ATTR static struct {
 // Snapshotted at boot, before the live breadcrumb starts overwriting it.
 static CrashReport g_lastCrash = {};
 
+// A wipe restarts the board -- see performWipe() -- and this says how it is to
+// come back: unlocked and straight to the main screen after a duress PIN or a
+// forgotten-PIN wipe, so the unlock looks like an unlock; locked after the
+// tenth wrong guess. RTC RAM survives the restart and nothing else, and it is
+// only believed after a software reset, never after a power-on.
+static const uint32_t WIPEBOOT_MAGIC = 0x57A1E000u;
+enum class WipeBoot : uint8_t { NONE, UNLOCKED, LOCKED };
+RTC_NOINIT_ATTR static uint32_t g_wipeBoot;
+static WipeBoot takeWipeBoot() {
+    const uint32_t v = g_wipeBoot;
+    g_wipeBoot = 0;
+    if (esp_reset_reason() != ESP_RST_SW) return WipeBoot::NONE;
+    if ((v & 0xFFFFFF00u) != WIPEBOOT_MAGIC) return WipeBoot::NONE;
+    const uint8_t m = (uint8_t)(v & 0xFF);
+    if (m == (uint8_t)WipeBoot::UNLOCKED) return WipeBoot::UNLOCKED;
+    if (m == (uint8_t)WipeBoot::LOCKED)   return WipeBoot::LOCKED;
+    return WipeBoot::NONE;
+}
+
 static void crashReportInit() {
     const esp_reset_reason_t r = esp_reset_reason();
     const bool panicked = (r == ESP_RST_PANIC || r == ESP_RST_INT_WDT ||
@@ -57,7 +87,9 @@ static void crashReportInit() {
     // that panic -- not the RTC watchdog, after which the dump in flash is an
     // earlier crash's. The summary is what the esp-coredump tool leads with.
     if (r == ESP_RST_PANIC || r == ESP_RST_INT_WDT || r == ESP_RST_TASK_WDT) {
-        static esp_core_dump_summary_t s;
+        // On the stack: it is read once, here, and ~200 bytes of BSS for
+        // the life of the board would be paying for it forever.
+        esp_core_dump_summary_t s;
         if (esp_core_dump_get_summary(&s) == ESP_OK) {
             g_lastCrash.haveDump = true;
             strncpy(g_lastCrash.task, s.exc_task, sizeof g_lastCrash.task - 1);
@@ -120,11 +152,15 @@ static void crashCrumbTick(uint32_t now, uint32_t lifetime, uint8_t screen) {
 #include "ui_meshphrase.h"
 #include "ui_meshcompose.h"
 #include "meshtutor.h"
+#include "ui_squad.h"
 #endif
 #include "ignore_list.h"
 #include "ignore_list.h"
 #include "ui_detfilter.h"
+#include "ui_beaconwarn.h"
 #include "ui_power.h"
+#include "security.h"
+#include "ui_security.h"
 #include "squachy.h"
 #include "cap_touch.h"
 #include "touch_cal.h"
@@ -916,6 +952,13 @@ static void clearSharedFrameBuffer() {
 // screens since only one can ever be showing at a time.
 static bool    s_confirmPending = false;
 static uint8_t s_confirmMac[6];
+// Which DEVICE the MORE INFO page is about, not just which type: the label
+// and name off the log entry, which is what device_info.cpp matches on. The
+// alert keeps its own copy for when its MORE INFO is tapped.
+static char s_confirmVendor[sizeof(Detection::vendor)] = "";
+static char s_confirmName[sizeof(Detection::name)]     = "";
+static char s_alertVendor[sizeof(Detection::vendor)]   = "";
+static char s_alertName[sizeof(Detection::name)]       = "";
 static char    s_confirmLabel[24];
 // LOG's long-press sets this per-row (BLE vs WiFi isn't implied by a
 // "current mode" the way it is for RAWSCAN, which already knows that
@@ -1005,7 +1048,11 @@ static void enterBoot() {
 // anywhere else never leaves a stale picker showing.
 static bool s_scanPickerOpen = false;
 
+static void enterLocked();
+// Every way home goes through here, which makes it the one place the lock has
+// to be honoured: while locked, "home" is the lock screen.
 static void enterClear() {
+    if (Security::locked()) { enterLocked(); return; }
     state = AppState::CLEAR;
     transitionStart = millis();
     s_scanPickerOpen = false;
@@ -1042,6 +1089,8 @@ static void enterAlert(const Detection& d) {
     alertStart = millis();
     transitionStart = alertStart;
     lastAlertType = d.type;
+    memcpy(s_alertVendor, d.vendor, sizeof s_alertVendor);
+    memcpy(s_alertName,   d.name,   sizeof s_alertName);
     lastAlertConf = d.conf;
     lastAlertHits = d.hits;
     lastAlertRssi = d.rssi;
@@ -1155,6 +1204,12 @@ static void enterMeshCompose() {
     uiMeshComposeInit(*canvas);
 }
 
+static void enterSquad() {
+    state = AppState::SQUAD;
+    transitionStart = millis();
+    uiSquadInit(*canvas);
+}
+
 static void enterMeshWarn() {
     state = AppState::MESH_WARN;
     transitionStart = millis();
@@ -1181,10 +1236,170 @@ static void enterPhoneMessage(const char* text) {
 }
 #endif
 
-static void enterDetFilter() {
+static void enterDetFilter(bool keepScroll = false) {
     state = AppState::DETECTION_FILTER;
     transitionStart = millis();
-    uiDetFilterInit(*canvas);
+    uiDetFilterInit(*canvas, keepScroll);
+}
+
+static void enterBeaconWarn() {
+    state = AppState::BEACON_WARN;
+    transitionStart = millis();
+    uiBeaconWarnInit(*canvas);
+}
+
+// ---- the PIN lock ------------------------------------------------------------
+// SECURITY is the menu; PIN_ENTRY is the payphone asking for a PIN on its
+// behalf, with BACK; LOCKED is the payphone as the lock screen, without.
+enum class PinFlow : uint8_t { SET_NEW, SET_AGAIN, OFF_VERIFY, CHANGE_CUR, CHANGE_NEW, CHANGE_AGAIN,
+                               DURESS_CUR, DURESS_NEW, DURESS_AGAIN, DURESS_OFF };
+static PinFlow s_pinFlow = PinFlow::SET_NEW;
+static char    s_pinFirst[9]  = "";   // the first entry of a confirm-by-repeating pair
+static char    s_pinPromptBuf[28] = "";
+
+static void enterSecurity() {
+    state = AppState::SECURITY;
+    transitionStart = millis();
+    uiSecurityInit(*canvas);
+}
+
+static const char* pinFlowPrompt(PinFlow f) {
+    switch (f) {
+        case PinFlow::SET_NEW:
+            snprintf(s_pinPromptBuf, sizeof s_pinPromptBuf, "NEW %u-DIGIT PIN", (unsigned)Security::pinLength());
+            return s_pinPromptBuf;
+        case PinFlow::SET_AGAIN:
+        case PinFlow::CHANGE_AGAIN:
+        case PinFlow::DURESS_AGAIN: return "AGAIN TO CONFIRM";
+        case PinFlow::CHANGE_NEW:   return "NEW PIN";
+        case PinFlow::DURESS_NEW:   return "DURESS PIN";
+        default:                    return "CURRENT PIN";
+    }
+}
+
+static void startPinFlow(PinFlow f, const char* prompt = nullptr) {
+    s_pinFlow = f;
+    state = AppState::PIN_ENTRY;
+    transitionStart = millis();
+    uiPhoneInitPin(*canvas, Security::pinLength(), prompt ? prompt : pinFlowPrompt(f), true);
+}
+
+static void enterLocked() {
+    state = AppState::LOCKED;
+    transitionStart = millis();
+    s_scanPickerOpen = false;
+    uiPhoneInitPin(*canvas, Security::pinLength(), "LOCKED", false);
+    uiPhonePinAllowForgot(true);
+}
+
+#if HAVE_NVS_ERASE
+// The NVS erase that actually erases. Deleting a key only marks its entry
+// erased -- the bytes sit in flash until that page is reused, and a USB cable
+// can read them -- so the secrets are removed by erasing the WHOLE store and
+// writing everything worth keeping back. Everything is kept except the two
+// namespaces that hold secrets: the message phrase and key, and the ignore
+// list. Settings, calibration, outfits, stats, the PIN itself: all restored.
+struct KeptEntry {
+    std::string ns, key;
+    nvs_type_t  type;
+    uint64_t    num;
+    std::vector<uint8_t> bytes;
+};
+
+static bool secretNamespace(const char* ns) {
+    return !strcmp(ns, "meshtalk") || !strcmp(ns, "ignore");
+}
+
+static void physicalNvsWipe() {
+    std::vector<KeptEntry> kept;
+    nvs_iterator_t it = nvs_entry_find(NVS_DEFAULT_PART_NAME, NULL, NVS_TYPE_ANY);
+    while (it) {
+        nvs_entry_info_t info;
+        nvs_entry_info(it, &info);
+        nvs_handle_t h;
+        if (!secretNamespace(info.namespace_name) &&
+            nvs_open(info.namespace_name, NVS_READONLY, &h) == ESP_OK) {
+            KeptEntry e;
+            e.ns = info.namespace_name; e.key = info.key; e.type = info.type; e.num = 0;
+            bool ok = true;
+            switch (info.type) {
+                case NVS_TYPE_U8:  { uint8_t  v; ok = nvs_get_u8 (h, info.key, &v) == ESP_OK; e.num = v; break; }
+                case NVS_TYPE_I8:  { int8_t   v; ok = nvs_get_i8 (h, info.key, &v) == ESP_OK; e.num = (uint64_t)(int64_t)v; break; }
+                case NVS_TYPE_U16: { uint16_t v; ok = nvs_get_u16(h, info.key, &v) == ESP_OK; e.num = v; break; }
+                case NVS_TYPE_I16: { int16_t  v; ok = nvs_get_i16(h, info.key, &v) == ESP_OK; e.num = (uint64_t)(int64_t)v; break; }
+                case NVS_TYPE_U32: { uint32_t v; ok = nvs_get_u32(h, info.key, &v) == ESP_OK; e.num = v; break; }
+                case NVS_TYPE_I32: { int32_t  v; ok = nvs_get_i32(h, info.key, &v) == ESP_OK; e.num = (uint64_t)(int64_t)v; break; }
+                case NVS_TYPE_U64: { uint64_t v; ok = nvs_get_u64(h, info.key, &v) == ESP_OK; e.num = v; break; }
+                case NVS_TYPE_I64: { int64_t  v; ok = nvs_get_i64(h, info.key, &v) == ESP_OK; e.num = (uint64_t)v; break; }
+                case NVS_TYPE_STR: {
+                    size_t n = 0;
+                    ok = nvs_get_str(h, info.key, nullptr, &n) == ESP_OK;
+                    if (ok) { e.bytes.resize(n); ok = nvs_get_str(h, info.key, (char*)e.bytes.data(), &n) == ESP_OK; }
+                    break;
+                }
+                case NVS_TYPE_BLOB: {
+                    size_t n = 0;
+                    ok = nvs_get_blob(h, info.key, nullptr, &n) == ESP_OK;
+                    if (ok) { e.bytes.resize(n); ok = nvs_get_blob(h, info.key, e.bytes.data(), &n) == ESP_OK; }
+                    break;
+                }
+                default: ok = false; break;
+            }
+            nvs_close(h);
+            if (ok) kept.push_back(std::move(e));
+        }
+        it = nvs_entry_next(it);
+    }
+    nvs_release_iterator(it);
+
+    nvs_flash_erase();       // de-initialises, then erases every page
+    nvs_flash_init();
+
+    for (const KeptEntry& e : kept) {
+        nvs_handle_t h;
+        if (nvs_open(e.ns.c_str(), NVS_READWRITE, &h) != ESP_OK) continue;
+        const char* k = e.key.c_str();
+        switch (e.type) {
+            case NVS_TYPE_U8:   nvs_set_u8 (h, k, (uint8_t)e.num);  break;
+            case NVS_TYPE_I8:   nvs_set_i8 (h, k, (int8_t)e.num);   break;
+            case NVS_TYPE_U16:  nvs_set_u16(h, k, (uint16_t)e.num); break;
+            case NVS_TYPE_I16:  nvs_set_i16(h, k, (int16_t)e.num);  break;
+            case NVS_TYPE_U32:  nvs_set_u32(h, k, (uint32_t)e.num); break;
+            case NVS_TYPE_I32:  nvs_set_i32(h, k, (int32_t)e.num);  break;
+            case NVS_TYPE_U64:  nvs_set_u64(h, k, e.num);           break;
+            case NVS_TYPE_I64:  nvs_set_i64(h, k, (int64_t)e.num);  break;
+            case NVS_TYPE_STR:  nvs_set_str(h, k, (const char*)e.bytes.data()); break;
+            case NVS_TYPE_BLOB: nvs_set_blob(h, k, e.bytes.data(), e.bytes.size()); break;
+            default: break;
+        }
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+#endif
+
+// The wipe: the secrets in NVS, the SD log, and -- on the device -- a real
+// erase of the store and a restart, which also takes the RAM log, the inbox
+// and every open handle to the old store with it. `after` is how the board
+// comes back; see takeWipeBoot().
+static void performWipe(WipeBoot after) {
+    Security::wipeSecrets();
+    engine.sd().wipe();
+#if HAVE_NVS_ERASE
+    physicalNvsWipe();
+    g_wipeBoot = WIPEBOOT_MAGIC | (uint8_t)after;
+    delay(20);
+    esp_restart();
+#else
+#if SQUACH_MESH
+    MeshTalk::forget();
+#endif
+    engine.clearLog();
+    engine.clearWatch();
+    engine.clearHunt();
+    if (after == WipeBoot::LOCKED) Security::lock();
+    enterClear();
+#endif
 }
 
 static void enterPower() {
@@ -1313,6 +1528,7 @@ void setup() {
     // of tft.setRotation() below so that call can already use the
     // saved rotation instead of always starting from the board default.
     Settings::load();
+    Security::begin();
 #if !defined(AWOK)
     // AWOK has no rotate button and stays fixed at its one physical
     // orientation (see screenRotation's own comment above) -- only
@@ -1535,8 +1751,19 @@ void setup() {
     MeshTalk::begin();
 #endif
     applyBrightness();
-    Squachy::trigger(Squachy::Event::BOOTED, DetectionType::UNKNOWN, engine.lifetimeTotal());
-    enterBoot();
+    // After a wipe the board comes back the way the wipe asked: straight to the
+    // main screen, unlocked, with no splash and no boot quip, after a duress
+    // PIN -- so it reads as an unlock and not a restart -- or locked after the
+    // tenth wrong guess.
+    const WipeBoot wb = takeWipeBoot();
+    if (wb == WipeBoot::UNLOCKED) {
+        Security::forceUnlock();
+        enterClear();
+    } else {
+        if (wb == WipeBoot::LOCKED) Security::lock();
+        Squachy::trigger(Squachy::Event::BOOTED, DetectionType::UNKNOWN, engine.lifetimeTotal());
+        enterBoot();
+    }
 }
 
 // ---- Frame timing ----
@@ -1607,6 +1834,26 @@ void loop() {
     Mesh::tick(now);
     MeshTalk::tick(now);
 #endif
+
+    // The padlock, left of the rotate icon while a PIN is set, on the screens
+    // that draw the corner icons. Ahead of the rotate handler, whose oversized
+    // target overlaps it, and it takes the whole gesture -- the same swallow a
+    // wake tap gets -- so nothing underneath sees the finger.
+    if (touchJustDown && Security::enabled() && !Security::locked() &&
+        (state == AppState::CLEAR || state == AppState::LOG || state == AppState::SETTINGS ||
+         state == AppState::OUTFIT || state == AppState::RAWSCAN || state == AppState::DETECTION_FILTER ||
+         state == AppState::IGNORE_LIST || state == AppState::POWER_SAVER || state == AppState::SECURITY ||
+         state == AppState::DIARY || state == AppState::HUNT || state == AppState::DIAGNOSTICS) &&
+        Theme::lockButtonHit(tp.x, tp.y, tft.width())) {
+        lastTouch = now;
+        if (state == AppState::RAWSCAN) engine.stopRawScan();
+        Security::lock();
+        enterLocked();
+        s_swallowTouch = true;
+        tp.valid = false;
+        touchJustDown = false;
+        touchJustUp = false;
+    }
 
     // Rotate button lives in the title bar's top-right corner, shown on
     // the CLEAR, LOG, SETTINGS and OUTFIT screens (drawTitleBar always
@@ -1695,12 +1942,14 @@ void loop() {
     if (tp.valid && (state == AppState::CLEAR || state == AppState::LOG ||
                       state == AppState::SETTINGS || state == AppState::OUTFIT ||
                       state == AppState::RAWSCAN || state == AppState::DETECTION_FILTER ||
-                      state == AppState::IGNORE_LIST || state == AppState::POWER_SAVER) &&
+                      state == AppState::IGNORE_LIST || state == AppState::POWER_SAVER ||
+                      state == AppState::SECURITY) &&
         Theme::settingsButtonHit(tp.x, tp.y) &&
         (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
         lastTouch = now;
         if (state == AppState::OUTFIT || state == AppState::DETECTION_FILTER ||
-            state == AppState::IGNORE_LIST || state == AppState::POWER_SAVER) enterSettings();
+            state == AppState::IGNORE_LIST || state == AppState::POWER_SAVER ||
+            state == AppState::SECURITY) enterSettings();
         else if (state == AppState::SETTINGS) enterClear();
         else {
             // Leaving RAWSCAN via the settings icon, same as BACK does
@@ -1855,6 +2104,7 @@ void loop() {
                     // still counted and still written to the LOG above, so
                     // the device stays visible and un-ignorable.
                     !IgnoreList::contains(latest->mac)) {
+                    uiAlertSetRedacted(false);
                     enterAlert(*latest);
                 }
             }
@@ -1985,6 +2235,13 @@ void loop() {
                 lastTouch = now;
                 sqActive  = false;
                 enterMeshCompose();
+            } else if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
+                       uiClearSquadHit(tp.x, tp.y)) {
+                // The squad badge, ahead of the scene gestures for the same
+                // reason as the bubble above.
+                lastTouch = now;
+                sqActive  = false;
+                enterSquad();
 #endif
             } else if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
                        Theme::backgroundTap(tp.x, tp.y, now)) {
@@ -2080,10 +2337,11 @@ void loop() {
         }
         case AppState::ALERT: {
             const char* alertInfoText = s_infoShowingPrimer ? DetectionInfo::rssiConfidencePrimer()
-                                                              : DetectionInfo::explain(s_confirmType);
+                                                              : DetectionInfo::explainFor(s_confirmType, s_confirmVendor, s_confirmName, engine);
             // No heading during the primer page -- it's about RSSI/
             // confidence in general, not any one detection type.
-            const char* alertInfoTypeName = s_infoShowingPrimer ? nullptr : detectionTypeName(s_confirmType);
+            const char* alertInfoTypeName = s_infoShowingPrimer ? nullptr
+                                          : DetectionInfo::titleFor(s_confirmType, s_confirmVendor, s_confirmName);
 #if defined(CYD35)
             if (frameBufferOk) {
                 // Same two-pass half-height `frame` trick CLEAR/BOOT
@@ -2140,10 +2398,23 @@ void loop() {
                 break;
             }
 
+            // Locked: an alert is for looking at, not acting on. MORE INFO,
+            // IGNORE and HUNT would all change the device without the PIN, so
+            // any tap -- or the timeout -- goes back to the lock screen.
+            if (Security::locked()) {
+                if ((tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) ||
+                    (now - alertStart) > ALERT_AUTO_DISMISS_MS) {
+                    lastTouch = now;
+                    enterClear();       // the lock screen, while locked
+                }
+                break;
+            }
             if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 lastTouch = now;
                 if (uiAlertHitMoreInfo(tp.x, tp.y, tft.width(), tft.height())) {
                     s_confirmType        = lastAlertType;
+                    memcpy(s_confirmVendor, s_alertVendor, sizeof s_confirmVendor);
+                    memcpy(s_confirmName,   s_alertName,   sizeof s_confirmName);
                     s_infoShowingPrimer  = !Settings::infoPrimerShown();
                     s_infoPending        = true;
                     s_infoArmed          = false;
@@ -2247,11 +2518,12 @@ void loop() {
         case AppState::LOG: {
             const char* infoText = s_infoShowingPrimer
                                   ? DetectionInfo::rssiConfidencePrimer()
-                                  : DetectionInfo::explainLive(s_confirmType, engine);
+                                  : DetectionInfo::explainFor(s_confirmType, s_confirmVendor, s_confirmName, engine);
 
             // No heading during the primer page -- it's about RSSI/
             // confidence in general, not any one detection type.
-            const char* infoTypeName = s_infoShowingPrimer ? nullptr : detectionTypeName(s_confirmType);
+            const char* infoTypeName = s_infoShowingPrimer ? nullptr
+                                     : DetectionInfo::titleFor(s_confirmType, s_confirmVendor, s_confirmName);
             uiLogTick(*canvas, now, engine, 0, s_confirmPending, s_confirmLabel,
                       s_infoPending, infoTypeName, infoText);
             Theme::drawToast(*canvas, now);
@@ -2399,6 +2671,8 @@ void loop() {
                         memcpy(s_confirmMac, d->mac, 6);
                         s_confirmIsBle = (d->channel == 0);
                         s_confirmType  = d->type;
+                        memcpy(s_confirmVendor, d->vendor, sizeof s_confirmVendor);
+                        memcpy(s_confirmName,   d->name,   sizeof s_confirmName);
                         const char* lbl = d->name[0] ? d->name : d->vendor;
                         strncpy(s_confirmLabel, lbl, sizeof(s_confirmLabel) - 1);
                         s_confirmLabel[sizeof(s_confirmLabel) - 1] = 0;
@@ -2643,6 +2917,7 @@ void loop() {
                         case SettingsRow::CONFIDENCE: Settings::cycleMinConfidence(); break;
                         case SettingsRow::DETECTION_FILTER: enterDetFilter(); break;
                         case SettingsRow::POWER_SAVER: enterPower(); break;
+                        case SettingsRow::SECURITY:    enterSecurity(); break;
                         case SettingsRow::IGNORED_DEVICES:  enterIgnoreList(); break;
 #if SQUACH_MESH
                         case SettingsRow::SQUACHMESH:
@@ -2761,6 +3036,20 @@ void loop() {
             }
             break;
         }
+        case AppState::SQUAD: {
+            uiSquadTick(*canvas, now, engine);
+            if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                lastTouch = now;
+                switch (uiSquadTouch(tp.x, tp.y, now)) {
+                    case SquadHit::BACK:    enterClear(); break;
+                    // Back to the main screen to watch the swap happen.
+                    case SquadHit::INVITED: enterClear(); break;
+                    case SquadHit::REPLY:   enterMeshCompose(); break;
+                    default: break;
+                }
+            }
+            break;
+        }
         case AppState::PHONE: {
             uiPhoneTick(*canvas, now, engine);
             // All three edges of a touch, not just the press. The payphone
@@ -2862,9 +3151,184 @@ void loop() {
                 if (!gestureMoved) {
                     lastTouch = now;
                     DetectionType hit = uiDetFilterHitTest(*canvas, gestureStartX, gestureStartY, tft.width(), tft.height());
-                    if (hit != DetectionType::COUNT) Settings::toggleType(hit);
+                    // iBeacons ask first, on the way ON only: see
+                    // ui_beaconwarn.h for why this one type does.
+                    if (hit == DetectionType::IBEACON && !Settings::typeEnabled(hit)) enterBeaconWarn();
+                    else if (hit != DetectionType::COUNT) Settings::toggleType(hit);
                 }
                 gestureActive = false;
+            }
+            break;
+        }
+        case AppState::BEACON_WARN: {
+            uiBeaconWarnTick(*canvas, now, engine);
+            if (touchJustDown) {
+                switch (uiBeaconWarnHitTest(*canvas, tp.x, tp.y)) {
+                    case BeaconWarnHit::ENABLE:
+                        if (!Settings::typeEnabled(DetectionType::IBEACON))
+                            Settings::toggleType(DetectionType::IBEACON);
+                        enterDetFilter(true);
+                        break;
+                    case BeaconWarnHit::KEEP_OFF: enterDetFilter(true); break;
+                    default: break;
+                }
+            }
+            break;
+        }
+        case AppState::SECURITY: {
+            uiSecurityTick(*canvas, now, engine);
+            Theme::drawToast(*canvas, now);
+            // The same drag-to-scroll, act-on-release gesture as POWER SAVER.
+            static bool gestureActive = false, gestureMoved = false;
+            static int  gestureStartX = 0, gestureStartY = 0, lastY = -1;
+            if (touchJustDown) {
+                gestureActive = true; gestureMoved = false;
+                gestureStartX = tp.x; gestureStartY = tp.y; lastY = tp.y;
+            }
+            if (tp.valid && gestureActive) {
+                int dy = tp.y - lastY;
+                if (abs(dy) > 10) { gestureMoved = true; uiSecurityScroll(dy > 0 ? -1 : 1); lastY = tp.y; }
+            }
+            if (touchJustUp && gestureActive) {
+                gestureActive = false;
+                if (!gestureMoved) {
+                    lastTouch = now;
+                    const bool on = Security::enabled();
+                    // Everything below PIN LOCK is inert until a PIN exists,
+                    // and PIN LENGTH is inert once one does -- the row draws
+                    // dim to match.
+                    switch (uiSecurityHitTest(*canvas, gestureStartX, gestureStartY, tft.width(), tft.height())) {
+                        case SecurityRow::PIN_LOCK:
+                            startPinFlow(on ? PinFlow::OFF_VERIFY : PinFlow::SET_NEW);
+                            break;
+                        case SecurityRow::PIN_LENGTH:
+                            if (!on) {
+                                const Security::PinLen n = Security::pinLen();
+                                Security::setPinLength(n == Security::PinLen::FOUR ? Security::PinLen::SIX
+                                                     : n == Security::PinLen::SIX  ? Security::PinLen::EIGHT
+                                                                                   : Security::PinLen::FOUR);
+                            }
+                            break;
+                        case SecurityRow::CHANGE_PIN:   if (on) startPinFlow(PinFlow::CHANGE_CUR); break;
+                        case SecurityRow::DURESS_PIN:
+                            if (on) startPinFlow(Security::hasDuress() ? PinFlow::DURESS_OFF : PinFlow::DURESS_CUR);
+                            break;
+                        case SecurityRow::AUTO_LOCK:    if (on) Security::cycleAutoLock(); break;
+                        case SecurityRow::LOCK_AT_BOOT: if (on) Security::setLockAtBoot(!Security::lockAtBoot()); break;
+                        case SecurityRow::WIPE_ON_FAIL: if (on) Security::setWipeOnFail(!Security::wipeOnFail()); break;
+                        case SecurityRow::LOCK_ALERTS:  if (on) Security::cycleLockAlerts(); break;
+                        default: break;
+                    }
+                }
+            }
+            break;
+        }
+        case AppState::PIN_ENTRY: {
+            uiPhoneTick(*canvas, now, engine);
+            if (touchJustDown) uiPhoneTouch(tp.x, tp.y, now, PhoneTouch::DOWN);
+            if (!uiPhoneDone()) break;
+            if (!uiPhonePinReady()) { memset(s_pinFirst, 0, sizeof s_pinFirst); enterSecurity(); break; }   // BACK
+            char d[9];
+            strncpy(d, uiPhonePinDigits(), sizeof d - 1);
+            d[sizeof d - 1] = '\0';
+            const bool same = strcmp(d, s_pinFirst) == 0;
+            bool done = false;
+            switch (s_pinFlow) {
+                case PinFlow::SET_NEW:
+                case PinFlow::CHANGE_NEW:
+                    if (Security::isDuress(d)) { startPinFlow(s_pinFlow, "THAT IS THE DURESS PIN"); break; }
+                    memcpy(s_pinFirst, d, sizeof s_pinFirst);
+                    startPinFlow(s_pinFlow == PinFlow::SET_NEW ? PinFlow::SET_AGAIN : PinFlow::CHANGE_AGAIN);
+                    break;
+                case PinFlow::SET_AGAIN:
+                case PinFlow::CHANGE_AGAIN: {
+                    const bool first = (s_pinFlow == PinFlow::SET_AGAIN);
+                    if (!same) { startPinFlow(first ? PinFlow::SET_NEW : PinFlow::CHANGE_NEW, "DIDN'T MATCH - AGAIN"); break; }
+                    Security::setPin(s_pinFirst);
+                    // Said once, where it is set: what the lock is for, and
+                    // what it is not.
+                    if (first) Theme::showToast("PIN LOCK ON", "Snoops, not USB cables", Theme::AMBER);
+                    else       Theme::showToast("PIN CHANGED", nullptr, Theme::GREEN);
+                    done = true;
+                    break;
+                }
+                case PinFlow::OFF_VERIFY:
+                    if (!Security::verify(d)) { startPinFlow(PinFlow::OFF_VERIFY, "WRONG - CURRENT PIN"); break; }
+                    Security::disable();
+                    Theme::showToast("PIN LOCK OFF", nullptr, Theme::AMBER);
+                    done = true;
+                    break;
+                case PinFlow::CHANGE_CUR:
+                case PinFlow::DURESS_CUR:
+                    if (!Security::verify(d)) { startPinFlow(s_pinFlow, "WRONG - CURRENT PIN"); break; }
+                    startPinFlow(s_pinFlow == PinFlow::CHANGE_CUR ? PinFlow::CHANGE_NEW : PinFlow::DURESS_NEW);
+                    break;
+                case PinFlow::DURESS_NEW:
+                    if (Security::verify(d)) { startPinFlow(PinFlow::DURESS_NEW, "MUST DIFFER FROM PIN"); break; }
+                    memcpy(s_pinFirst, d, sizeof s_pinFirst);
+                    startPinFlow(PinFlow::DURESS_AGAIN);
+                    break;
+                case PinFlow::DURESS_AGAIN:
+                    if (!same) { startPinFlow(PinFlow::DURESS_NEW, "DIDN'T MATCH - AGAIN"); break; }
+                    Security::setDuress(s_pinFirst);
+                    Theme::showToast("DURESS PIN SET", "Wipes, then unlocks", Theme::RED);
+                    done = true;
+                    break;
+                case PinFlow::DURESS_OFF:
+                    if (!Security::verify(d)) { startPinFlow(PinFlow::DURESS_OFF, "WRONG - CURRENT PIN"); break; }
+                    Security::clearDuress();
+                    Theme::showToast("DURESS PIN OFF", nullptr, Theme::AMBER);
+                    done = true;
+                    break;
+            }
+            memset(d, 0, sizeof d);
+            if (done) { memset(s_pinFirst, 0, sizeof s_pinFirst); enterSecurity(); }
+            break;
+        }
+        case AppState::LOCKED: {
+            // Detection runs on underneath, and ALERTS WHEN LOCKED decides how
+            // much of a new one reaches the glass. The same test CLEAR makes.
+            {
+                const Security::LockAlerts la = Security::lockAlerts();
+                const Detection* latest = engine.latest();
+                if (la != Security::LockAlerts::NONE && latest && (now - latest->firstSeen) < 200 &&
+                    latest->conf >= Settings::minConfidence() && !IgnoreList::contains(latest->mac)) {
+                    uiAlertSetRedacted(la == Security::LockAlerts::TYPE_ONLY);
+                    enterAlert(*latest);
+                    break;
+                }
+                if (la == Security::LockAlerts::FULL && engine.watchHitPending()) { enterWatchAlert(); break; }
+            }
+            const uint32_t wait = Security::lockoutRemainingMs(now);
+            static char waitMsg[24];
+            if (wait) {
+                snprintf(waitMsg, sizeof waitMsg, "WAIT %lu s", (unsigned long)((wait + 999) / 1000));
+                uiPhonePinWait(waitMsg);
+            } else {
+                uiPhonePinWait(nullptr);
+            }
+#if SQUACH_MESH
+            uiPhonePinPrompt(MeshTalk::inbox().unread ? "LOCKED - NEW MESSAGE" : "LOCKED");
+#endif
+            uiPhoneTick(*canvas, now, engine);
+            if (touchJustDown) uiPhoneTouch(tp.x, tp.y, now, PhoneTouch::DOWN);
+            if (uiPhonePinForgot()) {
+                // A forgotten PIN: every secret goes, and the PIN with it, and
+                // the board comes back unlocked. Settings and outfits stay.
+                Security::disable();
+                performWipe(WipeBoot::UNLOCKED);
+                break;
+            }
+            if (uiPhoneDone() && uiPhonePinReady()) {
+                switch (Security::check(uiPhonePinDigits(), now)) {
+                    case Security::Check::OK:
+                        uiAlertSetRedacted(false);
+                        enterClear();
+                        break;
+                    case Security::Check::DURESS: performWipe(WipeBoot::UNLOCKED); break;
+                    case Security::Check::WIPED:  performWipe(WipeBoot::LOCKED);   break;
+                    default:                      uiPhonePinReject();              break;
+                }
             }
             break;
         }
@@ -3090,6 +3554,20 @@ void loop() {
         if (wantDim != s_screenDimmed) {
             s_screenDimmed = wantDim;
             applyBrightness();
+        }
+
+        // Auto-lock, on the saver's idle clock: after N idle minutes, or the
+        // moment the saver dims the screen. Never out of the boot, a PIN being
+        // typed, or an alert that is still up.
+        if (Security::enabled() && !Security::locked() &&
+            state != AppState::BOOT && state != AppState::COLOR_CHECK && state != AppState::PIN_ENTRY &&
+            state != AppState::ALERT && state != AppState::WATCH_ALERT) {
+            const uint32_t lockMs = Security::autoLockIdleMs();
+            if ((lockMs && idleMs >= lockMs) || (Security::autoLockOnSleep() && s_screenDimmed)) {
+                if (state == AppState::RAWSCAN) engine.stopRawScan();
+                Security::lock();
+                enterLocked();
+            }
         }
 
         // Hold the loop to the chosen rate once idle. delay() hands the core

@@ -2,6 +2,7 @@
 #include "ui_settings.h"
 #include "theme.h"
 #include "settings.h"
+#include "security.h"
 #include "ignore_list.h"
 #include "squachy.h"
 #include <Arduino.h>
@@ -33,6 +34,7 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::OUTFIT, SettingsRow::PET,
     SettingsRow::REPLAY_INTRO, SettingsRow::SHOW_OFF, SettingsRow::VIEW_DIARY,
     SettingsRow::POWER_SAVER,
+    SettingsRow::SECURITY,
     SettingsRow::CALIBRATE, SettingsRow::CHECK_COLORS, SettingsRow::DIAGNOSTICS, SettingsRow::RESET_STATS, SettingsRow::BACK,
 };
 static const uint8_t ALL_ROWS_N = sizeof(ALL_ROWS) / sizeof(ALL_ROWS[0]);
@@ -486,6 +488,9 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             break;
         case SettingsRow::POWER_SAVER:
             label = "POWER SAVER"; value = Settings::powerSaver() ? "ON" : "OFF";
+            break;
+        case SettingsRow::SECURITY:
+            label = "SECURITY"; value = Security::enabled() ? "PIN ON" : "OFF";
             break;
         case SettingsRow::CALIBRATE:
             label = "CALIBRATE TOUCH";

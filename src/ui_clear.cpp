@@ -968,6 +968,10 @@ static void drawMessageIcon(TFT_eSPI& t, int x, int y, bool unread, bool sending
 // More SquachWatches in range than the one visiting: a small "+N" under his
 // message button, N being everybody beyond him. Not drawn for one visitor --
 // that is the normal case, and a badge that is always there says nothing.
+// The badge's tap target, filled by the draw -- finger-sized around a small pill.
+static bool    s_badgeOn = false;
+static int16_t s_badX = 0, s_badY = 0, s_badW = 0, s_badH = 0;
+
 static void drawSquadBadge(TFT_eSPI& t, int gx, int headTop, uint8_t extra) {
     char b[5];
     snprintf(b, sizeof b, "+%u", (unsigned)extra);
@@ -984,6 +988,14 @@ static void drawSquadBadge(TFT_eSPI& t, int gx, int headTop, uint8_t extra) {
     t.setTextColor(Theme::WHITE, Theme::PURPLE);
     t.setCursor(x + 12, y + 2);
     t.print(b);
+    s_badX = (int16_t)(x - 8); s_badY = (int16_t)(y - 6);
+    s_badW = (int16_t)(bw + 16); s_badH = (int16_t)(bh + 12);
+    s_badgeOn = true;
+}
+
+bool uiClearSquadHit(int x, int y) {
+    return s_badgeOn && !Settings::boringMode() &&
+           x >= s_badX && x < s_badX + s_badW && y >= s_badY && y < s_badY + s_badH;
 }
 
 static void drawMessageUi(TFT_eSPI& t, uint32_t now, int titleBottom, int squachyBottom) {
@@ -1523,6 +1535,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         // while it is up -- it carries the sender's name itself, in red.
         const bool msgFresh = messageShowing(now) || tutorReply();
         s_msgGuestOn = false;
+        s_badgeOn    = false;
         if (guest) {
             const int SMALL_PCT = 70;
             const int gap  = w / 4;

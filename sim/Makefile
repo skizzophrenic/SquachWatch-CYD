@@ -48,6 +48,10 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/qwerty.cpp \
             $(SRC)/ui_meshmenu.cpp \
             $(SRC)/ui_meshwarn.cpp \
+            $(SRC)/ui_beaconwarn.cpp \
+            $(SRC)/security.cpp \
+            $(SRC)/ui_security.cpp \
+            $(SRC)/ui_squad.cpp \
             $(SRC)/ui_meshphrase.cpp \
             $(SRC)/ui_meshcompose.cpp \
             $(SRC)/settings.cpp \
@@ -55,6 +59,7 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/remote_id.cpp \
             $(SRC)/clock.cpp \
             $(SRC)/detection_info.cpp \
+            $(SRC)/device_info.cpp \
             $(SRC)/idle_events.cpp \
             $(SRC)/ui_clear.cpp \
             $(SRC)/ui_power.cpp \

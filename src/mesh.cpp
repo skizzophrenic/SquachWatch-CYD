@@ -51,8 +51,13 @@ static const uint8_t SQUAD_N = 8;
 static uint8_t  s_squadMac[SQUAD_N][6];
 static uint32_t s_squadSeen[SQUAD_N];
 static bool     s_squadLive[SQUAD_N];
+static SquachMesh::Peer s_squadPeer[SQUAD_N];   // what each one looks like
 
-static void squadNote(const uint8_t* mac, uint32_t now) {
+// The visitor somebody picked on the SQUAD screen, if any. RAM only.
+static uint8_t  s_preferMac[6] = { 0 };
+static bool     s_preferSet    = false;
+
+static void squadNote(const uint8_t* mac, uint32_t now, const SquachMesh::Peer& p) {
     uint8_t slot = SQUAD_N;
     for (uint8_t i = 0; i < SQUAD_N; i++)
         if (s_squadLive[i] && memcmp(s_squadMac[i], mac, 6) == 0) { slot = i; break; }
@@ -66,7 +71,32 @@ static void squadNote(const uint8_t* mac, uint32_t now) {
         memcpy(s_squadMac[slot], mac, 6);
         s_squadLive[slot] = true;
     }
+    s_squadPeer[slot] = p;
     s_squadSeen[slot] = now;
+}
+
+uint8_t squadList(uint32_t now, SquadMember* out, uint8_t cap) {
+    if (!Settings::meshDetect()) return 0;
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < SQUAD_N && n < cap; i++) {
+        if (!s_squadLive[i] || (int32_t)(now - s_squadSeen[i]) > (int32_t)PEER_STALE_MS) continue;
+        memcpy(out[n].mac, s_squadMac[i], 6);
+        out[n].peer = s_squadPeer[i];
+        out[n].seen = s_squadSeen[i];
+        n++;
+    }
+    // Insertion sort by address: eight at most, and a stable order is what
+    // keeps the carousel from shuffling as adverts arrive in a new order.
+    for (uint8_t i = 1; i < n; i++)
+        for (uint8_t j = i; j > 0 && memcmp(out[j - 1].mac, out[j].mac, 6) > 0; j--) {
+            SquadMember t = out[j]; out[j] = out[j - 1]; out[j - 1] = t;
+        }
+    return n;
+}
+
+void preferPeer(const uint8_t mac[6]) {
+    memcpy(s_preferMac, mac, 6);
+    s_preferSet = true;
 }
 
 uint8_t squadCount(uint32_t now) {
@@ -126,7 +156,7 @@ bool onManufacturerData(const uint8_t* d, size_t len, const uint8_t* mac, uint32
 
     SquachMesh::Peer p;
     if (!SquachMesh::decode(d + 2, len - 2, p)) return false;
-    squadNote(mac, now);        // everybody counts, visiting or not
+    squadNote(mac, now, p);     // everybody counts, visiting or not
 
     // Remembered for a message frame later in this same callback: the name
     // goes on the message, and the advert is the only place it travels.
@@ -141,7 +171,11 @@ bool onManufacturerData(const uint8_t* d, size_t len, const uint8_t* mac, uint32
     // Ours. Keep the one we already have unless this IS the one we already
     // have -- a second SquachWatch arriving mid-visit does not get to shove
     // the first one off the screen.
-    if (s_havePeer && memcmp(mac, s_peerMac, 6) != 0) return true;
+    //
+    // ...unless the SQUAD screen picked this one. Then it takes the slot, and
+    // the visit machine sees a different guest and plays the goodbye.
+    const bool chosen = s_preferSet && memcmp(mac, s_preferMac, 6) == 0;
+    if (s_havePeer && memcmp(mac, s_peerMac, 6) != 0 && !chosen) return true;
 
     s_peer = p;
     memcpy(s_peerMac, mac, 6);

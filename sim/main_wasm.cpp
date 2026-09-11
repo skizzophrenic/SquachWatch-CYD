@@ -156,14 +156,20 @@ EMSCRIPTEN_KEEPALIVE void sw_touch(int down, int x, int y) {
 // this is the only way a visitor sees the alert path at all -- and on a
 // demo it is better than waiting: a Trigger button summons an AirTag
 // instead of leaving someone staring at ALL CLEAR.
-EMSCRIPTEN_KEEPALIVE int sw_detect(int type, int rssi) {
-    if (type <= 0 || type >= (int)DetectionType::COUNT) return 0;
+//
+// By DEVICE: `profile` indexes sim_detections.h's kSimProfiles, which has one
+// entry per device the firmware can name -- see sw_det_catalog().
+EMSCRIPTEN_KEEPALIVE int sw_detect(int profile, int rssi) {
+    if (profile < 0 || (size_t)profile >= kSimProfileCount) return 0;
     static uint16_t serial = 0;
     Detection d;
-    if (!simMakeDetection(d, (DetectionType)type, millis(), rssi, serial++)) return 0;
+    simMakeDetection(d, kSimProfiles[profile], millis(), rssi, serial++);
     engine.postBle(d);
     return 1;
 }
+
+// [[index, "TYPE", "label"], ...] -- the page's picker, from the same table.
+EMSCRIPTEN_KEEPALIVE const char* sw_det_catalog() { return simProfileCatalog(); }
 
 // The virtual SquachMesh peer (meshsim.h). The same command language the
 // native harness's P line takes, so the two emulators cannot disagree about

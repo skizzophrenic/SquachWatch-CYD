@@ -75,6 +75,18 @@ namespace Mesh {
     // How many SquachWatches have been heard in the last twelve seconds --
     // the visitor and everybody else. For the small "+2" beside him.
     uint8_t                 squadCount(uint32_t now);
+    // Every one of them, with what their advert said they look like -- for the
+    // SQUAD screen. Sorted by address so the order holds still frame to frame.
+    struct SquadMember {
+        uint8_t          mac[6];
+        SquachMesh::Peer peer;
+        uint32_t         seen;
+    };
+    uint8_t                 squadList(uint32_t now, SquadMember* out, uint8_t cap);
+    // Make this board the visitor. The one-visitor rule still holds; this only
+    // says who wins it. The guest already here leaves on the next advert the
+    // chosen one sends, and if the chosen one goes quiet, first-come applies.
+    void                    preferPeer(const uint8_t mac[6]);
     bool                    advertising();
     // Our own advert payload, as the radio should send it (src/mesh.cpp).
     size_t                  buildSelf(uint8_t* out);

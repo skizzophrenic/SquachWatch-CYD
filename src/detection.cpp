@@ -119,12 +119,16 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
         if (name && name[0]) {
             strncpy(det.name, name, sizeof(det.name) - 1);
         }
+        // The matched row's own label, for the types that cover several
+        // devices -- see where the vendor is written, below.
+        const char* label = nullptr;
         // Manufacturer data
         if (adv->haveManufacturerData()) {
             std::string mfg = adv->getManufacturerData();
             if (mfg.size() >= 2) {
                 uint16_t mfgId = (uint8_t)mfg[0] | ((uint8_t)mfg[1] << 8);
                 det.type = lookupMfgId(mfgId);
+                label    = mfgIdName(mfgId);
                 // Apple's company ID alone is every Apple device, so it
                 // still has to be confirmed as a tag. That check now
                 // runs against the RAW advert rather than this parsed
@@ -133,6 +137,7 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
                     if (!isAirTagPayload(adv->getPayload(),
                                          (uint8_t)adv->getPayloadLength())) {
                         det.type = DetectionType::UNKNOWN;
+                        label    = nullptr;
                         // Apple's company ID is also how an iBeacon announces
                         // itself, so this is where they used to die: not an
                         // AirTag, therefore nothing, therefore dropped. They
@@ -195,6 +200,7 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
                     for (uint16_t k : kKnown16) {
                         if (u.equals(NimBLEUUID((uint16_t)k))) {
                             det.type = lookupUuid(k);
+                            label    = uuidName(k);
                             break;
                         }
                     }
@@ -206,6 +212,7 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
         bool matchedByName = false;
         if (det.type == DetectionType::UNKNOWN && det.name[0]) {
             det.type = lookupBtName(det.name);
+            label    = nullptr;          // the name itself identifies it
             matchedByName = (det.type != DetectionType::UNKNOWN);
         }
         if (det.type == DetectionType::UNKNOWN) return;
@@ -240,7 +247,9 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
         } else if (det.type == DetectionType::DRONE) {
             strncpy(det.vendor, "DroneID", sizeof(det.vendor) - 1);
         } else if (det.type == DetectionType::META) {
-            strncpy(det.vendor, "Meta", sizeof(det.vendor) - 1);
+            // Which row matched, because META is four devices: Ray-Ban
+            // Meta's own UUID, any Meta radio, Luxottica, Snap Spectacles.
+            strncpy(det.vendor, label ? label : "Meta", sizeof(det.vendor) - 1);
         } else if (det.type == DetectionType::RAVEN) {
             strncpy(det.vendor, "Raven", sizeof(det.vendor) - 1);
         } else if (det.type == DetectionType::FLOCK) {
@@ -259,6 +268,10 @@ class BleScanCallbacks : public NimBLEAdvertisedDeviceCallbacks {
             // all theirs. The Pineapple and the deauther arrive over WiFi
             // and are labelled in processWiFiQ().
             strncpy(det.vendor, "Flipper", sizeof(det.vendor) - 1);
+        } else if (det.type == DetectionType::SKIMMER && label) {
+            // The serial-port UUID's row. A skimmer matched on its NAME has
+            // no label and stays "BLE": its page is found by the name.
+            strncpy(det.vendor, label, sizeof(det.vendor) - 1);
         } else {
             strncpy(det.vendor, "BLE", sizeof(det.vendor) - 1);
         }

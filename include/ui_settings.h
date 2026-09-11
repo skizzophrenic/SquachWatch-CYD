@@ -17,6 +17,7 @@ enum class SettingsRow : uint8_t {
     DETECTION_FILTER,
     IGNORED_DEVICES,
     POWER_SAVER,
+    SECURITY,
     CALIBRATE,
     CHECK_COLORS,
     DIAGNOSTICS,

@@ -228,6 +228,18 @@ class LiveDevice:
                 raise RuntimeError(f"bad catalog reply {line!r}")
             return line[4:].strip()
 
+    def detcatalog(self):
+        """Every device the emulator can fake, from sim/sim_detections.h."""
+        with self.lock:
+            if not self.proc or self.proc.poll() is not None:
+                self.start()
+            self.proc.stdin.write(b"Y\n")
+            self.proc.stdin.flush()
+            line = self.proc.stdout.readline().decode("utf-8", "replace")
+            if not line.startswith("DETS "):
+                raise RuntimeError(f"bad detection catalog reply {line!r}")
+            return line[5:].strip()
+
     def exchange(self, cmds):
         """Send commands, return (w, h, state, raw) for the LAST frame.
 
@@ -680,8 +692,22 @@ $('rebootBtn').onclick = () => liveReset(false);
 $('wipeBtn').onclick   = () => liveReset(true);
 $('liveZoom').onchange = liveZoom;
 
-TYPES.forEach(([i, name]) => $('detType').add(new Option(name, i)));
-$('detType').value = 6;   // AIRTAG, the one worth reaching for first
+// One entry per device, from the emulator's own table -- see /live/detcat.
+// The T command takes the index.
+(async () => {
+  try {
+    const groups = {};
+    for (const [i, type, label] of await (await fetch('/live/detcat')).json()) {
+      if (!groups[type]) {
+        groups[type] = document.createElement('optgroup');
+        groups[type].label = type;
+        $('detType').add(groups[type]);
+      }
+      groups[type].appendChild(new Option(label, i));
+      if (label === 'Apple AirTag') $('detType').value = i;   // the one worth reaching for first
+    }
+  } catch (e) { console.error('detection list', e); }
+})();
 // Queued like a touch rather than sent directly, so a trigger can't
 // overtake a tap that was made before it.
 $('trigBtn').onclick = () => {
@@ -920,6 +946,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._send(200, "application/octet-stream", raw,
                               [("X-Width", str(w)), ("X-Height", str(h)),
                                ("X-State", state), ("X-Mesh", DEVICE.mesh)])
+
+        if parsed.path == "/live/detcat":
+            try:
+                body = DEVICE.detcatalog().encode()
+            except Exception as e:
+                return self._fail(e)
+            return self._send(200, "application/json", body)
 
         if parsed.path == "/live/meshcat":
             try:

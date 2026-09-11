@@ -22,8 +22,8 @@ static void computeGeom(TFT_eSPI& t, int screenH, int& top, int& bodyBottom, int
     rowH = t.fontHeight() + 8;
 }
 
-void uiDetFilterInit(TFT_eSPI& t) {
-    g_scroll = 0;
+void uiDetFilterInit(TFT_eSPI& t, bool keepScroll) {
+    if (!keepScroll) g_scroll = 0;
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
 }
 

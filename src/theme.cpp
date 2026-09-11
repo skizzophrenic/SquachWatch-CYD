@@ -6,6 +6,7 @@
 #include "bangers_font.h"
 #include "squachy.h"
 #include "settings.h"
+#include "security.h"
 
 namespace Theme {
 
@@ -211,6 +212,42 @@ void setRotateIconVisible(bool visible) {
     s_rotateIconVisible = visible;
 }
 
+// The padlock. Shown only while a PIN is set (Security::enabled()), so its hit
+// box does not exist otherwise. It shares the rotate icon's box when rotation
+// is hidden, else sits one icon-width to its left.
+static const int LOCK_ICON_W = 26;
+static const int LOCK_HIT_W   = 44;
+
+// Same condition drawTitleBar uses to decide whether the rotate icon is up.
+static bool rotateShown() {
+    return s_rotateIconVisible && !Settings::rotationLocked();
+}
+// Left edge of the padlock's own icon box.
+static int lockIconX(int w) {
+    return rotateShown() ? (w - ROTATE_ICON_W - LOCK_ICON_W) : (w - LOCK_ICON_W);
+}
+
+static void drawLockIcon(TFT_eSPI& t, int w, int barH) {
+    const int x0 = lockIconX(w);
+    t.fillRect(x0, 0, LOCK_ICON_W, barH, BG);
+    const int cx = x0 + LOCK_ICON_W / 2;
+    const int cy = barH / 2;
+    // A little shackle over a body.
+    t.drawFastHLine(cx - 3, cy - 4, 6, AMBER);
+    t.drawFastVLine(cx - 3, cy - 4, 3, AMBER);
+    t.drawFastVLine(cx + 2, cy - 4, 3, AMBER);
+    t.fillRect(cx - 5, cy - 1, 10, 7, AMBER);
+    t.drawPixel(cx, cy + 2, BG);            // keyhole
+}
+
+bool lockButtonHit(int x, int y, int w) {
+    if (!Security::enabled()) return false;
+    const int x0 = lockIconX(w);
+    return x >= x0 - (LOCK_HIT_W - LOCK_ICON_W) && x < x0 + LOCK_ICON_W &&
+           y >= 0 && y < ROTATE_HIT_H;
+}
+
+
 // The bar is gone; the two buttons that lived on it are not.
 //
 // It used to paint a full-width gradient, a rule, and a centred title across
@@ -254,6 +291,11 @@ void drawTitleBar(TFT_eSPI& t, const char* title) {
         t.fillRect(w - ROTATE_ICON_W, 0, ROTATE_ICON_W, ICON_BOX_H, BG);
         s_rotateIconDrawn = false;
     }
+    // The padlock, only while a PIN is set. Every screen that draws this bar
+    // repaints its whole top band from the background first, so a lock that
+    // was there last frame and is not now leaves nothing behind -- no erase
+    // needed, unlike the rotate icon above, which predates that repaint.
+    if (Security::enabled()) drawLockIcon(t, w, ICON_BOX_H);
 }
 
 void drawButton(TFT_eSPI& t, int x, int y, int w, int h,

@@ -14,7 +14,9 @@
 // in would drag Preferences and the SD log into every UI translation unit.
 class DetectionEngine;
 
-void uiDetFilterInit(TFT_eSPI& t);
+// keepScroll: coming back from the iBeacon warning, to the row that opened it
+// rather than to the top of the list.
+void uiDetFilterInit(TFT_eSPI& t, bool keepScroll = false);
 // Takes the engine now, and only for the backdrop. THE GIBSON is the one
 // background made of real data -- the skyline reacts to the log and the
 // trace across the bottom is live per-channel activity -- so it cannot be

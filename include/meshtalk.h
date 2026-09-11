@@ -71,6 +71,11 @@ struct Message {
     uint32_t at;            // millis() when it arrived
 };
 const Message& inbox();
+// The last few messages, newest first -- the SQUAD screen's inbox. RAM only:
+// a reboot, or a wipe, and they are gone, as every message always has been.
+constexpr uint8_t INBOX_N = 8;
+uint8_t        inboxCount();
+const Message& inboxAt(uint8_t i);        // 0 is the newest
 void           markRead();
 const char*    lineText(const Message& m);
 
@@ -82,6 +87,11 @@ struct EmoteIn {
     uint32_t at;
 };
 bool takeEmote(EmoteIn& out);
+
+// Forget the phrase, the key and everything heard -- in RAM. The emulator's
+// half of a security wipe; on the device the store is erased and the board
+// restarts, which forgets all of it anyway.
+void forget();
 
 } // namespace MeshTalk
 #endif
