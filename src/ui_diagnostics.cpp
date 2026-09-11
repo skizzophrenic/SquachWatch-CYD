@@ -60,14 +60,31 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
     y = drawLine(t, y, Theme::CYAN, "RESET:", "%s", info.resetReason);
     // Only after an actual panic, and only when the breadcrumb survived. A
     // blank line here means a clean boot, not a missing feature.
-    if (info.crash.valid) {
-        y = drawLine(t, y, Theme::RED, "LAST CRASH:", "%lum%lus up, %lu free, %lu block",
-                     (unsigned long)(info.crash.uptimeMs / 60000),
-                     (unsigned long)((info.crash.uptimeMs / 1000) % 60),
-                     (unsigned long)info.crash.heapFree,
-                     (unsigned long)info.crash.heapBlock);
-        y = drawLine(t, y, Theme::RED, "  ON:", "screen %u, %lu detections",
-                     (unsigned)info.crash.screen, (unsigned long)info.crash.lifetime);
+    if (info.crash.valid || info.crash.haveDump) {
+        if (info.crash.valid)
+            y = drawLine(t, y, Theme::RED, "LAST CRASH:", "%lum%lus up, %lu free, %lu block",
+                         (unsigned long)(info.crash.uptimeMs / 60000),
+                         (unsigned long)((info.crash.uptimeMs / 1000) % 60),
+                         (unsigned long)info.crash.heapFree,
+                         (unsigned long)info.crash.heapBlock);
+        else
+            y = drawLine(t, y, Theme::RED, "LAST CRASH:", "no breadcrumb survived");
+        if (info.crash.haveDump) {
+            // Where it died, from the core dump. With these two lines and the
+            // ELF of the build that crashed, addr2line names the functions --
+            // which is the difference between "it crashed" and a fix.
+            y = drawLine(t, y, Theme::RED, "  IN:", "%s @ %08lX%s", info.crash.task,
+                         (unsigned long)info.crash.pc, info.crash.dumpOlder ? " (old fw)" : "");
+            char bt[40] = "--";
+            size_t o = 0;
+            for (uint8_t i = 0; i < info.crash.btN && i < 3; i++)
+                o += snprintf(bt + o, sizeof bt - o, "%s%08lX", i ? " " : "",
+                              (unsigned long)info.crash.bt[i]);
+            y = drawLine(t, y, Theme::RED, "  BT:", "%s", bt);
+        } else {
+            y = drawLine(t, y, Theme::RED, "  ON:", "screen %u, %lu detections",
+                         (unsigned)info.crash.screen, (unsigned long)info.crash.lifetime);
+        }
     }
     // Uptime next to the reset reason on purpose: together they answer
     // "did this thing restart on me", which is one question and not two.
@@ -99,19 +116,19 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
     y += 4;
 
     // Frame cost. The push is a fixed byte count over SPI, so it moves
-    // only if the bus clock does -- printed separately from the drawing
-    // work so a change to SPI_FREQUENCY shows up here unambiguously
-    // instead of being averaged into one "it feels smoother" number.
-    // fps is derived from the whole frame, not the push alone.
+    // only if the bus clock does -- kept as its own figure so a change to
+    // SPI_FREQUENCY shows up here unambiguously instead of being averaged
+    // into one "it feels smoother" number. fps is derived from the whole
+    // frame, not the push alone. On one line with FRAME since the crash
+    // report grew a line: the screen already ran into the BACK button.
     {
         uint32_t fus = info.frameUs ? info.frameUs : 1;
-        y = drawLine(t, y, Theme::AMBER, "PUSH:", "%lu.%lu ms",
-                     (unsigned long)(info.pushUs / 1000),
-                     (unsigned long)((info.pushUs % 1000) / 100));
-        y = drawLine(t, y, Theme::AMBER, "FRAME:", "%lu.%lu ms  (%lu fps)",
+        y = drawLine(t, y, Theme::AMBER, "FRAME:", "%lu.%lu ms (%lu fps), push %lu.%lu",
                      (unsigned long)(fus / 1000),
                      (unsigned long)((fus % 1000) / 100),
-                     (unsigned long)(1000000UL / fus));
+                     (unsigned long)(1000000UL / fus),
+                     (unsigned long)(info.pushUs / 1000),
+                     (unsigned long)((info.pushUs % 1000) / 100));
         // FRAME above is this screen, which has no backdrop. BG is the
         // last animated screen's, and is the only figure here that says
         // anything about the background you picked.
@@ -133,10 +150,9 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
     {
         y += 4;
         const MeshProbe::Stats ms = MeshProbe::stats();
-        y = drawLine(t, y, Theme::CYAN, "BLE SEEN:", "%u.%u /s",
-                     (unsigned)(ms.offRate / 10), (unsigned)(ms.offRate % 10));
-        y = drawLine(t, y, ms.advOn ? Theme::GREEN : Theme::VAPOR_PINK,
-                     "ADVERTISING:", "%s", ms.advOn ? "yes" : "no");
+        y = drawLine(t, y, ms.advOn ? Theme::GREEN : Theme::CYAN, "BLE SEEN:", "%u.%u /s, %s",
+                     (unsigned)(ms.offRate / 10), (unsigned)(ms.offRate % 10),
+                     ms.advOn ? "advertising" : "not advertising");
         // What the once-a-minute scan restart gave back: the leak it closes,
         // measured. This row used to repeat the HEAP line at the top, which
         // already carries free and largest block. Kilobytes a restart in a busy

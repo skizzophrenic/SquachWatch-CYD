@@ -10,6 +10,15 @@
 #include <Preferences.h>  // AWOK's own per-rotation touch-cal storage; see the AWOK block below pollTouch()'s globals
 #include <esp_heap_caps.h>   // heap_caps_get_largest_free_block() -- diagnostics screen
 #include <esp_system.h>      // esp_reset_reason() -- diagnostics screen
+// The core dump's own summary -- which task, and where. The emulator has
+// neither header, and nothing to summarise.
+#if __has_include(<esp_core_dump.h>)
+#include <esp_core_dump.h>
+#include <esp_ota_ops.h>
+#define HAVE_COREDUMP_SUMMARY (CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH && CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF)
+#else
+#define HAVE_COREDUMP_SUMMARY 0
+#endif
 #include <esp_heap_caps.h>
 #include "ui_diagnostics.h"   // CrashReport, used by the breadcrumb below
 
@@ -43,6 +52,32 @@ static void crashReportInit() {
         g_lastCrash.lifetime  = g_crumb.lifetime;
         g_lastCrash.screen    = g_crumb.screen;
     }
+#if HAVE_COREDUMP_SUMMARY
+    // The resets that write a core dump are the panics and the two watchdogs
+    // that panic -- not the RTC watchdog, after which the dump in flash is an
+    // earlier crash's. The summary is what the esp-coredump tool leads with.
+    if (r == ESP_RST_PANIC || r == ESP_RST_INT_WDT || r == ESP_RST_TASK_WDT) {
+        static esp_core_dump_summary_t s;
+        if (esp_core_dump_get_summary(&s) == ESP_OK) {
+            g_lastCrash.haveDump = true;
+            strncpy(g_lastCrash.task, s.exc_task, sizeof g_lastCrash.task - 1);
+            g_lastCrash.task[sizeof g_lastCrash.task - 1] = '\0';
+            g_lastCrash.pc    = s.exc_pc;
+            g_lastCrash.cause = s.ex_info.exc_cause;
+            g_lastCrash.vaddr = s.ex_info.exc_vaddr;
+            // The backtrace usually starts at the faulting PC itself; the
+            // frames above it are the ones worth the screen space.
+            uint32_t i = (s.exc_bt_info.depth && s.exc_bt_info.bt[0] == s.exc_pc) ? 1 : 0;
+            uint8_t  n = 0;
+            for (; i < s.exc_bt_info.depth && i < 16 && n < 4; i++) g_lastCrash.bt[n++] = s.exc_bt_info.bt[i];
+            g_lastCrash.btN = n;
+            char running[APP_ELF_SHA256_SZ] = { 0 };
+            esp_ota_get_app_elf_sha256(running, sizeof running);
+            g_lastCrash.dumpOlder =
+                strncmp((const char*)s.app_elf_sha256, running, sizeof running - 1) != 0;
+        }
+    }
+#endif
     g_crumb.magic = CRUMB_MAGIC;
 }
 
@@ -1218,6 +1253,16 @@ static void printBootBanner() {
             Serial.println("*** The crash is saved in flash. To read it out:");
             Serial.println("***   esptool read_flash 0x3F0000 0x10000 core.bin");
             Serial.println("***   espcoredump.py info_corefile -c core.bin firmware.elf");
+            if (g_lastCrash.haveDump) {
+                Serial.printf("*** In task %s at 0x%08lx (cause %lu, address 0x%08lx)%s\n",
+                              g_lastCrash.task, (unsigned long)g_lastCrash.pc,
+                              (unsigned long)g_lastCrash.cause, (unsigned long)g_lastCrash.vaddr,
+                              g_lastCrash.dumpOlder ? " -- written by other firmware" : "");
+                Serial.print("*** Backtrace:");
+                for (uint8_t i = 0; i < g_lastCrash.btN; i++)
+                    Serial.printf(" 0x%08lx", (unsigned long)g_lastCrash.bt[i]);
+                Serial.println();
+            }
             break;
         default:
             break;

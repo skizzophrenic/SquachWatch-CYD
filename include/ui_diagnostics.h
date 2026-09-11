@@ -33,6 +33,17 @@ struct CrashReport {
     uint32_t heapBlock;    // largest contiguous -- the fragmentation canary
     uint32_t lifetime;     // detections seen, as a proxy for RF churn
     uint8_t  screen;       // AppState it was on
+
+    // From the core dump in flash -- only after a reset that writes one. The
+    // task and the addresses are what addr2line needs, against the ELF of the
+    // firmware that crashed, to name the function from a photo of the screen.
+    bool     haveDump;
+    bool     dumpOlder;    // written by other firmware than is running now
+    char     task[16];
+    uint32_t pc;
+    uint32_t cause, vaddr; // the Xtensa exception cause and the address it hit
+    uint8_t  btN;
+    uint32_t bt[4];        // the frames above pc, nearest first
 };
 
 struct DiagnosticsInfo {
