@@ -152,24 +152,35 @@ uint8_t textParts(const char* s);
 // from the message screen and acted out by both pairs at once: the sender's
 // own, and the one on the other board, where the sender is the visitor.
 //
-// One sealed byte, the same shape as a canned line, under kind 3 -- which
-// v1.5.25 and earlier do not read, so they drop an emote without a word rather
-// than show a message they cannot place. The emote is the high four bits; the
-// low four carry whatever both boards must agree on for the two performances
-// to match. Rock-paper-scissors is the one that needs it: left to themselves
-// the boards would each pick both throws, and two people standing side by side
-// would watch two different games.
+// Two sealed bytes under kind 3 -- which v1.5.25 and earlier do not read, so
+// they drop an emote without a word rather than show a message they cannot
+// place. The first byte is the emote; the second, its SETUP: whatever both
+// boards must agree on for the two performances to match. Left to themselves
+// the boards would each roll their own dice, and two people standing side by
+// side would watch two different games.
+//
+// It was one byte, four bits of each, until there were more than sixteen
+// emotes. Nothing released had sent one, so the format was free to change.
 //
 // May be ADDED at the end once released, never reordered.
-enum class Emote : uint8_t { WAVE, HIGH_FIVE, DANCE, RPS, SNOWBALL, BOO, COUNT };
-constexpr size_t EMOTE_FRAME_LEN = CANNED_FRAME_LEN;
-// RPS's four bits: the sender's throw times three, plus the receiver's -- each
-// 0 rock, 1 paper, 2 scissors. No other emote uses them yet; they go as zero.
-constexpr uint8_t emoteByte(Emote e, uint8_t arg) {
-    return (uint8_t)(((uint8_t)e << 4) | (arg & 0x0F));
-}
+enum class Emote : uint8_t {
+    WAVE, HIGH_FIVE, DANCE, RPS, SNOWBALL, BOO,
+    // Everything from here on is a script -- see emote_script.h.
+    FIST_BUMP, HANDSHAKE, SALUTE, BOW, HUG,
+    COIN, DICE, ARM_WRESTLE, TUG, LEAPFROG,
+    PIE, BALLOON, PLANE, PILLOW, TICKLE,
+    GIFT, SNACK, CHEERS, CONFETTI, FIREWORKS,
+    HEART, LAUGH, SAD, GRR, SLEEPY,
+    TINFOIL, CAMERA, SPOTTED, HOWL, SELFIE,
+    COUNT
+};
+constexpr size_t EMOTE_FRAME_LEN = HDR_LEN + 2 + TAG_LEN;   // 16
+static_assert(EMOTE_FRAME_LEN <= FRAME_MAX, "an emote fits where a message does");
+// The setup byte, per emote. RPS: the sender's throw times three, plus the
+// receiver's -- each 0 rock, 1 paper, 2 scissors. The rest are described with
+// the scripts (EmoteScript::roll); an emote with nothing to agree on sends 0.
 size_t sealEmote(const Crypto& c, const uint8_t mac[6], uint32_t counter,
-                 uint8_t emote, uint8_t* out, size_t cap);
+                 uint8_t emote, uint8_t setup, uint8_t* out, size_t cap);
 
 void   nonceFor(const uint8_t mac[6], uint32_t counter, uint8_t nonce[NONCE_LEN]);
 bool   isFrame(const uint8_t* in, size_t len);        // magic only: is it ours at all
@@ -197,10 +208,10 @@ Open openCanned(const Crypto& c, const uint8_t mac[6], const uint8_t* in, size_t
 Open openTextPart(const Crypto& c, const uint8_t mac[6], const uint8_t* in, size_t len,
                   uint32_t& counter, uint8_t& part, uint8_t& total,
                   char chars[TEXT_PART_CHARS + 1]);
-// An emote's byte. UNKNOWN_LINE when it is authentic but newer than this
-// build: nothing here to act out, and nothing wrong either.
+// An emote and its setup. UNKNOWN_LINE when it is authentic but newer than
+// this build: nothing here to act out, and nothing wrong either.
 Open openEmote(const Crypto& c, const uint8_t mac[6], const uint8_t* in, size_t len,
-               uint32_t& counter, uint8_t& emote);
+               uint32_t& counter, uint8_t& emote, uint8_t& setup);
 
 // ---- reassembly ----------------------------------------------------------------
 // Parts arrive in whatever order the scan catches them, and each is repeated

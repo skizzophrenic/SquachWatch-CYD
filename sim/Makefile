@@ -39,6 +39,7 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/squachmesh.cpp \
             $(SRC)/mesh.cpp \
             $(SRC)/meshmsg.cpp \
+            $(SRC)/emote_script.cpp \
             $(SRC)/meshwords.cpp \
             $(SRC)/meshtalk.cpp \
             $(SRC)/meshtutor.cpp \

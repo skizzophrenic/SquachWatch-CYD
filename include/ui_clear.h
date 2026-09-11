@@ -28,9 +28,9 @@ void uiClearSetGuest(const SquachMesh::Peer* p);
 bool uiClearBubbleHit(int x, int y);
 // The "+N" squad badge beside a visitor, which opens the SQUAD screen.
 bool uiClearSquadHit(int x, int y);
-// An emote (MeshMsg::emoteByte): one this board just sent, or one from the
+// An emote (MeshMsg::Emote) and its setup: one this board just sent, or one from the
 // visitor's board (fromGuest). The two of them act it out at the next free
 // moment of the visit -- whoever sent it going first -- or not at all if none
 // comes within a few seconds. False when there is no visit to act it out in.
-bool uiClearEmote(uint8_t emote, bool fromGuest);
+bool uiClearEmote(uint8_t emote, uint8_t setup, bool fromGuest);
 #endif

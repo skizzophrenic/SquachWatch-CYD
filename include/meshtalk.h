@@ -44,7 +44,7 @@ Send     sendText(const char* text, uint32_t now);
 // An emote (see MeshMsg::Emote): one frame, on the air for nine seconds rather
 // than thirty -- a reaction caught a quarter of a minute late would be acted
 // out at nothing.
-Send     sendEmote(uint8_t emote, uint32_t now);
+Send     sendEmote(uint8_t emote, uint8_t setup, uint32_t now);
 bool     sending(uint32_t now);
 // A MESSAGE on the air, not an emote. What an emote must not cut short.
 bool     sendingMessage(uint32_t now);
@@ -82,7 +82,8 @@ const char*    lineText(const Message& m);
 // The last emote to arrive, handed over once. Not in the inbox: it is not
 // something to read, and it never lights the red bubble.
 struct EmoteIn {
-    uint8_t  emote;         // MeshMsg::emoteByte
+    uint8_t  emote;         // MeshMsg::Emote
+    uint8_t  setup;         // and what both boards agree on for it
     uint8_t  mac[6];
     uint32_t at;
 };

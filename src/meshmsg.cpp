@@ -122,7 +122,7 @@ static void writeHeader(uint32_t counter, uint8_t kind, uint8_t* out) {
     out[5] = (uint8_t)(counter >> 16);
 }
 
-// A canned line and an emote are the same frame: one sealed byte under its kind.
+// A canned line is one sealed byte under its kind.
 static size_t sealByte(const Crypto& c, const uint8_t mac[6], uint32_t counter,
                        uint8_t kind, uint8_t v, uint8_t* out, size_t cap) {
     if (cap < CANNED_FRAME_LEN || counter > COUNTER_MAX) return 0;
@@ -140,9 +140,15 @@ size_t sealCanned(const Crypto& c, const uint8_t mac[6], uint32_t counter,
 }
 
 size_t sealEmote(const Crypto& c, const uint8_t mac[6], uint32_t counter,
-                 uint8_t emote, uint8_t* out, size_t cap) {
-    if ((emote >> 4) >= (uint8_t)Emote::COUNT) return 0;
-    return sealByte(c, mac, counter, KIND_EMOTE, emote, out, cap);
+                 uint8_t emote, uint8_t setup, uint8_t* out, size_t cap) {
+    if (emote >= (uint8_t)Emote::COUNT) return 0;
+    if (cap < EMOTE_FRAME_LEN || counter > COUNTER_MAX) return 0;
+    writeHeader(counter, KIND_EMOTE, out);
+    uint8_t nonce[NONCE_LEN];
+    nonceFor(mac, counter, nonce);
+    const uint8_t pt[2] = { emote, setup };
+    if (!c.seal(nonce, out, HDR_LEN, pt, 2, out + HDR_LEN, out + HDR_LEN + 2)) return 0;
+    return EMOTE_FRAME_LEN;
 }
 
 size_t sealTextPart(const Crypto& c, const uint8_t mac[6], uint32_t counter,
@@ -191,12 +197,18 @@ Open openCanned(const Crypto& c, const uint8_t mac[6], const uint8_t* in, size_t
 }
 
 Open openEmote(const Crypto& c, const uint8_t mac[6], const uint8_t* in, size_t len,
-               uint32_t& counter, uint8_t& emote) {
-    uint8_t pt = 0;
-    const Open r = openByte(c, mac, in, len, KIND_EMOTE, counter, pt);
-    if (r != Open::OK) return r;
-    emote = pt;
-    return ((pt >> 4) < (uint8_t)Emote::COUNT) ? Open::OK : Open::UNKNOWN_LINE;
+               uint32_t& counter, uint8_t& emote, uint8_t& setup) {
+    if (!isFrame(in, len)) return Open::NOT_OURS;
+    uint8_t kind;
+    if (!parseHeader(in, len, counter, kind)) return Open::BAD_FORMAT;
+    if (kind != KIND_EMOTE || len != EMOTE_FRAME_LEN) return Open::BAD_FORMAT;
+    uint8_t nonce[NONCE_LEN];
+    nonceFor(mac, counter, nonce);
+    uint8_t pt[2] = { 0, 0 };
+    if (!c.open(nonce, in, HDR_LEN, in + HDR_LEN, 2, in + HDR_LEN + 2, pt)) return Open::BAD_TAG;
+    emote = pt[0];
+    setup = pt[1];
+    return (pt[0] < (uint8_t)Emote::COUNT) ? Open::OK : Open::UNKNOWN_LINE;
 }
 
 Open openTextPart(const Crypto& c, const uint8_t mac[6], const uint8_t* in, size_t len,

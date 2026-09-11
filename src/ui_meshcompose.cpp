@@ -9,7 +9,10 @@
 #include "settings.h"
 #include "detection.h"
 #include "ui_clear.h"
+#include "emote_script.h"
+#include "squachy.h"
 #include <Arduino.h>
+#include <esp_system.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -41,15 +44,18 @@ char        s_confirm[40];
 // on the status row, which is too narrow for forty-eight characters.
 char        s_typed[MeshMsg::TEXT_MAX + 1] = "";
 bool        s_typedOn = false;
-// Emotes: the smiley at the top swaps the lines for six things to DO. One tap
-// sends one -- no confirmation, unlike a message: it is over in a few seconds
-// and a wrong one costs a laugh, not something said that was not meant.
+// Emotes: the smiley at the top swaps the lines for things to DO -- thirty-six
+// of them, six tabs of six. One tap sends one -- no confirmation, unlike a
+// message: it is over in a few seconds and a wrong one costs a laugh, not
+// something said that was not meant. RANDOM picks for you.
 bool        s_emoteOn  = false;
 Rect        s_emoteBtn = { 0, 0, 0, 0 };
-Rect        s_emoteRect[(uint8_t)MeshMsg::Emote::COUNT];
-const char* const EMOTE_NAME[] = { "WAVE", "HIGH FIVE", "DANCE-OFF", "ROCK PAPER", "SNOWBALL", "BOO!" };
-const char* const EMOTE_SUB[]  = { "",     "",          "",          "SCISSORS",   "",         ""     };
-static_assert(sizeof EMOTE_NAME / sizeof EMOTE_NAME[0] == (size_t)MeshMsg::Emote::COUNT, "a name per emote");
+Rect        s_emoteRect[EmoteScript::PER_TAB];
+Rect        s_tabRect[EmoteScript::TABS];
+Rect        s_random = { 0, 0, 0, 0 };
+// Kept across visits to this screen, not across a reboot: whoever sends a lot
+// of pranks should find the pranks where they left them.
+uint8_t     s_tab = 0;
 
 const int BW = 68, BH = 26, AW = 44, TW = 56;
 
@@ -99,6 +105,12 @@ ComposeHit tutorTouch(int x, int y) {
         }
     }
     return ComposeHit::NONE;
+}
+
+void heart(TFT_eSPI& t, int cx, int cy, int r, uint16_t c) {
+    t.fillCircle(cx - r / 2, cy - 1, r / 2 + 1, c);
+    t.fillCircle(cx + r / 2, cy - 1, r / 2 + 1, c);
+    t.fillTriangle(cx - r - 1, cy, cx + r + 1, cy, cx, cy + r + 2, c);
 }
 
 void drawSmiley(TFT_eSPI& t, int cx, int cy) {
@@ -161,8 +173,190 @@ void drawEmoteIcon(TFT_eSPI& t, uint8_t e, int cx, int cy) {
         t.fillRect(cx + 2, cy - 4, 2, 3, K);
         t.fillRect(cx - 1, cy + 1, 3, 2, K);
         break;
+    case MeshMsg::Emote::FIST_BUMP:                     // two fists, meeting
+        t.fillRoundRect(cx - 11, cy - 3, 8, 7, 2, Y);
+        t.fillRoundRect(cx + 3, cy - 3, 8, 7, 2, Y);
+        t.drawFastVLine(cx, cy - 8, 4, W);
+        t.drawLine(cx - 4, cy - 7, cx - 2, cy - 5, W);
+        t.drawLine(cx + 4, cy - 7, cx + 2, cy - 5, W);
+        break;
+    case MeshMsg::Emote::HANDSHAKE:                     // hands clasped, two cuffs
+        t.fillRoundRect(cx - 8, cy - 3, 16, 7, 3, Y);
+        t.drawFastVLine(cx - 1, cy - 3, 7, K);
+        t.fillRect(cx - 12, cy - 4, 4, 9, Theme::CYAN);
+        t.fillRect(cx + 8, cy - 4, 4, 9, P);
+        break;
+    case MeshMsg::Emote::SALUTE:                        // two chevrons
+        for (int i = 0; i < 2; i++) {
+            t.drawWideLine(cx - 7, cy - 5 + i * 5, cx, cy + i * 5, 2, Y);
+            t.drawWideLine(cx, cy + i * 5, cx + 7, cy - 5 + i * 5, 2, Y);
+        }
+        break;
+    case MeshMsg::Emote::BOW:                           // a top hat, doffed
+        t.fillRect(cx - 7, cy + 3, 14, 2, P);
+        t.fillRect(cx - 4, cy - 6, 8, 9, P);
+        t.fillRect(cx - 4, cy, 8, 2, Y);
+        break;
+    case MeshMsg::Emote::HUG:                           // arms round a heart
+        heart(t, cx, cy, 3, P);
+        t.drawWideLine(cx - 9, cy - 4, cx - 5, cy + 6, 2, Y);
+        t.drawWideLine(cx + 9, cy - 4, cx + 5, cy + 6, 2, Y);
+        break;
+    case MeshMsg::Emote::COIN:
+        t.fillCircle(cx, cy, 7, Y);
+        t.drawCircle(cx, cy, 7, Theme::AMBER);
+        t.drawCircle(cx, cy, 4, Theme::AMBER);
+        break;
+    case MeshMsg::Emote::DICE:
+        t.fillRoundRect(cx - 7, cy - 7, 14, 14, 2, W);
+        t.fillCircle(cx - 4, cy - 4, 1, Theme::BLACK);
+        t.fillCircle(cx, cy, 1, Theme::BLACK);
+        t.fillCircle(cx + 4, cy + 4, 1, Theme::BLACK);
+        break;
+    case MeshMsg::Emote::ARM_WRESTLE:                   // a flexed arm
+        t.fillRect(cx - 9, cy + 1, 12, 5, Y);
+        t.fillCircle(cx + 3, cy - 2, 5, Y);
+        t.fillCircle(cx + 4, cy - 7, 3, Y);
+        break;
+    case MeshMsg::Emote::TUG:                           // a rope and its flag
+        t.drawWideLine(cx - 10, cy - 2, cx + 10, cy - 2, 2, Theme::AMBER);
+        t.fillTriangle(cx - 3, cy - 1, cx + 3, cy - 1, cx, cy + 6, Theme::RED);
+        break;
+    case MeshMsg::Emote::LEAPFROG: {                    // a frog
+        const uint16_t G = Theme::GREEN;
+        t.fillEllipse(cx, cy + 2, 8, 5, G);
+        t.fillCircle(cx - 4, cy - 3, 3, G);
+        t.fillCircle(cx + 4, cy - 3, 3, G);
+        t.fillRect(cx - 5, cy - 4, 2, 2, K);
+        t.fillRect(cx + 3, cy - 4, 2, 2, K);
+        break;
+    }
+    case MeshMsg::Emote::PIE:
+        t.fillEllipse(cx, cy + 3, 9, 4, Theme::W95_SHADOW);
+        t.fillEllipse(cx, cy, 8, 4, W);
+        t.fillCircle(cx, cy - 3, 2, Theme::RED);
+        break;
+    case MeshMsg::Emote::BALLOON:
+        t.fillCircle(cx, cy - 2, 6, Theme::VAPOR_BLUE);
+        t.fillCircle(cx - 2, cy - 4, 1, W);
+        t.drawLine(cx, cy + 4, cx + 2, cy + 8, W);
+        break;
+    case MeshMsg::Emote::PLANE:
+        t.fillTriangle(cx + 9, cy - 4, cx - 8, cy - 1, cx - 3, cy + 5, W);
+        t.drawLine(cx + 9, cy - 4, cx - 3, cy + 1, Theme::W95_SHADOW);
+        break;
+    case MeshMsg::Emote::PILLOW:
+        t.fillRoundRect(cx - 9, cy - 5, 18, 11, 4, W);
+        t.drawRoundRect(cx - 9, cy - 5, 18, 11, 4, Theme::W95_SHADOW);
+        break;
+    case MeshMsg::Emote::TICKLE:                        // a feather
+        t.drawWideLine(cx - 7, cy + 7, cx + 6, cy - 7, 2, W);
+        for (int i = 0; i < 4; i++) t.drawLine(cx - 3 + i * 3, cy + 3 - i * 3, cx - 7 + i * 3, cy - 1 - i * 3, W);
+        break;
+    case MeshMsg::Emote::GIFT:
+        t.fillRect(cx - 7, cy - 5, 14, 12, P);
+        t.fillRect(cx - 1, cy - 5, 2, 12, Y);
+        t.fillRect(cx - 7, cy, 14, 2, Y);
+        t.fillCircle(cx - 3, cy - 7, 2, Y);
+        t.fillCircle(cx + 3, cy - 7, 2, Y);
+        break;
+    case MeshMsg::Emote::SNACK:                         // a slice
+        t.fillTriangle(cx - 7, cy - 6, cx + 7, cy - 6, cx, cy + 8, Y);
+        t.fillRect(cx - 7, cy - 8, 14, 3, Theme::AMBER);
+        t.fillCircle(cx - 2, cy - 2, 1, Theme::RED);
+        t.fillCircle(cx + 2, cy + 1, 1, Theme::RED);
+        break;
+    case MeshMsg::Emote::CHEERS:                        // two mugs
+        for (int i = 0; i < 2; i++) {
+            const int x = cx - 9 + i * 11;
+            t.fillRect(x, cy - 3, 7, 9, Theme::AMBER);
+            t.fillRect(x, cy - 5, 7, 3, W);
+        }
+        t.drawFastVLine(cx, cy - 9, 3, W);
+        break;
+    case MeshMsg::Emote::CONFETTI: {
+        const uint16_t c[4] = { P, Theme::CYAN, Y, Theme::GREEN };
+        static const int8_t px[8] = { -8, -3, 3, 8, -6, 0, 6, -1 }, py[8] = { -6, -8, -5, -7, 1, -1, 2, 6 };
+        for (int i = 0; i < 8; i++) t.fillRect(cx + px[i], cy + py[i], 3, 2, c[i % 4]);
+        break;
+    }
+    case MeshMsg::Emote::FIREWORKS:
+        for (int i = 0; i < 8; i++) {
+            const float a = (float)i * 0.785398f;
+            t.drawLine(cx + (int)(cosf(a) * 3), cy + (int)(sinf(a) * 3),
+                       cx + (int)(cosf(a) * 8), cy + (int)(sinf(a) * 8), (i & 1) ? P : Y);
+        }
+        break;
+    case MeshMsg::Emote::HEART:
+        heart(t, cx, cy, 6, Theme::RED);
+        break;
+    case MeshMsg::Emote::LAUGH:
+        t.fillCircle(cx, cy, 7, Y);
+        t.drawLine(cx - 4, cy - 2, cx - 2, cy - 4, K);
+        t.drawLine(cx + 4, cy - 2, cx + 2, cy - 4, K);
+        t.fillEllipse(cx, cy + 3, 4, 2, K);
+        break;
+    case MeshMsg::Emote::SAD:
+        t.fillCircle(cx, cy, 7, Y);
+        t.fillRect(cx - 3, cy - 3, 2, 2, K);
+        t.fillRect(cx + 2, cy - 3, 2, 2, K);
+        t.drawLine(cx - 3, cy + 4, cx, cy + 2, K);
+        t.drawLine(cx, cy + 2, cx + 3, cy + 4, K);
+        t.fillCircle(cx - 3, cy + 1, 1, Theme::CYAN);
+        break;
+    case MeshMsg::Emote::GRR:
+        t.fillCircle(cx, cy, 7, Theme::RED);
+        t.drawWideLine(cx - 5, cy - 4, cx - 1, cy - 2, 2, K);
+        t.drawWideLine(cx + 5, cy - 4, cx + 1, cy - 2, 2, K);
+        t.fillRect(cx - 3, cy + 2, 7, 2, W);
+        break;
+    case MeshMsg::Emote::SLEEPY:                        // Zz
+        t.drawLine(cx - 7, cy - 5, cx + 1, cy - 5, Theme::CYAN);
+        t.drawLine(cx + 1, cy - 5, cx - 7, cy + 3, Theme::CYAN);
+        t.drawLine(cx - 7, cy + 3, cx + 1, cy + 3, Theme::CYAN);
+        t.drawLine(cx + 3, cy, cx + 8, cy, Theme::CYAN);
+        t.drawLine(cx + 8, cy, cx + 3, cy + 5, Theme::CYAN);
+        t.drawLine(cx + 3, cy + 5, cx + 8, cy + 5, Theme::CYAN);
+        break;
+    case MeshMsg::Emote::TINFOIL:
+        t.fillTriangle(cx - 8, cy + 6, cx + 8, cy + 6, cx + 2, cy - 8, Theme::W95_LIGHT);
+        t.drawLine(cx - 3, cy + 3, cx + 1, cy - 4, W);
+        t.drawLine(cx + 4, cy + 4, cx + 2, cy - 1, Theme::W95_SHADOW);
+        break;
+    case MeshMsg::Emote::CAMERA:
+        t.fillRoundRect(cx - 8, cy - 5, 16, 11, 2, Theme::W95_LIGHT);
+        t.fillCircle(cx, cy, 3, K);
+        t.fillCircle(cx + 5, cy - 3, 1, Theme::RED);
+        break;
+    case MeshMsg::Emote::SPOTTED:                       // wide eyes, and a "!"
+        t.fillEllipse(cx - 5, cy, 3, 4, W);
+        t.fillEllipse(cx + 3, cy, 3, 4, W);
+        t.fillRect(cx - 5, cy, 2, 2, K);
+        t.fillRect(cx + 3, cy, 2, 2, K);
+        t.fillRect(cx + 9, cy - 5, 2, 6, Y);
+        t.fillRect(cx + 9, cy + 3, 2, 2, Y);
+        break;
+    case MeshMsg::Emote::HOWL:                          // a crescent moon
+        t.fillCircle(cx, cy, 7, Y);
+        t.fillCircle(cx + 4, cy - 2, 6, K);
+        break;
+    case MeshMsg::Emote::SELFIE:                        // a phone
+        t.fillRoundRect(cx - 5, cy - 8, 11, 17, 2, Theme::W95_LIGHT);
+        t.fillRect(cx - 3, cy - 6, 7, 11, Theme::CYAN);
+        t.fillCircle(cx, cy + 7, 1, K);
+        break;
     default: break;
     }
+}
+
+// Sends one, and has our own pair act it out. Shared by the tiles and RANDOM.
+ComposeHit sendEmoteNow(MeshMsg::Emote e, uint32_t now, bool (*sent)(MeshTalk::Send)) {
+    // Rolled HERE, once, and sent: both boards act out the same result.
+    const uint8_t setup = EmoteScript::roll(e, esp_random(), (uint8_t)Squachy::lastCaught());
+    if (!sent(MeshTalk::sendEmote((uint8_t)e, setup, now))) return ComposeHit::NONE;
+    uiClearEmote((uint8_t)e, setup, false);
+    s_emoteOn = false;
+    return ComposeHit::SENT;
 }
 
 } // namespace
@@ -265,25 +459,41 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
         }
         t.setTextSize(1);
     } else if (s_emoteOn) {
-        // Six tiles where the lines were: a picture and a name each.
-        const uint8_t n = (uint8_t)MeshMsg::Emote::COUNT;
+        // A row of tabs, then the tab's six tiles where the lines were.
+        const int TH = 18;
+        const int tw = (w - 8 - (EmoteScript::TABS - 1) * 3) / EmoteScript::TABS;
+        for (uint8_t i = 0; i < EmoteScript::TABS; i++) {
+            const int x = 4 + i * (tw + 3);
+            const bool on = i == s_tab;
+            s_tabRect[i] = { (int16_t)x, (int16_t)y0, (int16_t)tw, (int16_t)TH };
+            t.fillRect(x, y0, tw, TH, on ? Theme::PURPLE : Theme::BG);
+            t.drawRect(x, y0, tw, TH, on ? Theme::VAPOR_PINK : Theme::W95_SHADOW);
+            const char* nm = EmoteScript::TAB_NAME[i];
+            t.setTextColor(on ? Theme::WHITE : Theme::W95_LIGHT, on ? Theme::PURPLE : Theme::BG);
+            t.setCursor(x + (tw - t.textWidth(nm)) / 2, y0 + (TH - 8) / 2);
+            t.print(nm);
+        }
+        const int ty0 = y0 + TH + 5;
+        const uint8_t n = EmoteScript::PER_TAB;
         const int ecols = port ? 2 : 3, erows = (n + ecols - 1) / ecols;
         const int ew = (w - 8 - (ecols - 1) * 6) / ecols;
-        int eh = ((h - BH - 6 - 16) - y0 - (erows - 1) * 6) / erows;
+        int eh = ((h - BH - 6 - 16) - ty0 - (erows - 1) * 5) / erows;
         if (eh > 44) eh = 44;
         for (uint8_t i = 0; i < n; i++) {
-            const int x = 4 + (i % ecols) * (ew + 6), y = y0 + (i / ecols) * (eh + 6);
+            const MeshMsg::Emote e = EmoteScript::atTab(s_tab, i);
+            const int x = 4 + (i % ecols) * (ew + 6), y = ty0 + (i / ecols) * (eh + 5);
             s_emoteRect[i] = { (int16_t)x, (int16_t)y, (int16_t)ew, (int16_t)eh };
             t.fillRect(x, y, ew, eh, Theme::BG);
             t.drawRect(x, y, ew, eh, Theme::VAPOR_YELLOW);
-            drawEmoteIcon(t, i, x + 15, y + eh / 2);
-            const bool two = EMOTE_SUB[i][0] != '\0';
+            drawEmoteIcon(t, (uint8_t)e, x + 15, y + eh / 2);
+            const char* sub = EmoteScript::sub(e);
+            const bool two = sub[0] != '\0';
             t.setTextColor(Theme::WHITE, Theme::BG);
             t.setCursor(x + 30, y + eh / 2 - (two ? 9 : 4));
-            t.print(EMOTE_NAME[i]);
+            t.print(EmoteScript::name(e));
             if (two) {
                 t.setCursor(x + 30, y + eh / 2 + 1);
-                t.print(EMOTE_SUB[i]);
+                t.print(sub);
             }
         }
     } else {
@@ -347,6 +557,7 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     s_help = { 0, 0, 0, 0 };
     s_type = { 0, 0, 0, 0 };
     s_emoteBtn = { 0, 0, 0, 0 };
+    s_random   = { 0, 0, 0, 0 };
     if (s_typedOn || s_sel >= 0) {
         s_send = { (int16_t)(w - 4 - BW), (int16_t)(h - BH - 6), BW, BH };
         Theme::drawButton(t, s_back.x, s_back.y, s_back.w, s_back.h,
@@ -355,6 +566,8 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     } else if (s_emoteOn) {
         // Back to the lines, not off the screen; the smiley, lit, does the same.
         Theme::drawButton(t, s_back.x, s_back.y, s_back.w, s_back.h, "[ LINES ]", false);
+        s_random = { (int16_t)(w - 4 - BW - 8), (int16_t)(h - BH - 6), (int16_t)(BW + 8), BH };
+        Theme::drawButton(t, s_random.x, s_random.y, s_random.w, s_random.h, "[ RANDOM ]", false);
         s_emoteBtn = { (int16_t)(w - 4 - 30), 2, 30, 20 };
         Theme::drawButton(t, s_emoteBtn.x, s_emoteBtn.y, s_emoteBtn.w, s_emoteBtn.h, "", true);
         drawSmiley(t, s_emoteBtn.x + 15, s_emoteBtn.y + 10);
@@ -450,22 +663,19 @@ ComposeHit uiMeshComposeTouch(int x, int y, uint32_t now) {
         }
         if (s_emoteOn) {
             if (inRect(s_back, x, y)) { s_emoteOn = false; s_status = nullptr; return ComposeHit::NONE; }
-            for (uint8_t i = 0; i < (uint8_t)MeshMsg::Emote::COUNT; i++) {
-                if (!inRect(s_emoteRect[i], x, y)) continue;
-                if (const char* why = cannotSend()) { s_status = why; s_statusCol = Theme::AMBER; return ComposeHit::NONE; }
-                if (!uiClearGuest())            { s_status = NOBODY_HERE;  s_statusCol = Theme::AMBER; return ComposeHit::NONE; }
-                // An emote would take over the scan response and cut the
-                // message short -- the one thing that should not happen.
-                if (MeshTalk::sendingMessage(now)) { s_status = STILL_ON_AIR; s_statusCol = Theme::AMBER; return ComposeHit::NONE; }
-                const MeshMsg::Emote e = (MeshMsg::Emote)i;
-                const uint8_t arg = (e == MeshMsg::Emote::RPS) ? (uint8_t)random(0, 9) : 0;
-                const uint8_t b   = MeshMsg::emoteByte(e, arg);
-                if (!sent(MeshTalk::sendEmote(b, now))) return ComposeHit::NONE;
-                uiClearEmote(b, false);         // and our pair act it out too
-                s_emoteOn = false;
-                return ComposeHit::SENT;
-            }
-            return ComposeHit::NONE;
+            for (uint8_t i = 0; i < EmoteScript::TABS; i++)
+                if (inRect(s_tabRect[i], x, y)) { s_tab = i; s_status = nullptr; return ComposeHit::NONE; }
+            int pick = -1;
+            if (inRect(s_random, x, y)) pick = (int)(esp_random() % (uint32_t)MeshMsg::Emote::COUNT);
+            for (uint8_t i = 0; i < EmoteScript::PER_TAB && pick < 0; i++)
+                if (inRect(s_emoteRect[i], x, y)) pick = (int)EmoteScript::atTab(s_tab, i);
+            if (pick < 0) return ComposeHit::NONE;
+            if (const char* why = cannotSend()) { s_status = why; s_statusCol = Theme::AMBER; return ComposeHit::NONE; }
+            if (!uiClearGuest())            { s_status = NOBODY_HERE;  s_statusCol = Theme::AMBER; return ComposeHit::NONE; }
+            // An emote would take over the scan response and cut the
+            // message short -- the one thing that should not happen.
+            if (MeshTalk::sendingMessage(now)) { s_status = STILL_ON_AIR; s_statusCol = Theme::AMBER; return ComposeHit::NONE; }
+            return sendEmoteNow((MeshMsg::Emote)pick, now, sent);
         }
         if (inRect(s_help, x, y)) return ComposeHit::HELP;
         if (inRect(s_back, x, y)) return ComposeHit::BACK;

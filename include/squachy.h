@@ -444,7 +444,22 @@ namespace Squachy {
     // friends. NONE is the ordinary cameo. Declared out here rather than with
     // them because drawWaving() is also the boot splash's, in every build.
     enum class VisitPose : uint8_t { NONE, HIGH_FIVE, LOW_FIVE, FIST, STARTLED, DANCE,
-                                     PUMP, SLEEPY, STRETCH };
+                                     PUMP, SLEEPY, STRETCH,
+                                     // The emotes' (see emote_script.h). The last
+                                     // three borrow his detection reactions.
+                                     LAUGH, SALUTE, BOW, HUG, SAD, GRR, CROUCH, PULL,
+                                     WIGGLE, CHEER, SELFIE, HOWL, POINT, STRAIN,
+                                     COVER, LOOK_AROUND, HANDS_UP };
+#if SQUACH_MESH
+    // The host's half of an emote's beat: any VisitPose, held for `ms`. The
+    // older ones go through the same moods visitReach() and friends use.
+    void visitPose(uint32_t now, uint32_t ms, VisitPose p);
+    // Restart the yawn-and-stretch clock, for a guest told to stretch -- his
+    // cameo has no clock of its own and borrows the host's.
+    void visitStretchClock(uint32_t now);
+    // What he caught last, or UNKNOWN: the "did you see that?" emote's subject.
+    DetectionType lastCaught();
+#endif
 
     void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale = 1.0f,
                     const char* line = nullptr, bool talking = false, int wanderRangePx = 0,

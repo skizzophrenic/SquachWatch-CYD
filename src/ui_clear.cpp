@@ -10,6 +10,7 @@
 #include "meshtutor.h"
 #include "squachy.h"
 #include "detection.h"
+#include "emote_script.h"
 
 // A peer supplied from outside -- the emulator's --peer flag today, the radio
 // eventually. Always wins over the demo below.
@@ -130,10 +131,13 @@ static bool visitWalking() {
 // fleeing, and he is only going home.
 // An emote's high five moves him too; defined with the set pieces below.
 static bool fiveGuestX(uint32_t now, int homeX, int meetX, int closePx, int& x);
+// ...and so do the scripted emotes that walk him in, or over.
+static bool scriptGuestX(uint32_t now, int homeX, int meetX, float gs, int& x);
 
-static int visitGuestX(uint32_t now, int homeX, int offX, int meetX, int closePx) {
+static int visitGuestX(uint32_t now, int homeX, int offX, int meetX, int closePx, float gs) {
     int fx;
     if (fiveGuestX(now, homeX, meetX, closePx, fx)) return fx;
+    if (scriptGuestX(now, homeX, meetX, gs, fx)) return fx;
     // In to the host for the high five, and back to his own spot after it.
     if (s_vp == VisitPhase::HIGH_FIVE) {
         const uint32_t e = now - s_vpAt;
@@ -312,7 +316,7 @@ static void visitBeat(uint32_t now, Squachy::VisitMoment m) {
 // the background that is already a dance floor, is mostly dance-offs and gets
 // them twice as often; everywhere else, dance-offs and rock-paper-scissors take
 // turns.
-enum class Piece : uint8_t { NONE, DANCE, RPS, SNOW, WAVE, FIVE, BOO };
+enum class Piece : uint8_t { NONE, DANCE, RPS, SNOW, WAVE, FIVE, BOO, SCRIPT };
 static const uint32_t PIECE_FIRST_MS  = 25000;   // into the hanging-around, at the earliest
 static const uint32_t PIECE_EVERY_MS  = 70000;
 static const uint32_t PIECE_JITTER_MS = 40000;
@@ -341,6 +345,7 @@ static bool     s_puffGuest = false;
 static bool     s_pieceGuestFirst = false;
 static uint8_t  s_pieceSub = 0xFF;               // a wave's hand, up and down
 static int16_t  s_emotePend = -1;                // the emote waiting for a gap, or -1
+static uint8_t  s_emotePendSetup = 0;            // ...and what the two boards agreed for it
 static bool     s_emotePendGuest = false;
 static uint32_t s_emotePendAt = 0;
 static const uint32_t EMOTE_WAIT_MS = 12000;     // ...and how long it may wait
@@ -469,6 +474,194 @@ static void pieceEnd(uint32_t now) {
     s_beatMs         = 900;
     s_exchange++;
     s_nextPieceAt    = now + pieceGap();
+}
+
+// ---- scripted emotes -------------------------------------------------------
+// The thirty emotes after the originals are tables (emote_script.h), and this
+// plays them: one beat at a time, each setting what the two of them do, who
+// says what, and what flies about -- drawScriptFx() below draws that part.
+static const EmoteScript::Script* s_script = nullptr;
+static MeshMsg::Emote s_scriptEmote  = MeshMsg::Emote::WAVE;
+static uint8_t  s_scriptSetup  = 0;
+static int8_t   s_scriptBeat   = -1;
+static uint32_t s_scriptBeatAt = 0;
+static bool     s_scriptAHost  = true;        // A, the sender, is the host here
+static EmoteScript::Result s_scriptResult   = EmoteScript::Result::NONE;
+static Squachy::VisitPose  s_scriptGuestPose = Squachy::VisitPose::NONE;
+// The lines built from the setup byte. Two, because the host's and the guest's
+// can both be up at once, and a bubble keeps its pointer while it is.
+static char     s_dynHost[24], s_dynGuest[24];
+static const uint32_t SCRIPT_IN_MS = 650;     // in to the host, for the close ones
+
+// EmoteScript::Pose, in its order, as the VisitPose that draws it.
+static const Squachy::VisitPose POSE_MAP[] = {
+    Squachy::VisitPose::NONE,      Squachy::VisitPose::LAUGH,
+    Squachy::VisitPose::HIGH_FIVE, Squachy::VisitPose::LOW_FIVE, Squachy::VisitPose::FIST,
+    Squachy::VisitPose::PUMP,      Squachy::VisitPose::DANCE,    Squachy::VisitPose::SLEEPY,
+    Squachy::VisitPose::STRETCH,
+    Squachy::VisitPose::COVER,     Squachy::VisitPose::LOOK_AROUND, Squachy::VisitPose::HANDS_UP,
+    Squachy::VisitPose::SALUTE,    Squachy::VisitPose::BOW,      Squachy::VisitPose::HUG,
+    Squachy::VisitPose::SAD,       Squachy::VisitPose::GRR,      Squachy::VisitPose::CROUCH,
+    Squachy::VisitPose::PULL,      Squachy::VisitPose::WIGGLE,   Squachy::VisitPose::CHEER,
+    Squachy::VisitPose::SELFIE,    Squachy::VisitPose::HOWL,     Squachy::VisitPose::POINT,
+    Squachy::VisitPose::STRAIN,
+};
+static_assert(sizeof POSE_MAP / sizeof POSE_MAP[0] == (size_t)EmoteScript::Pose::COUNT,
+              "a VisitPose for every script pose");
+
+// Which beat `e` ms into the piece falls in, and how far into it; -1 once over.
+static int8_t scriptBeatAt(uint32_t e, uint32_t& into) {
+    uint32_t acc = 0;
+    for (uint8_t i = 0; i < s_script->n; i++) {
+        const uint32_t ms = s_script->beat[i].ms;
+        if (e < acc + ms) { into = e - acc; return (int8_t)i; }
+        acc += ms;
+    }
+    into = 0;
+    return -1;
+}
+
+static void scriptBeat(uint8_t i, uint32_t now) {
+    using namespace EmoteScript;
+    const Beat& b = s_script->beat[i];
+    s_scriptBeat   = (int8_t)i;
+    s_scriptBeatAt = now;
+    Pose pa = b.a, pb = b.b;
+    bool aSpeaks = !(b.flags & B_SPEAKS);
+    // A contest's beat is written winner-first; turn it round when the
+    // receiver won, and make it a laugh for both when nobody did.
+    if (b.flags & OUTCOME) {
+        if (s_scriptResult == Result::TIE) {
+            pa = pb = Pose::LAUGH;
+        } else if (s_scriptResult == Result::RECEIVER) {
+            const Pose t = pa; pa = pb; pb = t;
+            aSpeaks = !aSpeaks;
+        }
+    }
+    const Pose hp = s_scriptAHost ? pa : pb, gp = s_scriptAHost ? pb : pa;
+    // A little past the beat, so his mood cannot lapse to idle for a frame
+    // before the next one lands.
+    Squachy::visitPose(now, b.ms + 150, POSE_MAP[(uint8_t)hp]);
+    s_scriptGuestPose = (gp == Pose::LAUGH) ? Squachy::VisitPose::NONE : POSE_MAP[(uint8_t)gp];
+    if (gp == Pose::LAUGH)   s_guestLaughUntil = now + b.ms;
+    if (gp == Pose::STRETCH) Squachy::visitStretchClock(now);
+
+    s_visitGuestLine = nullptr;
+    s_guestTurn      = false;
+    if (b.line) {
+        const bool hostSays = (aSpeaks == s_scriptAHost);
+        const char* text;
+        if (isDyn(b.line)) {
+            char* buf = hostSays ? s_dynHost : s_dynGuest;
+            dynLine(b.line, s_scriptEmote, s_scriptSetup, buf, sizeof s_dynHost);
+            text = buf;
+        } else {
+            text = line(b.line, (uint8_t)(s_exchange % VARIANTS));
+        }
+        if (text && hostSays) Squachy::visitSay(text);
+        else if (text)      { s_visitGuestLine = text; s_guestTurn = true; }
+    }
+}
+
+static void scriptStart(uint32_t now, MeshMsg::Emote e, uint8_t setup, bool guestFirst) {
+    const EmoteScript::Script* s = EmoteScript::script(e);
+    if (!s) return;
+    pieceBegin(now, Piece::SCRIPT, guestFirst);
+    s_script       = s;
+    s_scriptEmote  = e;
+    s_scriptSetup  = setup;
+    s_scriptAHost  = (s->flags & EmoteScript::S_HOST_FIRST) ? true : !guestFirst;
+    s_scriptResult = EmoteScript::outcome(e, setup);
+    s_scriptGuestPose = Squachy::VisitPose::NONE;
+    Serial.printf("[visit] %s %s\n", EmoteScript::name(e), EmoteScript::sub(e));
+    scriptBeat(0, now);
+}
+
+static void scriptTick(uint32_t now) {
+    uint32_t into;
+    const int8_t i = s_script ? scriptBeatAt(now - s_pieceAt, into) : -1;
+    if (i < 0) {
+        s_scriptGuestPose = Squachy::VisitPose::NONE;
+        pieceEnd(now);
+        return;
+    }
+    if (i != s_scriptBeat) scriptBeat((uint8_t)i, now);
+}
+
+// Where the visitor stands during a script that moves him: in close and back
+// out again, or leaping over the host and back. False when it does not.
+static bool scriptGuestX(uint32_t now, int homeX, int meetX, float gs, int& x) {
+    if (s_piece != Piece::SCRIPT || !s_script) return false;
+    const uint32_t e = now - s_pieceAt;
+    if (s_script->flags & EmoteScript::S_CLOSE) {
+        const uint32_t total = EmoteScript::totalMs(*s_script);
+        const uint32_t out   = s_script->beat[s_script->n - 1].ms;   // walks back through the last beat
+        // Where two held-out hands meet, whatever the lean has done, then
+        // however much nearer this one wants him.
+        int m = meetX + hostLeanPx() - guestLeanPx() + (int)((float)s_script->closeUnits * gs);
+        // In portrait the two already stand closer than arm's reach, and
+        // "in to the host" worked out as a step AWAY from him, off the edge.
+        if (m > homeX) m = homeX;
+        float k;
+        if (e < SCRIPT_IN_MS)    k = (float)e / (float)SCRIPT_IN_MS;
+        else if (e + out < total) k = 1.0f;
+        else {
+            k = 1.0f - (float)(e + out - total) / (float)out;
+            if (k < 0.0f) k = 0.0f;
+        }
+        k = k * k * (3.0f - 2.0f * k);
+        x = homeX + (int)((float)(m - homeX) * k);
+        return true;
+    }
+    if (s_script->flags & EmoteScript::S_LEAP) {
+        uint32_t into;
+        const int8_t i = scriptBeatAt(e, into);
+        // Past the host on his far side. The screen is only so wide, so on a
+        // landscape board he lands overlapping him a little, and on the
+        // narrowest he may clip the edge -- for the half second he is there.
+        const int hostX = meetX - (int)(REACH_K * gs);
+        int land = hostX - (int)(44.0f * gs);
+        if (land < (int)(12.0f * gs)) land = (int)(12.0f * gs);
+        if (i == 1 || i == 3) {
+            const float k = (float)into / (float)s_script->beat[i].ms;
+            x = (i == 1) ? homeX + (int)((float)(land - homeX) * k)
+                         : land + (int)((float)(homeX - land) * k);
+        } else {
+            x = (i == 2) ? land : homeX;
+        }
+        return true;
+    }
+    return false;
+}
+
+// How much taller the visitor's head is this beat: a tinfoil hat, which his
+// bubble and his name have to clear.
+static int scriptHatPx(float gs) {
+    if (s_piece != Piece::SCRIPT || !s_script || s_scriptBeat < 0) return 0;
+    const EmoteScript::Beat& b = s_script->beat[s_scriptBeat];
+    if (b.fx != EmoteScript::Fx::HATS) return 0;
+    // arg 0 is only A's; the visitor is A when the host is not.
+    return (b.fxArg == 1 || !s_scriptAHost) ? (int)(16.0f * gs) : 0;
+}
+
+// How high the visitor is off the ground: only ever mid-leap. Enough to clear
+// a crouching host's crest, and never so much his head leaves the screen --
+// `ceiling` is the most the caller has room for.
+static int scriptGuestLift(uint32_t now, float gs, int ceiling) {
+    if (s_piece != Piece::SCRIPT || !s_script || !(s_script->flags & EmoteScript::S_LEAP)) return 0;
+    uint32_t into;
+    const int8_t i = scriptBeatAt(now - s_pieceAt, into);
+    if (i != 1 && i != 3) return 0;
+    const float k = (float)into / (float)s_script->beat[i].ms;
+    int lift = (int)(54.0f * gs);
+    if (lift > ceiling) lift = ceiling;
+    return (int)(sinf(k * 3.14159265f) * (float)lift);
+}
+
+static bool scriptWalking(uint32_t now) {
+    if (s_piece != Piece::SCRIPT || !s_script || !(s_script->flags & EmoteScript::S_CLOSE)) return false;
+    const uint32_t e = now - s_pieceAt, total = EmoteScript::totalMs(*s_script);
+    return e < SCRIPT_IN_MS || e + s_script->beat[s_script->n - 1].ms >= total;
 }
 
 static void pieceTick(uint32_t now) {
@@ -607,6 +800,9 @@ static void pieceTick(uint32_t now) {
         if (s_pieceStep == 2 && e >= FIVE_IN_MS + FIVE_MS + STEP_MS) pieceEnd(now);
         return;
     }
+    case Piece::SCRIPT:
+        scriptTick(now);
+        return;
     case Piece::BOO: {
         const uint8_t step = e < BOO_JUMP_MS ? 0 : (e < BOO_MS ? 1 : 2);
         if (step == s_pieceStep) return;
@@ -641,7 +837,8 @@ static bool fiveGuestX(uint32_t now, int homeX, int meetX, int closePx, int& x) 
     const uint32_t e = now - s_pieceAt;
     // The caller adds guestLeanPx() afterwards; taking it off here puts him
     // exactly where the host's reach ends.
-    const int m = meetX + hostLeanPx() - guestLeanPx();
+    int m = meetX + hostLeanPx() - guestLeanPx();
+    if (m > homeX) m = homeX;          // portrait: never a step away from him
     float k;
     if (e < FIVE_IN_MS) {
         k = (float)e / (float)FIVE_IN_MS;
@@ -667,23 +864,26 @@ static bool fiveWalking(uint32_t now) {
     return e < FIVE_IN_MS || e >= FIVE_IN_MS + FIVE_MS;
 }
 
-bool uiClearEmote(uint8_t emote, bool fromGuest) {
+bool uiClearEmote(uint8_t emote, uint8_t setup, bool fromGuest) {
     if (s_vp == VisitPhase::GONE || s_vp == VisitPhase::LEAVING) return false;
+    if (emote >= (uint8_t)MeshMsg::Emote::COUNT) return false;
     s_emotePend      = emote;
+    s_emotePendSetup = setup;
     s_emotePendGuest = fromGuest;
     s_emotePendAt    = millis();
     return true;
 }
 
 static void emoteStart(uint32_t now) {
-    const uint8_t b = (uint8_t)s_emotePend;
+    const uint8_t b = (uint8_t)s_emotePend, setup = s_emotePendSetup;
     const bool    g = s_emotePendGuest;
     s_emotePend = -1;
     // A question left hanging when the button was pressed is dropped rather
     // than answered after the piece, when nobody remembers it.
     s_hangStep = 0;
-    Serial.printf("[visit] emote %u from %s\n", (unsigned)(b >> 4), g ? "the visitor" : "us");
-    switch ((MeshMsg::Emote)(b >> 4)) {
+    Serial.printf("[visit] emote %u (setup %u) from %s\n", (unsigned)b, (unsigned)setup,
+                  g ? "the visitor" : "us");
+    switch ((MeshMsg::Emote)b) {
         case MeshMsg::Emote::WAVE:      pieceBegin(now, Piece::WAVE,  g); break;
         case MeshMsg::Emote::HIGH_FIVE: pieceBegin(now, Piece::FIVE,  g); break;
         case MeshMsg::Emote::DANCE:     pieceBegin(now, Piece::DANCE, g); break;
@@ -693,12 +893,14 @@ static void emoteStart(uint32_t now) {
             pieceBegin(now, Piece::RPS, g);
             // The sender's throw, then the receiver's: the same game on both
             // boards, each from its own side.
-            const uint8_t a = (uint8_t)(((b & 0x0F) / 3) % 3), c = (uint8_t)((b & 0x0F) % 3);
+            const uint8_t a = (uint8_t)((setup / 3) % 3), c = (uint8_t)(setup % 3);
             s_rpsHost  = g ? c : a;
             s_rpsGuest = g ? a : c;
             break;
         }
-        default: break;
+        default:
+            scriptStart(now, (MeshMsg::Emote)b, setup, g);
+            break;
     }
 }
 
@@ -763,6 +965,7 @@ static Squachy::VisitPose guestPose(uint32_t now) {
         case Piece::RPS:   return s_pieceStep == 0 ? P::PUMP : (s_pieceStep == 1 ? P::FIST : P::NONE);
         case Piece::FIVE:  return (e >= FIVE_IN_MS && e < FIVE_IN_MS + FIVE_MS) ? P::HIGH_FIVE : P::NONE;
         case Piece::BOO:   return (s_pieceGuestFirst && s_pieceStep == 0) ? P::HIGH_FIVE : P::NONE;
+        case Piece::SCRIPT: return s_scriptGuestPose;
         case Piece::SNOW: {
             if (e / SNOW_SEG_MS != (s_pieceGuestFirst ? 0u : 1u)) return P::NONE;
             const uint32_t se = e % SNOW_SEG_MS;
@@ -808,10 +1011,383 @@ static void drawRps(TFT_eSPI& t, int x, int y, uint8_t kind, float s) {
     }
 }
 
+
+// ---- what the scripted emotes draw ------------------------------------------
+// Everything below is shapes: the frame is a sprite, and a prop is only ever a
+// few of them. The particle effects are capped at two dozen apiece, which is
+// what keeps them inside the frame budget on the slowest backgrounds.
+static void fxHeart(TFT_eSPI& t, int x, int y, int r, uint16_t c) {
+    t.fillCircle(x - r / 2, y, r / 2 + 1, c);
+    t.fillCircle(x + r / 2, y, r / 2 + 1, c);
+    t.fillTriangle(x - r - 1, y + 1, x + r + 1, y + 1, x, y + r + 2, c);
+}
+
+static void fxObj(TFT_eSPI& t, EmoteScript::Obj o, int x, int y, float s, int dir) {
+    auto U = [s](float v) { const int r = (int)(v * s); return r < 1 ? 1 : r; };
+    switch (o) {
+    case EmoteScript::Obj::PIE:
+        t.fillEllipse(x, y + U(2), U(7), U(3), Theme::W95_SHADOW);
+        t.fillEllipse(x, y, U(6), U(3), Theme::WHITE);
+        t.fillCircle(x, y - U(2), U(1.5f), Theme::RED);
+        break;
+    case EmoteScript::Obj::BALLOON:
+        t.fillCircle(x, y, U(4.5f), Theme::VAPOR_BLUE);
+        t.fillCircle(x - U(1.5f), y - U(1.5f), U(1), Theme::WHITE);
+        t.fillTriangle(x - U(1), y + U(5), x + U(1), y + U(5), x, y + U(3), Theme::VAPOR_BLUE);
+        break;
+    case EmoteScript::Obj::PLANE:
+        t.fillTriangle(x + dir * U(7), y, x - dir * U(5), y - U(3), x - dir * U(5), y + U(3), Theme::WHITE);
+        t.drawLine(x + dir * U(7), y, x - dir * U(5), y + U(1), Theme::W95_SHADOW);
+        break;
+    case EmoteScript::Obj::PILLOW:
+        t.fillRoundRect(x - U(7), y - U(4), U(14), U(9), U(3), Theme::W95_SHADOW);
+        t.fillRoundRect(x - U(6), y - U(4), U(12), U(8), U(3), Theme::WHITE);
+        break;
+    case EmoteScript::Obj::GIFT:
+        t.fillRect(x - U(5), y - U(4), U(10), U(9), Theme::VAPOR_PINK);
+        t.fillRect(x - U(1), y - U(4), U(2), U(9), Theme::VAPOR_YELLOW);
+        t.fillRect(x - U(5), y - U(1), U(10), U(2), Theme::VAPOR_YELLOW);
+        t.fillCircle(x - U(2), y - U(5), U(1.5f), Theme::VAPOR_YELLOW);
+        t.fillCircle(x + U(2), y - U(5), U(1.5f), Theme::VAPOR_YELLOW);
+        break;
+    case EmoteScript::Obj::PIZZA:
+        t.fillTriangle(x - U(5), y - U(4), x + U(5), y - U(4), x, y + U(6), Theme::VAPOR_YELLOW);
+        t.fillRect(x - U(5), y - U(5), U(10), U(2), Theme::AMBER);
+        t.fillCircle(x - U(1), y - U(1), U(1), Theme::RED);
+        t.fillCircle(x + U(2), y + U(1), U(1), Theme::RED);
+        break;
+    default: break;
+    }
+}
+
+static void fxDie(TFT_eSPI& t, int x, int y, uint8_t v, float s) {
+    const int h = (int)(5.0f * s) + 1, d = (int)(2.6f * s) + 1, r = s > 1.2f ? 2 : 1;
+    t.fillRoundRect(x - h, y - h, 2 * h, 2 * h, 2, Theme::WHITE);
+    auto pip = [&](int dx, int dy) { t.fillCircle(x + dx, y + dy, r, Theme::BLACK); };
+    if (v & 1) pip(0, 0);                                     // 1, 3, 5
+    if (v >= 2) { pip(-d, -d); pip(d, d); }
+    if (v >= 4) { pip(d, -d); pip(-d, d); }
+    if (v == 6) { pip(-d, 0); pip(d, 0); }
+}
+
+// A small five-pointed star, for BONK: a plus and an X.
+static void fxStar(TFT_eSPI& t, int x, int y, int r, uint16_t c) {
+    t.drawFastHLine(x - r, y, 2 * r + 1, c);
+    t.drawFastVLine(x, y - r, 2 * r + 1, c);
+    t.drawLine(x - r + 1, y - r + 1, x + r - 1, y + r - 1, c);
+    t.drawLine(x - r + 1, y + r - 1, x + r - 1, y - r + 1, c);
+}
+
+// The guest's head bobs -- drawWaving() does it off the clock -- and a hat that
+// did not bob with it would float. Same curve, same numbers.
+static int guestBob(uint32_t now, float gs) {
+    const bool laugh = now < s_guestLaughUntil;
+    const uint32_t per = laugh ? 240u : 900u;
+    return (int)(sinf((float)(now % per) / (float)per * 6.2831853f) * (laugh ? 7.0f : 6.0f) * gs);
+}
+
+static void drawScriptFx(TFT_eSPI& t, uint32_t now, int hx, int gx, int headTop, float gs) {
+    using namespace EmoteScript;
+    if (!s_script || s_scriptBeat < 0) return;
+    const Beat& b = s_script->beat[s_scriptBeat];
+    const uint32_t be = now - s_scriptBeatAt;
+    float k = (float)be / (float)b.ms;
+    if (k > 1.0f) k = 1.0f;
+    auto U = [gs](float v) { return (int)(v * gs); };
+    // A sent it; the effect starts from its actor and goes to the other one.
+    const int  ax = s_scriptAHost ? hx : gx, bx = s_scriptAHost ? gx : hx;
+    const bool fromB = (b.flags & FX_FROM_B) != 0;
+    const int  cx = fromB ? bx : ax, ox = fromB ? ax : bx;
+    const int  dir = (ox > cx) ? 1 : -1;
+    const int  handX = cx + dir * U(30), handY = headTop + U(22), oHandX = ox - dir * U(30);
+    const int  headY = headTop + U(12), groundY = headTop + U(54);
+    const int  midX = (hx + gx) / 2;
+    const uint8_t arg = b.fxArg;
+    const uint16_t CONF[5] = { Theme::VAPOR_PINK, Theme::CYAN, Theme::VAPOR_YELLOW,
+                               Theme::GREEN, Theme::VAPOR_PURPLE };
+    t.setTextSize(1);
+    switch (b.fx) {
+    case Fx::SPARK: {
+        // As the hands arrive, whichever height they meet at.
+        const int32_t s0 = (int32_t)b.ms - 420;
+        if ((int32_t)be >= s0 && (int32_t)be < s0 + 320)
+            drawSpark(t, hx + U(REACH_K * 0.5f), headTop + U(REACH_Y[arg % 3]),
+                      (float)((int32_t)be - s0) / 320.0f, gs);
+        break;
+    }
+    case Fx::THROW: {
+        const Obj o = (Obj)arg;
+        if (k >= 1.0f) break;
+        const int x = handX + (int)((float)(ox - handX) * k);
+        int y = handY - U(4) + (int)((float)(headY - handY + U(4)) * k);
+        if (o == Obj::PLANE) y -= (int)(sinf(k * 3.14159265f) * U(8)) + (int)(sinf(k * 12.566f) * U(3));
+        else                 y -= (int)(sinf(k * 3.14159265f) * U(26));
+        fxObj(t, o, x, y, gs, dir);
+        break;
+    }
+    case Fx::LOB: {
+        const int x = handX + (int)((float)(oHandX - handX) * k);
+        const int y = handY - U(5) - (int)(sinf(k * 3.14159265f) * U(18));
+        fxObj(t, (Obj)arg, x, y, gs, dir);
+        break;
+    }
+    case Fx::HOLD:
+        fxObj(t, (Obj)arg, handX, handY - U(5), gs, dir);
+        break;
+    case Fx::HIT: {
+        const Burst kind = (Burst)arg;
+        const int tx = ox, ty = headY;
+        if (kind == Burst::CREAM) {
+            // A pie's worth on his face, sliding slowly off it.
+            const int dy = (int)(k * U(3));
+            t.fillEllipse(tx, ty + U(3) + dy, U(11), U(8), Theme::WHITE);
+            t.fillCircle(tx - U(8), ty + U(10) + dy, U(2), Theme::WHITE);
+            t.fillCircle(tx + U(6), ty + U(11) + dy, U(2), Theme::WHITE);
+            t.fillCircle(tx + U(2), ty - U(2) + dy, U(1.5f) + 1, Theme::RED);
+            break;
+        }
+        const uint32_t burstMs = (kind == Burst::FEATHERS) ? b.ms : 450;
+        if (be >= burstMs) break;
+        const float q = (float)be / (float)burstMs;
+        const int n = (kind == Burst::CONFETTI) ? 16 : 10;
+        for (int i = 0; i < n; i++) {
+            const float a = (float)i / (float)n * 6.2831853f + (float)i * 0.37f;
+            if (kind == Burst::FEATHERS) {
+                // Out, then drifting down and swaying.
+                const int fx = tx + (int)(cosf(a) * (float)U(8 + 10.0f * q)) + (int)(sinf(q * 9.0f + i) * U(3));
+                const int fy = ty + (int)(sinf(a) * U(6)) + (int)(q * U(30));
+                t.drawLine(fx - U(2), fy, fx + U(2), fy - U(1), Theme::WHITE);
+            } else {
+                const float r = (float)U(4) + q * (float)U(16);
+                const int px = tx + (int)(cosf(a) * r);
+                const int py = ty + (int)(sinf(a) * r) + (kind == Burst::SPLASH ? (int)(q * q * U(14)) : 0);
+                if (kind == Burst::CONFETTI) t.fillRect(px, py, U(2) + 1, U(1) + 1, CONF[i % 5]);
+                else t.fillCircle(px, py, 1 + (int)gs, kind == Burst::SPLASH ? Theme::VAPOR_BLUE : Theme::WHITE);
+            }
+        }
+        break;
+    }
+    case Fx::HEARTS:
+        for (int i = 0; i < 4; i++) {
+            const float p = (float)((be + (uint32_t)i * 300u) % 1200u) / 1200.0f;
+            // Across between their faces, below where either bubble goes.
+            const int x = cx + (int)((float)(ox - cx) * p);
+            const int y = headTop + U(12) - (int)(sinf(p * 3.14159265f) * U(12));
+            fxHeart(t, x, y, U(3) + 1, (i & 1) ? Theme::PINK : Theme::VAPOR_PINK);
+        }
+        break;
+    case Fx::STEAM:
+        for (int i = 0; i < 4; i++) {
+            const float p = (float)((be + (uint32_t)i * 250u) % 1000u) / 1000.0f;
+            const int side = (i & 1) ? 1 : -1;
+            t.fillCircle(cx + side * (U(15) + (int)(p * U(6))), headTop + U(6) - (int)(p * U(18)),
+                         U(2) + (int)(p * U(3)), Theme::blend(Theme::BG, Theme::W95_LIGHT, (uint16_t)(255 * (1.0f - p))));
+        }
+        break;
+    case Fx::WAVES:
+        for (int i = 0; i < 3; i++) {
+            const float p = (float)((be + (uint32_t)i * 330u) % 1000u) / 1000.0f;
+            t.drawCircle(cx, headTop + U(16), U(18) + (int)(p * U(26)),
+                         Theme::blend(Theme::BG, Theme::CYAN, (uint16_t)(255 * (1.0f - p))));
+        }
+        break;
+    case Fx::FLASH: {
+        int x0 = (hx < gx ? hx : gx) - U(34), x1 = (hx > gx ? hx : gx) + U(34);
+        if (x0 < 2) x0 = 2;
+        if (x1 > t.width() - 3) x1 = t.width() - 3;
+        // Down to his feet and no further: the counters start right below.
+        const int y0 = headTop - U(10), y1 = headTop + U(58);
+        if (arg == 0 && be < 160) {
+            t.fillRect(x0, y0, x1 - x0, y1 - y0, Theme::WHITE);        // the flash
+        } else if ((arg == 1 && be < 700) || (arg == 0 && be >= 250)) {
+            for (int j = 0; j < 3; j++) t.drawRect(x0 + j, y0 + j, x1 - x0 - 2 * j, y1 - y0 - 2 * j, Theme::WHITE);
+            t.fillRect(x0, y1 - U(4), x1 - x0, U(4), Theme::WHITE);    // the photo's bottom edge
+        }
+        break;
+    }
+    case Fx::HATS:
+        for (int who = 0; who < 2; who++) {
+            if (who == 1 && arg == 0) break;                           // only A has his on yet
+            const bool host = (who == 0) == s_scriptAHost;
+            const int x = host ? hx : gx, top = headTop + (host ? 0 : guestBob(now, gs));
+            t.fillTriangle(x - U(13), top + U(3), x + U(13), top + U(3), x + U(3), top - U(16), Theme::W95_LIGHT);
+            t.drawLine(x - U(6), top, x + U(1), top - U(10), Theme::WHITE);
+            t.drawLine(x + U(5), top + U(1), x + U(1), top - U(6), Theme::W95_SHADOW);
+            t.drawFastHLine(x - U(12), top + U(3), U(24), Theme::W95_SHADOW);
+        }
+        break;
+    case Fx::CAMERA: {
+        // Up between their heads, clear of the host's bubble in the top row.
+        int y = headTop - U(6);
+        if (y < 30) y = 30;
+        t.drawFastVLine(midX, y - U(12), U(7), Theme::W95_SHADOW);
+        t.fillRoundRect(midX - U(9), y - U(6), U(18), U(11), 2, Theme::W95_SHADOW);
+        t.fillCircle(midX, y, U(3) + 1, Theme::BLACK);
+        t.drawCircle(midX, y, U(3) + 2, Theme::W95_LIGHT);
+        if ((now / 250) & 1) t.fillCircle(midX + U(6), y - U(3), U(1) + 1, Theme::RED);
+        break;
+    }
+    case Fx::ICON: {
+        // Between their faces when there is room for it (landscape), above
+        // their heads when there is not -- in portrait they nearly touch.
+        const int room = (gx > hx ? gx - hx : hx - gx) - U(48);
+        const bool roomy = room >= U(30);
+        int y = roomy ? headTop + U(6) : headTop - U(8);
+        if (y < 30) y = 30;
+        const DetectionType type = (DetectionType)s_scriptSetup;
+        if (type != DetectionType::UNKNOWN && s_scriptSetup < (uint8_t)DetectionType::COUNT)
+            Theme::drawTypeIcon(t, type, midX, y, U(8) + (int)((be / 180) & 1));
+        t.setTextColor(Theme::VAPOR_YELLOW);
+        t.setTextSize(2);
+        // Up there, the right-hand side is the visitor's bubble: go left.
+        t.setCursor(roomy ? midX + U(12) : midX - U(12) - 24, y - 7);
+        t.print("?!");
+        t.setTextSize(1);
+        break;
+    }
+    case Fx::COIN: {
+        const int ahx = ax + (bx > ax ? 1 : -1) * U(30);
+        if (arg == 2) {                                              // waiting in his hand
+            t.fillCircle(ahx, handY - U(4), U(3) + 1, Theme::VAPOR_YELLOW);
+            t.drawCircle(ahx, handY - U(4), U(3) + 1, Theme::AMBER);
+        } else if (arg == 0) {                                       // up, spinning, and down
+            const int x = ahx + (int)((float)(midX - ahx) * k);
+            const int y = handY - U(4) + (int)((float)(groundY - handY + U(4)) * k)
+                          - (int)(sinf(k * 3.14159265f) * U(48));
+            const int wv = (int)(fabsf(cosf((float)be / 60.0f)) * U(3)) + 1;
+            t.fillEllipse(x, y, wv, U(3) + 1, Theme::VAPOR_YELLOW);
+        } else {                                                     // landed, face up
+            const int y = groundY - U(6);
+            t.fillCircle(midX, y, U(6) + 1, Theme::VAPOR_YELLOW);
+            t.drawCircle(midX, y, U(6) + 1, Theme::AMBER);
+            t.setTextColor(Theme::BLACK);
+            t.setCursor(midX - 2, y - 3);
+            t.print((s_scriptSetup & 1) ? "T" : "H");
+        }
+        break;
+    }
+    case Fx::DICE: {
+        const int dA = (bx > ax ? -1 : 1);                            // A's lands on A's side
+        const int landA = midX + dA * U(10), landB = midX - dA * U(10);
+        const uint8_t va = EmoteScript::die(s_scriptSetup, 0), vb = EmoteScript::die(s_scriptSetup, 1);
+        if (arg == 0) {
+            const int hA = ax + (bx > ax ? 1 : -1) * U(30), hB = bx + (ax > bx ? 1 : -1) * U(30);
+            const int lift = (int)(sinf(k * 3.14159265f) * U(24));
+            const int yA = handY + (int)((float)(groundY - handY) * k) - lift;
+            const uint8_t spin = (uint8_t)(1 + (be / 90) % 6);
+            fxDie(t, hA + (int)((float)(landA - hA) * k), yA, spin, gs);
+            fxDie(t, hB + (int)((float)(landB - hB) * k), yA, (uint8_t)(7 - spin), gs);
+        } else {
+            fxDie(t, landA, groundY - U(5), va, gs);
+            fxDie(t, landB, groundY - U(5), vb, gs);
+        }
+        break;
+    }
+    case Fx::TABLE: {
+        const int mx = hx + U(30);                                   // where the two grips meet
+        const uint16_t wood = Theme::blend(Theme::AMBER, Theme::BLACK, 120);
+        t.fillRect(mx - U(13), headTop + U(31), U(26), U(3), wood);
+        t.fillRect(mx - U(11), headTop + U(34), U(2), groundY - headTop - U(34), wood);
+        t.fillRect(mx + U(9),  headTop + U(34), U(2), groundY - headTop - U(34), wood);
+        if (arg == 0) {
+            // Nobody winning yet: little strain marks over the grip.
+            const int s = (int)((now / 140) & 1);
+            t.drawLine(mx - U(4), headTop + U(12) - s, mx - U(2), headTop + U(16), Theme::WHITE);
+            t.drawLine(mx + U(4), headTop + U(12) + s, mx + U(2), headTop + U(16), Theme::WHITE);
+        }
+        break;
+    }
+    case Fx::ROPE: {
+        const int y = headTop + U(28);
+        const int hL = hx + U(26), gR = gx - U(26);
+        const uint16_t rope = Theme::blend(Theme::AMBER, Theme::WHITE, 60);
+        if (arg == 0) {
+            const int mx = (hL + gR) / 2 + (int)(sinf((float)be / 200.0f) * U(3));
+            t.drawWideLine(hL, y, mx, y + U(3), U(1) + 1, rope);
+            t.drawWideLine(mx, y + U(3), gR, y, U(1) + 1, rope);
+            t.fillTriangle(mx - U(3), y + U(3), mx + U(3), y + U(3), mx, y + U(9), Theme::RED);
+        } else {
+            // The loser let go: the rope runs from the winner's hands to the floor.
+            const bool hostWon = (s_scriptResult == Result::SENDER) == s_scriptAHost;
+            const int wx = hostWon ? hL : gR, fx = hostWon ? gR : hL;
+            t.drawWideLine(wx, y, midX, groundY, U(1) + 1, rope);
+            t.drawWideLine(midX, groundY, fx, groundY, U(1) + 1, rope);
+            t.fillTriangle(midX - U(3), groundY - U(1), midX + U(3), groundY - U(1), midX, groundY - U(7), Theme::RED);
+        }
+        break;
+    }
+    case Fx::CUPS: {
+        const int y = headTop + U(22) - U(6);
+        const int c1 = hx + U(30) - (arg == 1 ? 0 : U(2)), c2 = gx - U(30) + (arg == 1 ? 0 : U(2));
+        for (int i = 0; i < 2; i++) {
+            const int x = i ? c2 : c1;
+            t.fillRect(x - U(3), y - U(4), U(6) + 1, U(8), Theme::AMBER);
+            t.fillRect(x - U(3), y - U(5), U(6) + 1, U(2) + 1, Theme::WHITE);
+        }
+        if (arg == 1 && be >= 100 && be < 420)
+            drawSpark(t, (c1 + c2) / 2, y - U(4), (float)(be - 100) / 320.0f, gs);
+        break;
+    }
+    case Fx::CONFETTI: {
+        const int x0 = (hx < gx ? hx : gx) - U(40);
+        const int span = (hx > gx ? hx - gx : gx - hx) + U(80);
+        const int fall = U(110);
+        for (int i = 0; i < 24; i++) {
+            uint32_t hsh = (uint32_t)(i + 1) * 2654435761u;
+            hsh ^= hsh >> 13;
+            const int x = x0 + (int)(hsh % (uint32_t)(span > 0 ? span : 1)) + (int)(sinf((float)be / 180.0f + i) * U(3));
+            const uint32_t v = 30u + (hsh >> 8) % 40u;               // px a second, per piece
+            const int y = headTop - U(40) + (int)(((be * v) / 1000u + (hsh >> 16)) % (uint32_t)(fall > 0 ? fall : 1));
+            t.fillRect(x, y, U(2) + 1, U(1) + 1, CONF[i % 5]);
+        }
+        break;
+    }
+    case Fx::FIREWORKS: {
+        static const int8_t BX[3] = { -30, 28, 0 }, BY[3] = { -24, -34, -14 };
+        for (int j = 0; j < 4; j++) {
+            const int32_t st = j * 650;
+            if ((int32_t)be < st || (int32_t)be >= st + 800) continue;
+            const float p = (float)((int32_t)be - st) / 800.0f;
+            int y = headTop + U(BY[j % 3]);
+            if (y < 22) y = 22;
+            const int x = midX + U(BX[j % 3]);
+            const uint16_t c = Theme::blend(Theme::BG, CONF[j % 5], (uint16_t)(255 * (1.0f - p)));
+            for (int r = 0; r < 12; r++) {
+                const float a = (float)r * 0.5235988f;
+                const float d = p * (float)U(22);
+                t.drawLine(x + (int)(cosf(a) * d * 0.6f), y + (int)(sinf(a) * d * 0.6f),
+                           x + (int)(cosf(a) * d), y + (int)(sinf(a) * d), c);
+            }
+        }
+        break;
+    }
+    case Fx::HAHA:
+        for (int i = 0; i < 3; i++) {
+            const float p = (float)((be + (uint32_t)i * 400u) % 1200u) / 1200.0f;
+            t.setTextColor(Theme::blend(Theme::BG, Theme::VAPOR_YELLOW, (uint16_t)(255 * (1.0f - p))));
+            // Off the side of his head away from the other one, rising --
+            // above it they ran into his bubble.
+            t.setCursor(cx - dir * (U(24) + i * U(5)) - 6, headTop + U(16) - (int)(p * U(18)));
+            t.print("HA");
+        }
+        break;
+    case Fx::BONK:
+        for (int i = 0; i < 3; i++) {
+            const float a = (float)be / 150.0f + (float)i * 2.0943951f;
+            fxStar(t, ox + (int)(cosf(a) * U(13)), headTop + U(2) + (int)(sinf(a) * U(4)), U(2) + 1,
+                   Theme::VAPOR_YELLOW);
+        }
+        break;
+    default: break;
+    }
+}
+
 // What the set pieces throw about and hold up: snowballs and their puffs, and
 // the rock-paper-scissors reveal. Drawn over both of them.
 static void drawPieceFx(TFT_eSPI& t, uint32_t now, int hx, int gx, int headTop, float gs) {
-    if (s_piece == Piece::SNOW) {
+    if (s_piece == Piece::SCRIPT) {
+        drawScriptFx(t, now, hx, gx, headTop, gs);
+    } else if (s_piece == Piece::SNOW) {
         const uint32_t e = now - s_pieceAt, step = e / SNOW_SEG_MS, se = e % SNOW_SEG_MS;
         if (step <= 1 && se >= SNOW_WIND_MS && se < SNOW_WIND_MS + SNOW_FLY_MS) {
             // From the thrower's hand to the other one's head, on an arc.
@@ -1041,7 +1617,7 @@ static void visitTick(uint32_t now) {
         MeshTalk::EmoteIn in;
         if (MeshTalk::takeEmote(in) && now - in.at < EMOTE_WAIT_MS &&
             Mesh::peer() && memcmp(Mesh::peerMac(), in.mac, 6) == 0)
-            uiClearEmote(in.emote, true);
+            uiClearEmote(in.emote, in.setup, true);
         if (s_emotePend >= 0 && now - s_emotePendAt > EMOTE_WAIT_MS) s_emotePend = -1;
     }
 
@@ -1569,7 +2145,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
             // reaching hands meet. The host is not leaning yet -- that only
             // starts once the talking does -- so his centre is where it sits.
             const int   meetX = (w / 2 - gap) + (int)(REACH_K * gs);
-            const int   gx = visitGuestX(now, homeX, offX, meetX, (int)(8.0f * gs)) + guestLeanPx();
+            const int   gx = visitGuestX(now, homeX, offX, meetX, (int)(8.0f * gs), gs) + guestLeanPx();
             // wanderRangePx is what animates his legs. Walking in with it at 0
             // slid him across the floor like furniture; a couple of pixels of
             // wander is enough to put a walk cycle under the movement without
@@ -1581,16 +2157,18 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
                                         s_vp == VisitPhase::MEETING ||
                                         s_vp == VisitPhase::LEAVING ||
                                         s_piece == Piece::WAVE);    // and when waved at
-            Squachy::drawWaving(t, gx, squachyBottom, now, gs,
+            Squachy::drawWaving(t, gx, squachyBottom - scriptGuestLift(now, gs,
+                                    squachyBottom - (int)(58.0f * gs) - 20), now, gs,
                                 msgFresh ? nullptr : s_visitGuestLine,
                                 // Mouthing it while the red bubble is up.
                                 msgFresh || s_visitGuestLine != nullptr,
-                                (visitWalking() || fiveWalking(now)) ? 2 : 0, stillGreeting,
+                                (visitWalking() || fiveWalking(now) || scriptWalking(now)) ? 2 : 0,
+                                stillGreeting,
                                 // Just above his own head, not the boot
                                 // splash's 34 -- that lands in the host's
                                 // bubble row and the two paint over each
-                                // other.
-                                20,
+                                // other. Higher by a hat, when he has one.
+                                20 + scriptHatPx(gs),
                                 // Cracking up at whatever the host just said.
                                 // The host gets the same thing through his
                                 // mood machine; this cameo has none.
@@ -1651,7 +2229,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
                 // numbers, then the bubble's own gap, then its height -- so
                 // the name sits on the baseline the bubble would have used.
                 const int headTopY = squachyBottom - (int)(58.0f * gs);
-                const int ny = headTopY - 20 + 3;
+                const int ny = headTopY - 20 - scriptHatPx(gs) + 3;
                 t.setTextColor(Theme::CYAN, Theme::BG);
                 t.setCursor(nx, ny);
                 t.print(nm);

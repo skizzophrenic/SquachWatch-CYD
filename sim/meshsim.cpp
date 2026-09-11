@@ -13,6 +13,7 @@
 #include "squachy.h"
 #include "settings.h"
 #include "meshmsg.h"
+#include "emote_script.h"
 #include "meshtalk.h"
 #include "meshcrypto.h"
 
@@ -156,11 +157,12 @@ bool emote(int e, int arg, uint32_t now) {
         fprintf(stderr, "[meshsim] no emote %d (0..%u)\n", e, (unsigned)MeshMsg::Emote::COUNT - 1);
         return false;
     }
-    // Rock-paper-scissors needs both throws; anything else sends no setup.
-    if (arg < 0) arg = (e == (int)MeshMsg::Emote::RPS) ? (int)(millis() % 9) : 0;
+    // No setup given: rolled the way a board rolls it. The visitor has not
+    // caught anything, so SPOTTED gets a FLOCK to point at.
+    if (arg < 0) arg = EmoteScript::roll((MeshMsg::Emote)e, (uint32_t)millis() * 2654435761u,
+                                         (uint8_t)DetectionType::FLOCK);
     const uint32_t c = ++ctr;
-    frameLen[0] = MeshMsg::sealEmote(MeshCrypto::impl(), PEER_MAC, c,
-                                     MeshMsg::emoteByte((MeshMsg::Emote)e, (uint8_t)arg),
+    frameLen[0] = MeshMsg::sealEmote(MeshCrypto::impl(), PEER_MAC, c, (uint8_t)e, (uint8_t)arg,
                                      frames[0], sizeof frames[0]);
     snprintf(said, sizeof said, "(emote %d, setup %d)", e, arg);
     broadcast(frameLen[0] ? 1 : 0, now);
@@ -214,14 +216,14 @@ void hear(const uint8_t* out, size_t len, uint32_t gen, uint32_t now) {
         return;
     }
     if (kind == MeshMsg::KIND_EMOTE) {
-        uint8_t e = 0;
-        if (MeshMsg::openEmote(MeshCrypto::impl(), OWN_MAC, out, len, c, e) != MeshMsg::Open::OK) {
+        uint8_t e = 0, setup = 0;
+        if (MeshMsg::openEmote(MeshCrypto::impl(), OWN_MAC, out, len, c, e, setup) != MeshMsg::Open::OK) {
             fprintf(stderr, "[meshsim] %s could not open our emote\n", peerName());
             return;
         }
-        snprintf(heard, sizeof heard, "(emote %u, setup %u)", (unsigned)(e >> 4), (unsigned)(e & 0x0F));
-        fprintf(stderr, "[meshsim] %s saw emote %u (setup %u)\n", peerName(),
-                (unsigned)(e >> 4), (unsigned)(e & 0x0F));
+        snprintf(heard, sizeof heard, "(emote %u, setup %u)", (unsigned)e, (unsigned)setup);
+        fprintf(stderr, "[meshsim] %s saw emote %u %s (setup %u)\n", peerName(), (unsigned)e,
+                EmoteScript::name((MeshMsg::Emote)e), (unsigned)setup);
     }
 }
 

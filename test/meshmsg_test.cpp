@@ -481,33 +481,38 @@ int main() {
     suite("An emote round-trips, and is never read as a line");
     {
         uint8_t f[EMOTE_FRAME_LEN];
-        const uint8_t b = emoteByte(Emote::RPS, 2 * 3 + 1);
-        ck("it seals", sealEmote(TOY, me, 90, b, f, sizeof f) == EMOTE_FRAME_LEN);
+        ck("an emote is sixteen bytes", EMOTE_FRAME_LEN == 16);
+        ck("it seals", sealEmote(TOY, me, 90, (uint8_t)Emote::RPS, 2 * 3 + 1, f, sizeof f) == EMOTE_FRAME_LEN);
         uint32_t c = 0;
-        uint8_t e = 0, line = 0;
-        ck("it opens", openEmote(TOY, me, f, sizeof f, c, e) == Open::OK);
-        ck("to the same byte and counter", e == b && c == 90);
-        ck("the emote is the high four bits, its setup the low",
-           (Emote)(e >> 4) == Emote::RPS && (e & 0x0F) == 7);
+        uint8_t e = 0, s = 0, line = 0;
+        ck("it opens", openEmote(TOY, me, f, sizeof f, c, e, s) == Open::OK);
+        ck("to the same emote, setup and counter", (Emote)e == Emote::RPS && s == 7 && c == 90);
+        ck("the last emote round-trips, with a full byte of setup",
+           sealEmote(TOY, me, 94, (uint8_t)Emote::SELFIE, 0xA5, f, sizeof f) == EMOTE_FRAME_LEN &&
+           openEmote(TOY, me, f, sizeof f, c, e, s) == Open::OK &&
+           (Emote)e == Emote::SELFIE && s == 0xA5);
+        sealEmote(TOY, me, 90, (uint8_t)Emote::RPS, 7, f, sizeof f);
         ck("a canned reader refuses it", openCanned(TOY, me, f, sizeof f, c, line) == Open::BAD_FORMAT);
         uint8_t cf[CANNED_FRAME_LEN];
         sealCanned(TOY, me, 91, 3, cf, sizeof cf);
-        ck("and an emote reader refuses a line", openEmote(TOY, me, cf, sizeof cf, c, e) == Open::BAD_FORMAT);
+        ck("and an emote reader refuses a line", openEmote(TOY, me, cf, sizeof cf, c, e, s) == Open::BAD_FORMAT);
         ck("from any other address it does not authenticate",
-           openEmote(TOY, you, f, sizeof f, c, e) == Open::BAD_TAG);
+           openEmote(TOY, you, f, sizeof f, c, e, s) == Open::BAD_TAG);
         ck("sealEmote will not build one this build lacks",
-           sealEmote(TOY, me, 92, (uint8_t)((uint8_t)Emote::COUNT << 4), f, sizeof f) == 0);
+           sealEmote(TOY, me, 92, (uint8_t)Emote::COUNT, 0, f, sizeof f) == 0);
+        ck("nor into too small a buffer",
+           sealEmote(TOY, me, 92, 0, 0, f, EMOTE_FRAME_LEN - 1) == 0);
         // One from a newer build: authentic, and nothing here to act out.
         uint8_t g[EMOTE_FRAME_LEN];
         memcpy(g, MAGIC, sizeof MAGIC);
         g[2] = (uint8_t)((VERSION << 4) | KIND_EMOTE);
         g[3] = 93; g[4] = 0; g[5] = 0;
-        const uint8_t newer = 0xF0;
+        const uint8_t newer[2] = { 0xF0, 0 };
         uint8_t nonce[NONCE_LEN];
         nonceFor(me, 93, nonce);
-        TOY.seal(nonce, g, HDR_LEN, &newer, 1, g + HDR_LEN, g + HDR_LEN + 1);
+        TOY.seal(nonce, g, HDR_LEN, newer, 2, g + HDR_LEN, g + HDR_LEN + 2);
         ck("a newer emote reads as unknown, not as an error",
-           openEmote(TOY, me, g, sizeof g, c, e) == Open::UNKNOWN_LINE);
+           openEmote(TOY, me, g, sizeof g, c, e, s) == Open::UNKNOWN_LINE);
     }
 
     suite("The replay table survives a reboot");

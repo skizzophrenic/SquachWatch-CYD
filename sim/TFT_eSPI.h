@@ -88,7 +88,19 @@ public:
 
     void init() {}
     void begin() { init(); }
-    void setRotation(uint8_t r) { _rotation = r; }
+    // The panel is landscape unless a harness opts in: then an odd/even
+    // rotation change swaps the two sides, the way the real panel does, so
+    // portrait layouts can be looked at. Off by default -- the web page and
+    // the screenshot tool both assume 320x240.
+    static inline bool rotates = false;
+    void setRotation(uint8_t r) {
+        // Odd rotations are landscape on the CYD; the shape follows that.
+        if (rotates && ((r & 1) != 0) != (_w > _h) && _w != _h) {
+            const int t = _w; _w = _h; _h = t;
+            _buf.assign((size_t)_w * _h, 0x0000);
+        }
+        _rotation = r;
+    }
     uint8_t getRotation() const { return _rotation; }
     int16_t width()  const { return _w; }
     int16_t height() const { return _h; }

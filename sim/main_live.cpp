@@ -163,6 +163,8 @@ static const uint32_t STEP_MS = 33;
 
 int main() {
     SimClock::virtualTime = true;
+    // SQUACHSIM_ROTATE=1: rotation really turns the screen (see the shim).
+    TFT_eSPI::rotates = getenv("SQUACHSIM_ROTATE") != nullptr;
     setup();
 
     char line[128];

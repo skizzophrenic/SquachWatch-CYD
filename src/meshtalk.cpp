@@ -135,19 +135,20 @@ void deliver(const Slot& s, uint32_t now) {
     }
 
     if (kind == MeshMsg::KIND_EMOTE) {
-        uint8_t em = 0;
+        uint8_t em = 0, setup = 0;
         const MeshMsg::Open r = MeshMsg::openEmote(MeshCrypto::impl(), s.mac,
-                                                   s.data, s.len, ctr, em);
+                                                   s.data, s.len, ctr, em, setup);
         if (r != MeshMsg::Open::OK && r != MeshMsg::Open::UNKNOWN_LINE) return;
         s_replay.record(s.mac, ctr);
         saveReplay();
         if (r != MeshMsg::Open::OK) return;      // a newer build's: nothing to act out
         s_emote.emote = em;
+        s_emote.setup = setup;
         memcpy(s_emote.mac, s.mac, 6);
         s_emote.at    = now;
         s_emoteHave   = true;
-        Serial.printf("[meshtalk] emote %u (setup %u) from %s\n", (unsigned)(em >> 4),
-                      (unsigned)(em & 0x0F), s.name[0] ? s.name : "SOMEONE");
+        Serial.printf("[meshtalk] emote %u (setup %u) from %s\n", (unsigned)em,
+                      (unsigned)setup, s.name[0] ? s.name : "SOMEONE");
     }
 }
 
@@ -294,18 +295,18 @@ Send sendText(const char* text, uint32_t now) {
     return Send::OK;
 }
 
-Send sendEmote(uint8_t emote, uint32_t now) {
+Send sendEmote(uint8_t emote, uint8_t setup, uint32_t now) {
     const Send ok = checks();
     if (ok != Send::OK) return ok;
     uint32_t c = 0;
     if (!takeCounters(1, c)) return Send::FAILED;
-    const size_t n = MeshMsg::sealEmote(MeshCrypto::impl(), s_ownMac, c, emote,
+    const size_t n = MeshMsg::sealEmote(MeshCrypto::impl(), s_ownMac, c, emote, setup,
                                         s_out[0], sizeof s_out[0]);
     if (n == 0) return Send::FAILED;
     s_outLen[0] = (uint8_t)n;
     onAir(1, now, EMOTE_MS, true);
     Serial.printf("[meshtalk] sending #%lu: emote %u (setup %u)\n", (unsigned long)c,
-                  (unsigned)(emote >> 4), (unsigned)(emote & 0x0F));
+                  (unsigned)emote, (unsigned)setup);
     return Send::OK;
 }
 

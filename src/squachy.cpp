@@ -24,7 +24,8 @@ enum class Mood : uint8_t { IDLE, WAVE, SHOCKED, BOUNCE, SLEEPY, WALK, DANCE, WI
                             GUM,       // blowing a bubble, rare idle flourish
                             JUGGLE,    // showing off recent catches, needs activity heat
                             HIGHFIVE,  // one arm across -- see s_reachDir and s_reachLevel
-                            PUMP };    // a fist pumping, for rock-paper-scissors
+                            PUMP,      // a fist pumping, for rock-paper-scissors
+                            ACT };     // an emote's pose -- see s_actPose
 
 // Which way a HIGHFIVE reaches: +1 right, -1 left. Set by whoever draws the
 // body just before it does -- the host always reaches right, the guest always
@@ -36,6 +37,18 @@ static int8_t s_reachDir = 1;
 // host's comes from visitReach(), the guest's from his VisitPose.
 static uint8_t s_reachLevel = 0;
 static uint8_t s_hostReachLevel = 0;
+
+// Which emote pose Mood::ACT strikes, as a VisitPose, set by whoever draws the
+// body just before it does -- the host's from visitPose(), the guest's from
+// his own VisitPose -- exactly as s_reachDir is. And the detection reaction an
+// emote borrows: COVER, LOOK_AROUND and HANDS_UP are SHOCKED with a pose of
+// the emote's choosing rather than the one his last detection picks. -1 is
+// "his own", which is every SHOCKED that is not an emote's.
+static uint8_t  s_actPose  = 0;
+static int8_t   s_actReact = -1;
+static uint8_t  s_hostAct  = 0;
+static int8_t   s_hostReact = -1;
+static uint32_t s_hostActUntil = 0;
 
 // Which reaction pose a SHOCKED mood strikes — varies by what triggered
 // it so a detection actually reads differently depending on the type,
@@ -59,6 +72,7 @@ static ReactPose reactPoseFor(DetectionType t) {
         default:                     return ReactPose::STARTLED;   // UNKNOWN, RAVEN
     }
 }
+static ReactPose curReactPose();       // below, once s_reactType is declared
 
 // ---- Line banks (string literals live in flash, not RAM) ----
 static const char* IDLE_LINES[] = {
@@ -360,6 +374,11 @@ static const uint32_t WATCH_EVERY_MS = 30000;
 static uint32_t      s_nextWatchAt   = 6000;
 static uint32_t      lastInteraction = 0;
 static DetectionType s_reactType     = DetectionType::UNKNOWN;
+// The pose a SHOCKED body strikes: an emote's, when one has borrowed the
+// reaction, else whatever his last detection calls for.
+static ReactPose curReactPose() {
+    return s_actReact >= 0 ? (ReactPose)s_actReact : reactPoseFor(s_reactType);
+}
 static uint32_t      s_lastMilestone = 0;
 static bool          s_milestoneInit = false;
 static char          s_milestoneBuf[48];
@@ -947,6 +966,7 @@ void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal, uint32_t hitCo
         case Event::DETECTION: {
             mood = Mood::SHOCKED;
             moodUntil = now + 1400;
+            s_hostReact = -1;  // a real one, not an emote's borrowed pose
             s_dtStart = now;   // see the double-take offset in tick()
             // Map RSSI onto 0..1. Anything at or below -100 dBm is the
             // floor and anything above -40 is on top of you; 0 means the
@@ -2097,6 +2117,34 @@ void visitDance(uint32_t now, uint32_t ms) {
     moodUntil = now + ms;
 }
 
+void visitPose(uint32_t now, uint32_t ms, VisitPose p) {
+    s_hostReact = -1;
+    switch (p) {
+        case VisitPose::NONE:        return;
+        case VisitPose::HIGH_FIVE:   visitReach(now, ms, Reach::UP);    return;
+        case VisitPose::LOW_FIVE:    visitReach(now, ms, Reach::DOWN);  return;
+        case VisitPose::FIST:        visitReach(now, ms, Reach::LEVEL); return;
+        case VisitPose::LAUGH:       mood = Mood::BOUNCE;  break;
+        case VisitPose::PUMP:        mood = Mood::PUMP;    break;
+        case VisitPose::DANCE:       mood = Mood::DANCE;   break;
+        case VisitPose::SLEEPY:      mood = Mood::SLEEPY;  break;
+        case VisitPose::STRETCH:     mood = Mood::STRETCH; s_stretchStart = now; break;
+        case VisitPose::STARTLED:
+        case VisitPose::HANDS_UP:    mood = Mood::SHOCKED; s_hostReact = (int8_t)ReactPose::HANDS_UP;    break;
+        case VisitPose::COVER:       mood = Mood::SHOCKED; s_hostReact = (int8_t)ReactPose::COVER_FACE;  break;
+        case VisitPose::LOOK_AROUND: mood = Mood::SHOCKED; s_hostReact = (int8_t)ReactPose::LOOK_AROUND; break;
+        default:                     mood = Mood::ACT; s_hostAct = (uint8_t)p; break;
+    }
+    moodUntil      = now + ms;
+    s_hostActUntil = moodUntil;
+}
+
+void visitStretchClock(uint32_t now) { s_stretchStart = now; }
+
+DetectionType lastCaught() {
+    return s_haveLastDetection ? s_recentTypes[0] : DetectionType::UNKNOWN;
+}
+
 uint32_t lastShockAt() { return s_dtStart; }
 
 // The dance-off's call and answer, and what the guest says when a scare
@@ -3111,6 +3159,22 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     auto S = [scale](int v) { return (int)(v * scale); };
     int cx2 = cx;
 
+    // An emote's pose that moves the whole of him rather than only his arms:
+    // sinking into a crouch or a bow, hanging his head, throwing it back to
+    // howl, leaning back on a rope. His feet stay planted -- the legs below
+    // shorten by exactly what the body sank.
+    const VisitPose act = (m == Mood::ACT) ? (VisitPose)s_actPose : VisitPose::NONE;
+    int crouch = 0, actHead = 0;
+    switch (act) {
+        case VisitPose::CROUCH: crouch = S(9); actHead = S(2); break;
+        case VisitPose::BOW:    crouch = S(3); actHead = S(7); break;
+        case VisitPose::SAD:    actHead = S(3); break;
+        case VisitPose::HOWL:   actHead = -S(3); break;
+        case VisitPose::PULL:   cx2 -= s_reachDir * S(4); break;
+        default: break;
+    }
+    hy += crouch;
+
     using namespace Theme;
 
     // Permanent growth-stage re-tint first (see currentStage()), then
@@ -3499,14 +3563,15 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         t.fillRoundRect(s_footLx, s_footLy, S(12), S(6), 2, furLight);
         t.fillRoundRect(s_footRx, s_footRy, S(12), S(6), 2, furLight);
     } else {
-        keyR(cx2 - S(10), hy + S(40), S(8), S(10));
-        keyR(cx2 + S(2),  hy + S(40), S(8), S(10));
-        keyRR(cx2 - S(13), hy + S(49), S(12), S(6), 2);
-        keyRR(cx2 + S(1),  hy + S(49), S(12), S(6), 2);
-        t.fillRect(cx2 - S(10), hy + S(40), S(8), S(10), furMain);
-        t.fillRect(cx2 + S(2),  hy + S(40), S(8), S(10), furMain);
-        s_footLx = cx2 - S(13); s_footLy = hy + S(49);
-        s_footRx = cx2 + S(1);  s_footRy = hy + S(49);
+        const int legH = S(10) - crouch, footY = hy + S(49) - crouch;
+        keyR(cx2 - S(10), hy + S(40), S(8), legH);
+        keyR(cx2 + S(2),  hy + S(40), S(8), legH);
+        keyRR(cx2 - S(13), footY, S(12), S(6), 2);
+        keyRR(cx2 + S(1),  footY, S(12), S(6), 2);
+        t.fillRect(cx2 - S(10), hy + S(40), S(8), legH, furMain);
+        t.fillRect(cx2 + S(2),  hy + S(40), S(8), legH, furMain);
+        s_footLx = cx2 - S(13); s_footLy = footY;
+        s_footRx = cx2 + S(1);  s_footRy = footY;
         t.fillRoundRect(s_footLx, s_footLy, S(12), S(6), 2, furLight);
         t.fillRoundRect(s_footRx, s_footRy, S(12), S(6), 2, furLight);
     }
@@ -3633,6 +3698,88 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         const int jw = (int)(sinf((float)(now % 1200) / 1200.0f * 6.2831853f) * S(5));
         limbTo(cx2 - S(11), hy + S(26), cx2 - S(19), hy + S(20) + jw);
         limbTo(cx2 + S(11), hy + S(26), cx2 + S(19), hy + S(20) - jw);
+    } else if (m == Mood::ACT) {
+        // An emote's pose. sd points at the other Squachy, as HIGHFIVE's does.
+        const int sd = s_reachDir;
+        auto hang = [&](int side) {             // one arm hanging, left (-1) or right
+            const int ax = (side < 0) ? cx2 - S(18) : cx2 + S(10);
+            keyRR(ax, hy + S(22), S(8), S(22), S(3));
+            t.fillRoundRect(ax, hy + S(22), S(8), S(22), S(3), furLight);
+        };
+        const float beat = sinf((float)(now % 500) / 500.0f * 6.2831853f);
+        switch (act) {
+        case VisitPose::SALUTE:                 // hand to the brow
+            hang(-sd);
+            limbTo(cx2 + sd * S(11), hy + S(26), cx2 + sd * S(9), hy + S(3));
+            break;
+        case VisitPose::BOW:                    // hands folded at the belly
+            limbTo(cx2 - S(11), hy + S(26), cx2 + S(2), hy + S(36));
+            limbTo(cx2 + S(11), hy + S(26), cx2 - S(2), hy + S(34));
+            break;
+        case VisitPose::HUG:                    // both arms round the other one
+            limbTo(cx2 + sd * S(11), hy + S(26), cx2 + sd * S(27), hy + S(24));
+            limbTo(cx2 - sd * S(11), hy + S(26), cx2 + sd * S(21), hy + S(31));
+            break;
+        case VisitPose::SAD:                    // arms hanging limp and in
+            limbTo(cx2 - S(11), hy + S(26), cx2 - S(9), hy + S(44));
+            limbTo(cx2 + S(11), hy + S(26), cx2 + S(9), hy + S(44));
+            break;
+        case VisitPose::GRR: {                  // fists clenched at his sides, shaking
+            const int sh = (int)(sinf((float)(now % 120) / 120.0f * 6.2831853f) * S(1));
+            limbTo(cx2 - S(11), hy + S(26), cx2 - S(21) + sh, hy + S(41));
+            limbTo(cx2 + S(11), hy + S(26), cx2 + S(21) + sh, hy + S(41));
+            t.fillCircle(cx2 - S(21) + sh, hy + S(41), S(4), furLight);
+            t.fillCircle(cx2 + S(21) + sh, hy + S(41), S(4), furLight);
+            break;
+        }
+        case VisitPose::CROUCH:                 // hands on his knees
+            limbTo(cx2 - S(11), hy + S(26), cx2 - S(13), hy + S(38));
+            limbTo(cx2 + S(11), hy + S(26), cx2 + S(13), hy + S(38));
+            break;
+        case VisitPose::PULL: {                 // both hands on the rope, heaving
+            const int tug = (int)(beat * S(2));
+            limbTo(cx2 + sd * S(11), hy + S(26), cx2 + sd * S(30) + tug, hy + S(28));
+            limbTo(cx2 - sd * S(11), hy + S(26), cx2 + sd * S(24) + tug, hy + S(31));
+            break;
+        }
+        case VisitPose::WIGGLE: {               // tickling fingers, reaching over
+            const int wg = (int)(sinf((float)(now % 180) / 180.0f * 6.2831853f) * S(3));
+            limbTo(cx2 + sd * S(11), hy + S(26), cx2 + sd * S(28), hy + S(24) + wg);
+            limbTo(cx2 - sd * S(11), hy + S(26), cx2 + sd * S(20), hy + S(32) - wg);
+            break;
+        }
+        case VisitPose::CHEER: {                // both arms up, pumping
+            const int pk = (int)(fabsf(beat) * S(5));
+            limbTo(cx2 - S(11), hy + S(26), cx2 - S(19), hy - S(6) + pk);
+            limbTo(cx2 + S(11), hy + S(26), cx2 + S(19), hy - S(6) + pk);
+            break;
+        }
+        case VisitPose::SELFIE: {               // a phone held up and out
+            hang(-sd);
+            const int px = cx2 + sd * S(22), py = hy - S(4);
+            limbTo(cx2 + sd * S(11), hy + S(26), px, py);
+            t.fillRoundRect(px - S(3), py - S(6), S(6), S(9), 1, BLACK);
+            t.fillRect(px - S(2), py - S(5), S(4), S(6), blend(CYAN, BLACK, 90));
+            break;
+        }
+        case VisitPose::HOWL:                   // hands cupped either side of his mouth
+            limbTo(cx2 - S(11), hy + S(26), cx2 - S(15), hy + S(12));
+            limbTo(cx2 + S(11), hy + S(26), cx2 + S(15), hy + S(12));
+            break;
+        case VisitPose::POINT:                  // up and away: "look!"
+            hang(-sd);
+            limbTo(cx2 + sd * S(11), hy + S(26), cx2 + sd * S(27), hy - S(4));
+            break;
+        case VisitPose::STRAIN: {               // an arm locked out, trembling
+            hang(-sd);
+            const int sh = (int)(sinf((float)(now % 120) / 120.0f * 6.2831853f) * S(1));
+            limbTo(cx2 + sd * S(11), hy + S(26), cx2 + sd * S(30), hy + S(22) + sh);
+            break;
+        }
+        default:
+            hang(-1); hang(1);
+            break;
+        }
     } else if (m == Mood::HIGHFIVE) {
         // One arm up and across toward the other Squachy, the other hanging.
         // The hand ends S(30) out from centre, so two of them S(60) apart
@@ -3669,7 +3816,7 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         // that opted into wanderRangePx.
         float shakeT = (float)(now % 140) / 140.0f * 6.2831853f;
         int shake = (int)(sinf(shakeT) * S(2));
-        switch (reactPoseFor(s_reactType)) {
+        switch (curReactPose()) {
             case ReactPose::HANDS_UP:
                 limbTo(cx2 - S(11), hy + S(26), cx2 - S(14) + shake, hy - S(10));
                 limbTo(cx2 + S(11), hy + S(26), cx2 + S(14) + shake, hy - S(10));
@@ -3785,7 +3932,7 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     // and legs above keep using hy, and that difference is the whole
     // effect. The outfit comes along because a hat that stayed put
     // while the head moved would read as detached.
-    const int hh = hy + s_headDrop;
+    const int hh = hy + s_headDrop + actHead;
     s_lastCrownY = hh;          // see the declaration: the live one, not the base
 
     // PARKA recolours his fur orange so the coat's sleeves and legs need no
@@ -3908,7 +4055,7 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
 
     // Eyes / sunglasses + mouth
     if (m == Mood::SHOCKED) {
-        ReactPose pose = reactPoseFor(s_reactType);
+        ReactPose pose = curReactPose();
         int pdx = 0, pdy = 0;
         if (pose == ReactPose::LOOK_UP) {
             pdy = -S(2);
@@ -3936,6 +4083,19 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
             keyW(cx2 + S(11), hh + S(26), cx2, hh + S(17), S(7));
             t.drawWideLine(cx2 + S(11), hh + S(26), cx2, hh + S(17), S(7), furLight);
         }
+    } else if (act == VisitPose::SAD) {
+        // No shades for this one: eyes you can see, brows up in the middle, a
+        // frown, and a tear on its way down.
+        t.drawWideLine(cx2 - S(10), hh + S(6), cx2 - S(3), hh + S(4), S(1) + 1, furLight);
+        t.drawWideLine(cx2 + S(10), hh + S(6), cx2 + S(3), hh + S(4), S(1) + 1, furLight);
+        t.fillCircle(cx2 - S(6), hh + S(9), S(1) + 1, BLACK);
+        t.fillCircle(cx2 + S(6), hh + S(9), S(1) + 1, BLACK);
+        if (!noMouth) {
+            t.drawWideLine(cx2 - S(5), hh + S(20), cx2, hh + S(17), S(1) + 1, BLACK);
+            t.drawWideLine(cx2, hh + S(17), cx2 + S(5), hh + S(20), S(1) + 1, BLACK);
+        }
+        const float tk = (float)(now % 1100) / 1100.0f;
+        t.fillCircle(cx2 - S(7), hh + S(11) + (int)(tk * S(9)), S(1) + 1, CYAN);
     } else if (m == Mood::STRETCH) {
         // Eyes still shut and one enormous yawn -- he is not awake yet,
         // he is waking up, and those are different poses.
@@ -4033,6 +4193,12 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         if (lensL != BLACK) t.drawFastVLine(cx2 - S(11) + S(1 + gx), hh + S(7) + sd, S(4), WHITE);
         if (lensR != BLACK) t.drawFastVLine(cx2 + S(3)  + S(1 + gx), hh + S(7) + sd, S(4), WHITE);
 
+        // Angry brows, down in the middle, over the top of the frames.
+        if (act == VisitPose::GRR || act == VisitPose::STRAIN) {
+            t.drawWideLine(cx2 - S(12), hh + S(3), cx2 - S(3), hh + S(6), S(2), BLACK);
+            t.drawWideLine(cx2 + S(12), hh + S(3), cx2 + S(3), hh + S(6), S(2), BLACK);
+        }
+
         // A little cartoon "wink sparkle" beside the shut lens --
         // purely additive on top of the pose above rather than
         // touching its geometry, so it can never misalign with the
@@ -4057,6 +4223,15 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         bool talking = forceTalking || (ownsBubble && bubbleText && now < bubbleUntil);
         if (noMouth) {
             // nothing: this costume has no mouth in any mood
+        } else if (act == VisitPose::HOWL) {
+            // Wide open and round -- the howl itself.
+            t.fillEllipse(cx2, hh + S(19), S(4), S(6), BLACK);
+            t.fillEllipse(cx2, hh + S(21), S(2), S(2), PINK);
+        } else if (act == VisitPose::GRR || act == VisitPose::STRAIN) {
+            // Gritted teeth.
+            t.fillRoundRect(cx2 - S(7), hh + S(16), S(14), S(6), S(2), BLACK);
+            t.fillRect(cx2 - S(6), hh + S(17), S(12), S(4), WHITE);
+            for (int k = -1; k <= 1; k++) t.drawFastVLine(cx2 + k * S(3), hh + S(17), S(4), BLACK);
         } else if (m == Mood::GUM) {
             // Pursed, because there is a bubble coming out of it.
             t.fillCircle(cx2, hh + S(18), S(2), BLACK);
@@ -4227,11 +4402,23 @@ void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const
         // SHOCKED picks its arms from the host's last detection, so the two
         // of them throw the same pose at the same scare -- which is the point.
         case VisitPose::STARTLED:  cm = Mood::SHOCKED;  break;
-        default: break;
+        // The emotes'. Three borrow a detection reaction with a pose of their
+        // own; the rest are Mood::ACT, facing the host.
+        case VisitPose::HANDS_UP:    cm = Mood::SHOCKED; s_actReact = (int8_t)ReactPose::HANDS_UP;    break;
+        case VisitPose::COVER:       cm = Mood::SHOCKED; s_actReact = (int8_t)ReactPose::COVER_FACE;  break;
+        case VisitPose::LOOK_AROUND: cm = Mood::SHOCKED; s_actReact = (int8_t)ReactPose::LOOK_AROUND; break;
+        case VisitPose::NONE:
+        case VisitPose::LAUGH:     break;           // a laugh is his bob, not a pose
+        default:
+            if ((uint8_t)pose >= (uint8_t)VisitPose::SALUTE) {
+                cm = Mood::ACT; s_actPose = (uint8_t)pose; s_reachDir = -1;
+            }
+            break;
     }
     drawBody(t, bodyCx, hy, headTopY, now, cm, scale,
              cameoTalking, /*ownsBubble=*/false);
     s_reachDir = 1;
+    s_actReact = -1;
     // Fixed above his (pre-bob, pre-wander) head, same as tick()'s
     // bubble row — it shouldn't bounce or chase him around. Pulled up
     // further than tick()'s gap (18px) specifically so it sits right
@@ -4958,7 +5145,10 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     // region every frame, same guarantee, just with extra flair.)
     s_reachDir = 1;                   // he stands on the left; see s_reachDir
     s_reachLevel = s_hostReachLevel;
+    s_actPose    = s_hostAct;
+    s_actReact   = (mood == Mood::SHOCKED && (int32_t)(s_hostActUntil - now) > 0) ? s_hostReact : -1;
     drawBody(t, bodyCx, hy, headTopY, now, mood, scale);
+    s_actReact   = -1;
     if (now < s_petFxUntil) drawHeartFx(t, bodyCx, headTopY, now);
     if (scanningFx) drawScanFx(t, bodyCx, headTopY, now, scale);
 
