@@ -39,11 +39,13 @@ const char* const SETUP_PHRASE = "GIBSON MOTHMAN PHREAK NESSIE ZEROCOOL";
 
 // What it answers, by the canned line it heard. Something a person might
 // actually send back, not a random draw -- the point is to watch a
-// conversation, and a random one reads as a bug.
+// conversation, and a random one reads as a bug. A typed message gets
+// "Thanks." (20).
 const uint8_t REPLY[] = {
     20, 0, 19, 22, 10, 13, 19, 8, 18, 16, 20, 10,
     19, 6, 0, 10, 20, 18, 18, 20, 19, 6, 7, 10,
 };
+const uint8_t REPLY_TO_TEXT = 20;
 
 // Four shades travel in two bits; names as squachy.cpp's SHADE_NAMES, which
 // is not exported. The picker only needs them as labels.
@@ -56,11 +58,15 @@ bool macSet  = false, advDue = true;
 // Squachy there is, so nobody wonders which one is the visitor.
 SquachMesh::Peer look = { 4, 12, 1, false, "" };
 
-uint32_t lastAdv = 0, ctr = 0, sendUntil = 0, heardGen = 0, replyAt = 0;
+uint32_t lastAdv = 0, ctr = 0, sendUntil = 0, heardGen = 0, replyAt = 0, heardMsg = 0;
 int      replyLine = -1;
-uint8_t  frame[MeshMsg::CANNED_FRAME_LEN];
-size_t   frameLen = 0;
-char     said[40] = "", heard[40] = "";
+// What it is sending: one frame for a canned line, up to three for a typed
+// one, fed one per advert in turn -- the way a board's scan response rotates.
+uint8_t  frames[MeshMsg::TEXT_PARTS_MAX][MeshMsg::FRAME_MAX];
+size_t   frameLen[MeshMsg::TEXT_PARTS_MAX] = { 0 };
+uint8_t  frameN = 0, frameAt = 0;
+char     said[MeshMsg::TEXT_MAX + 1] = "", heard[MeshMsg::TEXT_MAX + 1] = "";
+MeshMsg::Assembly asmb;
 
 uint8_t nickCount() {
     // nicknameAt() wraps rather than failing, so the table's length is where
@@ -74,7 +80,7 @@ const char* peerName() {
     return (look.custom && look.name[0]) ? look.name : Squachy::nicknameAt(look.nick);
 }
 
-bool live(uint32_t now) { return frameLen && (int32_t)(sendUntil - now) > 0; }
+bool live(uint32_t now) { return frameN && (int32_t)(sendUntil - now) > 0; }
 
 // JSON string contents: the only two characters that could break it.
 void jsonCopy(char* out, size_t cap, const char* s) {
@@ -86,54 +92,105 @@ void jsonCopy(char* out, size_t cap, const char* s) {
     out[o] = '\0';
 }
 
+// What happens to every frame it sends, typed or canned: a group it is not in
+// means a tag that will not verify; no key at all -- nobody has set a phrase,
+// and the stand-in cipher is one shared key -- means a frame of the right
+// shape that the receiver has to refuse.
+void broadcast(uint8_t n, uint32_t now) {
+    if (n == 0) {
+        memcpy(frames[0], MeshMsg::MAGIC, sizeof MeshMsg::MAGIC);
+        frames[0][2] = (uint8_t)((MeshMsg::VERSION << 4) | MeshMsg::KIND_CANNED);
+        for (int i = 0; i < 3; i++) frames[0][3 + i] = (uint8_t)(ctr >> (8 * i));
+        memset(frames[0] + MeshMsg::HDR_LEN, 0xA5, MeshMsg::CANNED_FRAME_LEN - MeshMsg::HDR_LEN);
+        frameLen[0] = MeshMsg::CANNED_FRAME_LEN;
+        n = 1;
+    } else if (!shares) {
+        for (uint8_t i = 0; i < n; i++) frames[i][frameLen[i] - 1] ^= 0x5A;
+    }
+    frameN    = n;
+    frameAt   = 0;
+    sendUntil = now + SEND_MS;
+    fprintf(stderr, "[meshsim] %s sends \"%s\"%s\n", peerName(), said,
+            shares ? "" : " -- under a different phrase");
+}
+
 bool say(int line, uint32_t now) {
     if (line < 0 || line >= MeshMsg::CANNED_N) {
         fprintf(stderr, "[meshsim] no line %d (0..%u)\n", line, (unsigned)(MeshMsg::CANNED_N - 1));
         return false;
     }
     const uint32_t c = ++ctr;
-    size_t n = MeshMsg::sealCanned(MeshCrypto::impl(), PEER_MAC, c, (uint8_t)line,
-                                   frame, sizeof frame);
-    if (!n) {
-        // No key on this side at all -- nobody has set a phrase, and the
-        // stand-in cipher is one shared key. Still send a frame of the right
-        // shape, so what gets exercised is the receiver refusing it.
-        memcpy(frame, MeshMsg::MAGIC, 4);
-        frame[4] = MeshMsg::VERSION;
-        frame[5] = MeshMsg::KIND_CANNED;
-        for (int i = 0; i < 4; i++) frame[6 + i] = (uint8_t)(c >> (8 * i));
-        memset(frame + MeshMsg::HDR_LEN, 0xA5, sizeof frame - MeshMsg::HDR_LEN);
-        n = sizeof frame;
-    } else if (!shares) {
-        // Another group's key, as far as we can tell: the tag will not verify.
-        frame[n - 1] ^= 0x5A;
-    }
-    frameLen  = n;
-    sendUntil = now + SEND_MS;
+    frameLen[0] = MeshMsg::sealCanned(MeshCrypto::impl(), PEER_MAC, c, (uint8_t)line,
+                                      frames[0], sizeof frames[0]);
     snprintf(said, sizeof said, "%s", MeshMsg::CANNED[line]);
-    fprintf(stderr, "[meshsim] %s sends \"%s\"%s\n", peerName(), said,
-            shares ? "" : " -- under a different phrase");
+    broadcast(frameLen[0] ? 1 : 0, now);
     return true;
 }
 
-void hear(const uint8_t* out, size_t len, uint32_t now) {
+bool sayText(const char* text, uint32_t now) {
+    const uint8_t total = MeshMsg::textParts(text);
+    if (!total) {
+        fprintf(stderr, "[meshsim] not a message: up to %u of \"%s\"\n",
+                (unsigned)MeshMsg::TEXT_MAX, MeshMsg::TEXT_CHARSET);
+        return false;
+    }
+    const uint32_t base = ctr + 1;
+    ctr += total;
+    uint8_t n = total;
+    for (uint8_t p = 0; p < total; p++) {
+        frameLen[p] = MeshMsg::sealTextPart(MeshCrypto::impl(), PEER_MAC, base + p, text,
+                                            p, total, frames[p], sizeof frames[p]);
+        if (!frameLen[p]) n = 0;
+    }
+    snprintf(said, sizeof said, "%s", text);
+    broadcast(n, now);
+    return true;
+}
+
+void replyLater(uint8_t line, uint32_t now) {
+    if (!autoReply) return;
+    replyLine = line;
+    replyAt   = now + REPLY_MS;
+}
+
+void hear(const uint8_t* out, size_t len, uint32_t gen, uint32_t now) {
     if (!shares) {
-        snprintf(heard, sizeof heard, "(could not read it)");
-        fprintf(stderr, "[meshsim] %s picked up a message but is in another group\n", peerName());
+        // Once per message, not once per part.
+        if ((gen >> 2) != heardMsg) {
+            heardMsg = gen >> 2;
+            snprintf(heard, sizeof heard, "(could not read it)");
+            fprintf(stderr, "[meshsim] %s picked up a message but is in another group\n", peerName());
+        }
         return;
     }
     uint32_t c = 0;
-    uint8_t  line = 0;
-    const MeshMsg::Open r = MeshMsg::openCanned(MeshCrypto::impl(), OWN_MAC, out, len, c, line);
-    if (r != MeshMsg::Open::OK) {
-        fprintf(stderr, "[meshsim] %s could not open our frame (%d)\n", peerName(), (int)r);
+    uint8_t kind = 0;
+    if (!MeshMsg::parseHeader(out, len, c, kind)) return;
+    if (kind == MeshMsg::KIND_CANNED) {
+        uint8_t line = 0;
+        if (MeshMsg::openCanned(MeshCrypto::impl(), OWN_MAC, out, len, c, line) != MeshMsg::Open::OK) {
+            fprintf(stderr, "[meshsim] %s could not open our frame\n", peerName());
+            return;
+        }
+        snprintf(heard, sizeof heard, "%s", MeshMsg::CANNED[line]);
+        fprintf(stderr, "[meshsim] %s heard \"%s\"\n", peerName(), heard);
+        replyLater(line < sizeof REPLY ? REPLY[line] : 0, now);
         return;
     }
-    snprintf(heard, sizeof heard, "%s", MeshMsg::CANNED[line]);
-    fprintf(stderr, "[meshsim] %s heard \"%s\"\n", peerName(), heard);
-    if (autoReply) {
-        replyLine = line < sizeof REPLY ? REPLY[line] : 0;
-        replyAt   = now + REPLY_MS;
+    if (kind == MeshMsg::KIND_TEXT) {
+        uint8_t part = 0, total = 0;
+        char chars[MeshMsg::TEXT_PART_CHARS + 1];
+        if (MeshMsg::openTextPart(MeshCrypto::impl(), OWN_MAC, out, len, c, part, total, chars)
+                != MeshMsg::Open::OK) {
+            fprintf(stderr, "[meshsim] %s could not open part of our message\n", peerName());
+            return;
+        }
+        char body[MeshMsg::TEXT_MAX + 1];
+        uint32_t base = 0;
+        if (!asmb.add(OWN_MAC, c, part, total, chars, body, base)) return;   // more to come
+        snprintf(heard, sizeof heard, "%s", body);
+        fprintf(stderr, "[meshsim] %s heard \"%s\" (%u parts)\n", peerName(), heard, (unsigned)total);
+        replyLater(REPLY_TO_TEXT, now);
     }
 }
 
@@ -169,12 +226,13 @@ void tick(uint32_t now) {
     onAir = Settings::meshTransmit();
 
     // It hears our scan response only while it is here and we are on the air,
-    // and each message once -- `gen` moves exactly when the message does.
+    // and each frame once -- `gen` moves exactly when the frame does, part by
+    // part for a typed message.
     if (present && onAir) {
         size_t   len = 0;
         uint32_t gen = 0;
         const uint8_t* out = MeshTalk::outgoing(now, len, gen);
-        if (out && gen != heardGen) { heardGen = gen; hear(out, len, now); }
+        if (out && gen != heardGen) { heardGen = gen; hear(out, len, gen, now); }
     }
 
     if (present && (advDue || now - lastAdv >= ADV_MS)) {
@@ -186,12 +244,14 @@ void tick(uint32_t now) {
         const size_t n = SquachMesh::encode(look, buf + 2);
         Mesh::onManufacturerData(buf, n + 2, PEER_MAC, now);
         // The scan response follows its advert, as it does over the air --
-        // which is also what lets the frame pick up the name from it.
+        // which is also what lets the frame pick up the name from it. A typed
+        // message's parts take turns, one per advert.
         if (live(now)) {
-            uint8_t f[2 + sizeof frame];
+            const uint8_t p = frameAt++ % frameN;
+            uint8_t f[2 + MeshMsg::FRAME_MAX];
             f[0] = buf[0]; f[1] = buf[1];
-            memcpy(f + 2, frame, frameLen);
-            Mesh::onManufacturerData(f, frameLen + 2, PEER_MAC, now);
+            memcpy(f + 2, frames[p], frameLen[p]);
+            Mesh::onManufacturerData(f, frameLen[p] + 2, PEER_MAC, now);
         }
     }
 
@@ -244,6 +304,15 @@ bool command(const char* line) {
         if (!present) { fprintf(stderr, "[meshsim] nobody is here to say it\n"); return false; }
         return say(atoi(arg), now);
     }
+    if (!strcmp(verb, "text")) {
+        if (!present) { fprintf(stderr, "[meshsim] nobody is here to type it\n"); return false; }
+        char t[MeshMsg::TEXT_MAX + 2];
+        size_t i = 0;
+        for (; arg[i] && i < sizeof t - 1; i++) t[i] = (char)toupper((unsigned char)arg[i]);
+        t[i] = '\0';
+        while (i && t[i - 1] == ' ') t[--i] = '\0';
+        return sayText(t, now);
+    }
     if (!strcmp(verb, "setup")) {
         // Everything a person would do by hand through the warning, the menu
         // and the phrase screen -- skipped here because it is the emulator,
@@ -261,7 +330,7 @@ bool command(const char* line) {
     if (!strcmp(verb, "status")) { fprintf(stderr, "[meshsim] %s\n", status()); return true; }
     if (!strcmp(verb, "help") || !verb[0]) {
         fprintf(stderr, "[meshsim] on|off, outfit N, shade N, nick N, name TEXT, phrase same|other, "
-                        "reply on|off, say N, setup, status\n");
+                        "reply on|off, say N, text MESSAGE, setup, status\n");
         return true;
     }
     fprintf(stderr, "[meshsim] unknown: %s (try help)\n", verb);
@@ -269,8 +338,8 @@ bool command(const char* line) {
 }
 
 const char* status() {
-    static char buf[640];
-    char name[32], s[96], h[96];
+    static char buf[768];
+    char name[32], s[128], h[128];
     jsonCopy(name, sizeof name, look.name);
     jsonCopy(s, sizeof s, said);
     jsonCopy(h, sizeof h, heard);
@@ -309,6 +378,7 @@ const char* catalog() {
     list("outfits", Squachy::outfitCount(), Squachy::outfitNameAt);
     list("shades", 4, [](uint8_t i) { return SHADES[i]; });
     list("lines", MeshMsg::CANNED_N, [](uint8_t i) { return MeshMsg::CANNED[i]; });
+    o += snprintf(buf + o, sizeof buf - o, "\"textMax\":%u,", (unsigned)MeshMsg::TEXT_MAX);
     buf[o - 1] = '}';
     return buf;
 }

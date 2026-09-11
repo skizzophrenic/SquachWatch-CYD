@@ -1137,6 +1137,13 @@ static void enterPhone() {
     transitionStart = millis();
     uiPhoneInit(*canvas);
 }
+
+// The same payphone, typing a SquachMesh message instead of a name.
+static void enterPhoneMessage(const char* text) {
+    state = AppState::PHONE;
+    transitionStart = millis();
+    uiPhoneInitMessage(*canvas, text);
+}
 #endif
 
 static void enterDetFilter() {
@@ -2641,6 +2648,9 @@ void loop() {
             // bubble's dots show it going out.
             if (touchJustDown) {
                 const ComposeHit hit = uiMeshComposeTouch(tp.x, tp.y, now);
+                // TYPE -- or EDIT on a typed message -- opens the keyboard,
+                // carrying whatever is typed so far.
+                if (hit == ComposeHit::TYPE) { enterPhoneMessage(uiMeshComposeTyped()); break; }
                 // "?" replays the tutorial, which runs on the main screen.
                 if (hit == ComposeHit::HELP) MeshTutor::start();
                 if (hit != ComposeHit::NONE) enterClear();
@@ -2707,7 +2717,17 @@ void loop() {
             else if (tp.valid)    uiPhoneTouch(tp.x, tp.y, now, PhoneTouch::MOVE);
             else if (touchJustUp) uiPhoneTouch(tp.x, tp.y, now, PhoneTouch::UP);
             // Back to where it was opened from, not to Settings.
-            if (uiPhoneDone()) enterMeshMenu();
+            if (uiPhoneDone()) {
+                // A message goes back to the message screen to be read over
+                // before it is sent; a name goes back to the menu it came from.
+                if (uiPhoneMessageMode()) {
+                    const char* m = uiPhoneMessage();
+                    enterMeshCompose();
+                    if (m && m[0]) uiMeshComposeSetTyped(m);
+                } else {
+                    enterMeshMenu();
+                }
+            }
             break;
         }
 #endif

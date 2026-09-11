@@ -1,4 +1,4 @@
-// The payphone -- where you type your Squachy's name.
+// The payphone -- where you type your Squachy's name, and a message.
 //
 // Twelve keys rather than a keyboard's twenty-nine, which is not only the
 // better look. On a 320px screen twenty-nine keys means ten columns of about
@@ -11,13 +11,17 @@
 // built-in nickname is caps and the display face is uppercase-only, so there
 // is no shift key and no case handling anywhere in this file.
 //
+// A message gets what a phone gave a text: the digit after the letters on
+// every key, punctuation on 1, and 0 after the space. A name keeps letters
+// only -- it rides in the advert, and letters are what every decoder accepts.
+//
 // And for anybody who hates multi-tap regardless, a QWERTY board: one button
 // away, and remembered once chosen. It is drawn by this same screen rather
-// than a screen of its own because the name being typed lives here, and
+// than a screen of its own because the text being typed lives here, and
 // switching layouts mid-word keeps what you have typed -- which is the entire
 // point of a bailout. Its geometry, hit test and touch filter are pure
 // arithmetic in qwerty.cpp, host-tested against every pixel of both
-// rotations.
+// rotations and both boards.
 #include "ui_phone.h"
 
 #if SQUACH_MESH
@@ -26,6 +30,8 @@
 #include "settings.h"
 #include "squachy.h"
 #include "qwerty.h"
+#include "meshmsg.h"
+#include <stdio.h>
 #include <string.h>
 
 namespace {
@@ -51,8 +57,18 @@ const char* const KEY_D[12] = { "1","2","3","4","5","6","7","8","9","*","0","#" 
 // feel instead.
 const char* const KEY_L[12] = { "", "ABC","DEF","GHI","JKL","MNO",
                                 "PQRS","TUV","WXYZ","DEL","SPACE","OK" };
+// What each key cycles through when typing a message. Every character here
+// must be in MeshMsg::TEXT_CHARSET -- the keyboards are the only way text gets
+// into a message, so they are what keeps an untypeable one from existing.
+const char* const KEY_M[12] = { ".,?!'-1", "ABC2","DEF3","GHI4","JKL5","MNO6",
+                                "PQRS7","TUV8","WXYZ9", "", " 0", "" };
 
-char     s_buf[Squachy::CUSTOM_NAME_MAX + 1];
+enum class Mode : uint8_t { NAME, MESSAGE };
+Mode     s_mode   = Mode::NAME;
+uint8_t  s_max    = Squachy::CUSTOM_NAME_MAX;
+bool     s_msgOk  = false;      // a message ended on OK, not BACK
+
+char     s_buf[MeshMsg::TEXT_MAX + 1];
 // Filled by the draw, read by the hit test, so the two cannot disagree about
 // where the button is -- the same reason every other row list here computes
 // its geometry once.
@@ -77,19 +93,27 @@ Qwerty::TouchFilter s_filter;
 // value, and it is traditional because it works.
 const uint32_t MULTITAP_MS = 800;
 
+inline bool msg() { return s_mode == Mode::MESSAGE; }
+
 void commitPending() { s_liveKey = -1; s_tapIx = 0; }
 
-// OK, from either layout. One copy of the part that writes to NVS, so the two
-// boards cannot drift apart on the one thing that has consequences.
+// OK, from either layout. One copy of the part with consequences, so the two
+// boards cannot drift apart on it.
 void saveAndClose() {
     commitPending();
-    Squachy::setCustomName(s_len ? s_buf : nullptr);
+    if (msg()) {
+        // Trailing spaces are nothing anybody meant to send.
+        while (s_len && s_buf[s_len - 1] == ' ') s_buf[--s_len] = '\0';
+        s_msgOk = s_len > 0;
+    } else {
+        Squachy::setCustomName(s_len ? s_buf : nullptr);
+    }
     s_done = true;
 }
 void deleteLast() { commitPending(); if (s_len) s_buf[--s_len] = '\0'; }
 void appendChar(char c) {
     commitPending();
-    if (s_len < Squachy::CUSTOM_NAME_MAX) { s_buf[s_len++] = c; s_buf[s_len] = '\0'; }
+    if (s_len < s_max) { s_buf[s_len++] = c; s_buf[s_len] = '\0'; }
 }
 
 void bevel(TFT_eSPI& t, int x, int y, int w, int h, uint16_t face,
@@ -105,6 +129,20 @@ void bevel(TFT_eSPI& t, int x, int y, int w, int h, uint16_t face,
 
 void steel(TFT_eSPI& t, int x, int y, int w, int h, bool sunk = false) {
     bevel(t, x, y, w, h, STEEL, STEEL_HI, STEEL_LT, STEEL_DK, STEEL_SH, sunk);
+}
+
+void start(const char* text) {
+    s_len = 0;
+    s_buf[0] = '\0';
+    if (text) {
+        while (s_len < s_max && text[s_len]) { s_buf[s_len] = text[s_len]; s_len++; }
+        s_buf[s_len] = '\0';
+    }
+    commitPending();
+    s_done    = false;
+    s_msgOk   = false;
+    s_armed   = -1;
+    s_sliding = false;
 }
 
 } // namespace
@@ -152,6 +190,12 @@ static const char* keyLabel(char c) {
     }
 }
 
+// The small print under a keypad digit.
+static const char* padLabel(int i) {
+    if (msg() && i == 0) return ".,?!'-";
+    return KEY_L[i];
+}
+
 static void qwertyPress(int x, int y) {
     s_filter.down(x, y);
     s_armed   = (int8_t)Qwerty::keyAt(s_keys, s_keyN, x, y, PRESS_REACH);
@@ -180,20 +224,21 @@ static void qwertyRelease() {
 
 void uiPhoneInit(TFT_eSPI& t) {
     (void)t;
-    const char* cur = Squachy::customName();
-    s_len = 0;
-    s_buf[0] = '\0';
-    if (cur) {
-        while (s_len < Squachy::CUSTOM_NAME_MAX && cur[s_len]) { s_buf[s_len] = cur[s_len]; s_len++; }
-        s_buf[s_len] = '\0';
-    }
-    commitPending();
-    s_done = false;
-    s_armed = -1;
-    s_sliding = false;
+    s_mode = Mode::NAME;
+    s_max  = Squachy::CUSTOM_NAME_MAX;
+    start(Squachy::customName());
 }
 
-bool uiPhoneDone() { return s_done; }
+void uiPhoneInitMessage(TFT_eSPI& t, const char* text) {
+    (void)t;
+    s_mode = Mode::MESSAGE;
+    s_max  = MeshMsg::TEXT_MAX;
+    start(text);
+}
+
+bool        uiPhoneDone()        { return s_done; }
+bool        uiPhoneMessageMode() { return msg(); }
+const char* uiPhoneMessage()      { return (msg() && s_msgOk) ? s_buf : nullptr; }
 
 void uiPhoneTouch(int x, int y, uint32_t now, PhoneTouch phase) {
     // Only a QWERTY press that landed on a key has any use for the rest of a
@@ -209,6 +254,7 @@ void uiPhoneTouch(int x, int y, uint32_t now, PhoneTouch phase) {
     // and cannot collide.
     if (x >= BX && x <= BX + BW && y >= s_backY && y <= s_backY + BH) {
         commitPending();
+        s_msgOk = false;
         s_done = true;
         return;
     }
@@ -235,7 +281,6 @@ void uiPhoneTouch(int x, int y, uint32_t now, PhoneTouch phase) {
             return;
         }
         if (i == 11) {                                  // OK
-            commitPending();
             // An empty name is not a custom name: it clears back to the
             // curated one rather than storing nothing. That is also what
             // keeps a zero-length value away from NVS, which returns early
@@ -244,13 +289,13 @@ void uiPhoneTouch(int x, int y, uint32_t now, PhoneTouch phase) {
             saveAndClose();
             return;
         }
-        if (i == 10) {                                  // SPACE
+        if (i == 10 && !msg()) {                        // SPACE, for a name
             commitPending();
-            if (s_len < Squachy::CUSTOM_NAME_MAX) { s_buf[s_len++] = ' '; s_buf[s_len] = '\0'; }
+            if (s_len < s_max) { s_buf[s_len++] = ' '; s_buf[s_len] = '\0'; }
             return;
         }
-        const char* letters = KEY_L[i];
-        if (!letters[0]) return;                        // 1 carries nothing
+        const char* letters = msg() ? KEY_M[i] : KEY_L[i];
+        if (!letters[0]) return;                        // 1 carries nothing, for a name
 
         if (s_liveKey == i && (now - s_tapAt) < MULTITAP_MS && s_len) {
             // Same key inside the window: cycle in place rather than append.
@@ -260,7 +305,7 @@ void uiPhoneTouch(int x, int y, uint32_t now, PhoneTouch phase) {
             // A different key commits whatever was pending immediately. That
             // is what lets you type two letters off one key by waiting, and
             // two off different keys without waiting at all.
-            if (s_len >= Squachy::CUSTOM_NAME_MAX) return;
+            if (s_len >= s_max) return;
             s_tapIx = 0;
             s_buf[s_len++] = letters[0];
             s_buf[s_len] = '\0';
@@ -310,7 +355,7 @@ void uiPhoneTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     t.setTextSize(2);
     t.setTextWrap(false);
     t.setTextColor(Theme::GREEN);
-    // Right-aligned once it outgrows the window, so the END of the name --
+    // Right-aligned once it outgrows the window, so the END of the text --
     // the part being typed -- is always the part you can see.
     const int tw = t.textWidth(s_buf);
     int tx = dX + 7;
@@ -323,6 +368,10 @@ void uiPhoneTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
         t.setTextColor(s_liveKey >= 0 ? Theme::VAPOR_YELLOW : Theme::GREEN);
         t.print("_");
     }
+    // A message has a limit worth seeing coming; a name's twelve is its own
+    // readout.
+    char rem[8];
+    snprintf(rem, sizeof rem, "%u LEFT", (unsigned)(s_max - s_len));
 
     s_backY = backY(h);
 
@@ -332,7 +381,8 @@ void uiPhoneTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
         // than a bubble floating over the key. Phones float it because your
         // eye is somewhere else; this screen is 42mm tall and the whole board
         // is inside one glance. A fixed box also never runs off the top on
-        // row one, which a floating one does on every press there.
+        // row one, which a floating one does on every press there. Idle, it
+        // says how much of a message is left.
         const int pw = 34, px = w - 10 - pw;
         steel(t, px - 3, dY - 3, pw + 6, dH + 6, true);
         t.fillRect(px, dY, pw, dH, Theme::BLACK);
@@ -343,11 +393,18 @@ void uiPhoneTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
             t.setTextColor(Theme::VAPOR_YELLOW);
             t.setCursor(px + (pw - t.textWidth(lab)) / 2, dY + (dH - t.fontHeight()) / 2);
             t.print(lab);
+        } else if (msg()) {
+            char n[4];
+            snprintf(n, sizeof n, "%u", (unsigned)(s_max - s_len));
+            t.setTextSize(1);
+            t.setTextColor(STEEL_LT);
+            t.setCursor(px + (pw - t.textWidth(n)) / 2, dY + (dH - t.fontHeight()) / 2);
+            t.print(n);
         }
 
         // ---- keys ---------------------------------------------------------
         // Laid out here, every frame, and read by the hit test -- see s_keys.
-        s_keyN = Qwerty::layout(w, Qwerty::BAND_TOP, h - Qwerty::BAND_BOTTOM_INSET, s_keys);
+        s_keyN = Qwerty::layout(w, Qwerty::BAND_TOP, h - Qwerty::BAND_BOTTOM_INSET, s_keys, msg());
         for (uint8_t i = 0; i < s_keyN; i++) {
             const Qwerty::Key& k = s_keys[i];
             const bool lit = (s_armed == (int8_t)i);
@@ -361,6 +418,12 @@ void uiPhoneTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
             t.print(lab);
         }
     } else {
+        if (msg()) {
+            t.setTextSize(1);
+            t.setTextColor(STEEL_DK);
+            t.setCursor(UX + UW - 12 - t.textWidth(rem), dY + dH + 6);
+            t.print(rem);
+        }
         // ---- keypad -------------------------------------------------------
         for (int i = 0; i < 12; i++) {
             const int kx = KX + (i % 3) * (KW + KGAP);
@@ -372,11 +435,12 @@ void uiPhoneTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
             t.setTextColor(Theme::WHITE);
             t.setCursor(kx + (KW - t.textWidth(KEY_D[i])) / 2, ky + 5);
             t.print(KEY_D[i]);
-            if (KEY_L[i][0]) {
+            const char* small = padLabel(i);
+            if (small[0]) {
                 t.setTextSize(1);
                 t.setTextColor(lit ? Theme::VAPOR_YELLOW : STEEL_LT);
-                t.setCursor(kx + (KW - t.textWidth(KEY_L[i])) / 2, ky + KH - 9);
-                t.print(KEY_L[i]);
+                t.setCursor(kx + (KW - t.textWidth(small)) / 2, ky + KH - 9);
+                t.print(small);
             }
         }
 

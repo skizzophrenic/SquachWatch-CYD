@@ -291,12 +291,20 @@ static void drawRedBubble(TFT_eSPI& t, int cx, int headTop, const char* from, co
     t.setTextSize(1);
     t.setTextWrap(false);
     const int w = t.width();
-    int bw = t.textWidth(line);
-    const int fw = t.textWidth(from);
-    if (fw > bw) bw = fw;
+    // A typed message runs to 48 characters, wider than a portrait screen:
+    // it wraps to two lines, or three, rather than running off the edge.
+    int maxW = w - 20;
+    if (maxW > 47 * t.textWidth("M")) maxW = 47 * t.textWidth("M");
+    char rows[3][48];
+    const uint8_t n = Theme::wrapText(t, line, maxW, rows, 3);
+    int bw = t.textWidth(from);
+    for (uint8_t i = 0; i < n; i++) {
+        const int rw = t.textWidth(rows[i]);
+        if (rw > bw) bw = rw;
+    }
     bw += 12;
     if (bw > w - 8) bw = w - 8;
-    const int bh = 26;
+    const int bh = 17 + n * 9;                // 26 for one line, as it always was
     int bx = cx - bw / 2;
     if (bx < 4) bx = 4;
     if (bx + bw > w - 4) bx = w - 4 - bw;
@@ -311,8 +319,10 @@ static void drawRedBubble(TFT_eSPI& t, int cx, int headTop, const char* from, co
     t.setCursor(bx + 6, by + 3);
     t.print(from);
     t.setTextColor(Theme::WHITE, Theme::RED);
-    t.setCursor(bx + 6, by + 14);
-    t.print(line);
+    for (uint8_t i = 0; i < n; i++) {
+        t.setCursor(bx + 6, by + 14 + i * 9);
+        t.print(rows[i]);
+    }
 }
 
 // The little bubble. Cyan dots when there is nothing new; the dots take turns

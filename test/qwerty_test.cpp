@@ -31,15 +31,29 @@ int main() {
     Key k[KEY_N];
     char msg[96];
 
+    for (int ext = 0; ext < 2; ext++)
     for (const Screen& s : SCREENS) {
-        // The band the device actually gives the keyboard.
+        // The band the device actually gives the keyboard -- for a name, and
+        // for a message, which adds a digit row and punctuation.
         const int top = BAND_TOP, bot = s.h - BAND_BOTTOM_INSET;
-        const uint8_t n = layout(s.w, top, bot, k);
-        const int mi = find(k, n, 'M'), bi = find(k, n, BKSP);
+        const uint8_t n = layout(s.w, top, bot, k, ext != 0);
+        // The key backspace follows: M on the name board, the apostrophe
+        // after M on the message board.
+        const char* kind = ext ? "message" : "name";
+        const int mi = find(k, n, ext ? '\'' : 'M'), bi = find(k, n, BKSP);
 
-        snprintf(msg, sizeof msg, "The board is complete (%s)", s.name); suite(msg);
+        snprintf(msg, sizeof msg, "The board is complete (%s, %s)", s.name, kind); suite(msg);
         {
-            ck("thirty keys", n == KEY_N);
+            ck(ext ? "forty-six keys" : "thirty keys", n == (ext ? 46 : 30));
+            if (ext) {
+                bool extra = true;
+                for (const char* c = "0123456789.,?!'-"; *c; c++) {
+                    int count = 0;
+                    for (uint8_t i = 0; i < n; i++) if (k[i].ch == *c) count++;
+                    if (count != 1) extra = false;
+                }
+                ck("every digit and mark exactly once", extra);
+            }
             bool letters = true;
             for (char c = 'A'; c <= 'Z'; c++) {
                 int count = 0;
@@ -53,7 +67,7 @@ int main() {
             ck("OK",        find(k, n, OK)  >= 0);
         }
 
-        snprintf(msg, sizeof msg, "Every key is on screen, in its band (%s)", s.name); suite(msg);
+        snprintf(msg, sizeof msg, "Every key is on screen, in its band (%s, %s)", s.name, kind); suite(msg);
         {
             bool inside = true, sane = true;
             for (uint8_t i = 0; i < n; i++) {
@@ -65,7 +79,7 @@ int main() {
             ck("no key under 18px in either direction", sane);
         }
 
-        snprintf(msg, sizeof msg, "No two keys overlap (%s)", s.name); suite(msg);
+        snprintf(msg, sizeof msg, "No two keys overlap (%s, %s)", s.name, kind); suite(msg);
         {
             bool clean = true;
             for (uint8_t i = 0; i < n; i++)
@@ -74,7 +88,7 @@ int main() {
             ck("every pair of keys is disjoint", clean);
         }
 
-        snprintf(msg, sizeof msg, "Backspace does not cover M (%s)", s.name); suite(msg);
+        snprintf(msg, sizeof msg, "Backspace does not cover the key before it (%s, %s)", s.name, kind); suite(msg);
         if (mi >= 0 && bi >= 0) {
             const Key& m = k[mi];
             const Key& b = k[bi];
@@ -85,7 +99,7 @@ int main() {
             ck("M and backspace both exist", false);
         }
 
-        snprintf(msg, sizeof msg, "What you see is what you press (%s)", s.name); suite(msg);
+        snprintf(msg, sizeof msg, "What you see is what you press (%s, %s)", s.name, kind); suite(msg);
         {
             // Every pixel of every key. Not a sample -- the bug this replaces
             // was a few columns wide, at one edge, of one key.
@@ -108,7 +122,7 @@ int main() {
             }
         }
 
-        snprintf(msg, sizeof msg, "The gutters are live (%s)", s.name); suite(msg);
+        snprintf(msg, sizeof msg, "The gutters are live (%s, %s)", s.name, kind); suite(msg);
         {
             // Nearest-rectangle means a press between two keys is not a press
             // on nothing. Anywhere inside the keyboard's outline resolves.
@@ -138,13 +152,15 @@ int main() {
         for (const Screen& s : SCREENS)
             for (int top = 30; top <= 70; top += 4)
                 for (int bot = s.h - 60; bot <= s.h - 20; bot += 4) {
-                    const uint8_t n = layout(s.w, top, bot, k);
+                  for (int ext = 0; ext < 2; ext++) {
+                    const uint8_t n = layout(s.w, top, bot, k, ext != 0);
                     for (uint8_t i = 0; i < n; i++) {
                         if (k[i].x < 0 || k[i].x + k[i].w > s.w || k[i].y < 0) ok = false;
                         for (uint8_t j = i + 1; j < n; j++) if (overlap(k[i], k[j])) ok = false;
                     }
-                    const int mi = find(k, n, 'M'), bi = find(k, n, BKSP);
+                    const int mi = find(k, n, ext ? '\'' : 'M'), bi = find(k, n, BKSP);
                     if (mi < 0 || bi < 0 || k[bi].x - (k[mi].x + k[mi].w) != BKSP_GAP) ok = false;
+                  }
                 }
         ck("on screen, disjoint, and M clear of backspace throughout", ok);
     }

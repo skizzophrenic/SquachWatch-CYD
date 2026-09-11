@@ -30,7 +30,7 @@ const char* body(Step s) {
         case Step::TAP_ICON:
             return "To send a message, tap the speech bubble beside your visitor.";
         case Step::PICK_LINE:
-            return "Messages are ready-made lines, small enough for one radio packet. Tap one.";
+            return "Tap a ready-made line here, or TYPE your own, up to 48 characters.";
         case Step::PRESS_SEND:
             return "It asks first, so a wrong tap costs nothing. Check the line, then press SEND.";
         case Step::REPLY:

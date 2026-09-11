@@ -5,12 +5,12 @@
 // suite runs the protocol against a TOY AEAD -- one that binds the key, the
 // nonce, the associated data and the ciphertext into its tag the way a real one
 // does, so every tamper case below behaves as it would on the device -- and the
-// real cipher is pinned elsewhere: include/meshmsg_vectors.h holds a frame built
+// real cipher is pinned elsewhere: include/meshmsg_vectors.h holds frames built
 // by an independent implementation (Python's `cryptography`, see
 // gen_meshmsg_vectors.py) that the device must reproduce byte for byte at boot.
 //
-// What this suite CAN check against that golden frame, it does: the header and
-// the nonce. Those are the parts no cipher can rescue if they are laid out
+// What this suite CAN check against those golden frames, it does: the headers
+// and the nonce. Those are the parts no cipher can rescue if they are laid out
 // wrong, and the parts where two implementations quietly disagreeing would
 // otherwise only show up as two boards that cannot read each other.
 #include "meshmsg.h"
@@ -83,6 +83,16 @@ static size_t s_seqN = 0, s_seqI = 0;
 static uint32_t scripted() { return s_seqI < s_seqN ? s_seq[s_seqI++] : 0; }
 static uint32_t s_lcgState = 12345;
 static uint32_t lcg() { s_lcgState = s_lcgState * 1664525u + 1013904223u; return s_lcgState; }
+
+// Seals every part of `text` at consecutive counters from `base`.
+static uint8_t sealAll(const uint8_t mac[6], uint32_t base, const char* text,
+                       uint8_t f[TEXT_PARTS_MAX][TEXT_FRAME_LEN]) {
+    const uint8_t total = textParts(text);
+    for (uint8_t p = 0; p < total; p++)
+        if (sealTextPart(TOY, mac, base + p, text, p, total, f[p], TEXT_FRAME_LEN) != TEXT_FRAME_LEN)
+            return 0;
+    return total;
+}
 
 int main() {
     suite("The word list");
@@ -182,7 +192,7 @@ int main() {
         ck("a buffer too small is refused, never truncated", phraseText(idx, text, 5) == 0);
     }
 
-    suite("Header and nonce agree with an independent implementation");
+    suite("Headers and nonce agree with an independent implementation");
     {
         uint8_t nonce[NONCE_LEN];
         nonceFor(MeshMsgVec::MAC, MeshMsgVec::COUNTER, nonce);
@@ -203,12 +213,28 @@ int main() {
            s_lastAadLen == HDR_LEN && memcmp(s_lastAad, f, HDR_LEN) == 0);
         ck("the salt is the one the vectors were made with",
            strcmp(SALT, MeshMsgVec::SALT) == 0);
+
+        const uint8_t total = textParts(MeshMsgVec::TEXT);
+        uint8_t tf[TEXT_FRAME_LEN];
+        const size_t tn = sealTextPart(TOY, MeshMsgVec::MAC, MeshMsgVec::COUNTER + MeshMsgVec::TEXT_PART,
+                                       MeshMsgVec::TEXT, MeshMsgVec::TEXT_PART, total, tf, sizeof tf);
+        ck("the golden text is a two-part message", total == 2);
+        ck("a typed part is the golden length", tn == sizeof MeshMsgVec::TEXT_FRAME);
+        ck("its header is the golden header, byte for byte",
+           memcmp(tf, MeshMsgVec::TEXT_FRAME, HDR_LEN) == 0);
     }
 
     uint8_t key[KEY_LEN];
     for (size_t i = 0; i < KEY_LEN; i++) key[i] = (uint8_t)(0x40 + i);
     const uint8_t me[6]  = { 0x24, 0x0A, 0xC4, 0xAA, 0xBB, 0xCC };
     const uint8_t you[6] = { 0x24, 0x0A, 0xC4, 0x11, 0x22, 0x33 };
+
+    suite("A frame fits the packet it rides in");
+    {
+        ck("a typed part and its company ID fill one 29-byte AD, and no more",
+           2 + TEXT_FRAME_LEN == 29);
+        ck("a canned frame is smaller than a typed part", CANNED_FRAME_LEN < TEXT_FRAME_LEN);
+    }
 
     suite("A message round-trips");
     {
@@ -220,6 +246,11 @@ int main() {
         ck("it opens", openCanned(TOY, me, f, sizeof f, c, line) == Open::OK);
         ck("the counter survives", c == 41);
         ck("the line survives", line == 3);
+        ck("a counter past three bytes is refused, not wrapped",
+           sealCanned(TOY, me, COUNTER_MAX + 1, 3, f, sizeof f) == 0);
+        ck("the last three-byte counter is fine",
+           sealCanned(TOY, me, COUNTER_MAX, 3, f, sizeof f) == CANNED_FRAME_LEN &&
+           openCanned(TOY, me, f, sizeof f, c, line) == Open::OK && c == COUNTER_MAX);
     }
 
     suite("Anything tampered with is refused, not misread");
@@ -233,7 +264,7 @@ int main() {
         ck("a flipped ciphertext bit", openCanned(TOY, me, f, sizeof f, c, line) == Open::BAD_TAG);
         memcpy(f, good, sizeof f); f[sizeof f - 1] ^= 0x80;
         ck("a flipped tag bit", openCanned(TOY, me, f, sizeof f, c, line) == Open::BAD_TAG);
-        memcpy(f, good, sizeof f); f[6] ^= 0x01;
+        memcpy(f, good, sizeof f); f[3] ^= 0x01;
         ck("a changed counter", openCanned(TOY, me, f, sizeof f, c, line) == Open::BAD_TAG);
         ck("the right frame from the wrong sender",
            openCanned(TOY, you, good, sizeof good, c, line) == Open::BAD_TAG);
@@ -255,13 +286,13 @@ int main() {
         uint8_t line;
         memcpy(f, good, sizeof good); f[0] = 'X';
         ck("another magic is not ours", openCanned(TOY, me, f, sizeof good, c, line) == Open::NOT_OURS);
-        memcpy(f, good, sizeof good); f[3] = '1';
+        memcpy(f, good, sizeof good); f[1] = 'Q';
         ck("SquachMesh's own advert magic is not ours",
            openCanned(TOY, me, f, sizeof good, c, line) == Open::NOT_OURS);
-        ck("three bytes is not ours", openCanned(TOY, me, good, 3, c, line) == Open::NOT_OURS);
-        memcpy(f, good, sizeof good); f[4] = 2;
-        ck("an unknown version is refused", openCanned(TOY, me, f, sizeof good, c, line) == Open::BAD_FORMAT);
-        memcpy(f, good, sizeof good); f[5] = 9;
+        ck("one byte is not ours", openCanned(TOY, me, good, 1, c, line) == Open::NOT_OURS);
+        memcpy(f, good, sizeof good); f[2] = (uint8_t)((1 << 4) | KIND_CANNED);
+        ck("version 1 is refused", openCanned(TOY, me, f, sizeof good, c, line) == Open::BAD_FORMAT);
+        memcpy(f, good, sizeof good); f[2] = (uint8_t)((VERSION << 4) | 9);
         ck("an unknown kind is refused", openCanned(TOY, me, f, sizeof good, c, line) == Open::BAD_FORMAT);
         ck("a truncated frame is refused",
            openCanned(TOY, me, good, sizeof good - 1, c, line) == Open::BAD_FORMAT);
@@ -277,9 +308,9 @@ int main() {
         // than refused as forged or shown as garbage.
         TOY.setKey(key);
         uint8_t f[CANNED_FRAME_LEN];
-        memcpy(f, MAGIC, 4);
-        f[4] = VERSION; f[5] = KIND_CANNED;
-        f[6] = 9; f[7] = f[8] = f[9] = 0;
+        memcpy(f, MAGIC, sizeof MAGIC);
+        f[2] = (uint8_t)((VERSION << 4) | KIND_CANNED);
+        f[3] = 9; f[4] = f[5] = 0;
         uint8_t nonce[NONCE_LEN];
         nonceFor(me, 9, nonce);
         const uint8_t pt = CANNED_N;            // one past this build's last line
@@ -292,6 +323,108 @@ int main() {
            sealCanned(TOY, me, 9, CANNED_N, f, sizeof f) == 0);
     }
 
+    suite("What can be typed");
+    {
+        ck("letters, digits, space and the punctuation", textParts("HI THERE, I'M 5 MIN OUT - OK?!.") > 0);
+        ck("nothing is not a message", textParts("") == 0 && textParts(nullptr) == 0);
+        ck("lowercase is not typeable here", textParts("hello") == 0);
+        ck("nor is anything outside the set", textParts("A~B") == 0 && textParts("A\nB") == 0);
+        char s[64];
+        memset(s, 'A', sizeof s);
+        s[16] = '\0'; ck("sixteen characters is one part", textParts(s) == 1);
+        s[16] = 'A'; s[17] = '\0'; ck("seventeen is two", textParts(s) == 2);
+        s[17] = 'A'; s[48] = '\0'; ck("forty-eight is three", textParts(s) == 3);
+        s[48] = 'A'; s[49] = '\0'; ck("forty-nine is refused, never truncated", textParts(s) == 0);
+        ck("the golden text is typeable", textParts(MeshMsgVec::TEXT) == 2);
+    }
+
+    suite("A typed message round-trips, whatever order its parts arrive in");
+    {
+        TOY.setKey(key);
+        const char* text = "MEET BY THE FOOD TRUCK AT THE NORTH GATE IN 10.";   // 47
+        uint8_t f[TEXT_PARTS_MAX][TEXT_FRAME_LEN];
+        const uint8_t total = sealAll(me, 500, text, f);
+        ck("three parts, all sealed", total == 3);
+
+        Assembly a;
+        char out[TEXT_MAX + 1];
+        uint32_t base = 0;
+        const uint8_t order[3] = { 2, 0, 1 };
+        bool early = false, done = false;
+        for (uint8_t i = 0; i < 3; i++) {
+            uint32_t c; uint8_t part, tot; char chars[TEXT_PART_CHARS + 1];
+            const Open r = openTextPart(TOY, me, f[order[i]], TEXT_FRAME_LEN, c, part, tot, chars);
+            if (r != Open::OK || part != order[i] || tot != 3 || c != 500u + order[i]) early = true;
+            const bool complete = a.add(me, c, part, tot, chars, out, base);
+            if (i < 2 && complete) early = true;
+            if (i == 2) done = complete;
+        }
+        ck("every part opens as itself, and nothing completes early", !early);
+        ck("the last part completes it", done);
+        ck("the text comes back whole", !strcmp(out, text));
+        ck("and says where it started", base == 500);
+
+        Assembly b;
+        uint32_t c; uint8_t part, tot; char chars[TEXT_PART_CHARS + 1];
+        openTextPart(TOY, me, f[0], TEXT_FRAME_LEN, c, part, tot, chars);
+        ck("one part is not a message", !b.add(me, c, part, tot, chars, out, base));
+        ck("nor is the same part twice", !b.add(me, c, part, tot, chars, out, base));
+
+        const char* one = "HI.";
+        uint8_t g[TEXT_PARTS_MAX][TEXT_FRAME_LEN];
+        ck("a short message is one part", sealAll(me, 900, one, g) == 1);
+        openTextPart(TOY, me, g[0], TEXT_FRAME_LEN, c, part, tot, chars);
+        ck("and completes on its own", b.add(me, c, part, tot, chars, out, base) && !strcmp(out, one));
+    }
+
+    suite("A typed part is as tamper-proof as a canned line");
+    {
+        TOY.setKey(key);
+        uint8_t f[TEXT_PARTS_MAX][TEXT_FRAME_LEN];
+        sealAll(me, 60, "WHERE ARE YOU RIGHT NOW?", f);
+        uint32_t c; uint8_t part, tot; char chars[TEXT_PART_CHARS + 1];
+        uint8_t t[TEXT_FRAME_LEN];
+        memcpy(t, f[1], sizeof t); t[HDR_LEN + 4] ^= 0x10;
+        ck("a flipped text bit", openTextPart(TOY, me, t, sizeof t, c, part, tot, chars) == Open::BAD_TAG);
+        memcpy(t, f[1], sizeof t); t[3] ^= 0x01;
+        ck("a part moved to another counter", openTextPart(TOY, me, t, sizeof t, c, part, tot, chars) == Open::BAD_TAG);
+        ck("the right part from the wrong sender",
+           openTextPart(TOY, you, f[1], TEXT_FRAME_LEN, c, part, tot, chars) == Open::BAD_TAG);
+        ck("a typed part is not a canned line", [&] {
+            uint8_t line; return openCanned(TOY, me, f[0], TEXT_FRAME_LEN, c, line) == Open::BAD_FORMAT; }());
+        uint8_t cf[CANNED_FRAME_LEN];
+        sealCanned(TOY, me, 70, 1, cf, sizeof cf);
+        ck("and a canned line is not a typed part",
+           openTextPart(TOY, me, cf, sizeof cf, c, part, tot, chars) == Open::BAD_FORMAT);
+    }
+
+    suite("A code this build has no character for");
+    {
+        // A newer build may add characters; an older one shows '?' rather
+        // than refusing an authentic message or printing garbage.
+        TOY.setKey(key);
+        uint8_t f[TEXT_FRAME_LEN];
+        memcpy(f, MAGIC, sizeof MAGIC);
+        f[2] = (uint8_t)((VERSION << 4) | KIND_TEXT);
+        f[3] = 5; f[4] = f[5] = 0;
+        uint8_t pt[1 + TEXT_PART_BYTES];
+        pt[0] = (0 << 4) | 1;
+        // Codes: 'H' (8), 50 (unknown), END... packed by hand, MSB first.
+        uint8_t codes[TEXT_PART_CHARS];
+        for (uint8_t i = 0; i < TEXT_PART_CHARS; i++) codes[i] = TEXT_END;
+        codes[0] = 8; codes[1] = 50;
+        memset(pt + 1, 0, TEXT_PART_BYTES);
+        for (unsigned i = 0; i < TEXT_PART_CHARS; i++)
+            for (unsigned b = 0; b < 6; b++)
+                if (codes[i] & (0x20 >> b)) pt[1 + (i * 6 + b) / 8] |= (uint8_t)(0x80 >> ((i * 6 + b) % 8));
+        uint8_t nonce[NONCE_LEN];
+        nonceFor(me, 5, nonce);
+        TOY.seal(nonce, f, HDR_LEN, pt, sizeof pt, f + HDR_LEN, f + HDR_LEN + sizeof pt);
+        uint32_t c; uint8_t part, tot; char chars[TEXT_PART_CHARS + 1];
+        ck("it authenticates", openTextPart(TOY, me, f, sizeof f, c, part, tot, chars) == Open::OK);
+        ck("and reads as H?", !strcmp(chars, "H?"));
+    }
+
     suite("Each counter is delivered once per sender");
     {
         Replay r;
@@ -301,6 +434,15 @@ int main() {
         ck("an older counter is not", !r.fresh(me, 4));
         ck("a newer counter is", r.fresh(me, 6));
         ck("another sender is judged separately", r.fresh(you, 1));
+
+        // A three-part message at 10, 11, 12 is recorded by its LAST counter,
+        // so none of its parts is fresh once it has been delivered -- but
+        // until then, all of them are.
+        Replay t;
+        ck("before delivery every part is fresh", t.fresh(me, 10) && t.fresh(me, 11) && t.fresh(me, 12));
+        t.record(me, 12);
+        ck("after it, none is", !t.fresh(me, 10) && !t.fresh(me, 11) && !t.fresh(me, 12));
+        ck("and the next message is", t.fresh(me, 13));
 
         // Five senders into four slots: the one heard from longest ago goes.
         uint8_t m[5][6];

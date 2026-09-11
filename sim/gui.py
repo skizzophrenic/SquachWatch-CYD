@@ -419,6 +419,10 @@ PAGE = """<!doctype html>
       <button id="meshSay" class="ghost">Make it say</button>
     </div>
     <div class="row">
+      <input type="text" id="meshText" maxlength="48" placeholder="or type one: A-Z 0-9 .,?!'-" style="flex:1">
+      <button id="meshType" class="ghost">Make it type</button>
+    </div>
+    <div class="row">
       <label class="check"><input type="checkbox" id="meshShares" checked> same phrase as you</label>
       <label class="check"><input type="checkbox" id="meshReply" checked> answers back</label>
     </div>
@@ -734,6 +738,7 @@ function meshShow(h) {
   if (!meshCat && !meshCatBusy) loadMeshCat();
   $('meshHere').textContent = mesh.present ? 'Send it away' : 'Bring it nearby';
   $('meshSay').disabled = !mesh.present;
+  $('meshType').disabled = !mesh.present;
   for (const [id, v] of [['meshOutfit', mesh.outfit], ['meshShade', mesh.shade],
                          ['meshNick', mesh.nick], ['meshName', mesh.name]])
     if (document.activeElement !== $(id)) $(id).value = v;
@@ -744,6 +749,7 @@ function meshShow(h) {
 $('meshSetup').onclick = () => meshCmd('setup');
 $('meshHere').onclick  = () => meshCmd(mesh.present ? 'off' : 'on');
 $('meshSay').onclick   = () => meshCmd('say ' + $('meshLine').value);
+$('meshType').onclick  = () => meshCmd('text ' + $('meshText').value);
 $('meshOutfit').onchange = e => meshCmd('outfit ' + e.target.value);
 $('meshShade').onchange  = e => meshCmd('shade ' + e.target.value);
 $('meshNick').onchange   = e => meshCmd('nick ' + e.target.value);

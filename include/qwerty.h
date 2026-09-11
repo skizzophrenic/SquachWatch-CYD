@@ -22,7 +22,7 @@ constexpr char OK   = '\n';
 struct Key { int16_t x, y, w, h; char ch; };
 
 // 26 letters, space, backspace, clear, OK.
-constexpr uint8_t KEY_N = 30;
+constexpr uint8_t KEY_N = 48;   // the message board's 46, with room
 
 // The gap between the last letter of the bottom row and backspace. A number
 // of its own rather than the ordinary key gap, because that is exactly where
@@ -43,7 +43,10 @@ constexpr int BAND_BOTTOM_INSET = 26 + 6 + 6;
 // Rows are un-staggered -- rows two and three share a left edge -- because
 // QWERTY's offset is a typewriter linkage artefact, and squaring it up is
 // where the middle row gets its extra width.
-uint8_t layout(int w, int bandTop, int bandBottom, Key out[KEY_N]);
+// `message`: the board for a SquachMesh message -- a digit row on top, an
+// apostrophe after M, and , . ? ! - around the space bar. A name gets the
+// four-row letters-only board.
+uint8_t layout(int w, int bandTop, int bandBottom, Key out[KEY_N], bool message = false);
 
 // The key nearest (x, y), measured to its RECTANGLE rather than its centre.
 //

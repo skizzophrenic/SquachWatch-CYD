@@ -150,6 +150,7 @@ static void usage() {
         "  --qwerty          phone screen: the QWERTY board, not the keypad\n"
         "  --msgs            messages on, with a phrase set\n"
         "  --inbox N         ...and canned line N just arrived from the visitor\n"
+        "  --inboxtext TEXT  ...or this typed message did (A-Z 0-9 .,?!'-, up to 48)\n"
         "  --phrase-mode N   phrase screen: 0 show, 1 rolled, 2 picking a word, 3 picking a letter\n"
         "  --bg N            background style 0..9 (see Settings::Background)\n"
         "  --theme N         palette index\n"
@@ -200,6 +201,7 @@ int main(int argc, char** argv) {
     // the thing custom names exist for: a name that travelled here from
     // somebody else's device.
     std::string peerName;
+    std::string inboxText;
     // --type feeds the payphone a tap sequence: digits are key presses,
     // "." waits past the multi-tap window. Typing is the feature; a screen
     // that only renders proves nothing about it.
@@ -226,6 +228,7 @@ int main(int argc, char** argv) {
         else if (a == "--noseed") noSeed = true;
         else if (a == "--peer" && i + 1 < argc) peerOutfit = atoi(argv[++i]);
         else if (a == "--peername" && i + 1 < argc) peerName = argv[++i];
+        else if (a == "--inboxtext" && i + 1 < argc) inboxText = argv[++i];
         else if (a == "--type" && i + 1 < argc) typeSeq = argv[++i];
         else if (a == "--scroll" && i + 1 < argc) scrollBy = atoi(argv[++i]);
     }
@@ -287,7 +290,7 @@ int main(int argc, char** argv) {
     // because the NVS shim may remember a previous run.
     MeshTalk::begin();
     {
-        const bool want = msgs || inboxLine >= 0;
+        const bool want = msgs || inboxLine >= 0 || !inboxText.empty();
         if (Settings::messagesOn() != want) Settings::toggleMessages();
         if (want) MeshTalk::setPhrase("GIBSON MOTHMAN PHREAK NESSIE ZEROCOOL");
     }
@@ -297,6 +300,19 @@ int main(int argc, char** argv) {
         const size_t n = MeshMsg::sealCanned(MeshCrypto::impl(), from, 1,
                                              (uint8_t)inboxLine, f, sizeof f);
         MeshTalk::onFrame(from, f, n, peerName.empty() ? "BIGFOOT" : peerName.c_str());
+        MeshTalk::tick(millis());
+    }
+    if (!inboxText.empty()) {
+        // Every part, through the same receive path a board's scan feeds.
+        const uint8_t from[6] = { 0x24, 0x0A, 0xC4, 0xBF, 0x00, 0x7E };
+        const uint8_t total = MeshMsg::textParts(inboxText.c_str());
+        if (!total) fprintf(stderr, "--inboxtext: not a message\n");
+        for (uint8_t p = 0; p < total; p++) {
+            uint8_t f[MeshMsg::TEXT_FRAME_LEN];
+            const size_t n = MeshMsg::sealTextPart(MeshCrypto::impl(), from, 10 + p,
+                                                   inboxText.c_str(), p, total, f, sizeof f);
+            MeshTalk::onFrame(from, f, n, peerName.empty() ? "BIGFOOT" : peerName.c_str());
+        }
         MeshTalk::tick(millis());
     }
 

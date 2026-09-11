@@ -29,7 +29,11 @@ BG   = 8          # the v1.5.23 clip's background, so the two read as one series
 
 # Where things are. See the note above.
 ICON     = (284, 94)    # the speech bubble beside the visitor (inside its padded target)
-LINE     = (240, 64)    # "Where are you?": right column, first row
+LINE     = (80, 64)     # "On my way.": left column, first row
+
+# What the visitor types: 45 of the 48 characters, so three parts, and long
+# enough to wrap the red bubble -- which is the thing worth showing.
+TYPED = "SOMETHING'S FOLLOWING ME. MEET AT NORTH GATE?"
 SEND     = (282, 221)
 LETTER_P = (69, 142)    # the phrase picker's P, in the landscape 7-column grid
 RING_FRAMES = 6         # how long a tap's ring stays up
@@ -126,10 +130,13 @@ def render():
     live.send("P outfit 12", "P shade 1", "P name BIGFOOT",
               "P reply on", "P phrase same", "P setup")
     cap(42)                    # he walks in, and they say hello
-    live.send("P say 3")       # "Something's nearby."
-    cap(48)                    # it arrives with his next advert, in red, with the "!"
+    # A TYPED message: three parts, one per advert, put back together before
+    # it shows -- so it takes a few seconds to land, fast-forwarded here.
+    live.send("P text " + TYPED)
+    cap(28, every=4)
+    cap(40)                    # in red, wrapped over two lines, with the "!"
     tap(*ICON);  cap(12)       # into the message screen
-    tap(*LINE);  cap(22)       # chosen -- and it asks first
+    tap(*LINE);  cap(22)       # a ready-made answer, chosen -- and it asks first
     tap(*SEND);  cap(16)       # out it goes; the dots take turns while it is on the air
     cap(26, every=4)           # the other board reading it, fast-forwarded
     cap(40)                    # and its answer, in red

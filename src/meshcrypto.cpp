@@ -92,6 +92,22 @@ bool MeshCrypto::selfTest() {
         f[MeshMsg::HDR_LEN] ^= 0x01;
         if (MeshMsg::openCanned(IMPL, V::MAC, f, sizeof f, ctr, line)
                 != MeshMsg::Open::BAD_TAG) break;
+
+        // 5. A typed part agrees too: the six-bit packing, the part byte and
+        //    the counter offset, against an implementation that packed the
+        //    same text independently.
+        uint8_t tf[MeshMsg::TEXT_FRAME_LEN];
+        const uint8_t total = MeshMsg::textParts(V::TEXT);
+        if (MeshMsg::sealTextPart(IMPL, V::MAC, V::COUNTER + V::TEXT_PART, V::TEXT,
+                                  V::TEXT_PART, total, tf, sizeof tf) != sizeof tf) break;
+        if (memcmp(tf, V::TEXT_FRAME, sizeof tf) != 0) break;
+        uint8_t part = 0xFF, tot = 0;
+        char chars[MeshMsg::TEXT_PART_CHARS + 1];
+        if (MeshMsg::openTextPart(IMPL, V::MAC, V::TEXT_FRAME, sizeof V::TEXT_FRAME,
+                                  ctr, part, tot, chars) != MeshMsg::Open::OK) break;
+        if (part != V::TEXT_PART || tot != total ||
+            strncmp(chars, V::TEXT + V::TEXT_PART * MeshMsg::TEXT_PART_CHARS,
+                    MeshMsg::TEXT_PART_CHARS) != 0) break;
         ok = true;
     } while (false);
     s_keyed = false;            // nothing left keyed with the test key

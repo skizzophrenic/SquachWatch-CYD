@@ -26,6 +26,7 @@ uint8_t     s_lineN = 0;
 Rect        s_back = { 0, 0, 0, 0 }, s_prev = { 0, 0, 0, 0 }, s_next = { 0, 0, 0, 0 };
 Rect        s_send = { 0, 0, 0, 0 };
 Rect        s_help = { 0, 0, 0, 0 };
+Rect        s_type = { 0, 0, 0, 0 };
 const char* s_status = nullptr;
 uint16_t    s_statusCol = 0;
 // The line waiting to be confirmed, or -1. A tap on a line only chooses it;
@@ -33,8 +34,13 @@ uint16_t    s_statusCol = 0;
 // cost a second tap, not a message you did not mean.
 int8_t      s_sel = -1;
 char        s_confirm[40];
+// A typed message back from the keyboard, waiting to be sent -- the same
+// confirmation as a line, with the whole text shown large instead of quoted
+// on the status row, which is too narrow for forty-eight characters.
+char        s_typed[MeshMsg::TEXT_MAX + 1] = "";
+bool        s_typedOn = false;
 
-const int BW = 68, BH = 26, AW = 44;
+const int BW = 68, BH = 26, AW = 44, TW = 56;
 
 // Held to 36 characters. Portrait is 240 wide and these start 8 in, so 38 is
 // the most that fits; the first versions ran to 41 and lost their last words
@@ -43,6 +49,14 @@ const char* const NEED_PHRASE  = "Set a phrase: SQUACHMESH > PHRASE.";
 const char* const TRANSMIT_OFF = "TRANSMIT off: can read, not reply.";
 const char* const SENDING      = "Sending, for thirty seconds.";
 const char* const SEND_FAILED  = "Could not send. Try again.";
+
+// The reasons a message could not go out, given BEFORE anything is chosen or
+// typed rather than after the person has confirmed it. Null when it can.
+const char* cannotSend() {
+    if (!MeshTalk::ready())             return NEED_PHRASE;
+    if (!Settings::meshTransmit())      return TRANSMIT_OFF;
+    return nullptr;
+}
 
 // The tutorial's rules for this screen: only the step's target does anything,
 // and nothing is ever sent. SEND moves the lesson on and goes back to the main
@@ -77,13 +91,27 @@ ComposeHit tutorTouch(int x, int y) {
 
 void uiMeshComposeInit(TFT_eSPI& t) {
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
-    s_page   = 0;
-    s_status = nullptr;
-    s_sel    = -1;
+    s_page    = 0;
+    s_status  = nullptr;
+    s_sel     = -1;
+    s_typedOn = false;
+    s_typed[0] = '\0';
     // Opening this screen is reading the message, so the bubble on the main
     // screen stops calling for attention.
     MeshTalk::markRead();
 }
+
+void uiMeshComposeSetTyped(const char* text) {
+    size_t n = 0;
+    if (text) for (; n < MeshMsg::TEXT_MAX && text[n]; n++) s_typed[n] = text[n];
+    while (n && s_typed[n - 1] == ' ') n--;
+    s_typed[n] = '\0';
+    s_typedOn = MeshMsg::textParts(s_typed) > 0;
+    s_sel     = -1;
+    s_status  = nullptr;
+}
+
+const char* uiMeshComposeTyped() { return s_typed; }
 
 void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     const int w = t.width(), h = t.height();
@@ -102,16 +130,25 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     t.print("MESSAGE");
 
     // ---- the last one received, in red ------------------------------------
+    // Two rows inside the same 22 pixels a canned line had to itself: a
+    // typed message and its sender's name run past one row, and the list
+    // below cannot move down to make room.
     const MeshTalk::Message& m = MeshTalk::inbox();
     const int bx = 4, by = 26, bw = w - 8, bh = 22;
     t.setTextSize(1);
     if (m.have) {
-        char line[64];
+        char line[80];
         snprintf(line, sizeof line, "%s: %s", m.from, MeshTalk::lineText(m));
         t.fillRoundRect(bx, by, bw, bh, 4, Theme::RED);
+        int maxW = bw - 12;
+        if (maxW > 47 * t.textWidth("M")) maxW = 47 * t.textWidth("M");
+        char rows[2][48];
+        const uint8_t n = Theme::wrapText(t, line, maxW, rows, 2);
         t.setTextColor(Theme::WHITE, Theme::RED);
-        t.setCursor(bx + 6, by + (bh - 8) / 2);
-        t.print(line);
+        for (uint8_t i = 0; i < n; i++) {
+            t.setCursor(bx + 6, n == 1 ? by + (bh - 8) / 2 : by + 2 + i * 10);
+            t.print(rows[i]);
+        }
     } else {
         t.drawRoundRect(bx, by, bw, bh, 4, Theme::W95_SHADOW);
         t.setTextColor(Theme::W95_SHADOW, Theme::BG);
@@ -119,7 +156,7 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
         t.print("No messages yet.");
     }
 
-    // ---- the lines you can send -------------------------------------------
+    // ---- the lines you can send, or the one you typed ------------------------
     // Two columns in landscape, one in portrait -- the longest line is twenty
     // characters, which is wider than half of 240.
     const int cols = port ? 1 : 2, rows = port ? 9 : 6;
@@ -129,26 +166,49 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     const int cw = (w - 8 - (cols - 1) * 6) / cols, ch = 20;
     const int y0 = by + bh + 6;
     s_lineN = 0;
-    for (int i = 0; i < perPage; i++) {
-        const int idx = s_page * perPage + i;
-        if (idx >= MeshMsg::CANNED_N) break;
-        const int x = 4 + (i % cols) * (cw + 6), y = y0 + (i / cols) * (ch + 3);
-        s_lineRect[s_lineN] = { (int16_t)x, (int16_t)y, (int16_t)cw, (int16_t)ch };
-        s_lineIdx[s_lineN]  = (uint8_t)idx;
-        s_lineN++;
-        const bool sel = idx == s_sel;
-        const uint16_t bg = sel ? Theme::PURPLE : Theme::BG;
-        t.fillRect(x, y, cw, ch, bg);
-        t.drawRect(x, y, cw, ch, sel ? Theme::VAPOR_PINK : Theme::CYAN);
-        t.setTextColor(Theme::WHITE, bg);
-        t.setCursor(x + 6, y + (ch - 8) / 2);
-        t.print(MeshMsg::CANNED[idx]);
+    if (s_typedOn) {
+        // The whole message, large, where the lines were -- read once more
+        // before it goes, which is the point of asking.
+        const int px = 4, py = y0, pw = w - 8, ph = (h - BH - 6 - 16) - y0;
+        t.fillRect(px, py, pw, ph, Theme::BG);
+        t.drawRect(px, py, pw, ph, Theme::VAPOR_PINK);
+        t.setTextColor(Theme::W95_LIGHT, Theme::BG);
+        t.setCursor(px + 6, py + 5);
+        t.print("YOUR MESSAGE");
+        t.setTextSize(2);
+        char lines[4][48];
+        const uint8_t n = Theme::wrapText(t, s_typed, pw - 12, lines, 4);
+        t.setTextColor(Theme::WHITE, Theme::BG);
+        for (uint8_t i = 0; i < n; i++) {
+            t.setCursor(px + 6, py + 18 + i * 19);
+            t.print(lines[i]);
+        }
+        t.setTextSize(1);
+    } else {
+        for (int i = 0; i < perPage; i++) {
+            const int idx = s_page * perPage + i;
+            if (idx >= MeshMsg::CANNED_N) break;
+            const int x = 4 + (i % cols) * (cw + 6), y = y0 + (i / cols) * (ch + 3);
+            s_lineRect[s_lineN] = { (int16_t)x, (int16_t)y, (int16_t)cw, (int16_t)ch };
+            s_lineIdx[s_lineN]  = (uint8_t)idx;
+            s_lineN++;
+            const bool sel = idx == s_sel;
+            const uint16_t bg = sel ? Theme::PURPLE : Theme::BG;
+            t.fillRect(x, y, cw, ch, bg);
+            t.drawRect(x, y, cw, ch, sel ? Theme::VAPOR_PINK : Theme::CYAN);
+            t.setTextColor(Theme::WHITE, bg);
+            t.setCursor(x + 6, y + (ch - 8) / 2);
+            t.print(MeshMsg::CANNED[idx]);
+        }
     }
 
     // ---- what state you are in --------------------------------------------
     const char* st = s_status;
     uint16_t sc = s_statusCol;
-    if (s_sel >= 0) {
+    if (!st && s_typedOn) {
+        st = "Send it?";
+        sc = Theme::VAPOR_YELLOW;
+    } else if (!st && s_sel >= 0) {
         // Quoted back in full, so what is about to go out is read once more
         // before it does.
         snprintf(s_confirm, sizeof s_confirm, "Send \"%s\"?", MeshMsg::CANNED[s_sel]);
@@ -157,9 +217,9 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     } else if (!st && !tut) {
         // Not during the tutorial, which runs before there is a phrase and
         // would otherwise open with a warning about not having one.
-        if (!MeshTalk::ready())             { st = NEED_PHRASE;  sc = Theme::AMBER; }
-        else if (!Settings::meshTransmit()) { st = TRANSMIT_OFF; sc = Theme::AMBER; }
-        else if (MeshTalk::sending(now))    { st = SENDING;      sc = Theme::GREEN; }
+        st = cannotSend();
+        sc = Theme::AMBER;
+        if (!st && MeshTalk::sending(now)) { st = SENDING; sc = Theme::GREEN; }
     }
     if (st) {
         t.setTextColor(sc, Theme::BG);
@@ -168,35 +228,48 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     }
 
     // ---- chrome -------------------------------------------------------------
-    // While a line waits for confirmation the row becomes CANCEL and SEND --
-    // at opposite ends, so the one cannot be hit reaching for the other --
-    // and the page arrows go, so the choice cannot scroll out of sight.
+    // While something waits for confirmation the row becomes the way back and
+    // SEND -- at opposite ends, so the one cannot be hit reaching for the
+    // other -- and the page arrows go, so the choice cannot scroll out of
+    // sight. A typed message's way back is EDIT: to the keyboard, text kept.
     s_back = { 4, (int16_t)(h - BH - 6), BW, BH };
     s_send = { 0, 0, 0, 0 };
     s_help = { 0, 0, 0, 0 };
-    if (s_sel >= 0) {
+    s_type = { 0, 0, 0, 0 };
+    if (s_typedOn || s_sel >= 0) {
         s_send = { (int16_t)(w - 4 - BW), (int16_t)(h - BH - 6), BW, BH };
-        Theme::drawButton(t, s_back.x, s_back.y, s_back.w, s_back.h, "[ CANCEL ]", false);
+        Theme::drawButton(t, s_back.x, s_back.y, s_back.w, s_back.h,
+                          s_typedOn ? "[ EDIT ]" : "[ CANCEL ]", false);
         Theme::drawButton(t, s_send.x, s_send.y, s_send.w, s_send.h, "[ SEND ]", false);
     } else {
         Theme::drawButton(t, s_back.x, s_back.y, s_back.w, s_back.h, "[ BACK ]", false);
+        int right = w - 4;                  // where the page arrows start
         if (s_pages > 1) {
             s_prev = { (int16_t)(w - 4 - 2 * AW - 6), (int16_t)(h - BH - 6), AW, BH };
             s_next = { (int16_t)(w - 4 - AW),         (int16_t)(h - BH - 6), AW, BH };
             Theme::drawButton(t, s_prev.x, s_prev.y, s_prev.w, s_prev.h, "<", false);
             Theme::drawButton(t, s_next.x, s_next.y, s_next.w, s_next.h, ">", false);
-            char pg[8];
-            snprintf(pg, sizeof pg, "%u/%u", (unsigned)(s_page + 1), (unsigned)s_pages);
-            t.setTextColor(Theme::W95_LIGHT, Theme::BG);
-            const int mid = (s_back.x + s_back.w + s_prev.x) / 2;
-            t.setCursor(mid - t.textWidth(pg) / 2, s_back.y + (BH - 8) / 2);
-            t.print(pg);
+            right = s_prev.x;
         }
+        // TYPE between BACK and the arrows, where the page count used to sit;
+        // the count moved up beside "?".
+        const int mid = (s_back.x + s_back.w + right) / 2;
+        s_type = { (int16_t)(mid - TW / 2), (int16_t)(h - BH - 6), TW, BH };
+        Theme::drawButton(t, s_type.x, s_type.y, s_type.w, s_type.h, "[ TYPE ]", false);
         // "?" replays the tutorial. Top right, level with the title, where
         // nothing else on this screen can be reached for by mistake.
+        int pgRight = w - 4;
         if (!tut) {
             s_help = { (int16_t)(w - 4 - 30), 2, 30, 20 };
             Theme::drawButton(t, s_help.x, s_help.y, s_help.w, s_help.h, "?", false);
+            pgRight = s_help.x - 6;
+        }
+        if (s_pages > 1) {
+            char pg[8];
+            snprintf(pg, sizeof pg, "%u/%u", (unsigned)(s_page + 1), (unsigned)s_pages);
+            t.setTextColor(Theme::W95_LIGHT, Theme::BG);
+            t.setCursor(pgRight - t.textWidth(pg), 8);
+            t.print(pg);
         }
     }
 
@@ -219,23 +292,43 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
 
 ComposeHit uiMeshComposeTouch(int x, int y, uint32_t now) {
     if (MeshTutor::active()) return tutorTouch(x, y);
+
+    auto sent = [](MeshTalk::Send r) {
+        switch (r) {
+            case MeshTalk::Send::OK:           return true;
+            case MeshTalk::Send::NOT_READY:    s_status = NEED_PHRASE;  s_statusCol = Theme::AMBER; break;
+            case MeshTalk::Send::TRANSMIT_OFF: s_status = TRANSMIT_OFF; s_statusCol = Theme::AMBER; break;
+            default:                           s_status = SEND_FAILED;  s_statusCol = Theme::RED;   break;
+        }
+        return false;
+    };
+
+    if (s_typedOn) {
+        if (inRect(s_back, x, y)) return ComposeHit::TYPE;          // EDIT
+        if (inRect(s_send, x, y)) {
+            if (!sent(MeshTalk::sendText(s_typed, now))) return ComposeHit::NONE;
+            s_typedOn = false;
+            s_typed[0] = '\0';
+            return ComposeHit::SENT;
+        }
+        return ComposeHit::NONE;
+    }
     if (s_sel >= 0) {
         if (inRect(s_back, x, y)) { s_sel = -1; return ComposeHit::NONE; }
         if (inRect(s_send, x, y)) {
             const uint8_t line = (uint8_t)s_sel;
             s_sel = -1;
-            switch (MeshTalk::send(line, now)) {
-                case MeshTalk::Send::OK:           return ComposeHit::SENT;
-                case MeshTalk::Send::NOT_READY:    s_status = NEED_PHRASE;  s_statusCol = Theme::AMBER; break;
-                case MeshTalk::Send::TRANSMIT_OFF: s_status = TRANSMIT_OFF; s_statusCol = Theme::AMBER; break;
-                default:                           s_status = SEND_FAILED;  s_statusCol = Theme::RED;   break;
-            }
-            return ComposeHit::NONE;
+            return sent(MeshTalk::send(line, now)) ? ComposeHit::SENT : ComposeHit::NONE;
         }
         // Anything else falls through: another line changes the choice.
     } else {
         if (inRect(s_help, x, y)) return ComposeHit::HELP;
         if (inRect(s_back, x, y)) return ComposeHit::BACK;
+        if (inRect(s_type, x, y)) {
+            if (const char* why = cannotSend()) { s_status = why; s_statusCol = Theme::AMBER; return ComposeHit::NONE; }
+            s_typed[0] = '\0';
+            return ComposeHit::TYPE;
+        }
         if (s_pages > 1 && inRect(s_prev, x, y)) {
             s_page = (uint8_t)((s_page + s_pages - 1) % s_pages);
             s_status = nullptr;
@@ -249,10 +342,7 @@ ComposeHit uiMeshComposeTouch(int x, int y, uint32_t now) {
     }
     for (uint8_t i = 0; i < s_lineN; i++) {
         if (!inRect(s_lineRect[i], x, y)) continue;
-        // The reasons a message could not go out are given now, before
-        // anything is chosen, rather than after the person has confirmed it.
-        if (!MeshTalk::ready())             { s_sel = -1; s_status = NEED_PHRASE;  s_statusCol = Theme::AMBER; }
-        else if (!Settings::meshTransmit()) { s_sel = -1; s_status = TRANSMIT_OFF; s_statusCol = Theme::AMBER; }
+        if (const char* why = cannotSend()) { s_sel = -1; s_status = why; s_statusCol = Theme::AMBER; }
         else                                { s_sel = (int8_t)s_lineIdx[i]; s_status = nullptr; }
         return ComposeHit::NONE;
     }

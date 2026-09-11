@@ -235,8 +235,10 @@
         <label>Custom name <input type="text" id="meshName" maxlength="12" placeholder="none"></label>
       </div>
       <label>Message <select id="meshLine"></select></label>
+      <label>Or have it type one <input type="text" id="meshText" maxlength="48" placeholder="A-Z 0-9 .,?!'- up to 48"></label>
       <div class="btns" style="align-items:center">
         <button id="meshSay" class="ghost">Make it say</button>
+        <button id="meshType" class="ghost">Make it type</button>
         <label class="tick"><input type="checkbox" id="meshShares" checked> Same phrase as you</label>
         <label class="tick"><input type="checkbox" id="meshReply" checked> Answers back</label>
       </div>
@@ -438,6 +440,7 @@ function meshShow() {
   try { mesh = JSON.parse(meshStatus()); } catch (e) { return; }
   $('meshHere').textContent = mesh.present ? 'Send it away' : 'Bring it nearby';
   $('meshSay').disabled = !mesh.present;
+  $('meshType').disabled = !mesh.present;
   for (const [id, v] of [['meshOutfit', mesh.outfit], ['meshShade', mesh.shade],
                          ['meshNick', mesh.nick], ['meshName', mesh.name]])
     if (document.activeElement !== $(id)) $(id).value = v;
@@ -449,6 +452,7 @@ const meshDo = c => { meshCmd(c); meshShow(); };
 $('meshSetup').onclick = () => meshDo('setup');
 $('meshHere').onclick  = () => meshDo(mesh.present ? 'off' : 'on');
 $('meshSay').onclick   = () => meshDo('say ' + $('meshLine').value);
+$('meshType').onclick  = () => meshDo('text ' + $('meshText').value);
 $('meshOutfit').onchange = e => meshDo('outfit ' + e.target.value);
 $('meshShade').onchange  = e => meshDo('shade ' + e.target.value);
 $('meshNick').onchange   = e => meshDo('nick ' + e.target.value);
