@@ -283,6 +283,39 @@ namespace Squachy {
     // makes it read as a reaction rather than as a tic.
     void visitLaugh(uint32_t now);
 
+    // Set pieces for two Squachys. Each drives the HOST through his mood
+    // machine for a while; the guest's half is a VisitPose handed to
+    // drawWaving(), because the guest has no mood machine.
+    //
+    // One arm across toward the other Squachy, reaching right -- he stands
+    // on the left. UP is a high five, DOWN a low five, LEVEL a fist bump or a
+    // hand held out with a rock, paper or scissors over it.
+    enum class Reach : uint8_t { UP, DOWN, LEVEL };
+    void visitReach(uint32_t now, uint32_t ms, Reach level);
+    // A fist pumping, for rock-paper-scissors.
+    void visitPump(uint32_t now, uint32_t ms);
+    // Asleep for as long as it keeps being called; then a stretch on waking.
+    void visitNap(uint32_t now);
+    void visitWake(uint32_t now);
+    // When somebody last did anything to him -- a tap, a detection, a screen
+    // change. How a nap knows it has been left alone, and when to wake.
+    uint32_t lastInteractionAt();
+    // His turn in a dance-off: the DANCE mood, for `ms`.
+    void visitDance(uint32_t now, uint32_t ms);
+    // When his last detection reaction started (0 if none this boot): how
+    // a visit notices a scare it did not cause, and gives the guest his half.
+    uint32_t lastShockAt();
+    // Lines for the set pieces. The host says his; the guest's are handed back.
+    uint32_t    visitDanceCall(uint32_t seed);
+    const char* visitDanceReply(uint32_t seed);
+    const char* visitScareLine(uint32_t seed);
+    uint32_t    visitFriendHello(uint32_t seed);        // host, to a returning visitor
+    uint32_t    visitRpsCall(uint32_t seed);            // host
+    uint32_t    visitRpsResult(uint8_t outcome, uint32_t seed);   // 0 tie, 1 he won, 2 he lost
+    uint32_t    visitSnowCall(uint32_t seed);           // host
+    const char* visitSnowReply(uint32_t seed);          // guest
+    const char* visitWakeLine(uint32_t seed);           // guest
+
     // A nickname by index. nickname() only ever reports our own, and a guest
     // arrives carrying somebody else's -- both devices ship the same table,
     // which is the whole reason four bits was enough to send it.
@@ -407,8 +440,15 @@ namespace Squachy {
     // bubbleTail: hang a little pointer off the bubble aimed at him. Off by
     // default because a lone Squachy's bubble can only be his; it earns its
     // keep when there are two of them and two bubbles taking turns.
+    // The guest's half of a two-Squachy set piece -- see visitHighFive() and
+    // friends. NONE is the ordinary cameo. Declared out here rather than with
+    // them because drawWaving() is also the boot splash's, in every build.
+    enum class VisitPose : uint8_t { NONE, HIGH_FIVE, LOW_FIVE, FIST, STARTLED, DANCE,
+                                     PUMP, SLEEPY, STRETCH };
+
     void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale = 1.0f,
                     const char* line = nullptr, bool talking = false, int wanderRangePx = 0,
                     bool waving = true, int bubbleGap = 34, bool laughing = false,
-                    bool listening = false, bool bubbleTail = false);
+                    bool listening = false, bool bubbleTail = false,
+                    VisitPose pose = VisitPose::NONE);
 }

@@ -22,7 +22,20 @@ static const bool SQUACHY_SHADOW = false;
 enum class Mood : uint8_t { IDLE, WAVE, SHOCKED, BOUNCE, SLEEPY, WALK, DANCE, WINK,
                             STRETCH,   // waking out of a nap -- see the nap-exit branch
                             GUM,       // blowing a bubble, rare idle flourish
-                            JUGGLE };  // showing off recent catches, needs activity heat
+                            JUGGLE,    // showing off recent catches, needs activity heat
+                            HIGHFIVE,  // one arm across -- see s_reachDir and s_reachLevel
+                            PUMP };    // a fist pumping, for rock-paper-scissors
+
+// Which way a HIGHFIVE reaches: +1 right, -1 left. Set by whoever draws the
+// body just before it does -- the host always reaches right, the guest always
+// left -- because the two share drawBody() and this is the one thing about
+// the pose that differs between them.
+static int8_t s_reachDir = 1;
+// ...and at what height: 0 up (a high five), 1 down (a low five), 2 level (a
+// fist bump, or a hand held out with a rock, paper or scissors over it). The
+// host's comes from visitReach(), the guest's from his VisitPose.
+static uint8_t s_reachLevel = 0;
+static uint8_t s_hostReachLevel = 0;
 
 // Which reaction pose a SHOCKED mood strikes — varies by what triggered
 // it so a detection actually reads differently depending on the type,
@@ -2053,6 +2066,85 @@ void visitLaugh(uint32_t now) {
     moodUntil = now + 1500;
 }
 
+void visitReach(uint32_t now, uint32_t ms, Reach level) {
+    mood              = Mood::HIGHFIVE;
+    moodUntil         = now + ms;
+    s_hostReachLevel  = (uint8_t)level;
+}
+
+void visitPump(uint32_t now, uint32_t ms) {
+    mood      = Mood::PUMP;
+    moodUntil = now + ms;
+}
+
+void visitNap(uint32_t now) {
+    // Renewed every frame while it lasts, so the moment the visit stops
+    // asking he is awake within a second and a half regardless.
+    mood      = Mood::SLEEPY;
+    moodUntil = now + 1500;
+}
+
+void visitWake(uint32_t now) {
+    mood           = Mood::STRETCH;
+    s_stretchStart = now;
+    moodUntil      = now + STRETCH_MS;
+}
+
+uint32_t lastInteractionAt() { return lastInteraction; }
+
+void visitDance(uint32_t now, uint32_t ms) {
+    mood      = Mood::DANCE;
+    moodUntil = now + ms;
+}
+
+uint32_t lastShockAt() { return s_dtStart; }
+
+// The dance-off's call and answer, and what the guest says when a scare
+// catches up with them. Four apiece: these come round once in a minute or
+// two, not every beat, so four does not wear thin the way a banter pool would.
+static const char* const DANCE_CALLS[] = {
+    "Dance-off. Now.", "Beat this.", "Watch the feet.", "Try and keep up.",
+};
+static const char* const DANCE_REPLIES[] = {
+    "Hold my pelt.", "Oh, it's ON.", "Amateur hour.", "My turn.",
+};
+static const char* const SCARE_LINES[] = {
+    "Was that for us?", "Did you see that?", "I felt that one.", "Not again.",
+};
+
+uint32_t    visitDanceCall(uint32_t seed)  { return visitSay(DANCE_CALLS[seed % 4]); }
+const char* visitDanceReply(uint32_t seed) { return DANCE_REPLIES[seed % 4]; }
+const char* visitScareLine(uint32_t seed)  { return SCARE_LINES[seed % 4]; }
+
+// A returning visitor, rock-paper-scissors, snowballs, and waking up. Small
+// pools for the same reason as the dance-off's: these come round rarely.
+static const char* const FRIEND_HELLOS[] = {
+    "Back again!", "My favourite visitor.", "You again? Good.", "The usual spot?",
+};
+static const char* const RPS_CALLS[] = {
+    "Rock, paper, scissors!", "Best of one. Go!", "Rock, paper, SHOOT!", "Settle it.",
+};
+static const char* const RPS_WIN[]  = { "Undefeated.", "Too easy.", "Read you like a book." };
+static const char* const RPS_LOSE[] = { "Best of three?", "Rigged.", "I let you win." };
+static const char* const RPS_TIE[]  = { "Great minds.", "Again. Again.", "Jinx." };
+static const char* const SNOW_CALLS[] = { "Think fast!", "Heads up!", "Incoming!", "Catch!" };
+static const char* const SNOW_REPLIES[] = {
+    "Oh, it's ON.", "You'll pay for that.", "Cold! COLD!", "My turn.",
+};
+static const char* const WAKE_LINES[] = {
+    "Wha-? I was listening.", "Five more minutes.", "Was I snoring?", "I'm up. I'm up.",
+};
+
+uint32_t visitFriendHello(uint32_t seed) { return visitSay(FRIEND_HELLOS[seed % 4]); }
+uint32_t visitRpsCall(uint32_t seed)     { return visitSay(RPS_CALLS[seed % 4]); }
+uint32_t visitRpsResult(uint8_t outcome, uint32_t seed) {
+    const char* const* pool = outcome == 1 ? RPS_WIN : outcome == 2 ? RPS_LOSE : RPS_TIE;
+    return visitSay(pool[seed % 3]);
+}
+uint32_t    visitSnowCall(uint32_t seed)  { return visitSay(SNOW_CALLS[seed % 4]); }
+const char* visitSnowReply(uint32_t seed) { return SNOW_REPLIES[seed % 4]; }
+const char* visitWakeLine(uint32_t seed)  { return WAKE_LINES[seed % 4]; }
+
 uint32_t visitHangHost(uint32_t seed) {
     return visitSay(HANG_EXCHANGES[seed % HANG_EXCHANGES_N].host);
 }
@@ -3541,6 +3633,27 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         const int jw = (int)(sinf((float)(now % 1200) / 1200.0f * 6.2831853f) * S(5));
         limbTo(cx2 - S(11), hy + S(26), cx2 - S(19), hy + S(20) + jw);
         limbTo(cx2 + S(11), hy + S(26), cx2 + S(19), hy + S(20) - jw);
+    } else if (m == Mood::HIGHFIVE) {
+        // One arm up and across toward the other Squachy, the other hanging.
+        // The hand ends S(30) out from centre, so two of them S(60) apart
+        // meet in the middle -- which is where the visit puts the guest.
+        const int sd = s_reachDir;
+        const int hx = (sd > 0) ? cx2 - S(18) : cx2 + S(10);
+        keyRR(hx, hy + S(22), S(8), S(22), S(3));
+        t.fillRoundRect(hx, hy + S(22), S(8), S(22), S(3), furLight);
+        static const int8_t REACH_HY[3] = { 4, 40, 22 };   // must match ui_clear's REACH_Y
+        limbTo(cx2 + sd * S(11), hy + S(26), cx2 + sd * S(30), hy + S(REACH_HY[s_reachLevel % 3]));
+    } else if (m == Mood::PUMP) {
+        // One fist pumping in front of him, three times in the second and a
+        // half before the reveal; the other arm hangs.
+        const int sd = s_reachDir;
+        const int hx = (sd > 0) ? cx2 - S(18) : cx2 + S(10);
+        keyRR(hx, hy + S(22), S(8), S(22), S(3));
+        t.fillRoundRect(hx, hy + S(22), S(8), S(22), S(3), furLight);
+        const float pk = fabsf(sinf((float)(now % 500) / 500.0f * 3.14159265f));
+        const int fx = cx2 + sd * S(22), fy = hy + S(6) + (int)(pk * S(12));
+        limbTo(cx2 + sd * S(11), hy + S(26), fx, fy);
+        t.fillCircle(fx, fy, S(4), furLight);
     } else if (m == Mood::WAVE) {
         float wa = -1.0f + sinf((float)(now % 400) / 400.0f * 6.2831853f) * 0.5f;
         float ex = cx2 + S(13) + cosf(wa) * (18.0f * scale);
@@ -4032,7 +4145,7 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
 
 void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const char* line,
                 bool talking, int wanderRangePx, bool waving, int bubbleGap, bool laughing,
-                bool listening, bool bubbleTail) {
+                bool listening, bool bubbleTail, VisitPose pose) {
     // This cameo is placed by callers that have already reserved room, so
     // there is no region to clamp against.
     s_topLimit = -10000;
@@ -4049,8 +4162,19 @@ void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const
     // ask for it. 7 rather than tick()'s 9: the guest is drawn small and the
     // full amplitude put his ear tips through the title bar.
     float bobAmt = (laughing ? 7.0f : 6.0f) * scale;
-    const uint32_t bobPeriod = laughing ? 240u : 900u;
+    uint32_t bobPeriod = laughing ? 240u : 900u;
+    // A set piece's rhythm wins over a laugh: the dance keeps tick()'s DANCE
+    // bob, so the two of them move to the same beat when they dance together.
+    if (pose == VisitPose::DANCE)  { bobAmt = 6.0f * scale; bobPeriod = 300u; }
+    if (pose == VisitPose::SLEEPY) { bobAmt = 1.5f * scale; bobPeriod = 2200u; }
     float bob = sinf((float)(now % bobPeriod) / (float)bobPeriod * 6.2831853f) * bobAmt;
+    // Startled: up on his toes and shaking, the jolt tick()'s double-take
+    // gives the host, cut down to what a pose can do without his timing.
+    int jolt = 0;
+    if (pose == VisitPose::STARTLED) {
+        bob  = -4.0f * scale;
+        jolt = (int)(sinf((float)(now % 140) / 140.0f * 6.2831853f) * 2.0f * scale);
+    }
     // The same nod tick() gives the host, on the same curve and the same
     // period, so the two of them read as one pair of manners rather than as
     // two characters animated by different people.
@@ -4075,7 +4199,7 @@ void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const
     // for the same amble pace tick()'s own Mood::WALK uses, but runs
     // forever off a plain now%period instead of WALK's start/duration
     // window, since this cameo has no idle-mood scheduler ending it.
-    int bodyCx = cx;
+    int bodyCx = cx + jolt;
     if (wanderRangePx > 0) {
         float wt = (float)(now % WALK_CYCLE_MS) / (float)WALK_CYCLE_MS * 6.2831853f;
         bodyCx = cx + (int)(sinf(wt) * wanderRangePx);
@@ -4091,8 +4215,23 @@ void drawWaving(TFT_eSPI& t, int cx, int baseY, uint32_t now, float scale, const
     // held a line up without moving his mouth unless our own Squachy happened
     // to be mid-quip somewhere off-screen.
     const bool cameoTalking = talking || (line != nullptr);
-    drawBody(t, bodyCx, hy, headTopY, now, waving ? Mood::WAVE : Mood::IDLE, scale,
+    Mood cm = waving ? Mood::WAVE : Mood::IDLE;
+    switch (pose) {
+        case VisitPose::HIGH_FIVE: cm = Mood::HIGHFIVE; s_reachDir = -1; s_reachLevel = 0; break;
+        case VisitPose::LOW_FIVE:  cm = Mood::HIGHFIVE; s_reachDir = -1; s_reachLevel = 1; break;
+        case VisitPose::FIST:      cm = Mood::HIGHFIVE; s_reachDir = -1; s_reachLevel = 2; break;
+        case VisitPose::PUMP:      cm = Mood::PUMP;     s_reachDir = -1; break;
+        case VisitPose::SLEEPY:    cm = Mood::SLEEPY;   break;
+        case VisitPose::STRETCH:   cm = Mood::STRETCH;  break;
+        case VisitPose::DANCE:     cm = Mood::DANCE;    break;
+        // SHOCKED picks its arms from the host's last detection, so the two
+        // of them throw the same pose at the same scare -- which is the point.
+        case VisitPose::STARTLED:  cm = Mood::SHOCKED;  break;
+        default: break;
+    }
+    drawBody(t, bodyCx, hy, headTopY, now, cm, scale,
              cameoTalking, /*ownsBubble=*/false);
+    s_reachDir = 1;
     // Fixed above his (pre-bob, pre-wander) head, same as tick()'s
     // bubble row — it shouldn't bounce or chase him around. Pulled up
     // further than tick()'s gap (18px) specifically so it sits right
@@ -4817,6 +4956,8 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     // through instead of a box. (Party mode is the one exception —
     // when it's active the wash above already repaints this whole
     // region every frame, same guarantee, just with extra flair.)
+    s_reachDir = 1;                   // he stands on the left; see s_reachDir
+    s_reachLevel = s_hostReachLevel;
     drawBody(t, bodyCx, hy, headTopY, now, mood, scale);
     if (now < s_petFxUntil) drawHeartFx(t, bodyCx, headTopY, now);
     if (scanningFx) drawScanFx(t, bodyCx, headTopY, now, scale);
