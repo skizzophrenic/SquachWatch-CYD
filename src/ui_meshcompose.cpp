@@ -8,6 +8,8 @@
 #include "meshtutor.h"
 #include "settings.h"
 #include "detection.h"
+#include "ui_clear.h"
+#include <Arduino.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -39,6 +41,15 @@ char        s_confirm[40];
 // on the status row, which is too narrow for forty-eight characters.
 char        s_typed[MeshMsg::TEXT_MAX + 1] = "";
 bool        s_typedOn = false;
+// Emotes: the smiley at the top swaps the lines for six things to DO. One tap
+// sends one -- no confirmation, unlike a message: it is over in a few seconds
+// and a wrong one costs a laugh, not something said that was not meant.
+bool        s_emoteOn  = false;
+Rect        s_emoteBtn = { 0, 0, 0, 0 };
+Rect        s_emoteRect[(uint8_t)MeshMsg::Emote::COUNT];
+const char* const EMOTE_NAME[] = { "WAVE", "HIGH FIVE", "DANCE-OFF", "ROCK PAPER", "SNOWBALL", "BOO!" };
+const char* const EMOTE_SUB[]  = { "",     "",          "",          "SCISSORS",   "",         ""     };
+static_assert(sizeof EMOTE_NAME / sizeof EMOTE_NAME[0] == (size_t)MeshMsg::Emote::COUNT, "a name per emote");
 
 const int BW = 68, BH = 26, AW = 44, TW = 56;
 
@@ -49,6 +60,9 @@ const char* const NEED_PHRASE  = "Set a phrase: SQUACHMESH > PHRASE.";
 const char* const TRANSMIT_OFF = "TRANSMIT off: can read, not reply.";
 const char* const SENDING      = "Sending, for thirty seconds.";
 const char* const SEND_FAILED  = "Could not send. Try again.";
+const char* const NOBODY_HERE  = "Emotes need a visitor on screen.";
+const char* const STILL_ON_AIR = "Your message is still sending.";
+const char* const EMOTE_HINT   = "Tap one: you both act it out.";
 
 // The reasons a message could not go out, given BEFORE anything is chosen or
 // typed rather than after the person has confirmed it. Null when it can.
@@ -87,6 +101,70 @@ ComposeHit tutorTouch(int x, int y) {
     return ComposeHit::NONE;
 }
 
+void drawSmiley(TFT_eSPI& t, int cx, int cy) {
+    t.fillCircle(cx, cy, 7, Theme::VAPOR_YELLOW);
+    t.fillRect(cx - 3, cy - 3, 2, 2, Theme::BG);
+    t.fillRect(cx + 2, cy - 3, 2, 2, Theme::BG);
+    t.drawFastHLine(cx - 2, cy + 3, 5, Theme::BG);
+    t.drawPixel(cx - 3, cy + 2, Theme::BG);
+    t.drawPixel(cx + 3, cy + 2, Theme::BG);
+}
+
+// Each emote's picture, about sixteen pixels square, centred on (cx, cy). Only
+// rectangles, circles and pixels: this draws into the frame sprite.
+void drawEmoteIcon(TFT_eSPI& t, uint8_t e, int cx, int cy) {
+    const uint16_t Y = Theme::VAPOR_YELLOW, W = Theme::WHITE, K = Theme::BG, P = Theme::VAPOR_PINK;
+    switch ((MeshMsg::Emote)e) {
+    case MeshMsg::Emote::WAVE:                          // an open hand, and the motion
+        t.fillRoundRect(cx - 5, cy - 1, 10, 8, 2, Y);
+        t.fillRect(cx - 5, cy - 5, 2, 5, Y);
+        t.fillRect(cx - 2, cy - 7, 2, 7, Y);
+        t.fillRect(cx + 1, cy - 7, 2, 7, Y);
+        t.fillRect(cx + 4, cy - 5, 2, 5, Y);
+        t.fillRect(cx - 8, cy + 1, 3, 2, Y);
+        t.drawFastVLine(cx + 8, cy - 6, 3, W);
+        t.drawFastVLine(cx + 10, cy - 3, 3, W);
+        break;
+    case MeshMsg::Emote::HIGH_FIVE:                     // two hands meeting, and the spark
+        t.fillRoundRect(cx - 10, cy - 1, 7, 7, 2, Y);
+        t.fillRect(cx - 10, cy - 5, 7, 4, Y);
+        t.fillRoundRect(cx + 3, cy - 1, 7, 7, 2, Y);
+        t.fillRect(cx + 3, cy - 5, 7, 4, Y);
+        t.drawFastVLine(cx, cy - 9, 5, W);
+        t.drawFastHLine(cx - 2, cy - 7, 5, W);
+        break;
+    case MeshMsg::Emote::DANCE:                         // a note
+        t.fillCircle(cx - 3, cy + 4, 3, P);
+        t.fillRect(cx - 1, cy - 7, 2, 11, P);
+        t.fillRect(cx + 1, cy - 7, 4, 2, P);
+        t.fillRect(cx + 3, cy - 5, 2, 3, P);
+        break;
+    case MeshMsg::Emote::RPS:                           // one of each
+        t.fillCircle(cx - 7, cy + 2, 3, Theme::W95_LIGHT);
+        t.fillRect(cx - 2, cy - 4, 5, 8, W);
+        for (int i = 0; i < 5; i++) {
+            t.drawPixel(cx + 5 + i, cy - 4 + i, W);
+            t.drawPixel(cx + 9 - i, cy - 4 + i, W);
+        }
+        t.fillRect(cx + 4, cy + 1, 2, 2, P);
+        t.fillRect(cx + 9, cy + 1, 2, 2, P);
+        break;
+    case MeshMsg::Emote::SNOWBALL:
+        t.fillCircle(cx, cy, 6, Theme::W95_SHADOW);
+        t.fillCircle(cx - 1, cy - 1, 5, W);
+        break;
+    case MeshMsg::Emote::BOO:                           // a ghost
+        t.fillCircle(cx, cy - 2, 6, W);
+        t.fillRect(cx - 6, cy - 2, 13, 8, W);
+        for (int i = 0; i < 3; i++) t.fillRect(cx - 4 + i * 4, cy + 5, 2, 1, K);
+        t.fillRect(cx - 3, cy - 4, 2, 3, K);
+        t.fillRect(cx + 2, cy - 4, 2, 3, K);
+        t.fillRect(cx - 1, cy + 1, 3, 2, K);
+        break;
+    default: break;
+    }
+}
+
 } // namespace
 
 void uiMeshComposeInit(TFT_eSPI& t) {
@@ -96,6 +174,7 @@ void uiMeshComposeInit(TFT_eSPI& t) {
     s_sel     = -1;
     s_typedOn = false;
     s_typed[0] = '\0';
+    s_emoteOn = false;
     // Opening this screen is reading the message, so the bubble on the main
     // screen stops calling for attention.
     MeshTalk::markRead();
@@ -107,6 +186,7 @@ void uiMeshComposeSetTyped(const char* text) {
     while (n && s_typed[n - 1] == ' ') n--;
     s_typed[n] = '\0';
     s_typedOn = MeshMsg::textParts(s_typed) > 0;
+    s_emoteOn = false;
     s_sel     = -1;
     s_status  = nullptr;
 }
@@ -184,6 +264,28 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
             t.print(lines[i]);
         }
         t.setTextSize(1);
+    } else if (s_emoteOn) {
+        // Six tiles where the lines were: a picture and a name each.
+        const uint8_t n = (uint8_t)MeshMsg::Emote::COUNT;
+        const int ecols = port ? 2 : 3, erows = (n + ecols - 1) / ecols;
+        const int ew = (w - 8 - (ecols - 1) * 6) / ecols;
+        int eh = ((h - BH - 6 - 16) - y0 - (erows - 1) * 6) / erows;
+        if (eh > 44) eh = 44;
+        for (uint8_t i = 0; i < n; i++) {
+            const int x = 4 + (i % ecols) * (ew + 6), y = y0 + (i / ecols) * (eh + 6);
+            s_emoteRect[i] = { (int16_t)x, (int16_t)y, (int16_t)ew, (int16_t)eh };
+            t.fillRect(x, y, ew, eh, Theme::BG);
+            t.drawRect(x, y, ew, eh, Theme::VAPOR_YELLOW);
+            drawEmoteIcon(t, i, x + 15, y + eh / 2);
+            const bool two = EMOTE_SUB[i][0] != '\0';
+            t.setTextColor(Theme::WHITE, Theme::BG);
+            t.setCursor(x + 30, y + eh / 2 - (two ? 9 : 4));
+            t.print(EMOTE_NAME[i]);
+            if (two) {
+                t.setCursor(x + 30, y + eh / 2 + 1);
+                t.print(EMOTE_SUB[i]);
+            }
+        }
     } else {
         for (int i = 0; i < perPage; i++) {
             const int idx = s_page * perPage + i;
@@ -214,6 +316,14 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
         snprintf(s_confirm, sizeof s_confirm, "Send \"%s\"?", MeshMsg::CANNED[s_sel]);
         st = s_confirm;
         sc = Theme::VAPOR_YELLOW;
+    } else if (!st && s_emoteOn) {
+        st = cannotSend();
+        sc = Theme::AMBER;
+        if (!st) {
+            const bool here = uiClearGuest() != nullptr;
+            st = here ? EMOTE_HINT : NOBODY_HERE;
+            sc = here ? Theme::VAPOR_YELLOW : Theme::AMBER;
+        }
     } else if (!st && !tut) {
         // Not during the tutorial, which runs before there is a phrase and
         // would otherwise open with a warning about not having one.
@@ -236,11 +346,18 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     s_send = { 0, 0, 0, 0 };
     s_help = { 0, 0, 0, 0 };
     s_type = { 0, 0, 0, 0 };
+    s_emoteBtn = { 0, 0, 0, 0 };
     if (s_typedOn || s_sel >= 0) {
         s_send = { (int16_t)(w - 4 - BW), (int16_t)(h - BH - 6), BW, BH };
         Theme::drawButton(t, s_back.x, s_back.y, s_back.w, s_back.h,
                           s_typedOn ? "[ EDIT ]" : "[ CANCEL ]", false);
         Theme::drawButton(t, s_send.x, s_send.y, s_send.w, s_send.h, "[ SEND ]", false);
+    } else if (s_emoteOn) {
+        // Back to the lines, not off the screen; the smiley, lit, does the same.
+        Theme::drawButton(t, s_back.x, s_back.y, s_back.w, s_back.h, "[ LINES ]", false);
+        s_emoteBtn = { (int16_t)(w - 4 - 30), 2, 30, 20 };
+        Theme::drawButton(t, s_emoteBtn.x, s_emoteBtn.y, s_emoteBtn.w, s_emoteBtn.h, "", true);
+        drawSmiley(t, s_emoteBtn.x + 15, s_emoteBtn.y + 10);
     } else {
         Theme::drawButton(t, s_back.x, s_back.y, s_back.w, s_back.h, "[ BACK ]", false);
         int right = w - 4;                  // where the page arrows start
@@ -262,7 +379,11 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
         if (!tut) {
             s_help = { (int16_t)(w - 4 - 30), 2, 30, 20 };
             Theme::drawButton(t, s_help.x, s_help.y, s_help.w, s_help.h, "?", false);
-            pgRight = s_help.x - 6;
+            // The emotes, beside it: a smiley, since that is what they are.
+            s_emoteBtn = { (int16_t)(s_help.x - 6 - 30), 2, 30, 20 };
+            Theme::drawButton(t, s_emoteBtn.x, s_emoteBtn.y, s_emoteBtn.w, s_emoteBtn.h, "", false);
+            drawSmiley(t, s_emoteBtn.x + 15, s_emoteBtn.y + 10);
+            pgRight = s_emoteBtn.x - 6;
         }
         if (s_pages > 1) {
             char pg[8];
@@ -322,6 +443,30 @@ ComposeHit uiMeshComposeTouch(int x, int y, uint32_t now) {
         }
         // Anything else falls through: another line changes the choice.
     } else {
+        if (inRect(s_emoteBtn, x, y)) {
+            s_emoteOn = !s_emoteOn;
+            s_status  = nullptr;
+            return ComposeHit::NONE;
+        }
+        if (s_emoteOn) {
+            if (inRect(s_back, x, y)) { s_emoteOn = false; s_status = nullptr; return ComposeHit::NONE; }
+            for (uint8_t i = 0; i < (uint8_t)MeshMsg::Emote::COUNT; i++) {
+                if (!inRect(s_emoteRect[i], x, y)) continue;
+                if (const char* why = cannotSend()) { s_status = why; s_statusCol = Theme::AMBER; return ComposeHit::NONE; }
+                if (!uiClearGuest())            { s_status = NOBODY_HERE;  s_statusCol = Theme::AMBER; return ComposeHit::NONE; }
+                // An emote would take over the scan response and cut the
+                // message short -- the one thing that should not happen.
+                if (MeshTalk::sendingMessage(now)) { s_status = STILL_ON_AIR; s_statusCol = Theme::AMBER; return ComposeHit::NONE; }
+                const MeshMsg::Emote e = (MeshMsg::Emote)i;
+                const uint8_t arg = (e == MeshMsg::Emote::RPS) ? (uint8_t)random(0, 9) : 0;
+                const uint8_t b   = MeshMsg::emoteByte(e, arg);
+                if (!sent(MeshTalk::sendEmote(b, now))) return ComposeHit::NONE;
+                uiClearEmote(b, false);         // and our pair act it out too
+                s_emoteOn = false;
+                return ComposeHit::SENT;
+            }
+            return ComposeHit::NONE;
+        }
         if (inRect(s_help, x, y)) return ComposeHit::HELP;
         if (inRect(s_back, x, y)) return ComposeHit::BACK;
         if (inRect(s_type, x, y)) {

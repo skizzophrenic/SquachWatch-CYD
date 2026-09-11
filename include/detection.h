@@ -72,6 +72,9 @@ namespace Mesh {
     // The visitor, or nullptr. Goes stale on its own if the peer walks away.
     const SquachMesh::Peer* peer();
     const uint8_t*          peerMac();
+    // How many SquachWatches have been heard in the last twelve seconds --
+    // the visitor and everybody else. For the small "+2" beside him.
+    uint8_t                 squadCount(uint32_t now);
     bool                    advertising();
     // Our own advert payload, as the radio should send it (src/mesh.cpp).
     size_t                  buildSelf(uint8_t* out);

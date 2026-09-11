@@ -128,7 +128,12 @@ static bool visitWalking() {
 // Eased so he settles rather than stopping dead. Same shape both ways, with
 // the endpoints swapped -- a departure that accelerated away would read as
 // fleeing, and he is only going home.
+// An emote's high five moves him too; defined with the set pieces below.
+static bool fiveGuestX(uint32_t now, int homeX, int meetX, int closePx, int& x);
+
 static int visitGuestX(uint32_t now, int homeX, int offX, int meetX, int closePx) {
+    int fx;
+    if (fiveGuestX(now, homeX, meetX, closePx, fx)) return fx;
     // In to the host for the high five, and back to his own spot after it.
     if (s_vp == VisitPhase::HIGH_FIVE) {
         const uint32_t e = now - s_vpAt;
@@ -307,7 +312,7 @@ static void visitBeat(uint32_t now, Squachy::VisitMoment m) {
 // the background that is already a dance floor, is mostly dance-offs and gets
 // them twice as often; everywhere else, dance-offs and rock-paper-scissors take
 // turns.
-enum class Piece : uint8_t { NONE, DANCE, RPS, SNOW };
+enum class Piece : uint8_t { NONE, DANCE, RPS, SNOW, WAVE, FIVE, BOO };
 static const uint32_t PIECE_FIRST_MS  = 25000;   // into the hanging-around, at the earliest
 static const uint32_t PIECE_EVERY_MS  = 70000;
 static const uint32_t PIECE_JITTER_MS = 40000;
@@ -325,6 +330,34 @@ static const uint32_t SNOW_SEG_MS = 1500, SNOW_WIND_MS = 380, SNOW_FLY_MS = 650;
 static uint8_t  s_snowDone = 0;                  // which beats of the fight have fired
 static uint32_t s_puffAt = 0;
 static bool     s_puffGuest = false;
+
+// ---- emotes -----------------------------------------------------------------
+// A set piece a PERSON started, from the message screen -- on this board or on
+// the visitor's. WAVE, FIVE and BOO exist only as emotes; a dance-off, rock-
+// paper-scissors and a snowball fight are the same pieces the clock runs.
+// Whoever sent it goes first: on the sending board the host starts, on the
+// other the visitor does, so the two screens tell the same story from their
+// two sides.
+static bool     s_pieceGuestFirst = false;
+static uint8_t  s_pieceSub = 0xFF;               // a wave's hand, up and down
+static int16_t  s_emotePend = -1;                // the emote waiting for a gap, or -1
+static bool     s_emotePendGuest = false;
+static uint32_t s_emotePendAt = 0;
+static const uint32_t EMOTE_WAIT_MS = 12000;     // ...and how long it may wait
+static const uint32_t WAVE_SEG_MS = 1400;        // one turn each
+static const uint32_t FIVE_IN_MS  = 650;         // in to the host, from where he stands
+static const uint32_t BOO_JUMP_MS = 380, BOO_MS = 1700;
+static const char* const EMOTE_WAVE_CALL[]  = { "Heyyy!", "Yo!", "Hiii!" };
+static const char* const EMOTE_WAVE_BACK[]  = { "Hey hey!", "Yo yo!", "Hi hi hi!" };
+static const char* const EMOTE_FIVE_CALL[]  = { "Up top!", "Gimme five!", "Slap it!" };
+static const char* const EMOTE_DANCE_CALL[] = { "Dance-off. Now.", "Watch THIS.", "Beat that!" };
+static const char* const EMOTE_DANCE_BACK[] = { "Oh, it's ON.", "My turn!", "Amateur." };
+static const char* const EMOTE_RPS_CALL[]   = { "Rock, paper...", "Best of one!", "Ready? Shoot!" };
+static const char* const EMOTE_SNOW_CALL[]  = { "Think fast!", "Heads up!", "Incoming!" };
+static const char* const EMOTE_SNOW_BACK[]  = { "Oh, you're DONE.", "Payback!", "Take THAT!" };
+static const char* const EMOTE_BOO[]        = { "BOO!", "BOO!!", "RAAWR!" };
+static const char* const EMOTE_SCARED[]     = { "AAAH!", "Not funny!", "My FUR!" };
+#define EMOTE_PICK(a) (a[s_exchange % (sizeof(a) / sizeof(a[0]))])
 
 // ---- the shared scare -----------------------------------------------------
 // The host reacts to a detection through his mood machine; the guest gets
@@ -363,35 +396,70 @@ static uint32_t pieceGap() {
     return Settings::background() == Settings::Background::SYNTHWAVE ? g / 2 : g;
 }
 
-static void pieceStart(uint32_t now) {
-    s_piece          = nextPiece();
-    s_pieceAt        = now;
-    s_pieceStep      = 0;
-    s_guestTurn      = false;
-    s_visitGuestLine = nullptr;
+// guestFirst: an emote from the visitor's board -- he starts it, not the host.
+static void pieceBegin(uint32_t now, Piece p, bool guestFirst) {
+    s_piece           = p;
+    s_pieceAt         = now;
+    s_pieceStep       = 0;
+    s_pieceSub        = 0xFF;
+    s_pieceGuestFirst = guestFirst;
+    s_guestTurn       = guestFirst;
+    s_visitGuestLine  = nullptr;
     switch (s_piece) {
         case Piece::DANCE:
-            Squachy::visitDanceCall(s_exchange);          // throws down...
-            Squachy::visitDance(now, DANCE_SEG_MS);       // ...and goes first
+            if (guestFirst) {
+                s_visitGuestLine = EMOTE_PICK(EMOTE_DANCE_CALL);
+            } else {
+                Squachy::visitDanceCall(s_exchange);          // throws down...
+                Squachy::visitDance(now, DANCE_SEG_MS);       // ...and goes first
+            }
             Serial.println("[visit] dance-off");
             break;
         case Piece::RPS:
+            // Rolled here for the clock's; an emote's throws come with it and
+            // are set by emoteStart() straight after.
             s_rpsHost  = (uint8_t)random(0, 3);
             s_rpsGuest = (uint8_t)random(0, 3);
-            Squachy::visitRpsCall(s_exchange);
+            if (guestFirst) s_visitGuestLine = EMOTE_PICK(EMOTE_RPS_CALL);
+            else            Squachy::visitRpsCall(s_exchange);
             Squachy::visitPump(now, RPS_PUMP_MS);
             Serial.println("[visit] rock paper scissors");
             break;
         case Piece::SNOW:
             s_snowDone = 0;
             s_puffAt   = 0;
-            Squachy::visitSnowCall(s_exchange);
-            Squachy::visitReach(now, SNOW_WIND_MS, Squachy::Reach::UP);   // winding up
+            if (guestFirst) {
+                s_visitGuestLine = EMOTE_PICK(EMOTE_SNOW_CALL);
+            } else {
+                Squachy::visitSnowCall(s_exchange);
+                Squachy::visitReach(now, SNOW_WIND_MS, Squachy::Reach::UP);   // winding up
+            }
             Serial.println("[visit] snowball fight");
+            break;
+        case Piece::WAVE:
+            if (guestFirst) s_visitGuestLine = EMOTE_PICK(EMOTE_WAVE_CALL);
+            else            Squachy::visitSay(EMOTE_PICK(EMOTE_WAVE_CALL));
+            Serial.println("[visit] wave");
+            break;
+        case Piece::FIVE:
+            if (guestFirst) s_visitGuestLine = EMOTE_PICK(EMOTE_FIVE_CALL);
+            else            Squachy::visitSay(EMOTE_PICK(EMOTE_FIVE_CALL));
+            Serial.println("[visit] high five (emote)");
+            break;
+        case Piece::BOO:
+            if (guestFirst) {
+                s_visitGuestLine = EMOTE_PICK(EMOTE_BOO);
+            } else {
+                Squachy::visitSay(EMOTE_PICK(EMOTE_BOO));
+                Squachy::visitReach(now, BOO_JUMP_MS + 300, Squachy::Reach::UP);   // arms up
+            }
+            Serial.println("[visit] boo");
             break;
         default: break;
     }
 }
+
+static void pieceStart(uint32_t now) { pieceBegin(now, nextPiece(), false); }
 
 static void pieceEnd(uint32_t now) {
     s_piece          = Piece::NONE;
@@ -410,9 +478,16 @@ static void pieceTick(uint32_t now) {
         const uint8_t step = (uint8_t)(e / DANCE_SEG_MS);
         if (step == s_pieceStep) return;
         s_pieceStep = step;
-        if (step == 1) {                              // the guest answers it
-            s_guestTurn      = true;
-            s_visitGuestLine = Squachy::visitDanceReply(s_exchange);
+        if (step == 1) {                              // the other one answers it
+            if (s_pieceGuestFirst) {
+                s_guestTurn      = false;
+                s_visitGuestLine = nullptr;
+                Squachy::visitSay(EMOTE_PICK(EMOTE_DANCE_BACK));
+                Squachy::visitDance(now, DANCE_SEG_MS);
+            } else {
+                s_guestTurn      = true;
+                s_visitGuestLine = Squachy::visitDanceReply(s_exchange);
+            }
         } else if (step == 2) {                       // then both at once
             s_guestTurn      = false;
             s_visitGuestLine = nullptr;
@@ -449,9 +524,16 @@ static void pieceTick(uint32_t now) {
         const uint32_t se   = e % SNOW_SEG_MS;
         if (step != s_pieceStep) {
             s_pieceStep = step;
-            if (step == 1) {                          // the guest's turn to throw
-                s_guestTurn      = true;
-                s_visitGuestLine = Squachy::visitSnowReply(s_exchange);
+            if (step == 1) {                          // the other one throws back
+                if (s_pieceGuestFirst) {
+                    s_guestTurn      = false;
+                    s_visitGuestLine = nullptr;
+                    Squachy::visitSay(EMOTE_PICK(EMOTE_SNOW_BACK));
+                    Squachy::visitReach(now, SNOW_WIND_MS, Squachy::Reach::UP);
+                } else {
+                    s_guestTurn      = true;
+                    s_visitGuestLine = Squachy::visitSnowReply(s_exchange);
+                }
             } else if (step == 2) {                   // both of them laughing it off
                 s_guestTurn      = false;
                 s_visitGuestLine = nullptr;
@@ -462,26 +544,161 @@ static void pieceTick(uint32_t now) {
                 return;
             }
         }
-        // The release and each hit land inside a turn, not on its edge.
-        if (step == 0 && se >= SNOW_WIND_MS && !(s_snowDone & 1)) {
-            s_snowDone |= 1;
-            Squachy::visitReach(now, 300, Squachy::Reach::LEVEL);        // and let go
+        // The release and each hit land inside a turn, not on its edge. Which
+        // of them throws on which turn depends on who started it.
+        if (step <= 1) {
+            const bool    host = (step == 0) != s_pieceGuestFirst;
+            const uint8_t rel  = step ? 4 : 1, hit = step ? 8 : 2;
+            if (host && se >= SNOW_WIND_MS && !(s_snowDone & rel)) {
+                s_snowDone |= rel;
+                Squachy::visitReach(now, 300, Squachy::Reach::LEVEL);    // and let go
+            }
+            if (se >= SNOW_WIND_MS + SNOW_FLY_MS && !(s_snowDone & hit)) {
+                s_snowDone |= hit;
+                if (host) {                                            // got him
+                    s_guestStartleUntil = now + 450;
+                    s_puffAt = now; s_puffGuest = true;
+                } else {                                               // got HIM
+                    Squachy::visitLaugh(now);
+                    s_puffAt = now; s_puffGuest = false;
+                }
+            }
         }
-        if (step == 0 && se >= SNOW_WIND_MS + SNOW_FLY_MS && !(s_snowDone & 2)) {
-            s_snowDone |= 2;                                          // got him
-            s_guestStartleUntil = now + 450;
-            s_puffAt = now; s_puffGuest = true;
+        return;
+    }
+    case Piece::WAVE: {
+        // His hand going up and down the whole time: a wave is a reach, repeated.
+        const uint8_t sub  = (uint8_t)(e / 300);
+        const uint8_t step = (uint8_t)(e / WAVE_SEG_MS);
+        if (step < 2 && sub != s_pieceSub) {
+            s_pieceSub = sub;
+            Squachy::visitReach(now, 300, (sub & 1) ? Squachy::Reach::LEVEL : Squachy::Reach::UP);
         }
-        if (step == 1 && se >= SNOW_WIND_MS + SNOW_FLY_MS && !(s_snowDone & 4)) {
-            s_snowDone |= 4;                                          // got him back
+        if (step == s_pieceStep) return;
+        s_pieceStep = step;
+        if (step == 1) {                              // and the wave back
+            if (s_pieceGuestFirst) {
+                s_guestTurn      = false;
+                s_visitGuestLine = nullptr;
+                Squachy::visitSay(EMOTE_PICK(EMOTE_WAVE_BACK));
+            } else {
+                s_guestTurn      = true;
+                s_visitGuestLine = EMOTE_PICK(EMOTE_WAVE_BACK);
+            }
+        } else if (step >= 2) {
             Squachy::visitLaugh(now);
-            s_puffAt = now; s_puffGuest = false;
+            s_guestLaughUntil = now + 900;
+            pieceEnd(now);
+        }
+        return;
+    }
+    case Piece::FIVE: {
+        // In to the host, the slap, and back to his spot -- fiveGuestX() moves
+        // him; this is the host's arm and the laugh after.
+        if (s_pieceStep == 0 && e >= FIVE_IN_MS) {
+            s_pieceStep = 1;
+            Squachy::visitReach(now, FIVE_MS, Squachy::Reach::UP);
+        }
+        if (s_pieceStep == 1 && e >= FIVE_IN_MS + FIVE_MS) {
+            s_pieceStep = 2;
+            Squachy::visitLaugh(now);
+            s_guestLaughUntil = now + 900;
+        }
+        if (s_pieceStep == 2 && e >= FIVE_IN_MS + FIVE_MS + STEP_MS) pieceEnd(now);
+        return;
+    }
+    case Piece::BOO: {
+        const uint8_t step = e < BOO_JUMP_MS ? 0 : (e < BOO_MS ? 1 : 2);
+        if (step == s_pieceStep) return;
+        s_pieceStep = step;
+        if (step == 1) {                              // and the other one jumps out of his fur
+            if (s_pieceGuestFirst) {
+                Squachy::visitSay(EMOTE_PICK(EMOTE_SCARED));
+                Squachy::visitReach(now, BOO_MS - BOO_JUMP_MS, Squachy::Reach::UP);   // hands up
+            } else {
+                s_guestStartleUntil = now + 1100;
+                s_guestTurn         = true;
+                s_visitGuestLine    = EMOTE_PICK(EMOTE_SCARED);
+            }
+        } else {
+            Squachy::visitLaugh(now);
+            s_guestLaughUntil = now + 1200;
+            pieceEnd(now);
         }
         return;
     }
     default:
         s_piece = Piece::NONE;
         return;
+    }
+}
+
+// Where the visitor stands during an emote high five: in to the host, where
+// the hands meet whatever the lean has done, and back. False the rest of the
+// time, when visitGuestX() decides.
+static bool fiveGuestX(uint32_t now, int homeX, int meetX, int closePx, int& x) {
+    if (s_piece != Piece::FIVE) return false;
+    const uint32_t e = now - s_pieceAt;
+    // The caller adds guestLeanPx() afterwards; taking it off here puts him
+    // exactly where the host's reach ends.
+    const int m = meetX + hostLeanPx() - guestLeanPx();
+    float k;
+    if (e < FIVE_IN_MS) {
+        k = (float)e / (float)FIVE_IN_MS;
+        k = k * k * (3.0f - 2.0f * k);
+        x = homeX + (int)((float)(m + closePx - homeX) * k);
+    } else if (e < FIVE_IN_MS + FIVE_HIT_MS) {
+        k = (float)(e - FIVE_IN_MS) / (float)FIVE_HIT_MS;
+        x = m + (int)((float)closePx * (1.0f - k));
+    } else if (e < FIVE_IN_MS + FIVE_MS) {
+        x = m;
+    } else {
+        k = (float)(e - FIVE_IN_MS - FIVE_MS) / (float)STEP_MS;
+        if (k > 1.0f) k = 1.0f;
+        k = k * k * (3.0f - 2.0f * k);
+        x = m + (int)((float)(homeX - m) * k);
+    }
+    return true;
+}
+
+static bool fiveWalking(uint32_t now) {
+    if (s_piece != Piece::FIVE) return false;
+    const uint32_t e = now - s_pieceAt;
+    return e < FIVE_IN_MS || e >= FIVE_IN_MS + FIVE_MS;
+}
+
+bool uiClearEmote(uint8_t emote, bool fromGuest) {
+    if (s_vp == VisitPhase::GONE || s_vp == VisitPhase::LEAVING) return false;
+    s_emotePend      = emote;
+    s_emotePendGuest = fromGuest;
+    s_emotePendAt    = millis();
+    return true;
+}
+
+static void emoteStart(uint32_t now) {
+    const uint8_t b = (uint8_t)s_emotePend;
+    const bool    g = s_emotePendGuest;
+    s_emotePend = -1;
+    // A question left hanging when the button was pressed is dropped rather
+    // than answered after the piece, when nobody remembers it.
+    s_hangStep = 0;
+    Serial.printf("[visit] emote %u from %s\n", (unsigned)(b >> 4), g ? "the visitor" : "us");
+    switch ((MeshMsg::Emote)(b >> 4)) {
+        case MeshMsg::Emote::WAVE:      pieceBegin(now, Piece::WAVE,  g); break;
+        case MeshMsg::Emote::HIGH_FIVE: pieceBegin(now, Piece::FIVE,  g); break;
+        case MeshMsg::Emote::DANCE:     pieceBegin(now, Piece::DANCE, g); break;
+        case MeshMsg::Emote::SNOWBALL:  pieceBegin(now, Piece::SNOW,  g); break;
+        case MeshMsg::Emote::BOO:       pieceBegin(now, Piece::BOO,   g); break;
+        case MeshMsg::Emote::RPS: {
+            pieceBegin(now, Piece::RPS, g);
+            // The sender's throw, then the receiver's: the same game on both
+            // boards, each from its own side.
+            const uint8_t a = (uint8_t)(((b & 0x0F) / 3) % 3), c = (uint8_t)((b & 0x0F) % 3);
+            s_rpsHost  = g ? c : a;
+            s_rpsGuest = g ? a : c;
+            break;
+        }
+        default: break;
     }
 }
 
@@ -504,7 +721,7 @@ static void napStart(uint32_t now) {
 
 static void napTick(uint32_t now) {
     if (s_napping) {
-        const bool poked = Squachy::lastInteractionAt() != s_napSeen;
+        const bool poked = Squachy::lastInteractionAt() != s_napSeen || s_emotePend >= 0;
         if (!poked && !messageShowing(now)) { Squachy::visitNap(now); return; }
         s_napping        = false;
         s_wakeUntil      = now + WAKE_MS;
@@ -540,10 +757,14 @@ static Squachy::VisitPose guestPose(uint32_t now) {
     if (s_wakeUntil && (int32_t)(s_wakeUntil - now) > 0)     return P::STRETCH;
     const uint32_t e = now - s_pieceAt;
     switch (s_piece) {
-        case Piece::DANCE: return s_pieceStep >= 1 ? P::DANCE : P::NONE;
+        // Whoever sent an emote goes first: the guest dances on turns 0 and 2
+        // when it came from him, on 1 and 2 otherwise.
+        case Piece::DANCE: return (s_pieceGuestFirst ? s_pieceStep != 1 : s_pieceStep >= 1) ? P::DANCE : P::NONE;
         case Piece::RPS:   return s_pieceStep == 0 ? P::PUMP : (s_pieceStep == 1 ? P::FIST : P::NONE);
+        case Piece::FIVE:  return (e >= FIVE_IN_MS && e < FIVE_IN_MS + FIVE_MS) ? P::HIGH_FIVE : P::NONE;
+        case Piece::BOO:   return (s_pieceGuestFirst && s_pieceStep == 0) ? P::HIGH_FIVE : P::NONE;
         case Piece::SNOW: {
-            if (e / SNOW_SEG_MS != 1) return P::NONE;
+            if (e / SNOW_SEG_MS != (s_pieceGuestFirst ? 0u : 1u)) return P::NONE;
             const uint32_t se = e % SNOW_SEG_MS;
             if (se < SNOW_WIND_MS)       return P::HIGH_FIVE;   // winding up
             if (se < SNOW_WIND_MS + 300) return P::FIST;        // and letting go
@@ -595,8 +816,9 @@ static void drawPieceFx(TFT_eSPI& t, uint32_t now, int hx, int gx, int headTop, 
         if (step <= 1 && se >= SNOW_WIND_MS && se < SNOW_WIND_MS + SNOW_FLY_MS) {
             // From the thrower's hand to the other one's head, on an arc.
             const float k  = (float)(se - SNOW_WIND_MS) / (float)SNOW_FLY_MS;
-            const int   x0 = step == 0 ? hx + (int)(22.0f * gs) : gx - (int)(22.0f * gs);
-            const int   x1 = step == 0 ? gx : hx;
+            const bool  hostThrows = (step == 0) != s_pieceGuestFirst;
+            const int   x0 = hostThrows ? hx + (int)(22.0f * gs) : gx - (int)(22.0f * gs);
+            const int   x1 = hostThrows ? gx : hx;
             const int   y0 = headTop + (int)(8.0f * gs), y1 = headTop + (int)(14.0f * gs);
             const int   x  = x0 + (int)((x1 - x0) * k);
             const int   y  = y0 + (int)((y1 - y0) * k) - (int)(sinf(k * 3.14159265f) * 26.0f * gs);
@@ -618,6 +840,12 @@ static void drawPieceFx(TFT_eSPI& t, uint32_t now, int hx, int gx, int headTop, 
         const int y = headTop + (int)(22.0f * gs) - (int)(16.0f * gs);
         drawRps(t, hx + (int)(30.0f * gs), y, s_rpsHost, gs);
         drawRps(t, gx - (int)(30.0f * gs), y, s_rpsGuest, gs);
+    } else if (s_piece == Piece::FIVE) {
+        // Where the UP reach ends -- S(30) across, REACH_Y[0] down.
+        const uint32_t e = now - s_pieceAt, hit = FIVE_IN_MS + FIVE_HIT_MS;
+        if (e >= hit && e < hit + 320)
+            drawSpark(t, hx + (int)(REACH_K * 0.5f * gs), headTop + (int)(REACH_Y[0] * gs),
+                      (float)(e - hit) / 320.0f, gs);
     }
 }
 
@@ -737,6 +965,27 @@ static void drawMessageIcon(TFT_eSPI& t, int x, int y, bool unread, bool sending
     s_bubbleOn = true;
 }
 
+// More SquachWatches in range than the one visiting: a small "+N" under his
+// message button, N being everybody beyond him. Not drawn for one visitor --
+// that is the normal case, and a badge that is always there says nothing.
+static void drawSquadBadge(TFT_eSPI& t, int gx, int headTop, uint8_t extra) {
+    char b[5];
+    snprintf(b, sizeof b, "+%u", (unsigned)extra);
+    t.setTextSize(1);
+    const int bw = t.textWidth(b) + 14, bh = 11;
+    int x = gx + 26;
+    if (x + bw > t.width() - 4) x = t.width() - 4 - bw;
+    const int y = headTop + 40;
+    t.fillRoundRect(x, y, bw, bh, 5, Theme::PURPLE);
+    // A little head, for "more of us": round, with two ears.
+    t.fillCircle(x + 6, y + 6, 3, Theme::VAPOR_PINK);
+    t.fillRect(x + 3, y + 2, 2, 2, Theme::VAPOR_PINK);
+    t.fillRect(x + 8, y + 2, 2, 2, Theme::VAPOR_PINK);
+    t.setTextColor(Theme::WHITE, Theme::PURPLE);
+    t.setCursor(x + 12, y + 2);
+    t.print(b);
+}
+
 static void drawMessageUi(TFT_eSPI& t, uint32_t now, int titleBottom, int squachyBottom) {
     s_bubbleOn = false;
     // The tutorial runs before anybody has a phrase, so it shows the bubble
@@ -772,6 +1021,17 @@ bool uiClearBubbleHit(int x, int y) {
 
 static void visitTick(uint32_t now) {
     const uint32_t id = rawGuestId(now);
+
+    // An emote from the visitor's board -- his only. With more than one
+    // SquachWatch around, one from somebody off screen would be acted out by
+    // somebody who never sent it.
+    {
+        MeshTalk::EmoteIn in;
+        if (MeshTalk::takeEmote(in) && now - in.at < EMOTE_WAIT_MS &&
+            Mesh::peer() && memcmp(Mesh::peerMac(), in.mac, 6) == 0)
+            uiClearEmote(in.emote, true);
+        if (s_emotePend >= 0 && now - s_emotePendAt > EMOTE_WAIT_MS) s_emotePend = -1;
+    }
 
     // A scare, live: the host has just reacted to a detection here on this
     // screen, so the guest jumps with him. Fresh ones only -- one from before
@@ -892,6 +1152,9 @@ static void visitTick(uint32_t now) {
             // A set piece, or a nap, holds the conversation until it is done.
             if (s_piece != Piece::NONE)  { pieceTick(now); break; }
             if (s_napping || s_wakeUntil) { napTick(now);   break; }
+            // An emote goes straight in -- somebody pressed a button and is
+            // watching for it -- but waits out a set piece, and wakes a nap.
+            if (s_emotePend >= 0)         { emoteStart(now); break; }
             if (now - s_beatAt >= s_beatMs + TURN_GAP_MS) {
                 // No timed exit. He used to say goodbye after a minute and
                 // then -- with the other board still right there -- walk
@@ -1303,12 +1566,13 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
             // than as a greeting once he has been there half a minute.
             const bool stillGreeting = (s_vp == VisitPhase::ARRIVING ||
                                         s_vp == VisitPhase::MEETING ||
-                                        s_vp == VisitPhase::LEAVING);
+                                        s_vp == VisitPhase::LEAVING ||
+                                        s_piece == Piece::WAVE);    // and when waved at
             Squachy::drawWaving(t, gx, squachyBottom, now, gs,
                                 msgFresh ? nullptr : s_visitGuestLine,
                                 // Mouthing it while the red bubble is up.
                                 msgFresh || s_visitGuestLine != nullptr,
-                                visitWalking() ? 2 : 0, stillGreeting,
+                                (visitWalking() || fiveWalking(now)) ? 2 : 0, stillGreeting,
                                 // Just above his own head, not the boot
                                 // splash's 34 -- that lands in the host's
                                 // bubble row and the two paint over each
@@ -1378,6 +1642,11 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
                 t.setTextColor(Theme::CYAN, Theme::BG);
                 t.setCursor(nx, ny);
                 t.print(nm);
+            }
+            {
+                const uint8_t squad = Mesh::squadCount(now);
+                if (squad >= 2 && s_vp != VisitPhase::LEAVING)
+                    drawSquadBadge(t, gx, squachyBottom - (int)(58.0f * gs), (uint8_t)(squad - 1));
             }
             // Where he is this frame, for the message bubble and its button.
             s_msgGuestOn = true;

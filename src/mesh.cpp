@@ -42,6 +42,42 @@ static char             s_name[13]   = { 0 };
 // who actually left stops standing on your screen.
 static const uint32_t PEER_STALE_MS = 12000;
 
+// Every SquachWatch heard lately, not just the one visiting: the count behind
+// the small "+2" beside the visitor. Addresses only, eight of them, RAM only,
+// each gone twelve seconds after it stops being heard. Written in the BLE task
+// and read in the loop; a count wrong by one for a frame is the worst a race
+// here can do.
+static const uint8_t SQUAD_N = 8;
+static uint8_t  s_squadMac[SQUAD_N][6];
+static uint32_t s_squadSeen[SQUAD_N];
+static bool     s_squadLive[SQUAD_N];
+
+static void squadNote(const uint8_t* mac, uint32_t now) {
+    uint8_t slot = SQUAD_N;
+    for (uint8_t i = 0; i < SQUAD_N; i++)
+        if (s_squadLive[i] && memcmp(s_squadMac[i], mac, 6) == 0) { slot = i; break; }
+    if (slot == SQUAD_N) {
+        // A free slot, else the one heard from longest ago.
+        slot = 0;
+        for (uint8_t i = 0; i < SQUAD_N; i++) {
+            if (!s_squadLive[i]) { slot = i; break; }
+            if ((int32_t)(s_squadSeen[i] - s_squadSeen[slot]) < 0) slot = i;
+        }
+        memcpy(s_squadMac[slot], mac, 6);
+        s_squadLive[slot] = true;
+    }
+    s_squadSeen[slot] = now;
+}
+
+uint8_t squadCount(uint32_t now) {
+    if (!Settings::meshDetect()) return 0;
+    uint8_t n = 0;
+    // Signed: the BLE task's millis() can be a tick ahead of the loop's.
+    for (uint8_t i = 0; i < SQUAD_N; i++)
+        if (s_squadLive[i] && (int32_t)(now - s_squadSeen[i]) <= (int32_t)PEER_STALE_MS) n++;
+    return n;
+}
+
 const SquachMesh::Peer* peer() {
     return s_havePeer ? &s_peer : nullptr;
 }
@@ -90,6 +126,7 @@ bool onManufacturerData(const uint8_t* d, size_t len, const uint8_t* mac, uint32
 
     SquachMesh::Peer p;
     if (!SquachMesh::decode(d + 2, len - 2, p)) return false;
+    squadNote(mac, now);        // everybody counts, visiting or not
 
     // Remembered for a message frame later in this same callback: the name
     // goes on the message, and the advert is the only place it travels.

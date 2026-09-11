@@ -59,6 +59,10 @@ bool macSet  = false, advDue = true;
 SquachMesh::Peer look = { 4, 12, 1, false, "" };
 
 uint32_t lastAdv = 0, ctr = 0, sendUntil = 0, heardGen = 0, replyAt = 0, heardMsg = 0;
+// How many SquachWatches are here, counting this one. The rest only advertise:
+// the firmware hosts one visitor at a time, so they only ever show up as the
+// "+N" beside him.
+uint8_t  squad = 1;
 int      replyLine = -1;
 // What it is sending: one frame for a canned line, up to three for a typed
 // one, fed one per advert in turn -- the way a board's scan response rotates.
@@ -147,6 +151,22 @@ bool sayText(const char* text, uint32_t now) {
     return true;
 }
 
+bool emote(int e, int arg, uint32_t now) {
+    if (e < 0 || e >= (int)MeshMsg::Emote::COUNT) {
+        fprintf(stderr, "[meshsim] no emote %d (0..%u)\n", e, (unsigned)MeshMsg::Emote::COUNT - 1);
+        return false;
+    }
+    // Rock-paper-scissors needs both throws; anything else sends no setup.
+    if (arg < 0) arg = (e == (int)MeshMsg::Emote::RPS) ? (int)(millis() % 9) : 0;
+    const uint32_t c = ++ctr;
+    frameLen[0] = MeshMsg::sealEmote(MeshCrypto::impl(), PEER_MAC, c,
+                                     MeshMsg::emoteByte((MeshMsg::Emote)e, (uint8_t)arg),
+                                     frames[0], sizeof frames[0]);
+    snprintf(said, sizeof said, "(emote %d, setup %d)", e, arg);
+    broadcast(frameLen[0] ? 1 : 0, now);
+    return true;
+}
+
 void replyLater(uint8_t line, uint32_t now) {
     if (!autoReply) return;
     replyLine = line;
@@ -191,6 +211,17 @@ void hear(const uint8_t* out, size_t len, uint32_t gen, uint32_t now) {
         snprintf(heard, sizeof heard, "%s", body);
         fprintf(stderr, "[meshsim] %s heard \"%s\" (%u parts)\n", peerName(), heard, (unsigned)total);
         replyLater(REPLY_TO_TEXT, now);
+        return;
+    }
+    if (kind == MeshMsg::KIND_EMOTE) {
+        uint8_t e = 0;
+        if (MeshMsg::openEmote(MeshCrypto::impl(), OWN_MAC, out, len, c, e) != MeshMsg::Open::OK) {
+            fprintf(stderr, "[meshsim] %s could not open our emote\n", peerName());
+            return;
+        }
+        snprintf(heard, sizeof heard, "(emote %u, setup %u)", (unsigned)(e >> 4), (unsigned)(e & 0x0F));
+        fprintf(stderr, "[meshsim] %s saw emote %u (setup %u)\n", peerName(),
+                (unsigned)(e >> 4), (unsigned)(e & 0x0F));
     }
 }
 
@@ -253,6 +284,22 @@ void tick(uint32_t now) {
             memcpy(f + 2, frames[p], frameLen[p]);
             Mesh::onManufacturerData(f, frameLen[p] + 2, PEER_MAC, now);
         }
+        // The rest of the squad, after: on a board NimBLE hands an advert and
+        // its scan response over in one callback, so nobody else's advert can
+        // land between them and take the name the frame borrows.
+        for (uint8_t i = 1; i < squad; i++) {
+            SquachMesh::Peer o = look;
+            o.custom = false;
+            o.name[0] = '\0';
+            o.nick = (uint8_t)((look.nick + i) % nickCount());
+            uint8_t ob[2 + SquachMesh::LEN_MAX];
+            ob[0] = buf[0]; ob[1] = buf[1];
+            const size_t on = SquachMesh::encode(o, ob + 2);
+            uint8_t mac[6];
+            memcpy(mac, PEER_MAC, 6);
+            mac[5] = (uint8_t)(0x10 + i);
+            Mesh::onManufacturerData(ob, on + 2, mac, now);
+        }
     }
 
     if (replyLine >= 0 && (int32_t)(now - replyAt) >= 0) {
@@ -313,6 +360,24 @@ bool command(const char* line) {
         while (i && t[i - 1] == ' ') t[--i] = '\0';
         return sayText(t, now);
     }
+    if (!strcmp(verb, "emote")) {
+        if (!present) { fprintf(stderr, "[meshsim] nobody is here to do it\n"); return false; }
+        char* end = nullptr;
+        const long e = strtol(arg, &end, 10);
+        if (end == arg) { fprintf(stderr, "[meshsim] emote N [SETUP]\n"); return false; }
+        const long a = (end && *end) ? strtol(end, nullptr, 10) : -1;
+        return emote((int)e, (int)a, now);
+    }
+    if (!strcmp(verb, "squad")) {
+        uint8_t n = 0;
+        if (!pickIndex("squad", arg, 6, n) || n == 0) {
+            fprintf(stderr, "[meshsim] squad wants 1..5\n");
+            return false;
+        }
+        squad = n;
+        fprintf(stderr, "[meshsim] %u SquachWatch%s here\n", (unsigned)n, n == 1 ? "" : "es");
+        return true;
+    }
     if (!strcmp(verb, "setup")) {
         // Everything a person would do by hand through the warning, the menu
         // and the phrase screen -- skipped here because it is the emulator,
@@ -330,7 +395,7 @@ bool command(const char* line) {
     if (!strcmp(verb, "status")) { fprintf(stderr, "[meshsim] %s\n", status()); return true; }
     if (!strcmp(verb, "help") || !verb[0]) {
         fprintf(stderr, "[meshsim] on|off, outfit N, shade N, nick N, name TEXT, phrase same|other, "
-                        "reply on|off, say N, text MESSAGE, setup, status\n");
+                        "reply on|off, say N, text MESSAGE, emote N [SETUP], squad N, setup, status\n");
         return true;
     }
     fprintf(stderr, "[meshsim] unknown: %s (try help)\n", verb);
@@ -349,12 +414,12 @@ const char* status() {
              "\"nick\":%u,\"outfit\":%u,\"shade\":%u,\"name\":\"%s\","
              "\"sending\":%d,\"said\":\"%s\",\"heard\":\"%s\",\"replyIn\":%d,"
              "\"consent\":%d,\"detect\":%d,\"transmit\":%d,\"messages\":%d,"
-             "\"phrase\":%d,\"ready\":%d}",
+             "\"phrase\":%d,\"ready\":%d,\"squad\":%u}",
              present, Mesh::peer() && !memcmp(Mesh::peerMac(), PEER_MAC, 6), shares, autoReply,
              look.nick, look.outfit, look.shade, name,
              live(now), s, h, replyLine >= 0 ? (int)(replyAt - now) : -1,
              Settings::meshConsent(), Settings::meshDetect(), Settings::meshTransmit(),
-             Settings::messagesOn(), MeshTalk::havePhrase(), MeshTalk::ready());
+             Settings::messagesOn(), MeshTalk::havePhrase(), MeshTalk::ready(), (unsigned)squad);
     return buf;
 }
 
