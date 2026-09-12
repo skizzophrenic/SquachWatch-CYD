@@ -550,5 +550,32 @@ int main() {
         ck("an empty table round-trips as empty", none2.load(b, sizeof b) && none2.fresh(me, 0));
     }
 
+    suite("The line picker shows every canned line exactly once");
+    {
+        // The tab table is presentation only -- it never goes on the air -- but
+        // a line that sits on no tab is a line nobody can ever send, and one on
+        // two tabs is a picker that lies about where things are.
+        uint8_t seen[256] = {};
+        int empty = 0;
+        bool fits = true;
+        for (uint8_t t = 0; t < MeshMsg::CANNED_TABS; t++)
+            for (uint8_t i = 0; i < MeshMsg::CANNED_PER_TAB; i++) {
+                const uint8_t idx = MeshMsg::cannedAtTab(t, i);
+                if (idx == 0xFF) { empty++; continue; }
+                seen[idx]++;
+                // Twenty characters is what one speech bubble holds at either
+                // rotation; longer and it is cut off on the other board.
+                if (strlen(MeshMsg::CANNED[idx]) > 20) fits = false;
+            }
+        bool once = true;
+        for (uint8_t i = 0; i < MeshMsg::CANNED_N; i++) if (seen[i] != 1) once = false;
+        ck("six tabs of eight hold every line", MeshMsg::CANNED_TABS * MeshMsg::CANNED_PER_TAB == MeshMsg::CANNED_N);
+        ck("no empty slots", empty == 0);
+        ck("each line on exactly one tab", once);
+        ck("every line fits a bubble", fits);
+        ck("a tab out of range answers empty", MeshMsg::cannedAtTab(MeshMsg::CANNED_TABS, 0) == 0xFF);
+        ck("a slot out of range answers empty", MeshMsg::cannedAtTab(0, MeshMsg::CANNED_PER_TAB) == 0xFF);
+    }
+
     return report();
 }

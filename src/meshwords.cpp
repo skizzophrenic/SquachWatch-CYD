@@ -124,8 +124,73 @@ const char* const CANNED[] = {
     "Snacks?",
     "Is it following you?",
     "Going dark.",
+    // ---- 24..47, added 2026-09-12 --------------------------------------------
+    // The first twenty-four were written to prove messaging worked. These are
+    // written to be USED: what you actually need to say to somebody else
+    // carrying one of these, in the situations this device exists for.
+    // Appended, never inserted -- see the index note at the top of this file.
+    "Cop car ahead.",
+    "Drone overhead.",
+    "ALPR on the pole.",
+    "Two of them now.",
+    "It's gone now.",
+    "I'm safe.",
+    "Don't come here.",
+    "Turn around.",
+    "Being followed.",
+    "You okay?",
+    "Still there?",
+    "Can you talk?",
+    "Which way?",
+    "How many?",
+    "Need a ride?",
+    "Call when you can.",
+    "Got it.",
+    "On it.",
+    "Not yet.",
+    "Copy that.",
+    "Squatch out.",
+    "Big if true.",
+    "Beep boop.",
+    "Stay squachy.",
 };
 const uint8_t CANNED_N = (uint8_t)(sizeof(CANNED) / sizeof(CANNED[0]));
+
+// ---- the picker's tabs -------------------------------------------------------
+// PRESENTATION ONLY. Unlike the indices above, nothing here goes on the air, so
+// these may be reordered, renamed or regrouped in any release without breaking
+// a single board. The layout exists because forty-eight lines paged four at a
+// time is a worse way to find "Turn around." than six labelled tabs.
+//
+// The tabs are the same shape as the emote picker's, deliberately: both halves
+// of the message screen then work the same way, and the one you learn first
+// teaches the other.
+const char* const CANNED_TAB_NAME[CANNED_TABS] = {
+    "GOING", "SEEN", "SAFE", "ASK", "REPLY", "SQUACH",
+};
+
+// Each row is one tab: which CANNED indices it shows, in the order shown.
+// 0xFF leaves a slot empty, which nothing uses yet but costs nothing to allow.
+static const uint8_t CANNED_TAB[CANNED_TABS][CANNED_PER_TAB] = {
+    // GOING -- movement and timing
+    {  0,  4,  5,  9, 14, 15, 16, 17 },
+    // SEEN -- what you spotted, which is what this device is for
+    {  3, 11, 12, 24, 25, 26, 27, 28 },
+    // SAFE -- status, and the lines that matter most if it goes wrong
+    {  2, 10, 13, 23, 29, 30, 31, 32 },
+    // ASK -- questions
+    {  1, 22, 33, 34, 35, 36, 37, 38 },
+    // REPLY -- short answers
+    {  6,  7,  8, 20, 39, 40, 41, 42 },
+    // SQUACH -- he is still a sasquatch about it
+    { 18, 19, 21, 43, 44, 45, 46, 47 },
+};
+
+uint8_t cannedAtTab(uint8_t tab, uint8_t slot) {
+    if (tab >= CANNED_TABS || slot >= CANNED_PER_TAB) return 0xFF;
+    const uint8_t idx = CANNED_TAB[tab][slot];
+    return (idx < CANNED_N) ? idx : 0xFF;
+}
 
 } // namespace MeshMsg
 #endif // SQUACH_MESH

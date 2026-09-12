@@ -23,12 +23,14 @@ inline bool inRect(const Rect& r, int x, int y) {
     return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h;
 }
 
-uint8_t     s_page  = 0;
-uint8_t     s_pages = 1;
+// Which line tab is showing. The emote half has s_tab; this is its twin, kept
+// separate so switching to emotes and back does not lose your place.
+uint8_t     s_lineTab = 0;
+Rect        s_lineTabRect[MeshMsg::CANNED_TABS];
 Rect        s_lineRect[12];
 uint8_t     s_lineIdx[12];
 uint8_t     s_lineN = 0;
-Rect        s_back = { 0, 0, 0, 0 }, s_prev = { 0, 0, 0, 0 }, s_next = { 0, 0, 0, 0 };
+Rect        s_back = { 0, 0, 0, 0 };
 Rect        s_send = { 0, 0, 0, 0 };
 Rect        s_help = { 0, 0, 0, 0 };
 Rect        s_type = { 0, 0, 0, 0 };
@@ -350,7 +352,7 @@ ComposeHit sendEmoteNow(MeshMsg::Emote e, uint32_t now, bool (*sent)(MeshTalk::S
 
 void uiMeshComposeInit(TFT_eSPI& t) {
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
-    s_page    = 0;
+    s_lineTab = 0;
     s_status  = nullptr;
     s_sel     = -1;
     s_typedOn = false;
@@ -420,11 +422,11 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     // ---- the lines you can send, or the one you typed ------------------------
     // Two columns in landscape, one in portrait -- the longest line is twenty
     // characters, which is wider than half of 240.
-    const int cols = port ? 1 : 2, rows = port ? 9 : 6;
-    const uint8_t perPage = (uint8_t)(cols * rows);
-    s_pages = (uint8_t)((MeshMsg::CANNED_N + perPage - 1) / perPage);
-    if (s_page >= s_pages) s_page = 0;
-    const int cw = (w - 8 - (cols - 1) * 6) / cols, ch = 20;
+    // Eight to a tab: two columns of four in landscape, one of eight in
+    // portrait. The longest line is twenty characters, which is wider than half
+    // of 240, so portrait keeps a single column.
+    const int cols = port ? 1 : 2;
+    const int cw = (w - 8 - (cols - 1) * 6) / cols, ch = port ? 18 : 20;
     const int y0 = by + bh + 6;
     s_lineN = 0;
     if (s_typedOn) {
@@ -487,10 +489,26 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
             }
         }
     } else {
-        for (int i = 0; i < perPage; i++) {
-            const int idx = s_page * perPage + i;
-            if (idx >= MeshMsg::CANNED_N) break;
-            const int x = 4 + (i % cols) * (cw + 6), y = y0 + (i / cols) * (ch + 3);
+        // The same tab row the emote half draws, in the same place, so the two
+        // pickers read as one control with two halves.
+        const int LTH = 18;
+        const int ltw = (w - 8 - (MeshMsg::CANNED_TABS - 1) * 3) / MeshMsg::CANNED_TABS;
+        for (uint8_t i = 0; i < MeshMsg::CANNED_TABS; i++) {
+            const int x = 4 + i * (ltw + 3);
+            const bool on = i == s_lineTab;
+            s_lineTabRect[i] = { (int16_t)x, (int16_t)y0, (int16_t)ltw, (int16_t)LTH };
+            t.fillRect(x, y0, ltw, LTH, on ? Theme::PURPLE : Theme::BG);
+            t.drawRect(x, y0, ltw, LTH, on ? Theme::VAPOR_PINK : Theme::W95_SHADOW);
+            const char* nm = MeshMsg::CANNED_TAB_NAME[i];
+            t.setTextColor(on ? Theme::WHITE : Theme::W95_LIGHT, on ? Theme::PURPLE : Theme::BG);
+            t.setCursor(x + (ltw - t.textWidth(nm)) / 2, y0 + (LTH - 8) / 2);
+            t.print(nm);
+        }
+        const int ly0 = y0 + LTH + 5;
+        for (int i = 0; i < MeshMsg::CANNED_PER_TAB; i++) {
+            const uint8_t idx = MeshMsg::cannedAtTab(s_lineTab, (uint8_t)i);
+            if (idx == 0xFF) continue;
+            const int x = 4 + (i % cols) * (cw + 6), y = ly0 + (i / cols) * (ch + 3);
             s_lineRect[s_lineN] = { (int16_t)x, (int16_t)y, (int16_t)cw, (int16_t)ch };
             s_lineIdx[s_lineN]  = (uint8_t)idx;
             s_lineN++;
@@ -563,14 +581,9 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
         Theme::drawButton(t, s_emoteBtn.x, s_emoteBtn.y, s_emoteBtn.w, s_emoteBtn.h, "[ EMOTE ]", true);
     } else {
         Theme::drawButton(t, s_back.x, s_back.y, s_back.w, s_back.h, "[ BACK ]", false);
-        int right = w - 4;                  // where the page arrows start
-        if (s_pages > 1) {
-            s_prev = { (int16_t)(w - 4 - 2 * AW - 6), (int16_t)(h - BH - 6), AW, BH };
-            s_next = { (int16_t)(w - 4 - AW),         (int16_t)(h - BH - 6), AW, BH };
-            Theme::drawButton(t, s_prev.x, s_prev.y, s_prev.w, s_prev.h, "<", false);
-            Theme::drawButton(t, s_next.x, s_next.y, s_next.w, s_next.h, ">", false);
-            right = s_prev.x;
-        }
+        // No page arrows any more: the lines are on labelled tabs, and the
+        // emote half never had arrows either.
+        int right = w - 4;
         // TYPE between BACK and the arrows, where the page count used to sit;
         // the count moved up beside "?".
         const int mid = (s_back.x + s_back.w + right) / 2;
@@ -588,13 +601,6 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
             s_emoteBtn = { (int16_t)(s_help.x - 6 - BW), 2, BW, 20 };
             Theme::drawButton(t, s_emoteBtn.x, s_emoteBtn.y, s_emoteBtn.w, s_emoteBtn.h, "[ EMOTE ]", true);
             pgRight = s_emoteBtn.x - 6;
-        }
-        if (s_pages > 1) {
-            char pg[8];
-            snprintf(pg, sizeof pg, "%u/%u", (unsigned)(s_page + 1), (unsigned)s_pages);
-            t.setTextColor(Theme::W95_LIGHT, Theme::BG);
-            t.setCursor(pgRight - t.textWidth(pg), 8);
-            t.print(pg);
         }
     }
 
@@ -675,14 +681,13 @@ ComposeHit uiMeshComposeTouch(int x, int y, uint32_t now) {
             s_typed[0] = '\0';
             return ComposeHit::TYPE;
         }
-        if (s_pages > 1 && inRect(s_prev, x, y)) {
-            s_page = (uint8_t)((s_page + s_pages - 1) % s_pages);
-            s_status = nullptr;
-            return ComposeHit::NONE;
-        }
-        if (s_pages > 1 && inRect(s_next, x, y)) {
-            s_page = (uint8_t)((s_page + 1) % s_pages);
-            s_status = nullptr;
+        // A tab switches which eight are showing. It never changes what is
+        // selected: picking a line then browsing another tab should not quietly
+        // drop the thing you were about to send.
+        for (uint8_t i = 0; i < MeshMsg::CANNED_TABS; i++) {
+            if (!inRect(s_lineTabRect[i], x, y)) continue;
+            s_lineTab = i;
+            s_status  = nullptr;
             return ComposeHit::NONE;
         }
     }

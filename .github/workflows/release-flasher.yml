@@ -254,6 +254,31 @@ jobs:
             firmware-cyd-ili9341-merged.bin \
             firmware-awok-merged.bin             manifest-cyd.json             manifest-cyd-ili9341.json             manifest-awok.json             manifest-cyd-fast.json             manifest-cyd-ili9341-fast.json
 
+      - name: Build the browser emulator
+        # Skipped on a lab run, which serves the released emulator instead --
+        # see the Pages step for why. Only a tag needs a fresh one.
+        if: steps.ver.outputs.is_lab != 'true'
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          # Matched to the toolchain the working emulator was built with
+          # locally. Pinned rather than "latest": a compiler bump that changes
+          # the output is a thing to do deliberately and check, not something
+          # to discover because the public page stopped loading.
+          version: 6.0.9
+          actions-cache-folder: emsdk-cache
+
+      - name: Compile the emulator to WebAssembly
+        if: steps.ver.outputs.is_lab != 'true'
+        run: |
+          set -euo pipefail
+          em++ --version | head -1
+          make -C sim wasm
+          ls -l sim/web/squachsim.js sim/web/squachsim.wasm
+          # An empty or tiny output means the link quietly failed; the site
+          # would then serve a page that loads nothing and sits there blank.
+          test -s sim/web/squachsim.wasm
+          test "$(stat -c%s sim/web/squachsim.wasm)" -gt 200000
+
       - name: Assemble Pages site
         env:
           GH_TOKEN: ${{ github.token }}
@@ -317,15 +342,19 @@ jobs:
             cp "$board-firmware.bin" "_site/$board-firmware.bin"
           done
           # The browser emulator: this firmware compiled to WebAssembly,
-          # so the site can offer "try it" next to "flash it". Its sources
-          # live in sim/ now rather than in a separate checkout CI could
-          # not reach, so this COULD be built here -- what stops it is
-          # emsdk, roughly a gigabyte of toolchain that would have to be
-          # installed or cached on every run. Until that is worth paying
-          # for, the built files stay committed as a static artifact and
-          # do NOT rebuild on a tag: if the UI changes, run `make wasm` in
-          # sim/ and copy the three files in, or this quietly drifts
-          # behind the firmware it claims to be.
+          # so the site can offer "try it" next to "flash it".
+          #
+          # It is BUILT HERE on a tag, from the tag's own sources -- see the
+          # "Build the browser emulator" step above. It used to be a committed
+          # artifact that only refreshed when somebody remembered to run
+          # `make wasm` before tagging, and that safeguard failed twice: once
+          # at v1.5.8 (owned up to in the v1.5.9 notes) and again at v1.7.0,
+          # which shipped v1.6.0's emulator. A check that depends on a person
+          # remembering is not a check.
+          #
+          # The committed copy in web-flasher/emulator/ stays: it is what a lab
+          # run serves and what somebody can open locally without emsdk. It is
+          # just no longer what the public page gets on a release.
           #
           # The README's demo.gif has no such excuse any more. Its
           # renderer needs nothing but g++ and the sources already here --
@@ -343,9 +372,17 @@ jobs:
             done
             echo "emulator restored from $LATEST"
           else
-            cp web-flasher/emulator/index.html     _site/emulator/index.html
-            cp web-flasher/emulator/squachsim.js   _site/emulator/squachsim.js
-            cp web-flasher/emulator/squachsim.wasm _site/emulator/squachsim.wasm
+            # index.html is hand-written and not a build product, so it always
+            # comes from the tree. The two build products come from the build
+            # step, which has just compiled them from this tag's sources.
+            cp web-flasher/emulator/index.html _site/emulator/index.html
+            cp sim/web/squachsim.js            _site/emulator/squachsim.js
+            cp sim/web/squachsim.wasm          _site/emulator/squachsim.wasm
+            # Loud, because a silent mismatch here is the whole bug this step
+            # exists to stop.
+            if ! cmp -s sim/web/squachsim.wasm web-flasher/emulator/squachsim.wasm; then
+              echo "::notice::the committed emulator differs from this tag's build -- the site serves the freshly built one"
+            fi
           fi
 
       - name: Keep the previous two releases flashable

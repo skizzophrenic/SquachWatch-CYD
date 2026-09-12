@@ -297,11 +297,14 @@ namespace Squachy {
     void visitReach(uint32_t now, uint32_t ms, Reach level);
     // A fist pumping, for rock-paper-scissors.
     void visitPump(uint32_t now, uint32_t ms);
-    // Asleep for as long as it keeps being called; then a stretch on waking.
-    void visitNap(uint32_t now);
-    void visitWake(uint32_t now);
     // When somebody last did anything to him -- a tap, a detection, a screen
-    // change. How a nap knows it has been left alone, and when to wake.
+    // change. How his solo nap knows it has been left alone.
+    //
+    // There was a visit nap here too -- the two of them dozing off together
+    // mid-conversation -- with visitNap()/visitWake()/visitWakeLine() behind
+    // it. It was removed: a visitor is the one time there is banter to be had
+    // and sleeping through it was the opposite of the point. He still naps
+    // alone, on his own timer further down this file's implementation.
     uint32_t lastInteractionAt();
     // His turn in a dance-off: the DANCE mood, for `ms`.
     void visitDance(uint32_t now, uint32_t ms);
@@ -317,7 +320,6 @@ namespace Squachy {
     uint32_t    visitRpsResult(uint8_t outcome, uint32_t seed);   // 0 tie, 1 he won, 2 he lost
     uint32_t    visitSnowCall(uint32_t seed);           // host
     const char* visitSnowReply(uint32_t seed);          // guest
-    const char* visitWakeLine(uint32_t seed);           // guest
 
     // A nickname by index. nickname() only ever reports our own, and a guest
     // arrives carrying somebody else's -- both devices ship the same table,

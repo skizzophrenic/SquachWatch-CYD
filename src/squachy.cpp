@@ -2213,19 +2213,6 @@ void visitPump(uint32_t now, uint32_t ms) {
     moodUntil = now + ms;
 }
 
-void visitNap(uint32_t now) {
-    // Renewed every frame while it lasts, so the moment the visit stops
-    // asking he is awake within a second and a half regardless.
-    mood      = Mood::SLEEPY;
-    moodUntil = now + 1500;
-}
-
-void visitWake(uint32_t now) {
-    mood           = Mood::STRETCH;
-    s_stretchStart = now;
-    moodUntil      = now + STRETCH_MS;
-}
-
 uint32_t lastInteractionAt() { return lastInteraction; }
 
 void visitDance(uint32_t now, uint32_t ms) {
@@ -2295,9 +2282,6 @@ static const char* const SNOW_CALLS[] = { "Think fast!", "Heads up!", "Incoming!
 static const char* const SNOW_REPLIES[] = {
     "Oh, it's ON.", "You'll pay for that.", "Cold! COLD!", "My turn.",
 };
-static const char* const WAKE_LINES[] = {
-    "Wha-? I was listening.", "Five more minutes.", "Was I snoring?", "I'm up. I'm up.",
-};
 
 uint32_t visitFriendHello(uint32_t seed) { return visitSay(FRIEND_HELLOS[seed % 4]); }
 uint32_t visitRpsCall(uint32_t seed)     { return visitSay(RPS_CALLS[seed % 4]); }
@@ -2307,7 +2291,6 @@ uint32_t visitRpsResult(uint8_t outcome, uint32_t seed) {
 }
 uint32_t    visitSnowCall(uint32_t seed)  { return visitSay(SNOW_CALLS[seed % 4]); }
 const char* visitSnowReply(uint32_t seed) { return SNOW_REPLIES[seed % 4]; }
-const char* visitWakeLine(uint32_t seed)  { return WAKE_LINES[seed % 4]; }
 
 uint32_t visitHangHost(uint32_t seed) {
     return visitSay(HANG_EXCHANGES[seed % HANG_EXCHANGES_N].host);

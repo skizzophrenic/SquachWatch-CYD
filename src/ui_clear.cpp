@@ -390,14 +390,16 @@ static const char* const EMOTE_SCARED[]     = { "AAAH!", "Not funny!", "My FUR!"
 // that restarted the first one's double-take mid-swing.
 static uint32_t s_seenShock = 0, s_guestStartleUntil = 0;
 
-// ---- napping ----------------------------------------------------------------
-// Left alone long enough mid-visit -- no detection, nobody touching him -- the
-// two of them doze off together. Anything that would have interrupted a
-// conversation wakes them: a tap on him, a detection, a message arriving.
-static const uint32_t NAP_AFTER_MS = 240000;
-static const uint32_t WAKE_MS      = 1900;      // Squachy's STRETCH_MS: they stretch together
-static bool     s_napping = false;
-static uint32_t s_napSeen = 0, s_wakeUntil = 0;
+// ---- napping, and why there isn't any here ----------------------------------
+// Squachy used to doze off mid-visit: four quiet minutes and the two of them
+// would nod off together until something woke them. It is gone deliberately.
+// A visitor is the one time there is banter to be had, and sleeping through it
+// is the opposite of the point -- so a guest on screen now means he stays
+// awake for as long as they are there.
+//
+// He still naps ALONE. That is a separate mechanism living in squachy.cpp, on
+// its own ten-minute idle timer with its own sleepy lines, and nothing here
+// touches it.
 
 static bool messageShowing(uint32_t now);         // with the message UI, below
 
@@ -938,48 +940,6 @@ static void emoteStart(uint32_t now) {
     }
 }
 
-// ---- napping, continued ------------------------------------------------------
-static bool napDue(uint32_t now) {
-    // Four minutes of nobody doing anything to him -- and of this visit
-    // having gone on that long, so a guest who just arrived is not greeted
-    // by two Squachys nodding off.
-    return now - Squachy::lastInteractionAt() > NAP_AFTER_MS && now - s_vpAt > NAP_AFTER_MS;
-}
-
-static void napStart(uint32_t now) {
-    s_napping        = true;
-    s_napSeen        = Squachy::lastInteractionAt();
-    s_guestTurn      = false;
-    s_visitGuestLine = nullptr;
-    Squachy::visitNap(now);
-    Serial.println("[visit] nap");
-}
-
-static void napTick(uint32_t now) {
-    if (s_napping) {
-        const bool poked = Squachy::lastInteractionAt() != s_napSeen || s_eqN > 0;
-        if (!poked && !messageShowing(now)) { Squachy::visitNap(now); return; }
-        s_napping        = false;
-        s_wakeUntil      = now + WAKE_MS;
-        Squachy::visitWake(now);
-        s_guestTurn      = true;
-        s_visitGuestLine = Squachy::visitWakeLine(s_beatNo);
-        Serial.println("[visit] wake");
-        return;
-    }
-    // Stretched out: the conversation picks up where it left off, and the
-    // four minutes start again from here.
-    if ((int32_t)(s_wakeUntil - now) <= 0) {
-        s_wakeUntil      = 0;
-        s_visitGuestLine = nullptr;
-        s_guestTurn      = false;
-        s_beatAt         = now;
-        s_beatMs         = 600;
-        s_vpAt           = now;
-        if (!s_nextPieceAt || (int32_t)(s_nextPieceAt - now) < 30000) s_nextPieceAt = now + 30000;
-    }
-}
-
 // What the guest is doing this frame, beyond standing and talking.
 static Squachy::VisitPose guestPose(uint32_t now) {
     typedef Squachy::VisitPose P;
@@ -989,8 +949,6 @@ static Squachy::VisitPose guestPose(uint32_t now) {
         return (s_fiveSteps < 3 || st == 0) ? P::HIGH_FIVE : (st == 1 ? P::LOW_FIVE : P::FIST);
     }
     if ((int32_t)(s_guestStartleUntil - now) > 0)           return P::STARTLED;
-    if (s_napping)                                           return P::SLEEPY;
-    if (s_wakeUntil && (int32_t)(s_wakeUntil - now) > 0)     return P::STRETCH;
     const uint32_t e = now - s_pieceAt;
     switch (s_piece) {
         // Whoever sent an emote goes first: the guest dances on turns 0 and 2
@@ -2040,8 +1998,6 @@ void uiClearEmoteTick(uint32_t now) {
         if (s_eqN && s_vp != VisitPhase::GONE && s_vp != VisitPhase::ARRIVING &&
             s_vp != VisitPhase::LEAVING) {
             s_piece     = Piece::NONE;      // whatever was running, this is louder
-            s_napping   = false;
-            s_wakeUntil = 0;
             if (s_vp == VisitPhase::HIGH_FIVE || s_vp == VisitPhase::STEP_BACK) {
                 s_vp = VisitPhase::MEETING;
                 s_vpAt = now; s_beatAt = now; s_beatMs = 0;
@@ -2090,7 +2046,6 @@ static void visitTick(uint32_t now) {
         s_piece = Piece::NONE;              // nor a set piece, a scare or a nap
         s_nextPieceAt = 0;
         s_guestStartleUntil = 0;
-        s_napping = false; s_wakeUntil = 0;
         // Seen before, this boot? Then it is a handshake, not a high five.
         s_oldFriend = friendSeen(id);
         if (!s_oldFriend) friendAdd(id);
@@ -2111,7 +2066,7 @@ static void visitTick(uint32_t now) {
     // goes.
     if (id != s_hostingId && s_vp != VisitPhase::LEAVING) {
         // Whatever they were in the middle of ends with the visit.
-        s_piece = Piece::NONE; s_napping = false; s_wakeUntil = 0;
+        s_piece = Piece::NONE;
         s_vp = VisitPhase::LEAVING;
         visitBeat(now, Squachy::VisitMoment::PART);
         s_vpAt = now + s_beatMs;            // goodbye first, then the walk
@@ -2182,9 +2137,8 @@ static void visitTick(uint32_t now) {
             // line it is showing, so the rhythm comes from what is being
             // said rather than from a constant that has to suit both "Good."
             // and a full sentence.
-            // A set piece, or a nap, holds the conversation until it is done.
+            // A set piece holds the conversation until it is done.
             if (s_piece != Piece::NONE)  { pieceTick(now); break; }
-            if (s_napping || s_wakeUntil) { napTick(now);   break; }
             // Emotes are handled above, before the switch: they interrupt from
             // any phase with two Squachys on screen rather than only this one.
             if (now - s_beatAt >= s_beatMs + TURN_GAP_MS) {
@@ -2194,15 +2148,11 @@ static void visitTick(uint32_t now) {
                 // as a Squachy who kept trying to leave. He goes when the
                 // other one does: the id check above sends him off, with his
                 // goodbye, the moment the peer is gone.
-                // Between exchanges only -- never cutting a question off
-                // from its answer.
-                if (s_hangStep == 0 && napDue(now))
-                    napStart(now);
                 // Not while a crowd is on screen: every set piece puts the two
                 // of them on marks on the ground, and in a crowd there is no
                 // ground -- they are drifting. The conversation carries on.
-                else if (s_hangStep == 0 && s_nextPieceAt && Settings::meshCrowd() <= 1 &&
-                         (int32_t)(now - s_nextPieceAt) >= 0)
+                if (s_hangStep == 0 && s_nextPieceAt && Settings::meshCrowd() <= 1 &&
+                    (int32_t)(now - s_nextPieceAt) >= 0)
                     pieceStart(now);
                 else
                     visitBeat(now, Squachy::VisitMoment::HANGOUT);

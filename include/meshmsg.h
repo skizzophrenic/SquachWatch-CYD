@@ -40,6 +40,15 @@ extern const uint16_t    WORD_N;
 extern const char* const CANNED[];
 extern const uint8_t     CANNED_N;
 
+// How the picker groups them. PRESENTATION ONLY -- none of this travels, so
+// unlike the indices above it may be reordered or renamed freely. Same shape
+// as the emote picker's tabs (EmoteScript::TABS/PER_TAB) on purpose: both
+// halves of the message screen then behave identically.
+constexpr uint8_t CANNED_TABS = 6, CANNED_PER_TAB = 8;
+extern const char* const CANNED_TAB_NAME[CANNED_TABS];
+// The CANNED index at that slot, or 0xFF when the slot is empty.
+uint8_t cannedAtTab(uint8_t tab, uint8_t slot);
+
 // ---- phrases ---------------------------------------------------------------
 // A uniform index in [0, n). Rejection sampling rather than `rng() % n`, which
 // over-weights the low indices whenever n does not divide 2^32 -- slightly,
