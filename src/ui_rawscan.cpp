@@ -106,7 +106,7 @@ RawScanConfirmTap uiRawScanHitConfirm(int x, int y, int screenW, int screenH) {
 // scanning state, the empty state, or the results list) -- called
 // right before every return point in uiRawScanTick() rather than
 // restructuring those into a single shared tail.
-static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label) {
+static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label, bool watched) {
     int px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, igX, igY, igW, igH, cnX, cnY, cnW, cnH;
     confirmRects(w, h, px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH,
                  igX, igY, igW, igH, cnX, cnY, cnW, cnH);
@@ -128,7 +128,10 @@ static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label) {
     t.setCursor(lx, py + 24);
     t.print(label);
 
-    Theme::drawButton(t, wX, wY, wW, wH, "WATCH", false);
+    // Toggling, so the button names the next tap: "WATCH" on something
+    // already being watched would be a lie, and pressed state is how every
+    // other button in this app says "this one is on".
+    Theme::drawButton(t, wX, wY, wW, wH, watched ? "UNWATCH" : "WATCH", watched);
     Theme::drawButton(t, huX, huY, huW, huH, "HUNT", false);
     Theme::drawButton(t, igX, igY, igW, igH, "IGNORE", false);
     Theme::drawButton(t, cnX, cnY, cnW, cnH, "CANCEL", false);
@@ -169,7 +172,7 @@ int uiRawScanRowAt(TFT_eSPI& t, int x, int y, int screenW, int screenH) {
 }
 
 void uiRawScanTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool isBle, bool done,
-                    bool confirmPending, const char* confirmLabel) {
+                    bool confirmPending, const char* confirmLabel, bool confirmWatched) {
     int w = t.width();
     int h = t.height();
 
@@ -278,7 +281,7 @@ switch (Settings::background()) {
         }
 
         drawBottomBar(t, w, h, isBle);
-        if (confirmPending) drawConfirmPanel(t, w, h, confirmLabel);
+        if (confirmPending) drawConfirmPanel(t, w, h, confirmLabel, confirmWatched);
         return;
     }
 
@@ -293,7 +296,7 @@ switch (Settings::background()) {
         t.print(msg);
 
         drawBottomBar(t, w, h, isBle);
-        if (confirmPending) drawConfirmPanel(t, w, h, confirmLabel);
+        if (confirmPending) drawConfirmPanel(t, w, h, confirmLabel, confirmWatched);
         return;
     }
 
@@ -364,5 +367,5 @@ switch (Settings::background()) {
     Theme::drawScrollbar(t, w - 4, bodyTop, bodyH, count, max, g_scroll);
 
     drawBottomBar(t, w, h, isBle);
-    if (confirmPending) drawConfirmPanel(t, w, h, confirmLabel);
+    if (confirmPending) drawConfirmPanel(t, w, h, confirmLabel, confirmWatched);
 }

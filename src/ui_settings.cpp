@@ -7,7 +7,14 @@
 #include "squachy.h"
 #include <Arduino.h>
 
-static const int TOP_MARGIN = 16;
+// Was 16, which put the first row's top edge 4px ABOVE the bottom of the
+// title bar's 20px icon box (Theme::ICON_BOX_H) -- so the strip a thumb
+// reaches for to open/close this screen overlapped the first row's tap
+// target, and the miss landed on whatever sat at the top of the list.
+// 32 leaves 12px of clear space under the icons. Shared by computeGeom()
+// for both drawing and hit-testing, so the rows and their tap targets
+// move together.
+static const int TOP_MARGIN = 32;
 static int g_scroll = 0;
 
 // Fixed display order, grouped so a colored section header can sit
@@ -32,9 +39,9 @@ static const SettingsRow ALL_ROWS[] = {
     // portrait.
     SettingsRow::SQUACHMESH,
 #endif
-    // SHADES COLOR moved to the APPEARANCE page -- see APPEARANCE_ROWS.
-    SettingsRow::SQUACHY_SIZE,
-    SettingsRow::OUTFIT, SettingsRow::PET,
+    // SIZE, OUTFIT, PET and SHADES COLOR all live on the APPEARANCE page now
+    // -- see APPEARANCE_ROWS. Everything about how he LOOKS is on one page;
+    // what stays here is what he DOES.
     SettingsRow::REPLAY_INTRO, SettingsRow::SHOW_OFF, SettingsRow::VIEW_DIARY,
     SettingsRow::POWER_SAVER,
     SettingsRow::SECURITY,
@@ -42,13 +49,18 @@ static const SettingsRow ALL_ROWS[] = {
 };
 static const uint8_t ALL_ROWS_N = sizeof(ALL_ROWS) / sizeof(ALL_ROWS[0]);
 
-// The APPEARANCE page: everything about how the screen looks, plus the Legend
-// top hat -- which only gets a row once he has a hat to take off.
+// The APPEARANCE page: everything about how HE looks, then everything about
+// how the SCREEN looks. The Legend top hat only gets a row once he has a hat
+// to take off.
 static const SettingsRow APPEARANCE_ROWS[] = {
+    // How HE looks comes first -- these are the rows people open this page to
+    // change, and they were a scroll away on the main list. TOP HAT only
+    // appears once it has been earned; see buildDisplayList().
+    SettingsRow::SQUACHY_SIZE, SettingsRow::OUTFIT, SettingsRow::PET,
+    SettingsRow::SHADES_COLOR, SettingsRow::TOP_HAT,
+    // Then how the SCREEN looks.
     SettingsRow::THEME, SettingsRow::BACKGROUND, SettingsRow::BACKGROUND_LOCK, SettingsRow::BRIGHTNESS,
     SettingsRow::INVERT, SettingsRow::RGB_SWAP, SettingsRow::ROTATION_LOCK,
-    // How HE looks, under the same heading as how the screen does.
-    SettingsRow::SHADES_COLOR, SettingsRow::TOP_HAT,
     SettingsRow::BACK,
 };
 static const uint8_t APPEARANCE_ROWS_N = sizeof(APPEARANCE_ROWS) / sizeof(APPEARANCE_ROWS[0]);
@@ -89,6 +101,12 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::ROTATION_LOCK:
         case SettingsRow::SHADES_COLOR:
         case SettingsRow::TOP_HAT:
+        // SIZE, OUTFIT and PET moved onto the APPEARANCE page with the rest of
+        // how he looks. They answer APPEARANCE rather than SQUACHY so the page
+        // draws under one header instead of splitting in two.
+        case SettingsRow::SQUACHY_SIZE:
+        case SettingsRow::OUTFIT:
+        case SettingsRow::PET:
             return RowGroupId::APPEARANCE;
         case SettingsRow::BORING_MODE:
         case SettingsRow::CONFIDENCE:
@@ -99,9 +117,6 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::SQUACHY_NAME:
         case SettingsRow::APPEARANCE:
         case SettingsRow::SQUACHMESH:
-        case SettingsRow::SQUACHY_SIZE:
-        case SettingsRow::OUTFIT:
-        case SettingsRow::PET:
         case SettingsRow::REPLAY_INTRO:
         case SettingsRow::VIEW_DIARY:
         case SettingsRow::SHOW_OFF:

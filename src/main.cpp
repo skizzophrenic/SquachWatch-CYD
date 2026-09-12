@@ -2540,6 +2540,12 @@ void loop() {
 #endif
             if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 lastTouch = now;
+                // The button ends the watch; anywhere else just dismisses the
+                // alert and leaves it running. Both land back on CLEAR.
+                if (uiWatchAlertHitRemove(*canvas, tp.x, tp.y)) {
+                    engine.clearWatch();
+                    Theme::showToast("UNWATCHED", nullptr, Theme::CYAN);
+                }
                 enterClear();
             } else if ((now - watchAlertStart) > ALERT_AUTO_DISMISS_MS) {
                 enterClear();
@@ -2556,7 +2562,8 @@ void loop() {
             const char* infoTypeName = s_infoShowingPrimer ? nullptr
                                      : DetectionInfo::titleFor(s_confirmType, s_confirmVendor, s_confirmName);
             uiLogTick(*canvas, now, engine, 0, s_confirmPending, s_confirmLabel,
-                      s_infoPending, infoTypeName, infoText);
+                      s_infoPending, infoTypeName, infoText,
+                      engine.isWatched(s_confirmMac, s_confirmIsBle));
             Theme::drawToast(*canvas, now);
 
             // Same "ignore the touch that opened this until it releases"
@@ -2601,8 +2608,16 @@ void loop() {
                     if (ctap == LogConfirmTap::WATCH) {
                         lastTouch = now;
                         s_confirmPending = false;
-                        if (s_confirmIsBle) engine.watchBle(s_confirmMac, s_confirmLabel);
-                        else                engine.watchWifi(s_confirmMac, s_confirmLabel);
+                        // Toggling like IGNORE beside it -- the only way to
+                        // end a watch that isn't a reboot or the wipe.
+                        if (engine.isWatched(s_confirmMac, s_confirmIsBle)) {
+                            engine.clearWatch();
+                            Theme::showToast("UNWATCHED", nullptr, Theme::CYAN);
+                        } else if (s_confirmIsBle) {
+                            engine.watchBle(s_confirmMac, s_confirmLabel);
+                        } else {
+                            engine.watchWifi(s_confirmMac, s_confirmLabel);
+                        }
                     } else if (ctap == LogConfirmTap::IGNORE) {
                         lastTouch = now;
                         s_confirmPending = false;
@@ -2716,7 +2731,8 @@ void loop() {
         }
         case AppState::RAWSCAN: {
             bool done = s_rawScanIsBle ? engine.rawBleScanDone() : engine.rawWifiScanDone();
-            uiRawScanTick(*canvas, now, engine, s_rawScanIsBle, done, s_confirmPending, s_confirmLabel);
+            uiRawScanTick(*canvas, now, engine, s_rawScanIsBle, done, s_confirmPending, s_confirmLabel,
+                          engine.isWatched(s_confirmMac, s_rawScanIsBle));
             Theme::drawToast(*canvas, now);
 
             // The confirm panel is modal: while it's up, a tap only
@@ -2734,10 +2750,18 @@ void loop() {
                     if (ctap == RawScanConfirmTap::WATCH) {
                         lastTouch = now;
                         s_confirmPending = false;
-                        if (s_rawScanIsBle) engine.watchBle(s_confirmMac, s_confirmLabel);
-                        else                engine.watchWifi(s_confirmMac, s_confirmLabel);
-                        engine.stopRawScan();
-                        enterClear();
+                        // See the LOG screen's copy: same toggle. Unwatching
+                        // stays on this screen -- the reason to leave was to
+                        // go watch the thing, and there is nothing to go to.
+                        if (engine.isWatched(s_confirmMac, s_rawScanIsBle)) {
+                            engine.clearWatch();
+                            Theme::showToast("UNWATCHED", nullptr, Theme::CYAN);
+                        } else {
+                            if (s_rawScanIsBle) engine.watchBle(s_confirmMac, s_confirmLabel);
+                            else                engine.watchWifi(s_confirmMac, s_confirmLabel);
+                            engine.stopRawScan();
+                            enterClear();
+                        }
                     } else if (ctap == RawScanConfirmTap::IGNORE) {
                         lastTouch = now;
                         s_confirmPending = false;
@@ -3575,6 +3599,21 @@ void loop() {
 
     s_pushUsAvg  = emaUpdate(s_pushUsAvg, s_pushAccumUs);
     s_frameUsAvg = emaUpdate(s_frameUsAvg, micros() - frameStartUs);
+    // The same two numbers DIAGNOSTICS shows, once every ten seconds on
+    // serial, so a frame-rate change can be read off a capture rather than
+    // off a screen somebody has to navigate to and photograph. Ten seconds
+    // is the [scan] restart cadence; the log stays readable.
+    {
+        static uint32_t lastFrameSay = 0;
+        if (s_frameUsAvg && now - lastFrameSay >= 10000) {
+            lastFrameSay = now;
+            Serial.printf("[frame] avg %lu.%lu ms (%lu fps)  push %lu.%lu ms  screen %u\n",
+                          (unsigned long)(s_frameUsAvg / 1000), (unsigned long)((s_frameUsAvg / 100) % 10),
+                          (unsigned long)(1000000UL / s_frameUsAvg),
+                          (unsigned long)(s_pushUsAvg / 1000), (unsigned long)((s_pushUsAvg / 100) % 10),
+                          (unsigned)state);
+        }
+    }
 #if CROWD_BENCH
     CrowdBench::noteFrame(micros() - frameStartUs, s_pushAccumUs);
 #endif

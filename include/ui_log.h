@@ -24,9 +24,12 @@ void uiLogInit(TFT_eSPI& t);
 // DetectionInfo::explain()/rssiConfidencePrimer()), this module just
 // hands them through to Theme:: unchanged. Hit-testing its dismiss
 // button is Theme::infoPanelHitDismiss(), not owned here.
+// confirmWatched: see ui_rawscan.h's copy -- the panel's WATCH button becomes
+// UNWATCH when the device it is asking about is the one already being watched.
 void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
                int scrollOffset, bool confirmPending, const char* confirmLabel,
-               bool infoPending, const char* infoTypeName, const char* infoText);
+               bool infoPending, const char* infoTypeName, const char* infoText,
+               bool confirmWatched);
 void uiLogScroll(int delta);          // positive = scroll down (older)
 
 // Row index (0 = topmost visible, already adjusted for scroll) a tap

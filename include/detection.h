@@ -7,6 +7,7 @@
 #include "sd_log.h"
 #include "remote_id.h"
 #include <Preferences.h>
+#include <cstring>   // memcmp, for the inline isWatched()/isHunted() below
 
 // A single unfiltered BLE sighting from the manual raw scanner (see
 // startRawBleScan() below) -- every device seen, not just ones
@@ -232,6 +233,16 @@ public:
     void clearWatch();
     WatchKind watchKind() const { return _watchKind; }
     const char* watchLabel() const { return _watchLabel; }
+    // True when this exact address is the one currently being watched -- what
+    // makes the confirm panel's WATCH button a toggle rather than a one-way
+    // door, the same way IGNORE already reads IgnoreList::contains(). The kind
+    // has to match too: a BLE address and a WiFi BSSID are separate
+    // namespaces, so a collision across them would be a wrong answer rather
+    // than a near miss.
+    bool isWatched(const uint8_t* mac, bool ble) const {
+        if (_watchKind != (ble ? WatchKind::BLE : WatchKind::WIFI)) return false;
+        return memcmp(mac, _watchMac, 6) == 0;
+    }
 
     // Recent signal-strength history for the current watch target --
     // sampled independently of the alert cooldown above (every ~2s the

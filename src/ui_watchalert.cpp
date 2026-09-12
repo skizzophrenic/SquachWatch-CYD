@@ -4,6 +4,28 @@
 #include "squachy.h"
 #include <Arduino.h>
 
+// Shared by the drawing and the hit test so the two cannot drift -- the rule
+// every other panel here follows. Full width minus a margin: it is the only
+// control on the screen, so there is nothing for it to crowd.
+static const int REMOVE_H = 26;
+static void removeRect(TFT_eSPI& t, int& x, int& y, int& w, int& h) {
+    const int margin = 10;
+    w = t.width() - 2 * margin;
+    if (w > 240) w = 240;
+    h = REMOVE_H;
+    x = (t.width() - w) / 2;
+    y = t.height() - h - margin;
+}
+
+// The full label needs ~22 characters and the narrowest portrait rotation
+// cannot hold it. Shortened rather than shrunk: size-1 is already the
+// smallest the built-in font offers.
+static const char* removeLabel(TFT_eSPI& t, int w) {
+    const char* full = "REMOVE FROM WATCH LIST";
+    t.setTextSize(1);
+    return (t.textWidth(full) <= w - 8) ? full : "UNWATCH";
+}
+
 void uiWatchAlertInit(TFT_eSPI& t) {
     t.fillRect(0, 0, t.width(), t.height(), Theme::BLACK);
     Squachy::watchAlertReaction();
@@ -30,7 +52,12 @@ void uiWatchAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, boo
     // the whole screen to himself instead of sharing it with counters
     // and buttons.
     const int topY        = 16;
-    const int availHeight = h - topY - 40;
+    // The 40 was the old bottom reserve, back when "tap to dismiss" was the
+    // only thing down there. The REMOVE button and the hint above it now own
+    // that strip, and Squachy erases his own footprint with flat Theme::BG
+    // rather than this screen's pulsing red -- so anything he walks over gets
+    // stamped out in the wrong colour. Give him the room above them instead.
+    const int availHeight = h - topY - (REMOVE_H + 30);
     Squachy::tick(t, w / 2, topY, availHeight, now, advance);
 
     // Headline, outlined the same way CLEAR's ALL CLEAR/DETECTIONS
@@ -122,8 +149,27 @@ void uiWatchAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, boo
         }
     }
 
-    const char* tapMsg = "tap to dismiss";
+    // Two ways out doing different things: anywhere on the screen dismisses
+    // the alert and leaves the watch running, the button ends the watch.
+    // Drawn last so the button sits over Squachy rather than under him.
+    // Sits ABOVE the button with real clearance: size-1 glyphs are 8px tall
+    // and draw downward from the cursor, so the old -14 put the text's own
+    // rows 4px inside the button and it read as half-erased. The button's top
+    // is at h - REMOVE_H - 10, so clear it by the font height plus a gap.
+    const char* tapMsg = "tap anywhere to dismiss";
+    t.setTextSize(1);
+    t.setTextColor(Theme::WHITE, bg);
     int tmw = t.textWidth(tapMsg);
-    t.setCursor((w - tmw) / 2, h - 20);
+    t.setCursor((w - tmw) / 2, h - REMOVE_H - 10 - 8 - 6);
     t.print(tapMsg);
+
+    int bx, by, bw, bh;
+    removeRect(t, bx, by, bw, bh);
+    Theme::drawButton(t, bx, by, bw, bh, removeLabel(t, bw), false);
+}
+
+bool uiWatchAlertHitRemove(TFT_eSPI& t, int x, int y) {
+    int bx, by, bw, bh;
+    removeRect(t, bx, by, bw, bh);
+    return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
 }

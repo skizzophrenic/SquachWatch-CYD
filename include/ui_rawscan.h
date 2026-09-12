@@ -17,8 +17,13 @@ void uiRawScanInit(TFT_eSPI& t, bool isBle);
 // panel with WATCH/HUNT/CANCEL over everything else instead of the
 // normal list -- see uiRawScanHitConfirm() below. confirmLabel is
 // ignored when confirmPending is false.
+// confirmWatched: whether the device the panel is asking about is the one
+// already being watched -- the address itself lives in main.cpp, so the
+// comparison happens there and only the answer comes through here. Turns the
+// panel's WATCH button into UNWATCH; see drawConfirmPanel().
 void uiRawScanTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
-                    bool isBle, bool done, bool confirmPending, const char* confirmLabel);
+                    bool isBle, bool done, bool confirmPending, const char* confirmLabel,
+                    bool confirmWatched);
 void uiRawScanScroll(int delta);      // positive = scroll down (older)
 
 // This screen shows two buttons in place of the normal three-button

@@ -13,3 +13,10 @@ void uiWatchAlertInit(TFT_eSPI& t);
 // logical frame. Defaults to true (unchanged behavior for single-pass
 // boards).
 void uiWatchAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance = true);
+
+// True when (x,y) falls on the REMOVE FROM WATCH LIST button along the bottom
+// of this screen. Until this existed a watch could only be ended by a reboot
+// or the security wipe -- clearWatch() had no caller in any screen. The alert
+// is the one place the target is ever named on screen, so it is the one place
+// you can act on it without finding it in a scan again.
+bool uiWatchAlertHitRemove(TFT_eSPI& t, int x, int y);

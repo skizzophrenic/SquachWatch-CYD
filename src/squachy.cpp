@@ -19,6 +19,45 @@ static const bool SQUACHY_KEYLINE = true;
 // scale is derived from whether it is there.
 static const bool SQUACHY_SHADOW = false;
 
+// Every thick line he is drawn with -- arms, legs, brows, the keyline under
+// each limb -- goes through here rather than TFT_eSPI::drawWideLine().
+//
+// That call is anti-aliased: drawWedgeLine() walks the line's whole bounding
+// box computing a float distance-to-line per pixel, and alpha-blends the
+// edge pixels against what is already in the frame, which on a sprite means
+// reading each one back first. With a dozen or more of them a frame, at limb
+// widths, that was the single largest cost on the board -- ONE Squachy at
+// x1.88 drew in 28 ms, more than the 23 ms it takes to push the whole frame
+// over SPI. Measured on 2026-09-11 (crowd_bench "row 1").
+//
+// This is the emulator's version, and has been all along: two triangles and
+// two end caps, integer fills, no blending. Every render judged in the
+// emulator was drawn like this, so it changes the board to match what was
+// approved rather than the other way round. At RGB332 the missing
+// anti-aliasing is a colour or two of edge softness.
+//
+// -DSQUACHY_AA_LINES=1 puts the library call back, for measuring against.
+#ifndef SQUACHY_AA_LINES
+#define SQUACHY_AA_LINES 0
+#endif
+static void wideLine(TFT_eSPI& t, float ax, float ay, float bx, float by, float wd, uint32_t color) {
+#if SQUACHY_AA_LINES
+    t.drawWideLine(ax, ay, bx, by, wd, color);
+#else
+    const float dx = bx - ax, dy = by - ay;
+    const float len = sqrtf(dx * dx + dy * dy);
+    const int   r   = (int)(wd / 2);
+    if (len < 0.01f) { t.fillCircle((int)ax, (int)ay, r, color); return; }
+    const float nx = -dy / len * (wd / 2), ny = dx / len * (wd / 2);
+    t.fillTriangle((int)(ax + nx), (int)(ay + ny), (int)(ax - nx), (int)(ay - ny),
+                   (int)(bx + nx), (int)(by + ny), color);
+    t.fillTriangle((int)(bx + nx), (int)(by + ny), (int)(bx - nx), (int)(by - ny),
+                   (int)(ax - nx), (int)(ay - ny), color);
+    t.fillCircle((int)ax, (int)ay, r, color);
+    t.fillCircle((int)bx, (int)by, r, color);
+#endif
+}
+
 enum class Mood : uint8_t { IDLE, WAVE, SHOCKED, BOUNCE, SLEEPY, WALK, DANCE, WINK,
                             STRETCH,   // waking out of a nap -- see the nap-exit branch
                             GUM,       // blowing a bubble, rare idle flourish
@@ -2655,8 +2694,8 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
                 if (adx * adx + ady * ady < hdr * hdr) {
                     const int sx = (sg < 0) ? s_armL0x : s_armR0x;
                     const int sy = (sg < 0) ? s_armL0y : s_armR0y;
-                    t.drawWideLine(sx, sy, ax, ay, S(7) + 2, seam);
-                    t.drawWideLine(sx, sy, ax, ay, S(7), org);
+                    wideLine(t, sx, sy, ax, ay, S(7) + 2, seam);
+                    wideLine(t, sx, sy, ax, ay, S(7), org);
                 }
                 // Mittens, thumbs inboard. The thumb is filled and then
                 // outlined so its own edge crosses the palm and reads as a
@@ -2672,8 +2711,8 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
             // The drawstring is only the V, off the chin of the opening.
             const int d  = (int)(sinf((float)(now % 9000) / 9000.0f * 6.2831853f) * (float)S(1));
             const int vy = oy + oh - S(1);
-            t.drawWideLine(cx2 + d, vy, cx2 - S(5) + d, vy + S(8), 2, seam);
-            t.drawWideLine(cx2 + d, vy, cx2 + S(5) + d, vy + S(8), 2, seam);
+            wideLine(t, cx2 + d, vy, cx2 - S(5) + d, vy + S(8), 2, seam);
+            wideLine(t, cx2 + d, vy, cx2 + S(5) + d, vy + S(8), 2, seam);
             break;
         }
         case OutfitId::VOIDEYE: {
@@ -2984,8 +3023,8 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
             auto peltOn = [&](int x0, int y0, int x1, int y1, int outward) {
                 const int mx = x0 + (x1 - x0) * 55 / 100;
                 const int my = y0 + (y1 - y0) * 55 / 100;
-                t.drawWideLine(x0 + outward, y0 - Sf(2.0f), mx + outward, my, Sf(9.0f), peltDark);
-                t.drawWideLine(x0 + outward, y0 + Sf(1.0f), mx + outward, my - Sf(1.0f), Sf(3.0f), peltMid);
+                wideLine(t, x0 + outward, y0 - Sf(2.0f), mx + outward, my, Sf(9.0f), peltDark);
+                wideLine(t, x0 + outward, y0 + Sf(1.0f), mx + outward, my - Sf(1.0f), Sf(3.0f), peltMid);
             };
             peltOn(s_armL0x, s_armL0y, s_armL1x, s_armL1y, -Sf(3.0f));
             peltOn(s_armR0x, s_armR0y, s_armR1x, s_armR1y,  Sf(3.0f));
@@ -3011,7 +3050,7 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
                 float frac = (float)i / 6.0f;
                 int y0 = baseY + (int)((tipY - baseY) * frac);
                 int w0 = (int)(baseW * (1.0f - frac));
-                t.drawWideLine(cx2 - w0 / 2 - S(1), y0, cx2 + w0 / 2 + S(1), y0 - S(3), S(2), bands[i]);
+                wideLine(t, cx2 - w0 / 2 - S(1), y0, cx2 + w0 / 2 + S(1), y0 - S(3), S(2), bands[i]);
             }
             break;
         }
@@ -3085,7 +3124,7 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
             for (uint8_t i = 1; i <= 8; i++) {
                 const float a = a0 + (a1 - a0) * (float)i / 8.0f;
                 const int nx = cx2 + (int)(cosf(a) * ar), ny = cy + (int)(sinf(a) * ar);
-                t.drawWideLine(px, py, nx, ny, S(2) < 2 ? 2 : S(2), WHITE);
+                wideLine(t, px, py, nx, ny, S(2) < 2 ? 2 : S(2), WHITE);
                 px = nx; py = ny;
             }
             // Rim last, so the arc cannot spill over it.
@@ -3129,7 +3168,7 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
             t.fillCircle(cx2, hy - S(4), S(2), AMBER);
             // Eye patch strap only, not a filled patch, so the shades
             // underneath stay visible.
-            t.drawWideLine(cx2 - S(11), hy + S(5), cx2 + S(14), hy + S(3), S(2), BLACK);
+            wideLine(t, cx2 - S(11), hy + S(5), cx2 + S(14), hy + S(3), S(2), BLACK);
             break;
         }
         default: break;
@@ -3472,7 +3511,7 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
             rr2 *= 0.90f + (float)(hj & 255u) / 255.0f * 0.20f;
             int w = (int)(rr2 * 2.0f * scale);
             if (w < 2) w = 2;
-            t.drawWideLine(px[j], py[j], px[j+1], py[j+1], w,
+            wideLine(t, px[j], py[j], px[j+1], py[j+1], w,
                            ((j / 3) & 1) ? tdark : tcream);
         }
     }
@@ -3492,7 +3531,7 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         if (SQUACHY_KEYLINE) t.fillRect(x - kb, y - kb, w + 2 * kb, h + 2 * kb, keyCol);
     };
     auto keyW = [&](int x0, int y0, int x1, int y1, int w) {
-        if (SQUACHY_KEYLINE) t.drawWideLine(x0, y0, x1, y1, w + 2 * kb, keyCol);
+        if (SQUACHY_KEYLINE) wideLine(t, x0, y0, x1, y1, w + 2 * kb, keyCol);
     };
     // Crown spikes. They poke above the head's own keyline, so without
     // this they were the one part of the silhouette left unoutlined.
@@ -3736,7 +3775,7 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         else          { s_armR0x = x0; s_armR0y = y0; s_armR1x = x1; s_armR1y = y1; }
         const int ww = w ? w : S(7);
         keyW(x0, y0, x1, y1, ww);
-        t.drawWideLine(x0, y0, x1, y1, ww, furLight);
+        wideLine(t, x0, y0, x1, y1, ww, furLight);
     };
 
     // The resting pose's equivalent: the hanging roundrects are drawn
@@ -4175,26 +4214,26 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         // painted above, instead of underneath it with the other arm.
         if (pose == ReactPose::COVER_FACE) {
             keyW(cx2 - S(11), hh + S(26), cx2 + S(7), hh + S(6), S(7));
-            t.drawWideLine(cx2 - S(11), hh + S(26), cx2 + S(7), hh + S(6), S(7), furLight);
+            wideLine(t, cx2 - S(11), hh + S(26), cx2 + S(7), hh + S(6), S(7), furLight);
             keyW(cx2 + S(11), hh + S(26), cx2 - S(7), hh + S(6), S(7));
-            t.drawWideLine(cx2 + S(11), hh + S(26), cx2 - S(7), hh + S(6), S(7), furLight);
+            wideLine(t, cx2 + S(11), hh + S(26), cx2 - S(7), hh + S(6), S(7), furLight);
         } else if (pose == ReactPose::POINT_SHADES) {
             keyW(cx2 + S(11), hh + S(26), cx2 + S(4), hh + S(8), S(7));
-            t.drawWideLine(cx2 + S(11), hh + S(26), cx2 + S(4), hh + S(8), S(7), furLight);
+            wideLine(t, cx2 + S(11), hh + S(26), cx2 + S(4), hh + S(8), S(7), furLight);
         } else if (pose == ReactPose::DISGUST) {
             keyW(cx2 + S(11), hh + S(26), cx2, hh + S(17), S(7));
-            t.drawWideLine(cx2 + S(11), hh + S(26), cx2, hh + S(17), S(7), furLight);
+            wideLine(t, cx2 + S(11), hh + S(26), cx2, hh + S(17), S(7), furLight);
         }
     } else if (act == VisitPose::SAD) {
         // No shades for this one: eyes you can see, brows up in the middle, a
         // frown, and a tear on its way down.
-        t.drawWideLine(cx2 - S(10), hh + S(6), cx2 - S(3), hh + S(4), S(1) + 1, furLight);
-        t.drawWideLine(cx2 + S(10), hh + S(6), cx2 + S(3), hh + S(4), S(1) + 1, furLight);
+        wideLine(t, cx2 - S(10), hh + S(6), cx2 - S(3), hh + S(4), S(1) + 1, furLight);
+        wideLine(t, cx2 + S(10), hh + S(6), cx2 + S(3), hh + S(4), S(1) + 1, furLight);
         t.fillCircle(cx2 - S(6), hh + S(9), S(1) + 1, BLACK);
         t.fillCircle(cx2 + S(6), hh + S(9), S(1) + 1, BLACK);
         if (!noMouth) {
-            t.drawWideLine(cx2 - S(5), hh + S(20), cx2, hh + S(17), S(1) + 1, BLACK);
-            t.drawWideLine(cx2, hh + S(17), cx2 + S(5), hh + S(20), S(1) + 1, BLACK);
+            wideLine(t, cx2 - S(5), hh + S(20), cx2, hh + S(17), S(1) + 1, BLACK);
+            wideLine(t, cx2, hh + S(17), cx2 + S(5), hh + S(20), S(1) + 1, BLACK);
         }
         const float tk = (float)(now % 1100) / 1100.0f;
         t.fillCircle(cx2 - S(7), hh + S(11) + (int)(tk * S(9)), S(1) + 1, CYAN);
@@ -4297,8 +4336,8 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
 
         // Angry brows, down in the middle, over the top of the frames.
         if (act == VisitPose::GRR || act == VisitPose::STRAIN) {
-            t.drawWideLine(cx2 - S(12), hh + S(3), cx2 - S(3), hh + S(6), S(2), BLACK);
-            t.drawWideLine(cx2 + S(12), hh + S(3), cx2 + S(3), hh + S(6), S(2), BLACK);
+            wideLine(t, cx2 - S(12), hh + S(3), cx2 - S(3), hh + S(6), S(2), BLACK);
+            wideLine(t, cx2 + S(12), hh + S(3), cx2 + S(3), hh + S(6), S(2), BLACK);
         }
 
         // A little cartoon "wink sparkle" beside the shut lens --

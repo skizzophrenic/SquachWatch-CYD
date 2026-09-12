@@ -15,6 +15,31 @@ namespace Theme {
 // their own yEnd. Declared up here because drawFlyingToasters() reads
 // it and sits well above the setters.
 static int s_bgFloor   = -1;
+
+// How much of a "frame" has elapsed since the last one, for the backgrounds
+// that animate by stepping once per call. Computed once per frame at the top
+// of drawActiveBackground() and read by every stepper below.
+//
+// Those steppers were written as `x += 0.06f` per call and nothing tied them
+// to the clock, so they ran at whatever the board's frame rate was: ~54 ms a
+// frame on cyd-fast, ~65 on the 40 MHz boards, 33 in the emulator -- three
+// different speeds for the same animation, and nobody could tell because no
+// two were ever side by side. Then the wide-line fix took cyd-fast from 18 to
+// 25 fps (2026-09-11) and every one of them visibly sped up, which is how
+// it was noticed at all.
+//
+// ANIM_REF_MS is the cadence they were tuned at -- the cyd-fast frame before
+// that fix, which is the speed the owner was used to. A stepper multiplies
+// its increment by s_animK, so it moves the same distance per second on any
+// board, at any frame rate. Capped so a stall (a message screen, a scan)
+// does not deliver ten frames' worth of motion in one jump when CLEAR
+// comes back; a frame skipped is a frame skipped.
+//
+// The ski hill and the fireflies already did this their own way, with a
+// `ds = dt / 16` per function; this is the same idea for the rest, at the
+// cadence the rest were tuned at rather than retuning every constant.
+static const uint32_t ANIM_REF_MS = 50;
+static float          s_animK     = 1.0f;
 // Where the text starts, as opposed to where the ground is. See
 // setBackgroundFloor's comment in theme.h for why these are two values.
 static int s_bgTextTop = -1;
@@ -694,7 +719,7 @@ void drawDigitalRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advan
 
     static int16_t yPos[MAX_COLS];
     static uint8_t ySpeed[MAX_COLS];
-    static uint8_t yTick[MAX_COLS];
+    static float   yTick[MAX_COLS];      // frames' worth, in s_animK units
     // Per-DROP, re-rolled every time a column recycles. Hue used to be
     // HUES[i % 3], which made column 0 permanently pink, column 1
     // permanently cyan and so on -- a fixed stripe pattern across the whole
@@ -841,8 +866,9 @@ void drawDigitalRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advan
             charBuf[i][random(1, colLen[i])] = (uint8_t)random(0, GLN);
             if (random(0, 2)) charBuf[i][random(1, colLen[i])] = (uint8_t)random(0, GLN);
 
-            if (++yTick[i] >= ySpeed[i]) {
-                yTick[i] = 0;
+            yTick[i] += s_animK;
+            if (yTick[i] >= (float)ySpeed[i]) {
+                yTick[i] = 0.0f;
                 yPos[i] += 8;
                 // A fresh glyph enters at the head; everything already in
                 // the buffer shifts one slot further from it.
@@ -1355,9 +1381,9 @@ void drawStarfield(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         if (now < warpNext + 1900) targetWarp = 7.0f;
         else                       warpNext   = now + (uint32_t)random(6000, 14000);
     }
-    warp += (targetWarp - warp) * 0.07f;
+    warp += (targetWarp - warp) * 0.07f * s_animK;
 
-    const float step = 1.4f + warp * 1.9f;
+    const float step = (1.4f + warp * 1.9f) * s_animK;
     for (uint8_t i = 0; i < NS; i++) {
         const float zPrev = sz[i];
         sz[i] -= step;
@@ -1506,7 +1532,7 @@ void drawStarfield(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         { 150, 90,180,  186,124,214,  110, 58,140 },   // violet
     };
     for (uint8_t i = 0; i < NP; i++) {
-        px_[i] += pvx[i];
+        px_[i] += pvx[i] * s_animK;
         if (px_[i] - pr_[i] > (float)w) {
             px_[i]  = -(float)pr_[i] - 2.0f;
             py_[i]  = (float)(yStart + random(bandH / 6, bandH * 5 / 6));
@@ -2055,7 +2081,8 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // Rarity is the whole point: something that happens continuously is
     // texture, and texture here would just be visual noise.
     static float    ssX = 0, ssY = 0, ssVX = 0, ssVY = 0;
-    static uint16_t ssAge = 0, ssLife = 0;
+    static float    ssAge  = 0.0f;       // frames' worth, in s_animK units
+    static uint16_t ssLife = 0;
     static uint32_t ssNext = 0;
     static float    cmX = 0, cmY = 0, cmVX = 0, cmVY = 0, cmTurn = 0;
     static bool     cmLive = false;
@@ -2142,8 +2169,8 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // parallax for the cost of two adds. Twinkle is a sine on a per-star
     // phase rather than random(), so a star breathes instead of flickering.
     for (uint8_t i = 0; i < NSTAR; i++) {
-        starX[i] -= 0.06f;
-        starY[i] += 0.03f;
+        starX[i] -= 0.06f * s_animK;
+        starY[i] += 0.03f * s_animK;
         if (starX[i] < 0.0f)          starX[i] = (float)w;
         if (starY[i] >= (float)yEnd)  starY[i] = (float)yStart;
         if (starY[i] < (float)yStart) starY[i] = (float)(yEnd - 1);
@@ -2176,17 +2203,18 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         const float sp = 5.0f + (float)random(0, 40) / 10.0f;
         ssVX   = -sp * 0.86f;
         ssVY   =  sp * 0.50f;
-        ssAge  = 0;
+        ssAge  = 0.0f;
         ssLife = (uint16_t)random(16, 30);
     }
     if (ssLife > 0) {
-        ssX += ssVX;
-        ssY += ssVY;
+        ssX += ssVX * s_animK;
+        ssY += ssVY * s_animK;
         // Fade in over the first few frames and out over the last few, so
         // it neither appears nor vanishes as a hard pop.
-        const uint16_t rem = (uint16_t)(ssLife - ssAge);
+        const float    remF = (float)ssLife - ssAge;
+        const uint16_t rem  = remF > 0.0f ? (uint16_t)remF : 0;
         uint16_t amp = 255;
-        if (ssAge < 4) amp = (uint16_t)(64 * (ssAge + 1));
+        if (ssAge < 4.0f) amp = (uint16_t)(64.0f * (ssAge + 1.0f));
         if (rem  < 6)  amp = (uint16_t)(42 * rem);
         for (uint8_t k = 0; k < 3; k++) {
             const float t0 = (float)k * 2.4f, t1 = (float)(k + 1) * 2.4f;
@@ -2196,7 +2224,8 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
                        blend(BG, WHITE, a));
         }
         t.drawPixel((int)ssX, (int)ssY, blend(BG, WHITE, amp));
-        if (++ssAge >= ssLife || ssX < -20.0f || ssY > (float)yEnd) {
+        ssAge += s_animK;
+        if (ssAge >= (float)ssLife || ssX < -20.0f || ssY > (float)yEnd) {
             ssLife = 0;
             ssNext = now + (uint32_t)random(2500, 7000);
         }
@@ -2220,12 +2249,12 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     if (cmLive) {
         // Curve the flight by rotating the velocity a little each frame.
         // Travelling dead straight is most of what made it look static.
-        const float cs = cosf(cmTurn), sn = sinf(cmTurn);
+        const float cs = cosf(cmTurn * s_animK), sn = sinf(cmTurn * s_animK);
         const float nvx = cmVX * cs - cmVY * sn;
         cmVY = cmVX * sn + cmVY * cs;
         cmVX = nvx;
-        cmX += cmVX;
-        cmY += cmVY;
+        cmX += cmVX * s_animK;
+        cmY += cmVY * s_animK;
 
         // Push the new position on, oldest falling off the end.
         for (uint8_t k = CMTRAIL - 1; k > 0; k--) {
@@ -2339,7 +2368,7 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         boS    = 0.65f + (float)random(0, 40) / 100.0f;
     }
     if (boLive) {
-        boX += 1.1f;
+        boX += 1.1f * s_animK;
         // He rises and falls gently as he drifts, and swipes on a cadence.
         const float bob = sinf((float)now / 620.0f) * 5.0f;
         const bool swipe = ((now / 900u) % 3u) == 0u;
@@ -2372,7 +2401,7 @@ void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         for (uint8_t i = 0; i < GRASSW; i++) grass[i] = 0;
     }
     if (mmLive) {
-        mmX += 0.85f;
+        mmX += 0.85f * s_animK;
         // Stand him on the background floor when the screen has told us
         // where that is. At yEnd he mowed along the very bottom of the
         // band, which is where the detection counters are drawn on top of
@@ -3029,7 +3058,7 @@ void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     }
 
     for (uint8_t i = 0; i < NB; i++) {
-        bubY[i] -= 0.6f;
+        bubY[i] -= 0.6f * s_animK;
         if (bubY[i] < yStart) { bubY[i] = (float)yEnd; bubX[i] = (float)random(0, w); }
         t.drawCircle((int)bubX[i], (int)bubY[i], 1, VAPOR_BLUE);
     }
@@ -3044,8 +3073,8 @@ void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         if (f.species == 3) {
             // Jellyfish: slow vertical bob + pulsing bell + trailing
             // tentacles, independent of the side-to-side swimmers.
-            f.y += sinf((float)now / 1400.0f + f.phase) * 0.15f;
-            f.x += sinf((float)now / 2600.0f + f.phase) * 0.06f;
+            f.y += sinf((float)now / 1400.0f + f.phase) * 0.15f * s_animK;
+            f.x += sinf((float)now / 2600.0f + f.phase) * 0.06f * s_animK;
             if (f.x < 0) f.x = 0;
             if (f.x > w) f.x = (float)w;
             if (f.y < yStart + 8) f.y = (float)(yStart + 8);
@@ -3070,7 +3099,7 @@ void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         // object further away subtends less angular motion, and matching
         // all three is what stops a far fish reading as a small near one.
         const float near = 1.0f - f.depth;
-        f.x += f.dir * f.speed * fleeMul * (0.55f + near * 0.45f);
+        f.x += f.dir * f.speed * fleeMul * (0.55f + near * 0.45f) * s_animK;
         if (f.dir > 0 && f.x > w + 12) f.x = -12;
         if (f.dir < 0 && f.x < -12)    f.x = (float)(w + 12);
         // Occasionally turn around mid-tank instead of only at the
@@ -3170,8 +3199,8 @@ void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             const float cap = sharkActive ? 2.8f : 1.25f;
             if (sp > cap)                 { shVX[i] *= cap / sp;  shVY[i] *= cap / sp; }
             else if (sp < 0.30f && sp > 0.001f) { shVX[i] *= 0.30f / sp; shVY[i] *= 0.30f / sp; }
-            shX[i] += shVX[i];
-            shY[i] += shVY[i];
+            shX[i] += shVX[i] * s_animK;
+            shY[i] += shVY[i] * s_animK;
         }
         // Drawn small and tinted toward the water they are sitting in,
         // so the school reads as a cloud at middle distance rather than
@@ -3233,7 +3262,7 @@ void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         sharkY   = (float)(yStart + random(8, bandH > 16 ? bandH - 8 : bandH));
     }
     if (sharkActive) {
-        sharkX += sharkDir * 1.8f;
+        sharkX += sharkDir * 1.8f * s_animK;
         int8_t dir = sharkDir;
         // Nearly double the old size (12 -> 20) -- unmistakably the
         // biggest thing in the tank instead of just another fish shape.
@@ -3976,6 +4005,21 @@ uint32_t backgroundUs() { return s_bgUsAvg; }
 void drawActiveBackground(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
                           const DetectionEngine& eng, bool advance) {
     const uint32_t bgT0 = micros();
+    // The frame's worth of motion for every per-call stepper -- see s_animK.
+    // Zero on a non-advancing call (cyd35's second band), which is also
+    // what stops those steppers running twice per logical frame there.
+    {
+        static uint32_t last = 0;
+        if (advance) {
+            const uint32_t dt = last ? now - last : ANIM_REF_MS;
+            last = now;
+            float k = (float)dt / (float)ANIM_REF_MS;
+            if (k > 3.0f) k = 3.0f;
+            s_animK = k;
+        } else {
+            s_animK = 0.0f;
+        }
+    }
     switch (Settings::background()) {
         case Settings::Background::STARFIELD:  drawStarfield(t, now, yStart, yEnd); break;
         case Settings::Background::TOASTERS:   drawFlyingToasters(t, now, yStart, yEnd); break;
@@ -5067,10 +5111,10 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             }
             continue;
         }
-        ey[i] -= evy[i];
+        ey[i] -= evy[i] * s_animK;
         // Embers are light enough that the wind moves them noticeably
         // more than it bends the flame body.
-        ex[i] += windF * 0.85f + sinf((float)now / 260.0f + i) * 0.4f;
+        ex[i] += (windF * 0.85f + sinf((float)now / 260.0f + i) * 0.4f) * s_animK;
         if (ex[i] < 0.0f || ex[i] > (float)(w - 1)) { ey[i] = (float)(yStart - 1); continue; }
         float lifeFrac = (ey[i] - (float)yStart) / (float)bandH;
         if (lifeFrac < 0.0f) lifeFrac = 0.0f;
@@ -7897,7 +7941,7 @@ void drawWireframeTunnel(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         enInited = true;
     }
     for (uint8_t i = 0; i < NE; i++) {
-        enDepth[i] -= 0.055f;
+        enDepth[i] -= 0.055f * s_animK;
         if (enDepth[i] <= 0.2f) {
             enDepth[i] = (float)RINGS - 0.5f;
             enLane[i]  = (uint8_t)random(0, SIDES);
