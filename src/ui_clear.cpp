@@ -1613,6 +1613,65 @@ static void drawSquadBadge(TFT_eSPI& t, int rightX, int bottomY, uint8_t count) 
     s_badgeOn = true;
 }
 
+// ---- the watch/hunt indicator ------------------------------------------------
+// Until this existed, a watch was invisible: its label was drawn in exactly one
+// place, the alert screen, which only appears when the target comes back into
+// range AND the 30s cooldown has passed. Set one and walk away and there was no
+// way to learn it was still running -- or that you had set one at all.
+//
+// In the TITLE BAR's empty middle, not down by the counters. The bottom-left
+// corner looked free and is not: the landscape counter row is 312px wide on a
+// 320px screen, so it starts at x=4 -- exactly where this sat -- and
+// drawCounterLine() runs later in the same tick and painted over it. Portrait
+// is worse: that row overflows the screen. The renders showed no pill at all.
+//
+// drawTitleBar() paints the gear (x 0..28), the rotate icon (right 28px) and
+// the lock (26px inside that right group) and throws its title argument away,
+// so the span between them is genuinely empty -- and it is drawn BEFORE this,
+// which is what makes the placement safe rather than merely available.
+//
+// Unlike the squad badge this draws in boring mode too: it is not about
+// Squachy, it is the state of a detection feature, and boring mode keeps all
+// of those.
+static bool    s_watchPillOn = false;
+static int16_t s_wpX = 0, s_wpY = 0, s_wpW = 0, s_wpH = 0;
+
+static void drawWatchPill(TFT_eSPI& t, int screenW, bool watching, bool hunting) {
+    // HUNT wins the label when both are set: it is the active, look-at-me mode.
+    // The two are independent slots (see DetectionEngine), so both can be on.
+    const char* txt = hunting ? "HUNT" : "WATCH";
+    const uint16_t accent = hunting ? Theme::AMBER : Theme::CYAN;
+    t.setTextSize(1);
+    // 16 in a 20px bar: two rows of clearance top and bottom.
+    const int bh = 16;
+    const int bw = 16 + t.textWidth(txt) + 7;
+    // Left edge of the free span, past the gear. The right limit is the rotate
+    // icon (28) plus the lock (26) -- reserve both whether or not either is
+    // showing, so the pill cannot move when a PIN is set or rotation locked.
+    const int spanL = 32, spanR = screenW - 54;
+    int x = spanL + ((spanR - spanL) - bw) / 2;
+    if (x < spanL) x = spanL;
+    const int y = (20 - bh) / 2;
+    t.fillRoundRect(x, y, bw, bh, 4, Theme::BG);
+    t.drawRoundRect(x, y, bw, bh, 4, accent);
+    // An eye: open for a passive watch, with a line through it for a hunt.
+    t.drawCircle(x + 9, y + bh / 2, 4, accent);
+    t.fillCircle(x + 9, y + bh / 2, 1, accent);
+    if (hunting) t.drawFastHLine(x + 3, y + bh / 2, 12, accent);
+    t.setTextColor(accent, Theme::BG);
+    t.setCursor(x + 16, y + (bh - 8) / 2);
+    t.print(txt);
+    // A finger-sized target: the bar is only 20px tall, so grow downward.
+    s_wpX = (int16_t)(x - 4); s_wpY = (int16_t)0;
+    s_wpW = (int16_t)(bw + 8); s_wpH = (int16_t)(bh + 14);
+    s_watchPillOn = true;
+}
+
+bool uiClearWatchPillHit(int x, int y) {
+    return s_watchPillOn &&
+           x >= s_wpX && x < s_wpX + s_wpW && y >= s_wpY && y < s_wpY + s_wpH;
+}
+
 bool uiClearSquadHit(int x, int y) {
     return s_badgeOn && !Settings::boringMode() &&
            x >= s_badX && x < s_badX + s_badW && y >= s_badY && y < s_badY + s_badH;
@@ -2692,6 +2751,17 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
 
     // Title bar at the top
     Theme::drawTitleBar(t, ">> SQUACHWATCH <<  SCANNING");
+
+    // The watch/hunt indicator, in the title bar's empty middle. AFTER the bar
+    // itself, which repaints that whole band -- see drawWatchPill()'s comment
+    // for why the first attempt at this was invisible. Drawn in every mode,
+    // whenever either target is set.
+    {
+        const bool watching = eng.watchKind() != DetectionEngine::WatchKind::NONE;
+        const bool hunting  = eng.huntKind()  != DetectionEngine::WatchKind::NONE;
+        s_watchPillOn = false;
+        if (watching || hunting) drawWatchPill(t, w, watching, hunting);
+    }
 
     // ALL CLEAR (only flash if there are NO active detections). Same
     // Bangers headline font as the ALERT screen's "!! DETECTION !!" —

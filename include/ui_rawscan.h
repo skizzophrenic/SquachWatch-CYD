@@ -23,7 +23,7 @@ void uiRawScanInit(TFT_eSPI& t, bool isBle);
 // panel's WATCH button into UNWATCH; see drawConfirmPanel().
 void uiRawScanTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
                     bool isBle, bool done, bool confirmPending, const char* confirmLabel,
-                    bool confirmWatched);
+                    bool confirmWatched, bool confirmHunted);
 void uiRawScanScroll(int delta);      // positive = scroll down (older)
 
 // This screen shows two buttons in place of the normal three-button

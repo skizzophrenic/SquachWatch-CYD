@@ -12,3 +12,6 @@
 void uiHuntInit(TFT_eSPI& t);
 void uiHuntTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng);
 bool uiHuntHitBack(int x, int y, int screenW, int screenH);
+// STOP: ends the hunt outright (DetectionEngine::clearHunt) and returns to
+// CLEAR. BACK leaves the target set, so the two are not the same exit.
+bool uiHuntHitStop(int x, int y, int screenW, int screenH);

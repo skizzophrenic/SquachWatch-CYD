@@ -29,7 +29,7 @@ void uiLogInit(TFT_eSPI& t);
 void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
                int scrollOffset, bool confirmPending, const char* confirmLabel,
                bool infoPending, const char* infoTypeName, const char* infoText,
-               bool confirmWatched);
+               bool confirmWatched, bool confirmHunted);
 void uiLogScroll(int delta);          // positive = scroll down (older)
 
 // Row index (0 = topmost visible, already adjusted for scroll) a tap

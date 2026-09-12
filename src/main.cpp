@@ -1950,6 +1950,11 @@ void loop() {
                       state == AppState::IGNORE_LIST || state == AppState::POWER_SAVER ||
                       state == AppState::SECURITY) &&
         Theme::settingsButtonHit(tp.x, tp.y) &&
+        // ...but not where the watch/hunt pill is sitting. The gear's tap box
+        // is 55x50, much larger than its 28px glyph, so it reaches into the
+        // title bar's middle where the pill lives. The pill is only ever drawn
+        // while a target is set, so this gives up nothing the rest of the time.
+        !(state == AppState::CLEAR && uiClearWatchPillHit(tp.x, tp.y)) &&
         (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
         lastTouch = now;
         if (state == AppState::OUTFIT || state == AppState::DETECTION_FILTER ||
@@ -2259,6 +2264,15 @@ void loop() {
                 sqActive  = false;
                 enterMeshCompose();
             } else if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
+                       uiClearWatchPillHit(tp.x, tp.y)) {
+                // The watch/hunt pill. Opens the alert screen, which names the
+                // target and carries REMOVE FROM WATCH LIST -- the same screen
+                // a real sighting would have opened, just asked for rather
+                // than waited for.
+                lastTouch = now;
+                sqActive  = false;
+                enterWatchAlert();
+            } else if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
                        uiClearSquadHit(tp.x, tp.y)) {
                 // The squad badge, ahead of the scene gestures for the same
                 // reason as the bubble above.
@@ -2563,7 +2577,8 @@ void loop() {
                                      : DetectionInfo::titleFor(s_confirmType, s_confirmVendor, s_confirmName);
             uiLogTick(*canvas, now, engine, 0, s_confirmPending, s_confirmLabel,
                       s_infoPending, infoTypeName, infoText,
-                      engine.isWatched(s_confirmMac, s_confirmIsBle));
+                      engine.isWatched(s_confirmMac, s_confirmIsBle),
+                      engine.isHunted(s_confirmMac, s_confirmIsBle));
             Theme::drawToast(*canvas, now);
 
             // Same "ignore the touch that opened this until it releases"
@@ -2633,9 +2648,17 @@ void loop() {
                     } else if (ctap == LogConfirmTap::HUNT) {
                         lastTouch = now;
                         s_confirmPending = false;
-                        if (s_confirmIsBle) engine.huntBle(s_confirmMac, s_confirmLabel);
-                        else                engine.huntWifi(s_confirmMac, s_confirmLabel);
-                        enterHunt();
+                        // Toggles, same as WATCH above it. Stopping a hunt
+                        // stays here: HUNT MODE is somewhere to GO, and there
+                        // is nowhere to go once the target is gone.
+                        if (engine.isHunted(s_confirmMac, s_confirmIsBle)) {
+                            engine.clearHunt();
+                            Theme::showToast("HUNT STOPPED", nullptr, Theme::CYAN);
+                        } else {
+                            if (s_confirmIsBle) engine.huntBle(s_confirmMac, s_confirmLabel);
+                            else                engine.huntWifi(s_confirmMac, s_confirmLabel);
+                            enterHunt();
+                        }
                     } else if (ctap == LogConfirmTap::INFO) {
                         lastTouch = now;
                         s_confirmPending = false;
@@ -2732,7 +2755,8 @@ void loop() {
         case AppState::RAWSCAN: {
             bool done = s_rawScanIsBle ? engine.rawBleScanDone() : engine.rawWifiScanDone();
             uiRawScanTick(*canvas, now, engine, s_rawScanIsBle, done, s_confirmPending, s_confirmLabel,
-                          engine.isWatched(s_confirmMac, s_rawScanIsBle));
+                          engine.isWatched(s_confirmMac, s_rawScanIsBle),
+                          engine.isHunted(s_confirmMac, s_rawScanIsBle));
             Theme::drawToast(*canvas, now);
 
             // The confirm panel is modal: while it's up, a tap only
@@ -2775,10 +2799,18 @@ void loop() {
                     } else if (ctap == RawScanConfirmTap::HUNT) {
                         lastTouch = now;
                         s_confirmPending = false;
-                        if (s_rawScanIsBle) engine.huntBle(s_confirmMac, s_confirmLabel);
-                        else                engine.huntWifi(s_confirmMac, s_confirmLabel);
-                        engine.stopRawScan();
-                        enterHunt();
+                        // See the LOG screen's copy: same toggle. Stopping
+                        // leaves the scan running, because the list you were
+                        // looking at is still the thing you came here for.
+                        if (engine.isHunted(s_confirmMac, s_rawScanIsBle)) {
+                            engine.clearHunt();
+                            Theme::showToast("HUNT STOPPED", nullptr, Theme::CYAN);
+                        } else {
+                            if (s_rawScanIsBle) engine.huntBle(s_confirmMac, s_confirmLabel);
+                            else                engine.huntWifi(s_confirmMac, s_confirmLabel);
+                            engine.stopRawScan();
+                            enterHunt();
+                        }
                     } else if (ctap == RawScanConfirmTap::CANCEL) {
                         lastTouch = now;
                         s_confirmPending = false;
@@ -2949,8 +2981,47 @@ void loop() {
             if (touchJustUp && gestureActive) {
                 if (!gestureMoved) {
                     lastTouch = now;
+                    // The pinned strip along the bottom: up a level from a
+                    // sub-page, out of Settings from the main list. Reachable
+                    // from anywhere in the list, which is the point of it.
+                    if (uiSettingsTapPinnedBack(*canvas, gestureStartX, gestureStartY,
+                                                 tft.width(), tft.height())) {
+                        if (uiSettingsCurrentPage() != SettingsPage::MAIN)
+                            uiSettingsOpenPage(SettingsPage::MAIN);
+                        else
+                            enterClear();
+                        gestureActive = false;
+                        break;
+                    }
+                    // A heading folds its group away. Spends the tap.
+                    if (uiSettingsTapHeader(*canvas, gestureStartX, gestureStartY,
+                                             tft.width(), tft.height())) {
+                        gestureActive = false;
+                        break;
+                    }
                     SettingsRow row = uiSettingsHitTest(*canvas, gestureStartX, gestureStartY, tft.width(), tft.height());
+                    // Switched off by a mode: say so, rather than doing nothing
+                    // and reading as a broken row.
+                    if (uiSettingsRowIsOff(row)) {
+                        Theme::showToast("BORING MODE IS ON", nullptr, Theme::CYAN);
+                        gestureActive = false;
+                        break;
+                    }
                     switch (row) {
+                        case SettingsRow::SYSTEM:
+                            uiSettingsOpenPage(SettingsPage::SYSTEM);
+                            break;
+                        // Tapping a tracking row stops it. This and the pill on
+                        // CLEAR are the only two ways to end a watch short of a
+                        // reboot; before either existed there were none.
+                        case SettingsRow::WATCH_TARGET:
+                            engine.clearWatch();
+                            Theme::showToast("WATCH STOPPED", nullptr, Theme::CYAN);
+                            break;
+                        case SettingsRow::HUNT_TARGET:
+                            engine.clearHunt();
+                            Theme::showToast("HUNT STOPPED", nullptr, Theme::CYAN);
+                            break;
                         case SettingsRow::THEME:      Settings::cyclePalette(); break;
                         case SettingsRow::BACKGROUND: Settings::cycleBackground(); break;
                         case SettingsRow::BACKGROUND_LOCK: Settings::toggleBackgroundLocked(); break;
@@ -3516,10 +3587,16 @@ void loop() {
         }
         case AppState::HUNT: {
             uiHuntTick(*canvas, now, engine);
-            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
-                uiHuntHitBack(tp.x, tp.y, tft.width(), tft.height())) {
-                lastTouch = now;
-                enterClear();
+            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                if (uiHuntHitStop(tp.x, tp.y, tft.width(), tft.height())) {
+                    lastTouch = now;
+                    engine.clearHunt();
+                    Theme::showToast("HUNT STOPPED", nullptr, Theme::CYAN);
+                    enterClear();
+                } else if (uiHuntHitBack(tp.x, tp.y, tft.width(), tft.height())) {
+                    lastTouch = now;
+                    enterClear();
+                }
             }
             break;
         }

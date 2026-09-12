@@ -274,6 +274,13 @@ public:
     void huntBle(const uint8_t* mac, const char* name);
     void huntWifi(const uint8_t* bssid, const char* ssid);
     void clearHunt();
+    // The hunt half of isWatched(), and for the same reason: HUNT was the
+    // other one-way door -- clearHunt() had no caller outside the wipe, so a
+    // hunt could only be replaced, never ended.
+    bool isHunted(const uint8_t* mac, bool ble) const {
+        if (_huntKind != (ble ? WatchKind::BLE : WatchKind::WIFI)) return false;
+        return memcmp(mac, _huntMac, 6) == 0;
+    }
     WatchKind huntKind() const { return _huntKind; }
     const char* huntLabel() const { return _huntLabel; }
     uint8_t huntRssiCount() const { return _huntRssiCount; }

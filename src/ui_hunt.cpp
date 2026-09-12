@@ -9,12 +9,22 @@
 // so a reading means the same thing on both screens.
 static const int RSSI_LO = -100, RSSI_HI = -30;
 
+// Two buttons now, not one: BACK leaves the screen with the hunt still
+// running (which is the point -- you can go look at something else and come
+// back), and STOP ends it. Until STOP existed, clearHunt() had no caller in
+// any screen and a hunt could only be replaced or rebooted away.
 static void backButtonRect(int screenW, int screenH, int& x, int& y, int& w, int& h) {
     Theme::ButtonBarGeom g = Theme::computeButtonBar(screenW, screenH);
-    w = 120;
+    w = 110;
     h = g.h;
-    x = (screenW - w) / 2;
+    // The pair sits centred as a unit: BACK left of centre, STOP right.
+    x = screenW / 2 - w - 5;
     y = g.y;
+}
+
+static void stopButtonRect(int screenW, int screenH, int& x, int& y, int& w, int& h) {
+    backButtonRect(screenW, screenH, x, y, w, h);
+    x = screenW / 2 + 5;
 }
 
 // Tracks quip-worthy transitions across ticks -- see the trend block
@@ -45,6 +55,12 @@ void uiHuntInit(TFT_eSPI& t) {
 bool uiHuntHitBack(int x, int y, int screenW, int screenH) {
     int bx, by, bw, bh;
     backButtonRect(screenW, screenH, bx, by, bw, bh);
+    return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
+}
+
+bool uiHuntHitStop(int x, int y, int screenW, int screenH) {
+    int bx, by, bw, bh;
+    stopButtonRect(screenW, screenH, bx, by, bw, bh);
     return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
 }
 
@@ -202,4 +218,6 @@ void uiHuntTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     int bx, by, bw, bh;
     backButtonRect(w, h, bx, by, bw, bh);
     Theme::drawButton(t, bx, by, bw, bh, "[ BACK ]", false);
+    stopButtonRect(w, h, bx, by, bw, bh);
+    Theme::drawButton(t, bx, by, bw, bh, "[ STOP ]", false);
 }

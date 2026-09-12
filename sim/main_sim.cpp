@@ -361,7 +361,7 @@ int main(int argc, char** argv) {
             uiLogTick(frame, t, engine, 0, false, "", info,
                       info ? detectionTypeName(it) : nullptr,
                       info ? DetectionInfo::explainLive(it, engine) : "",
-                      false);   // no confirm panel in the sim, so nothing to be watched
+                      false, false);   // no confirm panel in the sim: nothing watched, nothing hunted
         }
         else if (screen == "alert")    uiAlertTick(frame, t, engine, false, nullptr, "");
         else if (screen == "settings") uiSettingsTick(frame, t, engine);
@@ -369,7 +369,7 @@ int main(int argc, char** argv) {
         else if (screen == "power")    uiPowerTick(frame, t, engine);
         else if (screen == "diary")    uiDiaryTick(frame, t, engine);
         else if (screen == "hunt")     uiHuntTick(frame, t, engine);
-        else if (screen == "rawscan")  uiRawScanTick(frame, t, engine, true, true, false, "", false);
+        else if (screen == "rawscan")  uiRawScanTick(frame, t, engine, true, true, false, "", false, false);
         else if (screen == "phone")    uiPhoneTick(frame, t, engine);
         else if (screen == "meshmenu") uiMeshMenuTick(frame, t, engine);
         else if (screen == "meshwarn") uiMeshWarnTick(frame, t, engine);

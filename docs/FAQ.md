@@ -4,11 +4,11 @@ Hey. It's me, the Sasquach. Yes, I know how to use GitHub. No, I don't know why 
 
 This is the FAQ for SquachWatch-CYD — the thing that turns a $15 screen into a pocket-sized "is someone watching me" detector. Here's how it all works, explained the way I'd explain it to you if you cornered me at a gas station at 2am, which, statistically, is likely.
 
-Just want to flash a board and go? **[Open the web flasher](https://skizzophrenic.github.io/SquachWatch-CYD/)** — no build tools, no account, just a browser.
+Just want to flash a board and go? **[Open the web flasher](https://squachwatch.com/)** — no build tools, no account, just a browser.
 
 ## What even is this?
 
-SquachWatch-CYD sniffs the 2.4 GHz airwaves — WiFi and Bluetooth — for the specific fingerprints of surveillance gear: Flock Safety license-plate cameras, Axon body cams, Ray-Ban Meta glasses, card skimmers, AirTags/Tile/Samsung/Google trackers, Ring doorbells, gunshot detectors, drones, ALPR units, and generic covert cameras. Thirteen detection types total. If it broadcasts a recognizable signature, this thing has a decent shot at flagging it.
+SquachWatch-CYD sniffs the 2.4 GHz airwaves — WiFi and Bluetooth — for the specific fingerprints of surveillance gear: Flock Safety license-plate cameras, Axon body cams, Ray-Ban Meta glasses, card skimmers, AirTags/Tile/Samsung/Google trackers, Ring doorbells, gunshot detectors, drones, ALPR units, deauth floods, evil twins, iBeacons, pentest hardware, and generic covert cameras. Seventeen detection types total. If it broadcasts a recognizable signature, this thing has a decent shot at flagging it.
 
 It's not magic. It's not X-ray vision. It's a $15 board doing pattern-matching on radio noise, wearing a mascot costume. But it's real pattern-matching on real, documented signatures — not vibes.
 
@@ -17,13 +17,15 @@ It's not magic. It's not X-ray vision. It's a $15 board doing pattern-matching o
 Two options right now:
 
 - **The 2.8" CYD** (ESP32-2432S028R) — the original, the stable one, the one I'd actually recommend if you just want it to work. ~$15-20 on AliExpress/Amazon.
-- **The 3.5" CYD** (Sunton ESP32-3248S035R) — bigger screen, bigger vibes, but it's genuinely still under construction. Touch doesn't work on it yet and I'm still chasing down a color quirk. If you want to tinker and don't mind rough edges, go for it. If you want it to just work today, get the 2.8".
+- **The 3.5" CYD** (Sunton ESP32-3248S035R) — **don't buy this one for SquachWatch right now.** The port is parked: it boot loops on real hardware, it's deliberately left out of the build, and I'm not actively working on it. Bigger screen, bigger vibes, currently zero vibes. Get the 2.8".
+
+There's also an **AWOK 2.4"** (ESP32-Marauder V6.1) port, contributed and working, if that's the board you already own.
 
 Either way: no GPS, no buzzer, no extra modules. The board *is* the whole device. Plug it into USB-C and you're done.
 
 ## Do I need to build it myself?
 
-No. That's what the [web flasher](https://skizzophrenic.github.io/SquachWatch-CYD/) is for — plug your board into a computer running Firefox, Chrome, Edge, or Brave, hit Connect & Install, and the firmware goes straight from your browser onto the board. No compiler, no IDE, no me judging your PlatformIO setup (I would never. probably).
+No. That's what the [web flasher](https://squachwatch.com/) is for — plug your board into a computer running Firefox, Chrome, Edge, or Brave, hit Connect & Install, and the firmware goes straight from your browser onto the board. No compiler, no IDE, no me judging your PlatformIO setup (I would never. probably).
 
 If you *do* want to build from source — maybe you're modifying something, maybe you just don't trust browsers with USB access, respectable — grab [PlatformIO](https://platformio.org/) and follow [docs/BUILD.md](docs/BUILD.md).
 

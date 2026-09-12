@@ -34,6 +34,9 @@ enum class SettingsRow : uint8_t {
     SQUACHMESH,     // announce ourselves to other SquachWatches
     APPEARANCE,     // opens the APPEARANCE page: the display rows, and the hat
     TOP_HAT,        // on the APPEARANCE page, once he is a Legend
+    SYSTEM,         // opens the SYSTEM page: calibrate, colours, diagnostics, reset
+    WATCH_TARGET,   // "WATCHING: <name>", only while a watch is set. Taps clear it.
+    HUNT_TARGET,    // "HUNTING: <name>", same deal
     BACK,
     COUNT,
     NONE = 255
@@ -43,11 +46,35 @@ void uiSettingsInit(TFT_eSPI& t);
 void uiSettingsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng);
 void uiSettingsScroll(int delta);     // positive = scroll down
 
-// The APPEARANCE page is this same screen with a different list on it, so its
-// rows draw and hit-test exactly as they always did. uiSettingsInit() always
-// comes back to the main page.
+// Sub-pages are this same screen with a different list on it, so their rows
+// draw and hit-test exactly as they always did. uiSettingsInit() always comes
+// back to the main page.
+//
+// Each page keeps its OWN scroll position, so leaving a page and coming back
+// puts you where you were instead of at the top -- the list is long enough
+// that losing your place was the most-felt annoyance on this screen.
+enum class SettingsPage : uint8_t { MAIN = 0, APPEARANCE = 1, SYSTEM = 2 };
+void         uiSettingsOpenPage(SettingsPage p);
+SettingsPage uiSettingsCurrentPage();
+
+// Kept so existing callers read the same. APPEARANCE only.
 void uiSettingsOpenAppearance(bool open);
 bool uiSettingsInAppearance();
+
+// A tap on a group heading folds that group away, turning a list that runs
+// four screens deep into a short menu. Returns true if (x,y) hit a heading and
+// the fold was toggled, in which case the tap is spent -- call this BEFORE
+// uiSettingsHitTest().
+bool uiSettingsTapHeader(TFT_eSPI& t, int x, int y, int screenW, int screenH);
+
+// True when a mode has switched this row off (boring mode, today). A tap on
+// one says why rather than silently doing nothing.
+bool        uiSettingsRowIsOff(SettingsRow r);
+
+// BACK is pinned to the bottom edge rather than living at the end of the list,
+// so leaving never means scrolling to find the way out. True when (x,y) is on
+// it -- checked before the row hit test, which cannot see it.
+bool uiSettingsTapPinnedBack(TFT_eSPI& t, int x, int y, int screenW, int screenH);
 
 // Row layout matches whatever uiSettingsTick just drew (same geometry
 // function underneath), so call this only against a screen that's

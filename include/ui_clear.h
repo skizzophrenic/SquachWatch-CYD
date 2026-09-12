@@ -28,6 +28,12 @@ void uiClearSetGuest(const SquachMesh::Peer* p);
 bool uiClearBubbleHit(int x, int y);
 // The "+N" squad badge beside a visitor, which opens the SQUAD screen.
 bool uiClearSquadHit(int x, int y);
+
+// The watch/hunt indicator, bottom left of CLEAR. True when a tap landed on
+// it; main.cpp opens the watch-alert screen, which is where the target is
+// named and where REMOVE FROM WATCH LIST lives. Only ever true while a watch
+// or a hunt is actually set -- the pill is not drawn otherwise.
+bool uiClearWatchPillHit(int x, int y);
 // A tap on somebody in the CROWD, which puts his name over him for a few
 // seconds. True if it landed on one. Past four of them the nameplates come
 // off -- at eight they are more clutter than label -- and this is how you ask

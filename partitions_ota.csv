@@ -1,0 +1,47 @@
+# SquachWatch-CYD — two-slot partition table, for over-the-air updates.
+#
+# WHY THIS EXISTS. Every release up to and including v1.6.0 shipped on Arduino's
+# huge_app.csv: one 3 MB app slot and 896 KB of SPIFFS that nothing ever touched.
+# One slot cannot take an OTA update — the board has to receive a new build into
+# a second slot while still running the old one, and be able to fall back if the
+# new one does not boot. So the app space is split in two here.
+#
+# THE ORDER THIS HAS TO SHIP IN. A partition table cannot itself be replaced
+# over the air: the bootloader reads it before any app runs. So this must go out
+# as a NORMAL web-flasher release that people install over USB, and only builds
+# AFTER that one can be delivered by OTA. Shipping OTA first would offer an
+# update that bricks the update path.
+#
+# WHAT IS DELIBERATELY UNCHANGED:
+#   nvs      at 0x9000, 20 KB — settings, the PIN and its duress twin, mesh
+#            pairings, Squachy's stats. Same offset and same size as huge_app,
+#            which is what lets a board keep all of it across the migration.
+#   coredump at 0x3F0000, 64 KB — same place, so the crash summary still works.
+#
+# WHAT CHANGED:
+#   app0/app1  0x1E0000 (1,966,080 bytes) each. The firmware is ~1.42 MB today,
+#              so that is roughly 540 KB of headroom per slot — enough for the
+#              OTA code and the TLS stack that WiFi updates will need.
+#   spiffs     gone. Arduino's min_spiffs.csv keeps a 128 KB scrap of it; this
+#              project never mounts a filesystem (the SD card is its own thing,
+#              see sd_log.cpp), so that space goes to the app slots instead.
+#
+# Layout, for reading at a glance:
+#   0x009000  20 KB   nvs
+#   0x00E000   8 KB   otadata      which slot the bootloader should run
+#   0x010000   1.9 MB app0
+#   0x1F0000   1.9 MB app1
+#   0x3D0000  128 KB  (free)       deliberately unassigned, see below
+#   0x3F0000  64 KB   coredump
+#
+# The 128 KB hole before coredump is not waste: partition offsets must stay
+# aligned to 64 KB, and growing either app slot into it would push app1 across
+# an alignment boundary. Leaving it unnamed keeps the table honest and leaves
+# somewhere for a future filesystem to land without moving anything.
+#
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x5000,
+otadata,  data, ota,     0xe000,   0x2000,
+app0,     app,  ota_0,   0x10000,  0x1E0000,
+app1,     app,  ota_1,   0x1F0000, 0x1E0000,
+coredump, data, coredump,0x3F0000, 0x10000,

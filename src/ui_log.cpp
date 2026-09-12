@@ -76,7 +76,7 @@ LogConfirmTap uiLogHitConfirm(int x, int y, int screenW, int screenH) {
     return LogConfirmTap::NONE;
 }
 
-static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label, bool watched) {
+static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label, bool watched, bool hunted) {
     int px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, infX, infY, infW, infH,
         igX, igY, igW, igH, cnX, cnY, cnW, cnH;
     confirmRects(w, h, px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH,
@@ -111,7 +111,8 @@ static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label, bool 
     // See ui_rawscan.cpp's copy of this panel: toggling, so the label names
     // the next tap rather than the thing already done.
     Theme::drawButton(t, wX, wY, wW, wH, watched ? "UNWATCH" : "WATCH", watched);
-    Theme::drawButton(t, huX, huY, huW, huH, "HUNT", false);
+    // Toggles like WATCH beside it -- see that button's comment.
+    Theme::drawButton(t, huX, huY, huW, huH, hunted ? "STOP HUNT" : "HUNT", hunted);
     Theme::drawButton(t, igX, igY, igW, igH, "IGNORE", false);
     Theme::drawButton(t, infX, infY, infW, infH, "MORE INFO", false);
     Theme::drawButton(t, cnX, cnY, cnW, cnH, "CANCEL", false);
@@ -144,7 +145,7 @@ int uiLogRowAt(TFT_eSPI& t, int x, int y, int screenW, int screenH) {
 void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int scrollOffset,
                bool confirmPending, const char* confirmLabel,
                bool infoPending, const char* infoTypeName, const char* infoText,
-               bool confirmWatched) {
+               bool confirmWatched, bool confirmHunted) {
     int w = t.width();
     int h = t.height();
 
@@ -215,7 +216,7 @@ switch (Settings::background()) {
 
         Theme::drawButtonBar(t, ButtonId::LOG);
         if (infoPending)        Theme::drawInfoPanel(t, w, h, now, infoTypeName, infoText);
-        else if (confirmPending) drawConfirmPanel(t, w, h, confirmLabel, confirmWatched);
+        else if (confirmPending) drawConfirmPanel(t, w, h, confirmLabel, confirmWatched, confirmHunted);
         return;
     }
 
@@ -330,5 +331,5 @@ switch (Settings::background()) {
     Theme::drawButtonBar(t, ButtonId::LOG);
 
     if (infoPending)        Theme::drawInfoPanel(t, w, h, now, infoTypeName, infoText);
-    else if (confirmPending) drawConfirmPanel(t, w, h, confirmLabel, confirmWatched);
+    else if (confirmPending) drawConfirmPanel(t, w, h, confirmLabel, confirmWatched, confirmHunted);
 }

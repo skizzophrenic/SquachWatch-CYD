@@ -15,7 +15,25 @@
 // for both drawing and hit-testing, so the rows and their tap targets
 // move together.
 static const int TOP_MARGIN = 32;
-static int g_scroll = 0;
+
+// One scroll position per page, not one shared: see SettingsPage in the header.
+static SettingsPage s_page = SettingsPage::MAIN;
+static int g_scrollFor[3] = { 0, 0, 0 };
+#define g_scroll (g_scrollFor[(uint8_t)s_page])
+
+// BACK is pinned along the bottom now. Height of that strip, reserved out of
+// the body so the last row cannot hide underneath it.
+static const int PINNED_BACK_H = 26;
+
+// Which groups are folded shut. Session-only on purpose: a fold is a "get this
+// out of my way for a minute", not a preference worth surviving a reboot.
+static bool s_folded[4] = { false, false, false, false };
+
+// Whether a watch/hunt target exists. Set every tick from the engine, read by
+// buildDisplayList() -- which has no engine of its own, and is called by the
+// hit test as well as the draw. Same pattern ui_clear.cpp uses for its crowd.
+static bool s_hasWatch = false, s_hasHunt = false;
+static char s_watchLabel[24] = "", s_huntLabel[24] = "";
 
 // Fixed display order, grouped so a colored section header can sit
 // above each cluster (see groupFor()/RowGroupId below) -- CALIBRATE/
@@ -45,7 +63,12 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::REPLAY_INTRO, SettingsRow::SHOW_OFF, SettingsRow::VIEW_DIARY,
     SettingsRow::POWER_SAVER,
     SettingsRow::SECURITY,
-    SettingsRow::CALIBRATE, SettingsRow::CHECK_COLORS, SettingsRow::DIAGNOSTICS, SettingsRow::RESET_STATS, SettingsRow::BACK,
+    // CALIBRATE, CHECK COLORS, DIAGNOSTICS and RESET STATS moved behind the
+    // SYSTEM row -- see SYSTEM_ROWS. They are the four you touch once a year,
+    // and they were sitting below everything you actually adjust.
+    SettingsRow::SYSTEM,
+    // No BACK here: it is pinned to the bottom edge instead, so it is reachable
+    // from anywhere in the list rather than only from the end of it.
 };
 static const uint8_t ALL_ROWS_N = sizeof(ALL_ROWS) / sizeof(ALL_ROWS[0]);
 
@@ -61,12 +84,27 @@ static const SettingsRow APPEARANCE_ROWS[] = {
     // Then how the SCREEN looks.
     SettingsRow::THEME, SettingsRow::BACKGROUND, SettingsRow::BACKGROUND_LOCK, SettingsRow::BRIGHTNESS,
     SettingsRow::INVERT, SettingsRow::RGB_SWAP, SettingsRow::ROTATION_LOCK,
-    SettingsRow::BACK,
 };
+
+// The SYSTEM page: the rarely-needed machinery, off the main list.
+static const SettingsRow SYSTEM_ROWS[] = {
+    SettingsRow::CALIBRATE, SettingsRow::CHECK_COLORS,
+    SettingsRow::DIAGNOSTICS, SettingsRow::RESET_STATS,
+};
+static const uint8_t SYSTEM_ROWS_N = sizeof(SYSTEM_ROWS) / sizeof(SYSTEM_ROWS[0]);
 static const uint8_t APPEARANCE_ROWS_N = sizeof(APPEARANCE_ROWS) / sizeof(APPEARANCE_ROWS[0]);
 static_assert(APPEARANCE_ROWS_N <= ALL_ROWS_N, "the display list is sized off ALL_ROWS");
-static bool s_appearance = false;   // which page is up
+// Kept as a thin shim over s_page so nothing that reads it has to change.
+#define s_appearance (s_page == SettingsPage::APPEARANCE)
 
+// Rows that boring mode switches off. They are now DRAWN, greyed, with the
+// reason in place of the value -- a hidden row and a row that was never there
+// look identical, so somebody looking for OUTFIT after turning boring mode on
+// had no way to learn where it went.
+//
+// This is deliberately NOT how unearned things behave: PET and TOP HAT stay
+// hidden entirely (see buildDisplayList), because a greyed-out row saying
+// "not found yet" hands over the existence of a secret.
 static bool isSquachyOnlyRow(SettingsRow r) {
     return r == SettingsRow::REPLAY_INTRO || r == SettingsRow::SHOW_OFF ||
            r == SettingsRow::NICKNAME || r == SettingsRow::SQUACHY_NAME ||
@@ -159,14 +197,23 @@ struct DisplayItem {
 };
 
 static uint8_t buildDisplayList(DisplayItem* out) {
-    SettingsRow rows[ALL_ROWS_N];
+    SettingsRow rows[ALL_ROWS_N + 2];   // + the two tracking rows
     uint8_t n = 0;
     bool boring = Settings::boringMode();
-    const SettingsRow* src  = s_appearance ? APPEARANCE_ROWS : ALL_ROWS;
-    const uint8_t      srcN = s_appearance ? APPEARANCE_ROWS_N : ALL_ROWS_N;
+    const SettingsRow* src = ALL_ROWS;
+    uint8_t            srcN = ALL_ROWS_N;
+    if (s_page == SettingsPage::APPEARANCE) { src = APPEARANCE_ROWS; srcN = APPEARANCE_ROWS_N; }
+    else if (s_page == SettingsPage::SYSTEM) { src = SYSTEM_ROWS;    srcN = SYSTEM_ROWS_N; }
+    // The tracking rows come first on the main page, and only when a target is
+    // actually set -- the whole point is that a watch stops being invisible.
+    if (s_page == SettingsPage::MAIN) {
+        if (s_hasWatch) rows[n++] = SettingsRow::WATCH_TARGET;
+        if (s_hasHunt)  rows[n++] = SettingsRow::HUNT_TARGET;
+    }
     for (uint8_t i = 0; i < srcN; i++) {
         const SettingsRow r = src[i];
-        if (boring && isSquachyOnlyRow(r)) continue;
+        // Boring mode greys these instead of hiding them -- see
+        // isSquachyOnlyRow(). They stay in the list; drawing handles the rest.
         // PET and TOP HAT are hidden by not being EARNED rather than by a
         // mode. Showing a permanently-off row for something you have never
         // seen would give the secret away -- and a switch for a hat he is
@@ -195,6 +242,9 @@ static uint8_t buildDisplayList(DisplayItem* out) {
             lastGroup = g;
             haveLastGroup = true;
         }
+        // Folded: the heading is still drawn (that is what you tap to unfold),
+        // its rows are not.
+        if (s_folded[(uint8_t)g]) continue;
         out[count].isHeader = false;
         out[count].group = g;
         out[count].row = rows[i];
@@ -235,7 +285,9 @@ static int itemHeight(const DisplayItem& it, int rowH, int headerH, int tallH) {
 static void computeGeom(TFT_eSPI& t, int screenH, int& top, int& bodyBottom,
                         int& rowH, int& headerH, int& tallH) {
     top = TOP_MARGIN;
-    bodyBottom = screenH - 4;
+    // The pinned BACK strip owns the bottom of the screen, so the list stops
+    // above it -- otherwise the last row draws underneath and cannot be tapped.
+    bodyBottom = screenH - PINNED_BACK_H - 2;
     t.setTextSize(2);
     rowH = t.fontHeight() + 8;
     const int big = t.fontHeight();
@@ -249,8 +301,13 @@ static void computeGeom(TFT_eSPI& t, int screenH, int& top, int& bodyBottom,
 // row above the one you pressed.
 
 void uiSettingsInit(TFT_eSPI& t) {
-    g_scroll = 0;
-    s_appearance = false;   // arriving at Settings is arriving at its main page
+    // Arriving at Settings is arriving at its main page, at the top, with
+    // nothing folded. Scroll memory is for moving BETWEEN pages inside one
+    // visit -- carrying it across a fresh entry would drop you mid-list with
+    // no idea why.
+    s_page = SettingsPage::MAIN;
+    for (uint8_t i = 0; i < 3; i++) g_scrollFor[i] = 0;
+    for (uint8_t i = 0; i < 4; i++) s_folded[i] = false;
     // Any pending question dies with the screen. Coming back to Settings and
     // finding a confirm panel still up from last time would be answering
     // something you no longer remember asking.
@@ -379,13 +436,54 @@ void uiSettingsScroll(int delta) {
     if (g_scroll < 0) g_scroll = 0;
 }
 
-void uiSettingsOpenAppearance(bool open) {
-    s_appearance = open;
-    g_scroll = 0;
+void uiSettingsOpenPage(SettingsPage p) {
+    s_page = p;
+    // Deliberately NOT resetting g_scroll: each page keeps its own position,
+    // so coming back to a page puts you where you left it. That is the whole
+    // point of g_scrollFor[] -- see the header.
     uiSettingsSetConfirm(SettingsRow::NONE);
 }
 
-bool uiSettingsInAppearance() { return s_appearance; }
+SettingsPage uiSettingsCurrentPage() { return s_page; }
+
+void uiSettingsOpenAppearance(bool open) {
+    uiSettingsOpenPage(open ? SettingsPage::APPEARANCE : SettingsPage::MAIN);
+}
+
+bool uiSettingsInAppearance() { return s_page == SettingsPage::APPEARANCE; }
+
+// True when a mode has switched this row off. main.cpp asks so a tap on a
+// greyed row says why instead of doing nothing.
+bool uiSettingsRowIsOff(SettingsRow r) {
+    return Settings::boringMode() && isSquachyOnlyRow(r);
+}
+
+// ---- the pinned BACK strip ---------------------------------------------------
+static void pinnedBackRect(int screenW, int screenH, int& x, int& y, int& w, int& h) {
+    x = 0;
+    w = screenW;
+    h = PINNED_BACK_H;
+    y = screenH - h;
+}
+
+static void drawPinnedBack(TFT_eSPI& t, int screenW, int screenH) {
+    int x, y, w, h;
+    pinnedBackRect(screenW, screenH, x, y, w, h);
+    t.fillRect(x, y, w, h, Theme::BG);
+    t.drawFastHLine(x, y, w, Theme::PURPLE);
+    t.setTextSize(2);
+    const char* lbl = (s_page == SettingsPage::MAIN) ? "[ BACK ]" : "[ UP ]";
+    t.setTextColor(Theme::CYAN, Theme::BG);
+    t.setCursor(x + (w - t.textWidth(lbl)) / 2, y + (h - t.fontHeight()) / 2);
+    t.print(lbl);
+}
+
+bool uiSettingsTapPinnedBack(TFT_eSPI& t, int x, int y, int screenW, int screenH) {
+    (void)t;
+    int bx, by, bw, bh;
+    pinnedBackRect(screenW, screenH, bx, by, bw, bh);
+    return x >= bx && x < bx + bw && y >= by && y < by + bh;
+}
 
 static void drawHeader(TFT_eSPI& t, int w, int y, int hgt, RowGroupId g) {
     t.setTextSize(1);
@@ -504,6 +602,17 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
     switch (r) {
         case SettingsRow::THEME:
             label = "THEME"; value = Theme::kPalettes[Settings::paletteIndex()].name;
+            break;
+        case SettingsRow::SYSTEM:
+            label = "SYSTEM"; value = ">";
+            break;
+        // The tracking rows. Their whole reason to exist is naming the thing,
+        // so the value is the target's own label rather than a state word.
+        case SettingsRow::WATCH_TARGET:
+            label = "WATCHING"; value = s_watchLabel;
+            break;
+        case SettingsRow::HUNT_TARGET:
+            label = "HUNTING"; value = s_huntLabel;
             break;
         case SettingsRow::BACKGROUND:
             label = "BACKGROUND"; value = Settings::backgroundName(Settings::background());
@@ -637,6 +746,14 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
 void uiSettingsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     int w = t.width(), h = t.height();
 
+    // buildDisplayList() has no engine of its own and is called by the hit test
+    // too, so the answer is cached here once a frame. Same pattern ui_clear.cpp
+    // uses for the crowd's tap targets.
+    s_hasWatch = eng.watchKind() != DetectionEngine::WatchKind::NONE;
+    s_hasHunt  = eng.huntKind()  != DetectionEngine::WatchKind::NONE;
+    if (s_hasWatch) { strncpy(s_watchLabel, eng.watchLabel(), sizeof(s_watchLabel) - 1); s_watchLabel[sizeof(s_watchLabel) - 1] = 0; }
+    if (s_hasHunt)  { strncpy(s_huntLabel,  eng.huntLabel(),  sizeof(s_huntLabel)  - 1); s_huntLabel[sizeof(s_huntLabel)  - 1] = 0; }
+
     int top, bodyBottom, rowH, headerH, tallH;
     computeGeom(t, h, top, bodyBottom, rowH, headerH, tallH);
 
@@ -674,9 +791,13 @@ switch (Settings::background()) {
     }
     Theme::restorePalette(saved);
 
-    Theme::drawTitleBar(t, s_appearance ? ">> APPEARANCE <<" : ">> SETTINGS <<");
+    const char* pageTitle = ">> SETTINGS <<";
+    if (s_page == SettingsPage::APPEARANCE) pageTitle = ">> APPEARANCE <<";
+    else if (s_page == SettingsPage::SYSTEM) pageTitle = ">> SYSTEM <<";
+    Theme::drawTitleBar(t, pageTitle);
 
-    DisplayItem items[ALL_ROWS_N + 4];
+    // +6, not +4: four group headers plus the two tracking rows.
+    DisplayItem items[ALL_ROWS_N + 6];
     uint8_t n = buildDisplayList(items);
 
     int y = top;
@@ -693,7 +814,12 @@ switch (Settings::background()) {
             const char* value;
             bool danger;
             rowContent(items[idx].row, eng, valBuf, sizeof(valBuf), label, value, danger);
-            if (isTwoLineRow(items[idx].row)) {
+            // Switched off by boring mode: greyed, with the reason where the
+            // value goes, rather than gone. See isSquachyOnlyRow().
+            const bool off = Settings::boringMode() && isSquachyOnlyRow(items[idx].row);
+            if (off) {
+                drawRow(t, w, y, itemH, label, "boring mode", false, Theme::W95_SHADOW, h > w);
+            } else if (isTwoLineRow(items[idx].row)) {
                 drawTwoLineRow(t, w, y, itemH, label, value, groupColor(items[idx].group),
                                items[idx].row == SettingsRow::BACKGROUND);
             } else {
@@ -708,9 +834,40 @@ switch (Settings::background()) {
 
     Theme::drawScrollbar(t, w - 4, top, bodyBottom - top, n, visibleCount, g_scroll);
 
+    // The way out, always on screen. Drawn before the panels so a confirm or
+    // an explanation sits over it rather than under.
+    drawPinnedBack(t, w, h);
+
     // Over the top of everything, so the list is still visible around it and
     // it is obvious which screen you are being asked about.
     drawSettingsConfirm(t, w, h);
+}
+
+bool uiSettingsTapHeader(TFT_eSPI& t, int x, int y, int screenW, int screenH) {
+    (void)x; (void)screenW;
+    int top, bodyBottom, rowH, headerH, tallH;
+    computeGeom(t, screenH, top, bodyBottom, rowH, headerH, tallH);
+
+    DisplayItem items[ALL_ROWS_N + 6];
+    uint8_t n = buildDisplayList(items);
+
+    int cy = top;
+    int idx = g_scroll;
+    while (idx < n) {
+        int itemH = itemHeight(items[idx], rowH, headerH, tallH);
+        if (cy + itemH > bodyBottom) break;
+        if (y >= cy && y < cy + itemH && items[idx].isHeader) {
+            const uint8_t g = (uint8_t)items[idx].group;
+            s_folded[g] = !s_folded[g];
+            // Folding shortens the list under your finger; an old scroll
+            // offset would leave you staring at blank space below the end.
+            g_scroll = 0;
+            return true;
+        }
+        cy += itemH;
+        idx++;
+    }
+    return false;
 }
 
 SettingsRow uiSettingsHitTest(TFT_eSPI& t, int x, int y, int screenW, int screenH) {
@@ -718,7 +875,7 @@ SettingsRow uiSettingsHitTest(TFT_eSPI& t, int x, int y, int screenW, int screen
     int top, bodyBottom, rowH, headerH, tallH;
     computeGeom(t, screenH, top, bodyBottom, rowH, headerH, tallH);
 
-    DisplayItem items[ALL_ROWS_N + 4];
+    DisplayItem items[ALL_ROWS_N + 6];
     uint8_t n = buildDisplayList(items);
 
     int cy = top;
