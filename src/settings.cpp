@@ -23,6 +23,13 @@ static bool        s_msgTutor     = false;
 #endif
 static bool        s_infoPrimerShown = false;
 static bool        s_rotationLocked = false;
+static bool        s_topHat = true;
+// Eight is the ceiling because the radio's own squad ring holds eight (see
+// SQUAD_N in mesh.cpp). A menu that offered thirty would be offering something
+// the hardware cannot hear: the ninth board in the room evicts the first, and
+// the screen would still show eight.
+static const uint8_t CROWD_MAX = 8;
+static uint8_t     s_meshCrowd = 1;   // how many on screen at once, 1..CROWD_MAX
 static uint8_t     s_rotation = 1;
 static bool        s_backgroundLocked = false;
 // Bit N = DetectionType N enabled. UNKNOWN (0) is never included -- see
@@ -157,6 +164,12 @@ void load() {
 #if SQUACH_MESH
     // Both off unless asked for. See the note in settings.h.
     s_meshDetect   = s_prefs.getBool("meshrx", false);
+    s_meshCrowd    = s_prefs.getUChar("crowd", 1);
+    if (s_meshCrowd < 1 || s_meshCrowd > CROWD_MAX) s_meshCrowd = 1;
+    // Two draws exactly what one does -- see cycleMeshCrowd(). An older build
+    // could not have stored it, but a hand-edited NVS can, and a setting that
+    // does nothing is worse than one that moved.
+    if (s_meshCrowd == 2) s_meshCrowd = 3;
     s_meshTransmit = s_prefs.getBool("meshtx", false);
     s_meshConsent  = s_prefs.getBool("meshok", false);
     s_phoneQwerty  = s_prefs.getBool("qwerty", false);
@@ -165,6 +178,7 @@ void load() {
 #endif
     s_infoPrimerShown = s_prefs.getBool("infoprimer", false);
     s_rotationLocked = s_prefs.getBool("rotlock", false);
+    s_topHat         = s_prefs.getBool("tophat", true);
     s_rotation = s_prefs.getUChar("rot", 1);
     if (s_rotation > 3) s_rotation = 1;
     s_backgroundLocked = s_prefs.getBool("bglock", false);
@@ -291,6 +305,13 @@ void markInfoPrimerShown() {
     s_prefs.putBool("infoprimer", true);
 }
 
+bool topHatShown() { return s_topHat; }
+
+void toggleTopHat() {
+    s_topHat = !s_topHat;
+    s_prefs.putBool("tophat", s_topHat);
+}
+
 bool rotationLocked() { return s_rotationLocked; }
 
 void toggleRotationLock() {
@@ -373,6 +394,35 @@ const char* meshDetectLabel()   { return s_meshDetect   ? "ON" : "OFF"; }
 // is the same answer the advertiser gets, so the row cannot say ON while
 // nothing is going out.
 const char* meshTransmitLabel() { return meshTransmit() ? "ON" : "OFF"; }
+uint8_t meshCrowd() { return s_meshCrowd; }
+
+const char* meshCrowdLabel() {
+    // ONE is a different thing, not a count of one: it is the ordinary visit,
+    // with the set pieces and the emotes that a crowd stands down.
+    if (s_meshCrowd <= 1) return "ONE";
+    static char b[10];
+    snprintf(b, sizeof b, "UP TO %u", (unsigned)s_meshCrowd);
+    return b;
+}
+
+// Every number from one to eight, one per tap, wrapping -- except two. It used
+// to offer only 1, 4 and 8 on the grounds that eight values would be eight
+// taps, which is true, but how many to put on screen is a matter of taste and
+// of screen size, and that is the owner's call rather than ours.
+//
+// TWO IS SKIPPED because it is the one number that would change nothing. The
+// crowd needs two PEERS before it draws anything, so "up to 2" is one visitor
+// -- which is the ordinary visit ONE already gives, and gives better: the
+// arrivals, the high fives, the rock-paper-scissors and every other set piece
+// written for exactly two Squachys, all of which a crowd stands down. A menu
+// value that silently does nothing reads as a bug.
+void cycleMeshCrowd() {
+    uint8_t n = (uint8_t)(s_meshCrowd >= CROWD_MAX ? 1 : s_meshCrowd + 1);
+    if (n == 2) n = 3;
+    s_meshCrowd = n;
+    s_prefs.putUChar("crowd", s_meshCrowd);
+}
+
 void cycleMeshDetect()   { s_meshDetect   = !s_meshDetect;   s_prefs.putBool("meshrx", s_meshDetect); }
 void cycleMeshTransmit() { s_meshTransmit = !s_meshTransmit; s_prefs.putBool("meshtx", s_meshTransmit); }
 

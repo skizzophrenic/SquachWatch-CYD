@@ -376,8 +376,11 @@ bool command(const char* line) {
     }
     if (!strcmp(verb, "squad")) {
         uint8_t n = 0;
-        if (!pickIndex("squad", arg, 6, n) || n == 0) {
-            fprintf(stderr, "[meshsim] squad wants 1..5\n");
+        // Up to eight, which is what Mesh's own ring holds and what CROWD's
+        // largest setting draws. It stopped at five while the firmware could
+        // only ever host one visitor.
+        if (!pickIndex("squad", arg, 9, n) || n == 0) {
+            fprintf(stderr, "[meshsim] squad wants 1..8\n");
             return false;
         }
         squad = n;

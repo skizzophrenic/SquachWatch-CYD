@@ -44,8 +44,8 @@ char        s_confirm[40];
 // on the status row, which is too narrow for forty-eight characters.
 char        s_typed[MeshMsg::TEXT_MAX + 1] = "";
 bool        s_typedOn = false;
-// Emotes: the smiley at the top swaps the lines for things to DO -- thirty-six
-// of them, six tabs of six. One tap sends one -- no confirmation, unlike a
+// Emotes: the EMOTE button at the top swaps the lines for things to DO -- thirty-five
+// of them, six tabs of up to six. One tap sends one -- no confirmation, unlike a
 // message: it is over in a few seconds and a wrong one costs a laugh, not
 // something said that was not meant. RANDOM picks for you.
 bool        s_emoteOn  = false;
@@ -111,15 +111,6 @@ void heart(TFT_eSPI& t, int cx, int cy, int r, uint16_t c) {
     t.fillCircle(cx - r / 2, cy - 1, r / 2 + 1, c);
     t.fillCircle(cx + r / 2, cy - 1, r / 2 + 1, c);
     t.fillTriangle(cx - r - 1, cy, cx + r + 1, cy, cx, cy + r + 2, c);
-}
-
-void drawSmiley(TFT_eSPI& t, int cx, int cy) {
-    t.fillCircle(cx, cy, 7, Theme::VAPOR_YELLOW);
-    t.fillRect(cx - 3, cy - 3, 2, 2, Theme::BG);
-    t.fillRect(cx + 2, cy - 3, 2, 2, Theme::BG);
-    t.drawFastHLine(cx - 2, cy + 3, 5, Theme::BG);
-    t.drawPixel(cx - 3, cy + 2, Theme::BG);
-    t.drawPixel(cx + 3, cy + 2, Theme::BG);
 }
 
 // Each emote's picture, about sixteen pixels square, centred on (cx, cy). Only
@@ -248,10 +239,6 @@ void drawEmoteIcon(TFT_eSPI& t, uint8_t e, int cx, int cy) {
     case MeshMsg::Emote::PILLOW:
         t.fillRoundRect(cx - 9, cy - 5, 18, 11, 4, W);
         t.drawRoundRect(cx - 9, cy - 5, 18, 11, 4, Theme::W95_SHADOW);
-        break;
-    case MeshMsg::Emote::TICKLE:                        // a feather
-        t.drawWideLine(cx - 7, cy + 7, cx + 6, cy - 7, 2, W);
-        for (int i = 0; i < 4; i++) t.drawLine(cx - 3 + i * 3, cy + 3 - i * 3, cx - 7 + i * 3, cy - 1 - i * 3, W);
         break;
     case MeshMsg::Emote::GIFT:
         t.fillRect(cx - 7, cy - 5, 14, 12, P);
@@ -481,6 +468,9 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
         if (eh > 44) eh = 44;
         for (uint8_t i = 0; i < n; i++) {
             const MeshMsg::Emote e = EmoteScript::atTab(s_tab, i);
+            // An empty tile: nothing drawn, and a zero rectangle so a tap
+            // there lands on nothing rather than on whatever was there last.
+            if (e >= MeshMsg::Emote::COUNT) { s_emoteRect[i] = { 0, 0, 0, 0 }; continue; }
             const int x = 4 + (i % ecols) * (ew + 6), y = ty0 + (i / ecols) * (eh + 5);
             s_emoteRect[i] = { (int16_t)x, (int16_t)y, (int16_t)ew, (int16_t)eh };
             t.fillRect(x, y, ew, eh, Theme::BG);
@@ -564,13 +554,13 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
                           s_typedOn ? "[ EDIT ]" : "[ CANCEL ]", false);
         Theme::drawButton(t, s_send.x, s_send.y, s_send.w, s_send.h, "[ SEND ]", false);
     } else if (s_emoteOn) {
-        // Back to the lines, not off the screen; the smiley, lit, does the same.
+        // Back to the lines, not off the screen; the EMOTE button, still lit,
+        // does the same.
         Theme::drawButton(t, s_back.x, s_back.y, s_back.w, s_back.h, "[ LINES ]", false);
         s_random = { (int16_t)(w - 4 - BW - 8), (int16_t)(h - BH - 6), (int16_t)(BW + 8), BH };
         Theme::drawButton(t, s_random.x, s_random.y, s_random.w, s_random.h, "[ RANDOM ]", false);
-        s_emoteBtn = { (int16_t)(w - 4 - 30), 2, 30, 20 };
-        Theme::drawButton(t, s_emoteBtn.x, s_emoteBtn.y, s_emoteBtn.w, s_emoteBtn.h, "", true);
-        drawSmiley(t, s_emoteBtn.x + 15, s_emoteBtn.y + 10);
+        s_emoteBtn = { (int16_t)(w - 4 - BW), 2, BW, 20 };
+        Theme::drawButton(t, s_emoteBtn.x, s_emoteBtn.y, s_emoteBtn.w, s_emoteBtn.h, "[ EMOTE ]", true);
     } else {
         Theme::drawButton(t, s_back.x, s_back.y, s_back.w, s_back.h, "[ BACK ]", false);
         int right = w - 4;                  // where the page arrows start
@@ -592,10 +582,11 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
         if (!tut) {
             s_help = { (int16_t)(w - 4 - 30), 2, 30, 20 };
             Theme::drawButton(t, s_help.x, s_help.y, s_help.w, s_help.h, "?", false);
-            // The emotes, beside it: a smiley, since that is what they are.
-            s_emoteBtn = { (int16_t)(s_help.x - 6 - 30), 2, 30, 20 };
-            Theme::drawButton(t, s_emoteBtn.x, s_emoteBtn.y, s_emoteBtn.w, s_emoteBtn.h, "", false);
-            drawSmiley(t, s_emoteBtn.x + 15, s_emoteBtn.y + 10);
+            // The emotes, beside it. It was a small smiley, which nobody found;
+            // now it is a full-width button, filled, and says what it is --
+            // the one thing on this screen most people came for.
+            s_emoteBtn = { (int16_t)(s_help.x - 6 - BW), 2, BW, 20 };
+            Theme::drawButton(t, s_emoteBtn.x, s_emoteBtn.y, s_emoteBtn.w, s_emoteBtn.h, "[ EMOTE ]", true);
             pgRight = s_emoteBtn.x - 6;
         }
         if (s_pages > 1) {

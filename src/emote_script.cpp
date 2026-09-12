@@ -21,7 +21,7 @@ enum : uint8_t {
     L_COIN_CALL, L_DICE_CALL, L_ARM_CALL, L_ARM_WIN, L_TUG_CALL, L_TUG_WIN,
     L_LEAP_CALL, L_LEAP_DONE,
     L_PIE_CALL, L_PIE_HIT, L_BALLOON_CALL, L_BALLOON_HIT, L_PLANE_CALL, L_PLANE_HIT,
-    L_PILLOW_CALL, L_PILLOW_BACK, L_PILLOW_DONE, L_TICKLE_CALL, L_TICKLE_HIT,
+    L_PILLOW_CALL, L_PILLOW_BACK, L_PILLOW_DONE,
     L_GIFT_CALL, L_GIFT_OPEN, L_SNACK_CALL, L_SNACK_EAT, L_CHEERS_CALL, L_CHEERS_BACK,
     L_CONFETTI_CALL, L_FIREWORK_CALL, L_FIREWORK_AFTER,
     L_HEART_CALL, L_HEART_BACK, L_LAUGH_CALL, L_LAUGH_BACK, L_SAD_CALL, L_SAD_BACK,
@@ -60,8 +60,6 @@ static const char* const LINES[L_COUNT][VARIANTS] = {
     { "Pillow fight!",   "En garde!",         "Feathers out!" },
     { "Take THAT!",      "Payback!",          "Oh, you're DONE." },
     { "Truce?",          "Feathers everywhere!", "Best fight ever." },
-    { "Tickle attack!",  "Gotcha!",           "Coochie coo!" },
-    { "HAHA stop!",      "Not the pits!",     "No fair!" },
     { "Got you something!", "For you!",       "Open it!" },
     { "For me?!",        "You shouldn't have!", "Ooh, shiny!" },
     { "Want a slice?",   "Pizza break!",      "Share?" },
@@ -194,11 +192,6 @@ static const Beat PILLOW[] = {
     BT( 600, NONE,  FIST,  L_NONE,        THROW, OB_PILLOW,   FX_FROM_B),
     BT(1400, LAUGH, LAUGH, L_PILLOW_DONE, HIT,   BU_FEATHERS, FX_FROM_B),
 };
-static const Beat TICKLE[] = {
-    BT( 900, WIGGLE, NONE,  L_TICKLE_CALL, NONE, 0, 0),
-    BT(1800, WIGGLE, LAUGH, L_TICKLE_HIT,  HAHA, 0, B_SPEAKS | FX_FROM_B),
-    BT( 900, LAUGH,  LAUGH, L_NONE,        NONE, 0, 0),
-};
 static const Beat GIFT[] = {
     BT( 900, FIST,  NONE,  L_GIFT_CALL, HOLD, OB_GIFT,     0),
     BT( 700, FIST,  FIST,  L_NONE,      LOB,  OB_GIFT,     0),
@@ -296,7 +289,6 @@ static const Script SCRIPTS[] = {
     SC(BALLOON,     0, 0),
     SC(PLANE,       0, 0),
     SC(PILLOW,      0, 0),
-    SC(TICKLE,      S_CLOSE, -6),
     SC(GIFT,        0, 0),
     SC(SNACK,       0, 0),
     SC(CHEERS,      S_CLOSE, 0),
@@ -424,13 +416,15 @@ void dynLine(uint8_t code, E e, uint8_t setup, char* out, size_t cap) {
 }
 
 // ---- the picker ----------------------------------------------------------------------
-// Six tabs of six. The originals are spread among them rather than kept in a
-// tab of their own: a wave belongs with the greetings, not with "the old ones".
+// Six tabs of up to six. The originals are spread among them rather than kept
+// in a tab of their own: a wave belongs with the greetings, not with "the old
+// ones". A slot holding E::COUNT is an EMPTY tile -- the picker draws nothing
+// there and nothing there can be tapped. PRANK has one, where the tickle was.
 const char* const TAB_NAME[TABS] = { "HI", "PLAY", "PRANK", "PARTY", "MOOD", "WATCH" };
 static const E TAB[TABS][PER_TAB] = {
     { E::WAVE,     E::HIGH_FIVE, E::FIST_BUMP, E::HANDSHAKE,   E::SALUTE,   E::BOW },
     { E::RPS,      E::COIN,      E::DICE,      E::ARM_WRESTLE, E::TUG,      E::LEAPFROG },
-    { E::SNOWBALL, E::PIE,       E::BALLOON,   E::PLANE,       E::PILLOW,   E::TICKLE },
+    { E::SNOWBALL, E::PIE,       E::BALLOON,   E::PLANE,       E::PILLOW,   E::COUNT },
     { E::HUG,      E::GIFT,      E::SNACK,     E::CHEERS,      E::CONFETTI, E::FIREWORKS },
     { E::DANCE,    E::HEART,     E::LAUGH,     E::SAD,         E::GRR,      E::SLEEPY },
     { E::BOO,      E::TINFOIL,   E::CAMERA,    E::SPOTTED,     E::HOWL,     E::SELFIE },
@@ -445,7 +439,6 @@ static const char* const NAME[(size_t)E::COUNT][2] = {
     { "COIN FLIP", "" }, { "DICE ROLL", "" }, { "ARM", "WRESTLE" }, { "TUG OF WAR", "" },
     { "LEAPFROG", "" },
     { "PIE", "" }, { "WATER", "BALLOON" }, { "PAPER", "PLANE" }, { "PILLOW", "FIGHT" },
-    { "TICKLE", "" },
     { "GIFT", "" }, { "SNACK", "" }, { "CHEERS", "" }, { "CONFETTI", "" }, { "FIREWORKS", "" },
     { "HEART", "" }, { "LAUGH", "" }, { "SAD", "" }, { "GRR", "" }, { "SLEEPY", "" },
     { "TINFOIL", "HATS" }, { "CAMERA!", "" }, { "SEE THAT?", "" }, { "HOWL", "" },

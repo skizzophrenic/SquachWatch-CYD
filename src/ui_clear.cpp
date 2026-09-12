@@ -11,6 +11,7 @@
 #include "squachy.h"
 #include "detection.h"
 #include "emote_script.h"
+#include "crowd_bench.h"
 
 // A peer supplied from outside -- the emulator's --peer flag today, the radio
 // eventually. Always wins over the demo below.
@@ -70,6 +71,13 @@ static uint32_t     s_beatAt   = 0;          // when the current line went up
 static uint32_t     s_beatNo   = 0;          // advances once per line
 static bool         s_guestTurn = false;
 static const char*  s_visitGuestLine = nullptr;
+// Whether a crowd was actually DRAWN this frame, which is a different question
+// from what CROWD is set to: the crowd only appears at two or more peers, so a
+// board set to UP TO 8 with a single visitor is running an ordinary visit.
+// uiClearEmote() needs the former and tested the latter, which silently
+// refused every emote sent to such a board. Declared up here because that
+// function is far above the crowd code that maintains it.
+static bool         s_crowdDrawn = false;
 static uint32_t     s_beatMs   = 2400;       // how long THIS line stays up
 static uint8_t      s_hangStep = 0;          // 0 ask, 1 answer, 2 topper
 static uint32_t     s_guestLaughUntil = 0;   // the guest's half of the laugh
@@ -344,11 +352,17 @@ static bool     s_puffGuest = false;
 // two sides.
 static bool     s_pieceGuestFirst = false;
 static uint8_t  s_pieceSub = 0xFF;               // a wave's hand, up and down
-static int16_t  s_emotePend = -1;                // the emote waiting for a gap, or -1
-static uint8_t  s_emotePendSetup = 0;            // ...and what the two boards agreed for it
-static bool     s_emotePendGuest = false;
-static uint32_t s_emotePendAt = 0;
-static const uint32_t EMOTE_WAIT_MS = 12000;     // ...and how long it may wait
+// Emotes waiting to be acted out. A QUEUE, not one slot: four can land in the
+// time a greeting takes, and a single slot meant every new one silently
+// clobbered the last -- three of four sent in a row were lost that way, with
+// nothing in the log to say so.
+static const uint8_t EMOTE_Q_N = 4;
+static struct EmoteQ { uint8_t emote, setup; bool guest; uint32_t at; } s_eq[EMOTE_Q_N];
+static uint8_t  s_eqN = 0;
+static const uint32_t EMOTE_WAIT_MS = 12000;     // ...and how long one may wait
+// One RECEIVED emote, held until the visit can act it out -- see visitTick().
+static MeshTalk::EmoteIn s_rxEmote{};
+static bool              s_rxHave = false;
 static const uint32_t WAVE_SEG_MS = 1400;        // one turn each
 static const uint32_t FIVE_IN_MS  = 650;         // in to the host, from where he stands
 static const uint32_t BOO_JUMP_MS = 380, BOO_MS = 1700;
@@ -866,18 +880,38 @@ static bool fiveWalking(uint32_t now) {
 
 bool uiClearEmote(uint8_t emote, uint8_t setup, bool fromGuest) {
     if (s_vp == VisitPhase::GONE || s_vp == VisitPhase::LEAVING) return false;
+    // An emote is two Squachys acting something out at arm's length from each
+    // other. With a crowd drifting about the screen there are no such two, so
+    // the compose screen says so rather than playing it to nobody.
+    //
+    // What matters is whether a crowd is ACTUALLY ON SCREEN, not what the
+    // setting says. This tested the setting, and the crowd only draws at two
+    // or more peers -- so a board set to UP TO 8 with one visitor was running
+    // an ordinary visit and silently refusing every emote sent to it.
+    if (s_crowdDrawn) return false;
     if (emote >= (uint8_t)MeshMsg::Emote::COUNT) return false;
-    s_emotePend      = emote;
-    s_emotePendSetup = setup;
-    s_emotePendGuest = fromGuest;
-    s_emotePendAt    = millis();
+    if (s_eqN == EMOTE_Q_N) {
+        // Full: the oldest goes, and says so. Silently dropping one is what
+        // made this look like emotes simply did not work.
+        Serial.printf("[visit] emote %u dropped: %u already waiting\n",
+                      (unsigned)s_eq[0].emote, (unsigned)EMOTE_Q_N);
+        for (uint8_t i = 1; i < s_eqN; i++) s_eq[i - 1] = s_eq[i];
+        s_eqN--;
+    }
+    s_eq[s_eqN].emote = emote;
+    s_eq[s_eqN].setup = setup;
+    s_eq[s_eqN].guest = fromGuest;
+    s_eq[s_eqN].at    = millis();
+    s_eqN++;
     return true;
 }
 
 static void emoteStart(uint32_t now) {
-    const uint8_t b = (uint8_t)s_emotePend, setup = s_emotePendSetup;
-    const bool    g = s_emotePendGuest;
-    s_emotePend = -1;
+    if (!s_eqN) return;
+    const uint8_t b = s_eq[0].emote, setup = s_eq[0].setup;
+    const bool    g = s_eq[0].guest;
+    for (uint8_t i = 1; i < s_eqN; i++) s_eq[i - 1] = s_eq[i];
+    s_eqN--;
     // A question left hanging when the button was pressed is dropped rather
     // than answered after the piece, when nobody remembers it.
     s_hangStep = 0;
@@ -923,7 +957,7 @@ static void napStart(uint32_t now) {
 
 static void napTick(uint32_t now) {
     if (s_napping) {
-        const bool poked = Squachy::lastInteractionAt() != s_napSeen || s_emotePend >= 0;
+        const bool poked = Squachy::lastInteractionAt() != s_napSeen || s_eqN > 0;
         if (!poked && !messageShowing(now)) { Squachy::visitNap(now); return; }
         s_napping        = false;
         s_wakeUntil      = now + WAKE_MS;
@@ -1548,30 +1582,315 @@ static void drawMessageIcon(TFT_eSPI& t, int x, int y, bool unread, bool sending
 static bool    s_badgeOn = false;
 static int16_t s_badX = 0, s_badY = 0, s_badW = 0, s_badH = 0;
 
-static void drawSquadBadge(TFT_eSPI& t, int gx, int headTop, uint8_t extra) {
-    char b[5];
-    snprintf(b, sizeof b, "+%u", (unsigned)extra);
-    t.setTextSize(1);
-    const int bw = t.textWidth(b) + 14, bh = 11;
-    int x = gx + 26;
-    if (x + bw > t.width() - 4) x = t.width() - 4 - bw;
-    const int y = headTop + 40;
-    t.fillRoundRect(x, y, bw, bh, 5, Theme::PURPLE);
+// How many SquachWatches are in range, bottom left, sitting just above the
+// detection counters. Tapping it opens the SQUAD screen.
+//
+// It used to be a small "+N" pill beside the visitor's head: it moved around
+// with him, it was eleven pixels tall, and it only appeared while somebody was
+// actually on screen. Down here it has a fixed home, it is thumb-sized, and it
+// can say how many are out there whether or not one of them is visiting.
+// `rightX` is its right edge: the badge grows leftward from there, so a count
+// that reaches two digits cannot push it off the screen.
+static void drawSquadBadge(TFT_eSPI& t, int rightX, int bottomY, uint8_t count) {
+    char b[6];
+    snprintf(b, sizeof b, "%u", (unsigned)count);
+    t.setTextSize(2);
+    const int bh = 22, bw = 24 + t.textWidth(b) + 8;
+    const int x = rightX - bw, y = bottomY - bh;
+    t.fillRoundRect(x, y, bw, bh, 6, Theme::PURPLE);
+    t.drawRoundRect(x, y, bw, bh, 6, Theme::VAPOR_PINK);
     // A little head, for "more of us": round, with two ears.
-    t.fillCircle(x + 6, y + 6, 3, Theme::VAPOR_PINK);
-    t.fillRect(x + 3, y + 2, 2, 2, Theme::VAPOR_PINK);
-    t.fillRect(x + 8, y + 2, 2, 2, Theme::VAPOR_PINK);
+    t.fillCircle(x + 12, y + 13, 6, Theme::VAPOR_PINK);
+    t.fillRect(x + 5, y + 4, 4, 4, Theme::VAPOR_PINK);
+    t.fillRect(x + 15, y + 4, 4, 4, Theme::VAPOR_PINK);
     t.setTextColor(Theme::WHITE, Theme::PURPLE);
-    t.setCursor(x + 12, y + 2);
+    t.setCursor(x + 24, y + (bh - 14) / 2);
     t.print(b);
-    s_badX = (int16_t)(x - 8); s_badY = (int16_t)(y - 6);
-    s_badW = (int16_t)(bw + 16); s_badH = (int16_t)(bh + 12);
+    t.setTextSize(1);
+    // A finger-sized target around it.
+    s_badX = (int16_t)(x - 6); s_badY = (int16_t)(y - 8);
+    s_badW = (int16_t)(bw + 12); s_badH = (int16_t)(bh + 16);
     s_badgeOn = true;
 }
 
 bool uiClearSquadHit(int x, int y) {
     return s_badgeOn && !Settings::boringMode() &&
            x >= s_badX && x < s_badX + s_badW && y >= s_badY && y < s_badY + s_badH;
+}
+
+// ---- the crowd ---------------------------------------------------------------
+// Everybody in range at once, drifting rather than standing. Two things make
+// this cheap enough to be worth having, both measured on hardware rather than
+// reasoned about: drawing cost follows the AREA a Squachy covers, so they get
+// cheaper as fast as they get more numerous; and eight at the size they land
+// on (about 0.72) cost 17 ms a frame against 29 ms for today's two at 2.00.
+//
+// Their drift is a pure function of `now` and the cell each one stands in, the
+// same discipline the backgrounds follow, so a board that renders in bands
+// cannot tear them and a peer arriving mid-frame cannot shuffle them.
+//
+// Two things are kept between frames, and only two: where each of them was
+// drawn, so a tap can find one, and which one was last asked to say his name.
+static const uint32_t CROWD_NAME_MS = 3000;
+static bool     s_tapName   = false;
+static uint8_t  s_tapMac[6] = { 0 };
+static uint32_t s_tapUntil  = 0;
+// Remembered by ADDRESS, never by index: the squad list re-sorts as adverts
+// arrive, and an index would hang the name on whoever inherited the slot.
+// Seven at most -- the eighth body in a crowd of eight is always ours, and
+// ours is not in here because a tap on him pets him instead.
+static uint8_t  s_crowdN = 0;
+static int16_t  s_crowdX[8], s_crowdHalf[8], s_crowdTop[8], s_crowdBot[8];
+static uint8_t  s_crowdMac[8][6];
+
+static void drawCrowd(TFT_eSPI& t, uint32_t now, const Mesh::SquadMember* crowd,
+                      uint8_t n, int top, int floorY, bool advance, bool msgFresh) {
+    const int w = t.width();
+    // Ours plus theirs. squadList() reports the peers it can hear and NEVER
+    // this board, so the body count is one higher than the list is long.
+    // Sizing the screen for `n` and then spending slot zero on ourselves is
+    // what quietly dropped a visitor: with four in range you saw three.
+    const uint8_t total = (uint8_t)(n + 1);
+    const int bottom = floorY - 22;   // clear of the squad badge and the counters
+
+    // The shape is a RULE, not a search. Up to four stand in one row; past
+    // four they take two, the back row full and the front row holding
+    // whatever is left over:
+    //
+    //     4 -> 4            5 -> 3 behind, 2 in front
+    //     6 -> 3 and 3      7 -> 4 behind, 3 in front      8 -> 4 and 4
+    //
+    // Five across reads as a queue where four across still reads as a group,
+    // and a search that was left to work it out for itself put five in a line
+    // because a single row scored 1.54 against two rows' 1.40.
+    const int rows = total <= 4 ? 1 : 2;
+    const int cols = ((int)total + rows - 1) / rows;
+    const float cw = (float)(w - 8) / (float)cols;
+    const float ch = (float)(bottom - top) / (float)rows;
+
+    // ...and then they are drawn as LARGE as that shape can carry. Each count
+    // gets its own size: two of them have room to be nearly full height, eight
+    // of them do not, and pinning every count to one size made the small
+    // crowds needlessly tiny.
+    //
+    // A body is 56 wide and 74 tall in scale units, and it has to clear its
+    // cell WITH the drift on top -- the wander is 15% of a cell either side
+    // horizontally and 10% vertically, so the body itself may have 70% of the
+    // width and 80% of the height. Without that margin neighbours collide at
+    // the ends of their drift rather than at rest, which is the kind of fault
+    // that only shows up a few seconds after a screenshot is taken.
+    const float sMax = (float)(floorY - top) / 91.0f;
+    float s = fminf(0.70f * cw / 56.0f, 0.80f * ch / 74.0f);
+    if (s > sMax) s = sMax;
+
+    // Where a cell sits, and how far its occupant has wandered off the middle
+    // of it. `drift` is what ours is denied.
+    // Half a body each way: for keeping them on the screen, and for standing
+    // them in the middle of their own patch of it.
+    const int halfW = (int)(28.0f * s), halfH = (int)(37.0f * s);
+    auto cellX = [&](int k, int i, bool drift) {
+        const float dx = drift ? sinf((float)now / 1900.0f + (float)i * 1.7f) * cw * 0.15f : 0.0f;
+        int x = 4 + (int)(((float)(k % cols) + 0.5f) * cw + dx);
+        // Nobody drifts off an edge. The left-hand cell was taking his box to
+        // x=-2, which is half a Squachy hanging off the side of the screen.
+        if (x < halfW + 2)     x = halfW + 2;
+        if (x > w - halfW - 2) x = w - halfW - 2;
+        return x;
+    };
+    // His FEET -- placed so the body stands in the MIDDLE of its cell rather
+    // than on the floor of it. With a single row that difference is the whole
+    // feature: feet at the bottom of the band put everybody along the bottom
+    // edge, standing in a line, which is exactly what roaming replaces.
+    auto cellY = [&](int k, int i, bool drift) {
+        const float dy = drift ? sinf((float)now / 2600.0f + (float)i * 0.9f) * ch * 0.10f : 0.0f;
+        return top + (int)(((float)(k / cols) + 0.5f) * ch + (float)halfH + dy);
+    };
+
+    // Ours takes the most central cell there is and holds it. In a crowd where
+    // everything is moving, the one you actually control is the one you have to
+    // be able to pick out, and a seat that never moves picks itself out.
+    // Measured against the middle of the screen rather than assumed, because
+    // the middle of a 3x3 and the middle of a 4x2 are not the same cell.
+    int selfIdx = 0;
+    {
+        float bestD = -1.0f;
+        const float mx = (float)w * 0.5f, my = (float)(top + bottom) * 0.5f;
+        for (int k = 0; k < (int)total; k++) {
+            const float x = 4.0f + ((float)(k % cols) + 0.5f) * cw;
+            // The middle of the cell, which is now the middle of the body in
+            // it: cellY() stands him in his patch rather than on its floor.
+            const float y = (float)top + ((float)(k / cols) + 0.5f) * ch;
+            const float d = (x - mx) * (x - mx) + (y - my) * (y - my);
+            if (bestD < 0.0f || d < bestD) { bestD = d; selfIdx = k; }
+        }
+    }
+    // Which cell peer `i` gets: everybody shuffles past the seat ours is in.
+    auto peerCell = [&](uint8_t i) { return (int)i < selfIdx ? (int)i : (int)i + 1; };
+
+#ifndef ARDUINO
+    // Emulator only: the geometry itself, not where bodies happened to land.
+    // Two fixes aimed at selfIdx and the row headroom changed nothing on
+    // screen, which means the numbers are not what they are being read as.
+    if (getenv("SQUACHSIM_CROWDBOX"))
+        fprintf(stderr, "[crowdgeom] total=%u cols=%d rows=%d s=%.3f top=%d bottom=%d "
+                        "cw=%.1f ch=%.1f selfIdx=%d selfX=%d selfY=%d\n",
+                (unsigned)total, cols, rows, (double)s, top, bottom,
+                (double)cw, (double)ch, selfIdx,
+                cellX(selfIdx, 0, false), cellY(selfIdx, 0, false));
+#endif
+
+    // Who is visiting, if anybody. He keeps the conversation -- his line, his
+    // nodding, his laugh -- and the rest are company.
+    int guestI = -1;
+    for (uint8_t i = 0; i < n; i++)
+        if (Mesh::peer() && memcmp(Mesh::peerMac(), crowd[i].mac, 6) == 0) { guestI = (int)i; break; }
+
+    // Nameplates stop being labels and start being clutter somewhere around
+    // five: past that they come off, and a tap puts one back for a few
+    // seconds. Four or fewer and everybody keeps his, which is the size where
+    // they still read.
+    const bool allNames = total <= 4;
+    if (s_tapName && (int32_t)(s_tapUntil - now) <= 0) s_tapName = false;
+    s_crowdN = 0;
+
+    // One of them, body only. Records where he landed so a tap can find him,
+    // and reports whether he is holding a bubble.
+    auto drawOne = [&](uint8_t i, int cx, int baseY, bool isGuest) {
+        const SquachMesh::Peer& p = crowd[i].peer;
+        Squachy::setOutfitPreview((int8_t)p.outfit);
+        Squachy::setShadesPreview((int8_t)p.shade);
+        const char* line = (isGuest && !msgFresh) ? s_visitGuestLine : nullptr;
+        Squachy::drawWaving(t, cx, baseY, now + (uint32_t)i * 137u, s, line,
+                            line != nullptr, 0, i % 3 == 0, 18, isGuest && now < s_guestLaughUntil,
+                            isGuest && !s_guestTurn, line != nullptr,
+                            isGuest ? guestPose(now) : Squachy::VisitPose::NONE);
+        Squachy::setShadesPreview(-1);
+        Squachy::setOutfitPreview(-1);
+        if (s_crowdN < 8) {
+            int half = (int)(30.0f * s);
+            if (half < 14) half = 14;      // a fingertip, however small he is
+            s_crowdX[s_crowdN]    = (int16_t)cx;
+            s_crowdHalf[s_crowdN] = (int16_t)half;
+            s_crowdTop[s_crowdN]  = (int16_t)(baseY - (int)(62.0f * s));
+            s_crowdBot[s_crowdN]  = (int16_t)(baseY + 4);
+            memcpy(s_crowdMac[s_crowdN], crowd[i].mac, 6);
+#ifndef ARDUINO
+            // Emulator only, and off unless asked: where the tap targets are.
+            // Aiming a tap by eye at a screenshot missed twice, which is two
+            // render cycles spent proving nothing about the feature itself.
+            if (getenv("SQUACHSIM_CROWDBOX"))
+                fprintf(stderr, "[crowdbox] %u x=%d..%d y=%d..%d centre %d,%d\n",
+                        (unsigned)s_crowdN, cx - half, cx + half,
+                        (int)s_crowdTop[s_crowdN], (int)s_crowdBot[s_crowdN],
+                        cx, (baseY + (int)s_crowdTop[s_crowdN]) / 2);
+#endif
+            s_crowdN++;
+        }
+        // Where the newest of them is, so the message bubble has somewhere to
+        // point. The visitor wins it when he is here.
+        if (isGuest || !s_msgGuestOn) {
+            s_msgGuestOn = true;
+            s_msgGx      = cx;
+            s_msgHeadTop = baseY - (int)(58.0f * s);
+        }
+        return line != nullptr;
+    };
+
+    // His name, small, where his bubble would be so the two can never both be up.
+    auto drawName = [&](uint8_t i, int cx, int baseY) {
+        const SquachMesh::Peer& p = crowd[i].peer;
+        const char* nm = (p.custom && p.name[0]) ? p.name : Squachy::nicknameAt(p.nick);
+        t.setTextSize(1);
+        t.setTextWrap(false);
+        const int nw = t.textWidth(nm);
+        int nx = cx - nw / 2;
+        if (nx < 2) nx = 2;
+        if (nx + nw > w - 2) nx = w - 2 - nw;
+        t.setTextColor(Theme::CYAN, Theme::BG);
+        t.setCursor(nx, baseY - (int)(58.0f * s) - 10);
+        t.print(nm);
+    };
+
+    auto wantsName = [&](uint8_t i) {
+        return allNames || (s_tapName && memcmp(s_tapMac, crowd[i].mac, 6) == 0);
+    };
+
+    // The order of what follows is the whole point of it.
+    //
+    // At eight, a speech bubble is wider than the patch its owner stands in,
+    // so it WILL cross a neighbour -- there is no layout where it doesn't.
+    // Drawn last it crosses him the way a speech bubble is meant to, in front,
+    // instead of being half-painted over by whoever happened to come after.
+    // So: the silent ones go down first, then their nameplates, then the only
+    // two who can be holding a bubble -- the visitor, and ours.
+
+    // 1. everybody who is neither talking nor us.
+    for (uint8_t i = 0; i < n; i++) {
+        if ((int)i == guestI) continue;
+        const int k = peerCell(i);
+        drawOne(i, cellX(k, i, true), cellY(k, i, true), false);
+    }
+    // 2. their names, over the lot of them.
+    for (uint8_t i = 0; i < n; i++) {
+        if ((int)i == guestI || !wantsName(i)) continue;
+        const int k = peerCell(i);
+        drawName(i, cellX(k, i, true), cellY(k, i, true));
+    }
+    // 3. the visitor, bubble and all.
+    if (guestI >= 0) {
+        const uint8_t i = (uint8_t)guestI;
+        const int k = peerCell(i);
+        const int cx = cellX(k, i, true), baseY = cellY(k, i, true);
+        if (!drawOne(i, cx, baseY, true) && wantsName(i)) drawName(i, cx, baseY);
+    }
+    // 4. and ours last of all, in the seat that does not move. He is drawn
+    //    through tick(), which owns his moods, his quips and his bubble, so he
+    //    keeps all of that while the others drift around him.
+    {
+        const int cx = cellX(selfIdx, 0, false), baseY = cellY(selfIdx, 0, false);
+        // He has to come out the same size as the cameos around him, and
+        // tick() works that out from numbers only it knows -- the bubble
+        // row it reserves, the headroom his crest and his costume need,
+        // and a base height that is not the one a cameo scales against.
+        // Reproducing that arithmetic here is how he ended up towering
+        // over everybody.
+        //
+        // So it is measured instead of derived: lastScale() is written by
+        // tick() alone (never by the cameo path), so it says what HE came
+        // out at last frame, and the percentage is nudged toward whatever
+        // lands him on the crowd's scale. It settles within a few frames
+        // and survives anything tick() changes about its own sizing.
+        static float corr = 0.85f;
+        const float got = Squachy::lastScale();
+        if (got > 0.05f && s > 0.05f) {
+            float want = corr * s / got;
+            if (want < 0.2f) want = 0.2f;
+            if (want > 3.0f) want = 3.0f;
+            corr += (want - corr) * 0.35f;
+        }
+        const int band = baseY - top;
+        int pct = band > 1 ? (int)(corr * s * 56.0f * 100.0f / (float)band) : 100;
+        if (pct < 10)  pct = 10;
+        if (pct > 100) pct = 100;
+        Squachy::tick(t, cx, top, band, now, advance, 0.3f, false, 0, (uint8_t)pct);
+    }
+}
+
+// A tap on one of the crowd: puts his name up for a few seconds. Ours is
+// deliberately not in the list -- a tap on him pets him, which is what a tap
+// on him has always done, and asking a Squachy you own who he is is not a
+// question anybody has.
+bool uiClearCrowdTap(int x, int y, uint32_t now) {
+    if (Settings::boringMode()) return false;
+    for (uint8_t i = 0; i < s_crowdN; i++) {
+        if (x < s_crowdX[i] - s_crowdHalf[i] || x > s_crowdX[i] + s_crowdHalf[i]) continue;
+        if (y < s_crowdTop[i] || y > s_crowdBot[i]) continue;
+        memcpy(s_tapMac, s_crowdMac[i], 6);
+        s_tapName  = true;
+        s_tapUntil = now + CROWD_NAME_MS;
+        return true;
+    }
+    return false;
 }
 
 static void drawMessageUi(TFT_eSPI& t, uint32_t now, int titleBottom, int squachyBottom) {
@@ -1607,19 +1926,74 @@ bool uiClearBubbleHit(int x, int y) {
            x >= s_bubX && x < s_bubX + s_bubW && y >= s_bubY && y < s_bubY + s_bubH;
 }
 
-static void visitTick(uint32_t now) {
-    const uint32_t id = rawGuestId(now);
-
-    // An emote from the visitor's board -- his only. With more than one
-    // SquachWatch around, one from somebody off screen would be acted out by
-    // somebody who never sent it.
+// Received emotes. See ui_clear.h: called from main.cpp's loop rather than
+// from the draw, because the draw does not happen on every frame and an emote
+// that arrives on one of the others must not be lost.
+//
+// HELD, not tested and dropped. takeEmote() consumes: it hands the emote over
+// and forgets it. It was once the first term of an && chain, so every
+// condition after it filtered something already off the queue -- and anything
+// arriving a moment before the visit machine was ready for it was gone for
+// good. Now it is parked and retried until it plays or twelve seconds pass.
+//
+// EVERY AGE IN HERE IS SIGNED, and that is the bug that kept received emotes
+// from ever playing on hardware. `now` is read once at the top of loop();
+// the frame is decrypted and queued some milliseconds later, stamped from
+// millis(). So the entry's `at` sits a few ms AHEAD of `now`, and the unsigned
+// `now - at` wraps to four billion -- older than any window -- and the entry
+// was expired in the same call that queued it. Measured: at=20549, now=20541,
+// age=4294967288. The emulator could not reproduce it because its clock does
+// not move within a frame, and the sender never hit it because its own emote
+// is queued on one iteration and checked on the next, when `now` has caught
+// up. The signed form treats a stamp from the near future as an age of zero,
+// which is what it is.
+void uiClearEmoteTick(uint32_t now) {
     {
         MeshTalk::EmoteIn in;
-        if (MeshTalk::takeEmote(in) && now - in.at < EMOTE_WAIT_MS &&
-            Mesh::peer() && memcmp(Mesh::peerMac(), in.mac, 6) == 0)
-            uiClearEmote(in.emote, in.setup, true);
-        if (s_emotePend >= 0 && now - s_emotePendAt > EMOTE_WAIT_MS) s_emotePend = -1;
+        if (MeshTalk::takeEmote(in)) { s_rxEmote = in; s_rxHave = true; }
+        if (s_rxHave) {
+            if ((int32_t)(now - s_rxEmote.at) >= (int32_t)EMOTE_WAIT_MS) {
+                s_rxHave = false;
+                Serial.printf("[visit] emote %u dropped: no visit with the sender in %lus\n",
+                              (unsigned)s_rxEmote.emote, (unsigned long)(EMOTE_WAIT_MS / 1000));
+            } else if (Mesh::peer() && memcmp(Mesh::peerMac(), s_rxEmote.mac, 6) == 0 &&
+                       uiClearEmote(s_rxEmote.emote, s_rxEmote.setup, true)) {
+                s_rxHave = false;
+            }
+        }
+        // Anything that has waited out its welcome goes, and says so. Signed --
+        // see the comment on this function.
+        while (s_eqN && (int32_t)(now - s_eq[0].at) > (int32_t)EMOTE_WAIT_MS) {
+            Serial.printf("[visit] emote %u expired after %lus unplayed\n",
+                          (unsigned)s_eq[0].emote, (unsigned long)(EMOTE_WAIT_MS / 1000));
+            for (uint8_t i = 1; i < s_eqN; i++) s_eq[i - 1] = s_eq[i];
+            s_eqN--;
+        }
+
+        // And acted out here, in the loop, rather than from inside the draw --
+        // the draw only runs on frames that paint Squachy, and an emote must
+        // not depend on one of those coming along.
+        //
+        // An emote INTERRUPTS. Somebody pressed a button and is watching for
+        // it; the set pieces and the naps start themselves and can wait. Not
+        // during the walk in or out, which own his position -- under two
+        // seconds -- and not with no visit at all.
+        if (s_eqN && s_vp != VisitPhase::GONE && s_vp != VisitPhase::ARRIVING &&
+            s_vp != VisitPhase::LEAVING) {
+            s_piece     = Piece::NONE;      // whatever was running, this is louder
+            s_napping   = false;
+            s_wakeUntil = 0;
+            if (s_vp == VisitPhase::HIGH_FIVE || s_vp == VisitPhase::STEP_BACK) {
+                s_vp = VisitPhase::MEETING;
+                s_vpAt = now; s_beatAt = now; s_beatMs = 0;
+            }
+            emoteStart(now);
+        }
     }
+}
+
+static void visitTick(uint32_t now) {
+    const uint32_t id = rawGuestId(now);
 
     // A scare, live: the host has just reacted to a detection here on this
     // screen, so the guest jumps with him. Fresh ones only -- one from before
@@ -1684,6 +2058,18 @@ static void visitTick(uint32_t now) {
         s_vpAt = now + s_beatMs;            // goodbye first, then the walk
         return;
     }
+    // An emote INTERRUPTS. Somebody pressed a button and is watching for it;
+    // the set pieces and the naps start themselves, unprompted, and can wait.
+    //
+    // This used to live in the HANGING case alone, which is the last of six
+    // phases and twenty seconds into a visit -- so every emote sent while the
+    // other board was still walking in, slapping hands or exchanging hellos
+    // sat in the queue until it expired, unplayed and unlogged. That is the
+    // whole window in which somebody actually sends one.
+    //
+    // Not while he is walking in or out: the arrival and the goodbye own his
+    // position, and an emote's own choreography would teleport him. That wait
+    // is under two seconds.
     switch (s_vp) {
         case VisitPhase::ARRIVING:
             // Straight up to the host and a high five before anybody says a
@@ -1740,9 +2126,8 @@ static void visitTick(uint32_t now) {
             // A set piece, or a nap, holds the conversation until it is done.
             if (s_piece != Piece::NONE)  { pieceTick(now); break; }
             if (s_napping || s_wakeUntil) { napTick(now);   break; }
-            // An emote goes straight in -- somebody pressed a button and is
-            // watching for it -- but waits out a set piece, and wakes a nap.
-            if (s_emotePend >= 0)         { emoteStart(now); break; }
+            // Emotes are handled above, before the switch: they interrupt from
+            // any phase with two Squachys on screen rather than only this one.
             if (now - s_beatAt >= s_beatMs + TURN_GAP_MS) {
                 // No timed exit. He used to say goodbye after a minute and
                 // then -- with the other board still right there -- walk
@@ -1754,7 +2139,11 @@ static void visitTick(uint32_t now) {
                 // from its answer.
                 if (s_hangStep == 0 && napDue(now))
                     napStart(now);
-                else if (s_hangStep == 0 && s_nextPieceAt && (int32_t)(now - s_nextPieceAt) >= 0)
+                // Not while a crowd is on screen: every set piece puts the two
+                // of them on marks on the ground, and in a crowd there is no
+                // ground -- they are drifting. The conversation carries on.
+                else if (s_hangStep == 0 && s_nextPieceAt && Settings::meshCrowd() <= 1 &&
+                         (int32_t)(now - s_nextPieceAt) >= 0)
                     pieceStart(now);
                 else
                     visitBeat(now, Squachy::VisitMoment::HANGOUT);
@@ -2084,6 +2473,13 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // fully repaints this whole region every frame, so skipping him
     // just leaves it as animated negative space — no layout changes
     // needed anywhere else on this screen.
+#if CROWD_BENCH
+    // A test build: the crowd benchmark stands in for the Squachys while it
+    // runs, and the visit machine sits it out.
+    if (CrowdBench::active() && !Settings::boringMode())
+        CrowdBench::draw(t, now, titleBottom, squachyBottom);
+    else
+#endif
     if (!Settings::boringMode()) {
         // The last argument is the SIZE row in Settings. CLEAR is the only
         // screen that passes it: everywhere else he is a cameo in a box
@@ -2112,7 +2508,31 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         const bool msgFresh = messageShowing(now) || tutorReply();
         s_msgGuestOn = false;
         s_badgeOn    = false;
-        if (guest) {
+        s_crowdN     = 0;
+        s_crowdDrawn = false;
+        // ---- the crowd ------------------------------------------------------
+        // With CROWD set past one, everybody in range is on screen at once and
+        // NOBODY is standing on the floor: they drift about their own patch of
+        // it, ours included. They shrink to fit, which is what makes it cheap
+        // -- measured on hardware, eight at the size they land on cost 17 ms a
+        // frame against 29 for today's two at full size.
+        //
+        // The visit machine still runs underneath: whoever is visiting keeps
+        // his conversation and his bubble. What stands down is the part that
+        // needs two Squachys at fixed marks on the ground -- the set pieces
+        // and the emotes -- because there is no ground here to stand on.
+        const uint8_t crowdMax = Settings::meshCrowd();
+        Mesh::SquadMember crowd[8];
+        uint8_t crowdN = 0;
+        // The cap is PEERS, and the setting counts bodies: we are the one it
+        // does not have to ask the radio about. Asking for `crowdMax` of them
+        // and then drawing ourselves as well would put nine on an UP TO 8.
+        const uint8_t peerCap = (uint8_t)((crowdMax > 8 ? 8 : crowdMax) - 1);
+        if (crowdMax > 1) crowdN = Mesh::squadList(now, crowd, peerCap);
+        if (crowdMax > 1 && crowdN >= 2) {
+            s_crowdDrawn = true;
+            drawCrowd(t, now, crowd, crowdN, titleBottom, squachyBottom, advance, msgFresh);
+        } else if (guest) {
             const int SMALL_PCT = 70;
             const int gap  = w / 4;
             const int homeX = w / 2 + gap;     // where the guest stands
@@ -2234,11 +2654,6 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
                 t.setCursor(nx, ny);
                 t.print(nm);
             }
-            {
-                const uint8_t squad = Mesh::squadCount(now);
-                if (squad >= 2 && s_vp != VisitPhase::LEAVING)
-                    drawSquadBadge(t, gx, squachyBottom - (int)(58.0f * gs), (uint8_t)(squad - 1));
-            }
             // Where he is this frame, for the message bubble and its button.
             s_msgGuestOn = true;
             s_msgGx      = gx;
@@ -2248,6 +2663,11 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         Squachy::tick(t, w / 2, titleBottom, squachyBottom - titleBottom, now, advance,
                       1.0f, false, -1, Settings::squachySizePct());
 #if SQUACH_MESH
+        // Everybody in range, whether or not one of them is on screen.
+        {
+            const uint8_t squad = Mesh::squadCount(now);
+            if (squad >= 1) drawSquadBadge(t, w - 4, counterTextTop - 2, squad);
+        }
         drawMessageUi(t, now, titleBottom, squachyBottom);
 #endif
     }

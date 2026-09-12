@@ -131,6 +131,7 @@ static void crashCrumbTick(uint32_t now, uint32_t lifetime, uint8_t screen) {
 #include "clock.h"
 #include "ui_boot.h"
 #include "ui_clear.h"
+#include "crowd_bench.h"
 #include "ui_alert.h"
 #include "ui_log.h"
 #include "ui_rawscan.h"
@@ -1833,6 +1834,10 @@ void loop() {
     MeshProbe::tick(now);
     Mesh::tick(now);
     MeshTalk::tick(now);
+    // Beside the radio, not inside the draw: an emote arriving while any other
+    // screen is up -- or while boring mode has turned Squachy off -- still has
+    // to be taken off the queue and acted on when CLEAR comes back.
+    uiClearEmoteTick(now);
 #endif
 
     // The padlock, left of the rotate icon while a PIN is set, on the screens
@@ -1950,7 +1955,12 @@ void loop() {
         if (state == AppState::OUTFIT || state == AppState::DETECTION_FILTER ||
             state == AppState::IGNORE_LIST || state == AppState::POWER_SAVER ||
             state == AppState::SECURITY) enterSettings();
-        else if (state == AppState::SETTINGS) enterClear();
+        else if (state == AppState::SETTINGS) {
+            // The gear on the APPEARANCE page goes back up a level, the way
+            // it does from every other screen Settings opens.
+            if (uiSettingsInAppearance()) uiSettingsOpenAppearance(false);
+            else                          enterClear();
+        }
         else {
             // Leaving RAWSCAN via the settings icon, same as BACK does
             // -- otherwise the raw scan (and the continuous detection
@@ -2060,6 +2070,19 @@ void loop() {
             }
 #else
             uiClearTick(*canvas, now, engine, true, s_scanPickerOpen);
+#endif
+#if CROWD_BENCH
+            // The crowd benchmark (a test build): its numbers or its table go
+            // over everything, a tap moves it on, and nothing else on this
+            // screen -- alerts included -- interrupts it while it runs.
+            if (CrowdBench::active()) {
+                CrowdBench::drawOver(*canvas, now);
+                if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                    lastTouch = now;
+                    CrowdBench::tap();
+                }
+                break;
+            }
 #endif
             // Check for new detection — gated by the settings-menu
             // confidence filter (LOW_CONF/default = no filtering, every
@@ -2242,6 +2265,14 @@ void loop() {
                 lastTouch = now;
                 sqActive  = false;
                 enterSquad();
+            } else if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
+                       uiClearCrowdTap(tp.x, tp.y, now)) {
+                // Asking one of the crowd who he is. Below the bubble and the
+                // badge, which sit over the crowd and mean something more
+                // specific; above the edge zones, so asking a stranger his
+                // name cannot also change the background out from under him.
+                lastTouch = now;
+                sqActive  = false;
 #endif
             } else if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
                        Theme::backgroundTap(tp.x, tp.y, now)) {
@@ -2962,7 +2993,14 @@ void loop() {
                         case SettingsRow::OUTFIT:       enterOutfit(); break;
                         case SettingsRow::PET:          Squachy::togglePet(); break;
                         case SettingsRow::VIEW_DIARY:   enterDiary(); break;
-                        case SettingsRow::BACK:        enterClear(); break;
+                        case SettingsRow::APPEARANCE:  uiSettingsOpenAppearance(true); break;
+                        case SettingsRow::TOP_HAT:     Settings::toggleTopHat(); break;
+                        // From the APPEARANCE page, back to the main list;
+                        // from the main list, out.
+                        case SettingsRow::BACK:
+                            if (uiSettingsInAppearance()) uiSettingsOpenAppearance(false);
+                            else                          enterClear();
+                            break;
                         default: break;
                     }
                 }
@@ -3028,6 +3066,7 @@ void loop() {
                             enterClear();
                         }
                         break;
+                    case MeshMenuRow::CROWD:    Settings::cycleMeshCrowd();    break;
                     case MeshMenuRow::PHRASE:   enterMeshPhrase();             break;
                     case MeshMenuRow::NAME:     enterPhone();                  break;
                     case MeshMenuRow::BACK:     enterSettings();               break;
@@ -3536,6 +3575,9 @@ void loop() {
 
     s_pushUsAvg  = emaUpdate(s_pushUsAvg, s_pushAccumUs);
     s_frameUsAvg = emaUpdate(s_frameUsAvg, micros() - frameStartUs);
+#if CROWD_BENCH
+    CrowdBench::noteFrame(micros() - frameStartUs, s_pushAccumUs);
+#endif
 
     // ---- power saver ------------------------------------------------------
     // Both timers hang off lastTouch, which every screen already maintains.

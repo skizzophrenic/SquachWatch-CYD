@@ -917,9 +917,86 @@ static_assert(sizeof(BG_LINES) / sizeof(BG_LINES[0]) == Settings::BACKGROUND_COU
               "a row count mismatch here means some background is silently reading "
               "another one's lines (see the incident this assert was added after).");
 
+// ---- unlock hints -----------------------------------------------------------
+// Every hidden unlock lives in a background, and the point of them is that
+// people FIND them -- so on the right background, while it is still locked,
+// his background chatter turns into hints. They escalate: the first time he
+// brings one up it is a nudge, the second is clearer, and from then on he just
+// tells you what to do. Counted in RAM, so a reboot starts the nudges over,
+// which is right for somebody who has not been paying attention.
+enum Egg : uint8_t { EGG_WOLF, EGG_CHROME, EGG_PET, EGG_EYE, EGG_PARKA, EGG_N };
+static const char* const HINTS[EGG_N][3] = {
+    /* FIRE: five taps on the moon */
+    { "That moon's got a werewolf look to it.",
+      "The moon might answer if you knock.",
+      "Tap the moon five times, quick!" },
+    /* TOASTERS: the rare gold toaster */
+    { "Keep an eye out for a shiny toaster.",
+      "The gold ones are rare. Catch one.",
+      "See a gold toaster? Tap it!" },
+    /* TOASTERS: the little guy who walks the ground */
+    { "Something little wanders by sometimes.",
+      "A little guy walks by every few minutes.",
+      "When the little guy walks by, tap him!" },
+    /* STARFIELD: two big eyes in a row */
+    { "Sometimes space looks back at you.",
+      "Catch a big eye while it's close.",
+      "Tap two big eyes in a row. Miss none!" },
+    /* SNOWFALL: five knocks on the lodge */
+    { "That lodge on the ridge looks lived in.",
+      "Five windows on that lodge. Wonder why.",
+      "Knock on the lodge five times. Quick!" },
+};
+static uint8_t s_hintSaid[EGG_N] = {};
+
+static void ensurePrefsLoaded();
+
+static bool eggLocked(uint8_t e) {
+    ensurePrefsLoaded();
+    switch (e) {
+        case EGG_WOLF:   return !outfitUnlocked((uint8_t)OutfitId::WOLFPELT);
+        case EGG_CHROME: return !outfitUnlocked((uint8_t)OutfitId::CHROMEWING);
+        case EGG_PET:    return !s_petUnlocked;
+        case EGG_EYE:    return !outfitUnlocked((uint8_t)OutfitId::VOIDEYE);
+        case EGG_PARKA:  return !outfitUnlocked((uint8_t)OutfitId::PARKA);
+        default:         return false;
+    }
+}
+
+// The locked unlocks this background holds, at most two.
+static uint8_t eggsHere(uint8_t out[2]) {
+    uint8_t n = 0;
+    auto add = [&](uint8_t e) { if (n < 2 && eggLocked(e)) out[n++] = e; };
+    switch (Settings::background()) {
+        case Settings::Background::FIRE:      add(EGG_WOLF); break;
+        case Settings::Background::TOASTERS:  add(EGG_CHROME); add(EGG_PET); break;
+        case Settings::Background::STARFIELD: add(EGG_EYE); break;
+        case Settings::Background::SNOWFALL:  add(EGG_PARKA); break;
+        default: break;
+    }
+    return n;
+}
+
+static bool hintAvailable() {
+    uint8_t e[2];
+    return eggsHere(e) > 0;
+}
+
 static const char* pickBackgroundLine() {
     uint8_t idx = (uint8_t)Settings::background();
     if (idx >= Settings::BACKGROUND_COUNT) idx = 0;
+    // Two times in three, if there is something to find here, a hint instead.
+    uint8_t eggs[2];
+    const uint8_t n = eggsHere(eggs);
+    if (n && random(0, 3) != 0) {
+        const uint8_t e = eggs[random(0, n)];
+        const uint8_t said = s_hintSaid[e];
+        // Nudge, clearer, then the answer -- and after that the clear one or
+        // the answer, so it does not become the same sentence every time.
+        const uint8_t lvl = said < 2 ? said : (uint8_t)random(1, 3);
+        if (said < 255) s_hintSaid[e]++;
+        return HINTS[e][lvl];
+    }
     return BG_LINES[idx][random(0, 3)];
 }
 
@@ -3141,6 +3218,31 @@ static int outfitReach(OutfitId o) {
     }
 }
 
+// Where the Legend top hat's brim rests, in units above the head anchor: on
+// top of whatever is highest on him. Read off drawOutfit() the same way
+// outfitReach() is. On the costumes that are already a hat it goes ON the
+// hat -- funnier than leaving it off, as long as it is seated, not floating.
+static const int TOP_HAT_H = 11;   // brim bottom to crown top
+static int topHatSeat(OutfitId o) {
+    switch (o) {
+        // Both points are one pixel wide at the very top. 9 sinks the brim
+        // down onto the cone and the tricorn, far enough that it is plainly
+        // sitting on them rather than balanced on a pinpoint.
+        case OutfitId::TINFOIL:  return  9;   // pushed down onto the cone
+        case OutfitId::CAPTAIN:  return  9;   // ...and onto the tricorn
+        case OutfitId::PARKA:    return 14;   // on the hood
+        case OutfitId::SPACE:    return  9;   // on the dome
+        case OutfitId::WOLFPELT: return  7;   // on the pelt, between the ears
+        case OutfitId::TALLBRO:  return  6;   // on the cap
+        case OutfitId::PLUMBER:  return  4;
+        case OutfitId::VOIDEYE:  return  4;   // perched on the sphere
+        case OutfitId::UNICORN:  return  2;   // the horn comes up through it
+        default:                 return  3;   // on his hair, over the tuft tips
+    }
+}
+
+bool hasTopHat() { return currentStage() == GrowthStage::LEGEND; }
+
 // How far past the top edge a costume is allowed to go, as a percentage of
 // his drawn height. Not zero: seating the horn and the ears completely
 // would cost a third of his size on those two outfits and he would visibly
@@ -3948,6 +4050,20 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     // would show around it. Everything inside keeps its original indentation
     // so this stays a two-line change instead of a two-hundred-line reformat.
     const bool hideFace = (outfitNow == OutfitId::VOIDEYE);
+    // The Legend top hat -- see where it goes on, in the head group below.
+    // Out here because the void eye skips that group and still wears it.
+    const bool legendHat = currentStage() == GrowthStage::LEGEND && Settings::topHatShown();
+    auto topHat = [&](int seat) {                // seat: the brim's bottom edge
+        // Charcoal inside a lighter rim, not flat black: most of his
+        // backgrounds are a night sky, and a black hat against one is a pink
+        // band floating over his head with nothing holding it up.
+        const uint16_t rim = blend(BLACK, WHITE, 140), felt = blend(BLACK, WHITE, 60);
+        t.fillRoundRect(cx2 - S(9) - 1, seat - S(3) - 1, S(18) + 2, S(3) + 2, 1, rim);
+        t.fillRect(cx2 - S(5) - 1, seat - S(TOP_HAT_H) - 1, S(10) + 2, S(9) + 1, rim);
+        t.fillRoundRect(cx2 - S(9), seat - S(3), S(18), S(3), 1, felt);
+        t.fillRect(cx2 - S(5), seat - S(TOP_HAT_H), S(10), S(9), felt);
+        t.fillRect(cx2 - S(5), seat - S(5), S(10), S(2), VAPOR_PINK);
+    };
     // PARKA has no mouth. Guarded at each draw rather than painted over
     // afterwards: the mouth moves and changes shape with the mood, so no
     // fixed patch covers all of them, and one big enough to try spills off
@@ -4012,21 +4128,7 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         t.fillTriangle(cx2 + S(5),  hh + S(3), cx2 + S(9), hh - S(4), cx2 + S(13),hh + S(3), furLight);
     }
 
-    // A tiny top hat, unlocked once he reaches Legend stage. Skipped for the
-    // Unicorn outfit specifically: its horn already occupies that exact spot,
-    // and the two stacked together read as clutter rather than two readable
-    // accessories.
-    //
-    // Seated five units of air above the tallest tuft, which is where it has
-    // always sat -- it just keeps having to follow the tuft down. Originally
-    // 22, against a 14-unit spike. Then 17, when the crest became a 9-unit
-    // cowlick. Now 15, with that tuft at 80% of nine. Same rule each time,
-    // and left alone at any step it floats above his head instead of on it.
-    if (currentStage() == GrowthStage::LEGEND && currentOutfit() != OutfitId::UNICORN) {
-        t.fillRoundRect(cx2 - S(9), hh - S(15), S(18), S(3), 1, BLACK);
-        t.fillRect(cx2 - S(5), hh - S(23), S(10), S(9), BLACK);
-        t.fillRect(cx2 - S(5), hh - S(17), S(10), S(2), VAPOR_PINK);
-    }
+    // (The Legend top hat goes on after drawOutfit(), below.)
 
     // Ears — small and tucked close, like a real Sasquach rather than
     // a cartoon animal's.
@@ -4248,6 +4350,16 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     }   // end if (!hideFace)
 
     drawOutfit(t, cx2, hh, now, m, scale, outfitNow);
+
+    // A tiny top hat, unlocked once he reaches Legend stage, seated on top of
+    // whatever is highest on his head -- see topHatSeat(). After the costume,
+    // so it sits on a cap or a hood or a pelt rather than under it.
+    //
+    // It used to hover five units above his tallest tuft on every outfit
+    // alike, which put it floating over the tinfoil cone, over both caps,
+    // outside the space helmet and half behind the captain's hat, and the
+    // void eye, drawn with his face hidden, never got one at all.
+    if (legendHat) topHat(hh - S(topHatSeat(outfitNow)));
 
     // ---- props ---------------------------------------------------------
     // Drawn last, so they sit in front of the costume as well as the body.
@@ -4756,7 +4868,9 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
                 say(pick(RELAXED_MOOD_LINES, 4), MIN_BUBBLE_MS);
             } else if (haveHistory && random(0, 6) == 0) {
                 say(buildStatLine(), MIN_BUBBLE_MS);
-            } else if (random(0, 6) == 0) {
+            } else if (random(0, hintAvailable() ? 2 : 6) == 0) {
+                // Three times as often on a background with something still to
+                // find in it -- see pickBackgroundLine().
                 say(pickBackgroundLine(), MIN_BUBBLE_MS);
             } else if (longIdle && random(0, 3) == 0) {
                 say(pick(BORED_LINES, 4), MIN_BUBBLE_MS);
@@ -4836,8 +4950,18 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     {
         const int A    = availHeight - bubbleRowH;
         const int Cy   = topY + bubbleRowH;
-        const int num  = baseH * (TOP_MARGIN - Cy) + CREST_REACH * A;
-        const int den  = baseH + CREST_REACH;
+        // A Legend's top hat is held to the same line as his crest -- all of
+        // it on screen, not the tenth a costume may run past the edge. A hat
+        // clipped at the top is a brim and a pink band, which is what it was
+        // on every Legend until this; he draws a little smaller instead.
+        int crestR = CREST_REACH;
+        // ...and not when it has been taken off, so he gets his size back.
+        if (currentStage() == GrowthStage::LEGEND && Settings::topHatShown()) {
+            const int hatR = topHatSeat(currentOutfit()) + TOP_HAT_H;
+            if (hatR > crestR) crestR = hatR;
+        }
+        const int num  = baseH * (TOP_MARGIN - Cy) + crestR * A;
+        const int den  = baseH + crestR;
         if (num > 0) {
             const int need = (num + den - 1) / den;
             if (headroom < need) headroom = need;

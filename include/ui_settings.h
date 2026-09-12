@@ -32,6 +32,8 @@ enum class SettingsRow : uint8_t {
     RESET_STATS,
     SQUACHY_NAME,   // opens the payphone; SquachMesh builds only
     SQUACHMESH,     // announce ourselves to other SquachWatches
+    APPEARANCE,     // opens the APPEARANCE page: the display rows, and the hat
+    TOP_HAT,        // on the APPEARANCE page, once he is a Legend
     BACK,
     COUNT,
     NONE = 255
@@ -40,6 +42,12 @@ enum class SettingsRow : uint8_t {
 void uiSettingsInit(TFT_eSPI& t);
 void uiSettingsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng);
 void uiSettingsScroll(int delta);     // positive = scroll down
+
+// The APPEARANCE page is this same screen with a different list on it, so its
+// rows draw and hit-test exactly as they always did. uiSettingsInit() always
+// comes back to the main page.
+void uiSettingsOpenAppearance(bool open);
+bool uiSettingsInAppearance();
 
 // Row layout matches whatever uiSettingsTick just drew (same geometry
 // function underneath), so call this only against a screen that's

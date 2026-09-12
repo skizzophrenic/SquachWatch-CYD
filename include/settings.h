@@ -88,6 +88,10 @@ namespace Settings {
     bool       rotationLocked();
     void       toggleRotationLock();
 
+    // The Legend top hat: worn unless taken off on the APPEARANCE page.
+    bool       topHatShown();
+    void       toggleTopHat();
+
     // Last rotation (0..3, TFT_eSPI's setRotation() values) the rotate
     // button left the screen on -- so it comes back up the same way
     // after a power cycle instead of always resetting to the board's
@@ -218,6 +222,21 @@ namespace Settings {
     void        setMeshConsent(bool v);
     const char* meshDetectLabel();
     const char* meshTransmitLabel();
+    // CROWD: how many SquachWatches may be on screen at once, roaming rather
+    // than standing. 1 is the old behaviour -- one visitor, both of them on
+    // the ground. Measured on hardware: eight at the size they shrink to cost
+    // LESS to draw than the two at today's size do (17.6 ms against 29).
+    //
+    // Any number from one to eight, and EIGHT IS NOT ARBITRARY: the radio's
+    // squad ring holds eight (SQUAD_N in mesh.cpp), so a ninth board in the
+    // room evicts the first. Raising this without raising that would offer a
+    // number the hardware cannot hear.
+    //
+    // Up to four share one row; past four they take two or three, because
+    // five across reads as a queue and four across still reads as a group.
+    uint8_t     meshCrowd();
+    const char* meshCrowdLabel();
+    void        cycleMeshCrowd();
     void        cycleMeshDetect();
     void        cycleMeshTransmit();
     // For the one-line summary on the Settings row that opens the menu.

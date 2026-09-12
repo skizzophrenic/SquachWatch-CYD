@@ -162,13 +162,16 @@ uint8_t textParts(const char* s);
 // It was one byte, four bits of each, until there were more than sixteen
 // emotes. Nothing released had sent one, so the format was free to change.
 //
-// May be ADDED at the end once released, never reordered.
+// May be ADDED at the end once released, never reordered. (TICKLE was cut
+// from the middle of this list before any release carried the scripted ones
+// -- v1.5.25 stops at BOO -- so nothing shipped ever sent the numbers that
+// moved. That was the last moment it could be done.)
 enum class Emote : uint8_t {
     WAVE, HIGH_FIVE, DANCE, RPS, SNOWBALL, BOO,
     // Everything from here on is a script -- see emote_script.h.
     FIST_BUMP, HANDSHAKE, SALUTE, BOW, HUG,
     COIN, DICE, ARM_WRESTLE, TUG, LEAPFROG,
-    PIE, BALLOON, PLANE, PILLOW, TICKLE,
+    PIE, BALLOON, PLANE, PILLOW,
     GIFT, SNACK, CHEERS, CONFETTI, FIREWORKS,
     HEART, LAUGH, SAD, GRR, SLEEPY,
     TINFOIL, CAMERA, SPOTTED, HOWL, SELFIE,

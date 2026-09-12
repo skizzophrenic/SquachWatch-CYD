@@ -19,18 +19,21 @@ static int g_scroll = 0;
 // removed here, so their SettingsRow values stay stable regardless of
 // which mode is active.
 static const SettingsRow ALL_ROWS[] = {
-    SettingsRow::THEME, SettingsRow::BACKGROUND, SettingsRow::BACKGROUND_LOCK, SettingsRow::BRIGHTNESS, SettingsRow::INVERT,
-    SettingsRow::RGB_SWAP, SettingsRow::ROTATION_LOCK,
     SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE, SettingsRow::DETECTION_FILTER,
     SettingsRow::IGNORED_DEVICES,
-    SettingsRow::NICKNAME,
+    // APPEARANCE opens the display page -- see APPEARANCE_ROWS. It sat at the
+    // very top of this list, which put it under the first thumb that opened
+    // the screen and got pressed by accident. Down here with SQUACHMESH it is
+    // beside the other row that opens a page rather than changing a value.
+    SettingsRow::NICKNAME, SettingsRow::APPEARANCE,
 #if SQUACH_MESH
     // One row, not two: NAME moved inside the SquachMesh menu, which is a
     // row back on a list carrying twenty-five with three colliding in
     // portrait.
     SettingsRow::SQUACHMESH,
 #endif
-    SettingsRow::SHADES_COLOR, SettingsRow::SQUACHY_SIZE,
+    // SHADES COLOR moved to the APPEARANCE page -- see APPEARANCE_ROWS.
+    SettingsRow::SQUACHY_SIZE,
     SettingsRow::OUTFIT, SettingsRow::PET,
     SettingsRow::REPLAY_INTRO, SettingsRow::SHOW_OFF, SettingsRow::VIEW_DIARY,
     SettingsRow::POWER_SAVER,
@@ -39,18 +42,43 @@ static const SettingsRow ALL_ROWS[] = {
 };
 static const uint8_t ALL_ROWS_N = sizeof(ALL_ROWS) / sizeof(ALL_ROWS[0]);
 
+// The APPEARANCE page: everything about how the screen looks, plus the Legend
+// top hat -- which only gets a row once he has a hat to take off.
+static const SettingsRow APPEARANCE_ROWS[] = {
+    SettingsRow::THEME, SettingsRow::BACKGROUND, SettingsRow::BACKGROUND_LOCK, SettingsRow::BRIGHTNESS,
+    SettingsRow::INVERT, SettingsRow::RGB_SWAP, SettingsRow::ROTATION_LOCK,
+    // How HE looks, under the same heading as how the screen does.
+    SettingsRow::SHADES_COLOR, SettingsRow::TOP_HAT,
+    SettingsRow::BACK,
+};
+static const uint8_t APPEARANCE_ROWS_N = sizeof(APPEARANCE_ROWS) / sizeof(APPEARANCE_ROWS[0]);
+static_assert(APPEARANCE_ROWS_N <= ALL_ROWS_N, "the display list is sized off ALL_ROWS");
+static bool s_appearance = false;   // which page is up
+
 static bool isSquachyOnlyRow(SettingsRow r) {
     return r == SettingsRow::REPLAY_INTRO || r == SettingsRow::SHOW_OFF ||
            r == SettingsRow::NICKNAME || r == SettingsRow::SQUACHY_NAME ||
+           // NOT Appearance: it is the only way to theme, background,
+           // brightness, invert, colour order and rotation lock, none of which
+           // are about Squachy. Listed here for one hour and boring mode lost
+           // its brightness control -- see groupFor(), which moves the row to
+           // SYSTEM in that mode instead of hiding it.
            r == SettingsRow::SQUACHMESH ||
            r == SettingsRow::SHADES_COLOR || r == SettingsRow::SQUACHY_SIZE ||
            r == SettingsRow::OUTFIT ||
-           r == SettingsRow::PET;
+           r == SettingsRow::PET || r == SettingsRow::TOP_HAT;
 }
 
 enum class RowGroupId : uint8_t { APPEARANCE, BEHAVIOR, SQUACHY, SYSTEM };
 
 static RowGroupId groupFor(SettingsRow r) {
+    // Appearance sits with the Squachy rows because that is where it was asked
+    // for and where a thumb opening this screen will not hit it by accident.
+    // Boring mode filters every OTHER row in that group, though, and a lone
+    // "APPEARANCE" under a SQUACHY heading in a mode with no Squachy reads as
+    // a leftover. It goes to SYSTEM there -- still reachable, which is the
+    // part that matters, since the display rows live behind it.
+    if (r == SettingsRow::APPEARANCE && Settings::boringMode()) return RowGroupId::SYSTEM;
     switch (r) {
         case SettingsRow::THEME:
         case SettingsRow::BACKGROUND:
@@ -59,6 +87,8 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::INVERT:
         case SettingsRow::RGB_SWAP:
         case SettingsRow::ROTATION_LOCK:
+        case SettingsRow::SHADES_COLOR:
+        case SettingsRow::TOP_HAT:
             return RowGroupId::APPEARANCE;
         case SettingsRow::BORING_MODE:
         case SettingsRow::CONFIDENCE:
@@ -67,8 +97,8 @@ static RowGroupId groupFor(SettingsRow r) {
             return RowGroupId::BEHAVIOR;
         case SettingsRow::NICKNAME:
         case SettingsRow::SQUACHY_NAME:
+        case SettingsRow::APPEARANCE:
         case SettingsRow::SQUACHMESH:
-        case SettingsRow::SHADES_COLOR:
         case SettingsRow::SQUACHY_SIZE:
         case SettingsRow::OUTFIT:
         case SettingsRow::PET:
@@ -117,13 +147,18 @@ static uint8_t buildDisplayList(DisplayItem* out) {
     SettingsRow rows[ALL_ROWS_N];
     uint8_t n = 0;
     bool boring = Settings::boringMode();
-    for (uint8_t i = 0; i < ALL_ROWS_N; i++) {
-        if (boring && isSquachyOnlyRow(ALL_ROWS[i])) continue;
-        // PET is the only row that is hidden by not being EARNED rather
-        // than by a mode. Showing a permanently-off row for something you
-        // have never seen would give the secret away.
-        if (ALL_ROWS[i] == SettingsRow::PET && !Squachy::petUnlocked()) continue;
-        rows[n++] = ALL_ROWS[i];
+    const SettingsRow* src  = s_appearance ? APPEARANCE_ROWS : ALL_ROWS;
+    const uint8_t      srcN = s_appearance ? APPEARANCE_ROWS_N : ALL_ROWS_N;
+    for (uint8_t i = 0; i < srcN; i++) {
+        const SettingsRow r = src[i];
+        if (boring && isSquachyOnlyRow(r)) continue;
+        // PET and TOP HAT are hidden by not being EARNED rather than by a
+        // mode. Showing a permanently-off row for something you have never
+        // seen would give the secret away -- and a switch for a hat he is
+        // not wearing yet would be a switch that does nothing.
+        if (r == SettingsRow::PET && !Squachy::petUnlocked()) continue;
+        if (r == SettingsRow::TOP_HAT && !Squachy::hasTopHat()) continue;
+        rows[n++] = r;
     }
 
     uint8_t count = 0;
@@ -131,7 +166,14 @@ static uint8_t buildDisplayList(DisplayItem* out) {
     RowGroupId lastGroup = RowGroupId::APPEARANCE;
     for (uint8_t i = 0; i < n; i++) {
         RowGroupId g = groupFor(rows[i]);
-        if (!haveLastGroup || g != lastGroup) {
+        // No SYSTEM header over the APPEARANCE page's own BACK.
+        //
+        // The APPEARANCE row used to be exempt too, back when it sat at the
+        // top of the list and read as a heading in its own right. It lives in
+        // the SQUACHY cluster now, so that exemption would suppress the
+        // SQUACHY header whenever APPEARANCE happened to come first in it.
+        const bool headerless = s_appearance && rows[i] == SettingsRow::BACK;
+        if (!headerless && (!haveLastGroup || g != lastGroup)) {
             out[count].isHeader = true;
             out[count].group = g;
             count++;
@@ -193,6 +235,7 @@ static void computeGeom(TFT_eSPI& t, int screenH, int& top, int& bodyBottom,
 
 void uiSettingsInit(TFT_eSPI& t) {
     g_scroll = 0;
+    s_appearance = false;   // arriving at Settings is arriving at its main page
     // Any pending question dies with the screen. Coming back to Settings and
     // finding a confirm panel still up from last time would be answering
     // something you no longer remember asking.
@@ -320,6 +363,14 @@ void uiSettingsScroll(int delta) {
     g_scroll += delta;
     if (g_scroll < 0) g_scroll = 0;
 }
+
+void uiSettingsOpenAppearance(bool open) {
+    s_appearance = open;
+    g_scroll = 0;
+    uiSettingsSetConfirm(SettingsRow::NONE);
+}
+
+bool uiSettingsInAppearance() { return s_appearance; }
 
 static void drawHeader(TFT_eSPI& t, int w, int y, int hgt, RowGroupId g) {
     t.setTextSize(1);
@@ -553,6 +604,12 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             value = valBuf;
             danger = true;
             break;
+        case SettingsRow::APPEARANCE:
+            label = "APPEARANCE"; value = ">";
+            break;
+        case SettingsRow::TOP_HAT:
+            label = "TOP HAT"; value = Settings::topHatShown() ? "SHOWN" : "HIDDEN";
+            break;
         case SettingsRow::BACK:
             label = "< BACK";
             break;
@@ -602,7 +659,7 @@ switch (Settings::background()) {
     }
     Theme::restorePalette(saved);
 
-    Theme::drawTitleBar(t, ">> SETTINGS <<");
+    Theme::drawTitleBar(t, s_appearance ? ">> APPEARANCE <<" : ">> SETTINGS <<");
 
     DisplayItem items[ALL_ROWS_N + 4];
     uint8_t n = buildDisplayList(items);

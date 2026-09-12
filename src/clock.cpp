@@ -1,6 +1,7 @@
 // SquachWatch-CYD — wall-clock time. See clock.h.
 #include "clock.h"
 #include "security.h"   // a locked device takes no console commands
+#include "crowd_bench.h"
 #include <Arduino.h>
 #include <time.h>
 #include <sys/time.h>
@@ -120,6 +121,10 @@ void pollSerial() {
                               "the epoch, e.g. TIME %lu\n",
                               (unsigned long)e, (unsigned long)kPlausible + 1u);
             }
+#if CROWD_BENCH
+        } else if (strncasecmp(line, "CROWD", 5) == 0) {
+            CrowdBench::command(line + 5);
+#endif
         } else {
             Serial.printf("[clock] unknown command. TIME <epoch seconds> "
                           "sets the clock.\n");

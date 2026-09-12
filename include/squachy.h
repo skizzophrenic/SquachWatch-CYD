@@ -165,6 +165,9 @@ namespace Squachy {
     // different thing that unfortunately shares the English.
     void unlockPet();          // earned: tap him on the toasters
     bool petUnlocked();
+    // Legend stage, where the top hat comes in -- and so where the
+    // APPEARANCE page's TOP HAT row appears.
+    bool hasTopHat();
     bool petEnabled();         // the Settings > PET row
     void togglePet();
 

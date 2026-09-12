@@ -24,7 +24,7 @@ class DetectionEngine;
 // What a tap landed on. NONE means it hit a gap.
 // In the order they are drawn -- the hit test maps a row index straight onto
 // this, so the two orders must never differ.
-enum class MeshMenuRow : uint8_t { DETECT, TRANSMIT, MESSAGES, PHRASE, NAME, BACK, NONE };
+enum class MeshMenuRow : uint8_t { DETECT, TRANSMIT, MESSAGES, CROWD, PHRASE, NAME, BACK, NONE };
 
 void uiMeshMenuInit(TFT_eSPI& t);
 // Takes the engine only for the backdrop: THE GIBSON reads the log and the

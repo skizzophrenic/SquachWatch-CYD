@@ -115,15 +115,19 @@ int main() {
     {
         uint8_t seen[(size_t)E::COUNT] = {};
         bool named = true;
+        int empty = 0;
         for (uint8_t t = 0; t < TABS; t++)
             for (uint8_t i = 0; i < PER_TAB; i++) {
                 const E e = atTab(t, i);
-                if ((uint8_t)e < (uint8_t)E::COUNT) seen[(uint8_t)e]++;
+                // E::COUNT in a slot is an empty tile, which the picker skips.
+                if ((uint8_t)e >= (uint8_t)E::COUNT) { empty++; continue; }
+                seen[(uint8_t)e]++;
                 if (!name(e)[0] || strlen(name(e)) > 10 || strlen(sub(e)) > 10) named = false;
             }
         bool once = true;
         for (uint8_t i = 0; i < (uint8_t)E::COUNT; i++) if (seen[i] != 1) once = false;
-        ck("six tabs of six is all thirty-six", TABS * PER_TAB == (int)E::COUNT);
+        ck("six tabs of six hold all thirty-five, and one empty tile", TABS * PER_TAB == (int)E::COUNT + 1);
+        ck("exactly one tile is empty", empty == 1);
         ck("each on exactly one tab", once);
         ck("each with a name that fits its tile", named);
     }

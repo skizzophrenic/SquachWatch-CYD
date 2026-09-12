@@ -13,7 +13,7 @@
 namespace {
 
 const int TOP_MARGIN = 34;   // room for the heading
-const uint8_t ROW_N = 6;
+const uint8_t ROW_N = 7;
 
 // Row height from live font metrics, shared by drawing and hit-testing so
 // the two cannot drift -- the same reason every other row list in this
@@ -81,12 +81,15 @@ void uiMeshMenuTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     row(t, w, top + 2 * rowH, rowH, "MESSAGES",
         !st ? "ERR" : (Settings::messagesOn() ? "ON" : "OFF"),
         !st ? Theme::RED : (Settings::messagesOn() ? Theme::GREEN : Theme::W95_SHADOW));
+    // How many of them may be on screen at once, and whether they roam.
+    row(t, w, top + 3 * rowH, rowH, "CROWD", Settings::meshCrowdLabel(),
+        Settings::meshCrowd() > 1 ? Theme::GREEN : Theme::W95_SHADOW);
     // Never the phrase itself. This screen is looked at over shoulders.
-    row(t, w, top + 3 * rowH, rowH, "PHRASE",
+    row(t, w, top + 4 * rowH, rowH, "PHRASE",
         MeshTalk::havePhrase() ? "SET >" : "NONE >",
         MeshTalk::havePhrase() ? Theme::VAPOR_YELLOW : Theme::W95_SHADOW);
-    row(t, w, top + 4 * rowH, rowH, "NAME",     nm, Theme::VAPOR_YELLOW);
-    row(t, w, top + 5 * rowH, rowH, "[ BACK ]", nullptr, Theme::CYAN);
+    row(t, w, top + 5 * rowH, rowH, "NAME",     nm, Theme::VAPOR_YELLOW);
+    row(t, w, top + 6 * rowH, rowH, "[ BACK ]", nullptr, Theme::CYAN);
 
     // One line saying what the two switches actually mean together, because
     // "DETECT off, TRANSMIT on" is not self-evidently "they can see you but
