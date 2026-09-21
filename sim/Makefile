@@ -234,6 +234,16 @@ $(OBJ_DIR)/live/%.o: %.cpp Makefile
 $(BIN): $(UI_OBJS) $(SIM_OBJS)
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lm
 
+$(OBJ_DIR)/check-progress: $(UI_OBJS) $(OBJ_DIR)/sim/detection_sim.o check_progress.cpp
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lm
+
+.PHONY: progress-check
+progress-check: $(OBJ_DIR)/check-progress
+	@mkdir -p $(OBJ_DIR)/progress-nvs
+	@rm -f $(OBJ_DIR)/progress-nvs/*.nvs
+	SQUACHSIM_NVS=$(OBJ_DIR)/progress-nvs ./$(OBJ_DIR)/check-progress
+	SQUACHSIM_NVS=$(OBJ_DIR)/progress-nvs ./$(OBJ_DIR)/check-progress reload
+
 $(LIVE_BIN): $(UI_OBJS) $(LIVE_OBJS)
 	$(CXX) $(CXXFLAGS) $(LIVE_FLAGS) -o $@ $^ -lm
 

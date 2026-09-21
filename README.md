@@ -76,6 +76,13 @@ otherwise see all week. It is one tap away in `DETECTION FILTER`.
 That's it. No buzzer, no GPS, no extra modules. The CYD is the
 whole device.
 
+An **experimental original M5Stack Cardputer (K132)** target is also available:
+`pio run -e cardputer`. It uses a keyboard-driven 240×135 interface with the
+shared detector, SD logging, Squachy, outfits and bingo. See the
+[Cardputer guide](docs/CARDPUTER.md) for controls, supported features, hardware
+validation and flashing instructions. Cardputer ADV is not supported by this
+target, and the CYD web flasher must not be used for it.
+
 ## Web Flash
 
 No build tools, no IDE, no cloning anything — flash a board straight

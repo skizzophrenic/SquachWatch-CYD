@@ -6,3 +6,4 @@
 
 # Host test binaries (test/Makefile builds into here)
 test/out/
+__pycache__/

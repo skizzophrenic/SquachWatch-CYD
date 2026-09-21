@@ -238,6 +238,11 @@ static const char* BOOT_LINES[] = {
 // rest of these banks use, since this is the one place Squachy needs
 // to actually explain something instead of just cracking a joke.
 static const char* const ONBOARD_LINES[] = {
+#if defined(CARDPUTER)
+    "I'm Squachy! P pets me. Space shows my moves.",
+    "Real matches earn outfits. O opens your wardrobe; C changes shades.",
+    "B opens detection bingo. L opens the log. S brings you home.",
+#else
     "Hey! First boot -- I'm Squachy. Two minutes, then I'll let you go.",
     "SquachWatch listens for surveillance nearby -- cameras, plate readers, trackers like AirTags.",
     "No magic. Just WiFi and Bluetooth, matching known hardware as it passes by.",
@@ -250,6 +255,7 @@ static const char* const ONBOARD_LINES[] = {
 #endif
     "Tap me for a pet, hold me for a beat longer, or stroke me. Hold then drag to carry me.",
     "That's everything. Stay squachy.",
+#endif
 };
 static const uint8_t  ONBOARD_N        = sizeof(ONBOARD_LINES) / sizeof(ONBOARD_LINES[0]);
 static const uint32_t ONBOARD_STEP_MS  = 11000; // auto-advances if nobody taps
@@ -332,15 +338,15 @@ static const char* PETTING_LINES[] = {
 // Deliberately more lines than the other pools. A reassurance you see twice
 // a minute for hours has to not wear out, and four would.
 static const char* WATCHING_LINES[] = {
-    "Still watching. Nothing's snuck past.",
-    "Eyes open. You're covered.",
-    "Sweeping the airwaves. All quiet so far.",
+    "Still watching for familiar signatures.",
+    "Eyes open. Still listening.",
+    "Sweeping the airwaves for matches.",
     "I'm on it. Go about your business.",
     "Listening. Nothing worth telling you about.",
-    "Two point four gigahertz of nothing. Good.",
-    "Nobody's looking at you but me.",
+    "Plenty of airwaves. Looking for signatures.",
+    "No match doesn't mean nothing's there.",
     "Watching the watchers. Nothing yet.",
-    "Radio's quiet. I'll shout if it isn't.",
+    "Listening for matches. I'll flag what I find.",
     "Keeping an eye out. Same as always.",
 };
 static const uint8_t WATCHING_N = sizeof(WATCHING_LINES) / sizeof(WATCHING_LINES[0]);
@@ -809,12 +815,12 @@ static const uint8_t NICKNAMES_N = sizeof(NICKNAMES) / sizeof(NICKNAMES[0]);
 // of these cycleShadesColor() can actually reach, based on pet count.
 static const char* const SHADE_NAMES[] = { "CYAN", "PINK", "GREEN", "PURPLE" };
 static const uint8_t SHADE_NAMES_N = sizeof(SHADE_NAMES) / sizeof(SHADE_NAMES[0]);
+static const uint32_t SHADE_PETS[] = {0, 10, 25, 50};
 
 static uint8_t unlockedShadeCount() {
-    if (s_petCount >= 50) return 4;
-    if (s_petCount >= 25) return 3;
-    if (s_petCount >= 10) return 2;
-    return 1;
+    uint8_t count = 1;
+    while (count < SHADE_NAMES_N && s_petCount >= SHADE_PETS[count]) ++count;
+    return count;
 }
 
 // Outfits (see squachy.h). NONE/TANOOKI/UNICORN are free (threshold 0);
@@ -987,12 +993,13 @@ static OutfitId currentOutfit() {
 // current by every DETECTION/BOOTED trigger. Legend also unlocks the
 // small hat drawn in drawBody().
 enum class GrowthStage : uint8_t { FLEDGLING, TRACKER, VETERAN, LEGEND };
+static const uint32_t GROWTH_TOTALS[] = {0, 25, 100, 500};
+static const char* const GROWTH_NAMES[] = {"FLEDGLING", "TRACKER", "VETERAN", "LEGEND"};
 
 static GrowthStage currentStage() {
-    if (s_cachedLifetimeTotal >= 500) return GrowthStage::LEGEND;
-    if (s_cachedLifetimeTotal >= 100) return GrowthStage::VETERAN;
-    if (s_cachedLifetimeTotal >= 25)  return GrowthStage::TRACKER;
-    return GrowthStage::FLEDGLING;
+    uint8_t stage = 0;
+    while (stage < 3 && s_cachedLifetimeTotal >= GROWTH_TOTALS[stage + 1]) ++stage;
+    return (GrowthStage)stage;
 }
 
 static char s_statBuf[56];
@@ -1575,6 +1582,9 @@ static const int CORNER_W    = 30;   // icon box plus a pixel of air
 static const int CORNER_H    = 20;   // ICON_BOX_H over in theme.cpp
 
 static int risenBubbleTop(int topY, int bx, int bw, int screenW) {
+#if defined(CARDPUTER)
+    return topY; // Preserve the compact keyboard UI's title bar.
+#endif
     // Clamped to row 1, not rejected below it. Every screen hands Squachy
     // topY = 16 and BUBBLE_RISE is 16, so ry is exactly 0 everywhere -- a
     // `< 1` test would fail on all of them and quietly switch the rise off
@@ -1757,7 +1767,12 @@ static void drawOnboardBubble(TFT_eSPI& t, int cx, int topY, const char* text,
     // chrome — the whole box already gets a full repaint every call
     // above, so this just naturally toggles on/off with no smear.
     if ((millis() / 500) % 2 == 0) {
-        const char* tap = "tap to continue >";
+        const char* tap =
+#if defined(CARDPUTER)
+            "Enter continues >";
+#else
+            "tap to continue >";
+#endif
         int tw2 = t.textWidth(tap);
         t.setCursor(bx + bw - tw2 - 6, topY + ONBOARD_BUBBLE_H - 12);
         t.print(tap);
@@ -1884,6 +1899,27 @@ uint8_t unlockedOutfitCount() {
 
 uint8_t outfitCount() {
     return OUTFITS_N;
+}
+
+bool nextOutfit(uint8_t& index, uint32_t& lifetimeTarget) {
+    ensurePrefsLoaded();
+    for (uint8_t i = 0; i < OUTFITS_N; ++i) {
+        if (OUTFITS[i].threshold != OUTFIT_BY_EVENT && !outfitUnlocked(i)) {
+            index = i; lifetimeTarget = OUTFITS[i].threshold;
+            return true;
+        }
+    }
+    return false;
+}
+uint32_t nextShadesPetCount() {
+    ensurePrefsLoaded();
+    const uint8_t count = unlockedShadeCount();
+    return count < SHADE_NAMES_N ? SHADE_PETS[count] : 0;
+}
+const char* growthStageName() { return GROWTH_NAMES[(uint8_t)currentStage()]; }
+uint32_t nextGrowthTotal() {
+    const uint8_t stage = (uint8_t)currentStage();
+    return stage < 3 ? GROWTH_TOTALS[stage + 1] : 0;
 }
 
 void unlockWolfPelt() {
@@ -2273,6 +2309,8 @@ static const char* const WINK_LINES[] = {
     "Still here. Still watching.",
 };
 
+// Layout reads this in standalone builds too, where it stays false.
+static bool s_company = false;
 #if SQUACH_MESH
 // ---- SquachMesh: the conversation two Squachys have -------------------
 //
@@ -2286,7 +2324,6 @@ static const char* const WINK_LINES[] = {
 // two speech bubbles on a 240px-tall screen is not a conversation, it is a
 // pile-up; taking turns is what makes it read as talking.
 void setVisiting(bool v) { s_visiting = v; }
-static bool s_company = false;
 void setCompany(bool on) { s_company = on; }
 bool visiting() { return s_visiting; }
 void setListening(bool v) { s_listening = v; }
@@ -5646,7 +5683,12 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     // above them. That is the wrapped bubbles and the ones beside a corner
     // button, drawn after him either way, over a part of his head with
     // nothing on it -- his face sits well below.
-    static const int BUBBLE_ROW_RISEN = 1;
+    static const int BUBBLE_ROW_RISEN =
+#if defined(CARDPUTER)
+        28; // Room for two small-font speech lines above the mascot.
+#else
+        1;
+#endif
     const int bubbleRowH = s_onboardActive ? ONBOARD_BUBBLE_H : BUBBLE_ROW_RISEN;
     // The floor below normally keeps him from going below scale 1.0 --
     // minScale lets a specific call site (the mini-scan-screen cameo)

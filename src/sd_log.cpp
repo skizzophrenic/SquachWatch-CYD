@@ -2,12 +2,16 @@
 #include "sd_log.h"
 #include <SD.h>
 #include <stdio.h>
+#include <esp_heap_caps.h>
+#if defined(CARDPUTER)
+#include <SPI.h>
+static SPIClass cardputerSdSPI(HSPI);
+#endif
 // The Phantoms define CYD (they ARE a CYD) but still need this reference,
 // because their touch shares the display's bus and SdLog::begin() has to hand
 // SD the display's own SPI instance -- see the comment on that branch below.
-#if !defined(CYD) || defined(RLPHANTOM) || defined(RLPHANTOM_R)
+#if (!defined(CYD) || defined(RLPHANTOM) || defined(RLPHANTOM_R)) && !defined(CARDPUTER)
 #include <TFT_eSPI.h>
-#include <esp_heap_caps.h>
 // The single TFT_eSPI instance main.cpp already owns and has already
 // init()'d by the time SdLog::begin() runs (see the comment below for
 // why AWOK/cyd35 specifically need this reference).
@@ -20,7 +24,9 @@ extern TFT_eSPI tft;
 // shares its display's VSPI bus too (14/13/12, not 18/19/23) but its
 // real SD-slot CS is unconfirmed -- 5 is a placeholder guess (SD has
 // failed to mount on every real unit tested so far regardless).
-#if defined(AWOK)
+#if defined(CARDPUTER)
+    #define SD_CS_PIN 12
+#elif defined(AWOK)
     #define SD_CS_PIN 14
 #else
     #define SD_CS_PIN 5
@@ -36,7 +42,10 @@ static const uint8_t SD_MAX_FILES = 2;
 bool SdLog::begin() {
     if (_ready) return true;
     Serial.printf("[sd] mounting: heap %lu, largest block %lu\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-#if defined(CYD35)
+#if defined(CARDPUTER)
+    cardputerSdSPI.begin(40, 39, 14, SD_CS_PIN);
+    if (!SD.begin(SD_CS_PIN, cardputerSdSPI, 4000000, "/sd", SD_MAX_FILES)) {
+#elif defined(CYD35)
     // (The RL Phantom used to land here too, and its SD card never worked as
     // a result: the card is on 18/19/23, and the display's SPI engine never
     // clocked those pins. Its display now runs on HSPI -- see its user setup

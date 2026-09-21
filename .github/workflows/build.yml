@@ -61,6 +61,11 @@ jobs:
       - name: Build
         run: pio run
 
+      # Opt-in board with its own entry point/source filter. Build it here
+      # without adding unreviewed S3 binaries to the CYD release flasher.
+      - name: Build original Cardputer
+        run: pio run -e cardputer
+
   tests:
     # The decoders are pure arithmetic over byte buffers, so they run on a
     # desktop with no board and no display. Worth a job of their own: the
@@ -82,6 +87,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build the PC emulator
         run: make -C sim -j"$(nproc)"
+      - name: Check Squachy reward progression and persistence
+        run: make -C sim progress-check
       - name: Render one frame
         run: |
           cd sim
