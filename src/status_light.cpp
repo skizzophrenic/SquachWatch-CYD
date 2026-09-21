@@ -17,7 +17,12 @@
 
 namespace StatusLight {
 
+#if defined(FNK0103L)
+// FNK0103L red LED is GPIO22; GPIO4 controls the audio amplifier.
+static const int     PIN_R = 22, PIN_G = 16, PIN_B = 17;
+#else
 static const int     PIN_R = 4, PIN_G = 16, PIN_B = 17;
+#endif
 static const uint8_t CH_R  = 3, CH_G  = 4,  CH_B  = 5;
 
 static const uint32_t TICK_MS        = 20;

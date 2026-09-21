@@ -9,12 +9,21 @@ namespace TouchCal {
 // The Fit lives in its own namespace, so a firmware that predates it (or a
 // rollback to one) never trips over it, and the old keys below stay exactly
 // where older firmware left them.
+#if defined(FNK0103L)
+// Keep incompatible calibrations from an earlier 2.8-inch build isolated.
+static const char* FIT_NS = "fnk32fit";
+#else
 static const char* FIT_NS  = "touchfit";
+#endif
 static const char* FIT_KEY = "fit";
 static const uint8_t FIT_VERSION = 1;
 
 // Where the calibrations written by older firmware live -- read-only now.
+#if defined(FNK0103L)
+static const char* NS = "fnk32cal";
+#else
 static const char* NS = "touchcal";
+#endif
 
 static const uint16_t GREEN = 0x07E0;
 static const uint16_t AMBER = 0xFD20;

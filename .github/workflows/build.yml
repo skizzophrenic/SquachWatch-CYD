@@ -61,6 +61,10 @@ jobs:
       - name: Build
         run: pio run
 
+      # Compile the opt-in board without adding it to release publishing.
+      - name: Build Freenove FNK0103L
+        run: pio run -e fnk0103l
+
   tests:
     # The decoders are pure arithmetic over byte buffers, so they run on a
     # desktop with no board and no display. Worth a job of their own: the

@@ -70,6 +70,21 @@ If asked to select a serial port, pick the one labeled
 `USB-SERIAL CH340` (Windows), `/dev/cu.usbserial-*` (macOS), or
 `/dev/ttyUSB0` (Linux).
 
+## Freenove FNK0103L (3.2-inch ST7789 IPS)
+
+Use the dedicated target for this board:
+
+```sh
+pio run -e fnk0103l
+pio run -e fnk0103l -t upload
+pio device monitor -b 115200
+```
+
+The upload speed is 115200 baud. Use a reliable USB data cable; packet
+corruption during flash reads was resolved by replacing the cable on the
+initial test board. Follow the five-target touch calibration at first boot.
+See [FNK0103L notes](FNK0103L.md) for wiring, testing, and update limitations.
+
 ## First boot
 
 The CYD will reboot and:

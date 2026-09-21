@@ -73,6 +73,9 @@ otherwise see all week. It is one tap away in `DETECTION FILTER`.
   Built-in 320×240 ILI9341 TFT, XPT2046 resistive touch, and an
   onboard microSD card slot.
 
+- **Freenove FNK0103L** — experimental 3.2-inch ST7789 IPS / XPT2046
+  support via the `fnk0103l` build. See [board setup and testing](docs/FNK0103L.md).
+
 That's it. No buzzer, no GPS, no extra modules. The CYD is the
 whole device.
 

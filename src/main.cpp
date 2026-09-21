@@ -389,12 +389,12 @@ static void drawCrashCard(TFT_eSPI& t) {
 //     getTouch() applied (rawReadFiltered()), as the 3.5" does, and may have
 //     an old TFT_eSPI calibration blob to convert for SKIP.
 //
-//   TOUCH_RAW_SHARED_BUS  -- the RL Phantom's resistive variant. A plain
+//   TOUCH_RAW_SHARED_BUS  -- RL Phantom resistive and Freenove FNK0103L. A plain
 //     pressure-gated raw read, and the 2.8"-style old calibration.
 #if defined(AWOK)
     #define TOUCH_ON_DISPLAY_BUS 1
 #endif
-#if defined(RLPHANTOM_R)
+#if defined(RLPHANTOM_R) || defined(FNK0103L)
     #define TOUCH_RAW_SHARED_BUS 1
 #endif
 // Everything that is true of BOTH: no dedicated touch peripheral, so nothing
@@ -457,7 +457,10 @@ static void drawCrashCard(TFT_eSPI& t) {
 // relative to it. File-scope (not local to setup()) so the Settings >
 // INVERT row handler in loop() can use the same XOR instead of
 // clobbering this baseline with an absolute call.
-#if defined(CYD35)
+#if defined(FNK0103L)
+// Freenove's IPS panel requires INVON, including after Settings changes.
+constexpr bool PANEL_NEEDS_INVERSION = true;
+#elif defined(CYD35)
 // UNCONFIRMED on real hardware post-fix: the original port's "true"
 // guess predates discovering the override bug above, so whatever
 // testing produced that value was toggling a header define that does
@@ -891,9 +894,13 @@ static bool s_screenDimmed = false;
 
 static void applyBrightness() {
     uint8_t duty = s_screenDimmed ? Settings::dimLevel() : Settings::brightness();
+#if !defined(FNK0103L)
     ledcWrite(BL_CH_ORIG, duty);
+#endif
     ledcWrite(BL_CH_CAP,  duty);
+#if !defined(FNK0103L)
     ledcWrite(BL_CH_AWOK, duty);
+#endif
 }
 
 // 240, 160 or 80 MHz. Never lower: the radio needs an 80 MHz APB clock, and
@@ -1912,11 +1919,14 @@ void setup() {
 // Not on AWOK (TOUCH_CS there) and not on either RL Phantom, where GPIO21 is
 // the capacitive controller's INTERRUPT line. Driving it high at boot is the
 // same mistake as the LEDC attach further down, just earlier.
-#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R)
+// FNK0103L drives only its verified backlight pin, GPIO27.
+#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(FNK0103L)
     pinMode(21, OUTPUT); digitalWrite(21, HIGH);
 #endif
     pinMode(27, OUTPUT); digitalWrite(27, HIGH);
+#if !defined(FNK0103L)
     pinMode(32, OUTPUT); digitalWrite(32, HIGH);  // AWOK's real BL pin; unused GPIO on the other two boards
+#endif
 
     tft.init();
 
@@ -1966,14 +1976,16 @@ void setup() {
 // TOUCH_CS on AWOK, and the capacitive controller's INTERRUPT line on the RL
 // Phantom. Driving a 5 kHz PWM onto either is the kind of fault that looks
 // like dead touch, which is exactly how it presented on the Phantom.
-#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R)
+#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(FNK0103L)
     ledcSetup(BL_CH_ORIG, 5000, 8);
     ledcAttachPin(BL_PIN_ORIG, BL_CH_ORIG);
 #endif
     ledcSetup(BL_CH_CAP, 5000, 8);
     ledcAttachPin(BL_PIN_CAP, BL_CH_CAP);
+#if !defined(FNK0103L)
     ledcSetup(BL_CH_AWOK, 5000, 8);
     ledcAttachPin(BL_PIN_AWOK, BL_CH_AWOK);
+#endif
     applyBrightness();
     // A saved core clock has to be restored here too, or the setting silently
     // reverts to 240 MHz on every reboot and looks like it never took.
@@ -2000,9 +2012,13 @@ void setup() {
         // radio start below: WiFi's RF calibration plus a full backlight is
         // more than a weak USB port holds, and the first run of this check
         // browned the Phantom out into a second boot.
+#if !defined(FNK0103L)
         ledcWrite(BL_CH_ORIG, 24);
+#endif
         ledcWrite(BL_CH_CAP,  24);
+#if !defined(FNK0103L)
         ledcWrite(BL_CH_AWOK, 24);
+#endif
         tft.fillScreen(Theme::BG);
         tft.setTextSize(1);
         tft.setTextWrap(false);
@@ -2077,13 +2093,17 @@ void setup() {
     usingCapTouch = false;
     Serial.println("cyd35 build -- XPT2046 on shared VSPI bus via TFT_eSPI.");
 #elif defined(TOUCH_RAW_SHARED_BUS)
-    // RL Phantom, resistive variant. The chip sits on the display's own bus
-    // (TOUCH_CS=33, armed by TFT_eSPI once rlphantom_r_user_setup.h is in
-    // scope), so there is no probe, no touch.begin() and no touchSPI -- but
+    // RL Phantom resistive and FNK0103L: TOUCH_CS=33 in the board header
+    // enables reads on the display bus. No capacitive probe, touch.begin()
+    // or touchSPI is needed here -- but
     // unlike AWOK the raw values come back to us and pollTouch() does its own
     // rotation maths on them, so touch follows the screen round.
     usingCapTouch = false;
+#if defined(FNK0103L)
+    Serial.println("FNK0103L -- XPT2046 on shared HSPI, raw reads + calibrated rotation.");
+#else
     Serial.println("RL Phantom (resistive) -- XPT2046 on shared bus, raw reads + rotation maths.");
+#endif
 #elif defined(TOUCH_ON_DISPLAY_BUS)
     // AWOK's XPT2046 sits on the display's own shared VSPI bus (TOUCH_CS=21,
     // already armed by TFT_eSPI itself once awok_user_setup.h's #define
@@ -2193,9 +2213,13 @@ void setup() {
     // browned out at exactly this point on every boot -- three seconds a
     // cycle, forever -- off any supply short of a powered hub. The backlight
     // is the one large load that nobody misses for a second at boot.
+#if !defined(FNK0103L)
     ledcWrite(BL_CH_ORIG, 24);
+#endif
     ledcWrite(BL_CH_CAP,  24);
+#if !defined(FNK0103L)
     ledcWrite(BL_CH_AWOK, 24);
+#endif
 
     // The black box, before the radios: this boot's record -- with the crash
     // in it when there was one -- then the log as the last boot left it, so
@@ -5007,7 +5031,9 @@ void loop() {
                 info.calB0 = (int16_t)lroundf(b0); info.calB1 = (int16_t)lroundf(b1);
             }
             info.usingCapTouch = usingCapTouch;
-#if defined(TOUCH_ON_DISPLAY_BUS)
+#if defined(FNK0103L)
+            info.boardName = "FNK0103L TEST";
+#elif defined(TOUCH_ON_DISPLAY_BUS)
             info.boardName = "AWOK";
 #elif defined(CYD35)
             info.boardName = "cyd35 BETA";
