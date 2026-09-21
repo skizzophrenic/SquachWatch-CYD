@@ -13,6 +13,9 @@
 #include "clock.h"
 #include "squachy.h"
 #include "bingo.h"
+#include "ignore_list.h"
+#include "cardputer_board.h"
+#include "cardputer_runtime.h"
 
 namespace {
 TFT_eSPI display;
@@ -22,24 +25,39 @@ CardputerKeys::Debouncer keys;
 constexpr uint8_t selectors[] = {8, 9, 11};
 constexpr uint8_t inputs[] = {13, 15, 3, 4, 5, 6, 7};
 constexpr uint16_t BG = 0x0801, CYAN = 0x07FF, PINK = 0xF81F;
-enum class Page { HOME, LOG, DETAIL, DIAGNOSTICS, WARDROBE, BINGO };
+enum class Page { HOME, LOG, DETAIL, DIAGNOSTICS, WARDROBE, BINGO, SETTINGS, FILTERS, IGNORED, DIARY, HELP };
 Page page = Page::HOME;
 uint8_t selected = 0;
 Detection detail = {};
 Detection alert = {};
-uint32_t alertAt = 0, lastAlertStamp = 0;
-uint8_t lastAlertMac[6] = {};
-bool haveAlert = false, haveLastAlert = false, buffered = false;
+uint32_t alertAt = 0;
+Cardputer::Sightings sightings;
+bool haveAlert = false, buffered = false;
 uint32_t wifiRate = 0, bleRate = 0, previousWifi = 0, previousBle = 0;
 uint32_t lastSample = 0, lastPaint = 0, lastSerial = 0;
 uint32_t bootReadyMs = 0;
 bool dirty = true;
 int dumpRow = -1;
-char command[16] = {};
+char command[32] = {};
 uint8_t commandLen = 0;
 bool commandOverflow = false;
 char reward[40] = {};
 uint32_t rewardAt = 0;
+int8_t rewardOutfit = -1;
+uint8_t menuRow = 0;
+constexpr uint8_t MENU_COUNT = 9;
+void handleKey(CardputerKeys::Action a);
+
+void reactTo(const Detection& d) {
+    Squachy::trigger(Squachy::Event::DETECTION, d.type, engine.lifetimeTotal(), d.hits, d.rssi, d.conf);
+}
+void dismissAlert() {
+    // Start the reaction when Squachy is visible again; otherwise its timer
+    // expires behind the eight-second match card and the player never sees it.
+    reactTo(alert);
+    haveAlert = false;
+    dirty = true;
+}
 int screenRow = -1;
 uint32_t screenAt = 0;
 
@@ -51,7 +69,7 @@ void clearFrame() {
     else display.fillScreen(BG);
 }
 
-// Read-only bench commands. Drain one row per loop so a full detection log
+// USB bench commands. Drain one row per loop so a full detection log
 // never blocks scanning or overfills the USB transmit buffer.
 void pollConsole() {
     for (unsigned n = 0; n < 32 && Serial.available(); ++n) {
@@ -67,6 +85,28 @@ void pollConsole() {
                 Serial.printf("[game] pets=%lu outfit=%s unlocked=%u bingo=%u lines=%u\n",
                     (unsigned long)Squachy::petCount(), Squachy::outfitName(),
                     Squachy::unlockedOutfitCount(), Bingo::markedCount(), Bingo::linesCalled());
+                Serial.printf("[ui] page=%u row=%u battery_mv=%u dimmed=%u brightness=%u saver=%u timeout=%u mode=%s clock=%u\n",
+                    (unsigned)page, menuRow, CardputerBoard::batteryMillivolts(), CardputerBoard::dimmed(),
+                    Settings::brightness(), Settings::powerSaver(), Settings::screenTimeoutSec(),
+                    CardputerBoard::scanModeName(), Clock::trusted());
+            } else if (!commandOverflow && !strncmp(command, "TIME ", 5)) {
+                uint32_t epoch;
+                const bool ok = Cardputer::parseEpoch(command + 5, epoch) && Clock::setEpoch(epoch);
+                Serial.printf("[clock] %s\n", ok ? "set" : "invalid epoch"); dirty = true;
+            } else if (!commandOverflow && !strncmp(command, "KEY ", 4) && strlen(command) == 5) {
+                // Same actions as the keyboard, useful for reproducible UI
+                // checks. No synthetic detections or reward unlock command.
+                const char* chars = "sld;.e`pob ckjh,/ix";
+                const CardputerKeys::Action actions[] = {
+                    CardputerKeys::Action::HOME, CardputerKeys::Action::LOG, CardputerKeys::Action::DIAGNOSTICS,
+                    CardputerKeys::Action::UP, CardputerKeys::Action::DOWN, CardputerKeys::Action::OPEN,
+                    CardputerKeys::Action::BACK, CardputerKeys::Action::PET, CardputerKeys::Action::OUTFIT,
+                    CardputerKeys::Action::BINGO, CardputerKeys::Action::SHOW, CardputerKeys::Action::SHADES,
+                    CardputerKeys::Action::SETTINGS, CardputerKeys::Action::DIARY,
+                    CardputerKeys::Action::HELP, CardputerKeys::Action::LEFT, CardputerKeys::Action::RIGHT,
+                    CardputerKeys::Action::IGNORE, CardputerKeys::Action::SNOOZE};
+                const char* match = strchr(chars, command[4]);
+                if (match) handleKey(actions[match - chars]);
             } else if (!commandOverflow && !strcmp(command, "FRAMECHECK") && buffered) {
                 // Exercise the same clear as every animation frame against
                 // the real TFT library and all pixels, including the far edge.
@@ -97,7 +137,7 @@ void pollConsole() {
                     f.close();
                     Serial.printf("[sdcheck] %s bytes=%u tail:\n%s\n", path, (unsigned)size, tail);
                 }
-            } else Serial.println("[console] STATUS | LOG | SD | SCREEN | FRAMECHECK");
+            } else Serial.println("[console] STATUS LOG SD SCREEN FRAMECHECK TIME <epoch> KEY <key>");
             commandLen = 0;
             commandOverflow = false;
         } else if (commandLen < sizeof command - 1) command[commandLen++] = c;
@@ -144,14 +184,53 @@ const char* confidence(Confidence c) {
     return c == Confidence::HIGH_CONF ? "HIGH" : c == Confidence::MED_CONF ? "MED" : "LOW";
 }
 
+void activateSetting(int direction) {
+    switch (menuRow) {
+    case 0: Settings::adjustBrightness(direction * 16); break;
+    case 1: Settings::togglePowerSaver(); break;
+    case 2: Settings::cycleScreenTimeout(); break;
+    case 3: CardputerBoard::cycleScanMode(); break;
+    case 4: Settings::cycleMinConfidence(); break;
+    case 5: page = Page::FILTERS; selected = 0; break;
+    case 6: page = Page::IGNORED; selected = 0; break;
+    case 7: Settings::cycleTimeZone(); break;
+    case 8: page = Page::HELP; break;
+    }
+}
+
 void handleKey(CardputerKeys::Action a) {
     using A = CardputerKeys::Action;
     if (a == A::NONE) return;
+    if (CardputerBoard::input(millis())) { dirty = true; return; }
     Serial.printf("[key] action=%u page=%u\n", (unsigned)a, (unsigned)page);
     dirty = true;
-    if (haveAlert) { haveAlert = false; return; }
+    if (haveAlert) {
+        if (a == A::IGNORE) IgnoreList::add(alert.mac, alert.type);
+        else if (a == A::SNOOZE) IgnoreList::snooze(alert.mac);
+        else if (a == A::OPEN) { detail = alert; page = Page::DETAIL; }
+        dismissAlert();
+        return;
+    }
     switch (a) {
     case A::HOME: page = Page::HOME; break;
+    case A::SETTINGS: page = Page::SETTINGS; break;
+    case A::DIARY: page = Page::DIARY; break;
+    case A::HELP: page = Page::HELP; break;
+    case A::IGNORE:
+        if (page == Page::DETAIL) {
+            if (IgnoreList::contains(detail.mac)) IgnoreList::remove(detail.mac);
+            else IgnoreList::add(detail.mac, detail.type);
+        }
+        break;
+    case A::SNOOZE:
+        if (page == Page::DETAIL) IgnoreList::snooze(detail.mac);
+        break;
+    case A::LEFT: case A::RIGHT:
+        if (page == Page::SETTINGS) activateSetting(a == A::LEFT ? -1 : 1);
+        else if (page == Page::WARDROBE) {
+            if (a == A::LEFT) Squachy::cyclePrevOutfit(); else Squachy::cycleOutfit();
+        }
+        break;
     case A::PET:
         page = Page::HOME;
         Squachy::stopShowOff();
@@ -168,17 +247,32 @@ void handleKey(CardputerKeys::Action a) {
         break;
     case A::LOG: page = Page::LOG; selected = 0; break;
     case A::DIAGNOSTICS: page = Page::DIAGNOSTICS; break;
-    case A::BACK: page = page == Page::DETAIL ? Page::LOG : Page::HOME; break;
+    case A::BACK:
+        page = page == Page::DETAIL ? Page::LOG :
+            (page == Page::FILTERS || page == Page::IGNORED) ? Page::SETTINGS : Page::HOME;
+        break;
     case A::UP:
         if (page == Page::WARDROBE) Squachy::cyclePrevOutfit();
         if (page == Page::LOG && selected) --selected;
+        if ((page == Page::FILTERS || page == Page::IGNORED) && selected) --selected;
+        if (page == Page::SETTINGS && menuRow) --menuRow;
         break;
     case A::DOWN:
         if (page == Page::WARDROBE) Squachy::cycleOutfit();
         if (page == Page::LOG && selected + 1 < engine.logCount()) ++selected;
+        if (page == Page::FILTERS && selected + 2 < (uint8_t)DetectionType::COUNT) ++selected;
+        if (page == Page::IGNORED && selected + 1 < IgnoreList::count()) ++selected;
+        if (page == Page::SETTINGS && menuRow + 1 < MENU_COUNT) ++menuRow;
         break;
     case A::OPEN:
-        if (page == Page::WARDROBE) Squachy::cycleOutfit();
+        if (page == Page::SETTINGS) activateSetting(1);
+        else if (page == Page::FILTERS) Settings::toggleType((DetectionType)(selected + 1));
+        else if (page == Page::IGNORED) {
+            if (const uint8_t* mac = IgnoreList::macAt(selected)) IgnoreList::remove(mac);
+            if (selected >= IgnoreList::count()) selected = IgnoreList::count() ? IgnoreList::count() - 1 : 0;
+        }
+        else if (page == Page::BINGO && Bingo::markedCount() == Bingo::CELLS) Bingo::newCard();
+        else if (page == Page::WARDROBE) Squachy::cycleOutfit();
         else if (page == Page::HOME && Squachy::onboardingActive()) Squachy::onboardingTapAdvance(0, 0);
         else if (page == Page::HOME) { page = Page::LOG; selected = 0; }
         else if (page == Page::LOG) {
@@ -198,7 +292,9 @@ void render() {
     t.setTextWrap(false);
     t.setTextColor(CYAN, BG);
     t.setCursor(4, 4);
-    t.print("SQUACHWATCH");
+    const uint16_t battery = CardputerBoard::batteryMillivolts();
+    if (battery) t.printf("SW %u.%02uV", battery / 1000, (battery % 1000) / 10);
+    else t.print("SW BAT:--");
     t.setCursor(94, 4);
     t.printf("W:%lu/s B:%lu/s", (unsigned long)wifiRate, (unsigned long)bleRate);
     t.drawFastHLine(0, 16, 240, PINK);
@@ -215,14 +311,25 @@ void render() {
         t.printf("%02X:%02X:%02X:%02X:%02X:%02X", d.mac[0], d.mac[1], d.mac[2], d.mac[3], d.mac[4], d.mac[5]);
         t.setCursor(4, 77); t.printf("%d dBm  %s  CH:%u", d.rssi, d.channel ? "WiFi" : "BLE", d.channel);
         t.setCursor(4, 90); t.printf("Confidence: %s  Hits:%u", confidence(d.conf), d.hits);
-        t.setCursor(4, 103); t.print("Signature match, not proof");
+        t.setCursor(4, 103);
+        t.print(IgnoreList::contains(d.mac) ? "IGNORED: I restores alerts" :
+                IgnoreList::snoozed(d.mac) ? "SNOOZED until restart" : "Signature match, not proof");
     } else if (page == Page::HOME) {
+        const bool celebrating = reward[0] && millis() - rewardAt < 8000;
+        Squachy::holdBubble(celebrating);
+        if (celebrating && rewardOutfit >= 0) Squachy::setOutfitPreview(rewardOutfit);
         Squachy::tick(t, 120, 19, 84, millis(), true, 0.35f);
+        Squachy::setOutfitPreview(-1);
+        Squachy::holdBubble(false);
         t.setTextFont(1); t.setTextSize(1); t.setTextColor(CYAN, BG);
+        if (celebrating) {
+            t.fillRoundRect(2, 19, 236, 23, 3, 0x2104);
+            t.setTextColor(PINK, 0x2104); t.setCursor(8, 27); t.printf("%.37s", reward);
+            t.setTextColor(CYAN, BG);
+        }
         t.fillRect(0, 107, 240, 11, BG);
         t.setCursor(4, 109);
-        if (reward[0] && millis() - rewardAt < 8000) t.print(reward);
-        else t.printf("Seen:%lu Pets:%lu Bingo:%u/16", (unsigned long)engine.lifetimeTotal(),
+        t.printf("Seen:%lu Pets:%lu Bingo:%u/16", (unsigned long)engine.lifetimeTotal(),
                       (unsigned long)Squachy::petCount(), Bingo::markedCount());
     } else if (page == Page::WARDROBE) {
         Squachy::drawWaving(t, 48, 103, millis(), 0.8f);
@@ -233,7 +340,13 @@ void render() {
         t.setCursor(96, 55); t.printf("Unlocked: %u/%u", Squachy::unlockedOutfitCount(), Squachy::outfitCount());
         t.setCursor(96, 69); t.printf("Shades: %.15s", Squachy::shadesColorName());
         t.setCursor(96, 83); t.printf("Pets: %lu", (unsigned long)Squachy::petCount());
-        t.setCursor(4, 109); t.print("Matches earn outfits; pets earn shades");
+        uint8_t next; uint32_t target;
+        t.setCursor(96, 96);
+        if (Squachy::nextOutfit(next, target)) t.printf("Next: %.16s", Squachy::outfitNameAt(next));
+        else t.print("Count rewards done!");
+        t.setCursor(4, 109);
+        if (Squachy::nextOutfit(next, target)) t.printf("Next outfit: %lu/%lu detections", (unsigned long)engine.lifetimeTotal(), (unsigned long)target);
+        else t.print("Special outfits need background games");
     } else if (page == Page::BINGO) {
         t.printf("BINGO %u/16  Lines:%u  All:%u", Bingo::markedCount(), Bingo::linesCalled(), Bingo::linesEver());
         for (uint8_t i = 0; i < Bingo::CELLS; ++i) {
@@ -244,7 +357,63 @@ void render() {
             if (Bingo::marked(i)) t.fillRect(x + 2, y + 1, 56, 14, CYAN);
             t.setCursor(x + 4, y + 4); t.printf("%.8s", detectionTypeName(Bingo::typeAt(i)));
         }
-        t.setTextColor(CYAN, BG); t.setCursor(4, 109); t.print("Real matches fill squares. Get 4 in a row!");
+        t.setTextColor(CYAN, BG); t.setCursor(4, 109);
+        t.print(Bingo::markedCount() == Bingo::CELLS ? "Full card! Enter deals your next card" : "Real matches fill squares. Get a line!");
+    } else if (page == Page::DIARY) {
+        t.setTextColor(CYAN, BG); t.printf("DIARY / %s", Squachy::growthStageName());
+        t.setTextColor(TFT_WHITE, BG);
+        t.setCursor(4, 39); t.printf("Lifetime sightings: %lu", (unsigned long)engine.lifetimeTotal());
+        const uint32_t growth = Squachy::nextGrowthTotal();
+        t.setCursor(4, 53);
+        if (growth) t.printf("Next growth: %lu / %lu", (unsigned long)engine.lifetimeTotal(), (unsigned long)growth);
+        else t.print("Legend reached!");
+        const uint32_t shades = Squachy::nextShadesPetCount();
+        t.setCursor(4, 67);
+        if (shades) t.printf("Next shades: %lu / %lu pets", (unsigned long)Squachy::petCount(), (unsigned long)shades);
+        else t.printf("All shades! Pets: %lu", (unsigned long)Squachy::petCount());
+        t.setCursor(4, 81); t.printf("Bingo: %u lines / %u full cards", Bingo::linesEver(), Bingo::cardsFilled());
+        t.setCursor(4, 95); t.printf("Boots together: %lu", (unsigned long)Squachy::bootCount());
+        t.setCursor(4, 109); t.print("O wardrobe  P pet  B bingo");
+    } else if (page == Page::HELP) {
+        const char* lines[] = {"S home L log D stats J diary", "P pet O outfits C shades B bingo",
+            "Space show-off  K settings  H help", ";/. move  ,/ adjust  Enter choose",
+            "Detail: I ignore/unignore X snooze", "W/B = WiFi/BLE packets per second",
+            "Battery volts; USB affects reading"};
+        for (unsigned i = 0; i < 7; ++i) { t.setCursor(4, 23 + i * 13); t.print(lines[i]); }
+    } else if (page == Page::SETTINGS || page == Page::FILTERS || page == Page::IGNORED) {
+        const uint8_t count = page == Page::SETTINGS ? MENU_COUNT : page == Page::FILTERS ? (uint8_t)DetectionType::COUNT - 1 : IgnoreList::count();
+        const uint8_t cursor = page == Page::SETTINGS ? menuRow : selected;
+        const unsigned first = (cursor / 5) * 5;
+        if (!count) t.print("No ignored devices.");
+        for (unsigned i = first; i < count && i < first + 5; ++i) {
+            const int y = 23 + (i - first) * 17;
+            const uint16_t bg = i == cursor ? 0x2104 : BG;
+            t.fillRect(0, y - 2, 240, 15, bg);
+            t.setTextColor(i == cursor ? CYAN : TFT_WHITE, bg); t.setCursor(4, y);
+            if (page == Page::SETTINGS) {
+                switch (i) {
+                case 0: t.printf("Brightness       %u/255", Settings::brightness()); break;
+                case 1: t.printf("Power saving     %s", Settings::powerSaver() ? "ON" : "OFF"); break;
+                case 2: t.printf("Dim after        %us (0=never)", Settings::screenTimeoutSecRaw()); break;
+                case 3: t.printf("BLE scan         %s", CardputerBoard::scanModeName()); break;
+                case 4: t.printf("Alert confidence %s", Settings::minConfidenceLabel()); break;
+                case 5: t.printf("Detection types  %u enabled >", Settings::enabledTypeCount()); break;
+                case 6: t.printf("Ignored devices  %u >", IgnoreList::count()); break;
+                case 7: t.printf("Zone: %.30s", Settings::timeZoneName()); break;
+                case 8: t.print("Keyboard help >"); break;
+                }
+            } else if (page == Page::FILTERS) {
+                const auto type = (DetectionType)(i + 1);
+                t.printf("[%c] %.32s", Settings::typeEnabled(type) ? 'x' : ' ', detectionTypeName(type));
+            } else {
+                const uint8_t* mac = IgnoreList::macAt(i);
+                if (mac) t.printf("%-11.11s %02X%02X%02X%02X%02X%02X", detectionTypeName(IgnoreList::typeAt(i)),
+                    mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+            }
+        }
+        t.setTextColor(CYAN, BG); t.setCursor(4, 109);
+        t.print(page == Page::IGNORED ? "Enter restores alerts for this device" :
+                page == Page::FILTERS ? "Disabled types are not logged/counted" : "Saved immediately; scanning continues");
     } else if (page == Page::LOG) {
         const uint8_t count = engine.logCount();
         if (selected >= count) selected = count ? count - 1 : 0;
@@ -266,14 +435,19 @@ void render() {
         t.setCursor(4, 53); t.printf("WiFi frames %lu (%lu/s)", (unsigned long)wifiFramesSeen(), (unsigned long)wifiRate);
         t.setCursor(4, 68); t.printf("BLE adverts %lu (%lu/s)", (unsigned long)advertsSeen(), (unsigned long)bleRate);
         t.setCursor(4, 83); t.printf("BLE dropped %lu", (unsigned long)advertsDropped());
-        t.setCursor(4, 98); t.printf("Uptime %lus  SD:%s", (unsigned long)(millis() / 1000), engine.sd().ready() ? "OK" : "OFF");
+        t.setCursor(4, 98); t.printf("Up %lus SD:%s BLE:%s", (unsigned long)(millis() / 1000), engine.sd().ready() ? "OK" : "OFF", CardputerBoard::scanModeName());
+        char clock[24]; Clock::formatClock(clock, sizeof clock);
+        t.setCursor(4, 110); t.printf("Clock: %s%s", clock, Clock::guessed() ? " ~" : "");
     }
     t.setTextColor(CYAN, BG);
     t.drawFastHLine(0, 119, 240, PINK);
     t.setCursor(4, 124);
-    t.print(haveAlert ? "Press a control key to dismiss" : page == Page::LOG ? ";/. move  Enter view  Esc back" :
-        page == Page::HOME ? "P pet O outfit B bingo Space show L log" :
-        page == Page::WARDROBE ? ";/. outfit  C shades  S home" : "S home  L log  D stats  Esc back");
+    t.print(haveAlert ? "I ignore X snooze Enter view Esc close" : page == Page::DETAIL ? "I ignore X snooze Esc back" :
+        page == Page::LOG ? ";/. move  Enter view  Esc back" :
+        page == Page::HOME ? "P pet O outfit B bingo K menu H help" :
+        page == Page::WARDROBE ? ";/. outfit  C shades  S home" :
+        page == Page::SETTINGS || page == Page::FILTERS || page == Page::IGNORED ? ";/. move ,/ adjust Enter choose Esc" :
+        "S home  L log  D stats  Esc back");
     if (buffered) canvas.pushSprite(0, 0);
 }
 }
@@ -295,9 +469,10 @@ void setup() {
     buffered = canvas.createSprite(240, 135) != nullptr;
     Settings::load();
     Clock::begin();
-    // Repeatable receive-only baseline. No mesh, network joins or OTA in
-    // this target. Active BLE scan responses are intentionally not sought.
-    setScanPin(2);
+    IgnoreList::begin();
+    // Passive is the initial default; the keyboard menu can opt into active
+    // scan responses or the adaptive policy. No network joins, mesh or OTA.
+    CardputerBoard::begin();
     engine.init();
     Bingo::begin(engine);
     Squachy::trigger(Squachy::Event::BOOTED, DetectionType::UNKNOWN, engine.lifetimeTotal());
@@ -309,49 +484,54 @@ void loop() {
     const uint32_t now = millis();
     // Preserve the selected device as new detections enter the front of log.
     uint8_t selectedMac[6];
+    DetectionType selectedType = DetectionType::UNKNOWN;
     bool preserve = false;
     if (page == Page::LOG) {
         if (const Detection* d = engine.logAt(selected)) {
-            memcpy(selectedMac, d->mac, 6); preserve = true;
+            memcpy(selectedMac, d->mac, 6); selectedType = d->type; preserve = true;
         }
     }
     engine.loop();
+    Clock::tick(now);
+    CardputerBoard::tick(now);
     Bingo::tick(now);
     DetectionType bingoType;
     const Bingo::Event bingoEvent = Bingo::takeEvent(bingoType);
     if (bingoEvent == Bingo::Event::MARKED || bingoEvent == Bingo::Event::LINE || bingoEvent == Bingo::Event::FULL) {
         snprintf(reward, sizeof reward, "%s", bingoEvent == Bingo::Event::FULL ? "BINGO! Full card!" :
             bingoEvent == Bingo::Event::LINE ? "BINGO! Four in a row!" : "New bingo square!");
+        rewardOutfit = -1;
         rewardAt = now; dirty = true;
     }
     uint8_t unlocked;
-    if ((!reward[0] || now - rewardAt >= 8000) && Squachy::consumeOutfitUnlock(unlocked)) {
+    if (page == Page::HOME && !haveAlert && (!reward[0] || now - rewardAt >= 8000) && Squachy::consumeOutfitUnlock(unlocked)) {
         snprintf(reward, sizeof reward, "Unlocked: %.28s", Squachy::outfitNameAt(unlocked));
+        rewardOutfit = unlocked;
         rewardAt = now; dirty = true;
     }
     pollConsole();
     if (preserve) {
         for (unsigned i = 0; i < engine.logCount(); ++i) {
             const Detection* d = engine.logAt(i);
-            if (d && memcmp(d->mac, selectedMac, 6) == 0) { selected = i; break; }
+            if (d && d->type == selectedType && memcmp(d->mac, selectedMac, 6) == 0) { selected = i; break; }
         }
     }
     handleKey(keys.update(readKeys(), now));
     const Detection* latest = engine.latest();
-    if (latest && (!haveLastAlert || latest->firstSeen != lastAlertStamp || memcmp(latest->mac, lastAlertMac, 6))) {
-        lastAlertStamp = latest->firstSeen;
-        memcpy(lastAlertMac, latest->mac, 6);
-        haveLastAlert = true;
-        Squachy::trigger(Squachy::Event::DETECTION, latest->type, engine.lifetimeTotal(), latest->hits, latest->rssi, latest->conf);
+    if (sightings.take(latest)) {
         // Browsing and diagnostics remain usable in busy environments.
-        if (page == Page::HOME && !haveAlert) { alert = *latest; alertAt = now; haveAlert = true; dirty = true; }
+        if (page == Page::HOME && !haveAlert && Cardputer::mayAlert(*latest, Settings::minConfidence(), IgnoreList::silenced(latest->mac)) &&
+            engine.alertGate(latest->mac, Settings::autoQuietAfter(), false) != DetectionEngine::AlertGate::HOLD) {
+            alert = *latest; alertAt = now; haveAlert = true; dirty = true;
+            CardputerBoard::alert(now);
+        } else reactTo(*latest);
     }
-    if (haveAlert && now - alertAt >= 8000) { haveAlert = false; dirty = true; }
+    if (haveAlert && now - alertAt >= 8000) dismissAlert();
     if (now - lastSample >= 1000) {
         const uint32_t elapsed = now - lastSample;
         const uint32_t wifi = wifiFramesSeen(), ble = advertsSeen();
-        wifiRate = uint64_t(wifi - previousWifi) * 1000 / elapsed;
-        bleRate = uint64_t(ble - previousBle) * 1000 / elapsed;
+        wifiRate = Cardputer::rate(wifi, previousWifi, elapsed);
+        bleRate = Cardputer::rate(ble, previousBle, elapsed);
         previousWifi = wifi; previousBle = ble; lastSample = now;
         dirty = true;
     }
@@ -369,7 +549,8 @@ void loop() {
             (unsigned long)wifiFramesSeen(), (unsigned long)advertsSeen(), promiscuous, channel,
             NimBLEDevice::getScan()->isScanning(), engine.logCount());
     }
-    if (screenRow < 0 && (dirty || page == Page::HOME || page == Page::WARDROBE) && now - lastPaint >= 100) { render(); lastPaint = now; dirty = false; }
+    const uint32_t frameMs = CardputerBoard::dimmed() ? 1000 : 100;
+    if (screenRow < 0 && (dirty || page == Page::HOME || page == Page::WARDROBE) && now - lastPaint >= frameMs) { render(); lastPaint = now; dirty = false; }
     delay(2);
 }
 #endif

@@ -11,7 +11,8 @@ constexpr uint64_t keyMask(unsigned row, unsigned col) {
 constexpr uint64_t matrixBit(unsigned bank, unsigned input) {
     return keyMask(3 - (bank % 4), input * 2 + (bank < 4 ? 1 : 0));
 }
-enum class Action { NONE, HOME, LOG, DIAGNOSTICS, UP, DOWN, OPEN, BACK, PET, OUTFIT, BINGO, SHOW, SHADES };
+enum class Action { NONE, HOME, LOG, DIAGNOSTICS, UP, DOWN, OPEN, BACK,
+    PET, OUTFIT, BINGO, SHOW, SHADES, SETTINGS, DIARY, HELP, LEFT, RIGHT, IGNORE, SNOOZE };
 inline Action decode(uint64_t pressed) {
     if (pressed & keyMask(0, 0)) return Action::BACK;       // grave / Fn-Esc
     if (pressed & keyMask(0, 13)) return Action::BACK;      // backspace
@@ -26,6 +27,13 @@ inline Action decode(uint64_t pressed) {
     if (pressed & keyMask(3, 7)) return Action::BINGO;      // b
     if (pressed & keyMask(3, 13)) return Action::SHOW;      // space
     if (pressed & keyMask(3, 5)) return Action::SHADES;     // c
+    if (pressed & keyMask(2, 9)) return Action::SETTINGS;   // k
+    if (pressed & keyMask(2, 8)) return Action::DIARY;      // j
+    if (pressed & keyMask(2, 7)) return Action::HELP;       // h
+    if (pressed & keyMask(3, 10)) return Action::LEFT;     // , / Fn-Left
+    if (pressed & keyMask(3, 12)) return Action::RIGHT;    // / / Fn-Right
+    if (pressed & keyMask(1, 8)) return Action::IGNORE;    // i
+    if (pressed & keyMask(3, 4)) return Action::SNOOZE;    // x
     return Action::NONE;
 }
 

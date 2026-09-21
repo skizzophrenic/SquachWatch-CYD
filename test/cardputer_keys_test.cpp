@@ -27,6 +27,13 @@ int main() {
     assert(decode(keyMask(3, 7)) == Action::BINGO);
     assert(decode(keyMask(3, 13)) == Action::SHOW);
     assert(decode(keyMask(3, 5)) == Action::SHADES);
+    assert(decode(keyMask(2, 9)) == Action::SETTINGS);
+    assert(decode(keyMask(2, 8)) == Action::DIARY);
+    assert(decode(keyMask(2, 7)) == Action::HELP);
+    assert(decode(keyMask(3, 10)) == Action::LEFT);
+    assert(decode(keyMask(3, 12)) == Action::RIGHT);
+    assert(decode(keyMask(1, 8)) == Action::IGNORE);
+    assert(decode(keyMask(3, 4)) == Action::SNOOZE);
 
     Debouncer d;
     const uint64_t enter = keyMask(2, 13);

@@ -152,6 +152,12 @@ namespace Squachy {
     void        cyclePrevOutfit();
     uint8_t     unlockedOutfitCount();
     uint8_t     outfitCount();
+    // Read-only progress for compact/keyboard UIs. Targets are absolute
+    // totals; false/0 means all count-earned rewards in that track are done.
+    bool        nextOutfit(uint8_t& index, uint32_t& lifetimeTarget);
+    uint32_t    nextShadesPetCount();
+    const char* growthStageName();
+    uint32_t    nextGrowthTotal();
 
     // Hidden unlock-everything trigger: main.cpp watches for a button
     // sequence (9x CLR, 1x SCAN, 1x CLR) and calls this when it

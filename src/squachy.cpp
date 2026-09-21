@@ -815,12 +815,12 @@ static const uint8_t NICKNAMES_N = sizeof(NICKNAMES) / sizeof(NICKNAMES[0]);
 // of these cycleShadesColor() can actually reach, based on pet count.
 static const char* const SHADE_NAMES[] = { "CYAN", "PINK", "GREEN", "PURPLE" };
 static const uint8_t SHADE_NAMES_N = sizeof(SHADE_NAMES) / sizeof(SHADE_NAMES[0]);
+static const uint32_t SHADE_PETS[] = {0, 10, 25, 50};
 
 static uint8_t unlockedShadeCount() {
-    if (s_petCount >= 50) return 4;
-    if (s_petCount >= 25) return 3;
-    if (s_petCount >= 10) return 2;
-    return 1;
+    uint8_t count = 1;
+    while (count < SHADE_NAMES_N && s_petCount >= SHADE_PETS[count]) ++count;
+    return count;
 }
 
 // Outfits (see squachy.h). NONE/TANOOKI/UNICORN are free (threshold 0);
@@ -993,12 +993,13 @@ static OutfitId currentOutfit() {
 // current by every DETECTION/BOOTED trigger. Legend also unlocks the
 // small hat drawn in drawBody().
 enum class GrowthStage : uint8_t { FLEDGLING, TRACKER, VETERAN, LEGEND };
+static const uint32_t GROWTH_TOTALS[] = {0, 25, 100, 500};
+static const char* const GROWTH_NAMES[] = {"FLEDGLING", "TRACKER", "VETERAN", "LEGEND"};
 
 static GrowthStage currentStage() {
-    if (s_cachedLifetimeTotal >= 500) return GrowthStage::LEGEND;
-    if (s_cachedLifetimeTotal >= 100) return GrowthStage::VETERAN;
-    if (s_cachedLifetimeTotal >= 25)  return GrowthStage::TRACKER;
-    return GrowthStage::FLEDGLING;
+    uint8_t stage = 0;
+    while (stage < 3 && s_cachedLifetimeTotal >= GROWTH_TOTALS[stage + 1]) ++stage;
+    return (GrowthStage)stage;
 }
 
 static char s_statBuf[56];
@@ -1898,6 +1899,27 @@ uint8_t unlockedOutfitCount() {
 
 uint8_t outfitCount() {
     return OUTFITS_N;
+}
+
+bool nextOutfit(uint8_t& index, uint32_t& lifetimeTarget) {
+    ensurePrefsLoaded();
+    for (uint8_t i = 0; i < OUTFITS_N; ++i) {
+        if (OUTFITS[i].threshold != OUTFIT_BY_EVENT && !outfitUnlocked(i)) {
+            index = i; lifetimeTarget = OUTFITS[i].threshold;
+            return true;
+        }
+    }
+    return false;
+}
+uint32_t nextShadesPetCount() {
+    ensurePrefsLoaded();
+    const uint8_t count = unlockedShadeCount();
+    return count < SHADE_NAMES_N ? SHADE_PETS[count] : 0;
+}
+const char* growthStageName() { return GROWTH_NAMES[(uint8_t)currentStage()]; }
+uint32_t nextGrowthTotal() {
+    const uint8_t stage = (uint8_t)currentStage();
+    return stage < 3 ? GROWTH_TOTALS[stage + 1] : 0;
 }
 
 void unlockWolfPelt() {

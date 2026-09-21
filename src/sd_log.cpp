@@ -12,7 +12,6 @@ static SPIClass cardputerSdSPI(HSPI);
 // SD the display's own SPI instance -- see the comment on that branch below.
 #if (!defined(CYD) || defined(RLPHANTOM) || defined(RLPHANTOM_R)) && !defined(CARDPUTER)
 #include <TFT_eSPI.h>
-#include <esp_heap_caps.h>
 // The single TFT_eSPI instance main.cpp already owns and has already
 // init()'d by the time SdLog::begin() runs (see the comment below for
 // why AWOK/cyd35 specifically need this reference).
