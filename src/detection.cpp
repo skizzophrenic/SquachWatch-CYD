@@ -25,7 +25,7 @@
 #include "settings.h"
 #endif
 #include <esp_bt.h>
-#include <esp_gap_bt_api.h>
+// No Classic GAP API is used here. ESP32-S3 only provides Bluetooth LE.
 #include <esp_heap_caps.h>
 #include <string.h>
 #include <SD.h>
@@ -181,7 +181,8 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
             memset(&r, 0, sizeof(r));
             memcpy(r.mac, mac, 6);
             r.rssi = adv->getRSSI();
-            const char* name = adv->getName().c_str();
+            const std::string advertisedName = adv->getName();
+            const char* name = advertisedName.c_str();
             if (name && name[0]) strncpy(r.name, name, sizeof(r.name) - 1);
             g_engine->postRawBle(r);
             return;
@@ -194,7 +195,10 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
         det.firstSeen = det.lastSeen = millis();
         det.hits   = 1;
         det.active = true;
-        const char* name = adv->getName().c_str();
+        // getName() returns a string by value. Keep it alive while both
+        // the displayed name and name-based signatures read its bytes.
+        const std::string advertisedName = adv->getName();
+        const char* name = advertisedName.c_str();
         if (name && name[0]) {
             strncpy(det.name, name, sizeof(det.name) - 1);
         }
@@ -405,13 +409,24 @@ bool DetectionEngine::init() {
 
     // 2. WiFi promiscuous mode for OUI/SSID detection
     //
-    // Each radio start is announced -- and flushed, so the line is out before
-    // the step that might brown the board out -- because a brownout leaves no
+    // Each radio start is announced (and flushed on UART builds), so the
+    // step that might brown the board out can be identified. A brownout leaves no
     // crash dump and the reset reason alone does not say which of the two it
     // was. A board that boot-loops prints the last one it reached.
+    // The CYD's low-memory driver restart is not needed for the smaller
+    // Cardputer framebuffer. Start with the Arduino S3 driver's defaults.
+#if defined(CARDPUTER)
+    static const bool SLIM_WIFI = false;
+#else
     static const bool SLIM_WIFI = true;    // A/B on the bench: 45 frames/40 s slim, 20/45 s stock
+#endif
     Serial.println("[boot] starting WiFi");
+#if !ARDUINO_USB_CDC_ON_BOOT
+    // UART flush is bounded by the outgoing bytes. Arduino 2.0.14 HWCDC
+    // flush waits indefinitely for a USB host to drain its ring buffer.
+    // Boot must work on battery and with USB connected but no monitor.
     Serial.flush();
+#endif
     Serial.printf("[boot] heap before WiFi: %lu free, %lu largest\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
@@ -534,7 +549,9 @@ bool DetectionEngine::init() {
     Serial.printf("[boot] heap with WiFi up: %lu free, %lu largest\n",
                   (unsigned long)s_bootHeap.wifiFree, (unsigned long)s_bootHeap.wifiLargest);
     Serial.println("[boot] starting Bluetooth");
+#if !ARDUINO_USB_CDC_ON_BOOT
     Serial.flush();
+#endif
     NimBLEDevice::init("");
     NimBLEScan* scan = NimBLEDevice::getScan();
     // Passive to start, whatever the room: the first second of an active

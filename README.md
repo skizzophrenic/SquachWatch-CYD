@@ -1,5 +1,11 @@
 # SquachWatch-CYD
 
+**Experimental original Cardputer port:** build with `pio run -e cardputer`.
+See [the Cardputer guide](docs/CARDPUTER.md) for scope, keyboard controls,
+flashing instructions and hardware validation. Initial boot, SD mounting
+and radio reception have been tested on one original Cardputer; display and
+keyboard acceptance are pending. The Cardputer ADV keyboard is not supported.
+
 > Surveillance-device detector for the ESP32-2432S028R ("Cheap Yellow Display").
 
 SquachWatch-CYD sniffs the 2.4 GHz airwaves for known wireless signatures

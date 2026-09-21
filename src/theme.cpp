@@ -334,7 +334,12 @@ bool lockButtonHit(int x, int y, int w) {
 #ifndef BUBBLE_FONT
 #define BUBBLE_FONT 2
 #endif
-#if BUBBLE_FONT == 2
+#if defined(CARDPUTER)
+void bubbleFontOn(TFT_eSPI& t)  { t.setTextFont(1); }
+void bubbleFontOff(TFT_eSPI& t) { t.setTextFont(1); }
+int  bubbleTextH()  { return 8; }
+int  bubbleAscent() { return 0; }
+#elif BUBBLE_FONT == 2
 void bubbleFontOn(TFT_eSPI& t)  { t.setTextFont(2); }
 void bubbleFontOff(TFT_eSPI& t) { t.setTextFont(1); }
 int  bubbleTextH()  { return 16; }
