@@ -1992,8 +1992,17 @@ void DetectionEngine::drainBlackBox(uint32_t now) {
     // every four. The ring only holds eighteen hundred sightings, so nothing
     // real is lost by capping it -- and a crowded festival stops wearing the
     // flash out at a hundred times the rate an ordinary day does.
+#if defined(CROWPANEL7)
+    // Sparser still on the CrowPanel, for the reason in saveLifetime(): each
+    // record is a flash write and a visible step. Two in a burst, then one
+    // every thirty seconds; the queue holds the rest and the ring keeps the
+    // same eighteen hundred sightings either way.
+    static const uint8_t  BURST = 2;
+    static const uint32_t EVERY = 30000;
+#else
     static const uint8_t  BURST = 6;
     static const uint32_t EVERY = 3000;
+#endif
     static uint8_t  tokens = BURST;
     static uint32_t filled = 0;
     if (!filled) filled = now;
@@ -2037,7 +2046,18 @@ void logDump() {
 // The lifetime tally, to flash: at most once every five seconds while it
 // has changed. Five seconds of counting is what a power cut can lose.
 void DetectionEngine::saveLifetime(uint32_t now) {
-    if (!_lifetimeDirty || now - _lifetimeSavedMs < 5000) return;
+#if defined(CROWPANEL7)
+    // Once a minute, not every five seconds. On the CrowPanel every flash
+    // write disables the cache the RGB panel's DMA reads its framebuffer
+    // through, and the picture steps sideways for it -- measured 2026-09-23:
+    // with this and the black-box drain below switched off the step went
+    // from "occasional" to "very rare". A crash costs under a minute of
+    // lifetime counts, which is what these are.
+    static const uint32_t LIFETIME_EVERY_MS = 60000;
+#else
+    static const uint32_t LIFETIME_EVERY_MS = 5000;
+#endif
+    if (!_lifetimeDirty || now - _lifetimeSavedMs < LIFETIME_EVERY_MS) return;
     _lifetimeDirty   = false;
     _lifetimeSavedMs = now;
     _prefs.putUInt("total", _lifetimeTotal);

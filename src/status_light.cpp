@@ -8,8 +8,10 @@
 // The 2.8" CYD's LED, and the RL Phantom's: same Sunton family, same three
 // pins, and nothing else on the Phantom's build uses 4, 16 or 17. The AWOK
 // and the 3.5" are unverified and get nothing -- see the header for why that
-// is a rule and not a shortcut.
-#if defined(ESP32) && !defined(CYD35) && !defined(AWOK) && !defined(TWATCH_S3)
+// is a rule and not a shortcut. The CrowPanel 7 gets nothing either: its 4,
+// 16 and 17 are the card slot's data line, the touch clock and a panel data
+// line (crowpanel7_board.h).
+#if defined(ESP32) && !defined(CYD35) && !defined(AWOK) && !defined(TWATCH_S3) && !defined(CROWPANEL7)
 #define STATUS_LIGHT_HW 1
 #else
 #define STATUS_LIGHT_HW 0

@@ -34,8 +34,10 @@ class TFT_eSPI;
 // declines any frame whose shape it does not recognise rather than guessing.
 // Not on the T-Watch S3 yet: the overlapped push talks to the ESP32 SPI
 // registers, and the S3 lays them out differently -- the first frame through
-// it came out white. pushSprite() until it is ported.
-#if defined(ARDUINO_ARCH_ESP32) && !defined(TWATCH_S3)
+// it came out white. pushSprite() until it is ported. And not on the
+// CrowPanel 7, which has no SPI display at all: CrowBlit writes rows into
+// its RGB framebuffer (crowpanel7_blit.h).
+#if defined(ARDUINO_ARCH_ESP32) && !defined(TWATCH_S3) && !defined(CROWPANEL7)
   #define SQW_FRAME_PUSH 1
 #else
   #define SQW_FRAME_PUSH 0

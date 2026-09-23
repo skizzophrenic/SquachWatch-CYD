@@ -1,0 +1,20 @@
+# SquachWatch -- partition table for the Elecrow CrowPanel ADVANCE 7.0 (16 MB flash).
+#
+# The same shape as partitions_ota.csv, with the room a 16 MB part gives:
+# two 4 MB app slots for over-the-air updates, the black box in the unnamed
+# gap after them, and the crash summary last. NVS and otadata sit where they
+# do on every other board, so nothing that reads them changes.
+#
+#   0x009000   20 KB  nvs
+#   0x00E000    8 KB  otadata
+#   0x010000    4 MB  app0
+#   0x410000    4 MB  app1
+#   0x810000  128 KB  (free)     the black box -- BlackBox::BASE for this board
+#   0x830000   64 KB  coredump
+#
+# Name,   Type, SubType, Offset,   Size,     Flags
+nvs,      data, nvs,     0x9000,   0x5000,
+otadata,  data, ota,     0xe000,   0x2000,
+app0,     app,  ota_0,   0x10000,  0x400000,
+app1,     app,  ota_1,   0x410000, 0x400000,
+coredump, data, coredump,0x830000, 0x10000,

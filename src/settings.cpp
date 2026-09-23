@@ -27,7 +27,10 @@ static bool        s_msgTutor     = false;
 static bool        s_infoPrimerShown = false;
 // Locked on the watch: a square screen with a crown has one way up, and a
 // corner button that spins it is a thing to hit by accident on a wrist.
-#if defined(TWATCH_S3)
+// Locked on the CrowPanel too, for a different reason: an RGB panel has no
+// MADCTL, so rotating it would be a per-pixel software transform of an
+// 800x480 buffer every frame -- and the panel is natively landscape anyway.
+#if defined(TWATCH_S3) || defined(CROWPANEL7)
 static const bool DEFAULT_ROTATION_LOCK = true;
 #else
 static const bool DEFAULT_ROTATION_LOCK = false;
@@ -47,6 +50,8 @@ static bool        s_deskFullVisit = false;   // one visitor: the whole visit, n
 // one step round from that with its crown on the right (LilyGo's default).
 #if defined(TWATCH_S3)
 static const uint8_t DEFAULT_ROTATION = 2;
+#elif defined(CROWPANEL7)
+static const uint8_t DEFAULT_ROTATION = 0;   // the panel is landscape as wired
 #else
 static const uint8_t DEFAULT_ROTATION = 1;
 #endif
