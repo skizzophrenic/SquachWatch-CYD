@@ -140,6 +140,11 @@ static const uint8_t RADIO_DUTY_DEFAULT = 1;
 #endif
 static uint8_t  s_radioDutyIx  = RADIO_DUTY_DEFAULT;
 
+// ---- buzzer --------------------------------------------------------------
+// Opt in. The one setting here that can make a sound, so it starts off and
+// stays off until somebody finds the row. Only the CrowPanel 7 shows it.
+static bool     s_buzzer       = false;
+
 // ---- status light --------------------------------------------------------
 static bool    s_lightOn     = true;
 static bool    s_lightAlerts = true;
@@ -255,6 +260,8 @@ void toggleWakeOnAlert() {
     s_wakeOnAlert = !s_wakeOnAlert;
     s_prefs.putBool("pwrWake", s_wakeOnAlert);
 }
+bool buzzerOn()     { return s_buzzer; }
+void toggleBuzzer() { s_buzzer = !s_buzzer; s_prefs.putBool("buzzer", s_buzzer); }
 
 // ---- easter-egg hunt progress ----------------------------------------
 // Packed into one NVS entry rather than one each: the store has a few
@@ -373,6 +380,9 @@ void load() {
     s_steady       = s_prefs.getBool("steady", false);
     s_radioDutyIx  = s_prefs.getUChar("pwrRadio", RADIO_DUTY_DEFAULT);
     if (s_radioDutyIx >= RADIO_DUTY_N) s_radioDutyIx = RADIO_DUTY_DEFAULT;
+    // The T-Watch's BUZZ (haptics on an alert) already owns "buzz", and with
+    // the opposite default, so the CrowPanel's buzzer keeps its own key.
+    s_buzzer       = s_prefs.getBool("buzzer", false);
     s_lightOn      = s_prefs.getBool("ltOn", true);
     s_lightAlerts  = s_prefs.getBool("ltAlert", true);
     s_lightMsgs    = s_prefs.getBool("ltMsg", true);

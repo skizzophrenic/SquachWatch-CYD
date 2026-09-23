@@ -87,12 +87,14 @@
 // every real finger lands past 1024 and looks like a ghost contact.
 #define GT911_REG_POINT1     0x814F
 
-// STC8 command bytes. A bare byte, no register address. Elecrow states the
-// rest of the command space is undocumented, so nothing else is ever sent.
+// STC8 command bytes. A bare byte, no register address. These, and only
+// these: Elecrow states the rest of the command space is undocumented.
 #define STC8_BL_BRIGHTEST 0     // yes, inverted: 0 is brightest
 #define STC8_BL_DIMMEST   244
 #define STC8_BL_OFF       245
 #define STC8_TOUCH_WAKE   250
+#define STC8_BUZZ_ON      246   // the buzzer sounds until STC8_BUZZ_OFF; see crowpanel7_buzzer.h
+#define STC8_BUZZ_OFF     247
 
 // ---- What the UI thinks the screen is -------------------------------------
 //

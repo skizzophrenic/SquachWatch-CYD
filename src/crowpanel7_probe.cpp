@@ -74,9 +74,9 @@ void crowPeriphProbe() {
     }
 
     // The helper's buzzer: 246 on, 247 off. A short chirp.
-    Wire.beginTransmission(STC8_ADDR); Wire.write((uint8_t)246); const bool on = Wire.endTransmission() == 0;
+    Wire.beginTransmission(STC8_ADDR); Wire.write((uint8_t)STC8_BUZZ_ON); const bool on = Wire.endTransmission() == 0;
     delay(120);
-    Wire.beginTransmission(STC8_ADDR); Wire.write((uint8_t)247); const bool off = Wire.endTransmission() == 0;
+    Wire.beginTransmission(STC8_ADDR); Wire.write((uint8_t)STC8_BUZZ_OFF); const bool off = Wire.endTransmission() == 0;
     Serial.printf("[probe] STC8 buzzer: on %s, off %s\n", on ? "ack" : "NAK", off ? "ack" : "NAK");
 
     // WiFi reception through the sniffer's own driver, with names: the number

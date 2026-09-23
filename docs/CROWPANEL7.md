@@ -53,7 +53,7 @@ full reasoning.
 | Data lines | B0..B4 = 21, 47, 48, 45, 38; G0..G5 = 9, 10, 11, 12, 13, 14; R0..R4 = 7, 17, 18, 3, 46 |
 | Touch | GT911 at 0x5D on I2C SDA 15 / SCL 16; INT on GPIO1 (also its address strap); points read from 0x814F |
 | Backlight | none on a GPIO: a byte to the STC8H1K28 helper at 0x30, 0 brightest … 244 dimmest, 245 off |
-| Buzzer | the helper: 246 on, 247 off (the optional audible alert) |
+| Buzzer | the helper: 246 on, 247 off (the optional audible alert, below) |
 | Clock chip | PCF8563 at 0x51, no backup cell on the tested unit (time is not held across power-off) |
 | SD card | GPIO 6/4/5 through a CH486F switch shared with the I2S amplifier and the wireless header; **K1**, a two-position DIP switch on the board, selects — both open is the card. Not used by this build |
 | Status LED | none (GPIO16 is the touch clock; the CYD's LED pins are left alone) |
@@ -72,6 +72,21 @@ Two board-specific behaviours, both measured rather than assumed:
   the tested unit out into a power-on reset. The update flow turns the
   backlight down and transmits at 8.5 dBm on this board; the boot check
   already did. Run it from a supply that gives two amps, not a laptop port.
+
+## The buzzer
+
+The board has a passive buzzer behind the same STC8 helper that runs the
+backlight (byte 246 on, 247 off). It is **off by default**. SETTINGS >
+BEHAVIOR > BUZZER turns it to NEW ONLY, and that is all it ever does: one
+chirp of about a tenth of a second when the alert card goes up for a device
+this board has not logged before. It does not chirp for a device coming
+back into range, not while the power saver has dimmed the screen, not
+between eleven at night and five in the morning by a set clock, not at
+boot, and not through a wipe. Switching the row on plays the chirp once so
+you know what it sounds like; that is the test. There is no alarm mode, and
+no other board has a buzzer -- the rule elsewhere stands. The firmware
+silences the buzzer at every boot, because the helper keeps its state
+across a reset and a crash mid-chirp would otherwise leave it sounding.
 
 ## Validation and remaining checks
 

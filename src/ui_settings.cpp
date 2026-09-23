@@ -67,6 +67,12 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::WATCH_XTAL,
 #endif
     SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE, SettingsRow::AUTO_QUIET,
+#if defined(CROWPANEL7)
+    // Beside ALERT FILTER and AUTO SNOOZE because it is about alerts: one
+    // switch, not a page of knobs like the light. Compiled only for the
+    // board with a buzzer, so the emulator (no board macro) never lists it.
+    SettingsRow::BUZZER,
+#endif
     SettingsRow::DETECTION_FILTER,
     SettingsRow::IGNORED_DEVICES,
     // APPEARANCE opens the display page -- see APPEARANCE_ROWS. It sat at the
@@ -217,6 +223,9 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::BORING_MODE:
         case SettingsRow::CONFIDENCE:
         case SettingsRow::AUTO_QUIET:
+#if defined(CROWPANEL7)
+        case SettingsRow::BUZZER:
+#endif
         case SettingsRow::DETECTION_FILTER:
         case SettingsRow::IGNORED_DEVICES:
             return RowGroupId::BEHAVIOR;
@@ -805,6 +814,14 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
         case SettingsRow::AUTO_QUIET:
             label = "AUTO SNOOZE"; value = Settings::autoQuietLabel();
             break;
+#if defined(CROWPANEL7)
+        case SettingsRow::BUZZER:
+            // NEW ONLY rather than ON: the value says what the switch does,
+            // the way AT BOOT and AFTER 5 do, so nobody expects a beep per
+            // alert. The rules are in crowpanel7_buzzer.h.
+            label = "BUZZER"; value = Settings::buzzerOn() ? "NEW ONLY" : "OFF";
+            break;
+#endif
         case SettingsRow::DETECTION_FILTER:
             // "DETECTION FILTER" (the row's own screen title, no width
             // constraint there) overlaps its own "14/14" value in

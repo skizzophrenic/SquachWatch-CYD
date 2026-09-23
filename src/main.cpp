@@ -15,6 +15,7 @@
 #include "crowpanel7_backlight.h"
 #include "gt911_touch.h"
 #include "crowpanel7_probe.h"
+#include "crowpanel7_buzzer.h"
 // The [frame] line's "rows" is whoever actually wrote them.
 #define SQW_PUSH_ROWS() CrowBlit::lastRows()
 #else
@@ -1060,6 +1061,12 @@ static char    s_confirmLabel[24];
 // touch this, only LOG's do.
 static bool    s_confirmIsBle = true;
 static bool s_alertLastFree = false;
+#if defined(CROWPANEL7)
+// The chirp's length. A pass on this board is 34-59 ms and the OFF goes out
+// on the first pass at or after this, so the real sound runs 80-140 ms:
+// a chirp, not an alarm. The probe's bench chirp is 120.
+static const uint16_t BUZZ_CHIRP_MS = 80;
+#endif
 
 // Whether a sighting may take the screen, and AUTO SNOOZE's bookkeeping
 // with it. Call it once for each alert about to be raised and obey the
@@ -1085,9 +1092,29 @@ static bool alertMayInterrupt(const Detection& d) {
 #endif
     switch (g) {
         case DetectionEngine::AlertGate::HOLD:       return false;
-        case DetectionEngine::AlertGate::ALLOW_LAST: s_alertLastFree = true;  return true;
-        default:                                     s_alertLastFree = false; return true;
+        case DetectionEngine::AlertGate::ALLOW_LAST: s_alertLastFree = true;  break;
+        default:                                     s_alertLastFree = false; break;
     }
+#if defined(CROWPANEL7)
+    // The chirp, on the board that has something to chirp with. HERE and not
+    // in enterAlert(): this is the one gate every AUTOMATIC announcement
+    // passes -- the main screen, the desk's small card, the lock screen, the
+    // update window -- and none of the manual ones (NEARBY's hold, a tap on
+    // the desk card), which open a card for something already on the glass.
+    // Everything upstream of this line is the board's own idea of
+    // alert-worthy: within ALERT_GRACE_MS of firstSeen, past ALERT FILTER,
+    // not ignored or snoozed, and now past AUTO SNOOZE. The buzzer adds four
+    // of its own: it is switched on; the row is one the log never held (a
+    // device coming back is news to the screen, not to the room); the saver
+    // has not dimmed the screen -- read now, because the alert un-dims it
+    // later in this same pass; and it is not the hour the card calls AT
+    // NIGHT. Never at boot (no automatic alert runs before loop()) and never
+    // through a wipe (performWipe() silences it first).
+    if (Settings::buzzerOn() && &d == engine.latest() && engine.latestIsNew() &&
+        !s_screenDimmed && !Clock::night())
+        CrowBuzzer::chirp(BUZZ_CHIRP_MS);
+#endif
+    return true;
 }
 
 // The current alert's target, captured in enterAlert(). Kept separate
@@ -1898,6 +1925,10 @@ static void performWipe(WipeBoot after) {
     // Dark first. A duress restart has to look like any other restart, and
     // the light is the one thing visible from the back of the board.
     StatusLight::off();
+#if defined(CROWPANEL7)
+    // And silent: a chirp mid-wipe would be the one sound this restart makes.
+    CrowBuzzer::quiet();
+#endif
     Security::wipeSecrets();
     engine.sd().wipe();
     BlackBox::wipe();        // the log and the crash history kept in flash
@@ -2953,6 +2984,11 @@ void setup() {
     usingCapTouch = Gt911::begin();
     Serial.println(usingCapTouch ? "CrowPanel 7 -- GT911 capacitive touch answered."
                                  : "CrowPanel 7 -- GT911 did not answer; no touch.");
+    // Here and not with StatusLight::begin(): this is the first point the
+    // I2C bus is up and the helper has been spoken to. Sends OFF only, for a
+    // buzzer a crash may have left sounding -- the helper keeps its state
+    // across our reset. Not a boot beep.
+    CrowBuzzer::begin();
 #elif defined(TWATCH_S3)
     // The T-Watch's FT6336, on I2C SDA 39 / SCL 40 at 0x38. No reset line;
     // the AXP2101 powers it (ALDO3) in twatchPowerUp(), before this runs.
@@ -5027,6 +5063,15 @@ void loop() {
                             break;
                         case SettingsRow::CONFIDENCE: Settings::cycleMinConfidence(); break;
                         case SettingsRow::AUTO_QUIET:  Settings::cycleAutoQuiet(); break;
+#if defined(CROWPANEL7)
+                        case SettingsRow::BUZZER:
+                            // Switching it ON plays the chirp once, the job the
+                            // light's TEST row does: the owner hears what they
+                            // signed up for before a camera does. OFF is silent.
+                            Settings::toggleBuzzer();
+                            if (Settings::buzzerOn()) CrowBuzzer::chirp(BUZZ_CHIRP_MS);
+                            break;
+#endif
                         case SettingsRow::DETECTION_FILTER: enterDetFilter(); break;
                         case SettingsRow::POWER_SAVER: enterPower(); break;
 #if defined(TWATCH_S3)
@@ -6346,6 +6391,11 @@ void loop() {
         lc.screenDimmed = s_screenDimmed;
         lc.screenDark   = s_screenDimmed && Settings::dimLevel() == 0;
         StatusLight::tick(now, lc);
+#if defined(CROWPANEL7)
+        // Every pass in every state, so the chirp's OFF lands whatever
+        // screen the alert opened.
+        CrowBuzzer::tick();
+#endif
     }
     prevTouchValid = tp.valid;
 }

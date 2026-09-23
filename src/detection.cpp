@@ -1325,6 +1325,7 @@ void DetectionEngine::processDeauthQ() {
                 Dex::note(DetectionType::DEAUTH, e.rssi);
                 Regulars::note(e.mac, DetectionType::DEAUTH);
                 _latest = &row;
+                _latestNew = false;      // the row the first flood made
                 _latestChangeMs = now;
                 queueBlackBox(row, true);
                 return;
@@ -1408,6 +1409,7 @@ void DetectionEngine::postBle(Detection d) {
                 _log[slot].firstSeen = millis();   // fresh sighting for alert purposes
                 _typeCounts[(uint8_t)d.type]++;
                 _latest = &_log[slot];
+                _latestNew = false;                // ...but a device we had already
                 _latestChangeMs = millis();
                 queueBlackBox(_log[slot], true);
             }
@@ -1888,6 +1890,7 @@ void DetectionEngine::processWiFiQ() {
                     _log[slot].firstSeen = millis();
                     _typeCounts[(uint8_t)t]++;
                     _latest = &_log[slot];
+                    _latestNew = false;            // came back; not new to the log
                     _latestChangeMs = millis();
                     queueBlackBox(_log[slot], true);
                 }
@@ -1940,6 +1943,7 @@ void DetectionEngine::pushLog(const Detection& d) {
     _logHead = (_logHead + 1) % LOG_CAP;
     if (_logCount < LOG_CAP) _logCount++;
     _latest = &_log[(_logHead + LOG_CAP - 1) % LOG_CAP];
+    _latestNew = true;      // the one place a row the log never held is made
     _latestChangeMs = millis();
     _typeCounts[(uint8_t)d.type]++;
     _lifetimeTotal++;
