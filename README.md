@@ -76,6 +76,12 @@ otherwise see all week. It is one tap away in `DETECTION FILTER`.
 That's it. No buzzer, no GPS, no extra modules. The CYD is the
 whole device.
 
+Other boards have builds of their own -- `platformio.ini` has one
+`[env:...]` each, with what is and is not confirmed on it. The newest is the
+**Freenove ESP32-S3 Display 2.8"** (FNK0104B, `[env:freenove-s3]`): an S3
+with capacitive touch, an SDMMC card slot, a WS2812 status light and a
+battery connector. Pins in [docs/PINOUT.md](docs/PINOUT.md).
+
 ## Web Flash
 
 No build tools, no IDE, no cloning anything — flash a board straight
@@ -102,6 +108,8 @@ Three steps:
    ```sh
    pio run -t upload
    ```
+   For a board that is not the default three, name its build, e.g.
+   `pio run -e freenove-s3 -t upload`.
 
 The first build pulls the TFT_eSPI, XPT2046, and NimBLE-Arduino
 libraries; after that it's incremental.
@@ -189,7 +197,8 @@ The power saver never dims this screen.
 
 ## The status light
 
-The RGB LED on the back of the 2.8" CYD (on the front of the RL Phantom)
+The RGB LED on the back of the 2.8" CYD (on the front of the RL Phantom, and
+a WS2812 on the Freenove ESP32-S3 2.8")
 tells you what the screen is doing without the screen. A slow breathe in the
 theme's colour when nothing is happening; three flashes and a hold in the
 detection's own colour when something is, for as long as the alert card is
