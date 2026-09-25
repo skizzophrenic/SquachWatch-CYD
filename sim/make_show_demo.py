@@ -32,6 +32,15 @@ CYAN  = (0, 214, 214)
 # ---- the clips ----
 
 CLIPS = {
+    # v1.21.0 "All Ears": the watch hears again, the buzz grew up, and the
+    # watch rows got a page. Shot on the watch's 240x240 like v1.20.0's; the
+    # emulator is not the watch build, so the page itself is the notes' to
+    # describe and the captions carry the story.
+    "all-ears": [
+        ("clear",  60, 36, ["--noseed", "--bg", "7"],  {}, 1600, "HE HEARS AGAIN. EVERY BOOT. WE CHECKED."),
+        ("alert",  30, 16, [],                          {}, 1600, "THE BUZZ GREW A BACKBONE. MED BY DEFAULT."),
+        ("clear",  60, 36, ["--noseed", "--bg", "10"], {}, 1500, "WORN ALL DAY. NOT ONE DEAF MINUTE."),
+    ],
     # v1.20.0 "SquachWatch^2": he moves onto a wrist. Shot on the T-Watch S3's
     # own 240x240 panel (see CLIP_SIZE). The emulator is not the watch build,
     # so the corner clock and the WATCH settings are the notes' to describe.
@@ -118,6 +127,7 @@ CLIPS = {
 # 1 there: 480x320 doubled is a 960-pixel GIF, which is more than the notes
 # embed at anyway.
 CLIP_SIZE = {
+    "all-ears":            (240, 240, 2),
     "squachwatch-squared": (240, 240, 2),
     "the-big-screen": (480, 320, 1),
     "good-company":   (480, 320, 1),
