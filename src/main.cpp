@@ -373,7 +373,7 @@ static void drawCrashCard(TFT_eSPI& t) {
 #define BL_PIN_ORIG 21
 #define BL_PIN_CAP  27
 #define BL_PIN_AWOK 32
-#define BL_PIN_TWATCH 45
+#define BL_PIN_S3   45   // the T-Watch S3's and the Freenove S3's, both
 #define BL_CH_ORIG  0
 #define BL_CH_CAP   1
 #define BL_CH_AWOK  2
@@ -394,6 +394,10 @@ static void drawCrashCard(TFT_eSPI& t) {
 #if defined(TWATCH_S3)
 // Confirmed on the watch 2026-09-22: the ST7789 wants inversion on (as
 // LilyGo's own setup says); false showed every colour inverted.
+constexpr bool PANEL_NEEDS_INVERSION = true;
+#elif defined(FREENOVE_S3)
+// Freenove's own setup for the S3 2.8" (FNK0104AB) turns inversion on, and
+// confirmed on an FNK0104B 2026-09-25: colours right with INVERT untouched.
 constexpr bool PANEL_NEEDS_INVERSION = true;
 #elif defined(FREENOVE32)
 // Freenove's own setup for the 3.2" turns inversion on. UNCONFIRMED here
@@ -1101,7 +1105,7 @@ static bool    s_confirmArmed = false;
 // The compiled-in ranges are a 2.8" board's. Anywhere else -- the digitisers
 // on the display's own bus -- they put taps nowhere near the finger, so a
 // board with nothing better has no SKIP to offer.
-#if defined(TOUCH_SHARES_DISPLAY_BUS) || defined(CYD35) || defined(TWATCH_S3)
+#if defined(TOUCH_SHARES_DISPLAY_BUS) || defined(CYD35) || defined(SQW_S3)
 static const bool DEFAULT_TOUCH_USABLE = false;
 #else
 static const bool DEFAULT_TOUCH_USABLE = true;
@@ -2616,7 +2620,7 @@ void setup() {
     // while it is still the previous life's, not this one's.
     crashReportInit();
     Serial.begin(SERIAL_BAUD);
-#if defined(TWATCH_S3)
+#if defined(SQW_S3)
     // Native USB: with nothing reading the port, every print would otherwise
     // wait its full timeout for a host, and after the chatty first-boot
     // calibration the loop crawled so slowly the screen looked frozen black.
@@ -2653,13 +2657,13 @@ void setup() {
 // Not on AWOK (TOUCH_CS there) and not on either RL Phantom, where GPIO21 is
 // the capacitive controller's INTERRUPT line. Driving it high at boot is the
 // same mistake as the LEDC attach further down, just earlier.
-#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(TWATCH_S3)
+#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(SQW_S3)
     pinMode(21, OUTPUT); digitalWrite(21, HIGH);
 #endif
-#if defined(TWATCH_S3)
+#if defined(SQW_S3)
     // GPIO27 and GPIO32 are the S3's PSRAM lines: touching either hangs the
-    // chip until the watchdog reboots it. The watch's backlight is GPIO45.
-    pinMode(45, OUTPUT); digitalWrite(45, HIGH);
+    // chip until the watchdog reboots it. Both S3 boards' backlight is GPIO45.
+    pinMode(BL_PIN_S3, OUTPUT); digitalWrite(BL_PIN_S3, HIGH);
 #else
     pinMode(27, OUTPUT); digitalWrite(27, HIGH);
 #if !defined(FREENOVE32)   // not a known-spare pin on the Freenove; its backlight is 27 alone
@@ -2721,11 +2725,11 @@ void setup() {
 // TOUCH_CS on AWOK, and the capacitive controller's INTERRUPT line on the RL
 // Phantom. Driving a 5 kHz PWM onto either is the kind of fault that looks
 // like dead touch, which is exactly how it presented on the Phantom.
-#if defined(TWATCH_S3)
+#if defined(SQW_S3)
     // One backlight, GPIO45, on the first channel. The CYD pins below are
     // flash/PSRAM lines and the power chip's interrupt on an S3.
     ledcSetup(BL_CH_ORIG, 5000, 8);
-    ledcAttachPin(BL_PIN_TWATCH, BL_CH_ORIG);
+    ledcAttachPin(BL_PIN_S3, BL_CH_ORIG);
 #else
 #if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R)
     ledcSetup(BL_CH_ORIG, 5000, 8);
@@ -2805,8 +2809,8 @@ void setup() {
     // 16-bit — the full 16-bit buffer didn't fit in the available
     // contiguous heap on this board.
     frame.setColorDepth(8);
-#if defined(TWATCH_S3)
-    // 57.6 KB fits in internal RAM with room to spare, and a sprite in
+#if defined(SQW_S3)
+    // 57.6 KB fits in internal RAM with room to spare (75 KB at 320x240), and a sprite in
     // PSRAM pushes slower and cannot go by DMA. Keep it inside.
     frame.setAttribute(PSRAM_ENABLE, false);
 #endif
@@ -2860,6 +2864,15 @@ void setup() {
     usingCapTouch = CapTouch::probe();
     Serial.println(usingCapTouch ? "T-Watch S3 -- FT6336 capacitive touch answered."
                                  : "T-Watch S3 -- FT6336 did not answer; no touch.");
+#elif defined(FREENOVE_S3)
+    // The Freenove S3 2.8"'s FT6336, on I2C SDA 16 / SCL 15 at 0x38, reset on
+    // GPIO18 (active low). The ES8311 codec shares the bus at 0x18. FNK0104A
+    // is the same board with no touch panel: nothing answers, and the screen
+    // runs without touch rather than on a guessed fallback.
+    CapTouch::begin(16, 15, 18, 0x38);
+    usingCapTouch = CapTouch::probe();
+    Serial.println(usingCapTouch ? "Freenove S3 -- FT6336 capacitive touch answered."
+                                 : "Freenove S3 -- FT6336 did not answer; no touch (FNK0104A?).");
 #elif defined(TOUCH_ON_DISPLAY_BUS)
     // AWOK's XPT2046 sits on the display's own shared VSPI bus (TOUCH_CS=21,
     // already armed by TFT_eSPI itself once awok_user_setup.h's #define

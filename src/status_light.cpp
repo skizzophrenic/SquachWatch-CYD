@@ -8,8 +8,10 @@
 // The 2.8" CYD's LED, and the RL Phantom's: same Sunton family, same three
 // pins, and nothing else on the Phantom's build uses 4, 16 or 17. The AWOK
 // and the 3.5" are unverified and get nothing -- see the header for why that
-// is a rule and not a shortcut.
-#if defined(ESP32) && !defined(CYD35) && !defined(AWOK) && !defined(TWATCH_S3)
+// is a rule and not a shortcut. Nor do the S3 boards: the watch has no light,
+// and the Freenove S3's is a WS2812 on GPIO42 while its 16 and 17 are the
+// touch controller's SDA and interrupt -- PWM on them is dead touch.
+#if defined(ESP32) && !defined(CYD35) && !defined(AWOK) && !defined(SQW_S3)
 #define STATUS_LIGHT_HW 1
 #else
 #define STATUS_LIGHT_HW 0

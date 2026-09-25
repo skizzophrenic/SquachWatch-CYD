@@ -37,6 +37,8 @@ bool SdLog::begin() {
     if (_ready) return true;
 #if defined(TWATCH_S3)
     return false;   // no card slot; GPIO19/20 are the S3's USB pins
+#elif defined(FREENOVE_S3)
+    return false;   // a 4-bit SDMMC slot (CLK 38, CMD 40, D0 39), not SPI on CS5: needs an SD_MMC path
 #endif
     Serial.printf("[sd] mounting: heap %lu, largest block %lu\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 #if defined(CYD35)
