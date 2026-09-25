@@ -2970,7 +2970,15 @@ void setup() {
 
     // Seed the PRNG so the digital rain starts in a fresh-looking state
     // on every boot. Analog read on a floating pin is plenty.
+#if defined(SQW_S3)
+    // GPIO34 is not an ADC pin on an S3 (it is an octal PSRAM line on these
+    // boards): analogRead() refuses it and the seed was a constant. The
+    // hardware RNG instead -- before WiFi starts it is running on the
+    // bootloader's entropy rather than radio noise, still no constant.
+    randomSeed(esp_random());
+#else
     randomSeed(analogRead(34));
+#endif
 
     // The backlight goes down while the radios come up, and back to your
     // setting once they are running.

@@ -17,7 +17,8 @@
 //
 // The LED sits on GPIO 4 / 16 / 17 on the 2.8" CYD, both the ST7789 and the
 // ILI9341 kinds, and on the RL Phantom, where it is on the front. Common
-// anode, so the pin goes LOW to light. The AWOK and the 3.5" are unverified
+// anode, so the pin goes LOW to light. The Freenove S3 2.8" has a WS2812 on
+// GPIO 42 instead, driven with the same rules. The AWOK and the 3.5" are unverified
 // and the driver compiles to nothing on them: driving PWM onto a pin that
 // turns out to be something else is exactly how the Phantom's touch fault
 // happened.

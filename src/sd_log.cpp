@@ -1,6 +1,15 @@
 // SquachWatch-CYD — SD log implementation
 #include "sd_log.h"
 #include <SD.h>
+#if defined(FREENOVE_S3)
+// The Freenove S3's slot is wired for SDMMC, not SPI: every card call in this
+// file goes through CARD, which is SD_MMC there and SD everywhere else. Both
+// are an fs::FS, so open/remove/cardSize read the same either way.
+#include <SD_MMC.h>
+#define CARD SD_MMC
+#else
+#define CARD SD
+#endif
 #include <stdio.h>
 // The Phantoms define CYD (they ARE a CYD) but still need this reference,
 // because their touch shares the display's bus and SdLog::begin() has to hand
@@ -37,11 +46,23 @@ bool SdLog::begin() {
     if (_ready) return true;
 #if defined(TWATCH_S3)
     return false;   // no card slot; GPIO19/20 are the S3's USB pins
-#elif defined(FREENOVE_S3)
-    return false;   // a 4-bit SDMMC slot (CLK 38, CMD 40, D0 39), not SPI on CS5: needs an SD_MMC path
 #endif
     Serial.printf("[sd] mounting: heap %lu, largest block %lu\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-#if defined(CYD35)
+#if defined(FREENOVE_S3)
+    // SDMMC on the S3's GPIO matrix. Pins from Freenove's own SDMMC sketch and
+    // the schematic: CLK 38, CMD 40, D0 39, D1 41, D2 48, D3 47, each with a
+    // 10K pull-up on the board. 4-bit first; if a card will not start that
+    // way, 1-bit (CLK/CMD/D0 only) before giving up, and the log says which.
+    SD_MMC.setPins(38, 40, 39, 41, 48, 47);
+    bool mounted = SD_MMC.begin("/sd", false, false, SDMMC_FREQ_DEFAULT, SD_MAX_FILES);
+    if (!mounted) {
+        SD_MMC.end();
+        SD_MMC.setPins(38, 40, 39);
+        mounted = SD_MMC.begin("/sd", true, false, SDMMC_FREQ_DEFAULT, SD_MAX_FILES);
+        if (mounted) Serial.println("[sd] 4-bit did not start; mounted 1-bit");
+    }
+    if (!mounted) {
+#elif defined(CYD35)
     // (The RL Phantom used to land here too, and its SD card never worked as
     // a result: the card is on 18/19/23, and the display's SPI engine never
     // clocked those pins. Its display now runs on HSPI -- see its user setup
@@ -99,7 +120,7 @@ bool SdLog::begin() {
         _ready = false;
         return false;
     }
-    Serial.printf("[sd] card mounted: %llu MB\n", (unsigned long long)(SD.cardSize() >> 20));
+    Serial.printf("[sd] card mounted: %llu MB\n", (unsigned long long)(CARD.cardSize() >> 20));
     _ready = true;
     openDaily();
     return true;
@@ -114,7 +135,7 @@ void SdLog::openDaily() {
 
 void SdLog::logEvent(const Detection& d) {
     if (!_ready) return;
-    File f = SD.open(_filename, FILE_APPEND);
+    File f = CARD.open(_filename, FILE_APPEND);
     if (!f) return;
     char line[96];
     char mac[18];
@@ -144,7 +165,7 @@ void SdLog::wipe() {
     // Walk the root and remove every file this firmware writes. Names are
     // /squachwatch-YYYYMMDD.log; matching on the prefix takes them all rather
     // than only today's, which is the whole point of a wipe.
-    File dir = SD.open("/");
+    File dir = CARD.open("/");
     if (!dir) return;
     // Collect first, then remove: deleting while iterating openNextFile() is
     // not something the FAT driver promises to survive.
@@ -163,7 +184,7 @@ void SdLog::wipe() {
         f.close();
     }
     dir.close();
-    for (int i = 0; i < n; i++) SD.remove(victims[i]);
+    for (int i = 0; i < n; i++) CARD.remove(victims[i]);
     _filename[0] = '\0';       // force a fresh openDaily() on the next event
 }
 
