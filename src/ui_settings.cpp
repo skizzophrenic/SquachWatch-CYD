@@ -52,6 +52,9 @@ static uint8_t s_dexCaught = 0;
 // has turned off) are filtered out by visibleRows() below rather than
 // removed here, so their SettingsRow values stay stable regardless of
 // which mode is active.
+#if defined(FREENOVE_S3)
+void boardBatteryLine(char* out, size_t n);    // main.cpp: the divider on GPIO9
+#endif
 #if defined(TWATCH_S3)
 void twatchBatteryLine(char* out, size_t n);   // main.cpp, where the power chip lives
 bool twatchRadioResetArmed();                  // main.cpp: the first tap of two
@@ -115,6 +118,9 @@ static const SettingsRow APPEARANCE_ROWS[] = {
 
 // The SYSTEM page: the rarely-needed machinery, off the main list.
 static const SettingsRow SYSTEM_ROWS[] = {
+#if defined(FREENOVE_S3)
+    SettingsRow::BOARD_BATTERY,
+#endif
     SettingsRow::CALIBRATE, SettingsRow::CHECK_COLORS,
     SettingsRow::DIAGNOSTICS, SettingsRow::UPDATE_FIRMWARE, SettingsRow::UPDATE_CHECK, SettingsRow::WIFI_NETWORKS,
     SettingsRow::RESET_STATS,
@@ -829,6 +835,11 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             snprintf(valBuf, valBufN, "%u", (unsigned)IgnoreList::count());
             value = valBuf;
             break;
+#if defined(FREENOVE_S3)
+        case SettingsRow::BOARD_BATTERY:
+            label = "BATTERY"; boardBatteryLine(valBuf, valBufN); value = valBuf;
+            break;
+#endif
 #if defined(TWATCH_S3)
         case SettingsRow::WATCH_BATTERY:
             label = "BATTERY"; twatchBatteryLine(valBuf, valBufN); value = valBuf;

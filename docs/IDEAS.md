@@ -228,6 +228,17 @@ who would rather it did not happen.
   days." The genuinely useful one, and the one to be careful with: many
   trackers change their address, so it has to be tested before it is claimed.
 
+## Faster frames on the ESP32-S3 boards
+
+The overlapped frame push (`frame_push.h`, v1.15.0) is off on both S3 boards:
+it drives the ESP32's SPI registers directly, and the S3 lays them out
+differently -- the watch's first frame through it came out white. They use the
+library's plain `pushSprite()` instead. On the Freenove S3 2.8" that is 40 ms a
+frame on the wire at 40 MHz against about 31 ms of actual bytes, the rest spent
+converting a line while the bus waits: 14-17 fps on the main screen. Porting
+the push to the S3's registers is worth roughly 5-8 fps there, and the watch
+gets it too. The clock is not the way: 80 MHz garbles that panel.
+
 ## Rules of thumb for anything here
 
 - **Working memory, not firmware space, is the limit.** A game that needs a
