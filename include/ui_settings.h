@@ -58,7 +58,8 @@ enum class SettingsRow : uint8_t {
     WATCH_RADIO,     // the T-Watch only: the radio duty cycle, under WATCH
     WATCH_LISTEN,    // the T-Watch only: BLE LISTEN, how much of the time the receiver is open
     WATCH_IDLE_CPU,  // the T-Watch only: SLEEP CPU, the clock while the screen is asleep
-    WATCH_BUZZ,      // the T-Watch only: buzz on an alert, under WATCH
+    WATCH_BUZZ,      // the T-Watch only: buzz on an alert, OFF / HIGH / MED / LOW
+    WATCH_SETTINGS,  // the T-Watch only: the row on the main list that opens the WATCH SETTINGS page
     WATCH_RADIO_RESET, // the T-Watch only: power cycle the watch to wake the radios, under WATCH
     WATCH_STEADY,    // the T-Watch only: STEADY POWER, DC1 held in PWM, under WATCH
     WATCH_TEMP,      // the T-Watch only: the chip's temperature, a reading, under WATCH
@@ -79,7 +80,7 @@ void uiSettingsScroll(int delta);     // positive = scroll down
 // Each page keeps its OWN scroll position, so leaving a page and coming back
 // puts you where you were instead of at the top -- the list is long enough
 // that losing your place was the most-felt annoyance on this screen.
-enum class SettingsPage : uint8_t { MAIN = 0, APPEARANCE = 1, SYSTEM = 2, DESK = 3 };
+enum class SettingsPage : uint8_t { MAIN = 0, APPEARANCE = 1, SYSTEM = 2, DESK = 3, WATCH = 4 };
 void         uiSettingsOpenPage(SettingsPage p);
 SettingsPage uiSettingsCurrentPage();
 

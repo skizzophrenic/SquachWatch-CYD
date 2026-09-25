@@ -129,7 +129,7 @@ static const uint8_t  IDLE_CPU_DEFAULT   = 2;   // no change asleep
 static uint8_t  s_bleIx        = BLE_LISTEN_DEFAULT;
 static uint8_t  s_idleCpuIx    = IDLE_CPU_DEFAULT;
 static bool     s_wakeOnAlert  = true;
-static bool     s_buzz         = true;
+static uint8_t  s_buzzMode     = 2;    // 0 OFF, 1 HIGH, 2 MED, 3 LOW; MED by default
 static bool     s_steady       = false;
 // The watch's radio duty cycle: on for a few seconds, resting for the rest.
 // 0 ALWAYS, 1 five seconds of thirty, 2 ten of sixty, 3 BLE always on with
@@ -205,7 +205,7 @@ uint8_t  idleFps()          { return s_powerSaver ? IDLE_FPS[s_idleFpsIx] : 0; }
 uint16_t idleAfterSec()     { return IDLE_AFTER[s_idleAfterIx]; }
 uint16_t cpuMhz()           { return s_powerSaver ? CPU_MHZ[s_cpuIx] : 240; }
 bool     wakeOnAlert()      { return s_wakeOnAlert; }
-bool     buzz()             { return s_buzz; }
+bool     buzz()             { return s_buzzMode != 0; }
 bool     steadyPower()      { return s_steady; }
 // Only while POWER SAVER is on. Either RADIO DUTY row (the Power screen,
 // or WATCH in settings) picks the mode; neither turns the saver on.
@@ -265,9 +265,14 @@ void toggleSteadyPower() {
     s_prefs.putBool("steady", s_steady);
 }
 
-void toggleBuzz() {
-    s_buzz = !s_buzz;
-    s_prefs.putBool("buzz", s_buzz);
+uint8_t buzzStrength() { return s_buzzMode == 0 ? 0 : (uint8_t)(3 - s_buzzMode); }
+const char* buzzModeName() {
+    static const char* const N[] = { "OFF", "HIGH", "MED", "LOW" };
+    return N[s_buzzMode < 4 ? s_buzzMode : 2];
+}
+void cycleBuzz() {
+    s_buzzMode = (uint8_t)((s_buzzMode + 1) % 4);
+    s_prefs.putUChar("buzzMode", s_buzzMode);
 }
 void toggleWakeOnAlert() {
     s_wakeOnAlert = !s_wakeOnAlert;
@@ -391,7 +396,9 @@ void load() {
     if (s_bleIx > 2)     s_bleIx = BLE_LISTEN_DEFAULT;
     if (s_idleCpuIx > 2) s_idleCpuIx = IDLE_CPU_DEFAULT;
     s_wakeOnAlert  = s_prefs.getBool("pwrWake", true);
-    s_buzz         = s_prefs.getBool("buzz", true);
+    // The old on/off switch carries over: a watch that had BUZZ off stays off.
+    s_buzzMode     = s_prefs.getUChar("buzzMode", s_prefs.getBool("buzz", true) ? 2 : 0);
+    if (s_buzzMode > 3) s_buzzMode = 2;
     s_steady       = s_prefs.getBool("steady", false);
     s_radioDutyIx  = s_prefs.getUChar("pwrRadio", RADIO_DUTY_DEFAULT);
     if (s_radioDutyIx >= RADIO_DUTY_N) s_radioDutyIx = RADIO_DUTY_DEFAULT;

@@ -1970,12 +1970,24 @@ static uint8_t drvRead(uint8_t reg) {
     return Wire1.read();
 }
 
+// BUZZ STRENGTH. Library 1 is the driver's table for a 1.3 V motor and was
+// what this shipped with; the watch's motor is a 3 V ERM, so library 2 drives
+// it as hard as it is rated for, and MAX lifts the overdrive clamp from the
+// default 3.1 V to about 3.6 V -- only ever for the fraction of a second an
+// effect lasts. Called at init and whenever the row is tapped; the chip is
+// out of standby on both paths, which the register writes need.
+static void twatchHapticApply() {
+    const uint8_t lvl = Settings::buzzStrength();
+    drvWrite(0x03, lvl == 0 ? 0x01 : 0x02);  // LIBRARY
+    drvWrite(0x17, lvl == 2 ? 0xA5 : 0x8C);  // OD_CLAMP: 5.6 V * n / 255
+}
+
 static void twatchHapticBegin() {
     if (!s_pmuOk) return;
     s_drvOk = drvWrite(0x01, 0x00);          // MODE: out of standby, internal trigger
     if (!s_drvOk) { Serial.println("[buzz] DRV2605 did not answer"); return; }
     drvWrite(0x02, 0x00);                    // no real-time input
-    drvWrite(0x03, 0x01);                    // effect library 1: ERM
+    twatchHapticApply();                     // library and drive clamp from BUZZ STRENGTH
     drvWrite(0x1A, drvRead(0x1A) & 0x7F);    // FEEDBACK: ERM, not LRA
     drvWrite(0x1D, drvRead(0x1D) | 0x20);    // CONTROL3: ERM open loop
     drvWrite(0x01, 0x40);                    // STANDBY until a buzz: a few uA instead of ~0.5 mA
@@ -1992,10 +2004,16 @@ static void twatchBuzz(Buzz kind) {
     if (kind == Buzz::ALERT && lastAt && now - lastAt < 10000) return;
     lastAt = now;
     uint8_t seq[8] = { 0 };
+    // Effects from the driver's library: 1 strong click, 14 strong buzz,
+    // 15 a 750 ms alert, 16 a 1000 ms alert, 47 buzz. A byte with the top bit
+    // set is a wait of that many tens of milliseconds.
+    const uint8_t lvl = Settings::buzzStrength();
     if (kind == Buzz::WATCH) {               // three long buzzes
-        seq[0] = 47; seq[1] = 0x80 | 12; seq[2] = 47; seq[3] = 0x80 | 12; seq[4] = 47;
-    } else {                                 // a double click
-        seq[0] = 1; seq[1] = 0x80 | 10; seq[2] = 1;
+        const uint8_t e = lvl == 2 ? 16 : 47;
+        seq[0] = e; seq[1] = 0x80 | 12; seq[2] = e; seq[3] = 0x80 | 12; seq[4] = e;
+    } else {                                 // a double click, or a double buzz
+        const uint8_t e = lvl == 0 ? 1 : lvl == 1 ? 14 : 15;
+        seq[0] = e; seq[1] = 0x80 | 10; seq[2] = e;
     }
     drvWrite(0x01, 0x00);                    // out of standby for this one
     s_drvAwakeAt = millis();
@@ -4906,13 +4924,19 @@ void loop() {
                             break;
                         case SettingsRow::WATCH_TEMP: break;   // a reading, not a switch
                         case SettingsRow::WATCH_XTAL: twatchXtalStart(); break;
+                        case SettingsRow::WATCH_SETTINGS: uiSettingsOpenPage(SettingsPage::WATCH); break;
                         case SettingsRow::WATCH_BUZZ:
-                            Settings::toggleBuzz();
-                            // The sample only when turning it ON: playing it on
-                            // the way off too made the tap feel like a test that
-                            // passed, and left alerts silent.
-                            if (Settings::buzz()) twatchBuzz(Buzz::SAMPLE);
-                            Serial.printf("[buzz] alerts %s\n", Settings::buzz() ? "ON" : "OFF");
+                            // OFF, HIGH, MED, LOW. Each level plays the alert
+                            // pattern once, so the choice is made by feel; OFF
+                            // stays silent, so the tap never feels like a test
+                            // that passed while alerts are actually off.
+                            Settings::cycleBuzz();
+                            if (Settings::buzz()) {
+                                drvWrite(0x01, 0x00);
+                                twatchHapticApply();
+                                twatchBuzz(Buzz::SAMPLE);
+                            }
+                            Serial.printf("[buzz] %s\n", Settings::buzzModeName());
                             break;
 #endif
                         case SettingsRow::STATUS_LIGHT: enterLight(); break;

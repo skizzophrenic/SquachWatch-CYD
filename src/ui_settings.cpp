@@ -23,7 +23,7 @@ static const int TOP_MARGIN = 32;
 
 // One scroll position per page, not one shared: see SettingsPage in the header.
 static SettingsPage s_page = SettingsPage::MAIN;
-static int g_scrollFor[4] = { 0, 0, 0, 0 };
+static int g_scrollFor[5] = { 0, 0, 0, 0, 0 };
 #define g_scroll (g_scrollFor[(uint8_t)s_page])
 
 // BACK is pinned along the bottom now. Height of that strip, reserved out of
@@ -61,11 +61,9 @@ void twatchXtalLine(char* out, size_t n);      // main.cpp: CLOCK CHECK's state 
 
 static const SettingsRow ALL_ROWS[] = {
 #if defined(TWATCH_S3)
-    // The watch's own group, first: what only a watch has to think about.
-    SettingsRow::WATCH_BATTERY, SettingsRow::WATCH_RADIO, SettingsRow::WATCH_LISTEN,
-    SettingsRow::WATCH_IDLE_CPU, SettingsRow::WATCH_BUZZ,
-    SettingsRow::WATCH_RADIO_RESET, SettingsRow::WATCH_STEADY, SettingsRow::WATCH_TEMP,
-    SettingsRow::WATCH_XTAL,
+    // The watch's own page, first: what only a watch has to think about grew
+    // to ten rows, so the main list carries one row that opens it.
+    SettingsRow::WATCH_SETTINGS,
 #endif
     SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE, SettingsRow::AUTO_QUIET,
     SettingsRow::DETECTION_FILTER,
@@ -113,6 +111,18 @@ static const SettingsRow APPEARANCE_ROWS[] = {
     SettingsRow::STATUS_LIGHT,
 };
 
+#if defined(TWATCH_S3)
+// The WATCH SETTINGS page: the battery first (a reading), then the knobs that
+// decide how long it lasts, then the buzz, then the tools.
+static const SettingsRow WATCH_ROWS[] = {
+    SettingsRow::WATCH_BATTERY, SettingsRow::WATCH_RADIO, SettingsRow::WATCH_LISTEN,
+    SettingsRow::WATCH_IDLE_CPU, SettingsRow::WATCH_BUZZ,
+    SettingsRow::WATCH_RADIO_RESET, SettingsRow::WATCH_STEADY, SettingsRow::WATCH_TEMP,
+    SettingsRow::WATCH_XTAL,
+};
+static const uint8_t WATCH_ROWS_N = sizeof(WATCH_ROWS) / sizeof(WATCH_ROWS[0]);
+#endif
+
 // The SYSTEM page: the rarely-needed machinery, off the main list.
 static const SettingsRow SYSTEM_ROWS[] = {
     SettingsRow::CALIBRATE, SettingsRow::CHECK_COLORS,
@@ -140,6 +150,9 @@ static const uint8_t APPEARANCE_ROWS_N = sizeof(APPEARANCE_ROWS) / sizeof(APPEAR
 static const uint8_t LIST_MAX_N = APPEARANCE_ROWS_N > ALL_ROWS_N ? APPEARANCE_ROWS_N : ALL_ROWS_N;
 static_assert(SYSTEM_ROWS_N <= LIST_MAX_N, "the display list is sized off LIST_MAX_N");
 static_assert(DESK_ROWS_N <= LIST_MAX_N, "the display list is sized off LIST_MAX_N");
+#if defined(TWATCH_S3)
+static_assert(WATCH_ROWS_N <= LIST_MAX_N, "the display list is sized off LIST_MAX_N");
+#endif
 // Kept as a thin shim over s_page so nothing that reads it has to change.
 #define s_appearance (s_page == SettingsPage::APPEARANCE)
 
@@ -181,6 +194,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::WATCH_LISTEN:
         case SettingsRow::WATCH_IDLE_CPU:
         case SettingsRow::WATCH_BUZZ:
+        case SettingsRow::WATCH_SETTINGS:
         case SettingsRow::WATCH_RADIO_RESET:
         case SettingsRow::WATCH_STEADY:
         case SettingsRow::WATCH_TEMP:
@@ -284,6 +298,9 @@ static uint8_t buildDisplayList(DisplayItem* out) {
     if (s_page == SettingsPage::APPEARANCE) { src = APPEARANCE_ROWS; srcN = APPEARANCE_ROWS_N; }
     else if (s_page == SettingsPage::SYSTEM) { src = SYSTEM_ROWS;    srcN = SYSTEM_ROWS_N; }
     else if (s_page == SettingsPage::DESK)   { src = DESK_ROWS;      srcN = DESK_ROWS_N; }
+#if defined(TWATCH_S3)
+    else if (s_page == SettingsPage::WATCH)  { src = WATCH_ROWS;     srcN = WATCH_ROWS_N; }
+#endif
     // The tracking rows come first on the main page, and only when a target is
     // actually set -- the whole point is that a watch stops being invisible.
     if (s_page == SettingsPage::MAIN) {
@@ -422,7 +439,7 @@ void uiSettingsInit(TFT_eSPI& t) {
     // visit -- carrying it across a fresh entry would drop you mid-list with
     // no idea why.
     s_page = SettingsPage::MAIN;
-    for (uint8_t i = 0; i < 4; i++) g_scrollFor[i] = 0;
+    for (uint8_t i = 0; i < 5; i++) g_scrollFor[i] = 0;
     for (uint8_t i = 0; i < 7; i++) s_folded[i] = false;
     // Any pending question dies with the screen. Coming back to Settings and
     // finding a confirm panel still up from last time would be answering
@@ -843,7 +860,10 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             label = "SLEEP CPU"; snprintf(valBuf, valBufN, "%u MHz", (unsigned)Settings::idleCpuMhzRaw()); value = valBuf;
             break;
         case SettingsRow::WATCH_BUZZ:
-            label = "BUZZ"; value = Settings::buzz() ? "ON" : "OFF";
+            label = "BUZZ"; value = Settings::buzzModeName();
+            break;
+        case SettingsRow::WATCH_SETTINGS:
+            label = "WATCH SETTINGS"; value = ">";
             break;
         case SettingsRow::WATCH_RADIO_RESET:
             label = "RADIO RESET"; value = twatchRadioResetArmed() ? "SURE?" : "GO";
@@ -1033,6 +1053,7 @@ switch (Settings::background()) {
     if (s_page == SettingsPage::APPEARANCE) pageTitle = ">> APPEARANCE <<";
     else if (s_page == SettingsPage::SYSTEM) pageTitle = ">> SYSTEM <<";
     else if (s_page == SettingsPage::DESK)   pageTitle = ">> DESK MODE <<";
+    else if (s_page == SettingsPage::WATCH)  pageTitle = ">> WATCH SETTINGS <<";
     Theme::drawTitleBar(t, pageTitle);
 
     // +6, not +4: four group headers plus the two tracking rows.
