@@ -94,6 +94,23 @@ To verify the detector works:
 If a microSD card is inserted (and FAT32-formatted), every detection
 is also written to `squachwatch-<day>.log` on the card.
 
+## Elecrow CrowPanel Advance 7.0 (ESP32-S3, 800×480 RGB)
+
+Its own target, because nothing about it is a CYD:
+
+```sh
+pio run -e crowpanel7
+pio run -e crowpanel7 -t upload
+pio device monitor -b 115200
+```
+
+The console is a real UART through a CH340K (macOS needs WCH's driver);
+there is no native USB. No touch calibration on first boot: the GT911
+reports panel pixels. Power it from a supply that gives two amps -- the
+panel's backlight plus WiFi joining a network browned a unit out on a
+laptop port. See [CrowPanel notes](CROWPANEL7.md) for the pin map, why it
+draws 400×240 doubled, and what has and has not been tested.
+
 ## Troubleshooting
 
 ### "A fatal error occurred: Failed to connect to ESP32"

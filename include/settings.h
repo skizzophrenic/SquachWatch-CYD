@@ -241,6 +241,17 @@ namespace Settings {
     const char* radioDutyName(uint8_t ix);
     void        cycleRadioDuty();
 
+    // ---- BUZZER ----------------------------------------------------------
+    // The CrowPanel 7's buzzer, behind the helper MCU that runs its backlight.
+    // OFF by default, and ON means one chirp for a device this board has not
+    // logged before, at the moment the alert goes up -- never for one coming
+    // back, never with the screen dimmed, never at night. The rules live with
+    // the hook in main.cpp (alertMayInterrupt); this is only the switch.
+    // Boards without a buzzer never show the row; the value is kept on all
+    // of them so a saved preference travels, the way the light's knobs do.
+    bool        buzzerOn();
+    void        toggleBuzzer();
+
     // ---- STATUS LIGHT ----------------------------------------------------
     // The RGB LED on the back of the 2.8" CYD. See status_light.h for the
     // rules it follows; these are only the knobs. Every one of them is

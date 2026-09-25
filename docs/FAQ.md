@@ -23,7 +23,14 @@ There's also an **AWOK 2.4"** (ESP32-Marauder V6.1) port, contributed and workin
 
 And the **RL Phantom 2.4"** (Sunton ESP32-2432S024R, the resistive-touch one) works too. The capacitive version (the one ending in **C**) isn't supported yet.
 
-Either way: no GPS, no buzzer, no extra modules. The board *is* the whole device. Plug it into USB-C and you're done.
+There's an **Elecrow CrowPanel Advance 7.0** port too (ESP32-S3, an 800×480
+RGB panel with capacitive touch), if that's the board you already own. It
+is experimental: one unit, a few days of testing, and it draws the 2.8"
+board's screen doubled rather than a new 7" layout. Build it yourself with
+`pio run -e crowpanel7` — it isn't in the web flasher. Notes in
+[docs/CROWPANEL7.md](CROWPANEL7.md).
+
+Either way: no GPS, no extra modules, and nothing that makes a sound unless you ask it to. The board *is* the whole device. Plug it into USB-C and you're done.
 
 ## Do I need to build it myself?
 

@@ -567,7 +567,7 @@ Per-section attribution lives in `docs/DETECTIONS.md`:
 
 ## 14. What's OUT of scope (v1.0)
 
-- No buzzer / audio alerts
+- No buzzer / audio alerts (The CYD contract. The one board with a buzzer on it, the CrowPanel 7, keeps it opt-in and off by default -- docs/CROWPANEL7.md.)
 - No SD card logging
 - No GPS
 - No web UI / WiFi AP config portal

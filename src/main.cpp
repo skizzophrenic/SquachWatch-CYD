@@ -7,6 +7,20 @@
 #include <SPI.h>
 #include <Wire.h>
 #include <TFT_eSPI.h>
+#if defined(CROWPANEL7)
+#include "crowpanel7_board.h"
+#include "crowpanel7_display.h"
+#include "crowpanel7_rgb.h"
+#include "crowpanel7_blit.h"
+#include "crowpanel7_backlight.h"
+#include "gt911_touch.h"
+#include "crowpanel7_probe.h"
+#include "crowpanel7_buzzer.h"
+// The [frame] line's "rows" is whoever actually wrote them.
+#define SQW_PUSH_ROWS() CrowBlit::lastRows()
+#else
+#define SQW_PUSH_ROWS() FramePush::lastRows()
+#endif
 #include <XPT2046_Touchscreen.h>
 #include <Preferences.h>  // AWOK's own per-rotation touch-cal storage; see the AWOK block below pollTouch()'s globals
 #include <esp_heap_caps.h>   // heap_caps_get_largest_free_block() -- diagnostics screen
@@ -414,6 +428,11 @@ constexpr bool PANEL_NEEDS_INVERSION = false;
 // (non-inverted) polarity, matching the original CYD board this panel
 // shares a driver with.
 constexpr bool PANEL_NEEDS_INVERSION = false;
+#elif defined(CROWPANEL7)
+// An RGB panel has no inversion register at all; Panel_RGB's invertDisplay()
+// is a no-op and CrowPanelTFT hides it. False keeps the XOR in the Settings
+// handler meaningful rather than pretending a control exists.
+constexpr bool PANEL_NEEDS_INVERSION = false;
 #else
 constexpr bool PANEL_NEEDS_INVERSION = false;
 #endif
@@ -451,7 +470,15 @@ public:
 };
 
 // ---- Globals ----
+#if defined(CROWPANEL7)
+// Not a TFT_eSPI: an 800x480 RGB parallel panel driven by ESP-IDF's esp_lcd, wearing
+// TFT_eSPI's interface because `canvas` below upcasts the sprite to the
+// device type and only this hierarchy gives the two a common base. Nothing
+// is ever sent to an SPI display bus on this board -- see the header.
+CrowPanelTFT        tft;
+#else
 TFT_eSPI            tft = TFT_eSPI();
+#endif
 // All screens draw into this off-screen buffer, pushed to the physical
 // display in one shot at the end of each loop(). Without it, every
 // screen's erase-then-redraw sequence is briefly visible on real
@@ -609,8 +636,16 @@ static bool rawReadResistive(int16_t& a, int16_t& b);
 // (rotation 1). Not const: overwritten at boot if a saved calibration
 // exists (see loadOrDefaultCal()/TouchCal), and by the long-press
 // calibration flow (see checkCalibrationTrigger()).
+#if defined(CROWPANEL7)
+// The GT911 reports panel pixels, so these make initTouchFit()'s affine map a
+// plain divide by CROWPANEL_SCALE (2 here, 1 in the -native build) -- no
+// calibration is needed or wanted.
+static uint16_t CAP_NX_MIN = CROW_CAP_NX_MIN, CAP_NX_MAX = CROW_CAP_NX_MAX;
+static uint16_t CAP_NY_MIN = CROW_CAP_NY_MIN, CAP_NY_MAX = CROW_CAP_NY_MAX;
+#else
 static uint16_t CAP_NX_MIN = 32,  CAP_NX_MAX = 166;
 static uint16_t CAP_NY_MIN = 10,  CAP_NY_MAX = 308;
+#endif
 // Resistive XPT2046 raw ADC range — same idea, factory default was a
 // flat 200-3800 for both axes; not const for the same reason.
 static uint16_t RAW_X_MIN = 200, RAW_X_MAX = 3800;
@@ -817,11 +852,20 @@ static bool rawReadFiltered(int16_t& a, int16_t& b) {
 // The one reader pollTouch(), the calibration and the diagnostics screen all
 // use, so what the calibration measures is exactly what touch then reads.
 static bool readTouchRaw(int16_t& a, int16_t& b) {
+#if defined(CROWPANEL7)
+    // The GT911 already reports panel pixels; TouchFit divides by the scale,
+    // so nothing else differs.
+    uint16_t x, y;
+    if (!Gt911::read(x, y)) return false;
+    a = (int16_t)x; b = (int16_t)y;
+    return true;
+#else
     if (usingCapTouch) return rawReadCap(a, b);
 #if defined(TOUCH_ON_DISPLAY_BUS) || defined(CYD35)
     return rawReadFiltered(a, b);
 #else
     return rawReadResistive(a, b);
+#endif
 #endif
 }
 
@@ -879,9 +923,16 @@ static void applyBrightness() {
         applyCpuClock();   // back to CPU CLOCK
     }
 #endif
+#if defined(CROWPANEL7)
+    // No backlight GPIO on this board: an STC8H1K28 helper MCU owns it and
+    // takes a bare I2C command byte on an inverted scale. CrowBL::set()
+    // keeps the firmware's own 0..255-with-255-brightest convention.
+    CrowBL::set(duty);
+#else
     ledcWrite(BL_CH_ORIG, duty);
     ledcWrite(BL_CH_CAP,  duty);
     ledcWrite(BL_CH_AWOK, duty);
+#endif
 }
 
 // 240, 160 or 80 MHz. Never lower: the radio needs an 80 MHz APB clock, and
@@ -1018,6 +1069,12 @@ static char    s_confirmLabel[24];
 // touch this, only LOG's do.
 static bool    s_confirmIsBle = true;
 static bool s_alertLastFree = false;
+#if defined(CROWPANEL7)
+// The chirp's length. A pass on this board is 34-59 ms and the OFF goes out
+// on the first pass at or after this, so the real sound runs 80-140 ms:
+// a chirp, not an alarm. The probe's bench chirp is 120.
+static const uint16_t BUZZ_CHIRP_MS = 80;
+#endif
 
 // Whether a sighting may take the screen, and AUTO SNOOZE's bookkeeping
 // with it. Call it once for each alert about to be raised and obey the
@@ -1043,9 +1100,29 @@ static bool alertMayInterrupt(const Detection& d) {
 #endif
     switch (g) {
         case DetectionEngine::AlertGate::HOLD:       return false;
-        case DetectionEngine::AlertGate::ALLOW_LAST: s_alertLastFree = true;  return true;
-        default:                                     s_alertLastFree = false; return true;
+        case DetectionEngine::AlertGate::ALLOW_LAST: s_alertLastFree = true;  break;
+        default:                                     s_alertLastFree = false; break;
     }
+#if defined(CROWPANEL7)
+    // The chirp, on the board that has something to chirp with. HERE and not
+    // in enterAlert(): this is the one gate every AUTOMATIC announcement
+    // passes -- the main screen, the desk's small card, the lock screen, the
+    // update window -- and none of the manual ones (NEARBY's hold, a tap on
+    // the desk card), which open a card for something already on the glass.
+    // Everything upstream of this line is the board's own idea of
+    // alert-worthy: within ALERT_GRACE_MS of firstSeen, past ALERT FILTER,
+    // not ignored or snoozed, and now past AUTO SNOOZE. The buzzer adds four
+    // of its own: it is switched on; the row is one the log never held (a
+    // device coming back is news to the screen, not to the room); the saver
+    // has not dimmed the screen -- read now, because the alert un-dims it
+    // later in this same pass; and it is not the hour the card calls AT
+    // NIGHT. Never at boot (no automatic alert runs before loop()) and never
+    // through a wipe (performWipe() silences it first).
+    if (Settings::buzzerOn() && &d == engine.latest() && engine.latestIsNew() &&
+        !s_screenDimmed && !Clock::night())
+        CrowBuzzer::chirp(BUZZ_CHIRP_MS);
+#endif
+    return true;
 }
 
 // The current alert's target, captured in enterAlert(). Kept separate
@@ -1557,7 +1634,14 @@ static void restoreFrameBuffer() {
 #if !defined(CYD35)
     if (frameBufferOk) return;
     frame.setColorDepth(8);
-    if (frame.createSprite(tft.width(), tft.height())) {
+#if defined(CROWPANEL7) && CROWPANEL_FRAME_INTERNAL
+    heap_caps_malloc_extmem_enable(1u << 20);   // back into internal RAM, see setup()
+#endif
+    const bool back = frame.createSprite(tft.width(), tft.height());
+#if defined(CROWPANEL7) && CROWPANEL_FRAME_INTERNAL
+    heap_caps_malloc_extmem_enable(CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL);
+#endif
+    if (back) {
         frame.setTextSize(1);
         frameBufferOk = true;
         canvas = &frame;
@@ -1849,6 +1933,10 @@ static void performWipe(WipeBoot after) {
     // Dark first. A duress restart has to look like any other restart, and
     // the light is the one thing visible from the back of the board.
     StatusLight::off();
+#if defined(CROWPANEL7)
+    // And silent: a chirp mid-wipe would be the one sound this restart makes.
+    CrowBuzzer::quiet();
+#endif
     Security::wipeSecrets();
     engine.sd().wipe();
     BlackBox::wipe();        // the log and the crash history kept in flash
@@ -2671,13 +2759,21 @@ void setup() {
 // Not on AWOK (TOUCH_CS there) and not on either RL Phantom, where GPIO21 is
 // the capacitive controller's INTERRUPT line. Driving it high at boot is the
 // same mistake as the LEDC attach further down, just earlier.
-#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(TWATCH_S3)
+// ... and not on the CrowPanel 7, where GPIO21 is the panel's BLUE-0 data
+// line. Driving it high before the panel driver claims it is a stripe down the
+// picture at best.
+#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(TWATCH_S3) && !defined(CROWPANEL7)
     pinMode(21, OUTPUT); digitalWrite(21, HIGH);
 #endif
 #if defined(TWATCH_S3)
     // GPIO27 and GPIO32 are the S3's PSRAM lines: touching either hangs the
     // chip until the watchdog reboots it. The watch's backlight is GPIO45.
     pinMode(45, OUTPUT); digitalWrite(45, HIGH);
+#elif defined(CROWPANEL7)
+    // Nothing at all. This board's backlight is not a GPIO -- it is an I2C
+    // command to the helper MCU, sent once Wire is up. GPIO27/32 are the same
+    // OPI PSRAM lines the watch avoids, and every other candidate here is an
+    // RGB data line.
 #else
     pinMode(27, OUTPUT); digitalWrite(27, HIGH);
 #if !defined(FREENOVE32)   // not a known-spare pin on the Freenove; its backlight is 27 alone
@@ -2686,6 +2782,17 @@ void setup() {
 #endif
 
     tft.init();
+
+#if defined(CROWPANEL7_PANELTEST)
+    // Bring-up only: prove the panel before anything else can be blamed for
+    // it. Colour bars in a known order (so a red/blue swap in the pin map is
+    // visible rather than merely wrong), a one-pixel grid (so a pixel clock
+    // that is running away shows as a moving moire instead of "looks fine"),
+    // and the measured frame period -- quiet, then with a flash write every
+    // 20 ms in alternate three-second phases, which is what flash costs the
+    // picture in numbers.
+    crowPanelTest();
+#endif
 
     // Load persisted settings before the first real pixel is drawn, so
     // boot itself already reflects the saved theme/invert choice
@@ -2739,7 +2846,10 @@ void setup() {
 // TOUCH_CS on AWOK, and the capacitive controller's INTERRUPT line on the RL
 // Phantom. Driving a 5 kHz PWM onto either is the kind of fault that looks
 // like dead touch, which is exactly how it presented on the Phantom.
-#if defined(TWATCH_S3)
+#if defined(CROWPANEL7)
+    // No LEDC at all: the backlight is an I2C command byte. Claiming channels
+    // here would only take them away from something that has a pin.
+#elif defined(TWATCH_S3)
     // One backlight, GPIO45, on the first channel. The CYD pins below are
     // flash/PSRAM lines and the power chip's interrupt on an S3.
     ledcSetup(BL_CH_ORIG, 5000, 8);
@@ -2782,9 +2892,13 @@ void setup() {
         // radio start below: WiFi's RF calibration plus a full backlight is
         // more than a weak USB port holds, and the first run of this check
         // browned the Phantom out into a second boot.
+#if defined(CROWPANEL7)
+        CrowBL::set(24);
+#else
         ledcWrite(BL_CH_ORIG, 24);
         ledcWrite(BL_CH_CAP,  24);
         ledcWrite(BL_CH_AWOK, 24);
+#endif
         tft.fillScreen(Theme::BG);
         tft.setTextSize(1);
         tft.setTextWrap(false);
@@ -2823,12 +2937,35 @@ void setup() {
     // 16-bit — the full 16-bit buffer didn't fit in the available
     // contiguous heap on this board.
     frame.setColorDepth(8);
-#if defined(TWATCH_S3)
+#if defined(TWATCH_S3) || (defined(CROWPANEL7) && CROWPANEL_FRAME_INTERNAL)
     // 57.6 KB fits in internal RAM with room to spare, and a sprite in
     // PSRAM pushes slower and cannot go by DMA. Keep it inside.
+    //
+    // CrowPanel: not an economy but the fix for a twitching picture -- the
+    // panel's DMA reads its framebuffer from PSRAM, and the UI's scattered
+    // writes into a PSRAM sprite starve it (see crowpanel7_board.h).
     frame.setAttribute(PSRAM_ENABLE, false);
 #endif
-    if (!frame.createSprite(tft.width(), tft.height())) {
+#if defined(CROWPANEL7) && CROWPANEL_FRAME_INTERNAL
+    // PSRAM_ENABLE=false only makes TFT_eSPI call plain calloc() -- and on a
+    // PSRAM-enabled Arduino core plain calloc() of anything over
+    // CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL (4 KB here) is served from PSRAM
+    // regardless. Measured: the frame landed at 0x3D8BC308, which is PSRAM.
+    // Raise that threshold for this one allocation and put it straight back.
+    heap_caps_malloc_extmem_enable(1u << 20);
+#endif
+    const bool frameOk = frame.createSprite(tft.width(), tft.height());
+#if defined(CROWPANEL7) && CROWPANEL_FRAME_INTERNAL
+    heap_caps_malloc_extmem_enable(CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL);
+    // Say where it landed: internal SRAM sits at 0x3FC8xxxx on the S3, PSRAM
+    // at 0x3C000000..0x3DFFFFFF, and a frame in the wrong one is the twitch.
+    if (frameOk) {
+        const uintptr_t a = (uintptr_t)frame.buf();
+        Serial.printf("[boot] frame %ux%u at %p (%s)\n", (unsigned)frame.bufW(), (unsigned)frame.bufH(), (void*)a,
+                      (a >= 0x3C000000u && a < 0x3E000000u) ? "PSRAM" : "internal");
+    }
+#endif
+    if (!frameOk) {
         Serial.println("ERROR: frame buffer allocation failed (low memory)");
 #if HAVE_NVS_ERASE
         if (bootCheckRan) {
@@ -2871,6 +3008,19 @@ void setup() {
     // rotation maths on them, so touch follows the screen round.
     usingCapTouch = false;
     Serial.println("RL Phantom (resistive) -- XPT2046 on shared bus, raw reads + rotation maths.");
+#elif defined(CROWPANEL7)
+    // The GT911, on the same I2C bus as the backlight helper -- which is why
+    // there is no Wire.end() anywhere on this path. It will not answer until
+    // the helper has been told to wake it and its INT line pulsed low, so
+    // Gt911::begin() does that dance before it gives up.
+    usingCapTouch = Gt911::begin();
+    Serial.println(usingCapTouch ? "CrowPanel 7 -- GT911 capacitive touch answered."
+                                 : "CrowPanel 7 -- GT911 did not answer; no touch.");
+    // Here and not with StatusLight::begin(): this is the first point the
+    // I2C bus is up and the helper has been spoken to. Sends OFF only, for a
+    // buzzer a crash may have left sounding -- the helper keeps its state
+    // across our reset. Not a boot beep.
+    CrowBuzzer::begin();
 #elif defined(TWATCH_S3)
     // The T-Watch's FT6336, on I2C SDA 39 / SCL 40 at 0x38. No reset line;
     // the AXP2101 powers it (ALDO3) in twatchPowerUp(), before this runs.
@@ -2923,7 +3073,13 @@ void setup() {
         uint32_t windowStart = millis();
         while (millis() - windowStart < 1200) {
             int16_t a, b;
+#if defined(CROWPANEL7)
+            // The GT911 is neither of the two below; the two-way dispatch
+            // polled a capacitive controller that is not on this bus.
+            bool down = readTouchRaw(a, b);
+#else
             bool down = usingCapTouch ? rawReadCap(a, b) : rawReadResistive(a, b);
+#endif
             if (down) {
                 if (holdStart == 0) holdStart = millis();
                 else if (millis() - holdStart > 800) {
@@ -2966,16 +3122,31 @@ void setup() {
     // injected against the compiled-in ranges -- a calibration screen would
     // just sit there waiting for a finger.
     initTouchFit();
-#if defined(ESP32)
+#if defined(ESP32) && !defined(CROWPANEL7)
     if (s_calSource != CalSource::SAVED) {
         Serial.println("Touch: no five-target calibration yet -- running it now.");
         runTouchCalibration();
     }
 #endif
+#if defined(CROWPANEL7)
+    // Never on first boot here. The GT911 reports panel pixels, so the
+    // compiled-in fit is already the identity and there is nothing to
+    // calibrate -- making someone tap five targets would only replace an
+    // exact mapping with a hand-aimed one. SETTINGS can still run it.
+    Serial.println("Touch: GT911 reports panel pixels; no calibration needed.");
+#endif
 
     // Seed the PRNG so the digital rain starts in a fresh-looking state
-    // on every boot. Analog read on a floating pin is plenty.
+    // on every boot.
+#if defined(CROWPANEL7)
+    // Not analogRead(34) here: GPIO34 is an OPI PSRAM data line on this
+    // board's N16R8 module, and not an ADC pin on the S3 at all. The
+    // hardware RNG is a fine seed and is already fed by the radios.
+    randomSeed(esp_random());
+#else
+    // Analog read on a floating pin is plenty.
     randomSeed(analogRead(34));
+#endif
 
     // The backlight goes down while the radios come up, and back to your
     // setting once they are running.
@@ -2987,9 +3158,13 @@ void setup() {
     // browned out at exactly this point on every boot -- three seconds a
     // cycle, forever -- off any supply short of a powered hub. The backlight
     // is the one large load that nobody misses for a second at boot.
+#if defined(CROWPANEL7)
+    CrowBL::set(24);
+#else
     ledcWrite(BL_CH_ORIG, 24);
     ledcWrite(BL_CH_CAP,  24);
     ledcWrite(BL_CH_AWOK, 24);
+#endif
 
     // The black box, before the radios: this boot's record -- with the crash
     // in it when there was one -- then the log as the last boot left it, so
@@ -3033,6 +3208,9 @@ void setup() {
     }
 #endif
     engine.init();
+#if defined(CROWPANEL7_PERIPH_PROBE)
+    crowPeriphProbe();
+#endif
     // After the engine: the card leans on the lifetime counts to pick which
     // type sits out, and those are read in init().
     Bingo::begin(engine);
@@ -3156,11 +3334,19 @@ static inline void pushFrame(int x, int y) {
     // so DIAGNOSTICS and the [frame] line measure the same thing either way.
     // The buffer and its REAL size: with a viewport set the sprite reports the
     // viewport's size, not the buffer's, and cyd35 pushes through one.
+#if defined(CROWPANEL7)
+    // No wire to overlap and no pushSprite fallback: the framebuffer is
+    // memory, and CrowBlit writes the changed rows straight into it, doing
+    // the 8->16 bit conversion on the way. It declines only if the panel
+    // never came up, in which case there is nowhere to put the frame at all.
+    CrowBlit::push(frame.buf(), frame.bufW(), frame.bufH(), x, y);
+#else
     if (frame.getColorDepth() != 8 ||
         !FramePush::push(tft, frame.buf(), frame.bufW(), frame.bufH(), x, y)) {
         frame.pushSprite(x, y);
         FramePush::invalidate();   // the panel now holds something push() did not record
     }
+#endif
     s_pushAccumUs += micros() - t0;
 }
 
@@ -4909,6 +5095,15 @@ void loop() {
                             break;
                         case SettingsRow::CONFIDENCE: Settings::cycleMinConfidence(); break;
                         case SettingsRow::AUTO_QUIET:  Settings::cycleAutoQuiet(); break;
+#if defined(CROWPANEL7)
+                        case SettingsRow::BUZZER:
+                            // Switching it ON plays the chirp once, the job the
+                            // light's TEST row does: the owner hears what they
+                            // signed up for before a camera does. OFF is silent.
+                            Settings::toggleBuzzer();
+                            if (Settings::buzzerOn()) CrowBuzzer::chirp(BUZZ_CHIRP_MS);
+                            break;
+#endif
                         case SettingsRow::DETECTION_FILTER: enterDetFilter(); break;
                         case SettingsRow::POWER_SAVER: enterPower(); break;
 #if defined(TWATCH_S3)
@@ -5936,7 +6131,9 @@ void loop() {
                 info.calB0 = (int16_t)lroundf(b0); info.calB1 = (int16_t)lroundf(b1);
             }
             info.usingCapTouch = usingCapTouch;
-#if defined(TOUCH_ON_DISPLAY_BUS)
+#if defined(CROWPANEL7)
+            info.boardName = "CrowPanel 7";
+#elif defined(TOUCH_ON_DISPLAY_BUS)
             info.boardName = "AWOK";
 #elif defined(CYD35)
             info.boardName = "cyd35 BETA";
@@ -6093,13 +6290,13 @@ void loop() {
             Serial.printf("[bands] draw %lu / %lu us   hash %lu us   wire %lu us   rows %ld\n",
                           (unsigned long)s_bandUs[0], (unsigned long)s_bandUs[1],
                           (unsigned long)FramePush::hashUs(), (unsigned long)FramePush::wireUs(),
-                          (long)FramePush::lastRows());
+                          (long)SQW_PUSH_ROWS());
 #endif
             const volatile uint32_t* ak = advertKinds();
             Serial.printf("[frame] avg %lu.%lu ms (%lu fps, loop %lu/s)  push %lu.%lu ms (%ld rows)  screen %u  bg %u  heap %lu/%lu  wifi %lu  ble %lu/s  adv %lu  kinds %lu/%lu/%lu/%lu/%lu  det %lu\n",
                           (unsigned long)(s_frameUsAvg / 1000), (unsigned long)((s_frameUsAvg / 100) % 10),
                           (unsigned long)(1000000UL / s_frameUsAvg), (unsigned long)loopsPerS,
-                          (unsigned long)(s_pushUsAvg / 1000), (unsigned long)((s_pushUsAvg / 100) % 10), (long)FramePush::lastRows(),
+                          (unsigned long)(s_pushUsAvg / 1000), (unsigned long)((s_pushUsAvg / 100) % 10), (long)SQW_PUSH_ROWS(),
                           (unsigned)state, (unsigned)Settings::background(), (unsigned long)ESP.getFreeHeap(),
                           (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
                           (unsigned long)wifiFramesSeen(), (unsigned long)advertRate(), (unsigned long)advertsSeen(),
@@ -6234,6 +6431,11 @@ void loop() {
         lc.screenDimmed = s_screenDimmed;
         lc.screenDark   = s_screenDimmed && Settings::dimLevel() == 0;
         StatusLight::tick(now, lc);
+#if defined(CROWPANEL7)
+        // Every pass in every state, so the chirp's OFF lands whatever
+        // screen the alert opened.
+        CrowBuzzer::tick();
+#endif
     }
     prevTouchValid = tp.valid;
 }

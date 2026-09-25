@@ -160,6 +160,15 @@ public:
     uint8_t  logCount() const { return _logCount; }
     const Detection* logAt(uint8_t idx) const;     // 0 = newest
     const Detection* latest() const { return _latest; }
+    // Whether latest() is a row the log had never held, as opposed to a
+    // device that went stale and came back -- which the engine announces
+    // again (firstSeen is reset in the reactivation branches, so the alert
+    // card goes up for it too). A re-sighting is news to the screen, not to
+    // the room; the CrowPanel 7's buzzer reads this to tell the two apart.
+    // Nothing else can: hits climbs per frame on WiFi, and alerts only
+    // moves under AUTO SNOOZE. True to the RAM log only -- a device evicted
+    // from the ring and seen again reads as new, as the LOG screen shows it.
+    bool latestIsNew() const { return _latestNew; }
     uint16_t countByType(DetectionType t) const { return _typeCounts[(uint8_t)t]; }
 
     // Lifetime total across reboots (persisted to NVS), unlike the
@@ -574,6 +583,7 @@ private:
     uint8_t    _logCount = 0;            // number of valid entries (<= LOG_CAP)
     uint8_t    _logHead  = 0;            // next slot to write
     Detection* _latest   = nullptr;      // pointer into _log or null
+    bool       _latestNew = false;       // _latest is a fresh row, not a reactivation
     uint32_t   _latestChangeMs = 0;
     DetectionType _lastAlertType = DetectionType::UNKNOWN;
 

@@ -72,9 +72,13 @@ otherwise see all week. It is one tap away in `DETECTION FILTER`.
 - **ESP32-2432S028R** ("Cheap Yellow Display" / CYD) — about $15.
   Built-in 320×240 ILI9341 TFT, XPT2046 resistive touch, and an
   onboard microSD card slot.
+- **Elecrow CrowPanel Advance 7.0** — experimental: an ESP32-S3 with an
+  800×480 RGB panel and GT911 touch, via the `crowpanel7` build. It renders
+  at 400×240 doubled, on purpose. See [board setup and testing](docs/CROWPANEL7.md).
 
-That's it. No buzzer, no GPS, no extra modules. The CYD is the
-whole device.
+That's it. No GPS, no extra modules. The CYD is the whole device, and the
+one board that happens to carry a buzzer keeps it silent unless you switch
+it on.
 
 ## Web Flash
 
