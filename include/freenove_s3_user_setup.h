@@ -41,10 +41,13 @@
 #define LOAD_FONT4
 #define SMOOTH_FONT
 
-// Freenove's own rate for this panel. The CYD's ILI9341 does not hold 80 MHz
-// either (cyd-ili9341 has no -fast build), so this is not pushed until it is
-// measured on a board.
+// Freenove's own rate for this panel, and the ceiling: measured 2026-09-25,
+// 80 MHz (on HSPI and on FSPI's IO_MUX pins alike -- the port changed
+// nothing, 24.6 ms a frame either way) garbles the display. The CYD's
+// ILI9341 does not hold 80 MHz either (cyd-ili9341 has no -fast build).
+#ifndef SPI_FREQUENCY
 #define SPI_FREQUENCY         40000000
+#endif
 #define SPI_READ_FREQUENCY    20000000
 
 #define TFT_INVERSION_ON

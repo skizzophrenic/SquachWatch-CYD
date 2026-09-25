@@ -1948,6 +1948,43 @@ static void twatchPowerUp() {
 }
 #endif
 
+#if defined(FREENOVE_S3)
+// The Freenove S3's battery: a 1-cell LiPo on its JST, a TP4054 charging it
+// from USB, and a 200K/200K divider from the cell to GPIO9 (ADC1, so WiFi does
+// not take it away). No fuel gauge, and the charger's CHRG line goes to an LED
+// rather than a GPIO -- so a voltage and an estimate from it, never "charging".
+// On the cable the cell reads the charger's ~4.2 V, which is the honest reading.
+static uint16_t boardBatteryMv() {
+    uint32_t sum = 0;
+    for (int i = 0; i < 8; i++) sum += analogReadMilliVolts(9);
+    return (uint16_t)(sum / 8 * 2);   // the divider halves it
+}
+// Resting LiPo, per cell: rough, but a percent that moves the right way.
+static uint8_t boardBatteryPct(uint16_t mv) {
+    static const uint16_t MV[]  = { 3300, 3500, 3600, 3700, 3750, 3800, 3850, 3900, 4000, 4100, 4200 };
+    static const uint8_t  PCT[] = {    0,    5,   10,   20,   30,   40,   50,   60,   75,   90,  100 };
+    if (mv <= MV[0]) return 0;
+    for (uint8_t i = 1; i < sizeof MV / sizeof MV[0]; i++)
+        if (mv <= MV[i]) return (uint8_t)(PCT[i-1] + (uint32_t)(PCT[i] - PCT[i-1]) * (mv - MV[i-1]) / (MV[i] - MV[i-1]));
+    return 100;
+}
+// The SYSTEM page's BATTERY row: "81% 4.12V". Under 2.5 V there is no cell on
+// the connector at all (the divider just floats), and it says so.
+void boardBatteryLine(char* out, size_t n) {
+    static uint32_t at = 0;
+    static char     line[16] = "";
+    const uint32_t now = millis();
+    if (!line[0] || now - at >= 2000) {   // eight ADC reads, not eight per frame
+        at = now;
+        const uint16_t mv = boardBatteryMv();
+        if (mv < 2500) snprintf(line, sizeof line, "NONE");
+        else snprintf(line, sizeof line, "%u%% %u.%02uV", (unsigned)boardBatteryPct(mv),
+                      (unsigned)(mv / 1000), (unsigned)(mv % 1000 / 10));
+    }
+    snprintf(out, n, "%s", line);
+}
+#endif
+
 #if defined(TWATCH_S3)
 // One battery sample into the black box. See BattRecord for what it holds
 // and why. Printed too, so a bench run shows the same line the ring keeps.
@@ -2873,6 +2910,7 @@ void setup() {
     usingCapTouch = CapTouch::probe();
     Serial.println(usingCapTouch ? "Freenove S3 -- FT6336 capacitive touch answered."
                                  : "Freenove S3 -- FT6336 did not answer; no touch (FNK0104A?).");
+    { char b[16]; boardBatteryLine(b, sizeof b); Serial.printf("[batt] %s (raw GPIO9 %u mV)\n", b, (unsigned)analogReadMilliVolts(9)); }
 #elif defined(TOUCH_ON_DISPLAY_BUS)
     // AWOK's XPT2046 sits on the display's own shared VSPI bus (TOUCH_CS=21,
     // already armed by TFT_eSPI itself once awok_user_setup.h's #define
