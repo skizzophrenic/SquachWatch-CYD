@@ -103,6 +103,9 @@ struct DiagnosticsInfo {
     const char* otaSlot;
     const char* otaOther;
     bool        usingCapTouch;
+    // The wireless slot, on the board that has one: the chip, the
+    // oscillator, the mode. Empty elsewhere, and the line is skipped.
+    char        lora[80];
 };
 
 void uiDiagnosticsInit(TFT_eSPI& t);

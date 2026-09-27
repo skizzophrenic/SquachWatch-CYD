@@ -24,6 +24,11 @@
 #define ST7789_DRIVER
 #define TFT_WIDTH   240
 #define TFT_HEIGHT  320
+// One pixel on this glass, in micrometres: 3.2" 240x320, active area
+// 48.6 x 64.8 mm on the module datasheet, 0.2025 mm a pixel. From the sheet,
+// not the bench -- nobody here has held this board; Theme::computeButtonBar
+// reads it, so a measured figure should replace it.
+#define SQW_PIXEL_PITCH_UM 203
 
 #define USE_HSPI_PORT
 #define TFT_MISO  12

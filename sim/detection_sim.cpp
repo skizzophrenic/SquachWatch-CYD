@@ -123,13 +123,46 @@ bool DetectionEngine::rawBleScanDone() const { return true; }
 const RawBleResult* DetectionEngine::rawBleAt(uint8_t idx) const {
     return idx < _rawBleCount ? &_rawBle[idx] : nullptr;
 }
+// The WiFi half of the raw scanner, which had no fixture at all -- it answered
+// "done, nothing found", so the SCAN > WIFI list has never been rendered off the
+// board. It is the list the SSIDs are drawn in, and an SSID is 32 characters
+// against a row that holds 21 of them on a 2.8" panel, so it is exactly the
+// screen that needed looking at. Off by default (nothing else in the emulator
+// wants results here); simRawWifiFixture() turns it on.
+//
+// The names are the shape a real street is: three of them are one router's
+// three networks, differing only at the END, which is what a head-cut name
+// cannot show. Nothing here is a capture -- every SSID says SIM.
+namespace {
+struct SimWifi { const char* ssid; int8_t rssi; uint8_t ch; bool open; };
+const SimWifi SIM_WIFI[] = {
+    { "SIM-FRITZ!Box 7590 Gastzugang 2.4", -58, 6,  false },
+    { "SIM-FRITZ!Box 7590 Gastzugang 5",   -71, 36, false },
+    { "SIM-FRITZ!Box 7590",                -52, 11, false },
+    { "SIM-Telekom_FON",                   -83, 1,  true  },
+    { "SIM-o2-WLAN14",                     -90, 13, false },
+};
+bool s_simWifi = false;
+}
+void simRawWifiFixture(bool on) { s_simWifi = on; }
+
 void DetectionEngine::startRawWifiScan() {}
 bool DetectionEngine::rawWifiScanDone() const { return true; }
-uint8_t DetectionEngine::rawWifiCount() const { return 0; }
-const char* DetectionEngine::rawWifiSsid(uint8_t) const { return ""; }
-int8_t DetectionEngine::rawWifiRssi(uint8_t) const { return 0; }
-uint8_t DetectionEngine::rawWifiChannel(uint8_t) const { return 0; }
-bool DetectionEngine::rawWifiOpen(uint8_t) const { return false; }
+uint8_t DetectionEngine::rawWifiCount() const {
+    return s_simWifi ? (uint8_t)(sizeof SIM_WIFI / sizeof SIM_WIFI[0]) : 0;
+}
+const char* DetectionEngine::rawWifiSsid(uint8_t i) const {
+    return i < rawWifiCount() ? SIM_WIFI[i].ssid : "";
+}
+int8_t DetectionEngine::rawWifiRssi(uint8_t i) const {
+    return i < rawWifiCount() ? SIM_WIFI[i].rssi : 0;
+}
+uint8_t DetectionEngine::rawWifiChannel(uint8_t i) const {
+    return i < rawWifiCount() ? SIM_WIFI[i].ch : 0;
+}
+bool DetectionEngine::rawWifiOpen(uint8_t i) const {
+    return i < rawWifiCount() ? SIM_WIFI[i].open : false;
+}
 const uint8_t* DetectionEngine::rawWifiBssid(uint8_t) const { return nullptr; }
 void DetectionEngine::stopRawScan() {}
 void DetectionEngine::startUpdateRadio() {}

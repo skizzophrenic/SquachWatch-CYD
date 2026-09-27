@@ -66,6 +66,25 @@ enum class SettingsRow : uint8_t {
     WATCH_XTAL,      // the T-Watch only: CLOCK CHECK, the ESP32's crystal against the clock chip's
 #if defined(CROWPANEL7)
     BUZZER,          // the CrowPanel 7 only, the one board with a buzzer: OFF, or NEW ONLY
+    LORA,            // the CrowPanel 7 only: opens the LORA screen (SYSTEM page)
+    LORA_MODE,       // ...and the slot's mode: OFF, FOCUS, SURVEY
+    LORA_PROFILE,    // ...and which profile FOCUS parks on
+    LORA_CHANNELS,   // ...and the keys it holds: opens the LORA screen on CHANS
+    // The online lookups, all OFF until somebody here says otherwise. Four
+    // rows and not one: the master says whether anything may leave the board,
+    // and the three under it say WHICH third party may be reached. Only ever
+    // shown on the board with the radio, and the row values name the hosts,
+    // because a switch that does not say where the bytes go is not consent
+    // (include/lora_enrich.h).
+    //
+    // MC ADVERTS is the odd one and its row says so: the other two are told
+    // which node we heard, that one is told a row count and nothing else
+    // (include/lora_feed.h). Last in the group because it is the one whose
+    // answer has to be matched locally before it means anything.
+    LORA_LOOKUPS,
+    LORA_LK_CALL,
+    LORA_LK_OGN,
+    LORA_LK_FEED,
 #endif
     BOARD_BATTERY,   // the Freenove S3 only: the cell's voltage, on the SYSTEM page
     BACK,

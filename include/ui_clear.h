@@ -34,6 +34,24 @@ uint32_t uiMascotStepMs();
 void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
                   bool advance = true, bool scanMenu = false);
 
+#if defined(CROWPANEL7)
+// The LORA pill: the main screen's door to the sniffer, in the title bar's
+// empty middle beside the WATCH one. True when a tap landed on it; main.cpp
+// opens the LORA screen, and BACK there returns HERE rather than to a settings
+// page nobody opened.
+//
+// Drawn on every frame whether or not a module answered -- Lora::present()
+// decides what it says and what colour it says it in, nothing more. A board
+// with K1 on the card position has to be able to reach the screen that
+// explains that ("NO MODULE: set K1 to the wireless position and restart",
+// ui_lora.cpp), and a hidden pill would be one more thing with no way in.
+//
+// CrowPanel 7 only, the same condition SETTINGS' own LoRa rows are compiled
+// under (ui_settings.cpp): it is the one board with a wireless slot, and on
+// the others there is nothing behind the door.
+bool uiClearLoraPillHit(int x, int y);
+#endif
+
 #if SQUACH_MESH
 // SPIKE: the peer currently visiting, or nullptr. Owned by whatever discovers
 // peers -- for now that is only the emulator's --peer flag, so the CLEAR screen

@@ -18,6 +18,14 @@
 #define ST7789_DRIVER
 #define TFT_WIDTH   800
 #define TFT_HEIGHT  480
+// How big one LOGICAL pixel is on this glass, in micrometres. The panel is
+// 800x480 on a 152.4 x 91.4 mm active area and the UI draws at 400x240 with
+// the blit doubling it (crowpanel7_board.h, CROWPANEL_SCALE), so one logical
+// pixel is 0.381 mm -- measured on the bench last pass, and the figure the
+// hit-test comments in theme.cpp and ui_lora.cpp are in. Read by
+// Theme::computeButtonBar, which keeps this board's 20-row bar because 26
+// rows here is already 9.9 mm.
+#define SQW_PIXEL_PITCH_UM 381
 
 #define TFT_MISO  -1
 #define TFT_MOSI  -1

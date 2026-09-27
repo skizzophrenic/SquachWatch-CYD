@@ -1,6 +1,7 @@
 // SquachWatch-CYD — manual raw BLE/WiFi scanner screen implementation
 #include "ui_rawscan.h"
 #include "ui_scroll.h"
+#include "ui_fit.h"
 #include "theme.h"
 #include "squachy.h"
 #include "settings.h"
@@ -49,8 +50,11 @@ void uiRawScanScroll(int delta) {
 RawScanTap uiRawScanHitTest(int x, int y, int screenW, int screenH) {
     int bx, by, bw, bh, ax, ay, aw, ah;
     bottomButtonRects(screenW, screenH, bx, by, bw, bh, ax, ay, aw, ah);
-    if (x >= bx && x <= bx + bw && y >= by && y <= by + bh) return RawScanTap::BACK;
-    if (x >= ax && x <= ax + aw && y >= ay && y <= ay + ah) return RawScanTap::SWITCH;
+    // To the bottom of the glass, not to the drawn edge: Theme::hitTestButtonBar
+    // explains the five bare rows under every bar built from computeButtonBar
+    // and why a press landing in them is the button's. Same rule here.
+    if (x >= bx && x <= bx + bw && y >= by && y < screenH) return RawScanTap::BACK;
+    if (x >= ax && x <= ax + aw && y >= ay && y < screenH) return RawScanTap::SWITCH;
     return RawScanTap::NONE;
 }
 
@@ -308,8 +312,9 @@ switch (Settings::background()) {
     // Off, not the TFT_eSPI default (on) -- a long SSID or BLE device
     // name otherwise wraps onto a second line at this width, which
     // pushes into (or reads as extra space before) the detail line
-    // below it. Long names just run off the right edge instead, same
-    // as everywhere else in this file already relies on clipping.
+    // below it. The row loop below then cuts the name to the room it
+    // actually has rather than leaving it to run into the RSSI, which
+    // is what "it just runs off the right edge" used to mean here.
     t.setTextWrap(false);
 
     uiClampScroll(g_scroll, count, bodyH, rowH);
@@ -320,13 +325,39 @@ switch (Settings::background()) {
     for (int i = 0; i < max && idx < count; i++, idx++) {
         t.drawFastHLine(0, y + rowH - 1, w, Theme::PURPLE);
 
+        // THE NAME STOPS AT THE NUMBER, not at the edge of the glass. The
+        // comment above says a long name "just runs off the right edge", and
+        // that was never what happened: the RSSI is right-aligned at a fixed
+        // inset on the SAME line and is printed AFTERWARDS, opaquely, so a long
+        // name is overpainted mid-glyph by the number's own background box.
+        // Nothing marks the cut, and the names that overflow are exactly the
+        // ones that need telling apart -- a router puts its variants at the end
+        // ("FRITZ!Box 7590 Gastzugang 2.4 GHz" against the 5 GHz one), and a
+        // BLE device puts its serial there.
+        //
+        // The room, measured: the number is at w - textWidth - 14 and the BLE
+        // trend arrow takes another 11 to its left; the name starts at x = 4 and
+        // advances 12 px a glyph at size 2. On the CrowPanel's 400 px canvas
+        // that is 28 glyphs for an SSID and 27 for a BLE name; on the 2.8" CYD's
+        // 320 it is 21 and 20. SSIDs hold 32 characters and BLE names 23
+        // (include/detection.h), so both overflow on the smaller boards and the
+        // SSID overflows on all of them. A middle cut keeps the tail, which is
+        // where the difference between two of a router's networks lives.
         if (isBle) {
             const RawBleResult* r = eng.rawBleAt(idx);
             if (!r) break;
+            t.setTextSize(1);
+            char rssi[12];
+            snprintf(rssi, sizeof(rssi), "%ddBm", r->rssi);
+            const int rw = t.textWidth(rssi);
+            const int ax = w - rw - 14 - 11;      // the trend arrow's left edge
+            char name[40];
+            UiFit::fitMid(name, sizeof name, r->name[0] ? r->name : "(unnamed)",
+                          UiFit::chars(ax - 2 - 4, 2));
             t.setTextSize(2);
             t.setTextColor(Theme::CYAN, Theme::BG);
             t.setCursor(4, y + topPad);
-            t.print(r->name[0] ? r->name : "(unnamed)");
+            t.print(name);
 
             t.setTextSize(1);
             t.setTextColor(Theme::WHITE, Theme::BG);
@@ -337,9 +368,6 @@ switch (Settings::background()) {
             t.print(mac);
 
             t.setTextColor(Theme::VAPOR_PURPLE, Theme::BG);
-            char rssi[12];
-            snprintf(rssi, sizeof(rssi), "%ddBm", r->rssi);
-            int rw = t.textWidth(rssi);
             t.setCursor(w - rw - 14, y + topPad);
             t.print(rssi);
             // Closer or further since the last reading: an arrow beside the
@@ -347,15 +375,22 @@ switch (Settings::background()) {
             // a wobble of under four dB, which is what a still device does.
             {
                 const int d  = (int)r->rssi - (int)r->prev;
-                const int ax = w - rw - 14 - 11, ay = y + topPad + 1;
+                const int ay = y + topPad + 1;
                 if (d >= 4)       t.fillTriangle(ax, ay + 6, ax + 6, ay + 6, ax + 3, ay, Theme::GREEN);
                 else if (d <= -4) t.fillTriangle(ax, ay, ax + 6, ay, ax + 3, ay + 6, Theme::RED);
             }
         } else {
+            t.setTextSize(1);
+            char rssi[12];
+            snprintf(rssi, sizeof(rssi), "%ddBm", eng.rawWifiRssi(idx));
+            const int rw = t.textWidth(rssi);
+            char ssid[40];
+            UiFit::fitMid(ssid, sizeof ssid, eng.rawWifiSsid(idx),
+                          UiFit::chars(w - rw - 14 - 2 - 4, 2));
             t.setTextSize(2);
             t.setTextColor(Theme::CYAN, Theme::BG);
             t.setCursor(4, y + topPad);
-            t.print(eng.rawWifiSsid(idx));
+            t.print(ssid);
 
             t.setTextSize(1);
             t.setTextColor(Theme::WHITE, Theme::BG);
@@ -366,9 +401,6 @@ switch (Settings::background()) {
             t.print(line);
 
             t.setTextColor(Theme::VAPOR_PURPLE, Theme::BG);
-            char rssi[12];
-            snprintf(rssi, sizeof(rssi), "%ddBm", eng.rawWifiRssi(idx));
-            int rw = t.textWidth(rssi);
             t.setCursor(w - rw - 14, y + topPad);
             t.print(rssi);
         }

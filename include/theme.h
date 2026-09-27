@@ -200,7 +200,16 @@ namespace Theme {
     void showToast(const char* head, const char* sub, uint16_t accent, uint32_t ms = 1500);
 
     // No-op unless a toast is live. Call last, after the screen has drawn.
+    // The head is one line at size 2, fitted to the box with the '>' mark;
+    // the sub word-wraps onto up to three lines (theme.cpp says why three)
+    // and the box grows 10 rows a line. A toast whose text fits one line is
+    // drawn exactly as it always was.
     void drawToast(TFT_eSPI& t, uint32_t now);
+
+    // Whether drawToast() would paint anything at `now`. For a screen that
+    // skips redraws while nothing changes (the LORA screen): a toast coming
+    // up, and a toast going away, are both changes.
+    bool toastUp(uint32_t now);
 
     // How big to draw the built-in font on THIS panel.
     //
@@ -266,14 +275,25 @@ namespace Theme {
 
     // Bottom [SCAN][LOG][DESK] button bar, laid out from the current
     // screen width/height so it adapts to any rotation (landscape or
-    // portrait). Button height is a fixed finger-sized touch target,
-    // independent of screen size. Settings lives in the title bar (see
-    // settingsButtonHit above), not this bar.
+    // portrait). The button height follows the GLASS, not the screen size:
+    // 20 rows where a logical pixel is 0.381 mm (the CrowPanel), taller
+    // where a pixel is smaller, so that the touchable bar -- these rows plus
+    // the six under them to the bottom edge -- is 7 mm where the glass allows
+    // it: 9.9 mm on the CrowPanel, 5.3 on the T-Watch (buttonBarH in theme.cpp
+    // has the table). Settings lives in the title bar (see settingsButtonHit
+    // above), not this bar.
     struct ButtonBarGeom {
         int y, h;
         int x[3], w[3];
     };
     ButtonBarGeom computeButtonBar(int screenW, int screenH);
+    int buttonBarH(int screenW, int screenH);
+
+    // One logical pixel of this board's glass, in micrometres. The firmware
+    // gets it from SQW_PIXEL_PITCH_UM in the board's user setup header; the
+    // simulator, which has no board, sets it per run. 0 means unknown.
+    int  pixelPitchUm();
+    void setPixelPitchUm(int um);
 
     // MAIN is the normal [SCAN][LOG][DESK] bar. SCAN_PICKER relabels the
     // exact same three slots as [BLE][WIFI][BACK] -- CLEAR's SCAN

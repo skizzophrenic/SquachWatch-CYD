@@ -198,6 +198,30 @@ void collectScan(int n) {
 // block for it -- the block that forced the screen buffer to be freed before
 // an update could start, on a board whose largest block is 34 KB.
 //
+// THE HEAP FIGURE, MEASURED OUT OF THE FRAMEWORK (2026-09-26). The 40 KB was
+// the right total and the wrong shape, and the shape decides whether it fits:
+//
+//   in record buffer   16,717 B       MBEDTLS_SSL_IN_BUFFER_LEN
+//   out record buffer  16,717 B       MBEDTLS_SSL_OUT_BUFFER_LEN
+//   handshake state     2,280 B       sizeof(mbedtls_ssl_handshake_params)
+//   session + config      776 B       sizeof(mbedtls_ssl_context) + _config
+//                      --------
+//                      36,490 B, plus the peer certificate chain
+//
+// -- read out of a compiled object rather than guessed; tools/tls_fit_probe.sh
+// reproduces every number. So the largest SINGLE allocation is 16.3 kB, not
+// 40, which a 34 kB or 57 kB largest free block would take.
+//
+// And the escape hatch is closed: CONFIG_SPIRAM_USE_MALLOC=y does not put any
+// of this in PSRAM, because mbedTLS does not call malloc. This core builds it
+// with CONFIG_MBEDTLS_INTERNAL_MEM_ALLOC=y, so MBEDTLS_PLATFORM_STD_CALLOC is
+// esp_mbedtls_mem_calloc, and the shipped libmbedcrypto.a has the capability
+// constant 0x804 -- MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT -- compiled into it.
+// Every one of those 36 kB is internal, by capability, and the buffers cannot
+// be shrunk from platformio.ini either: mbedTLS arrives prebuilt, so its
+// sdkconfig is fixed at 16,384 bytes of content length with the asymmetric
+// option off. It is 2 x 16.3 kB of internal heap or nothing.
+//
 // The cost is that somebody on the same network can see which release is
 // being fetched, and a network that blocks plain HTTP now blocks updates too.
 static WiFiClient* s_plain = nullptr;
@@ -788,12 +812,15 @@ bool bootCheck(uint32_t budgetMs) {
         // whole budget would have wrapped it round to about fifty days.
         const uint32_t usedJ = millis() - tj;
         const uint32_t left  = usedJ + 1000 < budgetMs ? budgetMs - usedJ : 1000;
-        // Plain HTTP, on purpose. A TLS handshake wants 40 KB in one piece
-        // and five to ten seconds, and one that timed out left a dead
-        // connection in the middle of the heap that cost the frame buffer
-        // its block -- measured, twice. The site answers the manifest over
-        // plain HTTP, and nothing rides on this answer but a notice: the
-        // install itself goes over HTTPS and checks the signature.
+        // Plain HTTP, on purpose, and one that timed out left a dead
+        // connection in the middle of the heap that cost the frame buffer its
+        // block -- measured, twice. The site answers the manifest over plain
+        // HTTP, and nothing rides on this answer but a notice.
+        //
+        // The install does NOT go over HTTPS -- this comment used to say it
+        // did, and line 374 has downloaded the image over a plain WiFiClient
+        // since v1.10.2. What makes it safe is the signature, not the pipe.
+        // What a handshake would really cost is measured at client() above.
         const String base = OTA_WIFI_BASE;
         WiFiClient plain;
         HTTPClient http;

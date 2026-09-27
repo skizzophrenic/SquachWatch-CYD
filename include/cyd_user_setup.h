@@ -14,6 +14,11 @@
 #define TFT_WIDTH   240
 #define TFT_HEIGHT  320
 #define TFT_ROTATION 1
+// How big one pixel is on this glass, in micrometres: 2.8" 240x320, active area
+// 43.2 x 57.6 mm (the ILI9341/ST7789 2.8" module datasheets; measured on the
+// bench last pass as 0.178 mm). What Theme::computeButtonBar sizes a finger
+// target from -- never the resolution, which the 2.4" shares exactly.
+#define SQW_PIXEL_PITCH_UM 178
 
 // SPI pins (canonical 2.8" CYD pinout, multiple sources)
 #define TFT_MISO  12

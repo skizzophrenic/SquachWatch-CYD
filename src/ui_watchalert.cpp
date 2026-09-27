@@ -315,5 +315,8 @@ void uiWatchAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, boo
 bool uiWatchAlertHitRemove(TFT_eSPI& t, int x, int y) {
     int bx, by, bw, bh;
     removeRect(t, bx, by, bw, bh);
-    return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
+    // The ten-pixel margin under the button is nobody's; the only control on
+    // the screen may as well answer for it (Theme::hitTestButtonBar has the
+    // measurement for why a press lands there).
+    return x >= bx && x <= bx + bw && y >= by && y < t.height();
 }

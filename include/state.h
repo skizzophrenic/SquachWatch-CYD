@@ -192,7 +192,9 @@ enum class AppState : uint8_t {
     // row steps it in place now.
     BINGO            = 36, // the detection bingo card, from Settings' BINGO
                             // row. See ui_bingo.h.
-    DEX              = 37  // the SQUACHY-DEX, from Settings' row. See ui_dex.h.
+    DEX              = 37, // the SQUACHY-DEX, from Settings' row. See ui_dex.h.
+    LORA             = 38  // what the CrowPanel 7's wireless slot hears, from
+                           // Settings' SYSTEM page. See ui_lora.h.
 };
 
 enum class ButtonId : uint8_t {

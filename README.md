@@ -86,6 +86,21 @@ Other boards have builds of their own -- `platformio.ini` has one
 with capacitive touch, an SDMMC card slot, a WS2812 status light and a
 battery connector. Pins in [docs/PINOUT.md](docs/PINOUT.md).
 
+### LoRa, on the CrowPanel 7
+
+The CrowPanel's wireless slot takes Elecrow's SX1262 module, and the
+`crowpanel7` build listens on it: Meshtastic, MeshCore, LoRaWAN (TTN,
+Helium and the operators, named from the DevAddr), LoRa APRS, MeshCom and
+FANET, each decoded as far as the network is open -- adverts, headers,
+positions and the default-key channels in full; private traffic as an
+envelope. A LORA screen on the SYSTEM page lists every frame, every
+transmitter with the flags a sysop wants, and the channel's numbers; the
+console has `LORA` commands, a spectrum sweep and a LoRaTap stream that
+`tools/loratap2pcap.py` turns into a Wireshark capture. Set the board's K1
+switch to the wireless position: the slot and the SD card share pins, so
+it is one or the other. The research behind it, what the chip can and
+cannot hear, and the law on decoding are in [docs/LORA.md](docs/LORA.md).
+
 ## Web Flash
 
 No build tools, no IDE, no cloning anything — flash a board straight
@@ -420,6 +435,7 @@ SquachWatch-CYD/
 │   ├── BUILD.md                  (friendly walkthrough)
 │   ├── PINOUT.md                 (CYD pin map)
 │   ├── DETECTIONS.md             (per-signature provenance)
+│   ├── LORA.md                   (research: the CrowPanel 7's LoRa module)
 │   └── SQUACHWARE-AESTHETIC.md   (CSS → RGB565 mapping)
 ├── include/
 │   ├── state.h                   (DetectionType, Detection, Confidence)

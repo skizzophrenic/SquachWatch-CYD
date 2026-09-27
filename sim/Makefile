@@ -53,8 +53,15 @@ CXX      ?= g++
 # makes <TFT_eSPI.h>, <Arduino.h> and <Preferences.h> resolve to the
 # shims here rather than to an ESP32 core that isn't installed.
 EXTRA_CXXFLAGS ?=
+# -DSQUACH_LORA_FAKE=1 makes include/lora_sniffer.h declare the sniffer API
+# rather than inline it away to no-ops, with lora_sim.cpp below as the
+# definitions -- that is what makes the LORA screen drivable here. NOT
+# -DSQUACH_LORA: that one also switches on the network halves of lora_feed.cpp
+# and lora_enrich.cpp, which want WiFi.h and HTTPClient.h, and there is no WiFi
+# shim in this directory. Every TU gets it, so no two of them disagree about
+# whether Lora::present() is a function or the constant false.
 CXXFLAGS := -std=c++17 -O1 -g -Wall -Wno-unused-parameter $(EXTRA_CXXFLAGS) \
-            -I$(SIM_DIR) -I$(INC) -DSQUACH_MESH=1
+            -I$(SIM_DIR) -I$(INC) -DSQUACH_MESH=1 -DSQUACH_LORA_FAKE=1
 
 UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/squachy.cpp \
@@ -90,6 +97,24 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/regulars.cpp \
             $(SRC)/notices.cpp \
             $(SRC)/ui_dex.cpp \
+            $(SRC)/ui_lora.cpp \
+            $(SRC)/lora_pkt.cpp \
+            $(SRC)/lora_profiles.cpp \
+            $(SRC)/lora_crypto.cpp \
+            $(SRC)/lora_classify.cpp \
+            $(SRC)/lora_meshtastic.cpp \
+            $(SRC)/lora_meshcore.cpp \
+            $(SRC)/lora_lorawan.cpp \
+            $(SRC)/lora_aprs.cpp \
+            $(SRC)/lora_fanet.cpp \
+            $(SRC)/lora_nodes.cpp \
+            $(SRC)/lora_survey.cpp \
+            $(SRC)/lora_msgs.cpp \
+            $(SRC)/lora_json.cpp \
+            $(SRC)/lora_feed.cpp \
+            $(SRC)/lora_ident.cpp \
+            $(SRC)/lora_enrich.cpp \
+            $(SIM_DIR)/lora_sim.cpp \
             $(SRC)/detection_info.cpp \
             $(SRC)/device_info.cpp \
             $(SRC)/idle_events.cpp \

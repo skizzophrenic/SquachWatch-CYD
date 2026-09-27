@@ -9,6 +9,7 @@
 #include "squachy.h"
 #include "settings.h"
 #include "security.h"
+#include "ui_fit.h"
 
 namespace Theme {
 
@@ -511,13 +512,78 @@ void drawWin95Button(TFT_eSPI& t, int x, int y, int w, int h,
     t.print(label);
 }
 
+// ---- the glass ----------------------------------------------------------------
+// How big one logical pixel is on THIS board, in micrometres. It comes from
+// the board's own display config -- SQW_PIXEL_PITCH_UM beside TFT_WIDTH in
+// include/*_user_setup.h, which every translation unit is built with -- and
+// never from the resolution: the 2.8" and the 2.4" are both 240x320 and one
+// is a sixth smaller than the other. A firmware build without it is an error,
+// so a new board cannot inherit a bar sized for somebody else's glass. The
+// simulator's shared UI objects are compiled with no board header at all,
+// since one binary there stands in for every panel; sim/main_live.cpp and
+// sim/main_sim.cpp hand the pitch in with setPixelPitchUm() instead.
+#ifndef SQW_PIXEL_PITCH_UM
+#if defined(ARDUINO_ARCH_ESP32)
+#error "SQW_PIXEL_PITCH_UM is not defined: this board's user setup header must say how big a pixel is"
+#endif
+#define SQW_PIXEL_PITCH_UM 0
+#endif
+static int s_pixelPitchUm = SQW_PIXEL_PITCH_UM;
+int  pixelPitchUm()        { return s_pixelPitchUm; }
+void setPixelPitchUm(int um) { s_pixelPitchUm = um; }
+
+// The bar's DRAWN height, from the glass it is drawn on.
+//
+// It was 40 rows once, sized to the ~9 mm finger-target guidance, and cut to
+// 20 on the 2.8" CYD by request: more room above for content, a tighter
+// target below. That request is honoured -- nobody has asked for 40 back --
+// but the touchable bar is these rows plus the 6 under them that
+// hitTestButtonBar counts to the bottom of the glass, and 26 rows is not one
+// size, it is one size per panel:
+//
+//   CrowPanel 7   0.381 mm/px   26 rows = 9.9 mm   a finger's worth
+//   2.8" CYD      0.178 mm/px   26 rows = 4.6 mm   half of one
+//   2.4"          0.152 mm/px   26 rows = 4.0 mm
+//
+// So the drawn height is whatever makes the touchable height 7.0 mm on this
+// glass -- ceil(7000 / pitch) rows, less the 6 below -- floored at the 20 the
+// CrowPanel has (7 mm there would be 13 rows, and 20 is already 9.9 mm) and
+// capped at a sixth of the panel's short side, so that rotating the screen
+// does not change it:
+//
+//   0.381 mm  ceil(18.4) = 19  -> 13 -> 20 (floor)  26 rows  9.9 mm  CrowPanel 7
+//   0.203 mm  ceil(34.5) = 35  -> 29               35 rows  7.1 mm  Freenove 3.2"
+//   0.178 mm  ceil(39.3) = 40  -> 34               40 rows  7.1 mm  2.8" CYD
+//   0.153 mm  ceil(45.8) = 46  -> 40               46 rows  7.0 mm  3.5"
+//   0.152 mm  ceil(46.1) = 47  -> 41 -> 40 (cap)   46 rows  7.0 mm  2.4" (AWOK, RL Phantom)
+//   0.116 mm  ceil(60.3) = 61  -> 55 -> 40 (cap)   46 rows  5.3 mm  T-Watch S3
+//
+// The cap is 240 / 6 = 40 on every 240-wide panel. On the 2.4" it costs the
+// target 0.01 mm; on the watch a 7 mm bar would be a quarter of a 27.7 mm
+// screen, and 5.3 mm on the wrist is the trade taken. A pitch of 0 -- the
+// simulator before a harness has said which glass it is -- keeps 20.
+//
+// What it costs in rows, on every screen that uses this bar (CLEAR, LOG,
+// DESK, HUNT, RAWSCAN, DIAGNOSTICS, BINGO, DEX, and LORA's own three-slot
+// bar): 14 rows of body on the 2.8" (20 -> 34), 20 on the 2.4" and the 3.5"
+// (20 -> 40), 9 on the 3.2" (20 -> 29), none on the CrowPanel. Every one of
+// those screens derives its body from computeButtonBar().y (audited
+// 2026-09-27: no literal 214 or h - 26 anywhere in src/), so they follow.
+int buttonBarH(int screenW, int screenH) {
+    int h = 20;
+    if (s_pixelPitchUm > 0) {
+        const int rows = (7000 + s_pixelPitchUm - 1) / s_pixelPitchUm;   // ceil, 7.0 mm of touchable rows
+        if (rows - 6 > h) h = rows - 6;
+        const int cap = (screenW < screenH ? screenW : screenH) / 6;
+        if (h > cap) h = cap;
+        if (h < 20) h = 20;
+    }
+    return h;
+}
+
 ButtonBarGeom computeButtonBar(int screenW, int screenH) {
     ButtonBarGeom g;
-    // Half of the original 40px (which was sized to comfortably clear
-    // ~9mm finger-touch-target guidance) — explicitly requested smaller
-    // to free up more room above for content. Still tappable, just a
-    // tighter target than the original guidance-driven size.
-    g.h = 20;
+    g.h = buttonBarH(screenW, screenH);
     const int margin = 8, gap = 8;
     g.y = screenH - g.h - 6;
     int bw = (screenW - 2 * margin - 2 * gap) / 3;
@@ -544,7 +610,37 @@ void drawButtonBar(TFT_eSPI& t, ButtonId highlighted, ButtonBarMode mode) {
 
 ButtonId hitTestButtonBar(int x, int y, int screenW, int screenH) {
     ButtonBarGeom g = computeButtonBar(screenW, screenH);
-    if (y < g.y || y > g.y + g.h) return ButtonId::NONE;
+    // THE BAR OWNS EVERY ROW FROM ITS TOP EDGE TO THE BOTTOM OF THE GLASS, not
+    // only the twenty-one its buttons are drawn in. computeButtonBar puts them
+    // at screenH - h - 6, so there are five rows underneath that no button is
+    // drawn in: bare on LOG and on the DEX card, animated wallpaper on CLEAR
+    // (measured on the fire background at frame 90: 1,200 lit pixels in rows
+    // 235..239 of the 400x240 canvas, 240 of them under the two outer buttons).
+    // Five logical rows is 1.9 mm on the
+    // CrowPanel (400x240 doubled onto a 152.4 x 91.4 mm panel: 0.381 mm to the
+    // logical pixel) and 0.9 mm on the 2.8" CYD. A press aimed at a button and
+    // landing at the very bottom edge of the screen used to miss it, and on
+    // CLEAR it did something else instead: taps outside the bar in the left and
+    // right tenths of the screen cycle the background, and the bar's outer two
+    // buttons sit in those tenths, so the last five rows under [ SCAN ] and
+    // under [ DESK ] changed the wallpaper. That band is 32 x 5 logical pixels
+    // in each bottom corner -- 12.2 x 1.9 mm.
+    //
+    // With the bottom rows included, each button is 26 rows: 9.9 mm on the
+    // CrowPanel against a 9 mm finger, where it was 8.0 mm. (On the small
+    // panels the drawn bar is taller now -- buttonBarH() above has the
+    // arithmetic -- and this rule is what makes those rows reach 7 mm.) On CLEAR that takes
+    // the corner slivers away from the wallpaper cycler -- a labelled 122 px
+    // button beats an unlabelled 32 px patch of the same rows, and main.cpp's
+    // inEdgeZone already claimed the outer buttons win there. Touchable and
+    // drawn are not the same rectangle after this; if that ever shows, draw the
+    // bar 26 rows tall rather than shrinking the hit test back.
+    //
+    // This is the rule pinnedBackHit() has always kept (it tests y < screenH),
+    // and the rule the LORA screen's bar was given after a press two
+    // millimetres low opened a frame instead of the view picker. Two bottom
+    // strips in one codebase should not disagree about who owns the last pixel.
+    if (y < g.y || y >= screenH) return ButtonId::NONE;
     if (x >= g.x[0] && x <= g.x[0] + g.w[0]) return ButtonId::SCAN;
     if (x >= g.x[1] && x <= g.x[1] + g.w[1]) return ButtonId::LOG;
     if (x >= g.x[2] && x <= g.x[2] + g.w[2]) return ButtonId::CLR;
@@ -4200,18 +4296,50 @@ void dimRegion(TFT_eSPI& t, int x, int y, int w, int h, uint8_t amount) {
         t.drawFastHLine(x, yy, w, BG);
 }
 
-static char     s_toastHead[18] = {0};
-static char     s_toastSub[22]  = {0};
+// ---- toasts ---------------------------------------------------------------
+//
+// The buffers are sized from the callers, not guessed. grep of every
+// Theme::showToast( in src/ on 2026-09-27: the longest literal head is 18
+// glyphs ("CAN'T START UPDATE" x4 and "NO PHRASE TO SHARE" in main.cpp), the
+// longest literal sub 43 ("walk, then STOP. LORA SURVEY LABEL names it",
+// ui_lora.cpp). The variable ones: a saved SSID as the sub (main.cpp's TRIED
+// FIRST, ota_wifi.h's ssid[33], so 32), the bingo and READ subs built in a
+// char[40] (39), a LoRa channel name (lora_sniffer.h's name[24], 23), and
+// Settings::backgroundName() as a head ("WIREFRAME TUNNEL", 16).
+//
+// The old 18/22 cut the head at 17 and the sub at 21 with no mark, and 23
+// call sites overflowed one of them: five heads came out as "CAN'T START
+// UPDAT" and the SSID toast lost eleven of its characters. 24/48 hold every
+// caller with room to spare; a longer one is fitted with the '>' mark on
+// the way in (UiFit::fitHead), never cut in silence.
+static const size_t TOAST_HEAD_CAP = 24;
+static const size_t TOAST_SUB_CAP  = 48;
+// How many lines the sub may wrap onto. The narrowest panel this runs on is
+// 240 px wide (the 2.8" and 2.4" in portrait): the widest box is w - 20 and
+// the text sits 15 px in from each side, so a line there holds 190 px, which
+// is 31 glyphs of the built-in font at size 1 (6 px each, include/ui_fit.h).
+// The longest caller, 43 glyphs, wraps onto two lines there and onto one
+// everywhere wider (320 px: 45 glyphs a line; 400 px: 58). Three lines hold
+// 93 glyphs on the narrowest panel, twice the longest caller, and cost the
+// box 20 rows more than a one-line sub -- 68 tall on a 240-row screen, rows
+// 86..153, still clear of the title bar and the counters. Past three, the
+// last line is marked, not silently dropped.
+static const uint8_t TOAST_SUB_LINES = 3;
+static const int     TOAST_SUB_LINE_H = 10;   // 8 px of glyph and 2 of lead
+static char     s_toastHead[TOAST_HEAD_CAP] = {0};
+static char     s_toastSub[TOAST_SUB_CAP]   = {0};
 static uint16_t s_toastAccent   = 0;
 static uint32_t s_toastUntil    = 0;
 
 void showToast(const char* head, const char* sub, uint16_t accent, uint32_t ms) {
-    strncpy(s_toastHead, head ? head : "", sizeof(s_toastHead) - 1);
-    s_toastHead[sizeof(s_toastHead) - 1] = 0;
-    strncpy(s_toastSub, sub ? sub : "", sizeof(s_toastSub) - 1);
-    s_toastSub[sizeof(s_toastSub) - 1] = 0;
+    UiFit::fitHead(s_toastHead, sizeof s_toastHead, head ? head : "", (int)sizeof s_toastHead - 1);
+    UiFit::fitHead(s_toastSub,  sizeof s_toastSub,  sub  ? sub  : "", (int)sizeof s_toastSub  - 1);
     s_toastAccent = accent;
     s_toastUntil  = millis() + ms;
+}
+
+bool toastUp(uint32_t now) {
+    return s_toastUntil && (int32_t)(now - s_toastUntil) < 0;
 }
 
 void drawToast(TFT_eSPI& t, uint32_t now) {
@@ -4219,15 +4347,71 @@ void drawToast(TFT_eSPI& t, uint32_t now) {
     if ((int32_t)(now - s_toastUntil) >= 0) { s_toastUntil = 0; return; }
 
     const int w = t.width(), h = t.height();
+    // The widest box, ten px of margin a side, and the text 15 px in from
+    // the box's edges (the +30 the width has always carried).
+    const int maxW = w - 20;
+    const int PAD  = 15;
+    // The font too, not just the size: textfont is sticky state on the sprite
+    // and this is drawn last, after whatever the screen set -- a speech
+    // bubble leaves font 2 behind, and drawPinnedBack() says why that one
+    // cannot be trusted on a banded board.
+    t.setTextFont(1);
+    t.setTextWrap(false);
+
+    // The head is one line at size 2. Fitted to the widest box with the mark
+    // rather than clamped: the old cursor was bx + (bw - textWidth) / 2, which
+    // goes NEGATIVE once the text is wider than the clamped box, so widening
+    // the buffers alone would have painted the head off the left edge.
+    // ... but the 15 px padding gives way before the mark does. At 240 px the
+    // widest box is 220, and a 17-glyph head at size 2 is 204 px: with 15 a
+    // side it would lose two glyphs to the mark, with 8 a side it fits whole,
+    // which is how "BORING MODE IS ON" has always drawn on the portrait CYD.
+    // Heads that fit with the full padding keep it, so every box that was
+    // right before is the same box now; an 18-glyph head (216 px) is marked
+    // at 240 px, as it was cut there before, and whole from 260 px up.
     t.setTextSize(2);
-    int bw = t.textWidth(s_toastHead) + 30;
+    char head[TOAST_HEAD_CAP];
+    int headPad  = PAD;
+    int headRoom = UiFit::chars(maxW - 2 * headPad, 2);
+    if ((int)strlen(s_toastHead) > headRoom) { headPad = 8; headRoom = UiFit::chars(maxW - 2 * headPad, 2); }
+    UiFit::fitHead(head, sizeof head, s_toastHead, headRoom);
+    int bw = t.textWidth(head) + 2 * headPad;
+
+    // The sub is one line at size 1 when it fits the widest box -- the
+    // geometry below is then exactly what it always was -- and word-wrapped
+    // inside it when it does not. wrapText drops what is past its last line;
+    // that is caught by length and the last line gets the mark.
+    char    lines[TOAST_SUB_LINES][48];
+    uint8_t n = 0;
     if (s_toastSub[0]) {
         t.setTextSize(1);
-        const int sw = t.textWidth(s_toastSub) + 30;
-        if (sw > bw) bw = sw;
+        if (t.textWidth(s_toastSub) + 2 * PAD <= maxW) {
+            strncpy(lines[0], s_toastSub, sizeof lines[0] - 1);
+            lines[0][sizeof lines[0] - 1] = 0;
+            n = 1;
+        } else {
+            n = wrapText(t, s_toastSub, maxW - 2 * PAD, lines, TOAST_SUB_LINES);
+            // Counted in ink, not in bytes: wrapText tokenises on spaces and a
+            // doubled space in the source would otherwise read as a dropped
+            // glyph and earn a mark the line has not deserved.
+            auto ink = [](const char* s) { size_t k = 0; for (; *s; s++) if (*s != ' ') k++; return k; };
+            size_t kept = 0;
+            for (uint8_t i = 0; i < n; i++) kept += ink(lines[i]);
+            if (n && kept < ink(s_toastSub)) {
+                char last[48];
+                strncpy(last, lines[n - 1], sizeof last - 1); last[sizeof last - 1] = 0;
+                UiFit::fitHead(lines[n - 1], sizeof lines[n - 1], last, (int)strlen(last) - 1);
+            }
+        }
+        for (uint8_t i = 0; i < n; i++) {
+            const int lw = t.textWidth(lines[i]) + 2 * PAD;
+            if (lw > bw) bw = lw;
+        }
     }
-    if (bw > w - 20) bw = w - 20;
-    const int bh = s_toastSub[0] ? 48 : 34;
+    if (bw > maxW) bw = maxW;
+    // 34 rows for a head alone, 48 with one line of sub, and a line pitch
+    // more for each further line -- the one-line box is the box it always was.
+    const int bh = n ? 48 + (n - 1) * TOAST_SUB_LINE_H : 34;
     const int bx = (w - bw) / 2, by = (h - bh) / 2;
 
     t.fillRect(bx, by, bw, bh, BG);
@@ -4236,13 +4420,15 @@ void drawToast(TFT_eSPI& t, uint32_t now) {
 
     t.setTextSize(2);
     t.setTextColor(s_toastAccent, BG);
-    t.setCursor(bx + (bw - t.textWidth(s_toastHead)) / 2, by + 8);
-    t.print(s_toastHead);
-    if (s_toastSub[0]) {
+    t.setCursor(bx + (bw - t.textWidth(head)) / 2, by + 8);
+    t.print(head);
+    if (n) {
         t.setTextSize(1);
         t.setTextColor(WHITE, BG);
-        t.setCursor(bx + (bw - t.textWidth(s_toastSub)) / 2, by + 31);
-        t.print(s_toastSub);
+        for (uint8_t i = 0; i < n; i++) {
+            t.setCursor(bx + (bw - t.textWidth(lines[i])) / 2, by + 31 + i * TOAST_SUB_LINE_H);
+            t.print(lines[i]);
+        }
     }
 }
 

@@ -23,6 +23,13 @@
 
 #define ILI9341_2_DRIVER
 #define TFT_WIDTH   240
+// One logical pixel on the glass, in micrometres, for Theme::buttonBarH and
+// the millimetre arithmetic behind every touch target (include/theme.h). The
+// FNK0104B carries the same 2.8" 240x320 panel class as the CYD 2.8" - a
+// 57.6 x 43.2 mm active area (0.18 mm a pixel by the panel's datasheet class,
+// not measured on this board; the CYD's 178 was). A firmware build without
+// this define stops in theme.cpp on purpose.
+#define SQW_PIXEL_PITCH_UM 180
 #define TFT_HEIGHT  320
 
 #define USE_HSPI_PORT

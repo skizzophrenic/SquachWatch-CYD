@@ -15,6 +15,8 @@
 #define TFT_WIDTH   240
 #define TFT_HEIGHT  320
 #define TFT_ROTATION 1
+// The same 2.8" glass as cyd_user_setup.h, 0.178 mm a pixel; see there.
+#define SQW_PIXEL_PITCH_UM 178
 
 // SPI pins (canonical 2.8" CYD pinout, multiple sources)
 #define TFT_MISO  12

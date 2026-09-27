@@ -132,3 +132,17 @@
 #define CROW_CAP_NX_MAX PANEL_W
 #define CROW_CAP_NY_MIN 0
 #define CROW_CAP_NY_MAX PANEL_H
+
+// ---- The wireless slot (J9/J11) ----------------------------------------------
+// Elecrow's SX1262 module, when K1 routes the bus to it; docs/LORA.md section
+// 1 has the schematic trail. SCK/MISO/MOSI are the SD card's pins through the
+// CH486F mux, so a card and the module never both answer. NSS is GPIO 8 from
+// V1.2 on (V1.0 used GPIO 0). DIO2 drives the module's own RF switch and the
+// TCXO hangs off DIO3, so neither reaches a GPIO here.
+#define LORA_PIN_SCK   5
+#define LORA_PIN_MISO  4
+#define LORA_PIN_MOSI  6
+#define LORA_PIN_NSS   8
+#define LORA_PIN_DIO1  20
+#define LORA_PIN_RST   19
+#define LORA_PIN_BUSY  2

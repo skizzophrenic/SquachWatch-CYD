@@ -24,6 +24,10 @@
 // at runtime via setRotation(1), same as the 2.8" board.
 #define TFT_WIDTH   320
 #define TFT_HEIGHT  480
+// One pixel on this glass, in micrometres: 3.5" 320x480, active area
+// 48.96 x 73.44 mm on the ST7796 module sheet, 0.153 mm a pixel. From the
+// sheet; the board is frozen (see platformio.ini) and was not measured.
+#define SQW_PIXEL_PITCH_UM 153
 
 // SPI pins — identical bus to the 2.8" board's display (VSPI: 12/13/14),
 // which is what lets the touch controller share this same bus below

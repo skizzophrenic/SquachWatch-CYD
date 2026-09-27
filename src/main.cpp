@@ -229,6 +229,9 @@ static void drawCrashCard(TFT_eSPI& t) {
 #include "state.h"
 #include "theme.h"
 #include "detection.h"
+#include "lora_sniffer.h"   // the CrowPanel 7's wireless slot; inline no-ops elsewhere
+#include "ui_lora.h"
+#include "lora_profiles.h"
 #include "clock.h"
 #include "ui_desk.h"
 #include "ui_zone.h"
@@ -1468,6 +1471,14 @@ static void enterUpdate() {
     uiUpdateInit(*canvas);
 }
 
+// Which door the LORA screen was opened by, so BACK can undo that one. Two
+// reach it now -- SETTINGS > SYSTEM > LORA, and the main screen's LORA pill --
+// and coming out of the pill into a settings page nobody opened is how a door
+// stops reading as a door. Declared out here rather than beside enterLora()
+// below because the AppState::LORA handler, which is what reads it, is
+// compiled on every board while enterLora() sits inside SQUACH_MESH.
+static bool s_loraFromClear = false;
+
 #if SQUACH_MESH
 // ---- the squad update -----------------------------------------------------
 // A nudge heard on the mesh waits here until the main screen is showing,
@@ -1506,6 +1517,12 @@ static void enterDex() {
     state = AppState::DEX;
     transitionStart = millis();
     uiDexInit(*canvas);
+}
+static void enterLora(LoraView view = LoraView::LIST, bool fromClear = false) {
+    state = AppState::LORA;
+    transitionStart = millis();
+    s_loraFromClear = fromClear;
+    uiLoraInit(*canvas, view);
 }
 
 static void enterSquadUpdate() {
@@ -3282,6 +3299,12 @@ void setup() {
 #if defined(CROWPANEL7_PERIPH_PROBE)
     crowPeriphProbe();
 #endif
+#if SQUACH_LORA
+    // The wireless slot, after the WiFi and Bluetooth radios: it has its own
+    // task and its own bus, and only the console and DIAGNOSTICS notice it
+    // until the LORA screens exist. Nothing if K1 is on the card.
+    Lora::begin();
+#endif
     // After the engine: the card leans on the lifetime counts to pick which
     // type sits out, and those are read in init().
     Bingo::begin(engine);
@@ -3389,6 +3412,19 @@ static uint32_t s_pushUsAvg  = 0;
 static uint32_t s_frameUsAvg = 0;
 static uint32_t s_loopsSinceSay = 0;
 static uint32_t s_pushAccumUs = 0;   // summed within a frame: cyd35 pushes twice
+// The repaint gate. A screen whose tick drew nothing this loop() sets
+// s_skipPush and the frame is not pushed: the sprite still holds the last
+// picture, and the panel still shows it. Only the LORA screen says so today
+// (uiLoraTick returns whether it drew, ui_lora.h); every other screen has a
+// mascot, a wallpaper or a scrolling list on it and keeps the full rate.
+// Measured in squachsim-live on the LORA frame list with the fake radio
+// quiet: 30 pushes a second before, 1 a second after (the screen's own 1 Hz
+// safety net), a finger on the glass back at the loop rate.
+// s_glitchedFrame remembers that the transition glitch painted over the
+// sprite on the last push, so the next tick redraws rather than skipping
+// over a picture the glitch has shifted.
+static bool s_skipPush      = false;
+static bool s_glitchedFrame = false;
 #if defined(CYD35)
 static uint32_t s_bandUs[2] = {0, 0};      // measurement: the 3.5"'s two draw passes
 #endif
@@ -3476,6 +3512,7 @@ static const char* timedScreenName(AppState s) {
     switch (s) {
         case AppState::CLEAR:       return "MAIN";
         case AppState::LOG:         return "LOG";
+        case AppState::LORA:        return "LORA";
         case AppState::DESK:        return "DESK";
         case AppState::RAWSCAN:     return "SCAN";
         case AppState::HUNT:        return "HUNT";
@@ -3496,6 +3533,7 @@ void loop() {
     s_loopsSinceSay++;   // the real loop rate, pacing delays included; on the [frame] line
     FrameProf::begin();
     s_pushAccumUs = 0;
+    s_skipPush    = false;
     FramePush::newFrame();
     uint32_t now = millis();
 #if defined(TWATCH_S3)
@@ -3601,6 +3639,7 @@ void loop() {
         touchJustUp = false;
     }
     engine.loop();
+    Lora::tick(now);   // nothing outside a SQUACH_LORA build
     floodTick();   // nothing outside a FLOOD_BENCH build
     // The heap at the first pass of loop(), for DIAGNOSTICS' BOOT line.
     static uint32_t s_loopHeapFree = 0, s_loopHeapLargest = 0;
@@ -4097,24 +4136,32 @@ void loop() {
             uiClearTick(*canvas, now, engine, true, s_scanPickerOpen);
 #endif
             FrameProf::lap(FrameProf::CHROME);
-            // Toasts on the main screen too. They were only drawn on LOG and
-            // NEARBY, so SNOOZED and READ, both raised on the way here or while
-            // here, went unseen.
-            Theme::drawToast(*canvas, now);
             // The clock is set and no zone was ever picked: the card, over
             // everything, until THIS IS RIGHT. A tap on it is the card's; a
             // tap beside it is the main screen's, so he can still be poked.
-            if (uiZoneCardWanted()) {
-                uiZoneCardDraw(*canvas, now);
-                if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
-                    const ZoneHit zh = uiZoneCardHit(tp.x, tp.y, tft.width(), tft.height());
-                    if (zh != ZoneHit::NONE) {
-                        lastTouch = now;
-                        if      (zh == ZoneHit::PREV) Settings::stepTimeZone(-1);
-                        else if (zh == ZoneHit::NEXT) Settings::stepTimeZone(1);
-                        else if (zh == ZoneHit::OK)   Settings::markTimeZoneChosen();
-                        break;
-                    }
+            const bool zoneCard = uiZoneCardWanted();
+            if (zoneCard) uiZoneCardDraw(*canvas, now);
+            // Toasts on the main screen too. They were only drawn on LOG and
+            // NEARBY, so SNOOZED and READ, both raised on the way here or while
+            // here, went unseen -- and then they were drawn UNDER the zone
+            // card, which fills the middle of the screen, exactly where a toast
+            // goes, for as long as the clock is trusted and no zone has been
+            // picked. On the emulator that is every boot until somebody presses
+            // THIS IS RIGHT, so a toast on CLEAR was never once seen there and
+            // the bench read that as "toasts never show on CLEAR"
+            // (sim/test_clear_toast.sh pins both cases now). A toast is a 1.5 s
+            // answer to something the owner just did; the card can wait under
+            // it. After the card, before its tap handling, so the frame that
+            // takes a tap on the card still has the toast on it.
+            Theme::drawToast(*canvas, now);
+            if (zoneCard && touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                const ZoneHit zh = uiZoneCardHit(tp.x, tp.y, tft.width(), tft.height());
+                if (zh != ZoneHit::NONE) {
+                    lastTouch = now;
+                    if      (zh == ZoneHit::PREV) Settings::stepTimeZone(-1);
+                    else if (zh == ZoneHit::NEXT) Settings::stepTimeZone(1);
+                    else if (zh == ZoneHit::OK)   Settings::markTimeZoneChosen();
+                    break;
                 }
             }
 #if CROWD_BENCH
@@ -4311,6 +4358,23 @@ void loop() {
             } else if (!boring && Squachy::onboardingActive() && tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
                 Squachy::onboardingTapAdvance(tp.x, tp.y)) {
                 lastTouch = now;
+#if defined(CROWPANEL7)
+            } else if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
+                       uiClearLoraPillHit(tp.x, tp.y)) {
+                // The LORA pill in the title bar: the main screen's door to the
+                // sniffer, which until now was only reachable from SETTINGS >
+                // SYSTEM. Opens the same view that row does, so the two doors
+                // land in the same place and there is only one thing to learn.
+                //
+                // Ahead of the edge zones for the same reason as the message
+                // bubble below: it sits in the top band, and a tap meant for it
+                // must never cycle the background on the way. The picker being
+                // open does not disarm it -- the picker relabels the BOTTOM
+                // bar, and enterClear() closes it when BACK comes back here.
+                lastTouch = now;
+                sqActive  = false;
+                enterLora(LoraView::LIST, true);
+#endif
 #if SQUACH_MESH
             } else if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
                        uiClearBubbleHit(tp.x, tp.y)) {
@@ -4799,6 +4863,13 @@ void loop() {
             static int  gestureStartX = 0, gestureStartY = 0;
             static int  lastY = -1;
             static uint32_t gestureDownMs = 0;
+            // The CLR arm, below. A separate flag rather than "is the deadline
+            // in the future", because millis() passes 2^31 after 24.8 days and
+            // a signed compare against a zero deadline would read as armed
+            // there; the unsigned difference below is wrap-safe on its own.
+            static bool     clrArmed   = false;
+            static uint32_t clrArmedAt = 0;
+            constexpr uint32_t CLR_CONFIRM_MS = 2500;
             if (touchJustDown) {
                 gestureActive = true;
                 gestureMoved  = false;
@@ -4811,6 +4882,8 @@ void loop() {
                 int dy = tp.y - lastY;
                 if (abs(dy) > 10) {
                     gestureMoved = true;
+                    // Scrolling the list is not answering the question.
+                    clrArmed = false;
                     uiLogScroll(dy > 0 ? -1 : 1);
                     lastY = tp.y;
                 }
@@ -4819,14 +4892,55 @@ void loop() {
                 if (!gestureMoved && now - gestureDownMs <= TAP_MAX_MS) {
                     lastTouch = now;
                     ButtonId b = Theme::hitTestButtonBar(gestureStartX, gestureStartY, tft.width(), tft.height());
-                    if (b == ButtonId::SCAN) { enterClear(); }
+                    if (b == ButtonId::SCAN) { clrArmed = false; enterClear(); }
                     if (b == ButtonId::CLR)  {
-                        engine.clearLog();
-                        BlackBox::markCleared();   // or a restart brings it all back
-                        Squachy::trigger(Squachy::Event::LOG_CLEARED);
-                        enterClear();
+                        // CLR ASKS FIRST. This is the only control on the device
+                        // that destroys data on one tap, and it is in the third
+                        // slot of the bottom bar -- the same 122 x 26 logical
+                        // pixel rectangle (46 x 10 mm on the CrowPanel) that
+                        // says [ DESK ] and opens desk mode on the screen you
+                        // just came from. Nothing else about the two presses
+                        // differs; one of them is a navigation and one of them
+                        // takes the log away, and markCleared() writes a CLEAR
+                        // record that forEachDetection stops at, so the black
+                        // box does not give it back either.
+                        //
+                        // SETTINGS > RESET STATS raises a whole confirm panel to
+                        // zero the detection COUNTS. Erasing every entry is the
+                        // larger destruction and had nothing.
+                        //
+                        // Arm-and-confirm rather than a panel: the panel would
+                        // want its own geometry and hit test on a screen that
+                        // already has two (the row menu and MORE INFO), and the
+                        // cost of the answer is one more tap on the button the
+                        // finger is already on. The toast IS the prompt and its
+                        // lifetime IS the window, so the question disappears at
+                        // the same moment the answer stops counting.
+                        // ...and the arm dies with the visit. A static that
+                        // outlives the screen is how a press meant for one
+                        // screen lands on another -- the LORA screen's gesture
+                        // had exactly that shape -- so an arm from a previous
+                        // visit does not count, however recent. Signed
+                        // difference, not >=: a raw compare fails once millis()
+                        // wraps between entering the log and pressing (closed,
+                        // but wrong), and the comment above promised wrap-safe.
+                        if (clrArmed && (int32_t)(clrArmedAt - transitionStart) >= 0 &&
+                            (now - clrArmedAt) <= CLR_CONFIRM_MS) {
+                            clrArmed = false;
+                            engine.clearLog();
+                            BlackBox::markCleared();   // or a restart brings it all back
+                            Squachy::trigger(Squachy::Event::LOG_CLEARED);
+                            enterClear();
+                        } else {
+                            clrArmed   = true;
+                            clrArmedAt = now;
+                            // Well inside Theme's toast buffers (24 and 48,
+                            // src/theme.cpp): one line each on every panel.
+                            Theme::showToast("ERASE THE LOG?", "CLR again to erase",
+                                             Theme::RED, CLR_CONFIRM_MS);
+                        }
                     }
-                    if (b == ButtonId::LOG)  { enterClear(); }   // toggle off
+                    if (b == ButtonId::LOG)  { clrArmed = false; enterClear(); }   // toggle off
                 }
                 gestureActive = false;
             }
@@ -5303,6 +5417,31 @@ void loop() {
                         case SettingsRow::VIEW_DIARY:   enterDiary(); break;
                         case SettingsRow::BINGO:        enterBingo(); break;
                         case SettingsRow::DEX:          enterDex(); break;
+#if defined(CROWPANEL7)
+                        case SettingsRow::LORA:         enterLora(); break;
+                        case SettingsRow::LORA_CHANNELS: enterLora(LoraView::CHANS); break;
+                        case SettingsRow::LORA_MODE:
+                            Settings::cycleLoraMode();
+                            Lora::setMode((Lora::Mode)Settings::loraMode());
+                            break;
+                        // Each switch is its own tap, and turning the master
+                        // off leaves the three under it as they were: coming
+                        // back to ON must not silently re-enable a source
+                        // somebody had singled out and turned off.
+                        case SettingsRow::LORA_LOOKUPS: Settings::toggleLoraLookups(); break;
+                        case SettingsRow::LORA_LK_CALL: Settings::toggleLoraLookupCall(); break;
+                        case SettingsRow::LORA_LK_OGN:  Settings::toggleLoraLookupOgn(); break;
+                        case SettingsRow::LORA_LK_FEED: Settings::toggleLoraLookupFeed(); break;
+                        case SettingsRow::LORA_PROFILE: {
+                            // Steps through the table; FOCUS follows at once
+                            // so the change can be heard while the row is
+                            // still under the finger.
+                            const uint8_t next = (uint8_t)((Settings::loraFocus() + 1) % Lora::profileCount());
+                            Settings::setLoraFocus(next);
+                            Lora::setFocus(next);
+                            break;
+                        }
+#endif
                         case SettingsRow::APPEARANCE:  uiSettingsOpenAppearance(true); break;
                         case SettingsRow::TOP_HAT:     Settings::toggleTopHat(); break;
                         // From a sub-page, back to the main list; from the
@@ -6209,6 +6348,109 @@ void loop() {
             }
             break;
         }
+        case AppState::LORA: {
+            // The ten views are static text. uiLoraTick draws only when
+            // something it shows has changed and says whether it did, and the
+            // push at the end of loop() is skipped when it did not (see
+            // s_skipPush). Three things force a draw regardless: a finger on
+            // the glass -- so a tap is reflected in the frame after it, the
+            // frame it always was -- the transition glitch, which paints over
+            // the sprite for TRANSITION_MS after entry, and the frame after
+            // that one, which still holds the glitched picture.
+            if (tp.valid || touchJustUp || (now - transitionStart) < TRANSITION_MS || s_glitchedFrame)
+                uiLoraDirty();
+            bool drew = false;
+            drawTwoBand([&](TFT_eSPI& t, bool advance) { drew = uiLoraTick(t, now, engine, advance) || drew; });
+            s_skipPush = !drew;
+            // Drag to scroll, tap for the rows and the bar: the settings
+            // screen's gesture, with trackers of its own like every other
+            // list screen keeps.
+            static bool gestureActive = false;
+            static bool gestureMoved  = false;
+            static int  gestureStartX = 0, gestureStartY = 0;
+            static int  lastY = -1;
+            static uint32_t gestureDownMs = 0;
+            static bool holdFired = false;
+            // A press that began on ANOTHER screen is not a press on this one.
+            // The main screen's LORA pill opens this screen on touch DOWN (see
+            // the CLEAR case, where it has to be: it sits in the top band and a
+            // release there would cycle the background on the way), so the
+            // finger is still on the glass when this case first runs. Its
+            // release would then be delivered here -- at gestureStartX/Y, which
+            // is wherever the LAST gesture on this screen went down, a frame row
+            // as often as not -- or its travel read as a drag and scroll the
+            // list out from under it. Both happen only when a gesture was left
+            // open by leaving the screen mid-press (an alert firing under the
+            // finger does it), which is rare and is exactly why it would never
+            // be found by trying. Keyed off the entry timestamp, so it is one
+            // reset per visit and not one per frame.
+            static uint32_t gestureEntry = 0;
+            if (gestureEntry != transitionStart) { gestureEntry = transitionStart; gestureActive = false; }
+            if (touchJustDown) {
+                gestureActive = true;
+                gestureMoved  = false;
+                holdFired     = false;
+                gestureStartX = tp.x;
+                gestureStartY = tp.y;
+                lastY = tp.y;
+                gestureDownMs = now;
+                lastTouch = now;
+            }
+            // A touch that has stayed put long enough to mean "I mean this".
+            // The two numbers are the raw-scan screen's, deliberately: that is
+            // the one hold-to-confirm gesture already on the device (see the
+            // RAWSCAN case's ROW_HOLD_MS), and a second threshold would make the
+            // same physical gesture behave differently on two screens.
+            //
+            // Not gated on gestureMoved: the drag threshold here is a whole row
+            // (uiLoraDragStep, 20 or 32 px), so a thumb can wobble well past
+            // this 12 px and still be called a tap. The hold has to judge the
+            // wobble itself, against the position the touch went DOWN at.
+            constexpr uint32_t LORA_HOLD_MS    = 500;
+            constexpr int32_t  LORA_MOVE_PX_SQ = 12 * 12;
+            if (tp.valid && gestureActive && !holdFired) {
+                const int32_t hdx = tp.x - gestureStartX, hdy = tp.y - gestureStartY;
+                if ((hdx * hdx + hdy * hdy) <= LORA_MOVE_PX_SQ &&
+                    (uint32_t)(now - gestureDownMs) >= LORA_HOLD_MS &&
+                    uiLoraHold(*canvas, gestureStartX, gestureStartY, tft.width(), tft.height())) {
+                    // The screen took it, so this gesture is spent: the release
+                    // must not also arrive as a tap on the panel that just came
+                    // up under the finger. Same rule as RAWSCAN's s_confirmArmed,
+                    // reached by ending the gesture instead of by a second flag.
+                    holdFired     = true;
+                    gestureActive = false;
+                    lastTouch     = now;
+                }
+            }
+            if (tp.valid && gestureActive) {
+                int dy = tp.y - lastY;
+                // One row of finger travel is one row of list. The flat 10 px
+                // this compared against was half a row once the rows became
+                // finger-sized (20 logical px, which is 7.6 mm on this panel --
+                // src/ui_lora.cpp has the arithmetic), so the list ran away
+                // under the thumb at twice its speed; on the survey's 32 px
+                // rows it was three times. It also means a wobble during a tap
+                // stays a tap, which on a target that size it is.
+                const int step = uiLoraDragStep(*canvas);
+                if (abs(dy) > step) {
+                    gestureMoved = true;
+                    uiLoraScroll(dy > 0 ? -1 : 1);
+                    lastY = tp.y;
+                }
+            }
+            if (touchJustUp && gestureActive) {
+                gestureActive = false;
+                if (!gestureMoved && uiLoraTap(*canvas, gestureStartX, gestureStartY, tft.width(), tft.height()) == LoraTap::BACK) {
+                    // Back the way you came in -- see s_loraFromClear.
+                    if (s_loraFromClear) enterClear();
+                    else {
+                        uiSettingsOpenPage(SettingsPage::SYSTEM);
+                        enterSettings();
+                    }
+                }
+            }
+            break;
+        }
         case AppState::DIAGNOSTICS: {
             DiagnosticsInfo info;
             {
@@ -6249,6 +6491,7 @@ void loop() {
             info.lastScreenName = s_lastScreenName;
             info.lastScreenUs   = s_lastScreenUs;
             info.freeHeap = ESP.getFreeHeap();
+            Lora::statusLine(info.lora, sizeof info.lora);
             info.largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
             info.resetReason = resetReasonName();
             info.loopFree    = s_loopHeapFree;
@@ -6349,10 +6592,16 @@ void loop() {
     // straight at tft and every draw this frame already landed on the
     // real screen -- pushing `frame` here would just paint stale data
     // from the sprite we stopped using back over the top of it.
-    if (frameBufferOk) {
-        if (now - transitionStart < TRANSITION_MS) {
+    // ...and not at all when the screen's tick drew nothing (s_skipPush): the
+    // sprite and the panel both still hold the last picture. A glitch cannot
+    // be running on a skipped frame -- the LORA case forces a draw while it
+    // is -- so s_glitchedFrame is only ever written here.
+    if (frameBufferOk && !s_skipPush) {
+        const bool glitch = now - transitionStart < TRANSITION_MS;
+        if (glitch) {
             Theme::drawTransitionGlitch(frame, now - transitionStart, TRANSITION_MS);
         }
+        s_glitchedFrame = glitch;
         FrameProf::lap(FrameProf::POST);
         pushFrame(0, 0);
         FrameProf::lap(FrameProf::PUSH);

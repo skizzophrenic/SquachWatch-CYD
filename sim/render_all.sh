@@ -9,7 +9,7 @@ mkdir -p "$DEST"
 # Pin the clock, or anything showing a time renders differently every run
 # and a comparison between two folders is all noise.
 export SQUACH_EPOCH="${SQUACH_EPOCH:-1789396740}"
-SCREENS="clear log alert settings detfilter power diary hunt rawscan watchalert colorcheck boot phone meshmenu meshwarn bingo"
+SCREENS="clear log alert settings detfilter power diary hunt rawscan watchalert colorcheck boot phone meshmenu meshwarn bingo lora"
 ok=0; bad=0
 for s in $SCREENS; do
   if ./squachsim "$s" "$DEST/$s.png" --frames 40 --size "$SIZE" >/dev/null 2>&1; then

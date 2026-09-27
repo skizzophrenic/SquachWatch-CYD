@@ -472,9 +472,18 @@ namespace Squachy {
     // geometry would otherwise give him, for the SIZE row in Settings. 100
     // is exactly the old behaviour, byte for byte, so every caller that
     // does not pass it is unaffected -- only CLEAR does.
+    //
+    // topBandLeft: how far the rows ABOVE topY are already occupied from the
+    // left. His one-line speech bubble rises into that band when it is clear --
+    // it has always stepped aside for the corner icons, which it knows about
+    // itself -- and this is for a caller that has put something else up there.
+    // The bubble that would cross it stays at topY instead, which is where every
+    // wrapped one sits anyway. 0, the default, is exactly the old behaviour: only
+    // CLEAR passes it, for the CrowPanel's LORA pill, which was punching a hole
+    // in 62 % of the lines he says (src/ui_clear.cpp's drawLoraPill).
     void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
               bool advance = true, float minScale = 1.0f, bool scanningFx = false,
-              int wanderRangePx = -1, uint8_t sizePct = 100);
+              int wanderRangePx = -1, uint8_t sizePct = 100, int topBandLeft = 0);
 
     // Themed one-liner reactions for the raw-scan screen (see
     // ui_rawscan.cpp), pulled from their own flavor pool instead of

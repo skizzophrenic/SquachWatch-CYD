@@ -24,6 +24,9 @@
 
 #define TFT_WIDTH   240
 #define TFT_HEIGHT  320
+// One pixel on this glass, in micrometres: the 2.4" (rlphantom_user_setup.h
+// has the figures), 0.152 mm.
+#define SQW_PIXEL_PITCH_UM 152
 
 // Display, on VSPI. Identical to the 2.8" board and to the capacitive Phantom.
 // On the HSPI engine, whose native pins these are. Left unsaid, TFT_eSPI

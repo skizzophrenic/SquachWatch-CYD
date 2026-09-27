@@ -35,6 +35,11 @@
 
 #define TFT_WIDTH   240
 #define TFT_HEIGHT  320
+// One pixel on this glass, in micrometres: 2.4" 240x320, active area
+// 36.72 x 48.96 mm, 0.152 mm a pixel (measured last pass). Same resolution as
+// the 2.8" and a sixth smaller, which is exactly why Theme::computeButtonBar
+// takes this rather than the resolution.
+#define SQW_PIXEL_PITCH_UM 152
 
 // Display, on VSPI. Identical to the 2.8" board -- see the note above.
 // On the HSPI engine, whose native pins these are. Left unsaid, TFT_eSPI

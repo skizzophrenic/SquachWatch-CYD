@@ -68,7 +68,10 @@ void uiHuntInit(TFT_eSPI& t) {
 bool uiHuntHitBack(int x, int y, int screenW, int screenH) {
     int bx, by, bw, bh;
     backButtonRect(screenW, screenH, bx, by, bw, bh);
-    return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
+    // To the bottom of the glass, not to the drawn edge: Theme::hitTestButtonBar
+    // explains the five bare rows under every bar built from computeButtonBar
+    // and why a press landing in them is the button's. Same rule here.
+    return x >= bx && x <= bx + bw && y >= by && y < screenH;
 }
 
 bool uiHuntCaught() { return (int32_t)(s_caughtUntil - millis()) > 0; }
@@ -76,7 +79,7 @@ bool uiHuntCaught() { return (int32_t)(s_caughtUntil - millis()) > 0; }
 bool uiHuntHitStop(int x, int y, int screenW, int screenH) {
     int bx, by, bw, bh;
     stopButtonRect(screenW, screenH, bx, by, bw, bh);
-    return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
+    return x >= bx && x <= bx + bw && y >= by && y < screenH;
 }
 
 // Semicircle strength gauge -- sweeps left (weak) to right (strong)

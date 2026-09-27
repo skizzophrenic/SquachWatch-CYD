@@ -21,10 +21,28 @@ void uiDiagnosticsInit(TFT_eSPI& t) {
 bool uiDiagnosticsHitBack(int x, int y, int screenW, int screenH) {
     int bx, by, bw, bh;
     backButtonRect(screenW, screenH, bx, by, bw, bh);
-    return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
+    // To the bottom of the glass, not to the drawn edge: Theme::hitTestButtonBar
+    // explains the five bare rows under every bar built from computeButtonBar
+    // and why a press landing in them is the button's. Same rule here.
+    return x >= bx && x <= bx + bw && y >= by && y < screenH;
 }
 
+// The body's floor, and what happened against it. Seventeen lines at the
+// built-in font's 8 px plus 2 of lead are 170 rows, and the four group gaps
+// another 16: fine under a 20-row bar, not under the 34 the 2.8" CYD grew
+// (Theme::buttonBarH) -- there the body is 180 rows and the last line drew
+// under [ BACK ]. So a line that would cross the floor is not drawn and is
+// counted; on the first frame that counts one the gaps go to zero and the
+// frame is drawn again at once (that alone brings 17 lines home on the 2.8"
+// and the 2.4"); whatever still does not fit is said in one marked figure at
+// the foot instead of being painted under the button.
+static int  s_bottom  = 0;
+static int  s_skipped = 0;
+static int  s_gap     = 4;
+static bool s_tight   = false;
+
 static int drawLine(TFT_eSPI& t, int y, uint16_t labelColor, const char* label, const char* fmt, ...) {
+    if (y + t.fontHeight() > s_bottom) { s_skipped++; return y; }
     t.setTextColor(labelColor, Theme::BG);
     t.setCursor(6, y);
     t.print(label);
@@ -50,6 +68,9 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
     Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
     int bodyTop = 16, bodyBottom = bar.y - 4;
     t.fillRect(0, bodyTop, w, bodyBottom - bodyTop, Theme::BG);
+    s_bottom  = bodyBottom;
+    s_skipped = 0;
+    s_gap     = s_tight ? 0 : 4;
 
     t.setTextSize(1);
     t.setTextWrap(false);
@@ -110,6 +131,7 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
     }
     y = drawLine(t, y, Theme::CYAN, "SLOT:", "%s  other: %s",
                  info.otaSlot ? info.otaSlot : "?", info.otaOther ? info.otaOther : "none");
+    if (info.lora[0]) y = drawLine(t, y, Theme::CYAN, "LORA:", "%s", info.lora);
     // The black box: what is kept in flash across restarts. The newest crash
     // kept by date and version, which is what a photo of this screen needs
     // to match it to a build; BLACKBOX on the console has the rest.
@@ -126,7 +148,7 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
                      (unsigned)info.bbKept, (unsigned)info.bbCrashes, info.bbCrashes == 1 ? "" : "es",
                      when, wide ? " v" : "", wide ? info.bbLast.version : "");
     }
-    y += 4;
+    y += s_gap;
 
     if (info.hasRaw) {
         y = drawLine(t, y, Theme::VAPOR_PURPLE, "RAW TOUCH:", "%s a=%d b=%d",
@@ -134,14 +156,14 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
     }
     y = drawLine(t, y, Theme::VAPOR_PURPLE, "MAPPED:", "%s x=%d y=%d",
                  info.touchValid ? "valid" : "--", info.mappedX, info.mappedY);
-    y += 4;
+    y += s_gap;
 
     y = drawLine(t, y, Theme::VAPOR_PINK, "CAL SOURCE:", "%s",
                  info.calSource ? info.calSource
                                 : info.usingSavedCal ? "saved" : "compiled-in default");
     y = drawLine(t, y, Theme::VAPOR_PINK, "CAL RANGE:", "A[%d,%d] B[%d,%d]",
                  info.calA0, info.calA1, info.calB0, info.calB1);
-    y += 4;
+    y += s_gap;
 
     // Frame cost. The push is a fixed byte count over SPI, so it moves
     // only if the bus clock does -- kept as its own figure so a change to
@@ -172,7 +194,7 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
                          (unsigned long)(info.bgUs / 1000), (unsigned long)((info.bgUs % 1000) / 100));
         }
     }
-    y += 4;
+    y += s_gap;
 
     y = drawLine(t, y, Theme::GREEN, "LOG:", "%u entries, %lu lifetime",
                  (unsigned)eng.logCount(), (unsigned long)eng.lifetimeTotal());
@@ -183,7 +205,7 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
     // for ten minutes gives ten samples of each rather than one of a good
     // moment and one of a bad one.
     {
-        y += 4;
+        y += s_gap;
         const MeshProbe::Stats ms = MeshProbe::stats();
         y = drawLine(t, y, ms.advOn ? Theme::GREEN : Theme::CYAN, "BLE SEEN:", "%u.%u /s, %s%s",
                      (unsigned)(ms.offRate / 10), (unsigned)(ms.offRate % 10),
@@ -208,6 +230,22 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
                      (unsigned long)fs.count);
     }
 #endif
+
+    if (s_skipped && !s_tight) {
+        // Once: the gaps were the slack, take them and draw again.
+        s_tight = true;
+        uiDiagnosticsTick(t, now, eng, info);
+        return;
+    }
+    if (s_skipped) {
+        // The lines that still did not fit, said where the eye ends up. The
+        // marker is one glyph, as everywhere on this device (ui_fit.h).
+        char more[16];
+        snprintf(more, sizeof more, "+%d more>", s_skipped);
+        t.setTextColor(Theme::CYAN, Theme::BG);   // the screen's label ink: a note, not an alarm
+        t.setCursor(w - 6 - t.textWidth(more), bodyBottom - t.fontHeight() - 1);
+        t.print(more);
+    }
 
     int bx, by, bw, bh;
     backButtonRect(w, h, bx, by, bw, bh);

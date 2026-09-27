@@ -512,8 +512,14 @@ public:
     // real device's equivalent of an SPI DMA push to the panel; here
     // it's just a straight copy into the parent's own in-memory buffer,
     // which is exactly what the sim harness reads out to PNG.
+    // How many times a sprite has been pushed to its parent since the
+    // process started -- the emulator's frame counter. On the board this is
+    // the push to the panel, so a harness that reads it before and after a
+    // run of loop()s has the panel's push rate (main_live.cpp's C command).
+    static inline uint32_t pushes = 0;
     void pushSprite(int32_t x, int32_t y) {
         if (!_parent || !_created) return;
+        pushes++;
         for (int32_t j = 0; j < _h; j++)
             for (int32_t i = 0; i < _w; i++)
                 _parent->drawPixel(x + i, y + j, _buf[(size_t)j * _w + i]);

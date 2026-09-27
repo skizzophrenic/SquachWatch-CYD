@@ -156,6 +156,18 @@ static uint8_t  s_radioDutyIx  = RADIO_DUTY_DEFAULT;
 // stays off until somebody finds the row. Only the CrowPanel 7 shows it.
 static bool     s_buzzer       = false;
 
+// ---- LoRa -----------------------------------------------------------------
+// SURVEY by default: the detector posture, everything in the band. FOCUS is
+// the sysop's, set from the LORA screen or the console.
+static uint8_t  s_loraMode     = 2;
+static uint8_t  s_loraFocus    = 0;
+// The online lookups, all four OFF. See Settings::loraLookups() for why the
+// default is the opposite of the update check's.
+static bool     s_loraLookups  = false;
+static bool     s_loraLkCall   = false;
+static bool     s_loraLkOgn    = false;
+static bool     s_loraLkFeed   = false;
+
 // ---- status light --------------------------------------------------------
 static bool    s_lightOn     = true;
 static bool    s_lightAlerts = true;
@@ -290,6 +302,45 @@ void toggleWakeOnAlert() {
 }
 bool buzzerOn()     { return s_buzzer; }
 void toggleBuzzer() { s_buzzer = !s_buzzer; s_prefs.putBool("buzzer", s_buzzer); }
+uint8_t loraMode()  { return s_loraMode; }
+void cycleLoraMode() { s_loraMode = (uint8_t)((s_loraMode + 1) % 3); s_prefs.putUChar("loraMode", s_loraMode); }
+uint8_t loraFocus() { return s_loraFocus; }
+void setLoraFocus(uint8_t ix) { s_loraFocus = ix; s_prefs.putUChar("loraFocus", ix); }
+// Keys: 8, 9, 9 and 9 characters, inside NVS's limit of 15, and none of them is
+// a prefix of "loraChans" -- which matters, because that entry holds the whole
+// channel list and is the one thing in this namespace that must not be
+// shadowed by a near-miss key.
+bool loraLookups()       { return s_loraLookups; }
+void toggleLoraLookups() { s_loraLookups = !s_loraLookups; s_prefs.putBool("loraLkup", s_loraLookups); }
+bool loraLookupCall()       { return s_loraLkCall; }
+void toggleLoraLookupCall() { s_loraLkCall = !s_loraLkCall; s_prefs.putBool("loraLkCal", s_loraLkCall); }
+bool loraLookupOgn()       { return s_loraLkOgn; }
+void toggleLoraLookupOgn() { s_loraLkOgn = !s_loraLkOgn; s_prefs.putBool("loraLkOgn", s_loraLkOgn); }
+bool loraLookupFeed()       { return s_loraLkFeed; }
+void toggleLoraLookupFeed() { s_loraLkFeed = !s_loraLkFeed; s_prefs.putBool("loraLkMcF", s_loraLkFeed); }
+
+// The channel list. Bytes in, bytes out: the store does not know or care what
+// a MeshCore hashtag is, which is why this pair takes a blob and the record
+// format lives with the decoders that write it.
+size_t loraChannels(uint8_t* out, size_t cap) {
+    if (!out || !cap) return 0;
+    // getBytesLength on a missing key is 0, which is exactly the empty list --
+    // no separate "has this ever been written" flag needed.
+    size_t len = s_prefs.getBytesLength("loraChans");
+    if (!len) return 0;
+    if (len > cap) len = cap;
+    return s_prefs.getBytes("loraChans", out, len);
+}
+
+bool setLoraChannels(const uint8_t* rec, size_t n) {
+    // Preferences::putBytes returns early on a zero-length value without
+    // touching NVS, so writing an empty list would be a silent no-op and the
+    // old blob would survive to be restored at the next boot. That exact bug
+    // shipped in v1.5.6 through v1.5.19 in IgnoreList::save(); emptying the list has
+    // to remove the key instead.
+    if (!rec || !n) { s_prefs.remove("loraChans"); return true; }
+    return s_prefs.putBytes("loraChans", rec, n) == n;
+}
 
 // ---- easter-egg hunt progress ----------------------------------------
 // Packed into one NVS entry rather than one each: the store has a few
@@ -417,6 +468,14 @@ void load() {
     // The T-Watch's BUZZ (haptics on an alert) already owns "buzz", and with
     // the opposite default, so the CrowPanel's buzzer keeps its own key.
     s_buzzer       = s_prefs.getBool("buzzer", false);
+    s_loraMode     = s_prefs.getUChar("loraMode", 2);
+    if (s_loraMode > 2) s_loraMode = 2;
+    s_loraFocus    = s_prefs.getUChar("loraFocus", 0);
+    // False, every time, unless somebody has said otherwise on this board.
+    s_loraLookups  = s_prefs.getBool("loraLkup", false);
+    s_loraLkCall   = s_prefs.getBool("loraLkCal", false);
+    s_loraLkOgn    = s_prefs.getBool("loraLkOgn", false);
+    s_loraLkFeed   = s_prefs.getBool("loraLkMcF", false);
     s_lightOn      = s_prefs.getBool("ltOn", true);
     s_lightAlerts  = s_prefs.getBool("ltAlert", true);
     s_lightMsgs    = s_prefs.getBool("ltMsg", true);

@@ -17,6 +17,7 @@
 #include "ui_clear.h"    // PACE, the mascot step clock
 #include "draw_band.h"   // BAND, the 3.5in row gate
 #include "squachy.h"     // TEMPO, his durations
+#include "lora_sniffer.h" // LORA ..., the wireless slot (a no-op without one)
 
 // PRIM, on every build: main.cpp runs the primitive benchmark on its next pass.
 extern volatile bool g_benchPrimNow;
@@ -507,6 +508,7 @@ void pollSerial() {
             Serial.printf("[radio] duty -> %s\n", Settings::radioDutyName(Settings::radioDutyRaw()));
             continue;
         }
+        if (Lora::console(line)) continue;
 #if defined(ARDUINO_ARCH_ESP32)   // the radios themselves: nothing to ask in the emulator
         if (strcasecmp(line, "RADIO HEAL") == 0) { g_consoleHeal = true; continue; }
         if (strcasecmp(line, "RADIO FULLCAL") == 0) {

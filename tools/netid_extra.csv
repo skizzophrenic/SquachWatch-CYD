@@ -1,0 +1,26 @@
+# LoRaWAN NetIDs that tools/gen_netid.py's input page does not cover, merged
+# into include/lora_netid_table.h by that script. Format: netid,operator.
+#
+# PROVENANCE. Every row here was in the hand-written REGISTRY[] in
+# src/lora_lorawan.cpp that the generated table replaced. That table's source
+# line (src/lora_lorawan.cpp:2-4) cites the LoRa Alliance NetID allocation
+# R111 (2025-09), so that is where these came from; they were not reverified
+# against the PDF for this change, and R111 is the file to check if one of
+# them is ever doubted.
+#
+# WHY THE PAGE MISSES THEM. Checked 2026-09-26 against the page as downloaded:
+# 000006 is listed there as "unassigned" while R111 names an operator, and the
+# other nine are not on the page at all -- it enumerates all 64 type-0 NetIDs
+# but only a sample of types 3, 6 and 7, of which type 6 alone has 32,768
+# values. When the page catches up with one of these the generator stops and
+# says so, rather than emitting the row twice.
+000006,EchoStar Mobile
+00003A,Minol ZENNER
+00003B,Semtech
+00003C,Helium
+00003E,Unidata
+00003F,Birdz
+600030,EchoStar Mobile
+600032,Orange
+C00068,ELSYS
+C00074,Swisscom

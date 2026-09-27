@@ -107,6 +107,8 @@ goes to stderr, so it can never corrupt the frame stream):
 | `S [n]` | step `n` `loop()` iterations (default 1), then emit a frame |
 | `T <type> [rssi]` | inject a synthetic detection (`T 6` or `T AIRTAG`) |
 | `R` | report the current `AppState` on stderr |
+| `C` | `PUSHES <n>` on stdout: how many frames have been pushed so far -- the panel's push count on the board |
+| `L [view]` | open the LORA screen on `LoraView` N, as `enterLora()` would. The board's doors to it are CrowPanel-only and this binary is the CYD build |
 | `Q` | quit |
 
 Each frame is `FRM <w> <h> <bytes> <state>\n` followed by `<bytes>` of
@@ -147,17 +149,61 @@ start from `settings.cpp`'s own defaults.
 ```
 
 Screens: `clear log alert settings diary hunt rawscan watchalert
-colorcheck boot`
+colorcheck boot lora`
 
 | Option | Effect |
 | --- | --- |
 | `--portrait` | render 240x320 instead of 320x240 |
+| `--size WxH` | render at another panel size, e.g. `400x240` for the CrowPanel |
+| `--pitch N` | one pixel of glass in micrometres (2.8" 178, 2.4" 152, CrowPanel 381): the button bar is sized from it, as on the board (`SQW_PIXEL_PITCH_UM` in each `include/*_user_setup.h`). Defaults to the board with that `--size`; the 2.4" shares the 2.8"'s 240x320 and needs it said |
 | `--bg N` | background style 0..9 (see `Settings::Background`) |
 | `--theme N` | palette index |
 | `--frames N` | animation warm-up frames before capture (default 90) |
 | `--onboard` | let Squachy's first-boot walkthrough run |
 | `--sequence N` | capture N consecutive frames instead of one |
 | `--raw PATH` | write raw RGB888 frames instead of PNGs (what the GUI consumes) |
+| `--tap F:X:Y` | tap at x,y on warm-up frame F -- the background on most screens, the LORA screen itself on that one |
+| `--loraview N` | lora screen: open on `LoraView` N (0 LIST .. 9 PICK) |
+| `--rawwifi` | rawscan screen: the WiFi side, with an SSID fixture behind it |
+
+### The LORA screen, and the radio that is not there
+
+`lora` is the CrowPanel 7's sniffer: ten views behind a three-slot button
+bar, on a 400x240 canvas (`./squachsim lora out.png --size 400x240`).
+There is no SX1262 here, so `sim/lora_sim.cpp` stands one up -- a dozen
+fabricated frames through the firmware's own classifier, node table,
+message store and survey. It says SIM on everything it invents; read that
+file's header before treating anything it renders as a measurement.
+
+`--tap` on this screen is a press on the screen, delivered through
+`uiLoraTap` at the position the finger went down at, the way
+`src/main.cpp`'s `AppState::LORA` case delivers one. It prints the view
+the press left showing on stderr, which is what `test_lora_bar.sh`
+asserts on -- that script is the regression pin for a bar whose buttons
+had two millimetres of "opens a frame" above and below them.
+
+### The raw scanner, which had no results in it either
+
+`rawscan` answered "done, nothing found" on both halves, so the list has
+never been rendered off the board with a device in it -- and it is one of
+the two screens that prints a name at size 2 beside a right-aligned RSSI
+on the same line, which is where a long name goes under the number. The
+BLE side now gets five fabricated devices and `--rawwifi` renders the
+WiFi side against `sim/detection_sim.cpp`'s SSID fixture. Both sets are
+deliberately long and share a prefix, because that is the case a cut name
+loses, and every one of them says SIM.
+
+### The bottom button bar, through the real state machine
+
+`test_button_bar.sh` drives `squachsim-live` -- the target that compiles
+the firmware's own `main.cpp` -- and asserts on the `AppState` in each
+frame header rather than on a hit test called in isolation. It holds two
+things: that the bar owns every row from its top edge to the bottom of
+the glass (the five rows under the drawn buttons used to belong to
+nobody, and on the main screen to the background-cycling edge zone), and
+that `[ CLR ]` asks before it erases the log. It primes the NVS once,
+answers the first-boot colour check, and gives every case its own copy of
+the store, because the firmware persists what a case did.
 
 `make shots` renders one PNG per screen into `out/`.
 

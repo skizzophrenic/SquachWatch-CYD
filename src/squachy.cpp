@@ -1863,6 +1863,11 @@ static const int BUBBLE_RISE = 16;   // exactly the row tick() reserves
 static const int CORNER_W    = 30;   // icon box plus a pixel of air
 static const int CORNER_H    = 20;   // ICON_BOX_H over in theme.cpp
 
+// Anything ELSE the caller has put in that band, measured from x = 0. Set from
+// tick()'s topBandLeft on every call; 0 on every screen that has nothing there,
+// which is every screen but the CrowPanel's CLEAR and its LORA pill.
+static int s_topBandLeft = 0;
+
 static int risenBubbleTop(int topY, int bx, int bw, int screenW) {
     // Clamped to row 1, not rejected below it. Every screen hands Squachy
     // topY = 16 and BUBBLE_RISE is 16, so ry is exactly 0 everywhere -- a
@@ -1874,7 +1879,13 @@ static int risenBubbleTop(int topY, int bx, int bw, int screenW) {
     if (ry < 1)          ry = 1;        // always a pixel of air at the top
     if (ry >= topY)      return topY;   // no room to rise; never sink
     if (ry >= CORNER_H)  return ry;     // starts below the buttons anyway
-    if (bx < CORNER_W || bx + bw > screenW - CORNER_W) return topY;
+    // The same geometric test, over everything that is actually up there: the
+    // corner icons, and whatever the caller has told us about. A bubble too wide
+    // to clear it stays at topY -- the top of his own band, where every wrapped
+    // bubble sits -- rather than rising into something and being painted over by
+    // it a moment later.
+    const int keepL = s_topBandLeft > CORNER_W ? s_topBandLeft : CORNER_W;
+    if (bx < keepL || bx + bw > screenW - CORNER_W) return topY;
     return ry;
 }
 // Hang a pointer off the bottom of a bubble, aimed at whoever said it.
@@ -6064,8 +6075,13 @@ static void drawPartyFx(TFT_eSPI& t, uint32_t now, int topY, int availHeight, bo
 
 void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
           bool advance, float minScale, bool scanningFx, int wanderRangePx,
-          uint8_t sizePct) {
+          uint8_t sizePct, int topBandLeft) {
     s_topLimit = topY;
+    // Assigned on EVERY call, band calls included, and never left over from a
+    // previous one: a screen that puts nothing in that band passes 0 and gets
+    // the rise it always had, and two band passes of one frame cannot disagree
+    // about whether the bubble rose. See risenBubbleTop().
+    s_topBandLeft = topBandLeft;
     // A property of the caller's screen, not of his mood -- see the arm
     // chain in drawBody(). Assigned on every call, band calls included,
     // so a banded board cannot paint one band holding binoculars and

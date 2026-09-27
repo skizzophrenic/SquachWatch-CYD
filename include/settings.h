@@ -6,6 +6,7 @@
 // stay in main.cpp, which reads these getters after a change.
 #pragma once
 #include <stdint.h>
+#include <stddef.h>
 #include "signatures.h"   // Confidence
 
 namespace Settings {
@@ -251,6 +252,57 @@ namespace Settings {
     // of them so a saved preference travels, the way the light's knobs do.
     bool        buzzerOn();
     void        toggleBuzzer();
+
+    // ---- LORA ------------------------------------------------------------
+    // The wireless slot: OFF, FOCUS on one profile, or SURVEY over the band
+    // (Lora::Mode's values), and which profile FOCUS parks on (an index into
+    // lora_profiles.cpp's table). Only the CrowPanel 7 shows the rows; the
+    // values are kept everywhere, like the buzzer's.
+    uint8_t     loraMode();
+    void        cycleLoraMode();
+    uint8_t     loraFocus();
+    void        setLoraFocus(uint8_t ix);
+
+    // ONLINE LOOKUPS: whether this board may ask a public service about a node
+    // it heard. Four switches, not one, because a master alone cannot say
+    // "aircraft yes, callsigns no" -- which is the setting a careful operator
+    // actually wants. All four default OFF, and that is the one place this
+    // differs in shape from updateCheck() below: that switch talks to
+    // first-party infrastructure about THIS board and defaults ON, these talk
+    // to third parties about OTHER PEOPLE. What each one sends, and the
+    // measured harm behind the default, is in include/lora_enrich.h.
+    //
+    // The fourth is a different KIND of request and still defaults off. The
+    // MeshCore adverts feed sends a row count and nothing else -- no key, no
+    // prefix, no name, nothing about what this board heard (include/lora_feed.h)
+    // -- so it is the one source here that cannot betray anything even in
+    // principle. It is off by default anyway: this board does not join a
+    // network unasked, whatever the request would have said.
+    bool        loraLookups();           // the master
+    void        toggleLoraLookups();
+    bool        loraLookupCall();        // hamrig.com, for APRS and MeshCom callsigns
+    void        toggleLoraLookupCall();
+    bool        loraLookupOgn();         // the OGN device database, for FANET
+    void        toggleLoraLookupOgn();
+    bool        loraLookupFeed();        // meshcore.df0x.de recent adverts, to name MeshCore rows
+    void        toggleLoraLookupFeed();
+
+    // The channel keys the two mesh decoders hold, as one opaque blob. The
+    // record format is Lora::Chan's business (include/lora_channels.h); this
+    // is only the NVS entry, so that the store stays the one place that talks
+    // to Preferences.
+    //
+    // ONE entry for the whole list, for the reason the egg-hunt progress is
+    // packed into one: thirty channels would be thirty entries in a store
+    // with a few hundred free, and a channel list is not what that budget is
+    // for. Key "loraChans" -- 9 characters, inside NVS's limit of 15, and no
+    // other key in settings.cpp begins with those letters.
+    size_t      loraChannels(uint8_t* out, size_t cap);        // bytes read; 0 = nothing stored
+    // n == 0 removes the entry. False when the store would not take it -- a
+    // full NVS partition, say. That has to be reported rather than swallowed:
+    // a write that silently fails is a board that silently forgets its keys
+    // again, which is the whole bug this entry exists to fix.
+    bool        setLoraChannels(const uint8_t* rec, size_t n);
 
     // ---- STATUS LIGHT ----------------------------------------------------
     // The RGB LED on the back of the 2.8" CYD. See status_light.h for the

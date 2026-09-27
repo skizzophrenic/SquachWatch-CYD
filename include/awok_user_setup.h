@@ -18,6 +18,11 @@
 // runtime via setRotation(1), same as the sister boards.
 #define TFT_WIDTH   240
 #define TFT_HEIGHT  320
+// One pixel on this glass, in micrometres: a 2.4" 240x320 ILI9341, active
+// area 36.72 x 48.96 mm, 0.152 mm a pixel -- the same module size as the RL
+// Phantom (rlphantom_user_setup.h). Theme::computeButtonBar sizes the bar
+// from this, not from the resolution the 2.8" shares.
+#define SQW_PIXEL_PITCH_UM 152
 
 // SPI pins — VSPI (18/23/19). Same physical bus is shared with the SD
 // card (CS=14) and the XPT2046 touch controller (CS=21); anything that
