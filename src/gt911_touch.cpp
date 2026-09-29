@@ -1,4 +1,4 @@
-#if defined(CROWPANEL7) || defined(CYD32C)
+#if defined(CROWPANEL7) || defined(CYD32C) || defined(CYD35C)
 #include "gt911_touch.h"
 #include <Arduino.h>
 #include <Wire.h>
@@ -6,7 +6,7 @@
 #include "crowpanel7_board.h"
 #include "crowpanel7_backlight.h"
 #else
-// The Sunton ESP32-2432S032C: the GT911 on the I2C pins the capacitive 2.8"
+// The Sunton ESP32-2432S032C and ESP32-3248S035C: the GT911 on the I2C pins the capacitive 2.8"
 // CYDs use for their CST816 (SDA 33, SCL 32, reset 25), and its INT on 21 --
 // the pin the other CYDs light their backlight with.
 #define PIN_I2C_SDA    33
@@ -69,7 +69,7 @@ static bool i2cPresent(uint8_t addr) {
 // of reset is also what latches its address to 0x5D rather than 0x14, which
 // is why this runs before the identify rather than after a failed one.
 static void wake() {
-#if defined(CYD32C)
+#if defined(CYD32C) || defined(CYD35C)
     // Goodix's own power-on sequence: INT low across the release of reset
     // latches 0x5D, then INT goes back to being the chip's output.
     pinMode(PIN_TOUCH_RST, OUTPUT);

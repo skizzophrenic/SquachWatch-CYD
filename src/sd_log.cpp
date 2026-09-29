@@ -11,6 +11,9 @@
 #define CARD SD
 #endif
 #include <stdio.h>
+#include <time.h>
+#include <ctype.h>
+#include "clock.h"
 // The Phantoms define CYD (they ARE a CYD) but still need this reference,
 // because their touch shares the display's bus and SdLog::begin() has to hand
 // SD the display's own SPI instance -- see the comment on that branch below.
@@ -67,55 +70,11 @@ bool SdLog::begin() {
         mounted = SD_MMC.begin("/sd", true, false, SDMMC_FREQ_DEFAULT, SD_MAX_FILES);
         if (mounted) Serial.println("[sd] 4-bit did not start; mounted 1-bit");
     }
-    if (!mounted) {
-#elif defined(CYD35)
-    // (The RL Phantom used to land here too, and its SD card never worked as
-    // a result: the card is on 18/19/23, and the display's SPI engine never
-    // clocked those pins. Its display now runs on HSPI -- see its user setup
-    // -- so it takes the original board's branch below with a bus of its own.)
-    // The RL Phantom landed here for the same reason cyd35 does, and it cost a
-    // tester an evening: its resistive touch chip sits on the DISPLAY's bus, so
-    // the extra pins this attaches corrupt MISO for every touch read afterwards.
-    // The symptom is precise and was reported exactly as described below --
-    // the 4-corner calibration works (it runs BEFORE engine.init() brings SD up)
-    // and touch is dead on the very next screen. Not a bad calibration blob: a
-    // corrupted bus underneath a perfectly good one.
-    //
-    // SD.begin(csPin) defaults its SPIClass& parameter to the Arduino
-    // *global* `SPI` object -- a separate, never-begun C++ instance
-    // from TFT_eSPI's own internal one, even though both ultimately
-    // target the same VSPI hardware. SDFS::begin() (ESP32 core's
-    // SD.cpp) unconditionally calls that object's own spi.begin() with
-    // NO arguments; for a never-begun SPIClass, SPIClass::begin() falls
-    // back to the compiled-in esp32dev board defaults -- SCK=18,
-    // MISO=19, MOSI=23 -- regardless of this board's real shared-bus
-    // pins (14/13/12 here). Root-caused on real cyd35 hardware: those
-    // extra pins get ADDITIONALLY attached to VSPI's signals via the
-    // GPIO matrix (spiAttachSCK() etc. are additive, not exclusive),
-    // corrupting MISO for every touch read afterward even though the
-    // display's write-only path looked completely fine.
-    //
-    // Passing TFT_eSPI's own already-init()'d SPI instance instead
-    // makes SDFS::begin()'s internal spi.begin() call a genuine no-op
-    // (SPIClass::begin() returns immediately if already begun -- see
-    // its own guard), so nothing extra ever gets attached to the bus.
-    //
-    // AWOK deliberately does NOT get this treatment despite sharing
-    // the same VSPI-bus shape: real hardware regression testing showed
-    // its touch stops responding once SD.begin() runs with the shared
-    // instance passed in (SD.begin() still attempts real transactions
-    // over that peripheral even though `begin()` itself becomes a
-    // no-op, and AWOK's touch chip is apparently more sensitive to
-    // that than cyd35's) -- so it keeps the plain no-args SD.begin()
-    // below, same as before this fix existed.
-    if (!SD.begin(SD_CS_PIN, tft.getSPIinstance(), 4000000, "/sd", SD_MAX_FILES)) {
 #elif defined(AWOK)
     if (!SD.begin(SD_CS_PIN, SPI, 4000000, "/sd", SD_MAX_FILES)) {
 #else
-    // Original board only: a genuinely separate, dedicated SD bus (not
-    // shared with the display), so it does need its own explicit begin()
-    // -- SD.begin()'s internal default-pin fallback happens to match
-    // this board's real wiring too, but stay explicit for clarity.
+    // Original CYD and 3.5" boards (CYD35 / CYD35C): dedicated SD bus on
+    // GPIO 18 (SCK), 19 (MISO), 23 (MOSI) with CS=5.
     SPI.begin(18, 19, 23, SD_CS_PIN);  // SCK, MISO, MOSI, CS
     if (!SD.begin(SD_CS_PIN, SPI, 4000000, "/sd", SD_MAX_FILES)) {
 #endif
@@ -132,65 +91,192 @@ bool SdLog::begin() {
     return true;
 }
 
+void SdLog::sanitizeFilename(const char* in, char* out, size_t maxLen) {
+    if (!in || !in[0]) {
+        strncpy(out, "unknown", maxLen - 1);
+        out[maxLen - 1] = '\0';
+        return;
+    }
+    size_t j = 0;
+    for (size_t i = 0; in[i] != '\0' && j < maxLen - 1; i++) {
+        char c = in[i];
+        if (isalnum((unsigned char)c) || c == '-' || c == '_') {
+            out[j++] = c;
+        } else if (c == ' ' || c == '.' || c == '@' || c == '#' || c == '+' || c == '~') {
+            out[j++] = '_';
+        }
+    }
+    if (j == 0) {
+        strncpy(out, "unknown", maxLen - 1);
+        out[maxLen - 1] = '\0';
+    } else {
+        out[j] = '\0';
+    }
+}
+
+void SdLog::formatTimestamp(char* out, size_t maxLen) {
+    if (Clock::isSet()) {
+        struct tm tmv;
+        time_t sec = (time_t)Clock::nowEpoch();
+        localtime_r(&sec, &tmv);
+        snprintf(out, maxLen, "%04d-%02d-%02d %02d:%02d:%02d",
+                 tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
+                 tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+    } else {
+        uint32_t ms = millis();
+        uint32_t sec = ms / 1000u;
+        uint32_t d = sec / 86400u;
+        uint32_t h = (sec % 86400u) / 3600u;
+        uint32_t m = (sec % 3600u) / 60u;
+        uint32_t s = sec % 60u;
+        if (d > 0) {
+            snprintf(out, maxLen, "%lud %02lu:%02lu:%02lu", (unsigned long)d, (unsigned long)h, (unsigned long)m, (unsigned long)s);
+        } else {
+            snprintf(out, maxLen, "%02lu:%02lu:%02lu", (unsigned long)h, (unsigned long)m, (unsigned long)s);
+        }
+    }
+}
+
 void SdLog::openDaily() {
     if (!_ready) return;
-    uint32_t t = millis();
-    uint32_t day = t / (24UL * 60UL * 60UL * 1000UL);
-    snprintf(_filename, sizeof(_filename), "/squachwatch-%lu.log", (unsigned long)day);
+    if (Clock::isSet()) {
+        struct tm tmv;
+        time_t sec = (time_t)Clock::nowEpoch();
+        localtime_r(&sec, &tmv);
+        snprintf(_filename, sizeof(_filename), "/squachwatch-%04d%02d%02d.log",
+                 tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday);
+    } else {
+        uint32_t t = millis();
+        uint32_t day = t / (24UL * 60UL * 60UL * 1000UL);
+        snprintf(_filename, sizeof(_filename), "/squachwatch-day%lu.log", (unsigned long)day);
+    }
 }
 
 void SdLog::logEvent(const Detection& d) {
     if (!_ready) return;
+    openDaily();
     File f = CARD.open(_filename, FILE_APPEND);
-    if (!f) return;
-    char line[96];
     char mac[18];
     snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
              d.mac[0], d.mac[1], d.mac[2], d.mac[3], d.mac[4], d.mac[5]);
+
     // Sanitize any commas in vendor / name
-    char vendorSafe[12], nameSafe[20];
+    char vendorSafe[24], nameSafe[36];
     strncpy(vendorSafe, vendorText(d), sizeof(vendorSafe) - 1); vendorSafe[sizeof(vendorSafe)-1] = 0;
     strncpy(nameSafe,   d.name,   sizeof(nameSafe)   - 1); nameSafe[sizeof(nameSafe)-1]   = 0;
     for (char* p = vendorSafe; *p; p++) if (*p == ',') *p = '.';
     for (char* p = nameSafe;   *p; p++) if (*p == ',') *p = '.';
-    snprintf(line, sizeof(line),
-             "%lu,%s,%d,%s,%u,%s,%s\n",
-             (unsigned long)millis(),
-             detectionTypeName(d.type),
-             d.rssi,
-             mac,
-             d.channel,
-             vendorSafe,
-             nameSafe);
-    f.print(line);
+
+    char timeBuf[32];
+    formatTimestamp(timeBuf, sizeof(timeBuf));
+
+    if (f) {
+        if (f.size() == 0) {
+            f.println("# SQUACHWATCH - WIRELESS THREAT & DETECTION LOG");
+            f.println("timestamp,type,rssi,mac,channel,vendor,name");
+        }
+        char line[128];
+        snprintf(line, sizeof(line),
+                 "%s,%s,%d,%s,%u,%s,%s\n",
+                 timeBuf,
+                 detectionTypeName(d.type),
+                 d.rssi,
+                 mac,
+                 d.channel,
+                 vendorSafe,
+                 nameSafe);
+        f.print(line);
+        f.close();
+    }
+
+    // Human-readable evil portal detection capture with SSID in filename
+    if (d.type == DetectionType::EVILTWIN) {
+        char safeSsid[32];
+        sanitizeFilename(d.name, safeSsid, sizeof(safeSsid));
+        char evilFile[64];
+        snprintf(evilFile, sizeof(evilFile), "/evilportal_%s.log", safeSsid);
+        File ef = CARD.open(evilFile, FILE_APPEND);
+        if (ef) {
+            if (ef.size() == 0) {
+                ef.println("==========================================================");
+                ef.println("  SQUACHWATCH - ROGUE AP / EVIL PORTAL DETECTION CAPTURE  ");
+                ef.println("==========================================================");
+                ef.printf("# Impersonated SSID: %s\n", d.name[0] ? d.name : "(hidden)");
+                ef.println("# An evil portal / rogue AP was detected cloning this SSID");
+                ef.println("# with conflicting encryption or vendor parameters.");
+                ef.println("# Format: Timestamp,Type,RSSI,Rogue_BSSID,Channel,Vendor,SSID,Alert");
+            }
+            ef.printf("%s,EVILTWIN,%d,%s,%u,EvilTwin,%s,EVIL_PORTAL_ALERT\n",
+                      timeBuf, d.rssi, mac, d.channel, nameSafe);
+            ef.close();
+            Serial.printf("[sd] logged evil portal capture to %s\n", evilFile);
+        }
+    }
+}
+
+void SdLog::logTargetScan(const char* ssid, const uint8_t* bssid, int8_t rssi, uint8_t channel, const char* mode) {
+    if (!_ready || !ssid || !ssid[0]) return;
+
+    char safeSsid[32];
+    sanitizeFilename(ssid, safeSsid, sizeof(safeSsid));
+    char filename[64];
+    snprintf(filename, sizeof(filename), "/scan_%s.log", safeSsid);
+    File f = CARD.open(filename, FILE_APPEND);
+    if (!f) return;
+    if (f.size() == 0) {
+        f.println("# SQUACHWATCH - TARGETED WIRELESS DEFENSE SCAN LOG");
+        f.printf("# Target SSID: %s\n", ssid);
+        f.println("# Format: Timestamp,Mode,RSSI,BSSID,Channel,SSID");
+    }
+    char mac[18] = {0};
+    if (bssid) {
+        snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
+    } else {
+        strncpy(mac, "00:00:00:00:00:00", sizeof(mac));
+    }
+    char ssidSafe[36];
+    strncpy(ssidSafe, ssid, sizeof(ssidSafe) - 1);
+    ssidSafe[sizeof(ssidSafe) - 1] = 0;
+    for (char* p = ssidSafe; *p; p++) if (*p == ',') *p = '.';
+
+    char timeBuf[32];
+    formatTimestamp(timeBuf, sizeof(timeBuf));
+    f.printf("%s,%s,%d,%s,%u,%s\n",
+             timeBuf, mode ? mode : "WATCH", rssi, mac, channel, ssidSafe);
     f.close();
+    Serial.printf("[sd] logged targeted scan sighting to %s\n", filename);
 }
 
 void SdLog::wipe() {
     if (!_ready) return;
-    // Walk the root and remove every file this firmware writes. Names are
-    // /squachwatch-YYYYMMDD.log; matching on the prefix takes them all rather
-    // than only today's, which is the whole point of a wipe.
-    File dir = CARD.open("/");
-    if (!dir) return;
-    // Collect first, then remove: deleting while iterating openNextFile() is
-    // not something the FAT driver promises to survive.
-    char victims[16][32];
-    int  n = 0;
-    for (File f = dir.openNextFile(); f && n < 16; f = dir.openNextFile()) {
-        const char* nm = f.name();
-        // name() is with or without a leading slash depending on core version;
-        // match the basename either way.
-        const char* base = nm;
-        for (const char* p = nm; *p; p++) if (*p == '/') base = p + 1;
-        if (strncmp(base, "squachwatch-", 12) == 0) {
-            snprintf(victims[n], sizeof victims[n], "/%s", base);
-            n++;
+    // Walk the root and remove every file this firmware writes:
+    // /squachwatch-*, /evilportal_*, /scan_*
+    bool more = true;
+    while (more) {
+        File dir = CARD.open("/");
+        if (!dir) break;
+        char victims[32][64];
+        int n = 0;
+        for (File f = dir.openNextFile(); f && n < 32; f = dir.openNextFile()) {
+            const char* nm = f.name();
+            const char* base = nm;
+            for (const char* p = nm; *p; p++) if (*p == '/') base = p + 1;
+            if (strncmp(base, "squachwatch-", 12) == 0 ||
+                strncmp(base, "evilportal_", 11) == 0 ||
+                strncmp(base, "scan_", 5) == 0) {
+                snprintf(victims[n], sizeof(victims[n]), "/%s", base);
+                n++;
+            }
+            f.close();
         }
-        f.close();
+        dir.close();
+        int removed = 0;
+        for (int i = 0; i < n; i++) {
+            if (CARD.remove(victims[i])) removed++;
+        }
+        if (n < 32 || removed == 0) more = false;
     }
-    dir.close();
-    for (int i = 0; i < n; i++) CARD.remove(victims[i]);
     _filename[0] = '\0';       // force a fresh openDaily() on the next event
 }
 
@@ -199,9 +285,9 @@ void SdLog::tick() {
     uint32_t now = millis();
     if (now - _lastFlush > 5000) {
         _lastFlush = now;
-        // Reopen daily file once an hour (or on day change)
+        // Reopen daily file once every 60s or on day change / clock set
         static uint32_t lastDayCheck = 0;
-        if (now - lastDayCheck > 3600000) {
+        if (now - lastDayCheck > 60000) {
             lastDayCheck = now;
             openDaily();
         }

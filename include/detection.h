@@ -559,7 +559,7 @@ private:
     char      _watchLabel[24] = "";
     uint32_t  _watchLastHitMs = 0;
     bool      _watchHitFlag   = false;
-    void checkWatchWifi(const uint8_t* mac, int8_t rssi);   // called from processWiFiQ()
+    void checkWatchWifi(const uint8_t* mac, int8_t rssi, uint8_t channel = 0);   // called from processWiFiQ()
 
     // Watch RSSI history ring buffer -- see watchRssiCount()/watchRssiAt()
     // above. 40 samples at the ~2s sample throttle is a bit over a
@@ -571,7 +571,7 @@ private:
     uint8_t  _watchRssiHead  = 0;
     uint8_t  _watchRssiCount = 0;
     uint32_t _watchRssiLastMs = 0;
-    void recordWatchRssi(int8_t rssi);
+    void recordWatchRssi(int8_t rssi, uint8_t channel = 0);
 
     // Hunt target -- see the public huntBle()/huntWifi() section above.
     // Deliberately a whole separate mac/label/history from the watch
@@ -585,8 +585,8 @@ private:
     uint8_t   _huntRssiHead  = 0;
     uint8_t   _huntRssiCount = 0;
     uint32_t  _huntRssiLastMs = 0;
-    void checkHuntWifi(const uint8_t* mac, int8_t rssi);
-    void recordHuntRssi(int8_t rssi);
+    void checkHuntWifi(const uint8_t* mac, int8_t rssi, uint8_t channel = 0);
+    void recordHuntRssi(int8_t rssi, uint8_t channel = 0);
 
     // The most recently decoded Remote ID broadcast, and whose it is.
     RemoteId::Info _rid;

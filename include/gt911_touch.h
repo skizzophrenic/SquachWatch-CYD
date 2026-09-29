@@ -1,4 +1,4 @@
-// SquachWatch-CYD — GT911 capacitive touch on the CrowPanel 7.
+// SquachWatch-CYD — GT911 capacitive touch on the CrowPanel 7 and Sunton capacitive boards.
 //
 // Same shape as src/cap_touch.cpp's CST820 driver (which is left byte-
 // identical): a probe at boot, then a raw read that the caller feeds into
