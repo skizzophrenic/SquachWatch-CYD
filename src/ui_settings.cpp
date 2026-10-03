@@ -75,6 +75,11 @@ static const SettingsRow ALL_ROWS[] = {
     // board with a buzzer, so the emulator (no board macro) never lists it.
     SettingsRow::BUZZER,
 #endif
+#if SQW_WIFI_5G
+    // What the sniffer listens to, beside what it does with what it hears.
+    // Only on a chip that has 5 GHz, so every other board's list is as it was.
+    SettingsRow::WIFI_BANDS,
+#endif
     SettingsRow::DETECTION_FILTER,
     SettingsRow::IGNORED_DEVICES,
     // APPEARANCE opens the display page -- see APPEARANCE_ROWS. It sat at the
@@ -259,6 +264,9 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::AUTO_QUIET:
 #if defined(CROWPANEL7)
         case SettingsRow::BUZZER:
+#endif
+#if SQW_WIFI_5G
+        case SettingsRow::WIFI_BANDS:
 #endif
         case SettingsRow::DETECTION_FILTER:
         case SettingsRow::IGNORED_DEVICES:
@@ -852,6 +860,13 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             // the way AT BOOT and AFTER 5 do, so nobody expects a beep per
             // alert. The rules are in crowpanel7_buzzer.h.
             label = "BUZZER"; value = Settings::buzzerOn() ? "NEW ONLY" : "OFF";
+            break;
+#endif
+#if SQW_WIFI_5G
+        case SettingsRow::WIFI_BANDS:
+            // Short values: the label and its value share 240px in portrait
+            // at size 2, the squeeze TYPE FILTER below is named for.
+            label = "WIFI BANDS"; value = Settings::wifi5() ? "2.4+5" : "2.4";
             break;
 #endif
         case SettingsRow::DETECTION_FILTER:

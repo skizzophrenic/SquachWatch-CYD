@@ -44,6 +44,9 @@ size_t field(const char* s, uint8_t len, char* out, size_t n) {
 uint16_t channelMhz(uint8_t ch) {
     if (ch >= 1 && ch <= 13) return (uint16_t)(2407 + 5 * ch);
     if (ch == 14) return 2484;
+#if SQW_WIFI_5G
+    if (ch >= 32 && ch <= 177) return (uint16_t)(5000 + 5 * ch);   // 5 GHz, for WiGLE's frequency column
+#endif
     return 0;
 }
 

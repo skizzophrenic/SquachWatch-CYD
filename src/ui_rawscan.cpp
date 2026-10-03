@@ -362,6 +362,12 @@ switch (Settings::background()) {
             t.setTextSize(1);
             t.setTextColor(Theme::WHITE, Theme::BG);
             char line[24];
+#if SQW_WIFI_5G
+            if (eng.rawWifiChannel(idx) > 14)
+                snprintf(line, sizeof(line), "5G CH%u  %s", (unsigned)eng.rawWifiChannel(idx),
+                         eng.rawWifiOpen(idx) ? "OPEN" : "LOCKED");
+            else
+#endif
             snprintf(line, sizeof(line), "CH%u  %s", (unsigned)eng.rawWifiChannel(idx),
                      eng.rawWifiOpen(idx) ? "OPEN" : "LOCKED");
             t.setCursor(4, y + detailY);

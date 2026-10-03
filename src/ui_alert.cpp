@@ -510,6 +510,14 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
     // The numbers, without the grade -- that moved up to the SIGNAL row so
     // this line fits the narrower plate.
     char info[40];
+#if SQW_WIFI_5G
+    // A 5 GHz catch says so, in the same width: two spaces where there
+    // were three, so "-72 dBm  5G CH 149  x12" is no longer than before.
+    if (s_last.channel > 14)
+        snprintf(info, sizeof(info), "%d dBm  5G CH %u  x%u",
+                 s_last.rssi, s_last.channel, (unsigned)s_last.hits);
+    else
+#endif
     snprintf(info, sizeof(info), "%d dBm   CH %u   x%u",
              s_last.rssi, s_last.channel, (unsigned)s_last.hits);
     t.setTextColor(confColor, Theme::BG);

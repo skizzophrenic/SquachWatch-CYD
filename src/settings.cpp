@@ -118,6 +118,9 @@ static const bool DEFAULT_POWER_SAVER = true;
 static const bool DEFAULT_POWER_SAVER = false;
 #endif
 static bool     s_powerSaver   = DEFAULT_POWER_SAVER;
+#if SQW_WIFI_5G
+static bool     s_wifi5        = true;
+#endif
 static uint8_t  s_scrTimeoutIx = 2;    // 30 s
 static uint8_t  s_dimLevel     = 16;   // ~6%, dim but not off
 static uint8_t  s_idleFpsIx    = 2;    // 12 fps
@@ -265,6 +268,10 @@ void cycleIdleCpu() {
     s_prefs.putUChar("idleCpu", s_idleCpuIx);
 }
 
+#if SQW_WIFI_5G
+bool wifi5()           { return s_wifi5; }
+void setWifi5(bool on) { s_wifi5 = on; s_prefs.putBool("wifi5", on); }
+#endif
 void togglePowerSaver() {
     s_powerSaver = !s_powerSaver;
     s_prefs.putBool("pwrOn", s_powerSaver);
@@ -490,6 +497,9 @@ void load() {
     // fresh device shows, and the two look nothing alike.
     if (s_background == Background::TUNNEL) s_background = Background::SYNTHWAVE;
     s_powerSaver   = s_prefs.getBool("pwrOn", DEFAULT_POWER_SAVER);
+#if SQW_WIFI_5G
+    s_wifi5        = s_prefs.getBool("wifi5", true);
+#endif
 #if defined(TWATCH_S3)
     // Once per watch: POWER SAVER on. The default only reaches a watch that
     // never saved the switch, and every watch that went through the bench

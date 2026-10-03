@@ -603,6 +603,19 @@ void pollSerial() {
             ESP.restart();
         }
         if (strncasecmp(line, "RADIO", 5) == 0) { radioReport(strcasestr(line, "SCAN") != nullptr); continue; }
+#if SQW_WIFI_5G
+        // BAND: which WiFi bands the sniffer sweeps. BAND 2 is 2.4 GHz only,
+        // as on every other board; BAND BOTH adds the 5 GHz slice. Saved.
+        if (strncasecmp(line, "BAND", 4) == 0) {
+            const char* arg = line + 4;
+            while (*arg == ' ') arg++;
+            if (strcasecmp(arg, "2") == 0 || strcasecmp(arg, "2.4") == 0) { Settings::setWifi5(false); setWifi5Enabled(false); }
+            else if (strcasecmp(arg, "BOTH") == 0 || strcasecmp(arg, "5") == 0) { Settings::setWifi5(true); setWifi5Enabled(true); }
+            else if (*arg) { Serial.println("[radio] BAND 2 (2.4 GHz only) or BAND BOTH"); continue; }
+            Serial.printf("[radio] band: %s\n", Settings::wifi5() ? "2.4 + 5 GHz" : "2.4 GHz only");
+            continue;
+        }
+#endif
 #endif
         if (strncasecmp(line, "ZONE ", 5) == 0) {
             // ZONE US EASTERN, or ZONE 4: the flasher sends the name it

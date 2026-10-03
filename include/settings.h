@@ -167,6 +167,12 @@ namespace Settings {
     // real are the backlight, the idle frame rate, and the core clock.
     bool       powerSaver();
     void       togglePowerSaver();
+#if SQW_WIFI_5G
+    // 5 GHz scanning, on a board whose chip has it: BAND BOTH (on, the
+    // default) or BAND 2 on the console. See hop5() in detection.cpp.
+    bool       wifi5();
+    void       setWifi5(bool on);
+#endif
 
     // Seconds of no touch before the backlight drops to dimLevel(). 0 = never.
     uint16_t   screenTimeoutSec();

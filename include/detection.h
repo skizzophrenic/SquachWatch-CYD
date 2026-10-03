@@ -132,6 +132,10 @@ uint32_t bleArrivals();
 void     bleArrivalsRoll(uint32_t now);
 #endif
 void     radioReport(bool withScan);   // the RADIO console command
+#if SQW_WIFI_5G
+bool     wifi5Enabled();                // 5 GHz on, and the radio accepted some channels
+void     setWifi5Enabled(bool on);      // takes effect at the next sweep
+#endif
 extern char g_bootRadioLine[192];     // how the radios started this boot
 uint32_t advertsSeen();      // adverts the radio has handed over since boot, seatbelt or not
 const volatile uint32_t* advertKinds();   // [ind, direct, scan, nonconn, other] since boot
@@ -657,5 +661,9 @@ private:
     void processDeauthQ();
     void expireStale();
     void hopChannel();
+#if SQW_WIFI_5G
+    bool start5(uint32_t now);
+    bool hop5(uint32_t now);
+#endif
     void decayChannelActivity();
 };
