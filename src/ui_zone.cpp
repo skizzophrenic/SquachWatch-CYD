@@ -1,6 +1,7 @@
 // SquachWatch-CYD — the time zone card. See ui_zone.h.
 #include "ui_zone.h"
 #include "clock.h"
+#include "draw_band.h"
 #include "settings.h"
 #include "theme.h"
 #include <Arduino.h>

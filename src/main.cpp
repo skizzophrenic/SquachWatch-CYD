@@ -1342,6 +1342,14 @@ static TouchPoint pollTouch() {
         if (tp.y < 0) tp.y = 0; else if (tp.y >= h) tp.y = h - 1;
     }
     tp.valid = sane;
+#if defined(CYD35C)
+    static uint32_t s_lastTLog = 0;
+    if (tp.valid && (millis() - s_lastTLog > 150)) {
+        s_lastTLog = millis();
+        Serial.printf("[touch] raw=(%d, %d) -> screen=(%d, %d) [rot: %u, %dx%d]\n",
+                      a, b, tp.x, tp.y, screenRotation, w, h);
+    }
+#endif
     return tp;
 }
 
@@ -1547,6 +1555,14 @@ static void initTouchFit() {
     const bool portrait = (screenRotation & 1) == 0;
     const int w0 = portrait ? tft.width() : tft.height();
     const int h0 = portrait ? tft.height() : tft.width();
+
+#if defined(CYD35C)
+    s_calSource = CalSource::BUILT_IN;
+    // GT911 reports panel pixels directly in native frame (320x480 portrait).
+    s_touchFit = { 1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, (int16_t)w0, (int16_t)h0 };
+    TouchCal::reset();
+    return;
+#endif
 
     TouchFit::Fit saved;
     if (TouchCal::loadFit(saved) && saved.w0 == w0 && saved.h0 == h0) {
@@ -3970,13 +3986,13 @@ void setup() {
     // injected against the compiled-in ranges -- a calibration screen would
     // just sit there waiting for a finger.
     initTouchFit();
-#if defined(ESP32) && !defined(CROWPANEL7) && !defined(SQW_SMALL)   // nothing to calibrate on a stick with no touch
+#if defined(ESP32) && !defined(CROWPANEL7) && !defined(CYD35C) && !defined(SQW_SMALL)   // nothing to calibrate on a stick with no touch
     if (s_calSource != CalSource::SAVED) {
         Serial.println("Touch: no five-target calibration yet -- running it now.");
         runTouchCalibration();
     }
 #endif
-#if defined(CROWPANEL7)
+#if defined(CROWPANEL7) || defined(CYD35C)
     // Never on first boot here. The GT911 reports panel pixels, so the
     // compiled-in fit is already the identity and there is nothing to
     // calibrate -- making someone tap five targets would only replace an
@@ -4309,11 +4325,13 @@ static inline void drawTwoBand(F&& draw) {
         frame.setViewport(0, 0, tft.width(), tft.height(), true);
         frame.fillRect(0, 0, tft.width(), tft.height(), Theme::BG);
         draw((TFT_eSPI&)frame, true);
+        Theme::drawToast((TFT_eSPI&)frame, millis());
         pushFrame(0, 0);
         DrawBand::set(halfH, tft.height());
         frame.setViewport(0, -halfH, tft.width(), tft.height(), true);
         frame.fillRect(0, 0, tft.width(), tft.height(), Theme::BG);
         draw((TFT_eSPI&)frame, false);
+        Theme::drawToast((TFT_eSPI&)frame, millis());
         pushFrame(0, halfH);
         DrawBand::all();
         frame.resetViewport();
@@ -5591,37 +5609,37 @@ void loop() {
                 DrawBand::set(0, halfH);
                 frame.setViewport(0, 0, tft.width(), tft.height(), true);
                 uiClearTick(frame, now, engine, true, s_scanPickerOpen);
+                Theme::drawToast(frame, now);
+                if (uiZoneCardWanted()) uiZoneCardDraw(frame, now);
                 s_bandUs[0] = micros() - tBand;
                 pushFrame(0, 0);
+
                 tBand = micros();
                 DrawBand::set(halfH, tft.height());
                 frame.setViewport(0, -halfH, tft.width(), tft.height(), true);
                 uiClearTick(frame, now, engine, false, s_scanPickerOpen);
+                Theme::drawToast(frame, now);
+                if (uiZoneCardWanted()) uiZoneCardDraw(frame, now);
                 s_bandUs[1] = micros() - tBand;
                 pushFrame(0, halfH);
                 DrawBand::all();
                 frame.resetViewport();
             } else {
-                // Fallback if a post-boot rotate ever failed to
-                // reallocate `frame` (see loop()) -- same direct-to-tft
-                // path this board already uses for every other screen.
                 uiClearTick(tft, now, engine, true, s_scanPickerOpen);
+                Theme::drawToast(tft, now);
+                if (uiZoneCardWanted()) uiZoneCardDraw(tft, now);
             }
 #elif defined(CARDPUTER_ADV)
             uiClearTick(*canvas, now, engine, !extFrame, s_scanPickerOpen);
+            Theme::drawToast(*canvas, now);
+            if (uiZoneCardWanted()) uiZoneCardDraw(*canvas, now);
 #else
             uiClearTick(*canvas, now, engine, true, s_scanPickerOpen);
+            Theme::drawToast(*canvas, now);
+            if (uiZoneCardWanted()) uiZoneCardDraw(*canvas, now);
 #endif
             FrameProf::lap(FrameProf::CHROME);
-            // Toasts on the main screen too. They were only drawn on LOG and
-            // NEARBY, so SNOOZED and READ, both raised on the way here or while
-            // here, went unseen.
-            Theme::drawToast(*canvas, now);
-            // The clock is set and no zone was ever picked: the card, over
-            // everything, until THIS IS RIGHT. A tap on it is the card's; a
-            // tap beside it is the main screen's, so he can still be poked.
             if (uiZoneCardWanted()) {
-                uiZoneCardDraw(*canvas, now);
                 if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                     const ZoneHit zh = uiZoneCardHit(tp.x, tp.y, tft.width(), tft.height());
                     if (zh != ZoneHit::NONE) {
