@@ -27,7 +27,7 @@
 // of mistake as the backlight pins in main.cpp, and silent in the same way:
 // the light would simply never come on, which reads as "this board has no
 // status LED" rather than as a bug.
-#if defined(ESP32) && !defined(CYD35) && !defined(AWOK) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(NM_CYD_C5)
+#if defined(ESP32) && !defined(AWOK) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(NM_CYD_C5)
 #define STATUS_LIGHT_HW 1
 #elif defined(FREENOVE_S3) || defined(NM_CYD_C5)
 #define STATUS_LIGHT_HW 2
