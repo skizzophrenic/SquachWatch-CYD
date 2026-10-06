@@ -65,6 +65,10 @@ jobs:
       - name: Build Elecrow CrowPanel Advance 7.0
         run: pio run -e crowpanel7
 
+      # Experimental: compile coverage only, no flasher/release publishing.
+      - name: Build AIPI Lite (ESP32-S3)
+        run: pio run -e aipi-lite
+
       # Same idea for the NM-CYD-C5, with one difference worth knowing: it is
       # the only environment on a different platform (Arduino 3.3 / IDF 5.5,
       # because the ESP32-C5 did not exist when core 2.0.14 was cut), so this

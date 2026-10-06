@@ -51,7 +51,7 @@ static const uint8_t SD_MAX_FILES = 2;
 
 bool SdLog::begin() {
     if (_ready) return true;
-#if defined(TWATCH_S3) || defined(SQW_SMALL)   // the Cardputer has a slot, on pins of its own: not brought up yet
+#if defined(SQW_NO_SD) || defined(TWATCH_S3) || defined(SQW_SMALL)   // the Cardputer has a slot, on pins of its own: not brought up yet
     return false;   // no card slot; GPIO19/20 are the S3's USB pins
 #endif
 #if defined(CROWPANEL7)

@@ -3,6 +3,8 @@
 The friendliest possible walkthrough. If you have a CYD board and
 a computer, you can flash this in about ten minutes.
 
+For the experimental AIPI Lite target, use the separate [AIPI Lite guide](AIPI_LITE.md), including stock backup and internal BOOT access.
+
 ## What you need
 
 - **ESP32-2432S028R** (the "Cheap Yellow Display" / CYD) — about $15

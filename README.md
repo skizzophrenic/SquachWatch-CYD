@@ -107,6 +107,8 @@ finishes.
 
 ## Build
 
+Experimental AIPI Lite (XY006PL01) support: see [hardware evidence, compact UI, and recovery](docs/AIPI_LITE.md). Build with `pio run -e aipi-lite`; initial USB bring-up works; extended hardware validation remains.
+
 Three steps:
 
 1. Install [PlatformIO](https://platformio.org/) (CLI or VS Code extension).

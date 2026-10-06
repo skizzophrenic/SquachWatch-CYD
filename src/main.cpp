@@ -3,6 +3,7 @@
 // and the DetectionEngine.
 
 #include <Arduino.h>
+#include "mini_scanner.h"
 #include "serial_flush.h"
 #include <SPI.h>
 #include <Wire.h>
@@ -3475,6 +3476,9 @@ static void printBootBanner() {
 static void wardriveBegin();
 #endif
 void setup() {
+#if defined(SQW_MINI)
+    MiniScanner::begin(tft, engine);
+#else
     // Before anything else can allocate: the breadcrumb has to be read out
     // while it is still the previous life's, not this one's.
     crashReportInit();
@@ -4120,6 +4124,7 @@ void setup() {
         Squachy::trigger(Squachy::Event::BOOTED, DetectionType::UNKNOWN, engine.lifetimeTotal());
         enterBoot();
     }
+#endif // SQW_MINI
 }
 
 // ---- PRIM: what each drawing primitive costs on the real sprite ----
@@ -4841,6 +4846,9 @@ static void bootButtonTick(uint32_t now) {
 #endif
 
 void loop() {
+#if defined(SQW_MINI)
+    MiniScanner::tick(tft, engine);
+#else
     // Cheap and unconditional: available() is a register read, and this
     // is the only way in for the one serial command the firmware takes.
     Clock::pollSerial();
@@ -8267,4 +8275,5 @@ void loop() {
 #endif
     }
     prevTouchValid = tp.valid;
+#endif // SQW_MINI
 }

@@ -29,7 +29,7 @@
 // status LED" rather than as a bug.
 #if defined(ESP32) && !defined(CYD35) && !defined(AWOK) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(NM_CYD_C5)
 #define STATUS_LIGHT_HW 1
-#elif defined(FREENOVE_S3) || defined(NM_CYD_C5)
+#elif defined(SQW_WS2812_PIN) || defined(FREENOVE_S3) || defined(NM_CYD_C5)
 #define STATUS_LIGHT_HW 2
 #else
 #define STATUS_LIGHT_HW 0
@@ -48,7 +48,9 @@ static const int     PIN_R = 4, PIN_G = 16, PIN_B = 17;
 #endif
 static const uint8_t CH_R  = 3, CH_G  = 4,  CH_B  = 5;
 #if STATUS_LIGHT_HW == 2
-#if defined(NM_CYD_C5)
+#if defined(SQW_WS2812_PIN)
+static const uint8_t PIN_WS2812 = SQW_WS2812_PIN;
+#elif defined(NM_CYD_C5)
 static const uint8_t PIN_WS2812 = 27;
 #else
 static const uint8_t PIN_WS2812 = 42;
