@@ -111,5 +111,8 @@ start a processor whose supply is off.
   passes and the framebuffer allocates. At ten seconds, Wi-Fi sniffer/channel
   hopping and BLE scanning are active (113 frames, 652 adverts). Battery
   voltage is 4202 mV with the charging signal active.
-- Physical USB-removal/button-start and screen recovery checks await user
-  observation; serial activity alone does not establish those results.
+- User confirmed the screen recovered after flashing, then confirmed the
+  USB-removal test works: the device stays running on battery.
+- Starting from a fully powered-off battery using the left/power button,
+  prolonged field operation and depleted-battery behavior remain separate
+  physical test items.

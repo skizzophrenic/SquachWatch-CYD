@@ -161,7 +161,9 @@ state machine. The pulse count is checked in one-second windows, and invalid
 voltage is also treated as unknown. Charge bars measure terminal voltage and
 can change under radio load. Validation on the connected module measured
 4190 mV, USB ADC 1976–1977 mV, no presence pulses, and GPIO47 low (charging).
-Charging-to-full, unplug and a depleted module still need physical checks after the power-latch fix.
+User retesting confirmed screen recovery and uninterrupted battery operation
+on USB removal after the power-latch fix. Charging-to-full, a depleted module
+and startup from a fully powered-off battery still need separate physical checks.
 
 ## Build, backup, flash and recover
 
