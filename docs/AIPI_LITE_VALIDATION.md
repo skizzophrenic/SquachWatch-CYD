@@ -129,4 +129,11 @@ start a processor whose supply is off.
   15:00, future timestamps, millis rollover and compact long ages. All 45
   host programs pass. Real draw code rendered with fifteen varied records
   confirms column/icon alignment.
-- Firmware upload and live checks pending restored serial-port permissions.
+- Uploaded commit `4d7fe99`; all written image hashes verified. Firmware
+  boot reports `v1.32.0-8-g4d7fe99`; PSRAM readback and framebuffer
+  initialization pass. At ten seconds Wi-Fi sniffer/channel hopping and BLE
+  scanning are active (79 frames, 623 adverts).
+- Battery now measures 4225 mV, USB ADC 1973 mV, no presence pulses and
+  GPIO47 high: the icon changes to full with active charging off. This
+  establishes a later full/not-charging signal state on the same module;
+  low/mid transitions remain untested physically.
