@@ -49,7 +49,7 @@ These are community pin findings, not a vendor guarantee for every revision.
 | Audio I2C SCL/SDA | 4 / 5 | Deferred |
 | Audio MCLK/DOUT/WS/DIN/BCLK | 6 / 11 / 12 / 13 / 14 | Deferred |
 | Speaker enable | 9 | Untouched |
-| Board power control | 10 | Untouched; not sufficiently characterized |
+| Board power hold | 10 | Active high, asserted first at boot to retain battery power |
 | Battery voltage ADC | 2 | Calibrated ADC1, 11 dB; stock voltage multiplier 2.5 |
 | USB voltage ADC | 8 | Stock USB-present threshold 1300 mV at ADC |
 | Charger status | 47 | Active low, qualified by USB voltage |
@@ -90,7 +90,7 @@ run through the same engine as the other boards.
 
 This first interface deliberately exposes a scanner subset. It has no full
 settings/PIN/lock interface, OTA UI, mascot, raw scanner, mesh messaging UI or
-power/sleep management. Mesh preferences default off on fresh settings. This
+automatic power/sleep management. Mesh preferences default off on fresh settings. This
 port does not initialize BlackBox or a filesystem. Detection lifetime counters
 and normal upstream settings still use NVS. Audio and LittleFS are follow-on
 work. Firmware updates for this milestone use USB.
@@ -141,12 +141,27 @@ corroborate ADC GPIO2/1/8 and the GPIO21 pulse input. No proprietary code or
 stock images are included in this patch; these addresses document observations
 from the privately retained backup and may differ across stock revisions.
 
-This port observes those inputs; it does not reproduce the stock shutdown
+GPIO10 is asserted high **before serial, display or radio startup** to retain
+battery power when USB is unplugged and after the physical power button is
+released. The stock `CustomPm` power-on routine at `0x4202b91c` configures
+GPIO10 as an output and sets it high; the community
+[voice-bridge configuration](https://github.com/noise754/AIPI-Lite-Voice-Bridge/blob/main/aipi.yaml)
+also keeps `board_power` GPIO10 always on. The earlier port omitted this latch;
+it could scan over USB but lost power immediately when USB was removed.
+
+To start from the battery alone, use the **left/power button**, held for about
+three seconds as described in the [vendor manual](https://static.aipi.com/AIPI_InstructionBook/AIPI_InstructionBook.html).
+The right function button changes scanner pages and cannot start an unpowered
+processor. USB insertion should start the scanner automatically. This milestone
+keeps the scanner running continuously; it does not implement the stock
+power-button shutdown or five-minute standby timeout.
+
+This port observes the battery inputs; it does not reproduce the stock shutdown
 state machine. The pulse count is checked in one-second windows, and invalid
 voltage is also treated as unknown. Charge bars measure terminal voltage and
 can change under radio load. Validation on the connected module measured
 4190 mV, USB ADC 1976–1977 mV, no presence pulses, and GPIO47 low (charging).
-Charging-to-full, unplug and a depleted module still need physical checks.
+Charging-to-full, unplug and a depleted module still need physical checks after the power-latch fix.
 
 ## Build, backup, flash and recover
 

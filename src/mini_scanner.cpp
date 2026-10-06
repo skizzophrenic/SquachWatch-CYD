@@ -160,6 +160,13 @@ void console(TFT_eSPI& d) {
 }
 
 void begin(TFT_eSPI& d, DetectionEngine& e) {
+#if defined(SQW_POWER_HOLD_PIN)
+    // The physical power button starts the supply; firmware must latch it
+    // before any initialization delays or it dies when the button/USB goes away.
+    digitalWrite(SQW_POWER_HOLD_PIN, HIGH);
+    pinMode(SQW_POWER_HOLD_PIN, OUTPUT);
+    digitalWrite(SQW_POWER_HOLD_PIN, HIGH);
+#endif
     Serial.begin(SERIAL_BAUD);
     Serial.setTxTimeoutMs(0);
     delay(200);
@@ -169,7 +176,7 @@ void begin(TFT_eSPI& d, DetectionEngine& e) {
     BatteryStatus::begin();
     IgnoreList::begin();
     pinMode(SQW_BUTTON_PIN, INPUT_PULLUP);
-    // Leave audio, power control and USB pins alone; battery inputs are read-only.
+    // Leave audio and USB pins alone; battery sensing inputs are read-only.
     pinMode(SQW_BACKLIGHT_PIN, OUTPUT);
     digitalWrite(SQW_BACKLIGHT_PIN, LOW);
     d.init();

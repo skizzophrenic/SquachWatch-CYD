@@ -19,6 +19,8 @@
 // Capabilities consumed by the mini runtime, with no board-name branches.
 #define SQW_BACKLIGHT_PIN 3
 #define SQW_BUTTON_PIN 42
+// Active-high battery power latch, asserted before USB/display/radio startup.
+#define SQW_POWER_HOLD_PIN 10
 #define SQW_WS2812_PIN 46
 // Match MicroPython rotation(1): MADCTL 0x60 is TFT_eSPI rotation 3.
 #define SQW_PANEL_ROTATION 3

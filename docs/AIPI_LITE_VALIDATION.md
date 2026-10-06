@@ -89,3 +89,17 @@ The target stays experimental and outside release/flasher publishing.
 - Battery boundary, hysteresis, missing-module and USB qualification host tests
   pass, together with the original host suite.
 - Low/mid/full transition and charging completion remain physical test items.
+
+## Battery power handoff regression
+
+Initial user testing found that USB removal shut the device off immediately,
+and reinsertion left a black screen. This invalidated the earlier untested
+battery-only milestone. The port had left GPIO10 unconfigured. Stock power-on
+code and a community always-on GPIO10 output independently establish the
+active-high power-hold signal. MiniScanner now preloads GPIO10 high and enables
+its output before serial, settings, display initialization or startup delays.
+The physical left/power button starts the battery supply; its startup supply
+must then be retained by this firmware latch. The right function button cannot
+start a processor whose supply is off.
+
+Build/recovery and physical handoff results are recorded below once verified.
