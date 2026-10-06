@@ -102,4 +102,14 @@ The physical left/power button starts the battery supply; its startup supply
 must then be retained by this firmware latch. The right function button cannot
 start a processor whose supply is off.
 
-Build/recovery and physical handoff results are recorded below once verified.
+- AIPI power-latch build passes. Uploaded commit `4383e19` without erasing
+  settings; esptool verified every written image hash.
+- Before flashing, opening the monitor triggered a normal USB reset and the
+  previous firmware initialized PSRAM/framebuffer and recorded real detections.
+  The original black-screen state was not captured, so its cause is unresolved.
+- The power-latch firmware boots as `v1.32.0-5-g4383e19`; PSRAM readback
+  passes and the framebuffer allocates. At ten seconds, Wi-Fi sniffer/channel
+  hopping and BLE scanning are active (113 frames, 652 adverts). Battery
+  voltage is 4202 mV with the charging signal active.
+- Physical USB-removal/button-start and screen recovery checks await user
+  observation; serial activity alone does not establish those results.
