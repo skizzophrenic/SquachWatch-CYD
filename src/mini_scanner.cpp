@@ -76,7 +76,7 @@ void draw(DetectionEngine& e, uint32_t now) {
         snprintf(b, sizeof b, "WiFi frames %lu", (unsigned long)wifiFramesSeen()); line(d, 41, b);
         snprintf(b, sizeof b, "BLE adverts/s %lu", (unsigned long)advertRate()); line(d, 57, b);
         snprintf(b, sizeof b, "Heap %lu KB", (unsigned long)(ESP.getFreeHeap() / 1024)); line(d, 73, b);
-        snprintf(b, sizeof b, "PSRAM %lu MB", (unsigned long)(ESP.getPsramSize() / 1048576)); line(d, 89, b);
+        snprintf(b, sizeof b, "PSRAM %lu KB", (unsigned long)(ESP.getPsramSize() / 1024)); line(d, 89, b);
         // Red, green, blue bars and the border expose color/offset mistakes.
         d.fillRect(4, 101, 38, 6, TFT_RED);
         d.fillRect(44, 101, 38, 6, TFT_GREEN);

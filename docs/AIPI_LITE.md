@@ -3,7 +3,8 @@
 The `aipi-lite` environment targets the XORIGIN / AIPI Lite **XY006PL01**
 configuration documented by the community: ESP32-S3, 16 MB flash, 8 MB octal
 PSRAM, ST7735-compatible 128x128 SPI LCD, one usable function button and one
-WS2812. It is a bring-up port, not a hardware-verified release. No PCB revision
+WS2812. Initial USB bring-up passed on one connected unit, but this is not a fully
+validated release. No PCB revision
 has been verified here; check the label, flash capacity and memory configuration
 of your unit before replacing its firmware. Other AIPI models are not covered.
 
@@ -118,20 +119,25 @@ Expected output is `.pio/build/aipi-lite/firmware.bin`, plus the matching
 bootloader and partition images. **Do not flash firmware.bin alone at offset
 zero**; let PlatformIO use the ESP32-S3 offsets.
 
-Before the first replacement, back up the complete stock flash. With the
-battery disconnected, remove the four rear screws, hold the internal BOOT
+Before the first replacement, back up the complete stock flash. Automatic
+loader entry through native USB worked on the connected unit: try `flash-id`
+first without opening the case. If automatic entry fails, use this fallback:
+with the battery disconnected, remove the four rear screws, hold the internal BOOT
 button and connect a USB data cable. The community procedure places BOOT under
 the display / near the ESP32-S3 module; the right function button is not BOOT.
 Release BOOT after connection. The display should remain black. Identify the
 new serial port (`pio device list`); do not select an unrelated connected board.
 For the commands below replace `PORT` with that port (for example `COM3` or
-`/dev/ttyACM0`). Use esptool 4.x for this underscore command syntax:
+`/dev/ttyACM0`). Use esptool 5.x for backup/recovery. The old 4.5.1 stub bundled with the
+pinned PlatformIO platform reads this device extremely slowly over native USB
+([Espressif issue #936](https://github.com/espressif/esptool/issues/936)). This
+does not require changing the firmware platform. These commands use 5.x syntax:
 
 ```sh
-python -m pip install 'esptool>=4.5,<5'
-python -m esptool --chip esp32s3 --port PORT flash_id
-python -m esptool --chip esp32s3 --port PORT read_flash 0 0x1000000 aipi-stock.bin
-python -m esptool --chip esp32s3 --port PORT read_flash 0 0x1000000 aipi-stock-check.bin
+python -m pip install 'esptool>=5.4,<6'
+python -m esptool --chip esp32s3 --port PORT flash-id
+python -m esptool --chip esp32s3 --port PORT read-flash 0 0x1000000 aipi-stock.bin
+python -m esptool --chip esp32s3 --port PORT read-flash 0 0x1000000 aipi-stock-check.bin
 ```
 
 Confirm detected flash is 16 MB, both files are exactly **16,777,216 bytes**,
@@ -144,7 +150,7 @@ For the **first installation**, erase stock application/settings only after
 backup, then write this target:
 
 ```sh
-python -m esptool --chip esp32s3 --port PORT erase_flash
+python -m esptool --chip esp32s3 --port PORT erase-flash
 pio run -e aipi-lite -t upload --upload-port PORT
 ```
 
@@ -166,7 +172,7 @@ power-control GPIO changes to fix it.
 To recover stock, enter BOOT mode and restore the verified **same-unit** image:
 
 ```sh
-python -m esptool --chip esp32s3 --port PORT write_flash 0 aipi-stock.bin
+python -m esptool --chip esp32s3 --port PORT write-flash 0 aipi-stock.bin
 ```
 
 This writes the full saved flash, including its original partition table and

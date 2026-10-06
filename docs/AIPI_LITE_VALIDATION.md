@@ -1,8 +1,8 @@
 # AIPI Lite validation
 
 Local checks on 2026-10-06 against upstream `6ef18479650b81945f4531951e69d3e66e1cfaff`
-(v1.32.0), branch `feature/aipi-lite-support`. Implementation commit:
-`507ef54` (later documentation commits do not change firmware behavior).
+(v1.32.0), branch `feature/aipi-lite-support`. Initial implementation commit: `507ef54`. The subsequent bring-up change
+reports usable PSRAM in KB and adds the device evidence below.
 
 | Check | Result |
 | --- | --- |
@@ -30,8 +30,8 @@ framework warnings remain. No compiler errors were accepted as passing.
 AIPI size report: **60,460 bytes static RAM** of 327,680; **1,013,141 bytes
 flash** of the 4,194,304-byte application slot. The 32 KB RGB565 framebuffer
 and radio allocations are runtime memory and are not included in the static
-RAM report. PSRAM is 8 MB by target configuration; its actual size/readback
-still requires device evidence.
+RAM report. PSRAM is 8 MB by target configuration; its actual usable size/readback
+is recorded below.
 
 The host lacked g++; Fedora's matching GCC 16 C++ frontend and headers were
 extracted under `/tmp` and used through a local wrapper, without system
@@ -40,10 +40,39 @@ normal pinned PlatformIO toolchain. One overlapping PlatformIO invocation
 caused an AWOK `.sconsign314.tmp` bookkeeping error; its isolated rerun passed.
 Subsequent PlatformIO builds are run sequentially.
 
-## Device status
+## Device bring-up
 
-Andy authorized flashing the connected AIPI on 2026-10-06. The candidate port
-is `/dev/ttyACM0` (Espressif USB JTAG/serial). Initial access was denied by Linux
-permissions. **No backup, erase or flash has occurred yet.** Hardware identity,
-PSRAM, display, button, LED, both radios, battery operation and recovery remain
-pending. Follow the acceptance checklist in [AIPI_LITE.md](AIPI_LITE.md).
+Andy authorized flashing the attached unit on 2026-10-06 and reported the
+interface working well after installation. Native USB identified an ESP32-S3
+revision 0.2, 16 MB quad flash and 8 MB embedded PSRAM (AP_3v3). Secure boot and
+flash encryption are disabled. Linux serial access needed a per-port ACL; no
+system group or global configuration was changed.
+
+Two independent full stock reads with esptool 5.4.0 produced 16,777,216-byte
+images with identical SHA-256 hashes. The old 4.5.1 stub was too slow for native
+USB reads; switching the backup tool solved it. Verified recovery images and
+raw serial logs are stored privately outside the repository. Flash erase and
+PlatformIO upload both succeeded; the uploader verified written hashes.
+
+Serial evidence after installation:
+
+- PSRAM: 8,386,295 usable bytes, external allocation/write/read **PASS**.
+- 128x128 RGB565 framebuffer allocated; both radios initialized.
+- At 5 seconds: 38 Wi-Fi frames and 281 BLE advertisements.
+- At 40 seconds: 388 Wi-Fi frames and 3,051 BLE advertisements; BLE scanning
+  active and Wi-Fi sniffer on with advancing channels.
+- `LOG` returned four real RAM-log records at 20 seconds. No synthetic
+  detections were injected. These are ambient matches, not verified fixtures.
+- Physical right-button taps produced page 1, page 2 and page 0 serial events.
+- `LED` was sent to exercise the existing light test. Andy reported the first
+  pass working; exact RGB order/border and long-hold behavior still need
+  individually recorded observations before declaring the whole checklist done.
+
+Diagnostics reports usable PSRAM in KB rather than truncating the usable-byte
+count to 7 MB. Chip-reported installed capacity is 8 MB; allocator metadata
+makes the usable count slightly smaller.
+
+PCB/model-label identification, controlled signature-fixture checks, extended
+soak/battery runtime and actual stock restore remain unverified. BOOT/recovery
+instructions are documented, but a backup is not proof of a completed restore.
+The target stays experimental and outside release/flasher publishing.
