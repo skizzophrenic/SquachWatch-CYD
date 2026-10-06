@@ -99,13 +99,21 @@ work. Firmware updates for this milestone use USB.
 
 - **Tap:** cycle scan summary, readable RAM log, dense RAM log and radio/memory diagnostics.
 - **Hold 700 ms on the log:** advance to the next older row, wrapping around.
-- **Dense log:** eleven rows at 8-pixel pitch. Each shows a nine-character
-  name/vendor/type, last detection stamp and latest RSSI in dBm. Hold advances
-  eleven entries at a time, wrapping at the end. Time follows the existing
-  clock formatter: wall time when trusted, otherwise minutes:seconds since
-  boot, changing to hours/minutes or days/hours for long uptimes. It retains the upstream
-  newest-created order; repeat sightings update time/RSSI in place. Detection
-  cards do not cover this page; status-light alerts continue.
+- **Dense log:** eleven rows at 8-pixel pitch, sorted by latest RSSI,
+  strongest first. Sorting affects this view only; equal RSSI retains the
+  original log order. Each row shows a seven-character name/vendor/type,
+  the last MAC byte (two uppercase hex characters), elapsed time since its
+  latest detection, and a four-bar signal icon. Hold advances eleven entries,
+  wrapping at the end. The two hex characters are a short matching aid, not
+  a unique identifier; different devices can share them or rotate addresses.
+  Age is `minutes:seconds` (`0:00` now, `15:00` fifteen minutes ago), changing
+  to hours/minutes or days/hours when necessary to fit. A radio timestamp
+  just ahead of the UI snapshot displays `0:00`, and rollover is handled.
+  Detection cards do not cover this page; LED alerts continue.
+  Signal bands: ≥−50 dBm = 4 bars, ≥−65 = 3, ≥−80 = 2, ≥−90 = 1,
+  otherwise a gray disconnected cross. Text colors are red (4), orange (3),
+  yellow (2), gray (1/0); icon colors are green/yellow/orange/red/gray.
+  These are coarse received-strength bands, not measured physical distances.
 - **Hold elsewhere:** return home. A held release never also cycles pages.
 - Allowed new sightings show a five-second type/vendor/RSSI card and use the
   existing status-light alert colors. A tap or hold dismisses the card.

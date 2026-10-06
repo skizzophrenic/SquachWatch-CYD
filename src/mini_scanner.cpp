@@ -12,6 +12,7 @@
 #include "privacy.h"
 #include "meshtalk.h"
 #include "single_button.h"
+#include "mini_log.h"
 #include "battery_status.h"
 #include <esp_heap_caps.h>
 
@@ -93,28 +94,36 @@ void draw(DetectionEngine& e, uint32_t now) {
         snprintf(b, sizeof b, "LOG %u-%u/%u", e.logCount() ? denseStart + 1 : 0,
                  unsigned(denseStart + denseRows < e.logCount() ? denseStart + denseRows : e.logCount()), e.logCount());
         line(d, 19, b, Theme::CYAN);
-        // Eleven rows, with no padding: 9-character identity, 6-character
-        // last-seen stamp and 4-character RSSI fill the 20-column font.
-        for (uint8_t i = 0; i < denseRows; ++i) {
-            const Detection* row = e.logAt(denseStart + i);
-            if (!row) break;
-            char name[24], stamp[16];
+        // Snapshot only the display order. The engine retains its own log.
+        uint8_t order[256]; // logCount/index API uses uint8_t
+        const uint8_t count = MiniLog::strongestFirst(e, order, sizeof order);
+        for (uint8_t i = 0; i < denseRows && denseStart + i < count; ++i) {
+            const Detection* row = e.logAt(order[denseStart + i]);
+            char name[24], stamp[8];
             const char* label = Privacy::name(row->name, name, sizeof name);
             if (!label[0]) label = vendorText(*row);
             if (!label[0]) label = detectionTypeName(row->type);
-            Clock::formatStamp(row->lastSeen, stamp, sizeof stamp);
-            // Clock's uptime stamp grows past six columns after 1000 min.
-            // Keep a complete time, rather than cutting off its seconds.
-            if (!Clock::trusted() && row->lastSeen / 60000u >= 1000) {
-                uint32_t minutes = row->lastSeen / 60000u;
-                if (minutes < 6000)
-                    snprintf(stamp, sizeof stamp, "%luh%02lum",
-                             (unsigned long)(minutes / 60), (unsigned long)(minutes % 60));
-                else snprintf(stamp, sizeof stamp, "%lud%02luh",
-                              (unsigned long)(minutes / 1440), (unsigned long)(minutes / 60 % 24));
+            MiniLog::age(now, row->lastSeen, stamp, sizeof stamp);
+            const uint8_t bars = MiniLog::bars(row->rssi);
+            // Close/strong rows are hot colors; the strength icon separately
+            // follows conventional green-to-red reception colors.
+            uint16_t rowColor = bars == 4 ? TFT_RED : bars == 3 ? TFT_ORANGE :
+                                bars == 2 ? TFT_YELLOW : TFT_DARKGREY;
+            snprintf(b, sizeof b, "%-7.7s %02X %6s", label, row->mac[5], stamp);
+            const int y = 27 + i * 8;
+            line(d, y, b, rowColor);
+            if (bars) {
+                const uint16_t signalColor = bars == 4 ? TFT_GREEN : bars == 3 ? TFT_YELLOW :
+                                             bars == 2 ? TFT_ORANGE : TFT_RED;
+                for (uint8_t k = 0; k < 4; ++k) {
+                    const int h = 2 + k * 2;
+                    d.fillRect(114 + k * 3, y + 8 - h, 2, h,
+                               k < bars ? signalColor : TFT_DARKGREY);
+                }
+            } else {
+                d.drawLine(115, y + 1, 122, y + 6, TFT_DARKGREY);
+                d.drawLine(122, y + 1, 115, y + 6, TFT_DARKGREY);
             }
-            snprintf(b, sizeof b, "%-9.9s %6.6s%4d", label, stamp, row->rssi);
-            line(d, 27 + i * 8, b, Theme::colorFor(row->type));
         }
         if (!e.logCount()) line(d, 43, "No detections yet");
     } else {

@@ -116,3 +116,17 @@ start a processor whose supply is off.
 - Starting from a fully powered-off battery using the left/power button,
   prolonged field operation and depleted-battery behavior remain separate
   physical test items.
+
+## Field test and signal-ranked dense view
+
+- User reported successful field scanning on battery with the screen lit,
+  then returned the device to USB.
+- Dense view now sorts a separate index by descending latest RSSI, preserves
+  equal-signal order and leaves the engine/readable log unchanged.
+- Added last MAC byte, elapsed last-seen time and four-bar signal rendering
+  with independent row/icon color mappings. Eleven rows still fit.
+- Host tests cover RSSI boundaries, sort stability/capacity, elapsed 0:00 and
+  15:00, future timestamps, millis rollover and compact long ages. All 45
+  host programs pass. Real draw code rendered with fifteen varied records
+  confirms column/icon alignment.
+- Firmware upload and live checks pending restored serial-port permissions.
