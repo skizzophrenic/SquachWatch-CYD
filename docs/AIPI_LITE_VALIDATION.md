@@ -137,3 +137,20 @@ start a processor whose supply is off.
   GPIO47 high: the icon changes to full with active charging off. This
   establishes a later full/not-charging signal state on the same module;
   low/mid transitions remain untested physically.
+
+## Photos of the working device
+
+Andy supplied these photos of the same AIPI Lite running on battery on
+2026-10-06. They show the four scanner pages, a full battery icon and the
+illuminated status LED. These are display-sized copies retrieved from Google
+Photos, without additional image edits. The photos document the physical UI;
+radio reception and PSRAM readback are supported by the checks recorded above.
+They do not establish calibrated range, detection accuracy or battery runtime.
+
+| Dense log: signal bars, MAC suffix and last-seen age | Readable detection log |
+| --- | --- |
+| ![Dense detection log on AIPI Lite](images/aipi-lite/dense-log.jpg) | ![Readable detection log on AIPI Lite](images/aipi-lite/readable-log.jpg) |
+
+| Radio and memory diagnostics | Scan summary |
+| --- | --- |
+| ![AIPI Lite diagnostics showing Wi-Fi frames, BLE advertisements and PSRAM](images/aipi-lite/diagnostics.jpg) | ![AIPI Lite scan summary showing live and logged detections](images/aipi-lite/scan-summary.jpg) |
