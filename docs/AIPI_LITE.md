@@ -50,7 +50,10 @@ These are community pin findings, not a vendor guarantee for every revision.
 | Audio MCLK/DOUT/WS/DIN/BCLK | 6 / 11 / 12 / 13 / 14 | Deferred |
 | Speaker enable | 9 | Untouched |
 | Board power control | 10 | Untouched; not sufficiently characterized |
-| Charge pulse input | 21 | Untouched; no invented battery percentage |
+| Battery voltage ADC | 2 | Calibrated ADC1, 11 dB; stock voltage multiplier 2.5 |
+| USB voltage ADC | 8 | Stock USB-present threshold 1300 mV at ADC |
+| Charger status | 47 | Active low, qualified by USB voltage |
+| Battery presence pulse input | 21 | Rising edges; stock treats six pulses as no battery |
 
 The LCD's exact panel variant is not established. The port follows the
 MicroPython red-tab setup with zero offsets and inversion off. ESPHome uses
@@ -58,7 +61,7 @@ inversion on; `INVERT` on the console toggles it and persists the choice. The
 MicroPython driver's rotation 1 writes MADCTL `0x60`; **TFT_eSPI rotation 3**
 writes the same bits. Copying the rotation number alone would turn the picture
 the other way. Diagnostics includes RGB bars and a one-pixel outer border to
-check order, polarity, orientation and offsets. All eight GPIO assignments live
+check order, polarity, orientation and offsets. All GPIO assignments live
 in `include/aipi_lite_user_setup.h`; adjust that header if hardware proves a
 revision difference.
 
@@ -94,18 +97,56 @@ work. Firmware updates for this milestone use USB.
 
 ## Compact interface
 
-- **Tap:** cycle scan summary, RAM log and radio/memory diagnostics.
+- **Tap:** cycle scan summary, readable RAM log, dense RAM log and radio/memory diagnostics.
 - **Hold 700 ms on the log:** advance to the next older row, wrapping around.
+- **Dense log:** eleven rows at 8-pixel pitch. Each shows a nine-character
+  name/vendor/type, last detection stamp and latest RSSI in dBm. Hold advances
+  eleven entries at a time, wrapping at the end. Time follows the existing
+  clock formatter: wall time when trusted, otherwise minutes:seconds since
+  boot, changing to hours/minutes or days/hours for long uptimes. It retains the upstream
+  newest-created order; repeat sightings update time/RSSI in place. Detection
+  cards do not cover this page; status-light alerts continue.
 - **Hold elsewhere:** return home. A held release never also cycles pages.
 - Allowed new sightings show a five-second type/vendor/RSSI card and use the
   existing status-light alert colors. A tap or hold dismisses the card.
 - Console at nominal 115200: `LOG` dumps all RAM log entries; `RADIO` reports
   current reception and radio state; `LED` runs the existing light test;
-  `INVERT` flips LCD polarity. End each command with a newline.
+  `INVERT` flips LCD polarity; `BATTERY` prints measured voltage, USB ADC, pulse count and charge input. End each command with a newline.
 - Serial also reports the latest changed sighting and radio counters every
   ten seconds. A burst can replace `latest()` between frames, as in the full
   UI; use `LOG` to inspect all retained rows. No fabricated detections are
   injected by this build.
+
+## Battery indicator and evidence
+
+The upper-right battery shows one/two/three bars for low/mid/full and a
+lightning bolt while actively charging. An unknown or absent battery shows
+`?`. These are **coarse voltage bands**, not a fuel-gauge percentage or an
+estimated runtime. The stock linear 3000–4200 mV scale supplies the 20%/80%
+voltage boundaries (3240/3960 mV); 60 mV hysteresis avoids flickering bars.
+Eight calibrated samples are averaged once per second, outside interrupts.
+
+The saved, verified stock firmware on the tested unit establishes the pin
+mapping more precisely than the teardown's tentative GPIO table. In its
+`YuanZhiESP32S3` constructor at `0x420308e0`, the `CustomPm` arguments are
+21 (presence pulse), 47 (charge status), 8 (USB ADC), 10 (power control),
+2 (battery ADC), and 1 (power-button ADC). The derived vtable at `0x3c212258`
+retains the base battery/charge methods. Battery conversion at `0x4202b9ec`
+multiplies the calibrated ADC millivolts by 2.5, clamps at 3000/4200 mV and
+linearly maps the interval. `0x4202b99c` tests GPIO47 low for charging;
+`0x4202b974` uses the 1300 mV USB threshold. `0x4202c2d0` transitions to
+`NoBattery` after six rising GPIO21 edges. Public stock
+[boot logs](https://gist.github.com/0xD34D/761db04261df5276ab78f9b350c68195)
+corroborate ADC GPIO2/1/8 and the GPIO21 pulse input. No proprietary code or
+stock images are included in this patch; these addresses document observations
+from the privately retained backup and may differ across stock revisions.
+
+This port observes those inputs; it does not reproduce the stock shutdown
+state machine. The pulse count is checked in one-second windows, and invalid
+voltage is also treated as unknown. Charge bars measure terminal voltage and
+can change under radio load. Validation on the connected module measured
+4190 mV, USB ADC 1976–1977 mV, no presence pulses, and GPIO47 low (charging).
+Charging-to-full, unplug and a depleted module still need physical checks.
 
 ## Build, backup, flash and recover
 

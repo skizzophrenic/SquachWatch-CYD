@@ -76,3 +76,16 @@ PCB/model-label identification, controlled signature-fixture checks, extended
 soak/battery runtime and actual stock restore remain unverified. BOOT/recovery
 instructions are documented, but a backup is not proof of a completed restore.
 The target stays experimental and outside release/flasher publishing.
+
+## Battery and dense log follow-up
+
+- Added eleven-row log page with lastSeen/RSSI, hold-to-page, and uninterrupted
+  reading while alerts continue on the LED. Rendered the real drawing code
+  with fifteen simulated records; all eleven rows and header/footer fit.
+- Verified stock CustomPm ADC/divider/charge mapping (details in AIPI_LITE.md).
+- Flashed battery/dense build with image hash verification. Real readings:
+  battery 4190 mV, USB ADC 1976–1977 mV, GPIO47 low, zero GPIO21 pulses.
+  Icon reports active charging; Wi-Fi hopping and BLE scanning remain active.
+- Battery boundary, hysteresis, missing-module and USB qualification host tests
+  pass, together with the original host suite.
+- Low/mid/full transition and charging completion remain physical test items.

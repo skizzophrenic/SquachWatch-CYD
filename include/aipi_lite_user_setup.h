@@ -23,3 +23,11 @@
 // Match MicroPython rotation(1): MADCTL 0x60 is TFT_eSPI rotation 3.
 #define SQW_PANEL_ROTATION 3
 #define SQW_PANEL_INVERTED 0
+
+// Stock CustomPm constructor and voltage conversion; see battery evidence.
+#define SQW_BATTERY_ADC_PIN 2
+#define SQW_BATTERY_ADC_NUMERATOR 5
+#define SQW_BATTERY_ADC_DENOMINATOR 2
+#define SQW_USB_ADC_PIN 8
+#define SQW_CHARGING_PIN 47
+#define SQW_BATTERY_PULSE_PIN 21
