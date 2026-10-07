@@ -135,6 +135,15 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
             y = drawLine(t, y, info.fresh ? Theme::GREEN : Theme::CYAN, "FIX:", "%s,%s %s %lus",
                          la, lo, acc, (unsigned long)(info.fixAgeMs / 1000));
         }
+        // Two lines: the file name does not fit beside the counts at 320 px.
+        static const char* const WD[] = { "OFF", "NO CARD", "LOW MEMORY", "WAITING FOR FIX", "ON" };
+        if (!info.wdOn)
+            y = drawLine(t, y, Theme::CYAN, "WARDRIVE:", "off");
+        else
+            y = drawLine(t, y, Theme::CYAN, "WARDRIVE:", "%s, %lu written, %lu repeats, %lu dropped",
+                         info.wdState < 5 ? WD[info.wdState] : "?", (unsigned long)info.wdWritten,
+                         (unsigned long)info.wdSkipped, (unsigned long)info.wdDropped);
+        y = drawLine(t, y, Theme::CYAN, "WIGLE:", "%s", info.wdFile && *info.wdFile ? info.wdFile : "no file yet");
     }
 #endif
     // Where the heap went on the way up, in KB: free/largest with WiFi up,

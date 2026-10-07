@@ -8121,6 +8121,10 @@ void loop() {
                 info.accM = f.accM; info.lat7 = f.lat7; info.lon7 = f.lon7;
                 info.fixAgeMs = f.atMs ? nowMs - f.atMs : UINT32_MAX;
                 info.fresh = Gnss::fresh(nowMs); info.faked = Gnss::faked();
+                info.wdOn = Wardrive::enabled();
+                info.wdState = (uint8_t)Wardrive::sdState(nowMs);
+                info.wdWritten = Wardrive::written(); info.wdSkipped = Wardrive::skipped();
+                info.wdDropped = Wardrive::dropped(); info.wdFile = Wardrive::sdFileName();
             }
 #endif
             info.resetReason = resetReasonName();

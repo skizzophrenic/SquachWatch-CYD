@@ -764,6 +764,10 @@ int main(int argc, char** argv) {
                 info.accM = f.accM; info.lat7 = f.lat7; info.lon7 = f.lon7;
                 info.fixAgeMs = f.atMs ? t - f.atMs : UINT32_MAX;
                 info.fresh = Gnss::fresh(t); info.faked = Gnss::faked();
+                // A drive in progress, so the render shows the wardrive lines.
+                info.wdOn = true; info.wdState = 4;   // LOGGING
+                info.wdWritten = 42; info.wdSkipped = 310; info.wdDropped = 0;
+                info.wdFile = "/wigle-20261006-1200.csv";
             }
             uiDiagnosticsTick(frame, t, engine, info);
         }

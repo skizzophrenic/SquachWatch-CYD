@@ -18,6 +18,12 @@
 // logic that decides what counts as a detection in the first place.
 #include "detection.h"
 #include <cstring>
+#if defined(CYD_GPS)
+#include "wardrive.h"
+#include "wifi_auth.h"
+#include <Arduino.h>
+#include <cstdio>
+#endif
 
 // ---- SdLog: no card, ever -------------------------------------------
 bool SdLog::begin() { _ready = false; return false; }
@@ -43,7 +49,35 @@ namespace MeshProbe {
 #endif
 
 bool DetectionEngine::init() { return true; }
+// The LOG DUMP console command: no SD log here, so nothing to print.
+void logDump() {}
+#if defined(CYD_GPS)
+// The emulator has no radio, so these stand in for what the WiFi and
+// Bluetooth callbacks would report to wardriving: four networks and two
+// tags, once a second of millis().
+void DetectionEngine::loop() {
+    static uint32_t last = 0;
+    const uint32_t now = millis();
+    if (last && now - last < 1000) return;
+    last = now ? now : 1;
+    static const uint8_t CH[4] = { 1, 6, 11, 6 };
+    for (uint8_t i = 0; i < 4; i++) {
+        const uint8_t mac[6] = { 0x02, 0x53, 0x51, 0x00, 0x00, (uint8_t)(i + 1) };
+        char ssid[12];
+        snprintf(ssid, sizeof ssid, "SimNet-%u", (unsigned)(i + 1));
+        // Three WPA2 networks and one open one.
+        const uint16_t auth = i < 3 ? (uint16_t)(WifiAuth::ESS | WifiAuth::PRIV | WifiAuth::RSN | WifiAuth::PSK | WifiAuth::CCMP)
+                                    : (uint16_t)WifiAuth::ESS;
+        Wardrive::noteWifi(mac, ssid, auth, CH[i], (int8_t)(-58 - i));
+    }
+    for (uint8_t i = 0; i < 2; i++) {
+        const uint8_t mac[6] = { 0x02, 0x53, 0x51, 0x00, 0x01, (uint8_t)(i + 1) };
+        Wardrive::noteBle(mac, "SimTag", (int8_t)(-62 - i), true, 0x004C);
+    }
+}
+#else
 void DetectionEngine::loop() {}
+#endif
 // No radio, so nothing to restart and nothing freed.
 ScanFlushStats scanFlushStats() { return ScanFlushStats{ 0, 0, 0 }; }
 BootHeap bootHeap()             { return BootHeap{ 0, 0, 0, 0 }; }
