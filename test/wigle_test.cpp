@@ -81,7 +81,7 @@ int main() {
 
     suite("The header");
     char h[512];
-    Wardrive::headerLines(h, sizeof h, "1.25.0", "twatch-s3", "T-Watch S3 Plus");
+    Wardrive::headerLines(h, sizeof h, "1.25.0", "twatch-s3", "T-Watch S3 Plus", "LilyGo");
     const char* pre = "WigleWifi-1.6,appRelease=1.25.0,model=T-Watch S3 Plus,release=1.25.0,device=SquachWatch,";
     ck("pre-header", !strncmp(h, pre, strlen(pre)));
     ck("ends star=Sol,body=3,subBody=0", strstr(h, ",star=Sol,body=3,subBody=0\n") != nullptr);

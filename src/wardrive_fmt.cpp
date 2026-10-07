@@ -67,11 +67,11 @@ void utcStamp(uint32_t epoch, char* out, size_t n) {
              (unsigned long)(sod / 3600), (unsigned long)(sod / 60 % 60), (unsigned long)(sod % 60));
 }
 
-size_t headerLines(char* out, size_t n, const char* version, const char* board, const char* model) {
+size_t headerLines(char* out, size_t n, const char* version, const char* board, const char* model, const char* brand) {
     const int w = snprintf(out, n,
-        "WigleWifi-1.6,appRelease=%s,model=%s,release=%s,device=SquachWatch,display=SquachWatch,board=%s,brand=LilyGo,star=Sol,body=3,subBody=0\n"
+        "WigleWifi-1.6,appRelease=%s,model=%s,release=%s,device=SquachWatch,display=SquachWatch,board=%s,brand=%s,star=Sol,body=3,subBody=0\n"
         "MAC,SSID,AuthMode,FirstSeen,Channel,Frequency,RSSI,CurrentLatitude,CurrentLongitude,AltitudeMeters,AccuracyMeters,RCOIs,MfgrId,Type\n",
-        version, model, version, board);
+        version, model, version, board, brand);
     return (w > 0 && (size_t)w < n) ? (size_t)w : 0;
 }
 

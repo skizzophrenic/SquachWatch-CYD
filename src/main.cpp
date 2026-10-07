@@ -2640,6 +2640,8 @@ static void performWipe(WipeBoot after) {
     BlackBox::wipe();        // the log and the crash history kept in flash
 #if defined(TWATCH_S3)
     Wardrive::clear();       // where the watch has been, and everything it heard there
+#elif defined(CYD_GPS)
+    Wardrive::sdWipe();      // the WiGLE file is a record of everywhere the board has been
 #endif
 #if HAVE_NVS_ERASE
     // The frame buffer is 77 KB the wipe can have: the board restarts in a
@@ -4554,7 +4556,7 @@ static void wigleExport(bool includeFake) {
     char buf[512];   // the two header lines run past 330 with a long version string
     struct Ctx { bool fake, ok; uint32_t rows, skipped; char* buf; } c = { includeFake, true, 0, 0, buf };
     usbWriteAll("=== WIGLE BEGIN ===\n", 20);
-    const size_t h = Wardrive::headerLines(buf, sizeof buf, FIRMWARE_VERSION, "twatch-s3", "LilyGo T-Watch S3 Plus");
+    const size_t h = Wardrive::headerLines(buf, sizeof buf, FIRMWARE_VERSION, "twatch-s3", "LilyGo T-Watch S3 Plus", "LilyGo");
     c.ok = usbWriteAll(buf, h);
     if (c.ok) Wardrive::forEach([](const Wardrive::Record& r, void* p) {
         Ctx& c = *(Ctx*)p;
@@ -4713,6 +4715,18 @@ static void cydGpsStart() {
     // pins only when both are negative, so TX stays unassigned here; the
     // default TX2 is GPIO17, the status light.
     Serial2.begin(9600, SERIAL_8N1, 35, -1);
+    Wardrive::sdBegin();
+}
+
+static const char* cydWardriveStateName(Wardrive::SdState st) {
+    switch (st) {
+        case Wardrive::SdState::OFF:             return "off";
+        case Wardrive::SdState::NO_CARD:         return "NO CARD";
+        case Wardrive::SdState::LOW_MEMORY:      return "LOW MEMORY";
+        case Wardrive::SdState::WAITING_FOR_FIX: return "WAITING FOR FIX";
+        case Wardrive::SdState::LOGGING:         return "ON";
+    }
+    return "?";
 }
 
 static void cydGpsTick(uint32_t now) {
@@ -4735,6 +4749,11 @@ static void cydGpsTick(uint32_t now) {
         } else {
             Serial.println("no position");
         }
+        const char* fn = Wardrive::sdFileName();
+        Serial.printf("[wardrive] %s; file %s; written %lu, skipped %lu as repeats, dropped %lu\n",
+                      cydWardriveStateName(Wardrive::sdState(now)), *fn ? fn : "none yet",
+                      (unsigned long)Wardrive::written(), (unsigned long)Wardrive::skipped(),
+                      (unsigned long)Wardrive::dropped());
     }
     else if (cmd == 4) {
         Gnss::fake(g_consoleFakeLat7, g_consoleFakeLon7, Clock::isSet() ? Clock::nowEpoch() : 0, now);
@@ -4744,6 +4763,15 @@ static void cydGpsTick(uint32_t now) {
         Serial.printf("[gps] BENCH FIX at %s,%s: SD rows written now carry FAKE, and the clock is left alone\n",
                       la, lo);
     }
+    else if (cmd == 5) {
+        Wardrive::setEnabled(true);
+        Serial.println("[wardrive] ON: rows go to the SD card once the GPS has a real fix");
+    }
+    else if (cmd == 6) { Wardrive::setEnabled(false); Serial.println("[wardrive] off"); }
+    else if (cmd >= 7 && cmd <= 9) {
+        const char* fn = Wardrive::sdFileName();
+        Serial.printf("[wardrive] the WiGLE file is on the SD card: %s\n", *fn ? fn : "none yet");
+    }
     else if (cmd) Serial.println("[gps] not on this board");
 
     // A bench fix is held until a real one replaces it; refreshed here so it
@@ -4751,6 +4779,7 @@ static void cydGpsTick(uint32_t now) {
     if (Gnss::faked()) Gnss::fake(Gnss::fix().lat7, Gnss::fix().lon7, Clock::isSet() ? Clock::nowEpoch() : 0, now);
 
     while (Serial2.available()) Gnss::feed((char)Serial2.read(), now);
+    Wardrive::sdTick(now, engine.sd().ready());
 
     const Gnss::Fix& f = Gnss::fix();
     if (f.valid && !Gnss::faked() && !s_cydGpsFirstFixMs) {
@@ -6979,6 +7008,17 @@ void loop() {
                                 twatchBuzz(Buzz::SAMPLE);
                             }
                             Serial.printf("[buzz] %s\n", Settings::buzzModeName());
+                            break;
+#endif
+#if defined(CYD_GPS)
+                        case SettingsRow::WATCH_WARDRIVE:
+                            // Through the console's path, as on the watch.
+                            g_consoleGps = Wardrive::enabled() ? 6 : 5;
+                            Theme::showToast(Wardrive::enabled() ? "WARDRIVE OFF" : "WARDRIVE ON",
+                                             Wardrive::enabled() ? nullptr
+                                                 : !engine.sd().ready() ? "Needs an SD card"
+                                                 : "Logging once the GPS has a fix",
+                                             Theme::CYAN);
                             break;
 #endif
                         case SettingsRow::STATUS_LIGHT: enterLight(); break;
