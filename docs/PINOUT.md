@@ -81,6 +81,12 @@ To check the build with no module, open the serial console at 2,000,000 baud:
 - `GPS STATUS` prints the sentence counts, the satellites and the position.
 - `GPS OFF` clears the bench fix.
 
+Wardriving: switch on WARDRIVE in Settings, or type `WARDRIVE ON` on the
+console. With a real fix, the board writes every network and Bluetooth device
+it hears to `/wigle-YYYYMMDD-HHMM.csv` on the SD card, named for the start of
+the session in UTC. Upload that file to wigle.net as it is. A bench fix writes
+nothing. Wardriving pauses when memory runs low, and detection keeps running.
+
 ## Freenove ESP32-S3 Display 2.8" (FNK0104B) — `[env:freenove-s3]`
 
 Not a CYD, though the screen is a CYD's: an **ESP32-S3R8** (8 MB octal PSRAM

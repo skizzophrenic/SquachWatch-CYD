@@ -148,8 +148,41 @@ struct SerialShim {
         va_end(ap);
     }
     void flush() { fflush(stderr); }
-    int  available() { return 0; }   // no PC-side serial input in the sim
+    // Console input, squachsim-live only (SQUACHSIM_SERIAL_IN, set by
+    // sim/Makefile): SQUACHSIM_CONSOLE holds console lines separated by ';',
+    // read once on first use and served as typed, each line ending '\n'
+    // (SQUACHSIM_CONSOLE='WARDRIVE ON;GPS STATUS'). Without it, nothing.
+    // One line each half second of millis(), as typed: several console
+    // commands share one slot that loop() empties, so lines read in one
+    // pass would overwrite each other.
+    std::string in;
+    size_t inPos = 0, lineEnd = 0;
+    uint32_t nextLineAt = 0;
+    bool inLoaded = false;
+    void loadInput() {
+        if (inLoaded) return;
+        inLoaded = true;
+        const char* c = getenv("SQUACHSIM_CONSOLE");
+        if (!c || !*c) return;
+        for (; *c; c++) in += (*c == ';') ? '\n' : *c;
+        in += '\n';
+    }
+#if defined(SQUACHSIM_SERIAL_IN)
+    int  available() {
+        loadInput();
+        if (inPos >= in.size()) return 0;
+        if (inPos >= lineEnd) {
+            if ((int32_t)(millis() - nextLineAt) < 0) return 0;
+            lineEnd = in.find('\n', inPos) + 1;
+            nextLineAt = millis() + 500;
+        }
+        return (int)(lineEnd - inPos);
+    }
+    int  read() { return available() ? (uint8_t)in[inPos++] : -1; }
+#else
+    int  available() { return 0; }   // no PC-side serial input
     int  read() { return -1; }
+#endif
     size_t write(const uint8_t*, size_t n) { return n; }
     int  availableForWrite() { return 256; }
 };
@@ -162,7 +195,8 @@ inline SerialShim Serial;
 // after begin(), in virtual time or real time, whichever millis() runs on. At
 // the end of the file the replay stops, so the fix goes stale as it would if
 // the module were unplugged. With no variable or no file, nothing is ever
-// available.
+// available. SQUACHSIM_CONSOLE (on Serial, above) types console commands
+// beside it, such as WARDRIVE ON.
 #ifndef SERIAL_8N1
 #define SERIAL_8N1 0x800001c
 #endif

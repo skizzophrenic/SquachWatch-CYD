@@ -114,6 +114,12 @@ struct DiagnosticsInfo {
     int32_t  lat7 = 0, lon7 = 0;
     uint32_t fixAgeMs = UINT32_MAX;     // UINT32_MAX: never a fix
     bool     fresh = false, faked = false;
+    // Wardriving: the state (Wardrive::SdState as a number), this boot's
+    // counts, and the session's file name.
+    bool     wdOn = false;
+    uint8_t  wdState = 0;
+    uint32_t wdWritten = 0, wdSkipped = 0, wdDropped = 0;
+    const char* wdFile = "";
 #endif
 };
 

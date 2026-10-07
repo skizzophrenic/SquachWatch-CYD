@@ -250,6 +250,33 @@ void setScanInterval(uint16_t ms, uint8_t w) {
 static volatile uint8_t s_scanPin = 0;   // 0 auto, 1 active, 2 passive -- the bench's say
 void setScanPin(uint8_t pin) { s_scanPin = pin > 2 ? 0 : pin; }
 
+#if defined(CYD_GPS)
+// Wardriving's name and company ID from an advert's AD structures (length,
+// type, data): the complete name (0x09), else the short one (0x08), and the
+// first two bytes of the manufacturer data (0xFF). No allocation.
+static void wardriveAdFields(const uint8_t* p, size_t n, char* name /* [33] */, bool& hasId, uint16_t& cid) {
+    name[0] = 0;
+    bool full = false;
+    for (size_t i = 0; i + 1 < n; ) {
+        const uint8_t len = p[i];
+        if (!len || i + 1 + len > n) break;
+        const uint8_t type = p[i + 1];
+        const uint8_t* d = p + i + 2;
+        const size_t dn = len - 1;
+        if ((type == 0x09 || (type == 0x08 && !full && !name[0])) && dn) {
+            const size_t k = dn < 32 ? dn : 32;
+            memcpy(name, d, k);
+            name[k] = 0;
+            if (type == 0x09) full = true;
+        } else if (type == 0xFF && dn >= 2 && !hasId) {
+            hasId = true;
+            cid = (uint16_t)(d[0] | (d[1] << 8));
+        }
+        i += 1 + len;
+    }
+}
+#endif
+
 class BleScanCallbacks : public NimBLEScanCallbacks {
     // First sight of every advert, before any reply. The counts live here
     // and not in onResult: in an active scan a device that never answers
@@ -353,6 +380,17 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
                 if (md.size() >= 2) { hasId = true; cid = (uint16_t)((uint8_t)md[0] | ((uint8_t)md[1] << 8)); }
             }
             Wardrive::noteBle(mac, nm.c_str(), (int8_t)adv->getRSSI(), hasId, cid);
+        }
+#elif defined(CYD_GPS)
+        // Wardriving on the CYD GPS builds: the same, read straight from the
+        // advert's bytes. The watch's std::string calls would allocate on the
+        // Bluetooth task, and the CYD has too little heap for that.
+        if (Wardrive::enabled()) {
+            char nm[33];
+            bool hasId = false; uint16_t cid = 0;
+            const std::vector<uint8_t>& pl = adv->getPayload();
+            wardriveAdFields(pl.data(), pl.size(), nm, hasId, cid);
+            Wardrive::noteBle(mac, nm, (int8_t)adv->getRSSI(), hasId, cid);
         }
 #endif
         if (!g_engine) return;
@@ -789,6 +827,13 @@ bool DetectionEngine::init() {
 #if defined(TWATCH_S3)
             // Wardriving: every access point, with its security read from the
             // RSN and WPA elements (the last four bytes are the FCS).
+            if (Wardrive::enabled() && sigLen > 40) {
+                const uint16_t cap = (uint16_t)(frame[34] | (frame[35] << 8));
+                Wardrive::noteWifi(frame + 16, ssid, WifiAuth::parse(cap, frame + 36, (uint16_t)(sigLen - 40)),
+                                   pkt->rx_ctrl.channel, (int8_t)pkt->rx_ctrl.rssi);
+            }
+#elif defined(CYD_GPS)
+            // Wardriving on the CYD GPS builds: the same call as the watch.
             if (Wardrive::enabled() && sigLen > 40) {
                 const uint16_t cap = (uint16_t)(frame[34] | (frame[35] << 8));
                 Wardrive::noteWifi(frame + 16, ssid, WifiAuth::parse(cap, frame + 36, (uint16_t)(sigLen - 40)),

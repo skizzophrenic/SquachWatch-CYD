@@ -128,6 +128,10 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/frame_prof.cpp \
             $(SRC)/fast_sprite.cpp \
             $(SRC)/gnss.cpp \
+            $(SRC)/wardrive_fmt.cpp \
+            $(SRC)/wifi_auth.cpp \
+            $(SRC)/wardrive_seen.cpp \
+            $(SRC)/wardrive_sd.cpp \
             $(SRC)/sd_row.cpp \
             $(SIM_DIR)/ota_sim.cpp
 
@@ -148,11 +152,18 @@ LIVE_SRCS := $(SRC)/main.cpp \
              $(SRC)/cap_touch.cpp \
              $(SRC)/touch_cal.cpp \
              $(SIM_DIR)/main_live.cpp \
-             $(SIM_DIR)/detection_sim.cpp
+             $(SIM_DIR)/detection_sim.cpp \
+             $(SRC)/clock.cpp
 # -include Arduino.h mirrors what the Arduino build system does for
 # every translation unit: cap_touch.cpp and friends call pinMode/delay
 # without including it themselves and rely on that being implicit.
-LIVE_FLAGS := -include $(SIM_DIR)/Arduino.h -include $(INC)/cyd_user_setup.h
+LIVE_FLAGS := -include $(SIM_DIR)/Arduino.h -include $(INC)/cyd_user_setup.h \
+              -DSQUACHSIM_SERIAL_IN=1
+# clock.cpp is compiled again for the live build, the one place Serial reads
+# console lines (SQUACHSIM_SERIAL_IN, sim/Arduino.h). Its console commands
+# name globals that only main.cpp defines, so the one-shot renderer keeps the
+# shared copy, where Serial never has input.
+LIVE_UI_OBJS = $(filter-out $(OBJ_DIR)/ui/clock.o,$(UI_OBJS))
 
 # ---- WebAssembly ----------------------------------------------------
 # The same sources as squachsim-live, compiled for the browser. The port
@@ -250,7 +261,7 @@ $(OBJ_DIR)/live/%.o: %.cpp Makefile
 $(BIN): $(UI_OBJS) $(SIM_OBJS)
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lm
 
-$(LIVE_BIN): $(UI_OBJS) $(LIVE_OBJS)
+$(LIVE_BIN): $(LIVE_UI_OBJS) $(LIVE_OBJS)
 	$(CXX) $(CXXFLAGS) $(LIVE_FLAGS) -o $@ $^ -lm
 
 -include $(DEPS)

@@ -102,6 +102,9 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::REPLAY_INTRO, SettingsRow::SHOW_OFF, SettingsRow::VIEW_DIARY,
     SettingsRow::BINGO, SettingsRow::DEX, SettingsRow::DESK_MODE,
     SettingsRow::POWER_SAVER,
+#if defined(CYD_GPS)
+    SettingsRow::WATCH_WARDRIVE,   // the watch's row and setting, on the CYD GPS builds
+#endif
 #if defined(ESP32) && !defined(TWATCH_S3)
     SettingsRow::CHARGE_MODE,
 #endif
@@ -219,6 +222,10 @@ static RowGroupId groupFor(SettingsRow r) {
     // a leftover. It goes to SYSTEM there -- still reachable, which is the
     // part that matters, since the display rows live behind it.
     if (r == SettingsRow::APPEARANCE && Settings::boringMode()) return RowGroupId::SYSTEM;
+#if defined(CYD_GPS)
+    // Under its neighbor's heading: a CYD has no WATCH heading.
+    if (r == SettingsRow::WATCH_WARDRIVE) return groupFor(SettingsRow::POWER_SAVER);
+#endif
     switch (r) {
         case SettingsRow::WATCH_BATTERY:
         case SettingsRow::WATCH_RADIO:
@@ -949,6 +956,22 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             break;
         }
 #endif
+#endif
+#if defined(CYD_GPS)
+        case SettingsRow::WATCH_WARDRIVE:
+            // OFF, or what stands between it and a row, or the rows written.
+            label = "WARDRIVE";
+            switch (Wardrive::sdState(millis())) {
+                case Wardrive::SdState::OFF:             value = "OFF"; break;
+                case Wardrive::SdState::NO_CARD:         value = "NO CARD"; break;
+                case Wardrive::SdState::LOW_MEMORY:      value = "LOW MEMORY"; break;
+                case Wardrive::SdState::WAITING_FOR_FIX: value = "WAITING FOR FIX"; break;
+                case Wardrive::SdState::LOGGING:
+                    snprintf(valBuf, valBufN, "ON  %lu", (unsigned long)Wardrive::written());
+                    value = valBuf;
+                    break;
+            }
+            break;
 #endif
         case SettingsRow::EXT_SCREEN:
             label = "EXT SCREEN"; value = Settings::extScreen() ? "ON" : "OFF";
