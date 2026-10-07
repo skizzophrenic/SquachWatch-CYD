@@ -71,8 +71,8 @@ The `cyd-gps` and `cyd-ili9341-gps` builds read an ATGM336H GPS module at
 | GND | GND on CN1 |
 | RX  | not connected |
 
-GPIO 35 is input only, so the firmware cannot configure the module. It uses
-the module's defaults.
+The module's RX is not connected, so the firmware cannot configure the
+module. It runs on the module's defaults.
 
 To check the build with no module, open the serial console at 2,000,000 baud:
 

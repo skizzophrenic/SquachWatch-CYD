@@ -1,4 +1,4 @@
-// SquachWatch-CYD — the SD log's row, src/sd_row.cpp.
+// SquachWatch-CYD: the SD log's row, src/sd_row.cpp.
 //
 // A wrong sign puts a detection south of the equator or west of Greenwich on
 // the other side of the map. A position from an old fix puts it where the

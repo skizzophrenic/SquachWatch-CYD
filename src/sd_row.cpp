@@ -1,4 +1,4 @@
-// SquachWatch-CYD — the SD log's file name and CSV row. See sd_row.h.
+// SquachWatch-CYD: the SD log's file name and CSV row. See sd_row.h.
 #include "sd_row.h"
 #include <stdio.h>
 #include <string.h>

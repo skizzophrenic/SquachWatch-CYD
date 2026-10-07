@@ -1,4 +1,4 @@
-// SquachWatch-CYD — the SD log's file name and CSV row, as plain text work.
+// SquachWatch-CYD: the SD log's file name and CSV row, as plain text work.
 //
 // No card and no Arduino here, so the host tests can check a row to the last
 // digit. sd_log.cpp owns the card and calls these.

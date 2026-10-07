@@ -229,8 +229,7 @@ void SdLog::wipe() {
     FramePush::busLock();
     // Walk the root and remove every file this firmware writes. Names are
     // /squachwatch-YYYYMMDD.log and /squachwatch-nodate.log; matching on the
-    // prefix takes them all rather than only today's, which is the whole point
-    // of a wipe.
+    // prefix takes every day's file, which is the whole point of a wipe.
     File dir = CARD.open("/");
     if (!dir) { FramePush::busUnlock(); return; }
     // Collect first, then remove: deleting while iterating openNextFile() is
