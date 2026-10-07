@@ -1,10 +1,14 @@
 // SquachWatch-CYD — wardriving capture and storage. See wardrive.h.
 #include "wardrive.h"
+#include "wardrive_capture.h"
 #include "gnss.h"
 #include <Arduino.h>
 #include <Preferences.h>
 #include <string.h>
 #include <math.h>
+
+// The CYD GPS builds take the same API from wardrive_sd.cpp.
+#if !defined(CYD_GPS)
 
 #if __has_include(<esp_flash.h>) && defined(TWATCH_S3)
 #include <esp_flash.h>
@@ -143,37 +147,7 @@ bool append(Record& r) {
 }
 
 // ---- the queue --------------------------------------------------------------
-// Two single-producer rings, one per radio task, drained by loop(). Each
-// producer only writes its own head and each consumer only its own tail.
-struct Pending {
-    uint8_t kind, flags, mac[6];
-    int8_t  rssi;
-    uint8_t channel;
-    uint16_t auth;
-    uint8_t nameLen;
-    char    name[32];
-};
-const uint8_t QN = 32;
-struct Q {
-    Pending item[QN];
-    volatile uint8_t head = 0, tail = 0;
-    bool push(const Pending& p) {
-        const uint8_t h = head, nx = (uint8_t)((h + 1) % QN);
-        if (nx == tail) return false;
-        item[h] = p;
-        __sync_synchronize();
-        head = nx;
-        return true;
-    }
-    bool pop(Pending& p) {
-        const uint8_t t = tail;
-        if (t == head) return false;
-        __sync_synchronize();
-        p = item[t];
-        tail = (uint8_t)((t + 1) % QN);
-        return true;
-    }
-};
+// Pending, Q and QN are in wardrive_capture.h.
 // Made by begin(), which only a board that can wardrive calls. As plain
 // globals they were 3 KB of RAM on every CYD, none of which has a GPS
 // (found in the firmware's symbol table, 2026-10-03). Set before s_ready,
@@ -182,22 +156,10 @@ Q* s_wifiQ = nullptr;
 Q* s_bleQ  = nullptr;
 
 // ---- not the same thing twice from the same place ------------------------------
-// A network heard ten times a second while you stand still is one row, not
-// six hundred a minute. A device is written again once it is five minutes
-// since its last row, or from 50 m away, whichever comes first -- enough for
-// WiGLE to place it, and enough to follow one that moves.
-struct Seen { uint8_t mac[6]; uint8_t kind; uint8_t used; int32_t lat7, lon7; uint32_t epoch; };
+// Seen, AGAIN_S, AGAIN_M and metres() are in wardrive_capture.h. The watch
+// keeps its own 1024-entry table, by hash.
 const uint16_t SEEN_N = 1024;
 Seen* s_seen = nullptr;
-const uint32_t AGAIN_S = 300;
-const float    AGAIN_M = 50.0f;
-
-float metres(int32_t la1, int32_t lo1, int32_t la2, int32_t lo2) {
-    const float k = 0.0111319f;                       // metres per 10^-7 degree of latitude
-    const float c = cosf((float)la1 * 1e-7f * 0.0174533f);
-    const float dy = (float)(la2 - la1) * k, dx = (float)(lo2 - lo1) * k * c;
-    return sqrtf(dx * dx + dy * dy);
-}
 
 uint16_t slotFor(const uint8_t* mac, uint8_t kind) {
     uint32_t h = 2166136261u ^ kind;
@@ -334,3 +296,5 @@ void clear() {
 }
 
 }  // namespace Wardrive
+
+#endif  // !CYD_GPS
