@@ -1741,13 +1741,14 @@ static int16_t drawCornerClock(TFT_eSPI& t, int w) {
 #if defined(CYD_GPS)
 // The GPS label, left of the right-hand icons in the top bar: dim while a
 // module talks with no fix, green with a fresh fix, amber for a bench fix
-// typed in on the console. Nothing until the first good sentence, so a build
-// with no module plugged in looks like any other. Drawn straight after the
-// background like the watch's corner clock. Returns where the WATCH pill's
-// free span must end, or -1.
+// typed in on the console. Nothing until the first good sentence or a bench
+// fix, so a build with no module plugged in looks like any other. Drawn
+// straight after the background like the watch's corner clock. Returns where
+// the WATCH pill's free span must end, or -1.
 static const int GPS_LABEL_W = 22;
+static bool gpsLabelShown() { return Gnss::good() > 0 || Gnss::faked(); }
 static int16_t drawGpsLabel(TFT_eSPI& t, int w) {
-    if (Gnss::good() == 0) return -1;
+    if (!gpsLabelShown()) return -1;
     const uint16_t col = Gnss::faked() ? Theme::AMBER
                        : Gnss::fresh(millis()) ? Theme::GREEN
                        : Theme::W95_SHADOW;
@@ -3381,7 +3382,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
                                     ? Theme::TITLE_ICON_W + (Security::enabled() ? 26 : 0)
                                     : Theme::TITLE_ICON_W) + 3
 #if defined(CYD_GPS)
-                               + (Gnss::good() ? GPS_LABEL_W + 2 : 0)   // the GPS label, left of the icons
+                               + (gpsLabelShown() ? GPS_LABEL_W + 2 : 0)   // the GPS label, left of the icons
 #endif
                                ;
         auto rowRoom = [&](uint8_t row) {
