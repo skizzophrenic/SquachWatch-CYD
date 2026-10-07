@@ -10,8 +10,8 @@ See: .planning/PROJECT.md (updated 2026-10-06)
 ## Current Position
 
 Phase: none planned
-Status: Quick task in progress
-Last activity: 2026-10-06 - GSD planning stub created
+Status: Ready for next task
+Last activity: 2026-10-06 - Completed quick task 261006-l11: Optional GPS on the CYD and the SD log fix
 
 ## Accumulated Context
 
@@ -25,4 +25,10 @@ None.
 
 ### Blockers/Concerns
 
-None.
+- cyd-gps is untested on hardware. The module arrives 2026-10-07; the checks are in the 261006-l11 SUMMARY.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 261006-l11 | Optional GPS on the CYD (cyd-gps builds), SD rows with UTC time and daily file names, PINOUT spare pins | 2026-10-06 | cb062ce | [261006-l11-add-optional-gps-support-to-the-cyd-buil](./quick/261006-l11-add-optional-gps-support-to-the-cyd-buil/) |
