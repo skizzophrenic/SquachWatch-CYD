@@ -103,6 +103,18 @@ struct DiagnosticsInfo {
     const char* otaSlot;
     const char* otaOther;
     bool        usingCapTouch;
+#if defined(CYD_GPS)
+    // The GPS module: sentences, satellites, and the last fix. Drawn only
+    // when gpsShown, next to the HEAP line, so the RAM cost of the module
+    // can be read with and without it.
+    bool     gpsShown = false;
+    uint32_t gpsGood = 0, gpsBad = 0;   // sentences parsed and rejected
+    uint8_t  view = 0, heard = 0, used = 0;
+    uint8_t  accM = 0;
+    int32_t  lat7 = 0, lon7 = 0;
+    uint32_t fixAgeMs = UINT32_MAX;     // UINT32_MAX: never a fix
+    bool     fresh = false, faked = false;
+#endif
 };
 
 void uiDiagnosticsInit(TFT_eSPI& t);

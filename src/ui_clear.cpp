@@ -18,6 +18,9 @@
 #include "emote_script.h"
 #include <esp_system.h>
 #include "crowd_bench.h"
+#if defined(CYD_GPS)
+#include "gnss.h"       // the GPS label in the top bar
+#endif
 
 // A peer supplied from outside -- the emulator's --peer flag today, the radio
 // eventually. Always wins over the demo below.
@@ -1735,6 +1738,29 @@ static int16_t drawCornerClock(TFT_eSPI& t, int w) {
     return (int16_t)(x - 3 - 4);
 }
 #endif
+#if defined(CYD_GPS)
+// The GPS label, left of the right-hand icons in the top bar: dim while a
+// module talks with no fix, green with a fresh fix, amber for a bench fix
+// typed in on the console. Nothing until the first good sentence, so a build
+// with no module plugged in looks like any other. Drawn straight after the
+// background like the watch's corner clock. Returns where the WATCH pill's
+// free span must end, or -1.
+static const int GPS_LABEL_W = 22;
+static int16_t drawGpsLabel(TFT_eSPI& t, int w) {
+    if (Gnss::good() == 0) return -1;
+    const uint16_t col = Gnss::faked() ? Theme::AMBER
+                       : Gnss::fresh(millis()) ? Theme::GREEN
+                       : Theme::W95_SHADOW;
+    const int right = Theme::titleBarRightIconsX(w) - 2;
+    const int x = right - GPS_LABEL_W;
+    t.setTextSize(1);
+    t.fillRect(x, 0, GPS_LABEL_W, 20, TFT_BLACK);
+    t.setTextColor(col, TFT_BLACK);
+    t.setCursor(x + (GPS_LABEL_W - (t.textWidth("GPS") - 1)) / 2, 6);
+    t.print("GPS");
+    return (int16_t)(x - 4);
+}
+#endif
 static int16_t s_wpX = 0, s_wpY = 0, s_wpW = 0, s_wpH = 0;
 
 // spanR: the right end of the free span. -1 keeps the old fixed reserve for
@@ -2960,6 +2986,9 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     twatchLoraBadge(t);
 #endif
 #endif
+#if defined(CYD_GPS)
+    if (DrawBand::has(0, titleBottom)) s_cornerClockPillR = drawGpsLabel(t, w);
+#endif
     // Everything from here that moves by the call, not by the clock, moves
     // on the mascot's clock. See uiMascotStep().
     const bool step = uiMascotStep(now, advance);
@@ -3350,7 +3379,11 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         // PIN is on) on the right. Centred, so the same margin both sides.
         const int iconMargin = (Theme::TITLE_ICON_W + (Security::enabled() ? 26 : 0) > Theme::TITLE_ICON_W
                                     ? Theme::TITLE_ICON_W + (Security::enabled() ? 26 : 0)
-                                    : Theme::TITLE_ICON_W) + 3;
+                                    : Theme::TITLE_ICON_W) + 3
+#if defined(CYD_GPS)
+                               + (Gnss::good() ? GPS_LABEL_W + 2 : 0)   // the GPS label, left of the icons
+#endif
+                               ;
         auto rowRoom = [&](uint8_t row) {
             const int top = tilesTop + row * lineH;
             return top < Theme::TITLE_ICON_BAND_H ? w - 2 * iconMargin : w - 8;

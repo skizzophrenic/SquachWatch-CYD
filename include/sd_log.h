@@ -1,6 +1,11 @@
 // SquachWatch-CYD — optional SD card event log
 // If the SD card is mounted at boot, each Detection is appended to
-// /squachwatch-YYYYMMDD.log as one CSV line.
+// /squachwatch-YYYYMMDD.log as one CSV line, one file per local day. Until the
+// clock is trusted the rows go to /squachwatch-nodate.log, because a guessed
+// date can be days behind.
+// Row columns: time (UTC "YYYY-MM-DDTHH:MM:SSZ", or millis() since boot when
+// the clock is not trusted), type, rssi, mac, channel, vendor, name. A GPS
+// build adds latitude, longitude and accuracy (see sd_row.h).
 // If the card is absent, every call is a silent no-op.
 #pragma once
 #include <Arduino.h>
@@ -19,6 +24,7 @@ public:
 private:
     bool     _ready = false;
     uint32_t _lastFlush = 0;
-    char     _filename[24] = {0};
+    uint32_t _day = 0;           // the local day _filename is for; 0 is nodate
+    char     _filename[32] = {0};
     void     openDaily();
 };

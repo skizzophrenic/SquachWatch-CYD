@@ -5,6 +5,9 @@
 #include "detection.h"
 #include <Arduino.h>
 #include <stdarg.h>
+#if defined(CYD_GPS)
+#include "sd_row.h"   // degreesText() for the FIX line
+#endif
 
 static void backButtonRect(int screenW, int screenH, int& x, int& y, int& w, int& h) {
     Theme::ButtonBarGeom g = Theme::computeButtonBar(screenW, screenH);
@@ -114,6 +117,26 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
     }
     y = drawLine(t, y, Theme::CYAN, "HEAP:", "%lu free / %lu largest",
                  (unsigned long)info.freeHeap, (unsigned long)info.largestBlock);
+#if defined(CYD_GPS)
+    if (info.gpsShown) {
+        if (info.gpsGood == 0)
+            y = drawLine(t, y, Theme::CYAN, "GPS:", "no data on GPIO35");
+        else
+            y = drawLine(t, y, Theme::CYAN, "GPS:", "%u in view, %u heard, %u used",
+                         info.view, info.heard, info.used);
+        if (info.fixAgeMs == UINT32_MAX) {
+            y = drawLine(t, y, Theme::CYAN, "FIX:", "none");
+        } else {
+            char la[16], lo[16], acc[12];
+            SdRow::degreesText(la, sizeof la, info.lat7, 5);
+            SdRow::degreesText(lo, sizeof lo, info.lon7, 5);
+            if (info.faked) snprintf(acc, sizeof acc, "FAKE");
+            else            snprintf(acc, sizeof acc, "+-%u m", info.accM);
+            y = drawLine(t, y, info.fresh ? Theme::GREEN : Theme::CYAN, "FIX:", "%s,%s %s %lus",
+                         la, lo, acc, (unsigned long)(info.fixAgeMs / 1000));
+        }
+    }
+#endif
     // Where the heap went on the way up, in KB: free/largest with WiFi up,
     // with Bluetooth up, and at the first pass of loop().
     {
