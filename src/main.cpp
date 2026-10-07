@@ -4725,21 +4725,24 @@ static void cydGpsTick(uint32_t now) {
         Serial.printf("[gps] status: sentences %lu good, %lu bad; in view %u, heard %u, used %u; ",
                       (unsigned long)Gnss::good(), (unsigned long)Gnss::bad(), k.view, k.heard, f.used);
         if (s_cydGpsFirstFixMs) Serial.printf("first fix %lu s after boot; ", (unsigned long)(s_cydGpsFirstFixMs / 1000));
-        else                    Serial.print("no fix yet; ");
+        else                    Serial.print(Gnss::faked() ? "no real fix yet; " : "no fix yet; ");
         if (f.valid) {
             char la[16], lo[16];
             SdRow::degreesText(la, sizeof la, f.lat7, 7);
             SdRow::degreesText(lo, sizeof lo, f.lon7, 7);
-            Serial.printf("%s at %s,%s%s\n", Gnss::fresh(now) ? "fixed" : "lost", la, lo,
-                          Gnss::faked() ? " (fake)" : "");
+            Serial.printf("%s at %s,%s\n",
+                          Gnss::faked() ? "bench fix" : Gnss::fresh(now) ? "fixed" : "lost", la, lo);
         } else {
             Serial.println("no position");
         }
     }
     else if (cmd == 4) {
         Gnss::fake(g_consoleFakeLat7, g_consoleFakeLon7, Clock::isSet() ? Clock::nowEpoch() : 0, now);
-        Serial.printf("[gps] BENCH FIX at %ld,%ld: SD rows written now carry FAKE, and the clock is left alone\n",
-                      (long)g_consoleFakeLat7, (long)g_consoleFakeLon7);
+        char la[16], lo[16];
+        SdRow::degreesText(la, sizeof la, g_consoleFakeLat7, 7);
+        SdRow::degreesText(lo, sizeof lo, g_consoleFakeLon7, 7);
+        Serial.printf("[gps] BENCH FIX at %s,%s: SD rows written now carry FAKE, and the clock is left alone\n",
+                      la, lo);
     }
     else if (cmd) Serial.println("[gps] not on this board");
 
