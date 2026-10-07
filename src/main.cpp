@@ -62,6 +62,11 @@
 #include "ui_diagnostics.h"   // CrashReport, used by the breadcrumb below
 #include "blackbox.h"
 #include "gnss.h"
+#if defined(CYD_GPS)
+#include "sd_row.h"
+static void cydGpsStart();
+static void cydGpsTick(uint32_t now);
+#endif
 #include "privacy.h"
 #include "lora_sniffer.h"   // the watch's SX1262; inline no-ops elsewhere
 #include "wardrive.h"
@@ -3588,6 +3593,9 @@ void setup() {
     // saved rotation instead of always starting from the board default.
     Settings::load();
     Clock::begin();   // after Settings: the zone is applied there, the history here
+#if defined(CYD_GPS)
+    cydGpsStart();
+#endif
 #if defined(TWATCH_S3)
     twatchRtcBegin();      // after Clock::begin(): a real time beats the note's guess
     twatchHapticBegin();
@@ -4675,6 +4683,81 @@ static void wardriveBegin() {
 }
 #endif
 
+#if defined(CYD_GPS)
+// ---- GPS on the CYD (cyd-gps builds) ------------------------------------------
+// An ATGM336H with its TX on GPIO35 (P3), at 9600 baud. Its sentences go to
+// Gnss (gnss.h); a fresh fix puts a position on each SD row and on the alert
+// card, and its time sets a clock that has no network time this boot.
+// No power control (the CYD has none) and no baud search.
+//
+// Not behind CYD: the emulator's squachsim-live compiles this file with no
+// board macro, and its Serial2 replays the NMEA file named by SQUACHSIM_NMEA.
+//
+// Console: GPS STATUS; GPS FAKE lat lon (a bench fix, marked FAKE on the
+// screens and the SD rows, and never used for the clock); GPS OFF ends it.
+static bool     s_cydGpsClockSet = false;   // set from GPS once this boot
+static uint32_t s_cydGpsFirstFixMs = 0;     // millis() of the first real fix, 0 until then
+
+static void cydGpsStart() {
+    Gnss::reset();
+    // TX -1: the module's RX is not wired. The core fills in its default
+    // pins only when both are negative, so TX stays unassigned here; the
+    // default TX2 is GPIO17, the status light.
+    Serial2.begin(9600, SERIAL_8N1, 35, -1);
+}
+
+static void cydGpsTick(uint32_t now) {
+    const uint8_t cmd = g_consoleGps;
+    if (cmd) g_consoleGps = 0;
+    if (cmd == 2) { Gnss::reset(); Serial.println("[gps] reset: any bench fix is gone"); }
+    else if (cmd == 3) {
+        const Gnss::Sky k = Gnss::sky();
+        const Gnss::Fix& f = Gnss::fix();
+        Serial.printf("[gps] status: sentences %lu good, %lu bad; in view %u, heard %u, used %u; ",
+                      (unsigned long)Gnss::good(), (unsigned long)Gnss::bad(), k.view, k.heard, f.used);
+        if (s_cydGpsFirstFixMs) Serial.printf("first fix %lu s after boot; ", (unsigned long)(s_cydGpsFirstFixMs / 1000));
+        else                    Serial.print("no fix yet; ");
+        if (f.valid) {
+            char la[16], lo[16];
+            SdRow::degreesText(la, sizeof la, f.lat7, 7);
+            SdRow::degreesText(lo, sizeof lo, f.lon7, 7);
+            Serial.printf("%s at %s,%s%s\n", Gnss::fresh(now) ? "fixed" : "lost", la, lo,
+                          Gnss::faked() ? " (fake)" : "");
+        } else {
+            Serial.println("no position");
+        }
+    }
+    else if (cmd == 4) {
+        Gnss::fake(g_consoleFakeLat7, g_consoleFakeLon7, Clock::isSet() ? Clock::nowEpoch() : 0, now);
+        Serial.printf("[gps] BENCH FIX at %ld,%ld: SD rows written now carry FAKE, and the clock is left alone\n",
+                      (long)g_consoleFakeLat7, (long)g_consoleFakeLon7);
+    }
+    else if (cmd) Serial.println("[gps] not on this board");
+
+    // A bench fix is held until a real one replaces it; refreshed here so it
+    // does not go stale while the console test runs.
+    if (Gnss::faked()) Gnss::fake(Gnss::fix().lat7, Gnss::fix().lon7, Clock::isSet() ? Clock::nowEpoch() : 0, now);
+
+    while (Serial2.available()) Gnss::feed((char)Serial2.read(), now);
+
+    const Gnss::Fix& f = Gnss::fix();
+    if (f.valid && !Gnss::faked() && !s_cydGpsFirstFixMs) {
+        s_cydGpsFirstFixMs = now ? now : 1;
+        Serial.printf("[gps] FIRST FIX after %lu s, %u satellites\n", (unsigned long)(now / 1000), f.used);
+    }
+    // Network time stays the preferred source: a synced clock is never
+    // overwritten, and a later NTP sync replaces this one. Once a boot, then
+    // again only if something left the clock untrusted.
+    if (Gnss::fresh(now) && !Gnss::faked() && Gnss::utcEpoch() && !Clock::synced() &&
+        (!s_cydGpsClockSet || !Clock::trusted())) {
+        if (Clock::setEpoch(Gnss::utcEpoch())) {
+            s_cydGpsClockSet = true;
+            Serial.println("[clock] set from GPS");
+        }
+    }
+}
+#endif
+
 // The runtime log: this boot's minutes, noted every ten minutes. On a board
 // that cannot read its battery, the last note before it died is how long
 // the charge lasted. RUNTIME on the console lists the last eight boots.
@@ -4968,6 +5051,9 @@ void loop() {
         touchJustUp = false;
     }
     engine.loop();
+#if defined(CYD_GPS)
+    cydGpsTick(millis());
+#endif
     Lora::tick(now);   // nothing outside a SQUACH_LORA build
 #if SQUACH_LORA && defined(TWATCH_S3)
     twatchLoraBuzzTick(now);

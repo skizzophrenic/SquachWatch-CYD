@@ -14,6 +14,8 @@
 #include <cstring>
 #include <cstdarg>
 #include <chrono>
+#include <string>
+#include <vector>
 
 // ---- timing ---------------------------------------------------------
 // Wall-clock ms since this process started, so animations (Squachy's
@@ -152,6 +154,68 @@ struct SerialShim {
     int  availableForWrite() { return 256; }
 };
 inline SerialShim Serial;
+
+// ---- Serial1/Serial2: a GPS on a UART, replayed from a file -----------------
+// The cyd-gps loop reads Serial2 exactly as on the board. Here begin() loads
+// the NMEA file named by SQUACHSIM_NMEA (sim/gps_sample.nmea is one), split
+// into one-second bursts at blank lines: burst k becomes readable k seconds
+// after begin(), in virtual time or real time, whichever millis() runs on. At
+// the end of the file the replay stops, so the fix goes stale as it would if
+// the module were unplugged. With no variable or no file, nothing is ever
+// available.
+#ifndef SERIAL_8N1
+#define SERIAL_8N1 0x800001c
+#endif
+struct HardwareSerial {
+    std::string data;                 // the file, blank lines removed
+    std::vector<size_t> ends;         // where each burst ends in data
+    size_t   pos = 0;
+    uint32_t t0 = 0;
+    bool     loaded = false;
+    void begin(unsigned long baud, uint32_t config = 0, int8_t rx = -1, int8_t tx = -1) {
+        t0 = millis();
+        pos = 0;
+        if (loaded) return;
+        loaded = true;
+        const char* path = getenv("SQUACHSIM_NMEA");
+        FILE* f = path && *path ? fopen(path, "rb") : nullptr;
+        if (!f) {
+            fprintf(stderr, "[sim] serial %lu baud: %s\n", baud,
+                    path && *path ? "SQUACHSIM_NMEA file not found" : "no SQUACHSIM_NMEA");
+            return;
+        }
+        std::string line;
+        bool inBurst = false;
+        for (int c = fgetc(f); ; c = fgetc(f)) {
+            if (c == '\n' || c == EOF) {
+                while (!line.empty() && line.back() == '\r') line.pop_back();
+                if (line.empty()) {
+                    if (inBurst) { ends.push_back(data.size()); inBurst = false; }
+                } else {
+                    data += line; data += "\r\n"; inBurst = true;
+                }
+                line.clear();
+                if (c == EOF) break;
+            } else {
+                line += (char)c;
+            }
+        }
+        if (inBurst) ends.push_back(data.size());
+        fclose(f);
+        fprintf(stderr, "[sim] serial %lu baud: replaying %s, %u bursts\n", baud, path, (unsigned)ends.size());
+    }
+    void end() {}
+    int available() {
+        if (ends.empty()) return 0;
+        size_t k = (millis() - t0) / 1000 + 1;
+        if (k > ends.size()) k = ends.size();
+        const size_t upTo = ends[k - 1];
+        return upTo > pos ? (int)(upTo - pos) : 0;
+    }
+    int read() { return available() ? (uint8_t)data[pos++] : -1; }
+};
+inline HardwareSerial Serial1;
+inline HardwareSerial Serial2;
 
 // ESP32 core-clock control. The firmware's POWER SAVER menu calls this; on a
 // PC there is nothing to scale, so it records the request and does nothing.

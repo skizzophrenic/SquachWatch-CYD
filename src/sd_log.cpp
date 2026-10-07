@@ -3,6 +3,9 @@
 #include "frame_push.h"   // busLock(): the card shares the panel's bus
 #include "sd_row.h"
 #include "clock.h"
+#if defined(CYD_GPS)
+#include "gnss.h"
+#endif
 #include <SD.h>
 #if defined(FREENOVE_S3)
 // The Freenove S3's slot is wired for SDMMC, not SPI: every card call in this
@@ -205,9 +208,17 @@ void SdLog::logEvent(const Detection& d) {
         return;
     }
     char line[SdRow::ROW_MAX];
+#if defined(CYD_GPS)
+    // Where the board is now. The queue drains on the loop task within a
+    // frame or two of the detection, so this is where it was seen.
+    SdRow::line(line, sizeof(line), d,
+                Clock::trusted() ? Clock::nowEpoch() : 0, millis(),
+                &Gnss::fix(), Gnss::faked(), millis());
+#else
     SdRow::line(line, sizeof(line), d,
                 Clock::trusted() ? Clock::nowEpoch() : 0, millis(),
                 nullptr, false, 0);
+#endif
     f.print(line);
     f.close();
     FramePush::busUnlock();

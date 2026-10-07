@@ -53,8 +53,10 @@ CXX      ?= g++
 # makes <TFT_eSPI.h>, <Arduino.h> and <Preferences.h> resolve to the
 # shims here rather than to an ESP32 core that isn't installed.
 EXTRA_CXXFLAGS ?=
+# CYD_GPS: both binaries are a cyd-gps build. squachsim-live reads its GPS
+# from the NMEA file named by SQUACHSIM_NMEA (sim/gps_sample.nmea is one).
 CXXFLAGS := -std=c++17 -O1 -g -Wall -Wno-unused-parameter $(EXTRA_CXXFLAGS) \
-            -I$(SIM_DIR) -I$(INC) -DSQUACH_MESH=1
+            -I$(SIM_DIR) -I$(INC) -DSQUACH_MESH=1 -DCYD_GPS=1
 
 UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/squachy.cpp \
@@ -125,6 +127,8 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/frame_push.cpp \
             $(SRC)/frame_prof.cpp \
             $(SRC)/fast_sprite.cpp \
+            $(SRC)/gnss.cpp \
+            $(SRC)/sd_row.cpp \
             $(SIM_DIR)/ota_sim.cpp
 
 # touch_cal.cpp for the touchcal screen, which runs the real calibration flow
