@@ -18,7 +18,7 @@
 namespace SdRow {
 
 // The buffer a caller gives line().
-constexpr size_t LINE_MAX = 144;
+constexpr size_t ROW_MAX = 144;
 
 // "/squachwatch-YYYYMMDD.log" for a local day number (days since 1970), or
 // "/squachwatch-nodate.log" for 0. False if it did not fit.
@@ -26,7 +26,7 @@ bool fileName(char* out, size_t n, uint32_t localDay);
 
 // Signed decimal degrees from degrees x 10^7, with `decimals` places (1..7).
 // Integer arithmetic only. Returns the length written.
-int degrees(char* out, size_t n, int32_t v7, uint8_t decimals);
+int degreesText(char* out, size_t n, int32_t v7, uint8_t decimals);
 
 // One CSV row with its newline. utcEpoch 0 writes `ms` in the first column.
 // fix null writes no position columns; otherwise three, filled only when the

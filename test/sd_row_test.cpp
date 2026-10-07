@@ -37,7 +37,7 @@ static int commas(const char* s) {
 }
 
 int main() {
-    char row[SdRow::LINE_MAX];
+    char row[SdRow::ROW_MAX];
     const Detection d = sample();
 
     suite("Seven columns without GPS");
