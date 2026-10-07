@@ -1,4 +1,4 @@
-// SquachWatch-CYD — wardriving's capture pieces, shared by the watch's flash
+// SquachWatch-CYD: wardriving's capture pieces, shared by the watch's flash
 // store (wardrive.cpp) and the CYD GPS builds' SD writer (wardrive_sd.cpp).
 // Internal: nothing outside those files and their tests includes it.
 #pragma once

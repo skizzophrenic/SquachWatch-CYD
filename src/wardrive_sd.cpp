@@ -1,4 +1,4 @@
-// SquachWatch-CYD — wardriving on the CYD GPS builds: the same capture as the
+// SquachWatch-CYD: wardriving on the CYD GPS builds, with the same capture as the
 // watch, written straight to the SD card as a WiGLE file. See wardrive.h.
 //
 // The CYD has little heap to spare with a card mounted (26 KB free, a 10.7 KB

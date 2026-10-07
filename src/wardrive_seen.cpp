@@ -1,4 +1,4 @@
-// SquachWatch-CYD — the CYD GPS builds' repeat table: which devices already
+// SquachWatch-CYD: the CYD GPS builds' repeat table, for which devices already
 // have a recent row from about here. See wardrive_capture.h.
 //
 // 256 entries, searched in full, since a CYD hears far fewer devices a minute

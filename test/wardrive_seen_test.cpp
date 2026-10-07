@@ -1,4 +1,4 @@
-// SquachWatch-CYD — the CYD GPS builds' repeat table, src/wardrive_seen.cpp.
+// SquachWatch-CYD: the CYD GPS builds' repeat table, src/wardrive_seen.cpp.
 //
 // What this guards: without it, a driver parked beside a cafe could upload
 // hundreds of copies of the cafe's network, or a board that has passed 256
