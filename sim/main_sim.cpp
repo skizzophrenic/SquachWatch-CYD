@@ -53,6 +53,7 @@
 #include "ignore_list.h"
 #include "ui_colorcheck.h"
 #include "ui_diagnostics.h"
+#include "gnss.h"
 #include "ui_desk.h"
 #include "ui_outfit.h"
 #include "ui_zone.h"
@@ -273,6 +274,17 @@ static int renderTouchCal(TFT_eSPI& tft, int W, int H, int skip, int want,
     return 0;
 }
 
+// One fix burst from sim/gps_sample.nmea, for --gps: satellites in view, a
+// GGA with a fix and an RMC with the date.
+static void gpsFeed(uint32_t nowMs) {
+    static const char* const BURST[] = {
+        "$GNGSV,1,1,04,02,45,120,24,05,30,210,29,12,60,045,34,15,20,300,39*67",
+        "$GNGGA,120000.000,3351.4000,S,15112.9000,E,1,08,1.2,25.3,M,22.1,M,,*6D",
+        "$GNRMC,120000.000,A,3351.4000,S,15112.9000,E,0.12,85.3,061026,,,A*6F",
+    };
+    for (const char* line : BURST) Gnss::sentence(line, nowMs);
+}
+
 static void usage() {
     fprintf(stderr,
         "usage: squachsim <screen> [out.png] [options]\n"
@@ -292,6 +304,8 @@ static void usage() {
         "  --alert N         DetectionType the ALERT screen fires on\n"
         "  --first / --night / --lastfree   the ALERT card's banners\n"
         "  --noseed          no detections at all -- CLEAR's idle state\n"
+        "  --gps             a fresh GPS fix: CLEAR's GPS label, DIAGNOSTICS' GPS lines,\n"
+        "                    the ALERT card's place\n"
         "  --pet N           companion: 0 off, 1 VAPOR SHAGGY, 2 the yeti\n"
         "  --peer N          draw a visiting SquachMesh peer in outfit N\n"
         "  --peername NAME   give that visitor a custom name\n"
@@ -346,6 +360,9 @@ int main(int argc, char** argv) {
     // and with detections always seeded the emulator could not render
     // the idle one at all. Same gap --alert filled from the other side.
     bool noSeed = false;
+    // --gps: a fresh fix from the sample file's sentences, fed just before
+    // each captured frame, so CLEAR, DIAGNOSTICS and ALERT show it.
+    bool gps = false;
     // SPIKE: --peer N draws a visiting Squachy in outfit N beside our own,
     // both at SMALL. No radio involved -- the point is to find out whether
     // two of him fit and whether the renderer survives being called twice.
@@ -389,6 +406,7 @@ int main(int argc, char** argv) {
         else if (a == "--night") alertNight = true;
         else if (a == "--lastfree") alertLastFree = true;
         else if (a == "--noseed") noSeed = true;
+        else if (a == "--gps") gps = true;
         else if (a == "--peer" && i + 1 < argc) peerOutfit = atoi(argv[++i]);
         else if (a == "--peername" && i + 1 < argc) peerName = argv[++i];
         else if (a == "--crowd" && i + 1 < argc) crowdN = atoi(argv[++i]);
@@ -737,6 +755,16 @@ int main(int argc, char** argv) {
             info.resetReason = "POWERON_RESET";
             info.boardName = "cyd";
             info.usingCapTouch = false;
+            if (gps) {
+                const Gnss::Fix& f = Gnss::fix();
+                const Gnss::Sky k = Gnss::sky();
+                info.gpsShown = true;
+                info.gpsGood = Gnss::good(); info.gpsBad = Gnss::bad();
+                info.view = k.view; info.heard = k.heard; info.used = f.used;
+                info.accM = f.accM; info.lat7 = f.lat7; info.lon7 = f.lon7;
+                info.fixAgeMs = f.atMs ? t - f.atMs : UINT32_MAX;
+                info.fresh = Gnss::fresh(t); info.faked = Gnss::faked();
+            }
             uiDiagnosticsTick(frame, t, engine, info);
         }
         else if (screen == "boot")     uiBootTick(frame, t);
@@ -1068,6 +1096,10 @@ int main(int argc, char** argv) {
         }
         if (!d) { fprintf(stderr, "no seeded detection to alert on\n"); return 1; }
         uiAlertInit(frame, *d);
+        if (gps) {
+            gpsFeed(now);
+            uiAlertSetPlace(true, Gnss::fix().lat7, Gnss::fix().lon7, false);
+        }
         // The banners, the way main.cpp sets them: after init, which clears them.
         if (alertFirst)    uiAlertSetFirst(true);
         if (alertNight)    uiAlertSetNight(true);
@@ -1181,6 +1213,7 @@ int main(int argc, char** argv) {
         const uint32_t sNow = now + (uint32_t)(frames + s) * STEP_MS;
         grabStep();
         throwStep(s, sNow);
+        if (gps) gpsFeed(sNow);
         tick(sNow);
         // --tap frame numbers run straight on through the capture, so a tap
         // can land on a frame you can actually look at afterwards.
