@@ -39,7 +39,7 @@ namespace {
 // The scanner's SCAN_FLUSH_BLOCK_B in detection.cpp: wardriving gives way at
 // the point where detection starts fighting for heap.
 const uint32_t PAUSE_BLOCK_B = 8192;
-const uint16_t ROWS_B   = 1024;     // the row buffer
+const uint16_t ROWS_B   = 512;      // the row buffer, about three rows
 const uint16_t ROW_MAX  = 320;      // one csvRow() always fits in this
 const uint32_t FLUSH_MS = 2000;     // the longest a row waits for the card
 const uint32_t RETRY_MS = 5000;     // after a failed allocation

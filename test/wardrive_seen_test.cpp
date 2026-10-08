@@ -1,8 +1,8 @@
 // SquachWatch-CYD: the CYD GPS builds' repeat table, src/wardrive_seen.cpp.
 //
 // What this guards: without it, a driver parked beside a cafe could upload
-// hundreds of copies of the cafe's network, or a board that has passed 256
-// devices could stop recording anything new.
+// hundreds of copies of the cafe's network, or a board whose table is full
+// could stop recording anything new.
 #include "wardrive_capture.h"
 #include "wardrive.h"
 #include "test_util.h"
@@ -10,6 +10,8 @@
 using Wardrive::Seen;
 using Wardrive::SeenTable;
 using Wardrive::seenWorthWriting;
+
+static const uint32_t N_SEEN = (uint32_t)SeenTable::BLOCKS * SeenTable::PER;
 
 static void mac(uint8_t* m, uint32_t k) { m[0] = 0x02; m[1] = 0xAA; m[2] = (uint8_t)(k >> 24); m[3] = (uint8_t)(k >> 16); m[4] = (uint8_t)(k >> 8); m[5] = (uint8_t)k; }
 
@@ -43,16 +45,16 @@ int main() {
     suite("A full table");
     fresh(t);
     int first = 0, again = 0;
-    for (uint32_t k = 0; k < 256; k++) { mac(m, 1000 + k); first += seenWorthWriting(t, W, m, LA, LO, T0 + k) ? 1 : 0; }
-    for (uint32_t k = 0; k < 256; k++) { mac(m, 1000 + k); again += seenWorthWriting(t, W, m, LA, LO, T0 + 260) ? 1 : 0; }
-    ck("256 devices: 256 rows", first == 256);
-    ck("all 256 heard again at once: no rows", again == 0);
+    for (uint32_t k = 0; k < N_SEEN; k++) { mac(m, 1000 + k); first += seenWorthWriting(t, W, m, LA, LO, T0 + k) ? 1 : 0; }
+    for (uint32_t k = 0; k < N_SEEN; k++) { mac(m, 1000 + k); again += seenWorthWriting(t, W, m, LA, LO, T0 + 260) ? 1 : 0; }
+    ck("a full table of devices: one row each", first == N_SEEN);
+    ck("all of them heard again at once: no rows", again == 0);
 
-    suite("Past 256, the oldest goes");
+    suite("Past a full table, the oldest goes");
     // Device 1000 was written at T0, 1001 at T0 + 1: the oldest two. The
     // second pass did not move them, since it wrote nothing.
     mac(m, 5000);
-    ck("a 257th device: a row", seenWorthWriting(t, W, m, LA, LO, T0 + 270));
+    ck("one more device: a row", seenWorthWriting(t, W, m, LA, LO, T0 + 270));
     mac(m, 1001);
     ck("the second-oldest heard again: still no row", !seenWorthWriting(t, W, m, LA, LO, T0 + 271));
     mac(m, 1000);

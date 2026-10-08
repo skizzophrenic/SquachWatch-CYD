@@ -20,7 +20,13 @@ struct Pending {
     uint8_t nameLen;
     char    name[32];
 };
+// Drained on every pass of loop(), about 38 a second, so a CYD with its
+// heap measured at 5.6 KB largest block keeps 8 of each; the watch keeps 32.
+#if defined(CYD_GPS)
+const uint8_t QN = 8;
+#else
 const uint8_t QN = 32;
+#endif
 struct Q {
     Pending item[QN];
     volatile uint8_t head = 0, tail = 0;
@@ -58,12 +64,14 @@ inline float metres(int32_t la1, int32_t lo1, int32_t la2, int32_t lo2) {
     return sqrtf(dx * dx + dy * dy);
 }
 
-// The CYD GPS builds' table: 256 entries in four blocks of 64 (1,280 bytes
+// The CYD GPS builds' table: 128 entries in two blocks of 64 (1,280 bytes
 // each). On the user's CYD with a card mounted the largest free block was
-// 10,740 bytes, so no single wardrive allocation goes over about 1.5 KB.
-// When all 256 are in use, the entry written longest ago is replaced.
+// 10,740 bytes, and 256 entries with 32-deep queues left it at 5,620 with
+// wardriving on, under the pause line. No single wardrive allocation goes
+// over about 1.5 KB. When all 128 are in use, the entry written longest ago
+// is replaced.
 struct SeenTable {
-    static const uint8_t  BLOCKS = 4;
+    static const uint8_t  BLOCKS = 2;
     static const uint16_t PER = 64;
     Seen* block[BLOCKS];
 };
