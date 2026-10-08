@@ -160,7 +160,7 @@ bool DetectionEngine::watchHitPending() { bool f = _watchHitFlag; _watchHitFlag 
 void DetectionEngine::checkWatchBle(const uint8_t* mac, int8_t rssi) {
     if (mac && isWatched(mac, true)) recordWatchRssi(rssi);
 }
-void DetectionEngine::checkWatchWifi(const uint8_t*, int8_t) {}
+void DetectionEngine::checkWatchWifi(const uint8_t*, int8_t, uint8_t) {}
 void DetectionEngine::recordWatchRssi(int8_t rssi) {
     _watchRssiHist[_watchRssiHead] = rssi;
     _watchRssiHead = (uint8_t)((_watchRssiHead + 1) % WATCH_RSSI_CAP);
@@ -191,7 +191,7 @@ void DetectionEngine::checkHuntBle(const uint8_t* mac, int8_t rssi) {
     if (_huntKind != WatchKind::BLE || memcmp(mac, _huntMac, 6) != 0) return;
     recordHuntRssi(rssi);
 }
-void DetectionEngine::checkHuntWifi(const uint8_t*, int8_t) {}
+void DetectionEngine::checkHuntWifi(const uint8_t*, int8_t, uint8_t) {}
 void DetectionEngine::recordHuntRssi(int8_t rssi) {
     _huntRssiHist[_huntRssiHead] = rssi;
     _huntRssiHead = (uint8_t)((_huntRssiHead + 1) % WATCH_RSSI_CAP);

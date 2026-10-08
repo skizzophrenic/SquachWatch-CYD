@@ -27,7 +27,7 @@
 // of mistake as the backlight pins in main.cpp, and silent in the same way:
 // the light would simply never come on, which reads as "this board has no
 // status LED" rather than as a bug.
-#if defined(ESP32) && !defined(CYD35) && !defined(AWOK) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(NM_CYD_C5)
+#if defined(ESP32) && !defined(AWOK) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(NM_CYD_C5)
 #define STATUS_LIGHT_HW 1
 #elif defined(FREENOVE_S3) || defined(NM_CYD_C5)
 #define STATUS_LIGHT_HW 2
@@ -43,8 +43,11 @@ namespace StatusLight {
 // enable. Red on 4 would have switched the amp with every breath of the light.
 // Pins from PR #7 (DevOpsDAdams), checked against Freenove's schematic.
 static const int     PIN_R = 22, PIN_G = 16, PIN_B = 17;
+#elif defined(CYD35)
+// The 3.5" Sunton CYD (ESP32-3248S035): Red 4, Green 17, Blue 16 (common anode)
+static const int     PIN_R = 4,  PIN_G = 17, PIN_B = 16;
 #else
-static const int     PIN_R = 4, PIN_G = 16, PIN_B = 17;
+static const int     PIN_R = 4,  PIN_G = 16, PIN_B = 17;
 #endif
 static const uint8_t CH_R  = 3, CH_G  = 4,  CH_B  = 5;
 #if STATUS_LIGHT_HW == 2
