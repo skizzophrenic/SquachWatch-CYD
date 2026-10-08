@@ -79,10 +79,14 @@ bool cardPresent(bool mounted) { return mounted; }
 
 bool writeOut(const char* path, const char* buf, size_t len) {
     FramePush::busLock();
+    // Asked before the open: on core 2.0.14 a file that FILE_APPEND creates
+    // reports a size() left over from the failed stat(), so the first file on
+    // the user's board went out with no header and WiGLE would refuse it.
+    const bool fresh = !SD.exists(path);
     File f = SD.open(path, FILE_APPEND);
     if (!f) { FramePush::busUnlock(); return false; }
     bool ok = true;
-    if (f.size() == 0) {
+    if (fresh) {
         char h[512];
         const size_t n = headerLines(h, sizeof h, FIRMWARE_VERSION, SQW_ENV, "ESP32-2432S028R", "Sunton");
         ok = n && f.write((const uint8_t*)h, n) == n;
