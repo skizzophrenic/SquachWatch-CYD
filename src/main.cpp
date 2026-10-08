@@ -2156,6 +2156,10 @@ volatile bool g_consoleAdc = false;     // ADC: the spare analog inputs, for fin
 volatile bool g_consoleXyzzy = false;   // XYZZY: the TERMINAL background types the magic word now
 volatile bool g_consoleClippy = false;    // CLIPPY: unlock C1iPPY, for the bench
 volatile bool g_consoleToaster = false;   // TOASTER: unlock T0@$TY, for the bench
+volatile bool g_consoleBall    = false;   // BALL: unlock the ball and chain as a pet, for the bench
+volatile bool g_consolePet     = false;   // PET: the next earned pet, as the Settings row would
+volatile bool g_consoleJail = false;      // JAIL: the arrest, for the bench
+volatile bool g_consoleFree = false;      // FREE: time served, now
 volatile uint8_t g_consoleHeadsUp = 0;   // HEADSUP n: tell the squad about a made-up catch of type n, for the bench
 volatile bool g_consoleLegend = false;  // LEGEND: wear the Legend look (and its aura) until the next boot, or take it off
 volatile bool g_consoleOutfitSet = false;  // OUTFIT n: wear costume n until the next boot, for timing it; -1 takes it off
@@ -3491,6 +3495,9 @@ static void printBootBanner() {
 static void wardriveBegin();
 #endif
 void setup() {
+#if defined(ARDUINO_ARCH_ESP32) && !defined(CROWPANEL7)
+    g_frameSprite = &frame;
+#endif
     // Before anything else can allocate: the breadcrumb has to be read out
     // while it is still the previous life's, not this one's.
     crashReportInit();
@@ -5313,6 +5320,18 @@ void loop() {
         Squachy::unlockClippy("It looks like you're having trouble typing.");
         Serial.println("[pet] C1iPPY unlocked and put on");
     }
+    if (g_consoleJail) {
+        g_consoleJail = false;
+        Pet::arrest(millis());
+        Serial.println("[jail] arrested: ten minutes");
+    }
+    if (g_consoleFree) {
+        g_consoleFree = false;
+        Squachy::jailFree();
+        Serial.println("[jail] time served");
+    }
+    if (g_consoleBall) { g_consoleBall = false; Squachy::unlockBall(); Serial.println("[pet] ball and chain unlocked"); }
+    if (g_consolePet)  { g_consolePet = false; Squachy::cyclePet(); Serial.printf("[pet] now %s\n", Squachy::petName()); }
     if (g_consoleToaster) {
         g_consoleToaster = false;
         Squachy::unlockToaster("Reporting for duty. I'm not scared.");
@@ -7093,8 +7112,16 @@ void loop() {
                             break;
                         case SettingsRow::SHADES_COLOR: Squachy::cycleShadesColor(); break;
                         case SettingsRow::SQUACHY_SIZE: Settings::cycleSquachySize(); break;
-                        case SettingsRow::OUTFIT:       enterOutfit(); break;
-                        case SettingsRow::PET:          Squachy::cyclePet(); break;
+                        case SettingsRow::OUTFIT:
+                        case SettingsRow::PET:
+                            if (Squachy::jailed()) {
+                                const uint32_t left = (Squachy::jailLeftMs() + 999) / 1000;
+                                char b[24];
+                                snprintf(b, sizeof(b), "%u:%02u left. Behave.", (unsigned)(left / 60), (unsigned)(left % 60));
+                                Theme::showToast("SERVING TIME", b, Theme::AMBER, 2500);
+                            } else if (row == SettingsRow::OUTFIT) enterOutfit();
+                            else Squachy::cyclePet();
+                            break;
                         case SettingsRow::BANTER:       Settings::cycleBanter(); break;
                         case SettingsRow::VIEW_DIARY:   enterDiary(); break;
                         case SettingsRow::BINGO:        enterBingo(); break;

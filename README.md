@@ -399,13 +399,14 @@ one board by hand, then UPDATE SQUAD from it.
 
 ## Every outfit
 
-Squachy has eighteen costumes. Most are earned by detection count; nine are
+Squachy has nineteen costumes. Most are earned by detection count; ten are
 hidden behind things nobody tells you about, on the background they belong
-to. Two of them are in the animation at the top of this page.
+to, and one of those is a punishment rather than a prize. Two of them are
+in the animation at the top of this page.
 
 <p align="center">
   <img src="docs/outfits.png" width="880"
-       alt="All eighteen of Squachy's outfits, rendered by the firmware">
+       alt="All nineteen of Squachy's outfits, rendered by the firmware">
 </p>
 
 No fabricated marketing shots, which was the promise here before there was

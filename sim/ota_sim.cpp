@@ -31,6 +31,13 @@ const char* failWords(Fail f) {
     switch (f) {
         case Fail::WIFI_PASSWORD: return "Couldn't join that WiFi network. Check the password and try again.";
         case Fail::CANCELLED:     return "Cancelled. Nothing was changed.";
+        // The reasons a fetch from the site can fail, as the board words them.
+        case Fail::NO_SITE:       return "Joined WiFi, but couldn't connect to squachwatch.com. Is this network online?";
+        case Fail::SIGN_IN:       return "This WiFi wants you to sign in first. Do that on your phone, then try again.";
+        case Fail::NET_BLOCKED:   return "This network blocks squachwatch.com. Try a phone hotspot or the USB flasher.";
+        case Fail::SITE_SLOW:     return "squachwatch.com didn't answer in time. Try again in a minute.";
+        case Fail::SITE_DOWN:     return "squachwatch.com is having trouble. Try again later.";
+        case Fail::HTTPS_ONLY:    return "squachwatch.com wants a secure link this board can't make. Use the USB flasher.";
         default:                  return "Something went wrong. Nothing was changed.";
     }
 }
@@ -144,7 +151,9 @@ void tick(uint32_t now) {
     switch (s_state) {
         case State::SCANNING:    if (e > 1500) s_state = State::PICK; break;
         case State::CONNECTING:  if (e > 2000) { if (s_badPass) s_state = State::FAILED; else { s_state = State::CHECKING; s_t0 = now; } } break;
-        case State::CHECKING:    if (e > 2000) s_state = State::READY; break;
+        // SQUACHSIM_OTAFAIL=N: the check fails with Fail N (see ota_core.h),
+        // for filming the new failure screens.
+        case State::CHECKING:    if (e > 2000) s_state = getenv("SQUACHSIM_OTAFAIL") ? State::FAILED : State::READY; break;
         case State::DOWNLOADING: if (e > 8000) { s_state = State::VERIFYING; s_t0 = now; } break;
         case State::VERIFYING:   if (e > 1500) { s_state = State::DONE; s_t0 = now; } break;
         case State::DONE:        if (e > 3000) s_state = State::OFF; break;
@@ -217,6 +226,15 @@ uint8_t percent() {
     const uint32_t x = bytesExpected();
     return x ? (uint8_t)((uint64_t)bytesReceived() * 100 / x) : 0;
 }
-const char* failureText() { return OtaCore::failWords(OtaCore::Fail::WIFI_PASSWORD); }
+const char* failureText() {
+    static char buf[160];
+    if (const char* f = getenv("SQUACHSIM_OTAFAIL")) {
+        // The detail the board appends, in brackets, as ota_wifi.cpp does.
+        const char* why = getenv("SQUACHSIM_OTAWHY");
+        snprintf(buf, sizeof buf, "%s%s%s%s", OtaCore::failWords((OtaCore::Fail)atoi(f)), why ? " (" : "", why ? why : "", why ? ")" : "");
+        return buf;
+    }
+    return OtaCore::failWords(OtaCore::Fail::WIFI_PASSWORD);
+}
 
 }  // namespace OtaWifi

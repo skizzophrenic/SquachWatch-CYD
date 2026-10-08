@@ -52,6 +52,7 @@ EM_JS(void, squachsim_nvs_write, (const char* key, const char* val), {
 #include "sim_touch.h"
 #include "sim_detections.h"
 #include "meshsim.h"
+#include "squachy.h"
 
 // Defined by the firmware's main.cpp, which this target compiles.
 void setup();
@@ -60,6 +61,7 @@ extern TFT_eSPI tft;
 extern AppState state;
 extern uint8_t  screenRotation;
 extern DetectionEngine engine;
+extern volatile bool g_consoleRotate;
 
 // pollTouch()'s XPT2046 defaults. Static inside main.cpp, but the
 // Preferences shim starts empty in the browser so loadOrDefaultCal()
@@ -123,6 +125,18 @@ EMSCRIPTEN_KEEPALIVE void sw_step(int n) {
     }
 }
 
+// One loop() iteration that moves the clock on by the REAL time since the
+// last one, for a host that cannot keep up with the device's 33 fps (a
+// slow phone manages about 22): the board's animations already scale to
+// elapsed time, so this keeps Squachy at the board's speed, just with fewer
+// frames. Capped so a backgrounded page does not come back a minute ahead.
+EMSCRIPTEN_KEEPALIVE void sw_step_ms(int ms) {
+    if (ms < 1) ms = 1;
+    if (ms > 100) ms = 100;
+    SimClock::nowMs += (uint32_t)ms;
+    loop();
+}
+
 // Converts the sprite's RGB565 to RGBA and returns the buffer address.
 // Sized on every call because a rotation changes the geometry.
 EMSCRIPTEN_KEEPALIVE uint8_t* sw_frame() {
@@ -177,6 +191,36 @@ EMSCRIPTEN_KEEPALIVE const char* sw_det_catalog() { return simProfileCatalog(); 
 EMSCRIPTEN_KEEPALIVE int         sw_mesh(const char* cmd) { return MeshSim::command(cmd) ? 1 : 0; }
 EMSCRIPTEN_KEEPALIVE const char* sw_mesh_status()        { return MeshSim::status(); }
 EMSCRIPTEN_KEEPALIVE const char* sw_mesh_catalog()       { return MeshSim::catalog(); }
+
+// For a host that is not a 320x240 board -- the phone app. Call before
+// sw_setup(): `w` x `h` is the panel's landscape shape (w >= h), and from
+// then on the rotate icon swaps the two sides the way a real panel does.
+// Every screen already composes itself against tft.width()/height(), the
+// same property the native emulator's --size leans on. The web page never
+// calls this, so it keeps the board's own 320x240 and its fixed landscape.
+EMSCRIPTEN_KEEPALIVE void sw_panel(int w, int h) {
+    if (w < h) { const int t = w; w = h; h = t; }
+    if (h >= 64 && w <= 1024) tft = TFT_eSPI(w, h);
+    TFT_eSPI::rotates = true;
+}
+
+// The firmware's own rotate path (the console ROTATE command), so the
+// frame buffer, the saved rotation and Squachy's reaction all happen as
+// they do for a tap on the icon.
+EMSCRIPTEN_KEEPALIVE void sw_rotate() { g_consoleRotate = true; }
+
+// A line from the host, said once in his bubble: the phone app's status and
+// setup lines ("Let me use Bluetooth?"). Copied, because say() keeps the
+// pointer for as long as the bubble is up and JS strings do not outlive the
+// call.
+EMSCRIPTEN_KEEPALIVE void sw_say(const char* text) {
+    static char line[96];
+    if (!text) return;
+    size_t i = 0;
+    for (; i < sizeof line - 1 && text[i]; i++) line[i] = text[i];
+    line[i] = 0;
+    Squachy::announce(line);
+}
 
 EMSCRIPTEN_KEEPALIVE int sw_state()    { return (int)state; }
 EMSCRIPTEN_KEEPALIVE int sw_rotation() { return (int)screenRotation; }

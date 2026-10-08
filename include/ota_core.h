@@ -47,6 +47,13 @@ enum class Fail : uint8_t {
     NOT_SIGNED,
     LOW_MEMORY,
     TOO_OLD,
+    // What a WiFi update ran into on the way to squachwatch.com (2026-10-06).
+    // NO_SITE above is now only "no connection at all".
+    SIGN_IN,        // a hotel/school/guest network's sign-in page answered instead
+    NET_BLOCKED,    // the network refused, or answered with something not ours
+    SITE_SLOW,      // connected, but no reply in time
+    SITE_DOWN,      // the site answered with a server error
+    HTTPS_ONLY,     // the site now redirects to https, which this board cannot follow
 };
 
 // What to tell a person, in words they can act on.

@@ -8,7 +8,6 @@
 #include "clock.h"
 #include <Arduino.h>
 #include <WiFi.h>
-#include <HTTPClient.h>
 #include <Preferences.h>
 #include <esp_heap_caps.h>
 #include <string.h>
@@ -54,6 +53,10 @@ uint8_t s_sig[80];
 uint8_t s_sigLen = 0;
 
 TaskHandle_t s_task       = nullptr;
+// What the last fetch from the site ran into, in a few words: shown after the
+// failure's own sentence and printed to the log, so a person reporting "it
+// won't update" can say which of the ways it was.
+char    s_why[28]   = "";
 
 void key(char* out, const char* k, uint8_t i) { snprintf(out, 4, "%s%u", k, (unsigned)i); }
 
@@ -142,7 +145,8 @@ void fail(Fail f) {
     if (s_cancel) return;
     s_fail  = f;
     s_state = State::FAILED;
-    Serial.printf("[ota] wifi update stopped: %s\n", OtaCore::failWords(f));
+    Serial.printf("[ota] wifi update stopped: %s%s%s%s\n", OtaCore::failWords(f),
+                  s_why[0] ? " (" : "", s_why, s_why[0] ? ")" : "");
 }
 
 void startScan() {
@@ -206,32 +210,261 @@ WiFiClient* client() {
     return s_plain;
 }
 
-// A small file into `out`. Returns the HTTP status, or a negative number when
-// nothing came back at all.
-int getSmall(const String& file, uint8_t* out, size_t cap, size_t& len) {
+// ---- Talking to the site ----------------------------------------------------
+//
+// One GET on a bare WiFiClient, written here (2026-10-06). Arduino's
+// HTTPClient did this before, and every way a fetch could go wrong reached
+// the screen as the same "couldn't reach squachwatch.com": a hotel's sign-in
+// page, a router's filter, a name lookup that failed and a slow minute all
+// looked alike, and people who hit one had nothing to go on. This one tells
+// them apart, knocks again when the trouble might pass, and reaches the site
+// by its fixed addresses when the router cannot look the name up. It is also
+// about 9 KB smaller than HTTPClient was.
+//
+// It understands what GitHub Pages sends: a status line, headers with a
+// Content-Length, then the body, and the connection closed when asked.
+
+enum class Got : uint8_t { OK, NO_CONNECT, NO_ANSWER, SIGN_IN, HTTPS_ONLY, BLOCKED, MISSING, SITE_TROUBLE };
+
+struct Reply {
+    Got     got    = Got::NO_CONNECT;
+    int     code   = 0;     // the HTTP status, 0 when none came back
+    int32_t length = -1;    // Content-Length, -1 when the reply had none
+};
+
+// squachwatch.com is served by GitHub Pages, whose four addresses are
+// published and have not changed since 2018. Used only when the router's name
+// lookup fails -- broken, filtered or very slow -- and only for the real site.
+const uint8_t PAGES_IP[4][4] = { {185, 199, 108, 153}, {185, 199, 109, 153},
+                                 {185, 199, 110, 153}, {185, 199, 111, 153} };
+const char*   SITE_HOST = "squachwatch.com";
+
+// OTA_WIFI_BASE taken apart once: "http://host[:port]/prefix/".
+char     s_host[48]   = "";
+uint16_t s_port       = 80;
+char     s_prefix[48] = "/";
+bool     s_noName     = false;   // the name lookup failed this session: go straight to the fixed addresses
+
+void parseBase() {
+    if (s_host[0]) return;
+    const char* b = OTA_WIFI_BASE;
+    if (strncmp(b, "http://", 7) == 0) b += 7;
+    const char* slash = strchr(b, '/');
+    const char* end   = slash ? slash : b + strlen(b);
+    const char* colon = (const char*)memchr(b, ':', (size_t)(end - b));
+    size_t n = (size_t)((colon ? colon : end) - b);
+    if (n >= sizeof s_host) n = sizeof s_host - 1;
+    memcpy(s_host, b, n);
+    s_host[n] = '\0';
+    if (colon) s_port = (uint16_t)strtoul(colon + 1, nullptr, 10);
+    if (slash) { strncpy(s_prefix, slash, sizeof s_prefix - 1); s_prefix[sizeof s_prefix - 1] = '\0'; }
+}
+
+// The site itself, with or without "www.".
+bool ourHost(const char* h, size_t n) {
+    if (n > 4 && strncasecmp(h, "www.", 4) == 0) { h += 4; n -= 4; }
+    return n == strlen(s_host) && strncasecmp(h, s_host, n) == 0;
+}
+
+// Everything inside `budgetMs`, apart from the name lookup itself, which
+// lwIP gives up to 15 s of its own. The boot check passes what is left of
+// its few seconds, so a bad network never holds the boot screen longer than
+// it did before.
+bool connectSite(WiFiClient& c, uint32_t budgetMs) {
+    const uint32_t t0 = millis();
+    IPAddress ip;
+    const bool literal = ip.fromString(s_host);
+#ifdef OTA_TEST_NO_DNS
+    if (!literal) s_noName = true;   // bench: pretend the router cannot look names up
+#endif
+    if (literal || !s_noName) {
+        if (literal || WiFi.hostByName(s_host, ip)) {
+            const uint32_t used = millis() - t0;
+            const uint32_t left = used + 1000 < budgetMs ? budgetMs - used : 1000;
+            if (c.connect(ip, s_port, (int32_t)(left > 8000 ? 8000 : left))) return true;
+            Serial.printf("[ota] %s (%s): no connection\n", s_host, ip.toString().c_str());
+            return false;
+        }
+        Serial.printf("[ota] name lookup for %s failed (asked %s, %s); trying its fixed addresses\n", s_host,
+                      WiFi.dnsIP(0).toString().c_str(), WiFi.dnsIP(1).toString().c_str());
+        s_noName = true;
+    }
+    if (strcmp(s_host, SITE_HOST) != 0) return false;
+    for (const auto& a : PAGES_IP) {
+        const uint32_t used = millis() - t0;
+        if (s_cancel || used + 1000 > budgetMs) return false;
+        const uint32_t left = budgetMs - used;
+        if (c.connect(IPAddress(a[0], a[1], a[2], a[3]), s_port, (int32_t)(left > 4000 ? 4000 : left))) {
+            Serial.printf("[ota] connected to %u.%u.%u.%u by fixed address\n", a[0], a[1], a[2], a[3]);
+            return true;
+        }
+    }
+    return false;
+}
+
+// One line of the reply without its CR LF; anything past `cap` is dropped.
+// False when nothing more came in time.
+bool readLine(WiFiClient& c, char* out, size_t cap, uint32_t timeoutMs) {
+    size_t n = 0;
+    uint32_t t0 = millis();
+    for (;;) {
+        if (c.available() > 0) {
+            const int ch = c.read();
+            if (ch < 0) continue;
+            t0 = millis();
+            if (ch == '\n') {
+                if (n && out[n - 1] == '\r') n--;
+                out[n] = '\0';
+                return true;
+            }
+            if (n < cap - 1) out[n++] = (char)ch;
+        } else if (!c.connected()) {
+            out[n] = '\0';
+            return n > 0;
+        } else if (millis() - t0 > timeoutMs || s_cancel) {
+            return false;
+        } else {
+            delay(5);
+        }
+    }
+}
+
+void noteWhy(const Reply& r) {
+    switch (r.got) {
+        case Got::OK:         s_why[0] = '\0'; return;
+        case Got::NO_CONNECT: snprintf(s_why, sizeof s_why, s_noName ? "name lookup failed" : "no connection"); return;
+        case Got::NO_ANSWER:  snprintf(s_why, sizeof s_why, r.code ? "reply cut short" : "no reply"); return;
+        default:
+            if (r.code) snprintf(s_why, sizeof s_why, "HTTP %d", r.code);
+            else        snprintf(s_why, sizeof s_why, "not a web reply");
+            return;
+    }
+}
+
+// Connects, asks for `file` and reads the status and headers; on OK the body
+// is waiting in `c`. A redirect back to the site itself is followed once.
+Reply get(WiFiClient& c, const char* file, uint32_t timeoutMs) {
+    parseBase();
+    Reply r;
+    char path[96];
+    snprintf(path, sizeof path, "%s%s", s_prefix, file);
+    for (int hop = 0; hop < 2; hop++) {
+        c.stop();
+        r = Reply();
+        if (!connectSite(c, timeoutMs > 20000 ? 20000 : timeoutMs)) { noteWhy(r); return r; }
+        const size_t sent = c.printf("GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: SquachWatch/%s\r\nConnection: close\r\n\r\n",
+                                     path, s_host, FIRMWARE_VERSION);
+        char line[128];
+        const uint32_t tw = millis();
+        if (!readLine(c, line, sizeof line, timeoutMs)) {
+            Serial.printf("[ota] %s: asked (%u bytes sent), nothing back in %lu ms, connected %d\n", file,
+                          (unsigned)sent, (unsigned long)(millis() - tw), c.connected() ? 1 : 0);
+            r.got = Got::NO_ANSWER; noteWhy(r); return r;
+        }
+        Serial.printf("[ota] %s: \"%s\" after %lu ms\n", file, line, (unsigned long)(millis() - tw));
+        if (strncmp(line, "HTTP/", 5) == 0) {
+            const char* sp = strchr(line, ' ');
+            if (sp) r.code = atoi(sp + 1);
+        }
+        bool html = false, chunked = false;
+        char loc[96] = "";
+        while (readLine(c, line, sizeof line, timeoutMs) && line[0]) {
+            if (strncasecmp(line, "Content-Length:", 15) == 0)          r.length = atol(line + 15);
+            else if (strncasecmp(line, "Content-Type:", 13) == 0)       html = strstr(line + 13, "html") != nullptr;
+            else if (strncasecmp(line, "Transfer-Encoding:", 18) == 0)  chunked = strstr(line + 18, "chunked") != nullptr;
+            else if (strncasecmp(line, "Location:", 9) == 0) {
+                const char* v = line + 9;
+                while (*v == ' ') v++;
+                strncpy(loc, v, sizeof loc - 1);
+                loc[sizeof loc - 1] = '\0';
+            }
+        }
+        const int code = r.code;
+        if (code == 0)            r.got = Got::BLOCKED;      // something answered, but not a web server
+        else if (code == 200)     r.got = html ? Got::SIGN_IN : (chunked ? Got::BLOCKED : Got::OK);
+        else if (code >= 300 && code < 400 && loc[0]) {
+            // Back to the site (www -> bare name, an old path) is followed;
+            // anywhere else is a network putting its own page in the way.
+            const char* p = loc;
+            bool https = false;
+            if (strncasecmp(p, "https://", 8) == 0)     { https = true; p += 8; }
+            else if (strncasecmp(p, "http://", 7) == 0) { p += 7; }
+            else if (*p == '/')                         { strncpy(path, p, sizeof path - 1); path[sizeof path - 1] = '\0'; continue; }
+            const size_t hn = strcspn(p, "/:");
+            if (!ourHost(p, hn))  r.got = Got::SIGN_IN;
+            else if (https)       r.got = Got::HTTPS_ONLY;
+            else {
+                const char* rest = strchr(p, '/');
+                strncpy(path, rest ? rest : "/", sizeof path - 1);
+                path[sizeof path - 1] = '\0';
+                Serial.printf("[ota] HTTP %d, following to %s\n", code, path);
+                continue;
+            }
+        }
+        else if (code == 401 || code == 407 || code == 511 || (code >= 300 && code < 400)) r.got = Got::SIGN_IN;
+        else if (code == 404)     r.got = Got::MISSING;
+        else if (code >= 500)     r.got = Got::SITE_TROUBLE;
+        else                      r.got = Got::BLOCKED;
+        if (r.got != Got::OK) Serial.printf("[ota] %s: HTTP %d%s%s%s\n", file, code, html ? ", a web page" : "",
+                                            loc[0] ? ", to " : "", loc);
+        noteWhy(r);
+        return r;
+    }
+    r.got = Got::BLOCKED;    // redirected round in a circle
+    noteWhy(r);
+    return r;
+}
+
+// get(), knocking again when the trouble might pass: no connection, no reply,
+// or the site's own server error. Not a sign-in page or a refusal -- those
+// will say the same thing a second later.
+Reply getTries(WiFiClient& c, const char* file, uint32_t timeoutMs, uint8_t tries) {
+    Reply r;
+    for (uint8_t i = 0; i < tries; i++) {
+        r = get(c, file, timeoutMs);
+        const bool again = r.got == Got::NO_CONNECT || r.got == Got::NO_ANSWER || r.got == Got::SITE_TROUBLE;
+        if (!again || s_cancel || i + 1 == tries) break;
+        Serial.printf("[ota] %s: %s, trying again\n", file, s_why);
+        c.stop();
+        delay(2000u * (i + 1));
+    }
+    return r;
+}
+
+Fail failFor(Got g) {
+    switch (g) {
+        case Got::SIGN_IN:      return Fail::SIGN_IN;
+        case Got::HTTPS_ONLY:   return Fail::HTTPS_ONLY;
+        case Got::BLOCKED:      return Fail::NET_BLOCKED;
+        case Got::NO_ANSWER:    return Fail::SITE_SLOW;
+        case Got::SITE_TROUBLE: return Fail::SITE_DOWN;
+        case Got::MISSING:      return Fail::NOT_SIGNED;
+        default:                return Fail::NO_SITE;
+    }
+}
+
+// A small file into `out`; OK only when all of it arrived.
+Reply getSmall(const char* file, uint8_t* out, size_t cap, size_t& len) {
     len = 0;
-    HTTPClient http;
-    if (!http.begin(*client(), String(OTA_WIFI_BASE) + file)) return -1;
-    http.setTimeout(STALL_TIMEOUT_MS);
-    const int code = http.GET();
-    if (code == 200) {
-        WiFiClient* s = http.getStreamPtr();
-        const int total = http.getSize();
+    WiFiClient& c = *client();
+    Reply r = getTries(c, file, STALL_TIMEOUT_MS, 3);
+    if (r.got == Got::OK) {
         uint32_t t0 = millis();
-        while (len < cap && (total < 0 || (int)len < total) && millis() - t0 < STALL_TIMEOUT_MS) {
-            const int a = s->available();
+        while (len < cap && (r.length < 0 || (int32_t)len < r.length) && millis() - t0 < STALL_TIMEOUT_MS) {
+            const int a = c.available();
             if (a > 0) {
-                const int r = s->read(out + len, (size_t)a < cap - len ? (size_t)a : cap - len);
-                if (r > 0) { len += (size_t)r; t0 = millis(); }
-            } else if (!http.connected()) {
+                const int n = c.read(out + len, (size_t)a < cap - len ? (size_t)a : cap - len);
+                if (n > 0) { len += (size_t)n; t0 = millis(); }
+            } else if (!c.connected()) {
                 break;
             } else {
                 delay(5);
             }
         }
+        if (r.length >= 0 && (int32_t)len < r.length && len < cap) { r.got = Got::NO_ANSWER; noteWhy(r); }
     }
-    http.end();
-    return code;
+    c.stop();
+    return r;
 }
 
 // Pulls "version": "1.7.2" out of a flasher manifest without a JSON library.
@@ -330,7 +563,7 @@ bool join() {
         fail(st == WL_NO_SSID_AVAIL ? Fail::WIFI_NOT_FOUND : Fail::WIFI_PASSWORD);
         return false;
     }
-    Serial.printf("[ota] joined %s as %s\n", s_ssid, WiFi.localIP().toString().c_str());
+    Serial.printf("[ota] joined %s as %s, signal %d dBm\n", s_ssid, WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
     // The clock rides along: one NTP round trip while the radio is up anyway.
     Clock::syncWait(1500);
     if (s_save && !saveNetwork(s_ssid, s_pass))
@@ -345,20 +578,23 @@ bool check() {
                   (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     uint8_t body[1024];
     size_t  len = 0;
-    int code = getSmall(String("manifest-") + OtaCore::buildName() + ".json", body, sizeof body - 1, len);
-    if (code != 200) {
-        Serial.printf("[ota] manifest: HTTP %d\n", code);
-        fail(Fail::NO_SITE);
+    char file[48];
+    snprintf(file, sizeof file, "manifest-%s.json", OtaCore::buildName());
+    Reply r = getSmall(file, body, sizeof body - 1, len);
+    if (r.got != Got::OK) { fail(failFor(r.got)); return false; }
+    body[len] = '\0';
+    if (!parseVersion((const char*)body, s_latest, sizeof s_latest)) {
+        snprintf(s_why, sizeof s_why, "unreadable manifest");
+        fail(Fail::NET_BLOCKED);
         return false;
     }
-    body[len] = '\0';
-    if (!parseVersion((const char*)body, s_latest, sizeof s_latest)) { fail(Fail::NO_SITE); return false; }
 
-    code = getSmall(String(OtaCore::buildName()) + "-firmware.sig", s_sig, sizeof s_sig, len);
-    if (code == 404) { fail(Fail::NOT_SIGNED); return false; }
-    if (code != 200 || len < 8 || len >= sizeof s_sig) {
-        Serial.printf("[ota] signature: HTTP %d, %u bytes\n", code, (unsigned)len);
-        fail(code == 200 ? Fail::NOT_SIGNED : Fail::NO_SITE);
+    snprintf(file, sizeof file, "%s-firmware.sig", OtaCore::buildName());
+    r = getSmall(file, s_sig, sizeof s_sig, len);
+    if (r.got != Got::OK) { fail(failFor(r.got)); return false; }
+    if (len < 8 || len >= sizeof s_sig) {
+        Serial.printf("[ota] signature: %u bytes\n", (unsigned)len);
+        fail(Fail::NOT_SIGNED);
         return false;
     }
     s_sigLen = (uint8_t)len;
@@ -370,24 +606,22 @@ void download() {
     s_state = State::DOWNLOADING;
     s_downloadStarted = true;
     s_rx = 0;
-    HTTPClient http;
-    if (!http.begin(*client(), String(OTA_WIFI_BASE) + OtaCore::buildName() + "-firmware.bin")) {
-        fail(Fail::NO_SITE);
-        return;
-    }
-    http.setTimeout(STALL_TIMEOUT_MS);
+    WiFiClient& c = *client();
+    char file[48];
+    snprintf(file, sizeof file, "%s-firmware.bin", OtaCore::buildName());
         Serial.printf("[ota] heap before GET: %lu free, largest %lu\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-    const int code = http.GET();
-    const int size = http.getSize();
+    const Reply r = getTries(c, file, STALL_TIMEOUT_MS, 3);
+    const int size = (int)r.length;
         Serial.printf("[ota] heap after GET: %lu free, largest %lu\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-    if (code != 200 || size <= 0) {
-        Serial.printf("[ota] firmware: HTTP %d, size %d\n", code, size);
-        http.end();
-        fail(Fail::NO_SITE);
+    if (r.got != Got::OK || size <= 0) {
+        Serial.printf("[ota] firmware: HTTP %d, size %d\n", r.code, size);
+        c.stop();
+        if (r.got == Got::OK) snprintf(s_why, sizeof s_why, "no size given");
+        fail(r.got == Got::OK ? Fail::NET_BLOCKED : failFor(r.got));
         return;
     }
     Fail f = OtaCore::begin((uint32_t)size, s_sig, s_sigLen);
-    if (f != Fail::NONE) { http.end(); fail(f); return; }
+    if (f != Fail::NONE) { c.stop(); fail(f); return; }
     s_size = (uint32_t)size;
         Serial.printf("[ota] heap after ota begin: %lu free, largest %lu\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 
@@ -396,9 +630,9 @@ void download() {
         Serial.printf("[ota] no room for the download buffer: heap %lu largest %lu\n",
                       (unsigned long)ESP.getFreeHeap(),
                       (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-        http.end(); OtaCore::abort(); fail(Fail::LOW_MEMORY); return;
+        c.stop(); OtaCore::abort(); fail(Fail::LOW_MEMORY); return;
     }
-    WiFiClient* s = http.getStreamPtr();
+    WiFiClient* s = &c;
     uint32_t last = millis();
     // Every 256 KB, and at the end: how far, how fast, and how much room is
     // left. "The download stopped" on its own said nothing about which of
@@ -409,7 +643,7 @@ void download() {
     while (s_rx < s_size && !s_cancel && s_state == State::DOWNLOADING) {
         const int a = s->available();
         if (a <= 0) {
-            if (!http.connected())                 { why = "connection closed"; break; }
+            if (!c.connected())                    { why = "connection closed"; break; }
             if (millis() - last > STALL_TIMEOUT_MS) { why = "no data for 15 s";  break; }
             delay(5);
             continue;
@@ -438,15 +672,15 @@ void download() {
         const uint32_t el = millis() - t0;
         Serial.printf("[ota] download ended: %s at %lu/%lu after %lu ms (last data %lu ms ago), "
                       "connected %d, heap %lu largest %lu\n", why, (unsigned long)s_rx, (unsigned long)s_size,
-                      (unsigned long)el, (unsigned long)(millis() - last), http.connected() ? 1 : 0,
+                      (unsigned long)el, (unsigned long)(millis() - last), c.connected() ? 1 : 0,
                       (unsigned long)ESP.getFreeHeap(),
                       (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     }
     free(buf);
-    http.end();
+    c.stop();
 
     if (s_cancel || s_state == State::FAILED) { OtaCore::abort(); return; }
-    if (s_rx != s_size) { OtaCore::abort(); fail(Fail::TIMEOUT); return; }
+    if (s_rx != s_size) { OtaCore::abort(); snprintf(s_why, sizeof s_why, "%s", why); fail(Fail::TIMEOUT); return; }
 
     s_state = State::VERIFYING;
     f = OtaCore::finish();
@@ -456,6 +690,8 @@ void download() {
 }
 
 void run(void*) {
+    s_why[0] = '\0';
+    s_noName = false;
     WiFi.scanDelete();
     Clock::syncStop();
     WiFi.disconnect(false, false);
@@ -780,7 +1016,7 @@ bool bootCheck(uint32_t budgetMs) {
     else if (st == WL_CONNECT_FAILED) setResult((int8_t)pick, SavedResult::BAD_PASSWORD);
     bool found = false;
     if (st == WL_CONNECTED) {
-        Serial.printf("[ota] boot check: joined in %lu ms\n", (unsigned long)(millis() - t0));
+        Serial.printf("[ota] boot check: joined in %lu ms, signal %d dBm\n", (unsigned long)(millis() - t0), (int)WiFi.RSSI());
         uint8_t body[1024];
         size_t  len = 0;
         // From the join, like the join's own wait, and never below a second:
@@ -791,24 +1027,21 @@ bool bootCheck(uint32_t budgetMs) {
         // Plain HTTP, on purpose. A TLS handshake wants 40 KB in one piece
         // and five to ten seconds, and one that timed out left a dead
         // connection in the middle of the heap that cost the frame buffer
-        // its block -- measured, twice. The site answers the manifest over
-        // plain HTTP, and nothing rides on this answer but a notice: the
-        // install itself goes over HTTPS and checks the signature.
-        const String base = OTA_WIFI_BASE;
+        // its block -- measured, twice. Nothing rides on this answer but a
+        // notice; an install checks the signature. One try only: the boot
+        // is waiting, and the update screen knocks again with words.
         WiFiClient plain;
-        HTTPClient http;
-        if (http.begin(plain, base + "manifest-" + OtaCore::buildName() + ".json")) {
-            http.setConnectTimeout((int32_t)left);
-            http.setTimeout((uint16_t)(left > 60000 ? 60000 : left));
-            const int code = http.GET();
-            if (code == 200) {
-                WiFiClient* s = http.getStreamPtr();
-                const int total = http.getSize();     // the server keeps the connection open, so the
-                const uint32_t t1 = millis();         // content length is what says "that is all of it"
+        char file[48];
+        snprintf(file, sizeof file, "manifest-%s.json", OtaCore::buildName());
+        const Reply rp = get(plain, file, left > 60000 ? 60000 : left);
+        {
+            if (rp.got == Got::OK) {
+                const int total = (int)rp.length;
+                const uint32_t t1 = millis();
                 while (len < sizeof body - 1 && (total < 0 || (int)len < total) && millis() - t1 < left) {
-                    const int a = s->available();
-                    if (a > 0) { const int r = s->read(body + len, (size_t)a < sizeof body - 1 - len ? (size_t)a : sizeof body - 1 - len); if (r > 0) len += (size_t)r; }
-                    else if (!http.connected()) break;
+                    const int a = plain.available();
+                    if (a > 0) { const int r = plain.read(body + len, (size_t)a < sizeof body - 1 - len ? (size_t)a : sizeof body - 1 - len); if (r > 0) len += (size_t)r; }
+                    else if (!plain.connected()) break;
                     else delay(5);
                 }
                 Serial.printf("[ota] boot check: manifest %u bytes in %lu ms\n", (unsigned)len, (unsigned long)(millis() - t1));
@@ -824,9 +1057,9 @@ bool bootCheck(uint32_t budgetMs) {
                     found = true;
                 }
             } else {
-                Serial.printf("[ota] boot check: manifest HTTP %d\n", code);
+                Serial.printf("[ota] boot check: manifest: %s\n", s_why);
             }
-            http.end();
+            plain.stop();
         }
         // The clock, asked AFTER the manifest rather than alongside it. The
         // two used to overlap to save a moment, and on two boots in three
@@ -894,6 +1127,14 @@ void tryAgain() {
 uint8_t     percent()       { return s_size ? (uint8_t)((uint64_t)s_rx * 100 / s_size) : 0; }
 uint32_t    bytesReceived() { return s_rx; }
 uint32_t    bytesExpected() { return s_size; }
-const char* failureText()   { return OtaCore::failWords(s_fail); }
+// The failure's sentence, and what the fetch ran into after it in brackets
+// when there is something: "(HTTP 403)", "(name lookup failed)".
+const char* failureText() {
+    static char buf[144];
+    const char* w = OtaCore::failWords(s_fail);
+    if (!s_why[0]) return w;
+    snprintf(buf, sizeof buf, "%s (%s)", w, s_why);
+    return buf;
+}
 
 }  // namespace OtaWifi

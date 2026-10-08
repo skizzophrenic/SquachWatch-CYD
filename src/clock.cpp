@@ -17,6 +17,9 @@
 #include "ui_clear.h"    // PACE, the mascot step clock
 #include "draw_band.h"   // BAND, the 3.5in row gate
 #include "squachy.h"     // TEMPO, his durations
+#if defined(BENCH_TOOLS) && SQUACH_MESH
+#include "meshtalk.h"    // SQUAD JOIN / SAY / TEXT / EMOTE, for testing the phone app
+#endif
 #include "lora_sniffer.h" // LORA ..., the radio (a no-op on a board without one)
 
 // RUNTIME: main.cpp lists how long the last few boots ran.
@@ -62,6 +65,10 @@ extern volatile bool g_consoleLegend;
 extern volatile uint8_t g_consoleHeadsUp;
 extern volatile bool g_consoleClippy;
 extern volatile bool g_consoleToaster;
+extern volatile bool g_consoleBall;
+extern volatile bool g_consolePet;
+extern volatile bool g_consoleJail;
+extern volatile bool g_consoleFree;
 #if defined(CARDPUTER_ADV)
 extern volatile int8_t g_consoleExt;
 #endif
@@ -564,6 +571,10 @@ void pollSerial() {
 #endif
         if (strcasecmp(line, "CLIPPY") == 0) { g_consoleClippy = true; continue; }
         if (strcasecmp(line, "TOASTER") == 0) { g_consoleToaster = true; continue; }
+        if (strcasecmp(line, "BALL") == 0)    { g_consoleBall = true; continue; }
+        if (strcasecmp(line, "PET") == 0)     { g_consolePet = true; continue; }
+        if (strcasecmp(line, "JAIL") == 0)    { g_consoleJail = true; continue; }
+        if (strcasecmp(line, "FREE") == 0)    { g_consoleFree = true; continue; }
         if (strncasecmp(line, "HEADSUP ", 8) == 0) { g_consoleHeadsUp = (uint8_t)atoi(line + 8); continue; }
         if (strcasecmp(line, "AURA") == 0)   { g_consoleAura = true; continue; }
         if (strncasecmp(line, "OUTFIT ", 7) == 0) { g_consoleOutfit = (int8_t)atoi(line + 7); g_consoleOutfitSet = true; continue; }
@@ -781,6 +792,34 @@ void pollSerial() {
         } else if (strncasecmp(line, "UPDATE STOP", 11) == 0) {
             g_benchUpdateStop = true;
             Serial.println("[bench] cancelling the update");
+#if SQUACH_MESH
+        } else if (strncasecmp(line, "SQUAD JOIN ", 11) == 0) {
+            // Everything the SQUACHMESH pages would switch on, and a phrase,
+            // for a bench board nobody is standing at. The phrase is not echoed.
+            Settings::setMeshConsent(true);
+            if (!Settings::meshDetect())   Settings::cycleMeshDetect();
+            if (!Settings::meshTransmit()) Settings::cycleMeshTransmit();
+            if (!Settings::messagesOn())   Settings::toggleMessages();
+            if (!Settings::meshHeadsUp())  Settings::toggleMeshHeadsUp();
+            char ph[64]; size_t n = 0;
+            for (const char* a = line + 11; *a && n < sizeof ph - 1; a++) ph[n++] = (char)toupper((unsigned char)*a);
+            while (n && ph[n - 1] == ' ') n--;
+            ph[n] = 0;
+            const bool ok = MeshTalk::setPhrase(ph);
+            Serial.printf("[squad] bench join: phrase %s, detect %d transmit %d messages %d heads-up %d\n",
+                          ok ? "set" : "REFUSED", Settings::meshDetect(), Settings::meshTransmit(),
+                          Settings::messagesOn(), Settings::meshHeadsUp());
+        } else if (strncasecmp(line, "SAY ", 4) == 0) {
+            const int r = (int)MeshTalk::send((uint8_t)atoi(line + 4), millis());
+            Serial.printf("[squad] bench say %d -> %d (0 = sent)\n", atoi(line + 4), r);
+        } else if (strncasecmp(line, "TEXT ", 5) == 0) {
+            char t[52]; size_t n = 0;
+            for (const char* a = line + 5; *a && n < sizeof t - 1; a++) t[n++] = (char)toupper((unsigned char)*a);
+            t[n] = 0;
+            Serial.printf("[squad] bench text -> %d (0 = sent)\n", (int)MeshTalk::sendText(t, millis()));
+        } else if (strncasecmp(line, "EMOTE ", 6) == 0) {
+            Serial.printf("[squad] bench emote -> %d (0 = sent)\n", (int)MeshTalk::sendEmote((uint8_t)atoi(line + 6), 0, millis()));
+#endif
         } else if (strncasecmp(line, "CRASH ME", 8) == 0) {
             // Bench builds only (-DBENCH_TOOLS=1): a deliberate panic, to
             // prove the crash history catches one.

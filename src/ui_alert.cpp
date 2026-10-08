@@ -631,11 +631,11 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
             t.drawRect(gx - gr - 4, gy - gr - 4, (gr + 4) * 2, (gr + 4) * 2, typeCol);
             Theme::drawTypeIcon(t, s_last.type, gx, gy, gr / 2);
             // Grid over the object, not under it.
-            t.drawCircle(gx, gy, gr,         t.color565(0, 90, 86));
-            t.drawCircle(gx, gy, gr * 2 / 3, t.color565(0, 64, 60));
-            t.drawCircle(gx, gy, gr / 3,     t.color565(0, 48, 45));
-            t.drawFastHLine(gx - gr, gy, 2 * gr, t.color565(0, 40, 38));
-            t.drawFastVLine(gx, gy - gr, 2 * gr, t.color565(0, 40, 38));
+            t.drawCircle(gx, gy, gr,         (uint16_t)0x02CA);
+            t.drawCircle(gx, gy, gr * 2 / 3, (uint16_t)0x0207);
+            t.drawCircle(gx, gy, gr / 3,     (uint16_t)0x0185);
+            t.drawFastHLine(gx - gr, gy, 2 * gr, (uint16_t)0x0144);
+            t.drawFastVLine(gx, gy - gr, 2 * gr, (uint16_t)0x0144);
             const float sweep = (float)(now % 2000) / 2000.0f * 6.2831853f;
             t.drawLine(gx, gy, gx + (int)(sinf(sweep) * gr),
                        gy - (int)(cosf(sweep) * gr), Theme::GREEN);

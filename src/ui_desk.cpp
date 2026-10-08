@@ -486,8 +486,27 @@ void uiDeskTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adva
     // The plate sits high -- 3 px under the top edge, digits from 26 -- so
     // the room under it is Squachy's, with a little air between his bubble
     // and the clock's foot rather than the overlap the first cut had.
-    const int plateTop = 3;
-    const int y = 26 + pad;
+    //
+    // Past 8:5 tall -- the phone app, upright; no board is that shape -- the
+    // main screen's rule applies: Squachy stands a fifth of the way up at a
+    // board's size, and the clock is centred in the sky above his bubble
+    // instead of pinned to the top edge, where his band used to reach up
+    // into the plate.
+    // He is three quarters of the width tall here, a little under the main
+    // screen's size, because on the desk the clock is the point. The plate is
+    // centred in the sky above him less two fifths of the width, the room a
+    // lit aura's flames take above his crest (they are allowed past his band).
+    const bool tall    = h * 5 > w * 8;
+    const int  tallFeet = h * 4 / 5;
+    const int  tallTop  = tallFeet - w * 3 / 4;
+    int yBase = 26;
+    if (tall) {
+        const int skyBottom = tallTop - w * 2 / 5;
+        const int c = (16 + skyBottom) / 2 - (dh - 18) / 2;
+        if (c > yBase) yBase = c;
+    }
+    const int y = yBase + pad;
+    const int plateTop = y - 23 - pad;
     const uint16_t on  = set ? Theme::VAPOR_PINK : Theme::W95_SHADOW;
 
     // The message box, first, so the plate drawn over it hides whatever
@@ -629,9 +648,10 @@ void uiDeskTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adva
     const bool side  = msgOn && (w - (XP_LEFT + XP_W)) >= 80;
     // 25 under the plate's foot: his bubble rises 16 above his top, which
     // leaves 4 px of air between bubble and plate.
-    const int  top   = (msgOn && !side) ? plateBottom + 4 + boxH + 18 : y + dh + 25;
+    int        top   = (msgOn && !side) ? plateBottom + 4 + boxH + 18 : y + dh + 25;
+    if (tall && tallTop > top) top = tallTop;
     const int  cx    = side ? XP_LEFT + XP_W + (w - XP_LEFT - XP_W) / 2 : w / 2;
-    const int  feet  = bar.y - 2;
+    const int  feet  = tall ? tallFeet : bar.y - 2;
     // Beside the box his bubble would lie across it, so it waits.
     Squachy::holdBubble(side);
 #if SQUACH_MESH

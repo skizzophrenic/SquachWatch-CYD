@@ -33,6 +33,12 @@
 #pragma once
 #include <TFT_eSPI.h>
 
+class FastSprite;
+// The frame every screen draws into, so code that is handed a TFT_eSPI& can
+// tell whether it is this one and read its buffer directly (see row8()).
+// nullptr in the emulator and on a board with no frame sprite.
+extern FastSprite* g_frameSprite;
+
 class FastSprite : public TFT_eSprite {
 public:
     explicit FastSprite(TFT_eSPI* tft) : TFT_eSprite(tft) {}
@@ -91,6 +97,18 @@ public:
     // Swap the 8-bit buffer for another of the same size and return the old
     // one: the C5's push task reads one while the loop draws into the other.
     uint8_t* swapBuf(uint8_t* nb) { uint8_t* o = _img8; _img8 = nb; return o; }
+    // One row of the 8-bit buffer to read, in panel coordinates (the datum
+    // applied): byte x is panel column x. nullptr when that row is not in
+    // this pass's buffer, or this is not the plain 8-bit case. Reading
+    // through readPixel() costs a virtual call, the clipping and a colour
+    // conversion per pixel -- half a microsecond, which a loop over a few
+    // thousand pixels a frame turns into milliseconds.
+    const uint8_t* row8(int32_t y) const {
+        if (!_created || _bpp != 8 || _xDatum != 0) return nullptr;
+        y += _yDatum;
+        if (y < 0 || y >= _iheight) return nullptr;
+        return _img8 + y * _iwidth;
+    }
 #else
     // The emulator's sprite is a different class and keeps none of those, but
     // it has no fast push to feed either -- these exist so the one call site

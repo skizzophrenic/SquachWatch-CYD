@@ -32,6 +32,17 @@ env.Append(BUILD_FLAGS=['-DFIRMWARE_VERSION=\\"%s\\"' % get_version()])
 # rather than installed as a white screen. See include/ota_ble.h.
 env.Append(BUILD_FLAGS=['-DSQW_ENV=\\"%s\\"' % env["PIOENV"]])
 
+# C++ exceptions off, for everything this build compiles: our code, the
+# Arduino core and the libraries built from source. The framework turns them
+# on, and that keeps an unwind table for every function so a throw can find
+# its way to a catch -- but there is no catch anywhere in the firmware (a
+# build with them off would refuse to compile one), so a throw has only ever
+# ended in abort() and a restart, and still does. The tables were 61.7 KB of
+# the 3.2in build (measured 2026-10-06). -fno-exceptions goes last, so it
+# wins over the framework's -fexceptions (as a build flag: CXXFLAGS from
+# a pre: script land before the framework's and lose). C accepts it too.
+env.Append(BUILD_FLAGS=["-fno-exceptions"])
+
 
 # ---------------------------------------------------------------------------
 # TFT_eSPI, ESP32-C5. Only for the nm-cyd-c5 environment.

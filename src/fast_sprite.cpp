@@ -4,6 +4,7 @@
 
 // 16-bit colour to the sprite's 8-bit byte: the library's own expression.
 bool FastSprite::s_fast = true;
+FastSprite* g_frameSprite = nullptr;
 
 static inline uint8_t to8(uint32_t color) {
     return (uint8_t)((color & 0xE000) >> 8 | (color & 0x0700) >> 6 | (color & 0x0018) >> 3);

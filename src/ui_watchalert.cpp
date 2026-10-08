@@ -123,7 +123,7 @@ void trendLine(TFT_eSPI& t, int x, int y, const WatchView& v, uint16_t col, bool
     const int x0 = centreIn ? x + (w - tw) / 2 : x;
     t.setCursor(x0 + 10, y);
     t.print(buf);
-    const uint16_t ac = v.trend > 0 ? t.color565(255, 36, 0) : v.trend < 0 ? t.color565(0, 219, 0) : col;
+    const uint16_t ac = v.trend > 0 ? (uint16_t)0xF920 : v.trend < 0 ? (uint16_t)0x06C0 : col;
     if (v.trend > 0)      t.fillTriangle(x0, y + 7, x0 + 6, y + 7, x0 + 3, y, ac);
     else if (v.trend < 0) t.fillTriangle(x0, y, x0 + 6, y, x0 + 3, y + 7, ac);
     else                  t.fillRect(x0, y + 3, 7, 2, ac);
@@ -155,7 +155,7 @@ float labelAngle(const char* label) {
 // The text column every variant shares: headline, name, type, trend, line.
 void scope(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, const WatchView& v,
            int rcx, int rcy, int R, bool tag) {
-    const uint16_t g1 = t.color565(0, 73, 0), g2 = t.color565(0, 146, 0), g3 = t.color565(0, 255, 0);
+    const uint16_t g1 = (uint16_t)0x0240, g2 = (uint16_t)0x0480, g3 = (uint16_t)0x07E0;
     const float TAU = 6.2831853f;
     t.fillCircle(rcx, rcy, R, Theme::BLACK);
     const float a = (float)(now % 2400) / 2400.0f * TAU;
@@ -185,7 +185,7 @@ void scope(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, const WatchVie
     const float fl = since < 1.2f ? 1.0f - since / 1.2f : 0.0f;
     t.fillCircle(bx, by, 3 + (int)(fl * 3.0f), Theme::blend(g2, Theme::WHITE, (uint16_t)(fl * 255.0f)));
     const int s = 10 + (int)(3.0f * sinf((float)(now % 800) / 800.0f * TAU));
-    const uint16_t lc = ((now / 250) & 1u) ? t.color565(255, 36, 0) : t.color565(255, 219, 0);
+    const uint16_t lc = ((now / 250) & 1u) ? (uint16_t)0xF920 : (uint16_t)0xFEC0;
     for (int sx = -1; sx <= 1; sx += 2)
         for (int sy = -1; sy <= 1; sy += 2) {
             const int cx = bx + sx * s, cy = by + sy * s;
@@ -216,7 +216,7 @@ void scope(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, const WatchVie
 void drawOperator(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int hintY, bool advance) {
     const int w = t.width(), h = t.height();
     const WatchView v = gather(eng);
-    const uint16_t g0 = t.color565(0, 36, 0), g1 = t.color565(0, 73, 0), g3 = t.color565(0, 255, 0);
+    const uint16_t g0 = (uint16_t)0x0120, g1 = (uint16_t)0x0240, g3 = (uint16_t)0x07E0;
     t.fillRect(0, 0, w, h, g0);
     for (int x = 0; x < w; x += 20) t.drawFastVLine(x, 0, h, g1);
     for (int y = 0; y < h; y += 20) t.drawFastHLine(0, y, w, g1);
@@ -232,7 +232,7 @@ void drawOperator(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int hin
         t.setTextColor(g3);
         t.setCursor(x0, 6);
         t.print("LOCKED ON");
-        fitPrint(t, x0, 28, v.label, cw, 1, t.color565(182, 255, 170), false);
+        fitPrint(t, x0, 28, v.label, cw, 1, (uint16_t)0xB7F5, false);
         if (v.haveRssi) trendLine(t, x0, 40, v, g3, false, cw);
         (void)advance; (void)hintY;
         Squachy::setHeadset(true);
@@ -276,10 +276,10 @@ void drawOperator(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int hin
     char nb[40];
     if (v.haveRssi) snprintf(nb, sizeof nb, "%s  %d dBm", v.label, (int)v.rssi);
     else            snprintf(nb, sizeof nb, "%s", v.label);
-    fitPrint(t, nx, bandBot + 4, nb, nw, 1, t.color565(182, 255, 170), false);
+    fitPrint(t, nx, bandBot + 4, nb, nw, 1, (uint16_t)0xB7F5, false);
     if (v.haveRssi) {
         const char* word = v.trend > 0 ? "CLOSER" : v.trend < 0 ? "FURTHER" : "HOLDING";
-        const uint16_t ac = v.trend > 0 ? t.color565(255, 36, 0) : v.trend < 0 ? g3 : t.color565(182, 255, 170);
+        const uint16_t ac = v.trend > 0 ? (uint16_t)0xF920 : v.trend < 0 ? g3 : (uint16_t)0xB7F5;
         const int ay = bandBot + 16;
         if (v.trend > 0)      t.fillTriangle(nx, ay + 7, nx + 6, ay + 7, nx + 3, ay, ac);
         else if (v.trend < 0) t.fillTriangle(nx, ay, nx + 6, ay, nx + 3, ay + 7, ac);

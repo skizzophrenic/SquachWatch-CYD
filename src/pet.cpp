@@ -323,15 +323,56 @@ static int16_t     s_cFromX = 0;
 enum class ClipThrow : uint8_t { NONE, HELD, AIR, SIT };
 static ClipThrow   s_cTh = ClipThrow::NONE;
 static float       s_cfX = 0, s_cfY = 0, s_cvX = 0, s_cvY = 0;
-static int         s_cOffX = 0, s_cOffY = 0, s_cDownX = 0, s_cDownY = 0;
-static int         s_cFingerX = 0, s_cFingerY = 0, s_cgX = 0, s_cgY = 0;
-static uint32_t    s_cGrabAt = 0, s_cgT = 0, s_cThLast = 0, s_cThAt = 0, s_cSqAt = 0;
-static float       s_cgvX = 0, s_cgvY = 0, s_cSqK = 0;
-static bool        s_cMoved = false;
+static const float CLIP_G = 0.0028f, CLIP_MIN_V = 0.32f, CLIP_MAX_V = 1.8f;
+// A finger on a pet: where it went down, where it is, how fast it is going
+// (smoothed the same way Squachy's is), and whether it has gone anywhere.
+// C1iPPY and T0@$TY share it -- they used to carry a copy each.
+struct Grip {
+    int offX = 0, offY = 0, downX = 0, downY = 0, fingerX = 0, fingerY = 0, gX = 0, gY = 0;
+    uint32_t grabAt = 0, gT = 0;
+    float gvX = 0, gvY = 0;
+    bool moved = false;
+};
+static void gripStart(Grip& g, int x, int y, int petX, int petY, uint32_t now) {
+    g.offX = x - petX; g.offY = y - petY;
+    g.downX = g.fingerX = g.gX = x;
+    g.downY = g.fingerY = g.gY = y;
+    g.grabAt = g.gT = now;
+    g.gvX = g.gvY = 0;
+    g.moved = false;
+}
+static void gripMove(Grip& g, int x, int y, uint32_t now) {
+    const int dx = x - g.downX, dy = y - g.downY;
+    if (dx * dx + dy * dy > 8 * 8) g.moved = true;
+    if (now - g.gT > 0 && now - g.gT < 150) {
+        const float dt = (float)(now - g.gT);
+        g.gvX = 0.5f * g.gvX + 0.5f * (float)(x - g.gX) / dt;
+        g.gvY = 0.5f * g.gvY + 0.5f * (float)(y - g.gY) / dt;
+    } else if (now - g.gT >= 150) {
+        g.gvX = g.gvY = 0;
+    }
+    if (now != g.gT) { g.gX = x; g.gY = y; g.gT = now; }
+    g.fingerX = x; g.fingerY = y;
+}
+// What letting go means: 0 a poke (a still tap), 1 a fling at (vx, vy),
+// 2 a drop (let go slowly), 3 nothing. On the boards with buttons there is
+// no finger to measure, so a hold let go tosses him up and to one side.
+static uint8_t gripLetGo(const Grip& g, uint32_t now, float& vx, float& vy) {
+    if (!g.moved && now - g.grabAt < 450) return 0;
+#if defined(SQW_SMALL)
+    if (!g.moved) { vx = random(0, 2) ? 0.5f : -0.5f; vy = -1.0f; return 1; }
+#endif
+    if (!g.moved) return 3;
+    if (now - g.gT < 120 && g.gvX * g.gvX + g.gvY * g.gvY > CLIP_MIN_V * CLIP_MIN_V) { vx = g.gvX; vy = g.gvY; return 1; }
+    vx = vy = 0;
+    return 2;
+}
+static Grip        s_cG;
+static uint32_t    s_cThLast = 0, s_cThAt = 0, s_cSqAt = 0;
+static float       s_cSqK = 0;
 static uint8_t     s_cBounces = 0;
 static bool        s_aValid = false, s_sqWasThrown = false;
 static int         s_aCx = 0, s_aHalfW = 0, s_aBot = 0;
-static const float CLIP_G = 0.0028f, CLIP_MIN_V = 0.32f, CLIP_MAX_V = 1.8f;
 
 // The toaster's half of each of these lives in pet_toaster.inc; the
 // functions keep C1iPPY's names because main.cpp learned them first, and
@@ -344,6 +385,16 @@ static void toasterPoke(uint32_t now);
 static void toasterGrab(int x, int y, uint32_t now);
 static void toasterDrag(int x, int y, uint32_t now);
 static void toasterRelease(uint32_t now);
+// The ball and chain, in pet_jail.inc: while it is out, a touch on the pet
+// is a touch on the ball.
+static void noteThrow(uint32_t now);
+static bool jailShowing(uint32_t now);
+// The ball is out either as the jailer or as the pet somebody chose.
+static bool ballOut(uint32_t now) { return jailShowing(now) || Squachy::ballPetOn(); }
+static bool ballHit(int x, int y);
+static void ballPoke(uint32_t now);
+static bool s_jGrab = false;
+extern int16_t s_jX, s_jY, s_jR;
 
 void noteCatch(uint8_t type) {
     if (toasterOn()) { toasterNoteCatch(type); return; }
@@ -364,6 +415,7 @@ static void clipSay(const char* line, uint32_t now, bool caught) {
 }
 
 bool clippyHit(int x, int y) {
+    if (ballOut(millis())) return ballHit(x, y);
     if (toasterOn()) return toasterHit(x, y);
     if (Squachy::petChoice() != Squachy::PetId::CLIPPY || s_cX < -50) return false;
     return x >= s_cX - 4 && x <= s_cX + 30 && y >= s_cY - 4 && y <= s_cY + CLIP_H;
@@ -380,6 +432,7 @@ void clippyPoke(uint32_t now) {
 }
 
 bool clippyCenter(int& x, int& y) {
+    if (ballOut(millis())) { if (s_jX < -50) return false; x = s_jX; y = s_jY - s_jR; return true; }
     if (toasterOn()) return toasterCenter(x, y);
     if (Squachy::petChoice() != Squachy::PetId::CLIPPY || s_cX < -50) return false;
     x = s_cX + 11; y = s_cY + 24;
@@ -387,34 +440,20 @@ bool clippyCenter(int& x, int& y) {
 }
 
 void clippyGrab(int x, int y, uint32_t now) {
+    if (ballOut(now)) { s_jGrab = true; return; }
     if (toasterOn()) { toasterGrab(x, y, now); return; }
     if (Squachy::petChoice() != Squachy::PetId::CLIPPY || s_cX < -50) return;
     s_cTh = ClipThrow::HELD;
     s_cfX = (float)s_cX; s_cfY = (float)s_cY;
-    s_cOffX = x - s_cX; s_cOffY = y - s_cY;
-    s_cDownX = s_cFingerX = s_cgX = x;
-    s_cDownY = s_cFingerY = s_cgY = y;
-    s_cGrabAt = s_cgT = now;
-    s_cgvX = s_cgvY = 0;
-    s_cMoved = false;
+    gripStart(s_cG, x, y, s_cX, s_cY, now);
     s_cHopAt = 0;
 }
 
 void clippyDrag(int x, int y, uint32_t now) {
+    if (s_jGrab) return;
     if (toasterOn()) { toasterDrag(x, y, now); return; }
     if (s_cTh != ClipThrow::HELD) return;
-    const int dx = x - s_cDownX, dy = y - s_cDownY;
-    if (dx * dx + dy * dy > 8 * 8) s_cMoved = true;
-    // The finger's speed, smoothed the same way Squachy's is.
-    if (now - s_cgT > 0 && now - s_cgT < 150) {
-        const float dt = (float)(now - s_cgT);
-        s_cgvX = 0.5f * s_cgvX + 0.5f * (float)(x - s_cgX) / dt;
-        s_cgvY = 0.5f * s_cgvY + 0.5f * (float)(y - s_cgY) / dt;
-    } else if (now - s_cgT >= 150) {
-        s_cgvX = s_cgvY = 0;
-    }
-    if (now != s_cgT) { s_cgX = x; s_cgY = y; s_cgT = now; }
-    s_cFingerX = x; s_cFingerY = y;
+    gripMove(s_cG, x, y, now);
 }
 
 static void clipLaunch(float vx, float vy, uint32_t now) {
@@ -430,30 +469,15 @@ static void clipLaunch(float vx, float vy, uint32_t now) {
 }
 
 void clippyRelease(uint32_t now) {
+    if (s_jGrab) { s_jGrab = false; ballPoke(now); return; }
     if (toasterOn()) { toasterRelease(now); return; }
     if (s_cTh != ClipThrow::HELD) return;
-    if (!s_cMoved && now - s_cGrabAt < 450) {
-        s_cTh = ClipThrow::NONE;
-        clippyPoke(now);
-        return;
-    }
-#if defined(SQW_SMALL)
-    // No finger to measure on the boards with buttons: a hold, let go,
-    // tosses him up and off to one side.
-    if (!s_cMoved) {
-        clipLaunch(random(0, 2) ? 0.5f : -0.5f, -1.0f, now);
-        s_cFlung = true;
-        return;
-    }
-#endif
-    if (!s_cMoved) { s_cTh = ClipThrow::NONE; return; }
-    const bool fresh = now - s_cgT < 120;
-    if (fresh && s_cgvX * s_cgvX + s_cgvY * s_cgvY > CLIP_MIN_V * CLIP_MIN_V) {
-        clipLaunch(s_cgvX, s_cgvY, now);
-        s_cFlung = true;
-    } else {
-        clipLaunch(0, 0, now);       // just let go: he falls from there
-        s_cFlung = false;
+    float vx, vy;
+    switch (gripLetGo(s_cG, now, vx, vy)) {
+        case 0:  s_cTh = ClipThrow::NONE; clippyPoke(now); break;
+        case 1:  clipLaunch(vx, vy, now); s_cFlung = true; noteThrow(now); break;
+        case 2:  clipLaunch(0, 0, now); s_cFlung = false; break;    // just let go: he falls from there
+        default: s_cTh = ClipThrow::NONE; break;
     }
 }
 
@@ -478,11 +502,18 @@ static void clipStamp(float x, float y, int r, uint8_t code) {
         }
 }
 // The wire as one path: inner leg, small turn, up, top turn, the long leg,
-// the big bottom turn, and the leg bent out into a pick with a hook on it.
-// visit(x, y, i) is called on points roughly two thirds of a pixel apart.
-template <typename F>
-static void clipPath(int wig, bool tipUp, F visit) {
+// the big bottom turn, and the leg bent out into a pick with a hook on it,
+// stamped on points roughly two thirds of a pixel apart. pass 0 lays the
+// outline, 1 the wire, 2 the glints on every ninth point. One function told
+// which pass rather than a template per pass: three copies of this cost
+// 1.2 KB of flash for the same arithmetic.
+static void clipPath(int wig, bool tipUp, uint8_t pass) {
     int i = 0;
+    auto visit = [pass](float x, float y, int idx) {
+        if (pass == 0) clipStamp(x, y, 2, 1);
+        else if (pass == 1) clipStamp(x, y, 1, 2);
+        else if (idx % 9 < 2) clipStamp(x - 0.6f, y - 0.6f, 0, 3);
+    };
     auto line = [&](float x0, float y0, float x1, float y1) {
         const int n = (int)ceilf(hypotf(x1 - x0, y1 - y0) * 1.6f) + 1;
         for (int k = 0; k <= n; k++) visit(x0 + (x1 - x0) * k / n, y0 + (y1 - y0) * k / n, i++);
@@ -501,16 +532,14 @@ static void clipPath(int wig, bool tipUp, F visit) {
 
 static void clipDraw(TFT_eSPI& t, int x, int y, uint32_t now, ClipFace face) {
     static const uint16_t WIRE = 0, OUT = 1, HI = 2;   // indices into col[]
-    const uint16_t col[3] = { t.color565(169, 178, 195), t.color565(34, 38, 47), t.color565(223, 229, 240) };
+    const uint16_t col[3] = { (uint16_t)0xAD98, (uint16_t)0x2125, (uint16_t)0xDF3E };
     int wig = (int)lroundf(sinf((float)now / 180.0f) * 1.2f);
     if (face == ClipFace::IDLE) wig = ((now % 2400) < 600) ? (int)lroundf(sinf((float)now / 60.0f)) : 0;   // raking pins
     if (face == ClipFace::SMUG) wig = (int)lroundf(sinf((float)now / 220.0f) * 2.0f);
     const bool surprised = face == ClipFace::SURPRISED;
 
     memset(s_cGrid, 0, sizeof s_cGrid);
-    clipPath(wig, surprised, [&](float px, float py, int) { clipStamp(px, py, 2, 1); });
-    clipPath(wig, surprised, [&](float px, float py, int) { clipStamp(px, py, 1, 2); });
-    clipPath(wig, surprised, [&](float px, float py, int i) { if (i % 9 < 2) clipStamp(px - 0.6f, py - 0.6f, 0, 3); });
+    for (uint8_t pass = 0; pass < 3; pass++) clipPath(wig, surprised, pass);
 
     // A shadow to stand on, then the wire a run at a time.
     Theme::dimRegion(t, x + 1, y + 42, 22, 2, 128);
@@ -590,7 +619,7 @@ static void petBalloon(TFT_eSPI& t, const char* s, int boxX, int boxY, int boxW,
     int tw = 0;
     for (uint8_t i = 0; i < n; i++) { const int w = t.textWidth(lines[i]); if (w > tw) tw = w; }
     const int bw = tw + 9, bh = n * 9 + 6;
-    const uint16_t paper = t.color565(255, 251, 208);
+    const uint16_t paper = (uint16_t)0xFFDA;
     if (side && maxC < 24 + 1 && (screenW - (boxX + boxW + 4) - 4 >= bw || boxX - 6 >= bw)) {
         int bx = right ? boxX + boxW + 4 : boxX - 4 - bw;
         int by = boxY + 6 - bh / 2;
@@ -702,17 +731,17 @@ static void clippyTick(TFT_eSPI& t, uint32_t now, int screenW, int floorY) {
         ClipFace tf = ClipFace::SURPRISED;
         s_cSq = 1.0f;
         if (s_cTh == ClipThrow::HELD) {
-            s_cfX = (float)(s_cFingerX - s_cOffX);
-            s_cfY = (float)(s_cFingerY - s_cOffY);
+            s_cfX = (float)(s_cG.fingerX - s_cG.offX);
+            s_cfY = (float)(s_cG.fingerY - s_cG.offY);
             if (s_cfX < leftX) s_cfX = leftX;
             if (s_cfX > rightX) s_cfX = rightX;
             if (s_cfY < ceilY) s_cfY = ceilY;
             if (s_cfY > floorY) s_cfY = floorY;
-            s_cSq = s_cMoved ? 1.06f : 1.0f;      // dangling
-            if (!s_cMoved) tf = ClipFace::IDLE;
+            s_cSq = s_cG.moved ? 1.06f : 1.0f;      // dangling
+            if (!s_cG.moved) tf = ClipFace::IDLE;
             // A finger that has stopped reporting has gone (see Squachy's
             // carry): let him drop rather than hang there.
-            if (now - s_cgT > 600 && s_cMoved) clipLaunch(0, 0, now);
+            if (now - s_cG.gT > 600 && s_cG.moved) clipLaunch(0, 0, now);
         } else if (s_cTh == ClipThrow::AIR) {
             uint32_t dt = now - s_cThLast;
             if (dt > 60) dt = 60;
@@ -799,9 +828,11 @@ static void clippyTick(TFT_eSPI& t, uint32_t now, int screenW, int floorY) {
 }
 
 #include "pet_toaster.inc"
+#include "pet_jail.inc"
 
 void reset() {
     toasterReset();
+    jailReset();
     s_phase  = Phase::AWAY;
     s_x      = -100.0f;
     s_nextAt = 0;
@@ -930,6 +961,14 @@ static void yetiTick(TFT_eSPI& t, uint32_t now, int screenW, int cx, int halfW, 
 
 
 void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom) {
+    // Serving time: the pet is in custody, and the ball is out instead. Or
+    // he IS the pet, by choice, which is its own kind of sentence.
+    if (ballOut(now)) {
+        s_phase = Phase::AWAY; s_yPhase = YPhase::AWAY; s_cX = -100; s_tX = -100;
+        jailTick(t, now, screenW);
+        return;
+    }
+    s_jX = -100;
     const Squachy::PetId which = Squachy::petChoice();
     if (which == Squachy::PetId::CLIPPY) {
         s_phase = Phase::AWAY; s_yPhase = YPhase::AWAY; s_tX = -100;

@@ -114,6 +114,28 @@ public:
         if (x < 0 || y < 0 || x >= _w || y >= _h) return;
         _buf[(size_t)y * _w + x] = (uint16_t)color;
     }
+    // A run of one colour along a row. Exactly what w drawPixel() calls
+    // would do, in one call: rectangles and lines used to cost a virtual
+    // call per pixel, which was most of the emulator's frame time on a
+    // phone. A class that overrides drawPixel() must override this too.
+    virtual void fillSpan(int32_t x, int32_t y, int32_t w, uint32_t color) {
+        if (y < 0 || y >= _h || w <= 0) return;
+        int64_t lo = x, hi = (int64_t)x + w;      // 64-bit: a huge w must not wrap
+        if (lo < 0) lo = 0;
+        if (hi > _w) hi = _w;
+        if (hi <= lo) return;
+        uint16_t* p = &_buf[(size_t)y * _w + (size_t)lo];
+        for (int64_t i = 0, n = hi - lo; i < n; i++) p[i] = (uint16_t)color;
+    }
+    // A row of ready-made pixels, for pushSprite(). Same contract as above.
+    virtual void copySpan(int32_t x, int32_t y, const uint16_t* src, int32_t w) {
+        if (y < 0 || y >= _h || w <= 0) return;
+        if (x < 0) { src -= x; w += x; x = 0; }
+        if (x + w > _w) w = _w - x;
+        if (w <= 0) return;
+        uint16_t* p = &_buf[(size_t)y * _w + x];
+        for (int32_t i = 0; i < w; i++) p[i] = src[i];
+    }
     virtual uint16_t readPixel(int32_t x, int32_t y) {
         if (x < 0 || y < 0 || x >= _w || y >= _h) return 0;
         return _buf[(size_t)y * _w + x];
@@ -219,7 +241,7 @@ public:
     // ---- shape primitives, built on the virtuals above (same split
     // real TFT_eSPI uses) ------------------------------------------
     void drawFastHLine(int32_t x, int32_t y, int32_t w, uint32_t color) {
-        for (int32_t i = 0; i < w; i++) drawPixel(x + i, y, color);
+        fillSpan(x, y, w, color);
     }
     void drawFastVLine(int32_t x, int32_t y, int32_t h, uint32_t color) {
         for (int32_t i = 0; i < h; i++) drawPixel(x, y + i, color);
@@ -517,9 +539,7 @@ public:
     // which is exactly what the sim harness reads out to PNG.
     void pushSprite(int32_t x, int32_t y) {
         if (!_parent || !_created) return;
-        for (int32_t j = 0; j < _h; j++)
-            for (int32_t i = 0; i < _w; i++)
-                _parent->drawPixel(x + i, y + j, _buf[(size_t)j * _w + i]);
+        for (int32_t j = 0; j < _h; j++) _parent->copySpan(x, y + j, &_buf[(size_t)j * _w], _w);
     }
 
     // Viewport support: main.cpp's CYD35 two-pass half-height render
@@ -558,6 +578,16 @@ public:
     // TFT_eSPI's own 8bpp path: RGB565 in, RGB332 stored, expanded back
     // on read. Reproduced here so what the emulator shows is what the
     // panel can actually display.
+    // Looked up rather than worked out: every pixel drawn at 8 bpp goes
+    // through it. 128 KB, built once from quantise332() itself.
+    static uint16_t q332(uint16_t c) {
+        static uint16_t* lut = nullptr;
+        if (!lut) {
+            lut = new uint16_t[65536];
+            for (uint32_t i = 0; i < 65536; i++) lut[i] = quantise332((uint16_t)i);
+        }
+        return lut[c];
+    }
     static uint16_t quantise332(uint16_t c) {
         const uint8_t r = (uint8_t)((c >> 11) & 0x1F);
         const uint8_t g = (uint8_t)((c >>  5) & 0x3F);
@@ -584,7 +614,35 @@ public:
         if (x < 0 || y < 0 || x >= _w || y >= _h) return;
         g_simPix++;
         _buf[(size_t)y * _w + x] =
-            (_depth == 8) ? quantise332((uint16_t)color) : (uint16_t)color;
+            (_depth == 8) ? q332((uint16_t)color) : (uint16_t)color;
+    }
+    // drawPixel()'s clipping, worked out once for the whole run.
+    void fillSpan(int32_t x, int32_t y, int32_t w, uint32_t color) override {
+        if (w <= 0) return;
+        int64_t lo = x, hi = (int64_t)x + w;      // [lo, hi) in the caller's coordinates; 64-bit so it can't wrap
+        if (_vpActive) {
+            if (_vpDatum) {
+                x += _vpX; y += _vpY; lo += _vpX; hi += _vpX;
+                if (y < 0) return;
+                if (lo < 0) lo = 0;
+            } else {
+                if (y < _vpY) return;
+                if (lo < _vpX) lo = _vpX;
+            }
+            if (y >= _vpH + _vpY) return;
+            if (hi > _vpW + _vpX) hi = _vpW + _vpX;
+        }
+        if (y < 0 || y >= _h) return;
+        if (lo < 0) lo = 0;
+        if (hi > _w) hi = _w;
+        if (hi <= lo) return;
+        g_simPix += (unsigned long long)(hi - lo);
+        const uint16_t c = (_depth == 8) ? q332((uint16_t)color) : (uint16_t)color;
+        uint16_t* p = &_buf[(size_t)y * _w + (size_t)lo];
+        for (int64_t i = 0, n = hi - lo; i < n; i++) p[i] = c;
+    }
+    void copySpan(int32_t x, int32_t y, const uint16_t* src, int32_t w) override {
+        for (int32_t i = 0; i < w; i++) drawPixel(x + i, y, src[i]);
     }
     uint16_t readPixel(int32_t x, int32_t y) override {
         if (x < 0 || y < 0 || x >= _w || y >= _h) return 0;

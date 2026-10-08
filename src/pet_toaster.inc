@@ -172,11 +172,10 @@ static int16_t     s_tSmokeX = 0, s_tSmokeY = 0;
 // Thrown.
 static TPhase      s_tPh = TPhase::NONE;
 static float       s_tfX = 0, s_tfY = 0, s_tvX = 0, s_tvY = 0;
-static int         s_tOffX = 0, s_tOffY = 0, s_tDownX = 0, s_tDownY = 0;
-static int         s_tFingerX = 0, s_tFingerY = 0, s_tgX = 0, s_tgY = 0;
-static uint32_t    s_tGrabAt = 0, s_tgT = 0, s_tThLast = 0, s_tThAt = 0, s_tSqAt = 0;
-static float       s_tgvX = 0, s_tgvY = 0, s_tSqK = 0, s_tSq = 1.0f;
-static bool        s_tMoved = false, s_tFlung = false, s_tHard = false;
+static Grip        s_tG;
+static uint32_t    s_tThLast = 0, s_tThAt = 0, s_tSqAt = 0;
+static float       s_tSqK = 0, s_tSq = 1.0f;
+static bool        s_tFlung = false, s_tHard = false;
 static uint8_t     s_tBounces = 0;
 // Crumbs off a thud, and the loose slice that falls out with them.
 static uint32_t    s_crumbAt = 0;
@@ -199,12 +198,12 @@ static void toastSay(const char* line, uint32_t now, bool caught) {
 // bottom line. `sq` squashes him into the floor on a landing; `flip` draws
 // him on his back (every row measured from the bottom instead of the top).
 static void toastDraw(TFT_eSPI& t, int x, int y, uint32_t now, TFace face, float sq, float lever, bool flip, bool air) {
-    const uint16_t OUT   = t.color565(20, 22, 27);
-    const uint16_t BODY  = t.color565(191, 200, 212), SHINE = t.color565(244, 247, 251);
-    const uint16_t SHADE = t.color565(151, 162, 178), BASE  = t.color565(43, 46, 54);
-    const uint16_t TRACK = t.color565(141, 151, 166), KNOB  = t.color565(216, 52, 42);
-    const uint16_t CREAM = t.color565(239, 230, 207), PRONG = t.color565(201, 208, 218);
-    const uint16_t INK   = t.color565(28, 32, 39), CHEEK = t.color565(255, 154, 60);
+    const uint16_t OUT   = (uint16_t)0x10A3;
+    const uint16_t BODY  = (uint16_t)0xBE5A, SHINE = (uint16_t)0xF7BF;
+    const uint16_t SHADE = (uint16_t)0x9516, BASE  = (uint16_t)0x2966;
+    const uint16_t TRACK = (uint16_t)0x8CB4, KNOB  = (uint16_t)0xD9A5;
+    const uint16_t CREAM = (uint16_t)0xEF39, PRONG = (uint16_t)0xCE9B;
+    const uint16_t INK   = (uint16_t)0x1904, CHEEK = (uint16_t)0xFCC7;
     const int w = TOAST_W, h = (int)lroundf(20.0f * sq);        // the body; 3 more for the feet
     const int H = h + 3;
     y += 20 - h;                                        // a squash sinks him into the floor, not off it
@@ -215,7 +214,7 @@ static void toastDraw(TFT_eSPI& t, int x, int y, uint32_t now, TFace face, float
     };
     const int bodyTop = 0;                              // the feet are the box's last three rows
     // shadow
-    if (!air && !flip) t.fillRect(x, y + H, w, 2, t.color565(20, 20, 20));
+    if (!air && !flip) t.fillRect(x, y + H, w, 2, (uint16_t)0x10A2);
     // cord to the right, red and cream, with a plug on the end
     {
         const int cy0 = H - 6;
@@ -293,14 +292,14 @@ static void toastDraw(TFT_eSPI& t, int x, int y, uint32_t now, TFace face, float
             case TFace::DIZZY:  R(cx - 3, my, 2, 1, INK); R(cx - 1, my - 1, 2, 1, INK); R(cx + 1, my, 2, 1, INK); break;
             default:            R(cx - 2, my, 4, 1, INK); R(cx - 3, my - 1, 1, 1, INK); R(cx + 2, my - 1, 1, 1, INK); break;
         }
-        if (face == TFace::SCARED) R(cx + 10, ey - 3 + (int)((now / 130) % 4), 1, 2, t.color565(127, 212, 255));
+        if (face == TFace::SCARED) R(cx + 10, ey - 3 + (int)((now / 130) % 4), 1, 2, (uint16_t)0x7EBF);
     }
 }
 
 // A slice of toast, 8 x 9, or flat (seen edge-on) mid-spin.
 static void toastSlice(TFT_eSPI& t, int x, int y, uint16_t faceCol, bool burnt, bool flat) {
-    const uint16_t OUT = t.color565(20, 22, 27);
-    const uint16_t CRUST = burnt ? t.color565(60, 36, 20) : t.color565(138, 84, 36);
+    const uint16_t OUT = (uint16_t)0x10A3;
+    const uint16_t CRUST = burnt ? (uint16_t)0x3922 : (uint16_t)0x8AA4;
     if (flat) {
         t.fillRect(x - 1, y + 2, 10, 4, OUT);
         t.fillRect(x, y + 3, 8, 2, CRUST);
@@ -314,8 +313,8 @@ static void toastSlice(TFT_eSPI& t, int x, int y, uint16_t faceCol, bool burnt, 
     t.fillRect(x + 1, y + 4, 6, 4, faceCol);
 }
 static uint16_t toastFaceCol(TFT_eSPI& t, uint8_t type, bool golden, bool burnt) {
-    if (golden) return t.color565(255, 215, 60);
-    const uint16_t bread = burnt ? t.color565(120, 80, 40) : t.color565(233, 184, 114);
+    if (golden) return (uint16_t)0xFEA7;
+    const uint16_t bread = burnt ? (uint16_t)0x7A85 : (uint16_t)0xEDCE;
     return Theme::blend(bread, Theme::colorFor((DetectionType)type), 150);
 }
 
@@ -341,28 +340,13 @@ static void toasterGrab(int x, int y, uint32_t now) {
     if (s_tX < -50) return;
     s_tPh = TPhase::HELD;
     s_tfX = (float)s_tX; s_tfY = (float)s_tY;
-    s_tOffX = x - s_tX; s_tOffY = y - s_tY;
-    s_tDownX = s_tFingerX = s_tgX = x;
-    s_tDownY = s_tFingerY = s_tgY = y;
-    s_tGrabAt = s_tgT = now;
-    s_tgvX = s_tgvY = 0;
-    s_tMoved = false;
+    gripStart(s_tG, x, y, s_tX, s_tY, now);
     s_tHopAt = 0;
     s_tCatchAt = 0;
 }
 static void toasterDrag(int x, int y, uint32_t now) {
     if (s_tPh != TPhase::HELD) return;
-    const int dx = x - s_tDownX, dy = y - s_tDownY;
-    if (dx * dx + dy * dy > 8 * 8) s_tMoved = true;
-    if (now - s_tgT > 0 && now - s_tgT < 150) {
-        const float dt = (float)(now - s_tgT);
-        s_tgvX = 0.5f * s_tgvX + 0.5f * (float)(x - s_tgX) / dt;
-        s_tgvY = 0.5f * s_tgvY + 0.5f * (float)(y - s_tgY) / dt;
-    } else if (now - s_tgT >= 150) {
-        s_tgvX = s_tgvY = 0;
-    }
-    if (now != s_tgT) { s_tgX = x; s_tgY = y; s_tgT = now; }
-    s_tFingerX = x; s_tFingerY = y;
+    gripMove(s_tG, x, y, now);
 }
 static void toastLaunch(float vx, float vy, uint32_t now) {
     if (vx > CLIP_MAX_V) vx = CLIP_MAX_V;
@@ -378,14 +362,13 @@ static void toastLaunch(float vx, float vy, uint32_t now) {
 }
 static void toasterRelease(uint32_t now) {
     if (s_tPh != TPhase::HELD) return;
-    if (!s_tMoved && now - s_tGrabAt < 450) { s_tPh = TPhase::NONE; toasterPoke(now); return; }
-#if defined(SQW_SMALL)
-    if (!s_tMoved) { toastLaunch(random(0, 2) ? 0.5f : -0.5f, -1.0f, now); s_tFlung = true; return; }
-#endif
-    if (!s_tMoved) { s_tPh = TPhase::NONE; return; }
-    const bool fresh = now - s_tgT < 120;
-    if (fresh && s_tgvX * s_tgvX + s_tgvY * s_tgvY > CLIP_MIN_V * CLIP_MIN_V) { toastLaunch(s_tgvX, s_tgvY, now); s_tFlung = true; }
-    else { toastLaunch(0, 0, now); s_tFlung = false; }
+    float vx, vy;
+    switch (gripLetGo(s_tG, now, vx, vy)) {
+        case 0:  s_tPh = TPhase::NONE; toasterPoke(now); break;
+        case 1:  toastLaunch(vx, vy, now); s_tFlung = true; noteThrow(now); break;
+        case 2:  toastLaunch(0, 0, now); s_tFlung = false; break;
+        default: s_tPh = TPhase::NONE; break;
+    }
 }
 
 static void toastCrumbs(int cx, int cy, uint32_t now) {
@@ -475,11 +458,11 @@ static void toasterTick(TFT_eSPI& t, uint32_t now, int screenW, int floorY) {
         const int sx = s_tsX0 + (int)lroundf((float)(mx - s_tsX0) * k);
         const int sy = s_tsY0 + (int)lroundf((float)(my - s_tsY0) * k - sinf(k * 3.14159265f) * 34.0f);
         toastSlice(t, sx - 4, sy - 5, s_tsCol, s_tsSerious, ((age / 120) & 1) != 0);
-        if (s_tsGolden) for (uint8_t q = 0; q < 3; q++) t.drawPixel(sx - 6 - q * 3, sy + (int)q - 1, t.color565(255, 235, 140));
+        if (s_tsGolden) for (uint8_t q = 0; q < 3; q++) t.drawPixel(sx - 6 - q * 3, sy + (int)q - 1, (uint16_t)0xFF51);
     };
     auto drawDebris = [&]() {
         if (s_crumbAt && now - s_crumbAt < 650) {
-            const uint16_t bread = t.color565(233, 184, 114);
+            const uint16_t bread = (uint16_t)0xEDCE;
             for (uint8_t i = 0; i < 6; i++) {
                 s_crumbVY[i] += 0.0011f * (float)seenMs;
                 s_crumbX[i] += s_crumbVX[i] * (float)seenMs; s_crumbY[i] += s_crumbVY[i] * (float)seenMs;
@@ -491,11 +474,11 @@ static void toasterTick(TFT_eSPI& t, uint32_t now, int screenW, int floorY) {
             else {
                 s_tlVY += 0.0011f * (float)seenMs;
                 s_tlX += s_tlVX * (float)seenMs; s_tlY += s_tlVY * (float)seenMs;
-                toastSlice(t, (int)s_tlX - 4, (int)s_tlY - 5, t.color565(233, 184, 114), false, (((now - s_tlBorn) / 120) & 1) != 0);
+                toastSlice(t, (int)s_tlX - 4, (int)s_tlY - 5, (uint16_t)0xEDCE, false, (((now - s_tlBorn) / 120) & 1) != 0);
             }
         }
         if (s_tSmokeAt && now - s_tSmokeAt < 1400) {
-            const uint16_t grey = Theme::blend(Theme::BG, t.color565(170, 170, 180), 150);
+            const uint16_t grey = Theme::blend(Theme::BG, (uint16_t)0xAD56, 150);
             for (uint8_t q = 0; q < 3; q++) {
                 const int rise = (int)(((now - s_tSmokeAt) / 70 + q * 4) % 14);
                 t.drawPixel(s_tSmokeX + q * 3 + (int)lroundf(sinf((float)now / 200.0f + (float)q)), s_tSmokeY - 2 - rise, grey);
@@ -511,14 +494,14 @@ static void toasterTick(TFT_eSPI& t, uint32_t now, int screenW, int floorY) {
         bool flip = false;
         s_tSq = 1.0f;
         if (s_tPh == TPhase::HELD) {
-            s_tfX = (float)(s_tFingerX - s_tOffX);
-            s_tfY = (float)(s_tFingerY - s_tOffY);
+            s_tfX = (float)(s_tG.fingerX - s_tG.offX);
+            s_tfY = (float)(s_tG.fingerY - s_tG.offY);
             if (s_tfX < leftX) s_tfX = leftX;
             if (s_tfX > rightX) s_tfX = rightX;
             if (s_tfY < ceilY) s_tfY = ceilY;
             if (s_tfY > floorBox) s_tfY = floorBox;
-            if (!s_tMoved) tf = TFace::IDLE;
-            if (now - s_tgT > 600 && s_tMoved) toastLaunch(0, 0, now);
+            if (!s_tG.moved) tf = TFace::IDLE;
+            if (now - s_tG.gT > 600 && s_tG.moved) toastLaunch(0, 0, now);
         } else if (s_tPh == TPhase::AIR) {
             uint32_t dt = now - s_tThLast;
             if (dt > 60) dt = 60;

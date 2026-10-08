@@ -221,7 +221,7 @@ namespace Squachy {
 
     // Which one. There are two now, so the Settings row cycles rather than
     // toggles: OFF, then each companion in turn.
-    enum class PetId : uint8_t { OFF = 0, SHAGGY, YETI, CLIPPY, TOASTER, COUNT };
+    enum class PetId : uint8_t { OFF = 0, SHAGGY, YETI, CLIPPY, TOASTER, BALL, COUNT };
     PetId       petChoice();
     const char* petName();     // for the row's value column
     void        cyclePet();
@@ -245,11 +245,33 @@ namespace Squachy {
     bool toasterUnlocked();
     void unlockToaster(const char* why);
     const char* takeToasterIntro();
+    // The ball and chain, as a pet: earned by serving a whole sentence. Out
+    // of custody he still sits chained to the ankle and still stops a throw
+    // short; he just has different things to say about it.
+    bool ballUnlocked();
+    void unlockBall();
+    bool ballPetOn();          // chosen, earned, and not already out as the jailer
     // Where his mouth is this frame, for a slice of toast aimed at it; false
     // before he has ever been drawn. And the bite: a hop and a word, a dance
     // for the rare golden slice.
     bool mouthPoint(int& x, int& y);
     void eatToast(bool golden);
+
+    // Cell block. Throw a pet ten times inside a minute and it is taken into
+    // custody: Squachy does ten minutes in STRIPES, chained to a ball that
+    // talks (Pet draws the ball). Outfit and Pet are locked while he serves;
+    // the time left is saved, so a reboot does not let him out. When it is
+    // served the stripes are his for good.
+    bool     jailed();
+    uint32_t jailLeftMs();
+    void     jailStart();
+    void     jailFree();                 // console FREE, and the clock running out
+    bool     takeJailFreed();            // once, when he walks out: the ball says goodbye
+    // Where the chain hooks onto his ankle this frame; false while he is
+    // not wearing the cuff.
+    bool     chainPoint(int& x, int& y);
+    // The last time the chain stopped a throw short, 0 if never.
+    uint32_t yankedAt();
     // A thrown pet has just hit the floor at screen x. Close to his feet and
     // he flinches and says so; anywhere else, nothing.
     void petLandedAt(int x);

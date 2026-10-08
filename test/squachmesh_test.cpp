@@ -198,7 +198,7 @@ int main() {
 
     suite("The seventeenth outfit, and boards from before it");
     {
-        ck("nineteen outfits", OUTFIT_N == 19);
+        ck("twenty outfits", OUTFIT_N == 20);
         size_t n = encode(mk(3, 16, 1, nullptr), buf);
         ck("outfit 16 survives the trip", decode(buf, n, p) && p.outfit == 16);
         ck("its fifth bit is a spare bit, not a new byte", n == LEN_INDEXED);

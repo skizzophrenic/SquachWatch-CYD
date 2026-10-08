@@ -1062,14 +1062,20 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             break;
 #endif
         case SettingsRow::OUTFIT:
-            label = "OUTFIT";
-            snprintf(valBuf, valBufN, "%s (%u/%u)", Squachy::outfitName(),
-                     (unsigned)Squachy::unlockedOutfitCount(), (unsigned)Squachy::outfitCount());
-            value = valBuf;
-            break;
         case SettingsRow::PET:
-            label = "PET";
-            value = Squachy::petName();
+            label = r == SettingsRow::OUTFIT ? "OUTFIT" : "PET";
+            if (Squachy::jailed()) {
+                // Serving time: both rows say how long, and neither moves.
+                const uint32_t left = (Squachy::jailLeftMs() + 999) / 1000;
+                snprintf(valBuf, valBufN, "SERVING %u:%02u", (unsigned)(left / 60), (unsigned)(left % 60));
+                value = valBuf;
+            } else if (r == SettingsRow::OUTFIT) {
+                snprintf(valBuf, valBufN, "%s (%u/%u)", Squachy::outfitName(),
+                         (unsigned)Squachy::unlockedOutfitCount(), (unsigned)Squachy::outfitCount());
+                value = valBuf;
+            } else {
+                value = Squachy::petName();
+            }
             break;
         case SettingsRow::BANTER:
             label = "BANTER";

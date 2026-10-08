@@ -40,4 +40,9 @@ namespace Pet {
     void clippyGrab(int x, int y, uint32_t now);
     void clippyDrag(int x, int y, uint32_t now);
     void clippyRelease(uint32_t now);
+
+    // The cell block (pet_jail.inc): the arrest itself, sirens and all. Ten
+    // flings of a pet inside a minute call it; so do the console's JAIL and
+    // the emulator.
+    void arrest(uint32_t now);
 }

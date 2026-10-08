@@ -195,6 +195,13 @@ bool onManufacturerData(const uint8_t* d, size_t len, const uint8_t* mac, uint32
     const bool chosen = s_preferSet && memcmp(mac, s_preferMac, 6) == 0;
     if (s_havePeer && memcmp(mac, s_peerMac, 6) != 0 && !chosen) return true;
 
+#ifdef BENCH_TOOLS
+    // A new visitor, for proving a phone (or anything) can visit from the bench.
+    if (!s_havePeer || memcmp(mac, s_peerMac, 6) != 0)
+        Serial.printf("[mesh] visitor %02X:%02X:%02X:%02X:%02X:%02X nick %u outfit %u shade %u aura %u name \"%s\"\n",
+                      mac[5], mac[4], mac[3], mac[2], mac[1], mac[0], (unsigned)p.nick, (unsigned)p.outfit,
+                      (unsigned)p.shade, (unsigned)p.aura, p.custom ? p.name : "");
+#endif
     s_peer = p;
     memcpy(s_peerMac, mac, 6);
     s_peerSeen = now;

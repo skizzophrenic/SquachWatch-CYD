@@ -21,6 +21,8 @@
 // OTA_WIFI_BASE overrides where it downloads from, for a bench test against a
 // local server: PLATFORMIO_BUILD_FLAGS='-DOTA_WIFI_BASE=\"http://192.168.4.42:8767/\"'.
 // Plain http is accepted there and nowhere else by default.
+// -DOTA_TEST_NO_DNS makes every name lookup "fail", to prove the fallback to
+// squachwatch.com's fixed addresses (see connectSite() in ota_wifi.cpp).
 #pragma once
 #include <stdint.h>
 #include <stddef.h>

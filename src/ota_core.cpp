@@ -169,7 +169,12 @@ const char* failWords(Fail f) {
         case Fail::RADIO_BUSY:      return "Bluetooth was busy. Leave this screen and try again.";
         case Fail::WIFI_NOT_FOUND:  return "Couldn't find that WiFi network. Move closer to the router and try again.";
         case Fail::WIFI_PASSWORD:   return "Couldn't join that WiFi network. Check the password and try again.";
-        case Fail::NO_SITE:         return "Joined WiFi, but couldn't reach squachwatch.com. Check the internet connection.";
+        case Fail::NO_SITE:         return "Joined WiFi, but couldn't connect to squachwatch.com. Is this network online?";
+        case Fail::SIGN_IN:         return "This WiFi wants you to sign in first. Do that on your phone, then try again.";
+        case Fail::NET_BLOCKED:     return "This network blocks squachwatch.com. Try a phone hotspot or the USB flasher.";
+        case Fail::SITE_SLOW:       return "squachwatch.com didn't answer in time. Try again in a minute.";
+        case Fail::SITE_DOWN:       return "squachwatch.com is having trouble. Try again later.";
+        case Fail::HTTPS_ONLY:      return "squachwatch.com wants a secure link this board can't make. Use the USB flasher.";
         case Fail::NOT_SIGNED:      return "The latest release can't be installed over the air yet. Use the USB flasher.";
         case Fail::TOO_OLD:         return "That firmware is older than the one running. Nothing was changed.";
         case Fail::LOW_MEMORY:      return "Not enough memory to download. Restart the board and try again.";

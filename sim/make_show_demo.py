@@ -32,6 +32,21 @@ CYAN  = (0, 214, 214)
 # ---- the clips ----
 
 CLIPS = {
+    # v1.33.0 "Doin Time": the arrest (SQUACHSIM_JAIL=1 runs the sirens and
+    # the ball drop from frame 0), the sentence in STRIPES with the ball
+    # talking (=2 is already serving), a throw the chain stops short, the
+    # clock over the ball once he has said his piece (~6.6 s in), the ball
+    # kept as a pet (--pet 5; his first line is due six seconds in), the
+    # Settings row, and the flash that came back.
+    "doin-time": [
+        ("clear", 4, 60, ["--noseed", "--bg", "8", "--pet", "4"], {"SQUACHSIM_JAIL": "1"}, 1500, "TEN PET THROWS IN A MINUTE. SIRENS."),
+        ("clear", 20, 60, ["--noseed", "--bg", "8", "--pet", "4"], {"SQUACHSIM_JAIL": "2"}, 1600, "TEN MINUTES IN STRIPES, CHAINED TO A CRITIC"),
+        ("clear", 40, 70, ["--noseed", "--bg", "5", "--pet", "4"], {"SQUACHSIM_JAIL": "2", "SQUACHSIM_THROW": "s:160:150:120:30"}, 1500, "THROW HIM ANYWAY. THE CHAIN HAS OPINIONS."),
+        ("clear", 200, 50, ["--noseed", "--bg", "8", "--pet", "4"], {"SQUACHSIM_JAIL": "2"}, 1500, "THE CLOCK HANGS OVER THE BALL"),
+        ("clear", 175, 70, ["--noseed", "--bg", "5", "--pet", "5"], {}, 1600, "SERVE IT ALL AND YOU CAN KEEP HIM"),
+        ("settings", 10, 16, ["--pet", "5", "--scroll", "3"], {"SQUACHSIM_PAGE": "1"}, 1300, "SETTINGS > PET > BALL & CHAIN"),
+        ("clear", 100, 40, ["--bg", "2", "--pet", "3"], {}, 1600, "AND 70 KB OF FLASH BACK. NOBODY NOTICED."),
+    ],
     # v1.32.0 "Put On Your Brave Face": T0@$TY on the TOASTERS background he
     # is earned on (--pet 4 unlocks him; his first tip is due eight seconds
     # in), a catch popping toast that Squachy eats (SQUACHSIM_CLIPCATCH goes
