@@ -4450,8 +4450,8 @@ void dimRegion(TFT_eSPI& t, int x, int y, int w, int h, uint8_t amount) {
         t.drawFastHLine(x, yy, w, BG);
 }
 
-static char     s_toastHead[18] = {0};
-static char     s_toastSub[22]  = {0};
+static char     s_toastHead[32] = {0};
+static char     s_toastSub[48]  = {0};
 static uint16_t s_toastAccent   = 0;
 static uint32_t s_toastUntil    = 0;
 
@@ -4468,7 +4468,15 @@ void drawToast(TFT_eSPI& t, uint32_t now) {
     if (!s_toastUntil) return;
     if ((int32_t)(now - s_toastUntil) >= 0) { s_toastUntil = 0; return; }
 
-    const int w = t.width(), h = t.height();
+#if defined(CYD35)
+    const int w = t.width();
+    const int h = (t.height() < 480) ? 480 : t.height();
+#else
+    const int w = t.width();
+    const int h = (t.height() < 320) ? 320 : t.height();
+#endif
+    t.setTextFont(1);
+    t.setTextWrap(false);
     t.setTextSize(2);
     int bw = t.textWidth(s_toastHead) + 30;
     if (s_toastSub[0]) {
@@ -4480,10 +4488,14 @@ void drawToast(TFT_eSPI& t, uint32_t now) {
     const int bh = s_toastSub[0] ? 48 : 34;
     const int bx = (w - bw) / 2, by = (h - bh) / 2;
 
+    if (!DrawBand::has(by, by + bh)) return;
+
     t.fillRect(bx, by, bw, bh, BG);
     t.drawRect(bx, by, bw, bh, s_toastAccent);
     t.drawRect(bx + 1, by + 1, bw - 2, bh - 2, blend(s_toastAccent, BG, 160));
 
+    t.setTextFont(1);
+    t.setTextWrap(false);
     t.setTextSize(2);
     t.setTextColor(s_toastAccent, BG);
     t.setCursor(bx + (bw - t.textWidth(s_toastHead)) / 2, by + 8);
