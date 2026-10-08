@@ -1,4 +1,4 @@
-// SquachWatch-CYD — DetectionEngine public API
+ // SquachWatch-CYD — DetectionEngine public API
 #pragma once
 #if SQUACH_MESH
 #include "squachmesh.h"
@@ -448,7 +448,9 @@ public:
     // the callback lives in a separate class, not a DetectionEngine
     // member.
     void checkWatchBle(const uint8_t* mac, int8_t rssi);
+    void checkWatchWifi(const uint8_t* mac, int8_t rssi, uint8_t channel = 0);
     void checkHuntBle(const uint8_t* mac, int8_t rssi);
+    void checkHuntWifi(const uint8_t* mac, int8_t rssi, uint8_t channel = 0);
 
     // SD log helper accessor.
     SdLog& sd() { return _sd; }
@@ -562,8 +564,8 @@ private:
     uint8_t   _watchMac[6] = {0};
     char      _watchLabel[24] = "";
     uint32_t  _watchLastHitMs = 0;
+    uint32_t  _watchLastLogMs = 0;
     bool      _watchHitFlag   = false;
-    void checkWatchWifi(const uint8_t* mac, int8_t rssi);   // called from processWiFiQ()
 
     // Watch RSSI history ring buffer -- see watchRssiCount()/watchRssiAt()
     // above. 40 samples at the ~2s sample throttle is a bit over a
@@ -589,7 +591,7 @@ private:
     uint8_t   _huntRssiHead  = 0;
     uint8_t   _huntRssiCount = 0;
     uint32_t  _huntRssiLastMs = 0;
-    void checkHuntWifi(const uint8_t* mac, int8_t rssi);
+    uint32_t  _huntLastLogMs = 0;
     void recordHuntRssi(int8_t rssi);
 
     // The most recently decoded Remote ID broadcast, and whose it is.

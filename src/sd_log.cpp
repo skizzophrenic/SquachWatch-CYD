@@ -1,7 +1,8 @@
-// SquachWatch-CYD — SD log implementation
 #include "sd_log.h"
+#include "clock.h"
 #include "frame_push.h"   // busLock(): the card shares the panel's bus
 #include <SD.h>
+#include <time.h>
 #if defined(FREENOVE_S3)
 // The Freenove S3's slot is wired for SDMMC, not SPI: every card call in this
 // file goes through CARD, which is SD_MMC there and SD everywhere else. Both
@@ -154,16 +155,68 @@ bool SdLog::begin() {
     return true;
 }
 
+void SdLog::formatTimestamp(char* out, size_t maxLen) {
+    if (!out || maxLen == 0) return;
+    if (Clock::isSet()) {
+        struct tm tmv;
+        time_t sec = (time_t)Clock::nowEpoch();
+        localtime_r(&sec, &tmv);
+        snprintf(out, maxLen, "%04d-%02d-%02d %02d:%02d:%02d",
+                 tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
+                 tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+    } else {
+        uint32_t sec = millis() / 1000u;
+        uint32_t d = sec / 86400u;
+        sec %= 86400u;
+        uint32_t h = sec / 3600u;
+        sec %= 3600u;
+        uint32_t m = sec / 60u;
+        uint32_t s = sec % 60u;
+        if (d > 0) {
+            snprintf(out, maxLen, "UPTIME_%lud_%02lu:%02lu:%02lu", (unsigned long)d, (unsigned long)h, (unsigned long)m, (unsigned long)s);
+        } else {
+            snprintf(out, maxLen, "UPTIME_%02lu:%02lu:%02lu", (unsigned long)h, (unsigned long)m, (unsigned long)s);
+        }
+    }
+}
+
+void SdLog::sanitizeFilename(const char* in, char* out, size_t maxLen) {
+    if (!out || maxLen == 0) return;
+    if (!in || !*in) {
+        strncpy(out, "unnamed", maxLen - 1);
+        out[maxLen - 1] = '\0';
+        return;
+    }
+    size_t o = 0;
+    for (size_t i = 0; in[i] != '\0' && o < maxLen - 1; i++) {
+        char c = in[i];
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+            out[o++] = c;
+        } else if (c == ' ') {
+            out[o++] = '_';
+        }
+    }
+    if (o == 0) {
+        strncpy(out, "target", maxLen - 1);
+        o = strlen(out);
+    }
+    out[o] = '\0';
+}
+
 void SdLog::openDaily() {
     if (!_ready) return;
-    uint32_t t = millis();
-    uint32_t day = t / (24UL * 60UL * 60UL * 1000UL);
-    snprintf(_filename, sizeof(_filename), "/squachwatch-%lu.log", (unsigned long)day);
+    if (Clock::isSet()) {
+        struct tm tmv;
+        time_t sec = (time_t)Clock::nowEpoch();
+        localtime_r(&sec, &tmv);
+        snprintf(_filename, sizeof(_filename), "/squachwatch-%04d%02d%02d.log",
+                 tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday);
+    } else {
+        uint32_t t = millis();
+        uint32_t day = t / (24UL * 60UL * 60UL * 1000UL);
+        snprintf(_filename, sizeof(_filename), "/squachwatch-day%lu.log", (unsigned long)day);
+    }
 #if defined(NM_CYD_C5)
-    // Say what is already on the card for today. Mounting proves the card
-    // answers; it does not prove a single row ever reached it, and until this
-    // line existed the only way to tell the two apart was to pull the card.
-    // Board-gated for the same reason as the branch in logEvent() below.
     FramePush::busLock();
     File f = CARD.open(_filename, FILE_READ);
     if (f) { Serial.printf("[sd] %s: %lu bytes already\n", _filename, (unsigned long)f.size()); f.close(); }
@@ -174,46 +227,36 @@ void SdLog::openDaily() {
 
 void SdLog::logEvent(const Detection& d) {
     if (!_ready) return;
-    // The card shares the panel's SPI bus on the boards that have it there;
-    // on the C5 the push runs in a task, so the write waits for a frame in
-    // flight (a no-op everywhere else).
+    openDaily();
     FramePush::busLock();
     File f = CARD.open(_filename, FILE_APPEND);
     if (!f) {
         FramePush::busUnlock();
-#if defined(NM_CYD_C5)
-        // Once, not once per detection: a card that mounts but cannot be
-        // opened for append reads exactly like a card that was logging, and
-        // begin()'s own comment two screens up says that is the thing to
-        // avoid. A write-protected card, a full one, or a filesystem the
-        // driver mounted but cannot write all land here.
-        //
-        // Board-gated ON PURPOSE. It is worth having on every board and costs
-        // ~288 bytes of flash, but this is a board-port PR: no existing board
-        // should change by a byte on account of it. Lift the guard if you want
-        // it everywhere -- see the note in the PR description.
-        static bool said = false;
-        if (!said) {
-            said = true;
-            Serial.printf("[sd] cannot open %s for append: mounted, but nothing is being logged\n",
-                          _filename);
-        }
-#endif
         return;
     }
-    char line[96];
+
     char mac[18];
     snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
              d.mac[0], d.mac[1], d.mac[2], d.mac[3], d.mac[4], d.mac[5]);
-    // Sanitize any commas in vendor / name
-    char vendorSafe[12], nameSafe[20];
+
+    // Sanitize any commas or quotes in vendor / name
+    char vendorSafe[24], nameSafe[36];
     strncpy(vendorSafe, vendorText(d), sizeof(vendorSafe) - 1); vendorSafe[sizeof(vendorSafe)-1] = 0;
     strncpy(nameSafe,   d.name,   sizeof(nameSafe)   - 1); nameSafe[sizeof(nameSafe)-1]   = 0;
-    for (char* p = vendorSafe; *p; p++) if (*p == ',') *p = '.';
-    for (char* p = nameSafe;   *p; p++) if (*p == ',') *p = '.';
+    for (char* p = vendorSafe; *p; p++) if (*p == ',' || *p == '"' || *p == '\r' || *p == '\n') *p = '.';
+    for (char* p = nameSafe;   *p; p++) if (*p == ',' || *p == '"' || *p == '\r' || *p == '\n') *p = '.';
+
+    char timeBuf[32];
+    formatTimestamp(timeBuf, sizeof(timeBuf));
+
+    if (f.size() == 0) {
+        f.println("# SQUACHWATCH - WIRELESS THREAT & DETECTION LOG");
+        f.println("timestamp,type,rssi,mac,channel,vendor,name");
+    }
+    char line[128];
     snprintf(line, sizeof(line),
-             "%lu,%s,%d,%s,%u,%s,%s\n",
-             (unsigned long)millis(),
+             "%s,%s,%d,%s,%u,%s,%s\n",
+             timeBuf,
              detectionTypeName(d.type),
              d.rssi,
              mac,
@@ -223,34 +266,95 @@ void SdLog::logEvent(const Detection& d) {
     f.print(line);
     f.close();
     FramePush::busUnlock();
+
+    if (d.type == DetectionType::EVILTWIN) {
+        char safeSsid[32];
+        sanitizeFilename(d.name, safeSsid, sizeof(safeSsid));
+        char evilFile[64];
+        snprintf(evilFile, sizeof(evilFile), "/evilportal_%s.log", safeSsid);
+        FramePush::busLock();
+        File ef = CARD.open(evilFile, FILE_APPEND);
+        if (ef) {
+            if (ef.size() == 0) {
+                ef.println("==========================================================");
+                ef.println("  SQUACHWATCH - ROGUE AP / EVIL PORTAL DETECTION CAPTURE  ");
+                ef.println("==========================================================");
+                ef.printf("# Impersonated SSID: %s\n", d.name[0] ? d.name : "(hidden)");
+                ef.println("# An evil portal / rogue AP was detected cloning this SSID");
+                ef.println("# with conflicting encryption or vendor parameters.");
+                ef.println("# Format: Timestamp,Type,RSSI,Rogue_BSSID,Channel,Vendor,SSID,Alert");
+            }
+            ef.printf("%s,EVILTWIN,%d,%s,%u,%s,%s,EVIL_PORTAL_ALERT\n",
+                      timeBuf, d.rssi, mac, d.channel, vendorSafe, d.name[0] ? d.name : "(hidden)");
+            ef.close();
+            Serial.printf("[sd] logged evil portal capture to %s\n", evilFile);
+        }
+        FramePush::busUnlock();
+    }
+}
+
+void SdLog::logTargetScan(const char* ssid, const uint8_t* bssid, int8_t rssi, uint8_t channel, const char* mode) {
+    if (!_ready || !ssid || !ssid[0]) return;
+    char safeSsid[32];
+    sanitizeFilename(ssid, safeSsid, sizeof(safeSsid));
+    char filename[64];
+    snprintf(filename, sizeof(filename), "/scan_%s.log", safeSsid);
+
+    FramePush::busLock();
+    File f = CARD.open(filename, FILE_APPEND);
+    if (!f) {
+        FramePush::busUnlock();
+        return;
+    }
+    if (f.size() == 0) {
+        f.println("# SQUACHWATCH - TARGETED WIRELESS DEFENSE SCAN LOG");
+        f.printf("# Target SSID: %s\n", ssid);
+        f.println("# Format: Timestamp,Mode,RSSI,BSSID,Channel,SSID");
+    }
+    char mac[18] = {0};
+    if (bssid) {
+        snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5]);
+    } else {
+        strncpy(mac, "00:00:00:00:00:00", sizeof(mac));
+    }
+    char timeBuf[32];
+    formatTimestamp(timeBuf, sizeof(timeBuf));
+    f.printf("%s,%s,%d,%s,%u,%s\n",
+             timeBuf, mode ? mode : "WATCH", rssi, mac, channel, ssid);
+    f.close();
+    FramePush::busUnlock();
+    Serial.printf("[sd] logged targeted scan sighting to %s\n", filename);
 }
 
 void SdLog::wipe() {
     if (!_ready) return;
     FramePush::busLock();
-    // Walk the root and remove every file this firmware writes. Names are
-    // /squachwatch-YYYYMMDD.log; matching on the prefix takes them all rather
-    // than only today's, which is the whole point of a wipe.
-    File dir = CARD.open("/");
-    if (!dir) { FramePush::busUnlock(); return; }
-    // Collect first, then remove: deleting while iterating openNextFile() is
-    // not something the FAT driver promises to survive.
-    char victims[16][32];
-    int  n = 0;
-    for (File f = dir.openNextFile(); f && n < 16; f = dir.openNextFile()) {
-        const char* nm = f.name();
-        // name() is with or without a leading slash depending on core version;
-        // match the basename either way.
-        const char* base = nm;
-        for (const char* p = nm; *p; p++) if (*p == '/') base = p + 1;
-        if (strncmp(base, "squachwatch-", 12) == 0) {
-            snprintf(victims[n], sizeof victims[n], "/%s", base);
-            n++;
+    bool more = true;
+    while (more) {
+        File dir = CARD.open("/");
+        if (!dir) break;
+        char victims[32][64];
+        int n = 0;
+        for (File f = dir.openNextFile(); f && n < 32; f = dir.openNextFile()) {
+            const char* nm = f.name();
+            const char* base = nm;
+            for (const char* p = nm; *p; p++) if (*p == '/') base = p + 1;
+            if (strncmp(base, "squachwatch-", 12) == 0 ||
+                strncmp(base, "evilportal_", 11) == 0 ||
+                strncmp(base, "scan_", 5) == 0) {
+                snprintf(victims[n], sizeof(victims[n]), "/%s", base);
+                n++;
+            }
+            f.close();
         }
-        f.close();
+        dir.close();
+        int removedCount = 0;
+        for (int i = 0; i < n; i++) {
+            if (CARD.remove(victims[i])) removedCount++;
+        }
+        if (n < 32 || removedCount == 0) more = false;
     }
-    dir.close();
-    for (int i = 0; i < n; i++) CARD.remove(victims[i]);
     FramePush::busUnlock();
     _filename[0] = '\0';       // force a fresh openDaily() on the next event
 }
@@ -260,9 +364,8 @@ void SdLog::tick() {
     uint32_t now = millis();
     if (now - _lastFlush > 5000) {
         _lastFlush = now;
-        // Reopen daily file once an hour (or on day change)
         static uint32_t lastDayCheck = 0;
-        if (now - lastDayCheck > 3600000) {
+        if (now - lastDayCheck > 60000) {
             lastDayCheck = now;
             openDaily();
         }

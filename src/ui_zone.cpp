@@ -1,6 +1,7 @@
 // SquachWatch-CYD — the time zone card. See ui_zone.h.
 #include "ui_zone.h"
 #include "clock.h"
+#include "draw_band.h"
 #include "settings.h"
 #include "theme.h"
 #include <Arduino.h>
@@ -31,6 +32,7 @@ void uiZoneCardDraw(TFT_eSPI& t, uint32_t now) {
     (void)now;
     int x, y;
     cardRect(t.width(), t.height(), x, y);
+    if (!DrawBand::has(y, y + CARD_H)) return;
     t.fillRoundRect(x, y, CARD_W, CARD_H, 6, Theme::BG);
     t.drawRoundRect(x, y, CARD_W, CARD_H, 6, Theme::VAPOR_PURPLE);
     t.drawRoundRect(x + 1, y + 1, CARD_W - 2, CARD_H - 2, 5, Theme::VAPOR_PURPLE);
