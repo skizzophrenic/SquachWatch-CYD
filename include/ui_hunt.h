@@ -18,6 +18,11 @@ bool uiHuntHitBack(int x, int y, int screenW, int screenH);
 // STOP: ends the hunt outright (DetectionEngine::clearHunt) and returns to
 // CLEAR. BACK leaves the target set, so the two are not the same exit.
 bool uiHuntHitStop(int x, int y, int screenW, int screenH);
+
+// Multi-target roster shown whenever no single target is active.
+int  uiHuntListHitTarget(TFT_eSPI& t, int x, int y, int screenW, int screenH);
+bool uiHuntListHitBack(int x, int y, int screenW, int screenH);
+void uiHuntListScroll(int delta);
 // True while the gauge is showing CAUGHT: the signal has sat at
 // arm's-length strength for two samples running. The status light reads
 // it so the catch shows from the back of the board too.

@@ -1111,11 +1111,17 @@ void uiSettingsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     // too, so the answer is cached here once a frame. Same pattern ui_clear.cpp
     // uses for the crowd's tap targets.
     s_hasWatch = eng.watchKind() != DetectionEngine::WatchKind::NONE;
-    s_hasHunt  = eng.huntKind()  != DetectionEngine::WatchKind::NONE;
+    s_hasHunt  = eng.huntTargetCount() > 0;
     s_dexCaught = uiDexCaught(eng);
     char pv[40];
     if (s_hasWatch) { strncpy(s_watchLabel, Privacy::name(eng.watchLabel(), pv, sizeof pv), sizeof(s_watchLabel) - 1); s_watchLabel[sizeof(s_watchLabel) - 1] = 0; }
-    if (s_hasHunt)  { strncpy(s_huntLabel,  Privacy::name(eng.huntLabel(),  pv, sizeof pv), sizeof(s_huntLabel)  - 1); s_huntLabel[sizeof(s_huntLabel)  - 1] = 0; }
+    if (s_hasHunt) {
+        DetectionEngine::HuntTargetInfo info;
+        if (eng.huntTargetCount() == 1 && eng.huntTargetInfo(0, info))
+            snprintf(s_huntLabel, sizeof s_huntLabel, "%s", Privacy::name(info.label, pv, sizeof pv));
+        else
+            snprintf(s_huntLabel, sizeof s_huntLabel, "%u TARGETS", (unsigned)eng.huntTargetCount());
+    }
 
     int top, bodyBottom, rowH, headerH, tallH;
     computeGeom(t, h, top, bodyBottom, rowH, headerH, tallH);

@@ -52,6 +52,10 @@ static const int8_t   CAUGHT_DBM  = -48;
 static const uint32_t CAUGHT_HOLD = 5000;
 static uint32_t s_caughtUntil = 0;
 static bool     s_caughtFired = false;
+static bool     s_gaugeStarted = false;
+static uint8_t  s_listOrder[DetectionEngine::HUNT_TARGET_CAP] = {0};
+static uint8_t  s_listCount = 0;
+static uint8_t  s_listScroll = 0;
 
 void uiHuntInit(TFT_eSPI& t) {
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
@@ -63,7 +67,8 @@ void uiHuntInit(TFT_eSPI& t) {
     s_stalledFired    = false;
     s_caughtUntil     = 0;
     s_caughtFired     = false;
-    Squachy::huntReaction(Squachy::HuntMoment::STARTED);
+    s_gaugeStarted    = false;
+    s_listScroll      = 0;
 }
 
 bool uiHuntHitBack(int x, int y, int screenW, int screenH) {
@@ -116,7 +121,159 @@ static void drawGauge(TFT_eSPI& t, int cx, int cy, int r, float frac, uint16_t n
     t.fillCircle(cx, cy, 4, needleColor);
 }
 
+
+static void huntListGeom(TFT_eSPI& t, int w, int h,
+                         int& top, int& bottom, int& rowH, int& visible) {
+    Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
+    top = 24;
+    bottom = bar.y - 4;
+    t.setTextSize(2);
+    const int nameH = t.fontHeight();
+    t.setTextSize(1);
+    const int detailH = t.fontHeight();
+    rowH = nameH + detailH + 5;
+    visible = (bottom - top) / rowH;
+    if (visible < 1) visible = 1;
+}
+
+static int huntListScore(const DetectionEngine::HuntTargetInfo& info, uint32_t now) {
+    if (!info.seen || now - info.lastSeenMs > 10000) return -200;
+    return (int)info.rssi;
+}
+
+static void buildHuntOrder(const DetectionEngine& eng, uint32_t now) {
+    s_listCount = eng.huntTargetCount();
+    for (uint8_t i = 0; i < s_listCount; i++) s_listOrder[i] = i;
+    for (uint8_t i = 1; i < s_listCount; i++) {
+        const uint8_t key = s_listOrder[i];
+        DetectionEngine::HuntTargetInfo keyInfo;
+        eng.huntTargetInfo(key, keyInfo);
+        const int keyScore = huntListScore(keyInfo, now);
+        uint8_t j = i;
+        while (j > 0) {
+            DetectionEngine::HuntTargetInfo prevInfo;
+            eng.huntTargetInfo(s_listOrder[j - 1], prevInfo);
+            if (huntListScore(prevInfo, now) >= keyScore) break;
+            s_listOrder[j] = s_listOrder[j - 1];
+            j--;
+        }
+        s_listOrder[j] = key;
+    }
+}
+
+static void drawHuntTrend(TFT_eSPI& t, int x, int y,
+                          const DetectionEngine::HuntTargetInfo& info) {
+    if (info.samples < 2) return;
+    const int delta = (int)info.rssi - (int)info.previousRssi;
+    if (delta >= 4)
+        t.fillTriangle(x, y + 7, x + 8, y + 7, x + 4, y, Theme::GREEN);
+    else if (delta <= -4)
+        t.fillTriangle(x, y, x + 8, y, x + 4, y + 7, Theme::RED);
+    else
+        t.drawFastHLine(x, y + 4, 8, Theme::CYAN);
+}
+
+static void drawHuntList(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
+    const int w = t.width(), h = t.height();
+    t.fillRect(0, 0, w, h, Theme::BG);
+    Theme::drawTitleBar(t, ">> HUNT TARGETS <<");
+
+    int top, bottom, rowH, visible;
+    huntListGeom(t, w, h, top, bottom, rowH, visible);
+    buildHuntOrder(eng, now);
+
+    const int maxScroll = s_listCount > visible ? s_listCount - visible : 0;
+    if (s_listScroll > maxScroll) s_listScroll = (uint8_t)maxScroll;
+
+    if (!s_listCount) {
+        t.setTextSize(1);
+        t.setTextColor(Theme::WHITE, Theme::BG);
+        const char* empty = "NO HUNT TARGETS";
+        t.setCursor((w - t.textWidth(empty)) / 2, top + 24);
+        t.print(empty);
+    }
+
+    for (uint8_t row = 0; row < (uint8_t)visible; row++) {
+        const uint8_t pos = (uint8_t)(s_listScroll + row);
+        if (pos >= s_listCount) break;
+
+        DetectionEngine::HuntTargetInfo info;
+        if (!eng.huntTargetInfo(s_listOrder[pos], info)) continue;
+        const int y = top + row * rowH;
+        const bool fresh = info.seen && now - info.lastSeenMs <= 10000;
+
+        t.drawFastHLine(6, y + rowH - 1, w - 12, Theme::PURPLE);
+
+        char fitted[28], pv[40];
+        t.setTextSize(2);
+        snprintf(fitted, sizeof fitted, "%s", Privacy::name(info.label, pv, sizeof pv));
+        while (fitted[0] && t.textWidth(fitted) > w - 104)
+            fitted[strlen(fitted) - 1] = '\0';
+        t.setTextColor(Theme::WHITE, Theme::BG);
+        t.setCursor(8, y + 1);
+        t.print(fitted);
+
+        char rbuf[16];
+        if (fresh) snprintf(rbuf, sizeof rbuf, "%d dBm", (int)info.rssi);
+        else if (info.seen) snprintf(rbuf, sizeof rbuf, "OUT");
+        else snprintf(rbuf, sizeof rbuf, "WAIT");
+        const int rw = t.textWidth(rbuf);
+        t.setTextColor(fresh ? Theme::CYAN : Theme::AMBER, Theme::BG);
+        t.setCursor(w - rw - 24, y + 1);
+        t.print(rbuf);
+        if (fresh) drawHuntTrend(t, w - 17, y + 5, info);
+
+        t.setTextSize(1);
+        t.setTextColor(Theme::VAPOR_PURPLE, Theme::BG);
+        t.setCursor(8, y + 18);
+        t.print(info.kind == DetectionEngine::WatchKind::BLE ? "BLE" : "WIFI");
+        if (info.seen) {
+            const uint32_t age = (now - info.lastSeenMs) / 1000;
+            t.printf("   seen %lus ago", (unsigned long)age);
+        } else {
+            t.print("   waiting for signal");
+        }
+    }
+
+    Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
+    const int bw = 120, bx = (w - bw) / 2;
+    Theme::drawButton(t, bx, bar.y, bw, bar.h, "[ BACK ]", false);
+}
+
+int uiHuntListHitTarget(TFT_eSPI& t, int x, int y, int screenW, int screenH) {
+    int top, bottom, rowH, visible;
+    huntListGeom(t, screenW, screenH, top, bottom, rowH, visible);
+    if (x < 0 || x >= screenW || y < top || y >= bottom) return -1;
+    const int row = (y - top) / rowH;
+    const int pos = (int)s_listScroll + row;
+    if (row < 0 || row >= visible || pos < 0 || pos >= s_listCount) return -1;
+    return (int)s_listOrder[pos];
+}
+
+bool uiHuntListHitBack(int x, int y, int screenW, int screenH) {
+    Theme::ButtonBarGeom bar = Theme::computeButtonBar(screenW, screenH);
+    const int bw = 120, bx = (screenW - bw) / 2;
+    return x >= bx && x <= bx + bw && y >= bar.y && y < screenH;
+}
+
+void uiHuntListScroll(int delta) {
+    int n = (int)s_listScroll + delta;
+    if (n < 0) n = 0;
+    if (n >= s_listCount) n = s_listCount ? s_listCount - 1 : 0;
+    s_listScroll = (uint8_t)n;
+}
+
 void uiHuntTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance) {
+    if (eng.huntKind() == DetectionEngine::WatchKind::NONE) {
+        drawHuntList(t, now, eng);
+        return;
+    }
+
+    if (!s_gaugeStarted) {
+        s_gaugeStarted = true;
+        Squachy::huntReaction(Squachy::HuntMoment::STARTED);
+    }
+
     int w = t.width(), h = t.height();
 
     Theme::drawTitleBar(t, ">> HUNT MODE <<");

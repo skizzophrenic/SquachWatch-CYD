@@ -245,7 +245,7 @@ static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label, bool 
         t.setCursor(px + (pw - t.textWidth(nm)) / 2, py + 6);
         t.print(nm);
         Theme::drawButton(t, wX, wY, wW, wH, watched ? "UNWATCH" : "WATCH", watched, 1);
-        Theme::drawButton(t, huX, huY, huW, huH, hunted ? "STOP HUNT" : "HUNT", hunted, 1);
+        Theme::drawButton(t, huX, huY, huW, huH, hunted ? "REMOVE HUNT" : "ADD HUNT", hunted, 1);
         Theme::drawButton(t, igX, igY, igW, igH, ignored ? "UN-IGNORE" : "IGNORE", ignored, 1);
         Theme::drawButton(t, infX, infY, infW, infH, "MORE INFO", false, 1);
         Theme::drawButton(t, cnX, cnY, cnW, cnH, "CANCEL", false, 1);
@@ -282,7 +282,7 @@ static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label, bool 
     // the next tap rather than the thing already done.
     Theme::drawButton(t, wX, wY, wW, wH, watched ? "UNWATCH" : "WATCH", watched);
     // Toggles like WATCH beside it -- see that button's comment.
-    Theme::drawButton(t, huX, huY, huW, huH, hunted ? "STOP HUNT" : "HUNT", hunted);
+    Theme::drawButton(t, huX, huY, huW, huH, hunted ? "REMOVE HUNT" : "ADD HUNT", hunted);
     // Toggles too (issue #18): the only way to tell a device was ignored used
     // to be tapping IGNORE again and reading which toast came back.
     Theme::drawButton(t, igX, igY, igW, igH, ignored ? "UN-IGNORE" : "IGNORE", ignored);

@@ -2926,7 +2926,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     const bool tilesLow = true;
 #else
     const bool tilesLow = eng.watchKind() != DetectionEngine::WatchKind::NONE ||
-                          eng.huntKind()  != DetectionEngine::WatchKind::NONE;
+                          eng.huntTargetCount() > 0;
 #endif
     const int tilesTop      = tilesLow ? titleBottom + 2 : 2;
     // The 135-pixel boards may borrow a third row on a crowded day (see the
@@ -3123,7 +3123,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // whenever either target is set.
     {
         const bool watching = eng.watchKind() != DetectionEngine::WatchKind::NONE;
-        const bool hunting  = eng.huntKind()  != DetectionEngine::WatchKind::NONE;
+        const bool hunting  = eng.huntTargetCount() > 0;
         // The flag goes inside the guard with the drawing it describes. Left
         // outside it, the pass that cannot reach the title bar would clear a
         // pill the other pass had just drawn, and it would stop being tappable.
