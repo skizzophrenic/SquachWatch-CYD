@@ -41,10 +41,51 @@ selects between them via their respective `CS` lines. The SD card
 is optional — if no card is inserted at boot, the firmware just
 skips SD logging and everything else works.
 
-## Unused GPIOs (free for future use)
+## Spare GPIOs
 
-GPIO 0, 1, 3, 12, 13, 16, 17, 22, 26, 34, 35, 37, 38 are exposed
-on the CYD's GPIO header but not used by SquachWatch-CYD v1.0.
+The spare pins on the connectors are GPIO 22 and 35. GPIO 27 on CN1 is
+also free, but the firmware drives it high at boot. GPIO 35 is input only.
+
+The pins an older version of this list called unused are in use:
+
+| GPIO | Used for |
+|---|---|
+| 0 | BOOT button |
+| 1, 3 | USB serial console |
+| 4, 16, 17 | status light (RGB LED) |
+| 12, 13 | display bus |
+| 21 | backlight |
+| 26 | speaker |
+| 34 | light sensor |
+| 37, 38 | not on the connectors |
+
+## GPS module (cyd-gps builds)
+
+The `cyd-gps` and `cyd-ili9341-gps` builds read an ATGM336H GPS module at
+9600 baud. Wire it like this:
+
+| Module | CYD |
+|---|---|
+| TX  | GPIO 35 on P3 |
+| VCC | 3.3V on CN1 |
+| GND | GND on CN1 |
+| RX  | not connected |
+
+The module's RX is not connected, so the firmware cannot configure the
+module. It runs on the module's defaults.
+
+To check the build with no module, open the serial console at 2,000,000 baud:
+
+- `GPS FAKE lat lon` sets a bench fix, for example `GPS FAKE -33.857 151.215`.
+  The screens and the SD rows mark it FAKE, and it never sets the clock.
+- `GPS STATUS` prints the sentence counts, the satellites and the position.
+- `GPS OFF` clears the bench fix.
+
+Wardriving: switch on WARDRIVE in Settings, or type `WARDRIVE ON` on the
+console. With a real fix, the board writes every network and Bluetooth device
+it hears to `/wigle-YYYYMMDD-HHMM.csv` on the SD card, named for the start of
+the session in UTC. Upload that file to wigle.net as it is. A bench fix writes
+nothing. Wardriving pauses when memory runs low, and detection keeps running.
 
 ## Freenove ESP32-S3 Display 2.8" (FNK0104B) — `[env:freenove-s3]`
 

@@ -6,6 +6,9 @@
 #include "detection.h"
 #include "ignore_list.h"
 #include <Arduino.h>
+#if defined(CYD_GPS)
+#include "sd_row.h"   // degreesText() for the place line
+#endif
 
 static const char* targetLabel(DetectionType t) {
     switch (t) {
@@ -149,6 +152,13 @@ void uiAlertSetLastFree(bool lastFree) { s_lastFree = lastFree; }
 static bool     s_spam      = false;
 static uint16_t s_spamFakes = 0;
 void uiAlertSetSpam(bool spam, uint16_t fakes) { s_spam = spam; s_spamFakes = fakes; }
+#if defined(CYD_GPS)
+static bool    s_place = false, s_placeFake = false;
+static int32_t s_placeLat7 = 0, s_placeLon7 = 0;
+void uiAlertSetPlace(bool has, int32_t lat7, int32_t lon7, bool fake) {
+    s_place = has; s_placeLat7 = lat7; s_placeLon7 = lon7; s_placeFake = fake;
+}
+#endif
 
 void uiAlertInit(TFT_eSPI& t, const Detection& d) {
     s_last = d;
@@ -156,6 +166,9 @@ void uiAlertInit(TFT_eSPI& t, const Detection& d) {
     s_night = false;
     s_lastFree = false;
     s_spam     = false;
+#if defined(CYD_GPS)
+    s_place    = false;   // a card never shows an earlier alert's place
+#endif
     s_touched = false;
     s_alertStart = millis();
     s_glitchStep = 0;
@@ -559,6 +572,27 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
         t.setCursor(PLATE_X + (PLATE_W - t.textWidth(fl)) / 2, tiny ? PLATE_Y + NAME_DY : stripHOf(w, h) + 2);
         t.print(fl);
     }
+#if defined(CYD_GPS)
+    // Where it was caught, from a fresh GPS fix. In the banner's line when
+    // there is no banner; else under the plate when the gauge is beside it,
+    // or under the gauge when it is below. Not on the tiny layout, and never
+    // on a locked card: it would show where the owner was.
+    if (s_place && !s_redacted && !tiny) {
+        char la[16], lo[16], pl[40];
+        SdRow::degreesText(la, sizeof la, s_placeLat7, 5);
+        SdRow::degreesText(lo, sizeof lo, s_placeLon7, 5);
+        snprintf(pl, sizeof pl, "%s, %s%s", la, lo, s_placeFake ? " FAKE" : "");
+        const int py = !banner ? stripHOf(w, h) + 2
+                     : wide    ? PLATE_Y + PLATE_H + 3
+                               : PLATE_Y + PLATE_H + 62;
+        t.setTextSize(1);
+        if (py + t.fontHeight() <= h - 56) {
+            t.setTextColor(Theme::CYAN, Theme::BG);
+            t.setCursor(PLATE_X + (PLATE_W - t.textWidth(pl)) / 2, py);
+            t.print(pl);
+        }
+    }
+#endif
 
     // ---- the gauge -----------------------------------------------------
     // The detected thing, drawn large with the instrument grid over the top

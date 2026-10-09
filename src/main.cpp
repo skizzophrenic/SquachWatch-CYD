@@ -62,6 +62,11 @@
 #include "ui_diagnostics.h"   // CrashReport, used by the breadcrumb below
 #include "blackbox.h"
 #include "gnss.h"
+#if defined(CYD_GPS)
+#include "sd_row.h"
+static void cydGpsStart();
+static void cydGpsTick(uint32_t now);
+#endif
 #include "privacy.h"
 #include "lora_sniffer.h"   // the watch's SX1262; inline no-ops elsewhere
 #include "wardrive.h"
@@ -1964,6 +1969,15 @@ static void enterAlert(const Detection& d) {
     // worked, which is presumably why nobody noticed the banner was missing.
     s_infoPending = false;
     uiAlertInit(*canvas, d);
+#if defined(CYD_GPS)
+    // Only for a live catch with a fresh fix: a card opened later from
+    // NEARBY shows no place, because the board may have moved since.
+    {
+        const uint32_t nowMs = millis();
+        if (Gnss::fresh(nowMs) && !d.restored && nowMs - d.lastSeen <= Gnss::FRESH_MS)
+            uiAlertSetPlace(true, Gnss::fix().lat7, Gnss::fix().lon7, Gnss::faked());
+    }
+#endif
     // The lifetime count for the type includes this one, so one means first.
     {
         const bool first = engine.lifetimeTypeCount(d.type) == 1;
@@ -2636,6 +2650,8 @@ static void performWipe(WipeBoot after) {
     BlackBox::wipe();        // the log and the crash history kept in flash
 #if defined(TWATCH_S3)
     Wardrive::clear();       // where the watch has been, and everything it heard there
+#elif defined(CYD_GPS)
+    Wardrive::sdWipe();      // the WiGLE file is a record of everywhere the board has been
 #endif
 #if HAVE_NVS_ERASE
     // The frame buffer is 77 KB the wipe can have: the board restarts in a
@@ -3601,6 +3617,9 @@ void setup() {
     // saved rotation instead of always starting from the board default.
     Settings::load();
     Clock::begin();   // after Settings: the zone is applied there, the history here
+#if defined(CYD_GPS)
+    cydGpsStart();
+#endif
 #if defined(TWATCH_S3)
     twatchRtcBegin();      // after Clock::begin(): a real time beats the note's guess
     twatchHapticBegin();
@@ -4550,7 +4569,7 @@ static void wigleExport(bool includeFake) {
     char buf[512];   // the two header lines run past 330 with a long version string
     struct Ctx { bool fake, ok; uint32_t rows, skipped; char* buf; } c = { includeFake, true, 0, 0, buf };
     usbWriteAll("=== WIGLE BEGIN ===\n", 20);
-    const size_t h = Wardrive::headerLines(buf, sizeof buf, FIRMWARE_VERSION, "twatch-s3", "LilyGo T-Watch S3 Plus");
+    const size_t h = Wardrive::headerLines(buf, sizeof buf, FIRMWARE_VERSION, "twatch-s3", "LilyGo T-Watch S3 Plus", "LilyGo");
     c.ok = usbWriteAll(buf, h);
     if (c.ok) Wardrive::forEach([](const Wardrive::Record& r, void* p) {
         Ctx& c = *(Ctx*)p;
@@ -4685,6 +4704,111 @@ uint8_t twatchGpsState() {
 static void wardriveBegin() {
     Wardrive::begin();
     if (Wardrive::enabled()) gpsStart(false);
+}
+#endif
+
+#if defined(CYD_GPS)
+// ---- GPS on the CYD (cyd-gps builds) ------------------------------------------
+// An ATGM336H with its TX on GPIO35 (P3), at 9600 baud. Its sentences go to
+// Gnss (gnss.h); a fresh fix puts a position on each SD row and on the alert
+// card, and its time sets a clock that has no network time this boot.
+// No power control (the CYD has none) and no baud search.
+//
+// Not behind CYD: the emulator's squachsim-live compiles this file with no
+// board macro, and its Serial2 replays the NMEA file named by SQUACHSIM_NMEA.
+//
+// Console: GPS STATUS; GPS FAKE lat lon (a bench fix, marked FAKE on the
+// screens and the SD rows, and never used for the clock); GPS OFF ends it.
+static bool     s_cydGpsClockSet = false;   // set from GPS once this boot
+static uint32_t s_cydGpsFirstFixMs = 0;     // millis() of the first real fix, 0 until then
+
+static void cydGpsStart() {
+    Gnss::reset();
+    // TX -1: the module's RX is not wired. The core fills in its default
+    // pins only when both are negative, so TX stays unassigned here; the
+    // default TX2 is GPIO17, the status light.
+    Serial2.begin(9600, SERIAL_8N1, 35, -1);
+    Wardrive::sdBegin();
+}
+
+static const char* cydWardriveStateName(Wardrive::SdState st) {
+    switch (st) {
+        case Wardrive::SdState::OFF:             return "off";
+        case Wardrive::SdState::NO_CARD:         return "NO CARD";
+        case Wardrive::SdState::LOW_MEMORY:      return "LOW MEMORY";
+        case Wardrive::SdState::WAITING_FOR_FIX: return "WAITING FOR FIX";
+        case Wardrive::SdState::LOGGING:         return "ON";
+    }
+    return "?";
+}
+
+static void cydGpsTick(uint32_t now) {
+    const uint8_t cmd = g_consoleGps;
+    if (cmd) g_consoleGps = 0;
+    if (cmd == 2) { Gnss::reset(); Serial.println("[gps] reset: any bench fix is gone"); }
+    else if (cmd == 3) {
+        const Gnss::Sky k = Gnss::sky();
+        const Gnss::Fix& f = Gnss::fix();
+        Serial.printf("[gps] status: sentences %lu good, %lu bad; in view %u, heard %u, used %u; ",
+                      (unsigned long)Gnss::good(), (unsigned long)Gnss::bad(), k.view, k.heard, f.used);
+        if (s_cydGpsFirstFixMs) Serial.printf("first fix %lu s after boot; ", (unsigned long)(s_cydGpsFirstFixMs / 1000));
+        else                    Serial.print(Gnss::faked() ? "no real fix yet; " : "no fix yet; ");
+        if (f.valid) {
+            char la[16], lo[16];
+            SdRow::degreesText(la, sizeof la, f.lat7, 7);
+            SdRow::degreesText(lo, sizeof lo, f.lon7, 7);
+            Serial.printf("%s at %s,%s\n",
+                          Gnss::faked() ? "bench fix" : Gnss::fresh(now) ? "fixed" : "lost", la, lo);
+        } else {
+            Serial.println("no position");
+        }
+        const char* fn = Wardrive::sdFileName();
+        Serial.printf("[wardrive] %s; file %s; written %lu, skipped %lu as repeats, dropped %lu\n",
+                      cydWardriveStateName(Wardrive::sdState(now)), *fn ? fn : "none yet",
+                      (unsigned long)Wardrive::written(), (unsigned long)Wardrive::skipped(),
+                      (unsigned long)Wardrive::dropped());
+    }
+    else if (cmd == 4) {
+        Gnss::fake(g_consoleFakeLat7, g_consoleFakeLon7, Clock::isSet() ? Clock::nowEpoch() : 0, now);
+        char la[16], lo[16];
+        SdRow::degreesText(la, sizeof la, g_consoleFakeLat7, 7);
+        SdRow::degreesText(lo, sizeof lo, g_consoleFakeLon7, 7);
+        Serial.printf("[gps] BENCH FIX at %s,%s: SD rows written now carry FAKE, and the clock is left alone\n",
+                      la, lo);
+    }
+    else if (cmd == 5) {
+        Wardrive::setEnabled(true);
+        Serial.println("[wardrive] ON: rows go to the SD card once the GPS has a real fix");
+    }
+    else if (cmd == 6) { Wardrive::setEnabled(false); Serial.println("[wardrive] off"); }
+    else if (cmd >= 7 && cmd <= 9) {
+        const char* fn = Wardrive::sdFileName();
+        Serial.printf("[wardrive] the WiGLE file is on the SD card: %s\n", *fn ? fn : "none yet");
+    }
+    else if (cmd) Serial.println("[gps] not on this board");
+
+    // A bench fix is held until a real one replaces it; refreshed here so it
+    // does not go stale while the console test runs.
+    if (Gnss::faked()) Gnss::fake(Gnss::fix().lat7, Gnss::fix().lon7, Clock::isSet() ? Clock::nowEpoch() : 0, now);
+
+    while (Serial2.available()) Gnss::feed((char)Serial2.read(), now);
+    Wardrive::sdTick(now, engine.sd().ready());
+
+    const Gnss::Fix& f = Gnss::fix();
+    if (f.valid && !Gnss::faked() && !s_cydGpsFirstFixMs) {
+        s_cydGpsFirstFixMs = now ? now : 1;
+        Serial.printf("[gps] FIRST FIX after %lu s, %u satellites\n", (unsigned long)(now / 1000), f.used);
+    }
+    // Network time stays the preferred source: a synced clock is never
+    // overwritten, and a later NTP sync replaces this one. Once a boot, then
+    // again only if something left the clock untrusted.
+    if (Gnss::fresh(now) && !Gnss::faked() && Gnss::utcEpoch() && !Clock::synced() &&
+        (!s_cydGpsClockSet || !Clock::trusted())) {
+        if (Clock::setEpoch(Gnss::utcEpoch())) {
+            s_cydGpsClockSet = true;
+            Serial.println("[clock] set from GPS");
+        }
+    }
 }
 #endif
 
@@ -4981,6 +5105,9 @@ void loop() {
         touchJustUp = false;
     }
     engine.loop();
+#if defined(CYD_GPS)
+    cydGpsTick(millis());
+#endif
     Lora::tick(now);   // nothing outside a SQUACH_LORA build
 #if SQUACH_LORA && defined(TWATCH_S3)
     twatchLoraBuzzTick(now);
@@ -6913,6 +7040,17 @@ void loop() {
                             Serial.printf("[buzz] %s\n", Settings::buzzModeName());
                             break;
 #endif
+#if defined(CYD_GPS)
+                        case SettingsRow::WATCH_WARDRIVE:
+                            // Through the console's path, as on the watch.
+                            g_consoleGps = Wardrive::enabled() ? 6 : 5;
+                            Theme::showToast(Wardrive::enabled() ? "WARDRIVE OFF" : "WARDRIVE ON",
+                                             Wardrive::enabled() ? nullptr
+                                                 : !engine.sd().ready() ? "Needs an SD card"
+                                                 : "Logging once the GPS has a fix",
+                                             Theme::CYAN);
+                            break;
+#endif
                         case SettingsRow::STATUS_LIGHT: enterLight(); break;
                         case SettingsRow::SECURITY:    enterSecurity(); break;
                         case SettingsRow::IGNORED_DEVICES:  enterIgnoreList(); break;
@@ -8010,6 +8148,23 @@ void loop() {
             info.lastScreenUs   = s_lastScreenUs;
             info.freeHeap = ESP.getFreeHeap();
             info.largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+#if defined(CYD_GPS)
+            {
+                const Gnss::Fix& f = Gnss::fix();
+                const Gnss::Sky k = Gnss::sky();
+                const uint32_t nowMs = millis();
+                info.gpsShown = true;
+                info.gpsGood = Gnss::good(); info.gpsBad = Gnss::bad();
+                info.view = k.view; info.heard = k.heard; info.used = f.used;
+                info.accM = f.accM; info.lat7 = f.lat7; info.lon7 = f.lon7;
+                info.fixAgeMs = f.atMs ? nowMs - f.atMs : UINT32_MAX;
+                info.fresh = Gnss::fresh(nowMs); info.faked = Gnss::faked();
+                info.wdOn = Wardrive::enabled();
+                info.wdState = (uint8_t)Wardrive::sdState(nowMs);
+                info.wdWritten = Wardrive::written(); info.wdSkipped = Wardrive::skipped();
+                info.wdDropped = Wardrive::dropped(); info.wdFile = Wardrive::sdFileName();
+            }
+#endif
             info.resetReason = resetReasonName();
             info.loopFree    = s_loopHeapFree;
             info.loopLargest = s_loopHeapLargest;
