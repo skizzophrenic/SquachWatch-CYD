@@ -120,6 +120,11 @@ bool uiSettingsTapPinnedOk(int x, int y, int screenW, int screenH);
 // font metrics -- same reasoning as ui_rawscan.cpp's uiRawScanRowAt().
 SettingsRow uiSettingsHitTest(TFT_eSPI& t, int x, int y, int screenW, int screenH);
 
+// BRIGHT draws its own visible "-" and "+" controls inside the row. Return
+// the matching -16/+16 step for a tap x coordinate using the same font sizing
+// as the row, so the touch split follows the glyphs in either orientation.
+int8_t uiSettingsBrightnessDeltaForTap(TFT_eSPI& t, int x, int screenW, int screenH);
+
 // ---- confirmation panel ---------------------------------------------------
 // Two rows here cannot be taken back by tapping them again: CALIBRATE TOUCH
 // throws away a working calibration before it knows the new one is any good,

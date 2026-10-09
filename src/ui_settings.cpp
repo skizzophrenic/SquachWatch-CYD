@@ -1212,6 +1212,17 @@ if (!Theme::stillBackdrop(t)) switch (Settings::background()) {
     drawSettingsConfirm(t, w, h);
 }
 
+int8_t uiSettingsBrightnessDeltaForTap(TFT_eSPI& t, int x, int screenW, int screenH) {
+    // drawRow() starts the BRIGHT label at x=8 and uses size 1 in portrait,
+    // otherwise the normal menu size. Split exactly in the visual gap between
+    // '-' and '+'. The old screenW/2 test put the visible '+' on the dimmer
+    // side on a 320px CYD, so only taps far to the right could brighten.
+    (void)screenW;
+    t.setTextSize(screenH > screenW ? 1 : Theme::uiMenuTextSize(t));
+    const int splitX = 8 + t.textWidth("BRIGHT - ");
+    return x < splitX ? -16 : 16;
+}
+
 SettingsRow uiSettingsHitTest(TFT_eSPI& t, int x, int y, int screenW, int screenH) {
     (void)x; (void)screenW;
     int top, bodyBottom, rowH, headerH, tallH;

@@ -6840,7 +6840,9 @@ void loop() {
                             break;
                         case SettingsRow::ROTATION_LOCK: Settings::toggleRotationLock(); break;
                         case SettingsRow::BRIGHTNESS:
-                            Settings::adjustBrightness(gestureStartX < tft.width() / 2 ? -16 : 16);
+                            Settings::adjustBrightness(
+                                uiSettingsBrightnessDeltaForTap(tft, gestureStartX,
+                                                                tft.width(), tft.height()));
                             applyBrightness();
                             break;
                         case SettingsRow::CONFIDENCE: Settings::cycleMinConfidence(); break;
