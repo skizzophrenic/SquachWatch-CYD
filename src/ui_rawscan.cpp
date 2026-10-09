@@ -5,6 +5,7 @@
 #include "privacy.h"
 #include "squachy.h"
 #include "settings.h"
+#include "ignore_list.h"
 #include <Arduino.h>
 
 static int g_scroll = 0;
@@ -160,6 +161,22 @@ static void rowLayout(TFT_eSPI& t, int w, int h, int& bodyTop, int& bodyBottom, 
     t.setTextSize(1);
     int detailH = t.fontHeight();
     rowH = 1 /* topPad */ + nameH + detailH + 2;
+}
+
+// Persistent per-row target state. Keep these as separate colored words
+// instead of folding them into the MAC/channel text so WATCH, HUNT and
+// IGNORE can be visible at the same time.
+static void drawTargetFlags(TFT_eSPI& t, int x, int y,
+                            bool watched, bool hunted, bool ignored) {
+    auto flag = [&](const char* label, uint16_t color) {
+        t.setTextColor(color, Theme::BG);
+        t.setCursor(x, y);
+        t.print(label);
+        x += t.textWidth(label) + 8;
+    };
+    if (watched) flag("WATCH",  Theme::CYAN);
+    if (hunted)  flag("HUNT",   Theme::VAPOR_PINK);
+    if (ignored) flag("IGNORE", Theme::AMBER);
 }
 
 // Row index (0 = topmost visible, adjusted for current scroll) a tap
@@ -336,6 +353,10 @@ if (!Theme::stillBackdrop(t)) switch (Settings::background()) {
             Privacy::mac(mac, sizeof mac, r->mac);
             t.setCursor(4, y + detailY);
             t.print(mac);
+            drawTargetFlags(t, 4 + t.textWidth(mac) + 8, y + detailY,
+                            eng.isWatched(r->mac, true),
+                            eng.isHunted(r->mac, true),
+                            IgnoreList::contains(r->mac));
 
             t.setTextColor(Theme::VAPOR_PURPLE, Theme::BG);
             char rssi[12];
@@ -372,6 +393,11 @@ if (!Theme::stillBackdrop(t)) switch (Settings::background()) {
                      eng.rawWifiOpen(idx) ? "OPEN" : "LOCKED");
             t.setCursor(4, y + detailY);
             t.print(line);
+            const uint8_t* bssid = eng.rawWifiBssid(idx);
+            drawTargetFlags(t, 4 + t.textWidth(line) + 8, y + detailY,
+                            bssid && eng.isWatched(bssid, false),
+                            bssid && eng.isHunted(bssid, false),
+                            bssid && IgnoreList::contains(bssid));
 
             t.setTextColor(Theme::VAPOR_PURPLE, Theme::BG);
             char rssi[12];
