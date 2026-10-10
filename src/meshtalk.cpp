@@ -4,6 +4,8 @@
 
 #if SQUACH_MESH
 #include "meshcrypto.h"
+#include "mesh_airtime.h"
+#include "mesh_primary_transport.h"
 #include "settings.h"
 #include "clock.h"
 #include "ota_core.h"
@@ -34,11 +36,10 @@ MeshMsg::Assembly s_asm;
 // message, short enough that the device stops announcing it has something to
 // say.
 constexpr uint32_t SEND_MS = 30000;
-// How long each part of a typed message holds the scan response before the
-// next takes over. Just over one advert interval (1500 ms), so every part is
-// on the air for at least one advert per turn; three parts come round every
-// 4.8 s, six times in the thirty.
-constexpr uint32_t PART_MS = 1600;
+// How long each part holds the scan response. The message advertiser uses
+// a much shorter interval than this dwell, giving each frame several on-air
+// opportunities after every NimBLE advertising restart. See mesh_airtime.h.
+constexpr uint32_t PART_MS = MeshAirtime::FRAME_DWELL_MS;
 constexpr uint32_t EMOTE_MS = 9000;
 // A nudge and its WiFi parts: up to seven frames taking turns, so each is
 // on the air far less often than a message's three. A full minute.
@@ -224,6 +225,26 @@ uint8_t  s_lastQMac[6] = { 0 };
 uint8_t  s_lastQ[MeshMsg::FRAME_MAX] = { 0 };
 uint8_t  s_lastQLen    = 0;
 
+static uint32_t s_rxSeen = 0;         // BLE producer
+static uint32_t s_rxQueued = 0;       // BLE producer
+static uint32_t s_rxQueueFull = 0;    // BLE producer
+static uint32_t s_rxReplay = 0;       // loop consumer
+static uint32_t s_rxInviteParts = 0;  // loop consumer, hash-validated
+static uint32_t s_rxInviteComplete = 0;
+static uint32_t s_rxInviteRejected = 0;
+static uint8_t s_rxInviteMask = 0;
+static uint8_t s_rxLastRole = 0xff;
+static uint8_t s_rxLastReject = 0;
+
+static void inviteRxReject(uint8_t code, const char* why) {
+    ++s_rxInviteRejected;
+    s_rxLastReject = code;
+    if (s_rxInviteRejected <= 8 || (s_rxInviteRejected % 32) == 0)
+        Serial.printf("[invite-rx] reject %s (%u), total %lu, mask %x/15\n",
+                      why, (unsigned)code, (unsigned long)s_rxInviteRejected,
+                      (unsigned)s_rxInviteMask);
+}
+
 void arrived(const Slot& s, uint32_t now) {
     s_inbox.have   = true;
     s_inbox.unread = true;
@@ -255,18 +276,42 @@ void deliverInvite(const Slot& s, uint32_t now, uint32_t ctr, uint8_t kind) {
     if (!s_selfTestOk || !s_macSet) return;
     uint8_t part = 0, bytes[MeshMsg::INVITE_PART_BYTES];
     if (kind == MeshMsg::KIND_INVITE_PUB) {
-        if (MeshMsg::openInvitePub(MeshCrypto::sha256, s.data, s.len, ctr, part, bytes) != MeshMsg::Open::OK) return;
-        if (!s_invAsm.add(s.mac, kind, ctr, part, bytes)) return;
+        if (MeshMsg::openInvitePub(MeshCrypto::sha256, s.data, s.len, ctr, part, bytes) != MeshMsg::Open::OK) {
+            inviteRxReject(1, "public-key frame hash");
+            return;
+        }
+        const bool complete = s_invAsm.add(s.mac, kind, ctr, part, bytes);
+        ++s_rxInviteParts;
+        s_rxInviteMask = s_invAsm.have;
+        // At most 4 logs per invitation rotation, not once per beacon.
+        // The radio reports many copies but onFrame() coalesces adjacent ones.
+        static uint8_t loggedMask = 0;
+        if (s_rxInviteMask != loggedMask || complete) {
+            loggedMask = s_rxInviteMask;
+            Serial.printf("[invite-rx] public key part %u/4, mask %x/15, state %u\n",
+                          (unsigned)part + 1, (unsigned)s_rxInviteMask, (unsigned)s_invState);
+        }
+        if (!complete) return;
         uint8_t target[6], role = 0, pub[MeshMsg::INVITE_PUB_LEN];
         const bool ok = MeshMsg::invitePubUnblob(s_invAsm.bytes, target, role, pub);
         s_invAsm.clear();
-        if (!ok || memcmp(target, s_ownMac, 6) != 0) return;     // somebody else's invite
+        if (!ok) { inviteRxReject(2, "bad public-key blob"); return; }
+        s_rxLastRole = role;
+        if (memcmp(target, s_ownMac, 6) != 0) {
+            inviteRxReject(3, "offer/answer target is not our BLE address");
+            return;
+        }
+        ++s_rxInviteComplete;
+        Serial.printf("[invite-rx] complete four-part %s for this board\n", role ? "ANSWER" : "OFFER");
         s_replay.record(s.nmac, ctr);
         saveReplay();
         if (role == 0) {
             // An offer. Only while nothing else is going on: a second offer
             // mid-invite is ignored, not swapped in.
-            if (s_invState != InviteState::IDLE && s_invState != InviteState::ASKED) return;
+            if (s_invState != InviteState::IDLE && s_invState != InviteState::ASKED) {
+                inviteRxReject(4, "offer received in incompatible invite state");
+                return;
+            }
             memcpy(s_invPeerMac, s.mac, 6);
             memcpy(s_invPeerPub, pub, sizeof s_invPeerPub);
             snprintf(s_invPeerName, sizeof s_invPeerName, "%s", s.name[0] ? s.name : "SOMEONE");
@@ -275,10 +320,21 @@ void deliverInvite(const Slot& s, uint32_t now, uint32_t ctr, uint8_t kind) {
             Serial.printf("[invite] %s offers to add us to their squad\n", s_invPeerName);
         } else {
             // An answer, to our offer, from the board we offered to.
-            if (s_invState != InviteState::OFFERING || !s_invInviter || memcmp(s.mac, s_invPeerMac, 6) != 0) return;
+            if (s_invState != InviteState::OFFERING || !s_invInviter) {
+                inviteRxReject(4, "answer received outside OFFERING state");
+                return;
+            }
+            if (memcmp(s.mac, s_invPeerMac, 6) != 0) {
+                inviteRxReject(5, "answer sender not invited peer");
+                return;
+            }
             memcpy(s_invPeerPub, pub, sizeof s_invPeerPub);
             uint8_t shared[MeshCrypto::DH_LEN];
-            if (!MeshCrypto::dhShared(s_invPriv, s_invPeerPub, shared)) { inviteFail("Bad key from their board", now); return; }
+            if (!MeshCrypto::dhShared(s_invPriv, s_invPeerPub, shared)) {
+                inviteRxReject(6, "DH agreement failed");
+                inviteFail("Bad key from their board", now);
+                return;
+            }
             MeshCrypto::dhSessionKey(shared, s_invKey);
             memset(shared, 0, sizeof shared);
             s_invCode = MeshCrypto::dhCode(s_invPub, s_invPeerPub);
@@ -322,7 +378,7 @@ void deliver(const Slot& s, uint32_t now) {
     if (!MeshMsg::parseHeader(s.data, s.len, ctr, kind)) return;
     // Cheap check first: a counter this sender has already used cannot be a
     // new message, so it never costs a decryption.
-    if (!s_replay.fresh(s.nmac, ctr)) return;
+    if (!s_replay.fresh(s.nmac, ctr)) { ++s_rxReplay; return; }
     // The invite's frames are the one thing a board without a phrase reads.
     if (kind == MeshMsg::KIND_INVITE_PUB || kind == MeshMsg::KIND_INVITE_KEY) { deliverInvite(s, now, ctr, kind); return; }
     if (!ready()) return;
@@ -925,24 +981,26 @@ static Send sendUpdated(uint32_t now) {
     return Send::OK;
 }
 
+// Broadcast each encrypted frame as a primary advertisement, then one
+// appearance/identity slot per complete rotation. Never request a scan
+// response from the receiver; both BLE scan modes can now receive frames.
 const uint8_t* outgoing(uint32_t now, size_t& len, uint32_t& gen) {
     if (s_outN && (int32_t)(now - s_outUntil) < 0) {
-        const uint8_t p = (uint8_t)(((now - s_outStart) / PART_MS) % s_outN);
-        len = s_outLen[p];
-        // Never 0 while something is on the air: s_outGen is at least 1 by
-        // the time anything has been sent.
-        gen = (s_outGen << 2) | p;
-        return s_out[p];
+        const uint8_t part = MeshPrimaryTransport::slot(now - s_outStart, s_outN);
+        if (part < s_outN) {
+            len = s_outLen[part];
+            gen = MeshPrimaryTransport::generation(s_outGen, part);
+            return s_out[part];
+        }
     }
-    len = 0;
-    gen = 0;
+    len = 0; gen = 0; // presence slot or idle
     return nullptr;
 }
 
 bool sending(uint32_t now) {
-    size_t l;
-    uint32_t g;
-    return outgoing(now, l, g) != nullptr;
+    // A presence slot must NOT allow a hello/receipt to overwrite a live
+    // message, invitation, or firmware update nudge.
+    return s_outN && (int32_t)(now - s_outUntil) < 0;
 }
 
 bool sendingMessage(uint32_t now) { return sending(now) && !s_outEmote; }
@@ -1012,12 +1070,26 @@ void setOwnMac(const uint8_t mac[6]) {
     s_macSet = true;
 }
 
+RxDiagnostics rxDiagnostics() {
+    return {
+        __atomic_load_n(&s_rxSeen, __ATOMIC_RELAXED),
+        __atomic_load_n(&s_rxQueued, __ATOMIC_RELAXED),
+        __atomic_load_n(&s_rxQueueFull, __ATOMIC_RELAXED),
+        s_rxReplay, s_rxInviteParts, s_rxInviteComplete,
+        s_rxInviteRejected, s_rxInviteMask, s_rxLastRole, s_rxLastReject
+    };
+}
+
 void onFrame(const uint8_t mac[6], const uint8_t* d, size_t len, const char* name, const uint8_t* sealedAs) {
+    __atomic_fetch_add(&s_rxSeen, 1u, __ATOMIC_RELAXED);
     if (len == 0 || len > sizeof(Slot::data)) return;
     if (len == s_lastQLen && memcmp(mac, s_lastQMac, 6) == 0 && memcmp(d, s_lastQ, len) == 0) return;
     const uint32_t h = __atomic_load_n(&s_head, __ATOMIC_RELAXED);
     const uint32_t t = __atomic_load_n(&s_tail, __ATOMIC_ACQUIRE);
-    if (h - t >= RING) return;          // full -- the sender repeats, it will be back
+    if (h - t >= RING) {
+        __atomic_fetch_add(&s_rxQueueFull, 1u, __ATOMIC_RELAXED);
+        return;  // full -- the sender repeats, it will be back
+    }
     Slot& s = s_ring[h % RING];
     memcpy(s.mac, mac, 6);
     memcpy(s.nmac, sealedAs ? sealedAs : mac, 6);
@@ -1027,6 +1099,7 @@ void onFrame(const uint8_t mac[6], const uint8_t* d, size_t len, const char* nam
     if (name) for (; i < sizeof s.name - 1 && name[i]; i++) s.name[i] = name[i];
     s.name[i] = '\0';
     __atomic_store_n(&s_head, h + 1, __ATOMIC_RELEASE);
+    __atomic_fetch_add(&s_rxQueued, 1u, __ATOMIC_RELAXED);
     memcpy(s_lastQMac, mac, 6);
     memcpy(s_lastQ, d, len);
     s_lastQLen = (uint8_t)len;

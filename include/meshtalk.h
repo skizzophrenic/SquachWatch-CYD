@@ -63,6 +63,25 @@ void setOwnMac(const uint8_t mac[6]);
 void onFrame(const uint8_t mac[6], const uint8_t* d, size_t len, const char* name,
              const uint8_t* sealedAs = nullptr);
 
+// Shared, read-only diagnosis of the message receiver. Kept in RAM only:
+// identifying a four-part invitation failure must not write to flash.
+// "seen" counts frames handed over by the BLE callback; "queued" means
+// unique frames copied into the ring, before any crypto. The invite fields
+// count hash-validated PUBLIC-key parts and complete four-part answers.
+struct RxDiagnostics {
+    uint32_t seen;
+    uint32_t queued;
+    uint32_t queueFull;
+    uint32_t replayRejected;
+    uint32_t inviteParts;
+    uint32_t inviteComplete;
+    uint32_t inviteRejected;
+    uint8_t  mask;          // 4 bits: which of the latest invite parts arrived
+    uint8_t  lastRole;      // 0 offer, 1 answer, 0xff unknown
+    uint8_t  lastReject;    // 0 none, 1 tag, 2 blob, 3 target, 4 state, 5 peer MAC, 6 DH, 7 replay
+};
+RxDiagnostics rxDiagnostics();
+
 struct Message {
     bool     have;
     bool     unread;

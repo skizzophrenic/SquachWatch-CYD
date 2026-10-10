@@ -15,6 +15,7 @@
 #include "meshmsg.h"
 #include "emote_script.h"
 #include "meshtalk.h"
+#include "mesh_primary_transport.h"
 #include "meshcrypto.h"
 
 namespace {
@@ -68,7 +69,7 @@ const uint8_t* sealMac() {
     return pm;
 }
 
-uint32_t lastAdv = 0, ctr = 0, sendUntil = 0, heardGen = 0, replyAt = 0, heardMsg = 0;
+uint32_t lastAdv = 0, ctr = 0, sendStart = 0, sendUntil = 0, heardGen = 0, replyAt = 0, heardMsg = 0;
 // How many SquachWatches are here, counting this one. The rest only advertise:
 // the firmware hosts one visitor at a time, so they only ever show up as the
 // "+N" beside him.
@@ -123,6 +124,7 @@ void broadcast(uint8_t n, uint32_t now) {
     }
     frameN    = n;
     frameAt   = 0;
+    sendStart = now;
     sendUntil = now + SEND_MS;
     fprintf(stderr, "[meshsim] %s sends \"%s\"%s\n", peerName(), said,
             shares ? "" : " -- under a different phrase");
@@ -276,6 +278,11 @@ bool pickIndex(const char* what, const char* arg, uint8_t n, uint8_t& out) {
 
 namespace Mesh {
 bool advertising() { return onAir; }
+TxStatus txStatus() {
+    size_t len = 0; uint32_t gen = 0;
+    return { onAir, MeshTalk::sending(millis()),
+             (uint32_t)(onAir ? 1 : 0), 0, 0 };
+}
 void radioTick(uint32_t now) { MeshSim::tick(now); }
 }
 
@@ -303,17 +310,17 @@ void tick(uint32_t now) {
         buf[0] = (uint8_t)(SquachMesh::COMPANY_ID & 0xFF);
         buf[1] = (uint8_t)(SquachMesh::COMPANY_ID >> 8);
         const size_t n = SquachMesh::encode(look, buf + 2);
-        Mesh::onManufacturerData(buf, n + 2, PEER_MAC, now);
-        // The scan response follows its advert, as it does over the air --
-        // which is also what lets the frame pick up the name from it. A typed
-        // message's parts take turns, one per advert.
+        // One primary manufacturer field per broadcast, just like a
+        // passive BLE scan receives; NO appended scan response.
         if (live(now)) {
-            const uint8_t p = frameAt++ % frameN;
-            uint8_t f[2 + MeshMsg::FRAME_MAX];
-            f[0] = buf[0]; f[1] = buf[1];
-            memcpy(f + 2, frames[p], frameLen[p]);
-            Mesh::onManufacturerData(f, frameLen[p] + 2, PEER_MAC, now);
-        }
+            const uint8_t p = MeshPrimaryTransport::slot(now - sendStart, frameN);
+            if (p < frameN) {
+                uint8_t packet[2 + MeshMsg::FRAME_MAX];
+                packet[0] = buf[0]; packet[1] = buf[1];
+                memcpy(packet + 2, frames[p], frameLen[p]);
+                Mesh::onManufacturerData(packet, frameLen[p] + 2, PEER_MAC, now);
+            } else Mesh::onManufacturerData(buf, n + 2, PEER_MAC, now);
+        } else Mesh::onManufacturerData(buf, n + 2, PEER_MAC, now);
         // The rest of the squad, after: on a board NimBLE hands an advert and
         // its scan response over in one callback, so nobody else's advert can
         // land between them and take the name the frame borrows.

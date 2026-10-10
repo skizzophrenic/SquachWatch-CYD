@@ -3,6 +3,9 @@
 #include "clock.h"
 #include "theme.h"
 #include "detection.h"
+#if SQUACH_MESH
+#include "meshtalk.h"
+#endif
 #include <Arduino.h>
 #include <stdarg.h>
 
@@ -114,6 +117,32 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
     }
     y = drawLine(t, y, Theme::CYAN, "HEAP:", "%lu free / %lu largest",
                  (unsigned long)info.freeHeap, (unsigned long)info.largestBlock);
+#if SQUACH_MESH
+    // Unlike BLE SEEN's old "advertising" flag, this is read from NimBLE's
+    // actual controller state. Failed starts can leave the UI looking like
+    // SEND worked; show the failure count and last failure stage on-device.
+    {
+        const Mesh::TxStatus tx = Mesh::txStatus();
+        y = drawLine(t, y, tx.advertising ? Theme::GREEN : Theme::AMBER,
+                     "MESH TX:", "%s %s, ok %lu / fail %lu (%u)",
+                     tx.advertising ? "ON" : "OFF",
+                     tx.sendingFrame ? "FRAME" : "IDLE",
+                     (unsigned long)tx.starts, (unsigned long)tx.failures,
+                     (unsigned)tx.lastFailure);
+        const MeshTalk::RxDiagnostics rx = MeshTalk::rxDiagnostics();
+        y = drawLine(t, y, Theme::CYAN, "MESH RX:", "%lu queued / %lu heard, full %lu",
+                     (unsigned long)rx.queued, (unsigned long)rx.seen,
+                     (unsigned long)rx.queueFull);
+        y = drawLine(t, y, Theme::CYAN, "INV RX:", "parts %lu mask %x/15 done %lu",
+                     (unsigned long)rx.inviteParts, (unsigned)rx.mask,
+                     (unsigned long)rx.inviteComplete);
+        y = drawLine(t, y, rx.inviteRejected ? Theme::AMBER : Theme::CYAN,
+                     "INV ERR:", "%lu rejected (%u), replay %lu",
+                     (unsigned long)rx.inviteRejected,
+                     (unsigned)rx.lastReject,
+                     (unsigned long)rx.replayRejected);
+    }
+#endif
     // Where the heap went on the way up, in KB: free/largest with WiFi up,
     // with Bluetooth up, and at the first pass of loop().
     {

@@ -65,6 +65,17 @@ namespace MeshProbe {
 // signature tables precisely so SquachWatches would not flag each other, and
 // this would reintroduce that from the other side.
 namespace Mesh {
+    // Live controller status (not an assumption that start() succeeded).
+    // A radio marked ON has started advertising; it is NOT proof the other
+    // device has heard or decrypted a particular scan response.
+    struct TxStatus {
+        bool advertising;
+        bool sendingFrame;
+        uint32_t starts;
+        uint32_t failures;
+        uint8_t lastFailure; // 0 none, 1 stop, 2 adv payload, 3 response, 4 mode, 5 start
+    };
+    TxStatus txStatus();
     void begin();
     void tick(uint32_t now);
 

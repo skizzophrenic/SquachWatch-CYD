@@ -11,6 +11,7 @@
 #include "meshtalk.h"
 #if SQUACH_MESH
 #include "squachmesh.h"
+#include "mesh_visit_appearance.h"
 #include "meshtutor.h"
 #include "squachy.h"
 #include "detection.h"
@@ -1510,11 +1511,11 @@ static void drawPieceFx(TFT_eSPI& t, uint32_t now, int hx, int gx, int headTop, 
 
 // The guest being drawn, held as a COPY rather than a pointer.
 //
-// Two things go wrong without this. A peer whose advert changes mid-visit
-// would morph on screen -- outfit and colours swapping on a Squachy standing
-// still, which reads as a glitch rather than as anything. And the visitor has
-// to keep being drawn through LEAVING after the peer is already gone, which a
-// pointer to a slot that has been cleared cannot do.
+// A different peer must still walk out/in rather than silently turning one
+// Squachy into another, and a peer that leaves must keep its final outfit
+// throughout the goodbye walk. But a *same-MAC* guest who changes clothes or
+// shades while visiting should update in place; Squad already reflects the
+// latest radio appearance and CLEAR must not keep the arrival snapshot.
 static SquachMesh::Peer s_hosting{};
 static uint32_t         s_hostingId = 0;
 
@@ -2300,7 +2301,7 @@ static void visitTick(uint32_t now) {
         if (!id) return;
         const SquachMesh::Peer* g = rawGuest(now);
         if (!g) return;
-        s_hosting   = *g;                   // copied once, on arrival
+        s_hosting   = *g;                   // copy on arrival; live same-peer edits refresh below
         s_hostingId = id;
         s_vp = VisitPhase::ARRIVING; s_vpAt = now;
         s_guestTurn = true;                 // so the HOST speaks first
@@ -2335,6 +2336,14 @@ static void visitTick(uint32_t now) {
         s_vpAt = now + s_beatMs;            // goodbye first, then the walk
         return;
     }
+    // Same guest, same identity: follow their newest appearance without
+    // resetting the visit's phase, high-five, conversation, or emote state.
+    // The radio's Mesh::peer() is refreshed on every presence advertisement;
+    // SQUAD already draws that current data. This updates our hosted COPY
+    // only while the identical visitor is still here, never during LEAVING.
+    if (id && id == s_hostingId && s_vp != VisitPhase::LEAVING)
+        MeshVisitAppearance::refresh(s_hosting, s_hostingId, id, rawGuest(now), false);
+
     // An emote INTERRUPTS. Somebody pressed a button and is watching for it;
     // the set pieces and the naps start themselves, unprompted, and can wait.
     //
@@ -3041,9 +3050,9 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         // reading order and it means the resident does not appear to move
         // aside for a stranger.
         visitTick(now);
-        // The hosted COPY, not whoever the radio is hearing right now. That
-        // is what keeps a visitor from morphing mid-visit and what lets him
-        // still be drawn while he walks out after the peer has gone.
+        // The hosted COPY, refreshed for the *same* visitor's outfit/shades/
+        // name changes but never swapped for a different MAC mid-visit.
+        // It stays intact through LEAVING even after radio presence is lost.
         const SquachMesh::Peer* guest = visitHosting();
         // A message in the air replaces his scripted line and his nameplate
         // while it is up -- it carries the sender's name itself, in red.
