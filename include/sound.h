@@ -17,10 +17,20 @@
 #pragma once
 #include <stdint.h>
 
+// SQW_SPEAKER is wider than its name: main.cpp also hangs the Freenove family's
+// battery power features on it (POWER OFF on BOOT, the power diary, the boot
+// stages). SQW_SOUND is only "there is a speaker this module drives": every
+// SQW_SPEAKER board, and the Waveshare C5 3.5", which has the speaker but none
+// of those (its BOOT is not GPIO0, and it has a real power chip).
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)
 #define SQW_SPEAKER 1
 #else
 #define SQW_SPEAKER 0
+#endif
+#if SQW_SPEAKER || defined(WAVESHARE_C5)
+#define SQW_SOUND 1
+#else
+#define SQW_SOUND 0
 #endif
 
 namespace Sound {
@@ -39,7 +49,7 @@ namespace Sound {
         COUNT
     };
 
-#if SQW_SPEAKER
+#if SQW_SOUND
     // Once in setup(), after the touch controller has started the I2C bus.
     // Finds the codec, sets it up for 16 kHz playback and parks the amplifier
     // off. Boots silent: nothing plays until something asks.

@@ -915,7 +915,11 @@ void connect(const char* ssid, const char* pass, bool save) {
     s_fail    = Fail::NONE;
     s_cancel  = s_install = s_downloadStarted = false;
     s_state   = State::CONNECTING;
-    if (xTaskCreatePinnedToCore(run, "otawifi", TASK_STACK, nullptr, 1, &s_task, 1) != pdPASS) {
+    // Core 1 where there is one. The ESP32-C5 boards have a single core, and
+    // FreeRTOS asserts on a task pinned to core 1 there: the update screen
+    // would reboot the board the moment it started connecting.
+    if (xTaskCreatePinnedToCore(run, "otawifi", TASK_STACK, nullptr, 1, &s_task,
+                                (portNUM_PROCESSORS > 1) ? 1 : tskNO_AFFINITY) != pdPASS) {
         s_task = nullptr;
         memset(s_pass, 0, sizeof s_pass);
         Serial.printf("[ota] no room for the update task: %u wanted, heap %lu largest %lu\n", (unsigned)TASK_STACK,

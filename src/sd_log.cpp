@@ -20,7 +20,9 @@
 // The Phantoms define CYD (they ARE a CYD) but still need this reference,
 // because their touch shares the display's bus and SdLog::begin() has to hand
 // SD the display's own SPI instance -- see the comment on that branch below.
-#if !defined(CYD) || defined(RLPHANTOM) || defined(RLPHANTOM_R)
+// The Waveshare C5 defines CYD and NM_CYD_C5 but not RLPHANTOM_R, which is how
+// the NM-CYD-C5 reached this; its card is on the display's bus all the same.
+#if !defined(CYD) || defined(RLPHANTOM) || defined(RLPHANTOM_R) || defined(WAVESHARE_C5)
 #include <TFT_eSPI.h>
 #include <esp_heap_caps.h>
 // The single TFT_eSPI instance main.cpp already owns and has already
@@ -41,6 +43,8 @@ extern TFT_eSPI tft;
 // UART, and the card simply never answers.
 #if defined(AWOK)
     #define SD_CS_PIN 14
+#elif defined(WAVESHARE_C5)
+    #define SD_CS_PIN 9    // on the panel's bus (6/2/7), per Waveshare's BSP (BSP_SD_SPI_CS)
 #elif defined(NM_CYD_C5)
     #define SD_CS_PIN 10
 #elif defined(TDECK_PLUS)
