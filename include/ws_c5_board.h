@@ -39,4 +39,21 @@ namespace WsC5 {
 
     // Whether begin() found the expander.
     bool ok();
+
+    // ---- AXP2101 power chip (I2C 0x34), battery only -------------------
+    // Turns on the chip's battery/USB measurements, as Waveshare's own
+    // example does. Leaves every power rail and the charger settings alone:
+    // the rails feed the board itself. Call after begin().
+    bool pmuBegin();
+    // Percent and voltage of the cell, and whether it is charging (the cable
+    // counts: full on USB still reads as charging, like the watch). False
+    // when there is no PMU or no cell on the connector. Cached for 2 s.
+    bool battery(uint8_t& pct, bool& charging, uint16_t& mv);
+
+    // ---- PCF85063 clock chip (I2C 0x51) --------------------------------
+    // At boot, after Clock::begin(): if the chip holds a time SquachWatch
+    // wrote and it never stopped, the clock is set from it. From then on
+    // every real time the clock learns is written back (Clock::onSet).
+    // Kept in UTC.
+    void rtcBegin();
 }

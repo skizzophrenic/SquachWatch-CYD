@@ -14,7 +14,9 @@ Vendor demos and schematic:
 | I/O expander | **CH32V003**, I2C 0x24: panel reset, touch reset, power enable, backlight PWM |
 | Card | microSD on the display's SPI bus |
 | USB | one USB-C, the C5's **native** USB (no CH340) |
-| Also on board, not used yet | AXP2101 PMIC + battery, ES8311 codec + speaker, QMI8658 IMU, PCF85063 RTC, SHTC3, camera connector |
+| Power | AXP2101 PMIC: battery % and voltage on the SYSTEM page and the home screen |
+| Clock | PCF85063 RTC: keeps the time across reboots once it has been set once |
+| Also on board, not used yet | ES8311 codec + speaker, QMI8658 IMU, SHTC3, camera connector |
 
 ## Build and install
 

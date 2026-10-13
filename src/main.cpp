@@ -3183,6 +3183,22 @@ static bool boardBatteryState(uint8_t& pct, bool& charging) {
 }
 #endif
 
+#if defined(WAVESHARE_C5)
+// The Waveshare C5 3.5"'s cell, through its AXP2101's own fuel gauge.
+// The SYSTEM page's BATTERY row: "81% 4.12V", with "+" while it charges.
+void boardBatteryLine(char* out, size_t n) {
+    uint8_t pct; bool chg; uint16_t mv;
+    if (!WsC5::battery(pct, chg, mv)) { snprintf(out, n, "NONE"); return; }
+    snprintf(out, n, "%u%% %u.%02uV%s", (unsigned)pct, (unsigned)(mv / 1000), (unsigned)(mv % 1000 / 10),
+             chg ? "+" : "");
+}
+// The home screen's lava lamp (uiClearSetBatterySource).
+static bool boardBatteryState(uint8_t& pct, bool& charging) {
+    uint16_t mv;
+    return WsC5::battery(pct, charging, mv);
+}
+#endif
+
 #if defined(TWATCH_S3)
 // One battery sample into the black box. See BattRecord for what it holds
 // and why. Printed too, so a bench run shows the same line the ring keeps.
@@ -4152,6 +4168,9 @@ void setup() {
     // saved rotation instead of always starting from the board default.
     Settings::load();
     Clock::begin();   // after Settings: the zone is applied there, the history here
+#if defined(WAVESHARE_C5)
+    WsC5::rtcBegin();      // after Clock::begin(): a real time beats the note's guess
+#endif
 #if defined(CYD_GPS)
     cydGpsStart();
 #endif
@@ -4507,6 +4526,9 @@ void setup() {
     usingCapTouch = CapTouch::probe();
     Serial.println(usingCapTouch ? "Waveshare C5 3.5 -- FT6336 capacitive touch answered."
                                  : "Waveshare C5 3.5 -- FT6336 did not answer; no touch.");
+    WsC5::pmuBegin();
+    { char b[20]; boardBatteryLine(b, sizeof b); Serial.printf("[batt] %s\n", b); }
+    uiClearSetBatterySource(boardBatteryState);
 #elif defined(FREENOVE_S3)
     // The Freenove S3 2.8"'s FT6336, on I2C SDA 16 / SCL 15 at 0x38, reset on
     // GPIO18 (active low). The ES8311 codec shares the bus at 0x18. FNK0104A
