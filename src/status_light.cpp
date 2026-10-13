@@ -29,6 +29,11 @@
 // status LED" rather than as a bug.
 #if defined(ESP32) && !defined(CYD35) && !defined(AWOK) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(NM_CYD_C5)
 #define STATUS_LIGHT_HW 1
+#elif defined(WAVESHARE_C5)
+// The Waveshare C5 3.5" has no status light, and its GPIO27 -- the NM-CYD-C5's
+// WS2812 -- is the I2C bus's SDA. Driving RMT onto it would take out touch,
+// the backlight and the panel's reset in one go.
+#define STATUS_LIGHT_HW 0
 #elif defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || (defined(NM_CYD_C5) && !defined(MARAUDER_V8))
 #define STATUS_LIGHT_HW 2
 // Not the Marauder V8: Marauder's own build leaves its WS2812 off

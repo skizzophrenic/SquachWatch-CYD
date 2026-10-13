@@ -22,6 +22,9 @@
 #else
 #define SQW_PUSH_ROWS() FramePush::lastRows()
 #endif
+#if defined(WAVESHARE_C5)
+#include "ws_c5_board.h"   // the CH32V003 that owns its reset and backlight
+#endif
 #if defined(FREENOVE_S3_35)
 #include "st77922_display.h"
 #include "st77922_qspi.h"
@@ -500,6 +503,10 @@ constexpr bool PANEL_NEEDS_INVERSION = true;
 // M5GFX sets invert for the StickS3's ST7789P3 and the Cardputer's ST7789V2.
 // Confirmed on the stick 2026-10-04.
 constexpr bool PANEL_NEEDS_INVERSION = true;
+#elif defined(WAVESHARE_C5)
+// Waveshare's ST7796 init sends INVON (0x21), in both their BSP and their
+// Arduino demo. UNCONFIRMED by eye; INVERT in Settings flips it if wrong.
+constexpr bool PANEL_NEEDS_INVERSION = true;
 #elif defined(FREENOVE_S3_35)
 // Freenove's init for the 3.5" ST77922 turns inversion on (0x21), which is
 // what St77922TFT::invertDisplay(true) sends. UNCONFIRMED by eye until the
@@ -640,7 +647,7 @@ static uint8_t*     s_frameB = nullptr;
 // into the other buffer once (see pushFrame()).
 static int          s_pushedState = -1;
 #endif
-#if defined(NM_CYD_C5)
+#if defined(NM_CYD_C5) && !defined(WAVESHARE_C5)
 // The touch sample pushFrame() takes while the bus is free, for pollTouch().
 // The C5's touch shares the display's SPI bus; the Freenove S3's is on I2C
 // and reads whenever it likes.
@@ -770,6 +777,11 @@ static bool rawReadResistive(int16_t& a, int16_t& b);
 // calibration is needed or wanted.
 static uint16_t CAP_NX_MIN = CROW_CAP_NX_MIN, CAP_NX_MAX = CROW_CAP_NX_MAX;
 static uint16_t CAP_NY_MIN = CROW_CAP_NY_MIN, CAP_NY_MAX = CROW_CAP_NY_MAX;
+#elif defined(WAVESHARE_C5)
+// The FT6336 reports panel pixels in the 320x480 portrait frame, the way
+// Waveshare's demo reads it (no swap, no mirror): a pass-through.
+static uint16_t CAP_NX_MIN = 0, CAP_NX_MAX = 320;
+static uint16_t CAP_NY_MIN = 0, CAP_NY_MAX = 480;
 #elif defined(FREENOVE_S3_35)
 // The ST77922's own touch reports panel pixels too: a pass-through.
 static uint16_t CAP_NX_MIN = St77922Touch::NX_MIN, CAP_NX_MAX = St77922Touch::NX_MAX;
@@ -911,7 +923,8 @@ static bool readTouchRaw(int16_t& a, int16_t& b);
 // finishing and the next starting, when the bus is free, and this only
 // consumes it. Everywhere else it is the plain read.
 static bool sampleTouchRaw(int16_t& a, int16_t& b) {
-#if defined(NM_CYD_C5)
+// Not the Waveshare C5: its FT6336 is on I2C, off the panel's bus entirely.
+#if defined(NM_CYD_C5) && !defined(WAVESHARE_C5)
     if (s_tsValid) { a = s_tsA; b = s_tsB; return s_tsDown; }
     FramePush::busLock();
     const bool down = readTouchRaw(a, b);
@@ -1708,6 +1721,9 @@ static void applyBrightness() {
     // takes a bare I2C command byte on an inverted scale. CrowBL::set()
     // keeps the firmware's own 0..255-with-255-brightest convention.
     CrowBL::set(duty);
+#elif defined(WAVESHARE_C5)
+    // An I2C register write, same 0..255-with-255-brightest scale.
+    WsC5::backlight(duty);
 #elif defined(NM_CYD_C5)
     // One backlight, and a pin-based call. Arduino core 3 dropped the LEDC
     // channel API entirely: ledcWrite takes the PIN now, and the channel is
@@ -4075,7 +4091,7 @@ void setup() {
 // ... and not on the CrowPanel 7, where GPIO21 is the panel's BLUE-0 data
 // line. Driving it high before the panel driver claims it is a stripe down the
 // picture at best.
-#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(CYD32C) && !defined(CYD35C)
+#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(CYD32C) && !defined(CYD35C) && !defined(WAVESHARE_C5)
     pinMode(21, OUTPUT); digitalWrite(21, HIGH);
 #endif
 #if defined(SQW_S3)
@@ -4087,6 +4103,11 @@ void setup() {
     // command to the helper MCU, sent once Wire is up. GPIO27/32 are the same
     // OPI PSRAM lines the watch avoids, and every other candidate here is an
     // RGB data line.
+#elif defined(WAVESHARE_C5)
+    // No backlight pin and no panel reset pin: both are on the CH32V003, which
+    // has to let the ST7796 out of reset before tft.init() can reach it. The
+    // backlight stays dark until applyBrightness() below.
+    WsC5::begin();
 #elif defined(NM_CYD_C5)
     // One backlight, TFT_BL (GPIO25), and ONLY that pin. Confirmed on the
     // board: the branch below drives 27 and 32, and on a C5 that is
@@ -4212,6 +4233,8 @@ void setup() {
     ledcSetup(BL_CH_ORIG, 5000, 8);
 #endif
     ledcAttachPin(BL_PIN_S3, BL_CH_ORIG);
+#elif defined(WAVESHARE_C5)
+    // No LEDC: the backlight is the I/O expander's PWM register (WsC5).
 #elif defined(NM_CYD_C5)
     // Backlight is TFT_BL (GPIO25) on this board and nothing else is a
     // backlight. The CYD pins below are actively wrong here, not merely
@@ -4475,6 +4498,15 @@ void setup() {
     uiClearSetBatterySource(boardBatteryState);
     Sound::begin();                       // the codec is on the touch bus, now up
     Serial.printf("[power] boot: %s, wake cause %d\n", resetReasonName(), (int)(s_wokeFromOff ? s_offWakeCause : esp_sleep_get_wakeup_cause()));
+#elif defined(WAVESHARE_C5)
+    // The FT6336 at 0x38 on the expander's bus (SDA 27, SCL 26), already out
+    // of reset: WsC5::begin() pulsed EXIO0 before the panel came up, so no
+    // reset pin here. Its INT line (GPIO3) is not used; touch is polled like
+    // every other capacitive board's.
+    CapTouch::begin(WsC5::I2C_SDA, WsC5::I2C_SCL, -1, WsC5::TOUCH_ADDR);
+    usingCapTouch = CapTouch::probe();
+    Serial.println(usingCapTouch ? "Waveshare C5 3.5 -- FT6336 capacitive touch answered."
+                                 : "Waveshare C5 3.5 -- FT6336 did not answer; no touch.");
 #elif defined(FREENOVE_S3)
     // The Freenove S3 2.8"'s FT6336, on I2C SDA 16 / SCL 15 at 0x38, reset on
     // GPIO18 (active low). The ES8311 codec shares the bus at 0x18. FNK0104A
@@ -4593,13 +4625,13 @@ void setup() {
     // injected against the compiled-in ranges -- a calibration screen would
     // just sit there waiting for a finger.
     initTouchFit();
-#if defined(ESP32) && !defined(CROWPANEL7) && !defined(SQW_SMALL) && !defined(FREENOVE_S3_35)   // nothing to calibrate on a stick with no touch
+#if defined(ESP32) && !defined(CROWPANEL7) && !defined(SQW_SMALL) && !defined(FREENOVE_S3_35) && !defined(WAVESHARE_C5)   // nothing to calibrate on a stick with no touch
     if (s_calSource != CalSource::SAVED) {
         Serial.println("Touch: no five-target calibration yet -- running it now.");
         runTouchCalibration();
     }
 #endif
-#if defined(CROWPANEL7) || defined(FREENOVE_S3_35)
+#if defined(CROWPANEL7) || defined(FREENOVE_S3_35) || defined(WAVESHARE_C5)
     // Never on first boot here. The GT911 (and the ST77922's own touch)
     // reports panel pixels, so the compiled-in fit is already the identity
     // and there is nothing to calibrate -- making someone tap five targets
@@ -4643,6 +4675,8 @@ void setup() {
     CrowBL::set(24);
 #elif defined(TDECK_PLUS)
     tdeckBacklight(24);
+#elif defined(WAVESHARE_C5)
+    WsC5::backlight(24);
 #else
     ledcWrite(BL_CH_ORIG, 24);
     ledcWrite(BL_CH_CAP,  24);
@@ -4874,7 +4908,7 @@ static inline void pushFrame(int x, int y) {
         // Between the last push finishing and this one starting the bus is
         // free: the one place touch can be read without waiting on a frame.
         FramePush::asyncWait();
-#if defined(NM_CYD_C5)
+#if defined(NM_CYD_C5) && !defined(WAVESHARE_C5)
         FramePush::busLock();
         s_tsDown  = readTouchRaw(s_tsA, s_tsB);
         s_tsValid = true;
@@ -5484,6 +5518,8 @@ static uint32_t s_chargeAt = 0, s_chargeLitAt = 0, s_chargeLitUntil = 0, s_charg
 static void chargeBacklight(uint8_t duty) {
 #if defined(CROWPANEL7)
     CrowBL::set(duty);
+#elif defined(WAVESHARE_C5)
+    WsC5::backlight(duty);
 #else
     ledcWrite(BL_CH_ORIG, duty);
     ledcWrite(BL_CH_CAP,  duty);
@@ -8939,6 +8975,8 @@ void loop() {
             info.boardName = "tdeck-plus LAB";
 #elif defined(FREENOVE_S3_35)
             info.boardName = "freenove-s3-35 BETA";
+#elif defined(WAVESHARE_C5)
+            info.boardName = "waveshare-c5-lcd35 BETA";
 #elif defined(FREENOVE_S3_40)
             info.boardName = "freenove-s3-40";
 #elif defined(CYD35C)
