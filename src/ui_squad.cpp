@@ -289,6 +289,23 @@ void uiSquadTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     }
 }
 
+uint8_t uiSquadStops(int16_t* xs, int16_t* ys, int16_t* ws, int16_t* hs, uint8_t cap) {
+    uint8_t n = 0;
+    auto put = [&](const Rect& r) {
+        if (r.w <= 0 || n >= cap) return;
+        xs[n] = r.x; ys[n] = r.y; ws[n] = r.w; hs[n] = r.h; n++;
+    };
+    // The order a hand would go: the messages, the board showing and what to
+    // do with it, then the two buttons along the bottom. Every rect is zeroed
+    // by the draw unless it is shown, the same rule uiSquadTouch() relies on.
+    for (uint8_t i = 0; i < s_rowN; i++) put(s_rows[i]);
+    if (s_n > 1) { put(s_prev); put(s_next); }
+    if (s_n) { put(s_invite); put(s_hunt); put(s_add); put(s_forget); }
+    put(s_send);
+    put(s_back);
+    return n;
+}
+
 SquadHit uiSquadTouch(int x, int y, uint32_t now) {
     if (in(s_back, x, y)) return SquadHit::BACK;
     if (s_send.w && in(s_send, x, y)) return SquadHit::SEND;

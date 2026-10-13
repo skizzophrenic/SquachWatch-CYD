@@ -10,7 +10,7 @@
 // The CYD GPS builds take the same API from wardrive_sd.cpp.
 #if !defined(CYD_GPS)
 
-#if __has_include(<esp_flash.h>) && defined(TWATCH_S3)
+#if __has_include(<esp_flash.h>) && SQW_WARDRIVE
 #include <esp_flash.h>
 #include <esp_partition.h>
 #define WD_ON_DEVICE 1

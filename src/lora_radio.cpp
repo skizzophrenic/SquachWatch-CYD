@@ -43,6 +43,20 @@ extern TFT_eSPI tft;                 // main.cpp's; for initDMA() (sharedDev bel
 #define LORA_SPI SPI                 // not used on this board; the device below is
 #define LORA_IDF_HOST SPI2_HOST      // TFT_eSPI's host on an S3 without USE_HSPI_PORT
 #define LORA_SHARED_BUS 1
+#elif defined(TLORA_PAGER)
+// The Pager's SX1262, from arduino-esp32's variants/lilygo_tlora_pager. The
+// expander's LORA_EN rail powers it (pagerPowerUp() in main.cpp). Unlike the
+// watch it has no bus of its own: SCK/MISO/MOSI are the panel's, so it takes
+// the very SPI object TFT_eSPI drives, and SPIClass's transaction lock is
+// what keeps a radio read out of the middle of a frame.
+#define LORA_PIN_SCK   35
+#define LORA_PIN_MISO  33
+#define LORA_PIN_MOSI  34
+#define LORA_PIN_NSS   36
+#define LORA_PIN_DIO1  14
+#define LORA_PIN_RST   47
+#define LORA_PIN_BUSY  48
+#define LORA_SPI SPI
 #else
 #error "SQUACH_LORA on a board with no LoRa pins"
 #endif

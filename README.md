@@ -97,6 +97,7 @@ whole firmware but has had fewer hours on it. The longer answer is in
 | RockBase NM-CYD-C5 | BETA | The 2.8" CYD's glass on an ESP32-C5, the first RISC-V chip here. Scans **5 GHz** too (WIFI BANDS in Settings). [docs/NM-CYD-C5.md](docs/NM-CYD-C5.md) |
 | Marauder V8 (justcallmekoko) | BETA | The ESP32-C5 Marauder: 2.8" screen, GPS for **wardriving** to the SD card (a WiGLE file), and a battery gauge. Scans 5 GHz too |
 | LilyGo T-Deck Plus | BETA | ESP32-S3 handheld: 2.8" screen, capacitive touch, a real keyboard that types into the message and password screens, speaker, GPS for **wardriving**, SD card, 2000 mAh battery. The trackball and LoRa radio are not used yet. Pins in [docs/PINOUT.md](docs/PINOUT.md) |
+| LilyGo T-LoRa Pager | BETA (build it yourself) | ESP32-S3 with a 480×222 screen, no touch: the scroll wheel moves a cursor and clicks, and the keyboard types into the password, message and PIN screens. Listens to **LoRa**, **GPS** for wardriving, battery gauge; hold BOOT 3 s to power off. `pio run -e tlora-pager -t upload`. Not on the flasher yet. Pins in [docs/PINOUT.md](docs/PINOUT.md) |
 | M5Stack StickS3 | BETA | 1.14" screen, landscape, two buttons |
 | M5Stack Cardputer ADV | BETA | Driven from its keyboard. Not the original Cardputer |
 | LilyGo T-Watch S3 / S3 Plus | BETA | On your wrist, with a battery and a buzz. Listens to **LoRa**; the S3 Plus adds **GPS**. See [On the watch](#on-the-watch) |

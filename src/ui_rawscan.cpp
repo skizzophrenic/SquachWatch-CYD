@@ -420,3 +420,44 @@ if (!Theme::stillBackdrop(t)) switch (Settings::background()) {
     drawBottomBar(t, w, h, isBle);
     if (confirmPending) drawConfirmPanel(t, w, h, confirmLabel, confirmWatched, confirmHunted, confirmIgnored);
 }
+
+int uiRawScanPageRows(TFT_eSPI& t, int screenW, int screenH) {
+    int bodyTop, bodyBottom, rowH;
+    rowLayout(t, screenW, screenH, bodyTop, bodyBottom, rowH);
+    const int n = (bodyBottom - bodyTop) / rowH;
+    return n > 0 ? n : 1;
+}
+
+uint8_t uiRawScanStops(TFT_eSPI& t, int w, int h, int count, bool confirm,
+                       int16_t* xs, int16_t* ys, int16_t* ws, int16_t* hs, uint8_t* kinds, uint8_t cap) {
+    uint8_t n = 0;
+    auto put = [&](int x, int y, int rw, int rh, uint8_t k) {
+        if (n >= cap) return;
+        xs[n] = (int16_t)x; ys[n] = (int16_t)y; ws[n] = (int16_t)rw; hs[n] = (int16_t)rh; kinds[n] = k; n++;
+    };
+    if (confirm) {
+        int px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, igX, igY, igW, igH, cnX, cnY, cnW, cnH;
+        confirmRects(w, h, px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH,
+                     igX, igY, igW, igH, cnX, cnY, cnW, cnH);
+        put(wX, wY, wW, wH, 0);   put(huX, huY, huW, huH, 0);
+        put(igX, igY, igW, igH, 0); put(cnX, cnY, cnW, cnH, 0);
+        return n;
+    }
+    int bodyTop, bodyBottom, rowH;
+    rowLayout(t, w, h, bodyTop, bodyBottom, rowH);
+    const int page = (bodyBottom - bodyTop) / rowH;
+    // The same clamp the draw applies, so the rows named are the rows shown.
+    uiClampScroll(g_scroll, count, bodyBottom - bodyTop, rowH);
+    // Both arrows whenever there is more than a page, at either end too, so
+    // a page turn never moves the cursor's stop out from under it.
+    const bool more = count > page;
+    if (more) put(w - 18, bodyTop, 18, 16, 2);
+    for (int i = 0; i < page && g_scroll + i < count; i++)
+        put(0, bodyTop + i * rowH, w - 6, rowH - 1, 3);
+    if (more) put(w - 18, bodyBottom - 16, 18, 16, 1);
+    int bx, by, bw, bh, ax, ay, aw, ah;
+    bottomButtonRects(w, h, bx, by, bw, bh, ax, ay, aw, ah);
+    put(bx, by, bw, bh, 0);
+    put(ax, ay, aw, ah, 0);
+    return n;
+}
