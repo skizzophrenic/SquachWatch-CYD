@@ -2,7 +2,8 @@
 //
 // The two Freenove S3 boards carry an ES8311 codec on the touch controller's
 // I2C bus and a small mono amplifier behind it, with a speaker plug on the
-// edge. Nothing else in the fleet has a speaker; this header is a set of
+// edge; the T-LoRa Pager the same codec on its expander's bus; the T-Deck Plus
+// an I2S amplifier. Nothing else in the fleet has a speaker; this header is a set of
 // no-ops everywhere else, so the pets and the mascot can ask for a sound
 // without knowing whether anything is listening.
 //
@@ -19,12 +20,11 @@
 #include <stdint.h>
 
 // SQUACHSIM: the browser emulator's builds have no speaker to drive.
-#if (defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(STICKS3) || defined(CARDPUTER_ADV)) && !defined(SQUACHSIM)
+#if (defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(STICKS3) || defined(CARDPUTER_ADV) || defined(TLORA_PAGER)) && !defined(SQUACHSIM)
 #define SQW_SPEAKER 1
 #else
 #define SQW_SPEAKER 0
 #endif
-
 // The Freenove boards' power switch, which grew up around their speaker:
 // BOOT held three seconds is POWER OFF (deep sleep, BOOT wakes it), the one
 // restart its wake needs, and the power diary (POWERLOG) that follows a board
@@ -32,6 +32,8 @@
 // speaker and no BOOT button to hold (the Core2), or a BOOT pin that is
 // something else (the Waveshare C5s). Add a board here only once POWER OFF
 // and its wake have been proven on it.
+// The T-LoRa Pager is deliberately absent: its power off is pagerPowerOff(),
+// not the BOOT-hold diary.
 // Not in the emulator (SQUACHSIM): a browser tab has no power to switch off.
 #if (defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)) && !defined(SQUACHSIM)
 #define SQW_BOOT_POWEROFF 1
