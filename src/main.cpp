@@ -7,7 +7,7 @@
 #include <SPI.h>
 #include <Wire.h>
 #include <TFT_eSPI.h>
-#include "sound.h"          // the Freenove S3 speaker; no-ops everywhere else
+#include "sound.h"          // the speaker boards; no-ops everywhere else
 #if defined(CROWPANEL7)
 #include "crowpanel7_board.h"
 #include "crowpanel7_display.h"
@@ -146,7 +146,7 @@ static bool takeBootCheckSkip() {
     g_bootCheckSkip = 0;
     return esp_reset_reason() == ESP_RST_SW && v == CHKSKIP_MAGIC;
 }
-#if SQW_SPEAKER
+#if SQW_POWER_DIARY
 // The Freenove boards' wake from POWER OFF restarts once, at the very top of
 // setup(), before anything runs. A deep-sleep wake brings the native USB port
 // up as a new device while the boot carries on, and with nothing on the other
@@ -200,7 +200,7 @@ static void crashReportInit() {
     takeHealCount();
 #endif
     g_resetReason = r;
-#if SQW_SPEAKER
+#if SQW_POWER_DIARY
     takeWakeRestart();
     if (s_wokeFromOff) g_resetReason = ESP_RST_DEEPSLEEP;   // what it really was
 #endif
@@ -3486,11 +3486,19 @@ static bool pagerIoWrite(uint8_t reg, uint8_t v) {
     Wire.write(reg); Wire.write(v);
     return Wire.endTransmission() == 0;
 }
+// The GPS bit is set from the loop and the speaker amp's from the sound task,
+// so the change to the shadow and its write go out as one.
+static SemaphoreHandle_t s_pagerIoLock = nullptr;
 static void pagerIoBit0(uint8_t bit, bool on) {
+    if (s_pagerIoLock) xSemaphoreTake(s_pagerIoLock, portMAX_DELAY);
     s_pagerIo0 = on ? (uint8_t)(s_pagerIo0 | (1u << bit)) : (uint8_t)(s_pagerIo0 & ~(1u << bit));
     pagerIoWrite(0x02, s_pagerIo0);
+    if (s_pagerIoLock) xSemaphoreGive(s_pagerIoLock);
 }
+// The speaker amp (port 0 bit 1), for sound.cpp: on only while a sound plays.
+void pagerSpeakerAmp(bool on) { pagerIoBit0(1, on); }
 static void pagerPowerUp() {
+    if (!s_pagerIoLock) s_pagerIoLock = xSemaphoreCreateMutex();
     static const uint8_t SHARED_CS[] = { 36 /* LoRa */, 39 /* NFC */, 21 /* SD */, 47 /* LoRa reset */ };
     for (uint8_t p : SHARED_CS) { pinMode(p, OUTPUT); digitalWrite(p, HIGH); }
     Wire.begin(3, 2, 400000);
@@ -4491,7 +4499,7 @@ static void printBootBanner() {
 #if SQW_WARDRIVE
 static void wardriveBegin();
 #endif
-#if SQW_SPEAKER
+#if SQW_POWER_DIARY
 // ---- the power diary ----------------------------------------------------------
 // The last sixteen power events, kept in NVS so they survive deep sleep and a
 // flat battery: every boot (with what woke it and where BOOT was), the boot
@@ -4637,7 +4645,7 @@ void setup() {
 #if defined(ARDUINO_ARCH_ESP32) && !defined(CROWPANEL7) && !defined(TAB5)
     g_frameSprite = &frame;
 #endif
-#if SQW_SPEAKER
+#if SQW_POWER_DIARY
     // POWER OFF's wake: straight into a restart (see WAKERESTART_MAGIC).
     // Before the breadcrumb is read, so it is still there for the boot after.
     if (esp_reset_reason() == ESP_RST_DEEPSLEEP) {
@@ -4649,7 +4657,7 @@ void setup() {
     // while it is still the previous life's, not this one's.
     crashReportInit();
     Serial.begin(SERIAL_BAUD);
-#if SQW_SPEAKER
+#if SQW_POWER_DIARY
     // POWER OFF left BOOT's pad on the RTC side for its wake, and a pad on
     // the RTC side reads nothing on the ordinary GPIO path. Hand it back
     // before anything reads the button.
@@ -4664,7 +4672,7 @@ void setup() {
     pinMode(0, INPUT_PULLUP);   // BOOT: see pagerBootTick()
     pinMode(46, OUTPUT);         // the keyboard backlight, off until asked for
 #endif
-#if SQW_SPEAKER
+#if SQW_POWER_DIARY
     powerDiaryBoot();
 #endif
 #if defined(SQW_S3) || defined(TAB5)
@@ -4692,6 +4700,7 @@ void setup() {
     gaugeBegin();
     { char b[20]; boardBatteryLine(b, sizeof b); Serial.printf("[batt] %s\n", b); }
     uiClearSetBatterySource(boardBatteryState);
+    Sound::begin();                       // the codec is on the expander's bus, now up
 #endif
 #if defined(CYD35) || defined(NM_CYD_C5)
     // On the NM-CYD-C5 this answers a specific open question rather than a
@@ -4767,7 +4776,7 @@ void setup() {
 #endif
 
     tft.init();
-#if SQW_SPEAKER
+#if SQW_POWER_DIARY
     bootStage(1);
 #endif
 
@@ -5195,7 +5204,7 @@ void setup() {
         touch.setRotation(0);
     }
 #endif
-#if SQW_SPEAKER
+#if SQW_POWER_DIARY
     bootStage(2);
 #endif
 
@@ -5357,7 +5366,7 @@ void setup() {
         }
         BlackBox::noteBoot(br);
     }
-#if SQW_SPEAKER
+#if SQW_POWER_DIARY
     bootStage(3);
 #endif
 
@@ -5402,7 +5411,7 @@ void setup() {
     // against a frame built by an independent implementation.
     MeshTalk::begin();
 #endif
-#if SQW_SPEAKER
+#if SQW_POWER_DIARY
     bootStage(9);
 #endif
     applyBrightness();
@@ -5419,7 +5428,7 @@ void setup() {
         Squachy::trigger(Squachy::Event::BOOTED, DetectionType::UNKNOWN, engine.lifetimeTotal());
         enterBoot();
     }
-#if SQW_SPEAKER
+#if SQW_POWER_DIARY
     bootStage(10);
 #endif
 }
@@ -6333,7 +6342,7 @@ static void chargeModeTick(uint32_t now) {
     delay(40);
 }
 
-#if SQW_SPEAKER
+#if SQW_POWER_DIARY
 // ---- POWER OFF, on the boards with a battery ---------------------------------
 // The two Freenove S3 boards have a cell on a connector and no power switch,
 // so BOOT held for three seconds is the switch: a note on the screen at 1.2 s
@@ -6418,14 +6427,14 @@ static void bootButtonTick(uint32_t now) {
     if (down && !longDone && now - downAt >= 1200) {
         longDone = true;
         Serial.println("[button] long press");
-#if SQW_SPEAKER
+#if SQW_POWER_DIARY
         if (s_chargeMode) exitChargeMode();
         else { s_offHeldAt = now ? now : 1; Theme::showToast("POWER OFF", "KEEP HOLDING BOOT", Theme::AMBER, 2200); }
 #else
         if (s_chargeMode) exitChargeMode(); else s_chargeWanted = true;
 #endif
     }
-#if SQW_SPEAKER
+#if SQW_POWER_DIARY
     if (s_offHeldAt && down && now - downAt >= 3000) cbdPowerOff();
     if (!down) s_offHeldAt = 0;
 #endif
@@ -6456,6 +6465,7 @@ static void pagerPowerOff() {
     chargerOnCable(cable);
     Serial.printf("[power] OFF: %s\n", cable ? "on the cable, so deep sleep; BOOT wakes it"
                                              : "ship mode; POWER turns it back on");
+    Sound::quiet();
     pagerBacklight(0);
     tft.writecommand(0x28);   // DISPOFF
     tft.writecommand(0x10);   // SLPIN
@@ -6530,7 +6540,7 @@ void loop() {
     if (g_consolePowerOff) pagerPowerOff();
 #endif
     if (g_consoleCharge) { g_consoleCharge = false; if (s_chargeMode) exitChargeMode(); else s_chargeWanted = true; }
-#if SQW_SPEAKER
+#if SQW_POWER_DIARY
     if (g_consolePowerOff) { cbdPowerOff(); }
     powerDiaryTick(millis());
     if (g_consolePowerLog) { g_consolePowerLog = false; powerDiaryPrint(); }
@@ -6582,6 +6592,8 @@ void loop() {
 #endif
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
     if (g_consoleBatt) { g_consoleBatt = false; boardBatteryPrintLog(); }
+#endif
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TLORA_PAGER)
     // The speaker's housekeeping: hushed while the saver has the screen
     // dimmed; a chime for a squad message that just landed (once per
     // message, by its arrival time); and the console's SOUND commands.

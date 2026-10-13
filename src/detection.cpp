@@ -11,7 +11,7 @@
 #include "regulars.h"
 #include "clock.h"
 #include "sound.h"
-#if SQW_SPEAKER
+#if SQW_POWER_DIARY
 void bootStage(uint8_t s);   // main.cpp: the power diary's steps through setup()
 #define BOOT_STAGE(n) bootStage(n)
 #else
