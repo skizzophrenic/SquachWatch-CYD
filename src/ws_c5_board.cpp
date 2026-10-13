@@ -17,7 +17,7 @@ static const uint8_t REG_PWM    = 0x05;
 
 static const uint8_t EXIO_TP_RST  = 0;
 static const uint8_t EXIO_LCD_RST = 1;
-static const uint8_t EXIO_POWER   = 5;
+static const uint8_t EXIO_AMP     = 5;   // PA_CTRL
 
 static bool    s_ok     = false;
 static uint8_t s_out    = 0;
@@ -41,8 +41,9 @@ bool begin() {
 
     // Waveshare's order: everything an input with outputs pre-loaded low and
     // the backlight off, then the three outputs enabled, then both resets
-    // pulsed high-low-high with the power enable raised at the end.
-    const uint8_t outputs = (1u << EXIO_TP_RST) | (1u << EXIO_LCD_RST) | (1u << EXIO_POWER);
+    // pulsed high-low-high. Waveshare raise EXIO5 at the end too; it is the
+    // speaker amplifier, so here it stays low until a sound wants it.
+    const uint8_t outputs = (1u << EXIO_TP_RST) | (1u << EXIO_LCD_RST) | (1u << EXIO_AMP);
     s_ok = writeReg(REG_MODE, 0xFF) &&
            writeReg(REG_OUTPUT, 0x00) &&
            writeReg(REG_PWM, 0x00) &&
@@ -68,12 +69,12 @@ bool begin() {
     s_out = 0;
     writeReg(REG_OUTPUT, s_out);
     delay(50);
-    s_out = outputs;
+    s_out = (1u << EXIO_TP_RST) | (1u << EXIO_LCD_RST);   // resets released, amp off
     writeReg(REG_OUTPUT, s_out);
     // The ST7796 wants 120 ms after reset before it takes SLPOUT; the FT6336
     // a little less. tft.init() comes straight after this.
     delay(120);
-    Serial.println("[ws-c5] I/O expander up: panel and touch out of reset, power on");
+    Serial.println("[ws-c5] I/O expander up: panel and touch out of reset, amp off");
     return true;
 }
 
@@ -83,6 +84,13 @@ void backlight(uint8_t duty) {
 }
 
 bool ok() { return s_ok; }
+
+void amp(bool on) {
+    if (!s_ok) return;
+    const uint8_t want = on ? (uint8_t)(s_out | (1u << EXIO_AMP)) : (uint8_t)(s_out & ~(1u << EXIO_AMP));
+    if (want == s_out) return;
+    if (writeReg(REG_OUTPUT, want)) s_out = want;
+}
 
 // ---- AXP2101 --------------------------------------------------------------
 static XPowersAXP2101 s_pmu;

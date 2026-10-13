@@ -16,7 +16,8 @@ Vendor demos and schematic:
 | USB | one USB-C, the C5's **native** USB (no CH340) |
 | Power | AXP2101 PMIC: battery % and voltage on the SYSTEM page and the home screen |
 | Clock | PCF85063 RTC: keeps the time across reboots once it has been set once |
-| Also on board, not used yet | ES8311 codec + speaker, QMI8658 IMU, SHTC3, camera connector |
+| Speaker | ES8311 codec + NS4150B amp: the SOUND and VOLUME rows in Settings (off by default) |
+| Also on board, not used yet | QMI8658 IMU, SHTC3, camera connector |
 
 ## Build and install
 
@@ -49,10 +50,14 @@ From Waveshare's BSP (`esp32_c5_touch_lcd_3_5.h`) and Arduino demos.
 | I2C (SDA 27, SCL 26) | Address | Notes |
 |---|---|---|
 | CH32V003 I/O expander | 0x24 | reg 0x02 direction, 0x03 outputs, 0x05 backlight PWM (255 brightest) |
+| ES8311 audio codec | 0x18 | I2S: BCLK 23, LRCK 10, DOUT 25; no MCLK wire (clocked from BCLK) |
+| AXP2101 power chip | 0x34 | battery readout only |
+| PCF85063 clock | 0x51 | time kept in UTC |
 | FT6336 touch | 0x38 | reset on EXIO0, INT on GPIO3 (not used: polled) |
 
-EXIO5 is a power enable that Waveshare's code raises along with the two
-resets; `WsC5::begin()` does the same.
+EXIO5 is `PA_CTRL`, the NS4150B speaker amplifier's enable (the schematic's net
+table shows it). Waveshare's code calls it power and leaves it on; here it stays
+off and is switched on only while a sound plays, so the speaker does not hiss.
 
 ## How the port is put together
 
@@ -73,8 +78,16 @@ platform, the DMA frame push, core 3's LEDC API, PSRAM frame buffers) and
 
 ## Status
 
-**Untested on hardware.** It compiles; nothing more is known. Things to look
-at on first boot, in order:
+**Confirmed on one board (2026-10-13):** it boots, and the display, touch,
+battery readout, clock chip and speaker all work, on both the 40 MHz build and
+`waveshare-c5-touch-lcd-35-fast` (80 MHz, picture clean), and it runs on its battery
+alone. UPDATE OVER WIFI joins the network and reaches squachwatch.com without
+crashing, then says no over-the-air release exists for this build, which is
+right until the site publishes one. The microSD slot mounts and logs; like
+every board here it wants a FAT32 card (an exFAT one, as most cards over
+32 GB ship, answers but reports no valid FAT volume).
+
+If a board misbehaves, look at these in order:
 
 1. **Blank or white screen**: check the serial console for
    `[ws-c5] I/O expander up`. If the expander did not answer, the panel is
@@ -82,7 +95,7 @@ at on first boot, in order:
 2. **Colours**: inversion is on and colour order BGR, as Waveshare's init
    sends them. The first-boot colour check offers ORDER and INVERT if either is
    wrong.
-3. **Torn or speckled picture**: the bus runs at 40 MHz. Waveshare run this
-   panel at 60, so 80 is worth a try once the picture is right (drop the two
-   `SQW_C5_*` lines in `platformio.ini`).
+3. **Speed**: `waveshare-c5-touch-lcd-35` runs the panel at 40 MHz. `waveshare-c5-touch-lcd-35-fast`
+   is the same build at 80 MHz (Waveshare run it at 60). If the fast one shows
+   torn or speckled rows, go back to the plain build.
 4. **Touch**: see above.

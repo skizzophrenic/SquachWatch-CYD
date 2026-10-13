@@ -22,9 +22,12 @@
 // the write, so a slow frame on the drawing side never puts a gap in a
 // sound. Four 256-frame buffers is 64 ms of DMA, 4 KB of internal RAM.
 #include "sound.h"
-#if SQW_SPEAKER
+#if SQW_SOUND
 #include <Arduino.h>
 #include <Wire.h>
+#if defined(WAVESHARE_C5)
+#include "ws_c5_board.h"
+#endif
 #include <math.h>
 #include <driver/i2s.h>
 #include "settings.h"
@@ -35,6 +38,16 @@ namespace Sound {
 #if defined(FREENOVE_S3_35)
 static const int PIN_MCK = 17, PIN_BCK = 18, PIN_WS = 21, PIN_DOUT = 15;
 static const int PIN_AMP = 1;
+#elif defined(WAVESHARE_C5)
+// The Waveshare C5 3.5": the same ES8311 (0x18, on the expander's bus) and an
+// NS4150B amplifier, from Waveshare's BSP (BSP_I2S_*) and schematic. Two
+// differences, both read off the schematic: the codec's MCLK pin is not
+// wired (so it clocks itself from BCLK -- SOUND_BCLK_MCLK below), and the
+// amplifier's enable (PA_CTRL, high = on) is the I/O expander's EXIO5, not a
+// GPIO, so amp() goes through WsC5::amp().
+static const int PIN_MCK = -1, PIN_BCK = 23, PIN_WS = 10, PIN_DOUT = 25;
+static const int PIN_AMP = -1;
+#define SOUND_BCLK_MCLK 1
 #elif defined(TDECK_PLUS)
 // The T-Deck Plus: a MAX98357A class-D amp straight on I2S (LilyGo's
 // BOARD_I2S_BCK 7 / WS 5 / DOUT 6). No codec to set up, no master clock, and
@@ -52,6 +65,10 @@ static const int PIN_AMP = 1;
 static const uint8_t    CODEC   = 0x18;
 static const uint32_t   RATE    = 16000;      // plenty for tones under 4 kHz
 static const i2s_port_t PORT    = I2S_NUM_0;
+// Core 1 on the dual-core S3s, as before. The C5 has one core, and FreeRTOS
+// asserts on a task pinned to a core that does not exist: the Waveshare C5's
+// first speaker build rebooted at Sound::begin() on exactly that.
+#define SOUND_CORE ((portNUM_PROCESSORS > 1) ? 1 : tskNO_AFFINITY)
 static const int        CHUNK   = 256;        // frames per write, 16 ms
 
 static bool          s_ok      = false;
@@ -109,8 +126,16 @@ static bool codecInit() {
     delay(20);
     wr(0x00, 0x00);
     wr(0x00, 0x80);                         // power on
+#if SOUND_BCLK_MCLK
+    // No MCLK wire: the internal clock comes from BCLK, multiplied 8x --
+    // 16 kHz x 32 bits x 8 = 4.096 MHz, the same 256 fs as the row below.
+    // Espressif's es8311 driver does exactly this when use_mclk is false.
+    wr(0x01, 0xBF);                         // MCLK from BCLK, every clock on
+    wr(0x02, (uint8_t)((rd(0x02) & 0x07) | (3 << 3)));   // pre-divider 1, multiplier 8x
+#else
     wr(0x01, 0x3F);                         // MCLK from the MCLK pin, every clock on
     wr(0x02, (uint8_t)(rd(0x02) & 0x07));   // pre-divider 1, multiplier 1x
+#endif
     wr(0x03, 0x10);                         // single speed, ADC OSR
     wr(0x04, 0x10);                         // DAC OSR
     wr(0x05, 0x00);                         // ADC and DAC dividers 1
@@ -131,7 +156,13 @@ static bool codecInit() {
 }
 
 // ---- the amplifier ---------------------------------------------------------
+#if defined(WAVESHARE_C5)
+// One I2C write to the expander. Wire locks per transaction, so this is safe
+// from the sound task while the loop polls touch on the same bus.
+static void amp(bool on) { WsC5::amp(on); }
+#else
 static void amp(bool on) { if (PIN_AMP >= 0) digitalWrite(PIN_AMP, (on == s_ampLow) ? LOW : HIGH); }
+#endif
 
 // ---- rendering -------------------------------------------------------------
 // Per-chunk synthesis into a stereo 16-bit buffer, the same sample in both
@@ -258,7 +289,7 @@ void begin() {
 #if SOUND_NO_CODEC
     i2s_stop(PORT);
     s_q = xQueueCreate(4, sizeof(uint8_t));
-    xTaskCreatePinnedToCore(soundTask, "sound", 3072, nullptr, 2, &s_task, 1);
+    xTaskCreatePinnedToCore(soundTask, "sound", 3072, nullptr, 2, &s_task, SOUND_CORE);
     s_ok = s_q && s_task;
     Serial.printf("[sound] I2S amp ready: BCK %d WS %d DOUT %d%s\n", PIN_BCK, PIN_WS, PIN_DOUT, s_ok ? "" : " -- task failed");
 #else
@@ -267,7 +298,7 @@ void begin() {
     i2s_stop(PORT);
     if (!ok) { Serial.println("[sound] ES8311 setup failed"); return; }
     s_q = xQueueCreate(4, sizeof(uint8_t));
-    xTaskCreatePinnedToCore(soundTask, "sound", 3072, nullptr, 2, &s_task, 1);
+    xTaskCreatePinnedToCore(soundTask, "sound", 3072, nullptr, 2, &s_task, SOUND_CORE);
     s_ok = s_q && s_task;
     Serial.printf("[sound] ES8311 id %02X%02X ready: MCK %d BCK %d WS %d DOUT %d, amp on GPIO%d%s\n",
                   id1, id2, PIN_MCK, PIN_BCK, PIN_WS, PIN_DOUT, PIN_AMP, s_ok ? "" : " -- task failed");
@@ -300,4 +331,4 @@ bool present() { return s_ok; }
 void ampLow(bool activeLow) { s_ampLow = activeLow; amp(false); }
 
 }  // namespace Sound
-#endif  // SQW_SPEAKER
+#endif  // SQW_SOUND

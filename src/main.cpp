@@ -1960,7 +1960,7 @@ static bool alertMayInterrupt(const Detection& d) {
         !s_screenDimmed && !Clock::night())
         CrowBuzzer::chirp(BUZZ_CHIRP_MS);
 #endif
-#if SQW_SPEAKER
+#if SQW_SOUND
     // The speaker's version of the same chirp, under the same four rules.
     // The SOUND row, night and the dimmed screen are checked in play().
     if (&d == engine.latest() && engine.latestIsNew())
@@ -4527,6 +4527,7 @@ void setup() {
     Serial.println(usingCapTouch ? "Waveshare C5 3.5 -- FT6336 capacitive touch answered."
                                  : "Waveshare C5 3.5 -- FT6336 did not answer; no touch.");
     WsC5::pmuBegin();
+    Sound::begin();                       // the ES8311 is on this bus too, now up
     { char b[20]; boardBatteryLine(b, sizeof b); Serial.printf("[batt] %s\n", b); }
     uiClearSetBatterySource(boardBatteryState);
 #elif defined(FREENOVE_S3)
@@ -7804,7 +7805,7 @@ void loop() {
                             if (Settings::buzzerOn()) CrowBuzzer::chirp(BUZZ_CHIRP_MS);
                             break;
 #endif
-#if SQW_SPEAKER
+#if SQW_SOUND
                         case SettingsRow::SOUND:
                             // Each level plays something it unlocks: ALERTS
                             // the new-device blips, ALL the squad chime. OFF

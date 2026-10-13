@@ -11,7 +11,10 @@
 //
 //   EXIO0  FT6336 touch reset (active low)
 //   EXIO1  ST7796 panel reset (active low)
-//   EXIO5  power enable (Waveshare's BSP raises it with the two resets)
+//   EXIO5  PA_CTRL: the NS4150B speaker amplifier's enable (high = on).
+//          Waveshare's BSP names it a power bit and leaves it on; here it
+//          stays off except while a sound plays (WsC5::amp), so the amp
+//          does not hiss. (Schematic net table: EXIO5 -> PA_CTRL.)
 //
 // The register map and the bring-up order are Waveshare's own, from
 // example/Arduino-v3.3.10/example/07_lvgl_demo/Board_IO.cpp and the factory
@@ -27,7 +30,7 @@ namespace WsC5 {
     static const int     SD_CS = 9;           // on the panel's SPI bus
 
     // Starts Wire on 27/26 and brings the board up the way Waveshare's demos
-    // do: backlight dark, both resets pulsed, power enable on. Call BEFORE
+    // do: backlight dark, both resets pulsed, the amplifier off. Call BEFORE
     // tft.init(): the panel has no reset line of its own and will not answer
     // until EXIO1 has been released. False if the expander never answered,
     // in which case the panel is probably still held in reset.
@@ -39,6 +42,9 @@ namespace WsC5 {
 
     // Whether begin() found the expander.
     bool ok();
+
+    // The speaker amplifier (EXIO5 / PA_CTRL), for sound.cpp.
+    void amp(bool on);
 
     // ---- AXP2101 power chip (I2C 0x34), battery only -------------------
     // Turns on the chip's battery/USB measurements, as Waveshare's own
