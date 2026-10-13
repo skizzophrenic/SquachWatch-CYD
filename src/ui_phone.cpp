@@ -454,17 +454,27 @@ static void drawPinPad(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bo
         Theme::drawButton(t, BX, s_backY, BW_(), BH, armed ? "[ WIPE? ]" : "[ FORGOT ]", armed);
 }
 
-// A key from a real keyboard (the T-Deck's), on whichever board is up: the
-// same dispatch as a QWERTY release. The boards are upper-case, so letters
-// go up; the name board takes letters and space only, the PIN pad digits
-// only, and the message board whatever it draws.
+// A key from a real keyboard (the T-Deck's or the Pager's), on whichever
+// board is up: the same rules as the on-screen boards. The boards are
+// upper-case, so letters go up; the name board takes letters and space only;
+// the PIN pad digits only, and submits itself on the last one as a tapped
+// pad does; the message board MeshMsg's alphabet, the only characters a
+// message can carry.
 void uiPhoneKey(char c) {
+    if (s_done) return;
     if (c == '\r') c = Qwerty::OK;
+    if (pin()) {
+        if (s_pinWaitMsg) return;
+        if (c == Qwerty::BKSP) { if (s_len) s_buf[--s_len] = '\0'; return; }
+        if (c < '0' || c > '9' || s_len >= s_pinLen) return;
+        s_buf[s_len++] = c; s_buf[s_len] = '\0';
+        if (s_len == s_pinLen) { s_pinReady = true; s_done = true; }
+        return;
+    }
     if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
     if      (c == Qwerty::BKSP) deleteLast();
     else if (c == Qwerty::OK)   saveAndClose();
-    else if (pin())             { if (c >= '0' && c <= '9') appendChar(c); }
-    else if (msg())             { if (c >= ' ' && c < 0x7F) appendChar(c); }
+    else if (msg())             { if (c && strchr(MeshMsg::TEXT_CHARSET, c)) appendChar(c); }
     else                        { if ((c >= 'A' && c <= 'Z') || c == ' ') appendChar(c); }
 }
 

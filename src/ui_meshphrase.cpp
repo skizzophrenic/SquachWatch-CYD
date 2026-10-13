@@ -452,6 +452,16 @@ void uiMeshPhraseTouch(int x, int y) {
     }
 }
 
+bool uiMeshPhrasePicking() { return s_mode == Mode::PICK; }
+
+void uiMeshPhraseTypeChar(char c) {
+    if (s_mode != Mode::PICK) return;
+    if (c == '\b') { pickBack(); return; }
+    if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+    if (c < 'A' || c > 'Z' || !s_letterOn[c - 'A']) return;
+    s_letter = c;   // on the word step too: a different letter is a change of mind
+}
+
 void uiMeshPhraseDemo(uint8_t mode) {
     if (mode == 1) {
         MeshTalk::rollPhrase(s_rolled);

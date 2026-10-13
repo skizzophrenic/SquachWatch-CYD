@@ -523,7 +523,9 @@ static void drawCrashCard(TFT_eSPI& t) {
 #define BL_PIN_ORIG 21
 #define BL_PIN_CAP  27
 #define BL_PIN_AWOK 32
-#if defined(SQW_SMALL)
+#if defined(TLORA_PAGER)
+#define BL_PIN_S3   42   // the Pager's AW9364: pulses, not PWM -- see pagerBacklight()
+#elif defined(SQW_SMALL)
 #define BL_PIN_S3   38   // the StickS3's and the Cardputer ADV's
 #elif defined(FREENOVE_S3_35)
 #define BL_PIN_S3   41   // the Freenove 3.5"'s, through a BSS138 (HIGH is on)
@@ -738,7 +740,15 @@ const uint16_t      TOUCH_DEBOUNCE_MS = 200;
 // kept opening rows they were only scrolling past -- so a long touch that
 // never moved is spent, not acted on. Long presses that mean something (a
 // LOG row's WATCH/HUNT) are timed separately and unaffected.
+#if defined(TLORA_PAGER)
+// The cursor's press is a click, never a resting thumb, and on the heavier
+// screens a loop pass can take a few hundred ms -- the click's release then
+// arrived "held" past 500 and Settings threw it away. So only a deliberate
+// hold of the wheel counts as long here.
+static const uint32_t TAP_MAX_MS = 3000;
+#else
 static const uint32_t TAP_MAX_MS = 500;
+#endif
 
 #if SQUACH_MESH
 // Why there is no free roll to make, for the key and the journal's row.
@@ -791,6 +801,10 @@ const uint32_t      OUTFIT_UNLOCK_AUTO_MS = 12000;
 // real hardware to be portrait/rotation 0.
 #if defined(AWOK)
 uint8_t             screenRotation = 0;
+#elif defined(TLORA_PAGER)
+// MX|MY|MV: LilyGoLib's own rotation 0 for this panel (MADCTL 0xE8), the
+// keyboard below the screen.
+uint8_t             screenRotation = 3;
 #else
 uint8_t             screenRotation = 1;
 #endif
@@ -1186,10 +1200,18 @@ static void extPush() {
 // everything, slowly.
 static bool           s_stickKey2Was = false, s_stickKey2Long = false, s_stickKey1Was = false;
 static uint32_t       s_stickKey2At = 0;
+#if defined(TLORA_PAGER)
+// The Pager's wheel is turned a notch at a time while reading the screen, so
+// the cursor stays up for longer than a glance.
+static const uint32_t STICK_HOLD_MS = 600, STICK_SHOW_MS = 30000;
+#else
 static const uint32_t STICK_HOLD_MS = 600, STICK_SHOW_MS = 8000;
+#endif
 static const uint32_t TDECK_CURSOR_MS = 15000;   // the T-Deck's highlight, after the ball last moved
 // kind 0 presses; 1 scrolls the list down, 2 up; 3 presses and holds
 // for a long press (a LOG row's WATCH/HUNT panel opens on a hold).
+// bw/bh: on a list row, the extent its hit test answered over, so the cursor
+// can box the whole row (the Pager); 0 for a stop that is only a point.
 struct StickPt { int16_t x, y; uint8_t kind; };
 static uint32_t      s_stickHoldUntil = 0;   // a kind-3 press, held for the screen
 static StickPt       s_stickHoldPt;
@@ -1495,6 +1517,190 @@ static SmallKeys smallKeysRead() {
     k.press = s_tbPress && !s_tbPressShowOnly;
     return k;
 }
+#elif defined(TLORA_PAGER)
+#include <soc/gpio_reg.h>
+#include <esp_timer.h>
+// The Pager: a rotary encoder with a press (A 40, B 41, C 7; board pull-ups,
+// the button pulls C low) and a TCA8418 keyboard at 0x34 on the shared I2C
+// bus (SDA 3, SCL 2), wired as four rows of ten. The wheel steps the cursor
+// and its press presses; on the keyboard ENTER and the space bar press too,
+// and backspace goes home.
+//
+// The wheel is decoded from interrupts, not from the loop: a frame is long
+// enough to miss a whole detent, and the full-step table (Ben Buxton's, as
+// LilyGoLib uses it) only counts a detent once all four edges have come in
+// order, so contact bounce never counts.
+static const int PAGER_ROT_A = 40, PAGER_ROT_B = 41, PAGER_ROT_C = 7;
+static volatile int16_t s_pagerWheel = 0;   // detents since the last read, + clockwise
+static volatile uint8_t s_pagerRotState = 0;
+static bool s_pagerKeysOk = false, s_pagerEnter = false;
+// A click, caught by its falling edge. The loop runs 5-12 times a second on
+// the heavier screens and a click is ~100 ms, so a press read only as a level
+// fell between two reads about half the time -- and Settings, which acts on
+// the release, never saw it. A latched click is reported as pressed for one
+// read and released on the next: always a tap, however briefly it was down.
+//
+// Debounced on the quiet before the press, not on a window after it: a click
+// counts only if the button had been up and still for 30 ms. Bounce, at the
+// press or at the release, is edges a few ms apart and never has that, so it
+// can never make a second click -- which a fixed 150 ms window after the press
+// did, on any click held longer than that: the release's bounce landed after
+// the window and opened a row, then tapped whatever replaced it.
+static volatile bool    s_pagerClick = false;
+static volatile int64_t s_pagerUpSinceUs = 0;   // when C last went high, 0 while low
+static void IRAM_ATTR pagerClickIsr() {
+    const int64_t t = esp_timer_get_time();
+    const bool high = (REG_READ(GPIO_IN_REG) >> PAGER_ROT_C) & 1;
+    if (high) {
+        s_pagerUpSinceUs = t;
+    } else {
+        if (s_pagerUpSinceUs && t - s_pagerUpSinceUs >= 30000) s_pagerClick = true;
+        s_pagerUpSinceUs = 0;
+    }
+}
+static void IRAM_ATTR pagerWheelIsr() {
+    static const uint8_t T[7][4] = {
+        { 0x0, 0x2, 0x4, 0x0 },        { 0x3, 0x0, 0x1, 0x0 | 0x10 }, { 0x3, 0x2, 0x0, 0x0 },
+        { 0x3, 0x2, 0x1, 0x0 },        { 0x6, 0x0, 0x4, 0x0 },        { 0x6, 0x5, 0x0, 0x0 | 0x20 },
+        { 0x6, 0x5, 0x4, 0x0 },
+    };
+    // Straight from the input register: A and B are GPIO40 and 41, bits 8
+    // and 9 of the high bank, and nothing here may live in flash.
+    const uint8_t pins = (uint8_t)((REG_READ(GPIO_IN1_REG) >> (PAGER_ROT_A - 32)) & 0x03);
+    const uint8_t st = T[s_pagerRotState & 0x0F][pins];
+    s_pagerRotState = st;
+    if (st & 0x10) s_pagerWheel++;
+    else if (st & 0x20) s_pagerWheel--;
+}
+// Typing. On a screen that takes text (see pagerTextScreen()) the keys
+// type instead of steering: letters as they are, CAPS (left of backspace)
+// for the next letter in capitals, and with SPACE or ALT held, the symbol
+// LilyGo prints on the key -- the digits along the top row. A space tapped on
+// its own is a space. Backspace deletes and ENTER is OK. The wheel still
+// moves the cursor, for SHOW, BACK and the on-screen symbols this keyboard
+// has no key for.
+static const char PAGER_KEYS[4][10] = {
+    { 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p' },
+    { 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', '\n' },
+    { 0,   'z', 'x', 'c', 'v', 'b', 'n', 'm', 0,   '\b' },
+    { ' ', 0,   0,   0,   0,   0,   0,   0,   0,   0 },
+};
+static const char PAGER_SYMS[4][10] = {
+    { '1', '2', '3', '4', '5', '6', '7', '8', '9', '0' },
+    { '*', '/', '+', '-', '=', ':', '\'', '"', '@', '\n' },
+    { 0,   '_', '$', ';', '?', '!', ',', '.', 0,   '\b' },
+    { ' ', 0,   0,   0,   0,   0,   0,   0,   0,   0 },
+};
+static char    s_pagerTyped[16];
+static uint8_t s_pagerTypedHead = 0, s_pagerTypedTail = 0;
+static bool    s_pagerSpaceHeld = false, s_pagerSpaceUsed = false, s_pagerAltHeld = false, s_pagerCaps = false;
+static void pagerTypedPush(char c) {
+    const uint8_t next = (uint8_t)((s_pagerTypedHead + 1) % sizeof s_pagerTyped);
+    if (next == s_pagerTypedTail) return;   // full: a dropped key, not a crash
+    s_pagerTyped[s_pagerTypedHead] = c;
+    s_pagerTypedHead = next;
+}
+// The next typed character, or 0.
+static char pagerTakeTyped() {
+    if (s_pagerTypedTail == s_pagerTypedHead) return 0;
+    const char c = s_pagerTyped[s_pagerTypedTail];
+    s_pagerTypedTail = (uint8_t)((s_pagerTypedTail + 1) % sizeof s_pagerTyped);
+    return c;
+}
+// Every screen that takes text: the WiFi password, the payphone (a name or a
+// message), the PIN pad and the lock screen, and the phrase picker's letters.
+static bool pagerPinScreen() { return state == AppState::PIN_ENTRY || state == AppState::LOCKED; }
+static bool pagerTextScreen() {
+    return state == AppState::WIFI_PASS || state == AppState::PHONE || pagerPinScreen() ||
+           (state == AppState::MESH_PHRASE && uiMeshPhrasePicking());
+}
+// One key event in text mode.
+static void pagerTypeKey(int row, int col, bool down) {
+    if (row == 3 && col == 0) {                 // space: a key of its own, or the symbol shift
+        if (down) { s_pagerSpaceHeld = true; s_pagerSpaceUsed = false; }
+        else { if (!s_pagerSpaceUsed) pagerTypedPush(' '); s_pagerSpaceHeld = false; }
+        return;
+    }
+    if (row == 2 && col == 0) { s_pagerAltHeld = down; return; }    // ALT
+    if (!down) return;
+    if (row == 2 && col == 8) { s_pagerCaps = !s_pagerCaps; return; }   // CAPS, for the next letter
+    // On the PIN pad the top row is its digits without a shift: there is
+    // nothing else a PIN can hold.
+    const bool sym = s_pagerSpaceHeld || s_pagerAltHeld || (pagerPinScreen() && row == 0);
+    if (s_pagerSpaceHeld) s_pagerSpaceUsed = true;
+    char c = sym ? PAGER_SYMS[row][col] : PAGER_KEYS[row][col];
+    if (!c) return;
+    if (!sym && s_pagerCaps && c >= 'a' && c <= 'z') { c = (char)(c - 'a' + 'A'); s_pagerCaps = false; }
+    pagerTypedPush(c);
+}
+static bool pagerKbReg(uint8_t reg, uint8_t v) {
+    Wire.beginTransmission(0x34);
+    Wire.write(reg); Wire.write(v);
+    return Wire.endTransmission() == 0;
+}
+static int pagerKbRead(uint8_t reg) {
+    Wire.beginTransmission(0x34);
+    Wire.write(reg);
+    if (Wire.endTransmission(false) != 0 || Wire.requestFrom(0x34, 1) != 1) return -1;
+    return Wire.read();
+}
+static bool pagerKeysBegin() {
+    pinMode(PAGER_ROT_A, INPUT);
+    pinMode(PAGER_ROT_B, INPUT);
+    pinMode(PAGER_ROT_C, INPUT);
+    attachInterrupt(PAGER_ROT_A, pagerWheelIsr, CHANGE);
+    attachInterrupt(PAGER_ROT_B, pagerWheelIsr, CHANGE);
+    s_pagerUpSinceUs = esp_timer_get_time() - 30000;   // up and still since boot
+    attachInterrupt(PAGER_ROT_C, pagerClickIsr, CHANGE);
+    // The keyboard: Wire is already up, from pagerPowerUp().
+    bool ok = pagerKbReg(0x1D, 0x0F);    // rows 0-3 are keypad rows
+    ok = pagerKbReg(0x1E, 0xFF) && ok;   // columns 0-7
+    ok = pagerKbReg(0x1F, 0x03) && ok;   // and 8-9
+    ok = pagerKbReg(0x01, 0x01) && ok;   // key events into the FIFO
+    for (int i = 0; i < 12 && (pagerKbRead(0x03) & 0x0F) > 0; i++) pagerKbRead(0x04);   // whatever was held at boot
+    pagerKbReg(0x02, 0x0F);
+    s_pagerKeysOk = ok;
+    return ok;
+}
+static SmallKeys smallKeysRead() {
+    SmallKeys k = {};
+    noInterrupts();
+    const int16_t turns = s_pagerWheel;
+    s_pagerWheel = 0;
+    interrupts();
+    if (turns > 0) k.next = true;
+    else if (turns < 0) k.prev = true;
+    bool keyEnter = s_pagerEnter;
+    static bool clickPending = false;
+    if (s_pagerClick) { s_pagerClick = false; clickPending = true; }
+    for (int i = 0; s_pagerKeysOk && i < 10; i++) {
+        const int cnt = pagerKbRead(0x03);
+        if (cnt < 0 || (cnt & 0x0F) == 0) break;
+        const int ev = pagerKbRead(0x04);
+        if (ev <= 0) break;
+        const bool down = (ev & 0x80) != 0;
+        const int  code = (ev & 0x7F) - 1;
+        if (code < 0 || code >= 40) continue;   // above 96 is a GPIO event, not a key
+        const int row = code / 10, col = code % 10;
+        if (pagerTextScreen()) { pagerTypeKey(row, col, down); continue; }
+        if ((row == 1 && col == 9) || (row == 3 && col == 0)) {                                // ENTER, or the space bar
+            keyEnter = down;
+            if (down) clickPending = true;   // down and up can arrive in the same read
+            continue;
+        }
+        if (!down) continue;
+        if (row == 2 && col == 9) k.home = true;                                              // backspace
+    }
+    if (s_pagerKeysOk) pagerKbReg(0x02, 0x0F);
+    s_pagerEnter = keyEnter;
+    if (!pagerTextScreen()) {
+        s_pagerTypedHead = s_pagerTypedTail = 0;
+        s_pagerSpaceHeld = s_pagerAltHeld = s_pagerCaps = false;
+    }
+    k.press = s_pagerEnter || digitalRead(PAGER_ROT_C) == LOW || clickPending;
+    clickPending = false;
+    return k;
+}
 #else
 // The StickS3, the same scheme as FUD: FRONT (KEY1) click steps to the next
 // stop, FRONT held selects. SIDE (KEY2) click is BACK, SIDE held is HOME.
@@ -1524,7 +1730,7 @@ static uint32_t       s_stickShownAt = 0;       // the cursor shows for a while 
 static bool           s_stickHome = false;      // KEY2 held: loop() goes home
 static int8_t         s_stickDrag = 0;          // a scripted drag under way: +1 down the list, -1 up
 static uint8_t        s_stickDragStep = 0;
-static const uint8_t  STICK_STOPS_MAX = 24;
+static const uint8_t  STICK_STOPS_MAX = 32;   // the phrase picker: 26 letters and its buttons
 
 // What is under a point on a list screen, as that screen's own hit test
 // sees it, or -1. The stops are found by sweeping this over the screen, so
@@ -1750,6 +1956,9 @@ static uint8_t stickDropPartial(StickCand* c, uint8_t n) {
     return k;
 }
 
+#if SQUACH_LORA && SQW_WARDRIVE
+static bool twatchLoraBadgeRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h);
+#endif
 static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
     const int16_t w = (int16_t)tft.width(), h = (int16_t)tft.height();
     uint8_t n = 0;
@@ -1802,6 +2011,12 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         if (stickSweep(clearBubbleAt, c)) add(c.x, c.y);   // a visitor's speech bubble
         if (stickSweep(clearSquadAt, c))  add(c.x, c.y);   // the squad badge
         if (stickSweep(clearWatchAt, c))  add(c.x, c.y);   // the watch / hunt pill
+#if SQUACH_LORA && SQW_WARDRIVE && defined(TLORA_PAGER)
+        {
+            int16_t bx, by, bw, bh;   // LORA n NEW, while there is something unread
+            if (twatchLoraBadgeRect(bx, by, bw, bh)) add(bx + bw / 2, by + bh / 2);
+        }
+#endif
         return n;
     }
     if (state == AppState::SYS_PROPS) {
@@ -1904,16 +2119,27 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
     if (stickIsList()) {
         // Each thing the hit test names gets one stop, at the middle of
         // everywhere it answered. In reading order, which for rows is down.
-        struct Acc { int id; int32_t sx, sy; uint16_t c; } acc[12];
+        struct Acc { int id; int32_t sx, sy; uint16_t c; int16_t x0, y0, x1, y1; } acc[12];
         uint8_t an = 0;
+#if defined(TLORA_PAGER)
+        // Twice the width, so twice the step across: 20 columns, not 40. The
+        // smallest thing swept for, a stepper's - or +, is 30-odd px wide.
+        const int SX = 24;
+#else
+        const int SX = 12;
+#endif
         for (int y = 2; y < h; y += 4)
-            for (int x = 6; x < w; x += 12) {
+            for (int x = SX / 2; x < w; x += SX) {
                 const int id = stickListId(x, y);
                 if (id < 0) continue;
                 uint8_t a = 0;
                 while (a < an && acc[a].id != id) a++;
-                if (a == an) { if (an == 12) continue; acc[an++] = { id, 0, 0, 0 }; }
+                if (a == an) { if (an == 12) continue; acc[an++] = { id, 0, 0, 0, (int16_t)x, (int16_t)y, (int16_t)x, (int16_t)y }; }
                 acc[a].sx += x; acc[a].sy += y; acc[a].c++;
+                if (x < acc[a].x0) acc[a].x0 = (int16_t)x;
+                if (x > acc[a].x1) acc[a].x1 = (int16_t)x;
+                if (y < acc[a].y0) acc[a].y0 = (int16_t)y;
+                if (y > acc[a].y1) acc[a].y1 = (int16_t)y;
             }
         // LOG's and RAWSCAN's rows open their WATCH/HUNT panel on a long press.
         const bool logRows = (state == AppState::LOG || state == AppState::RAWSCAN) && !s_confirmPending;
@@ -2032,9 +2258,18 @@ static StickPt  s_stickPts[STICK_STOPS_MAX];
 static uint8_t  s_stickPtsN = 0;
 static uint32_t s_stickPtsAt = 0;
 static AppState s_stickPtsState = AppState::BOOT;
+// A press is what changes a page, and it lands after this frame's poll: so
+// the next few reads after one rebuild, whatever the age of the answer.
+static uint8_t  s_stickPtsRefresh = 0;
+#if defined(TLORA_PAGER)
+static const uint32_t STICK_PTS_MS = 600;   // a sweep here is ~1100 hit tests
+#else
+static const uint32_t STICK_PTS_MS = 200;
+#endif
 static uint8_t stickStops(StickPt* out, bool fresh = false) {
     const uint32_t now = millis();
-    if (fresh || !s_stickPtsAt || state != s_stickPtsState || now - s_stickPtsAt > 200) {
+    if (s_stickPtsRefresh) { s_stickPtsRefresh--; fresh = true; }
+    if (fresh || !s_stickPtsAt || state != s_stickPtsState || now - s_stickPtsAt > STICK_PTS_MS) {
         s_stickPtsN = stickStopsBuild(s_stickPts, STICK_STOPS_MAX);
         s_stickPtsAt = now ? now : 1;
         s_stickPtsState = state;
@@ -2389,6 +2624,7 @@ static TouchPoint stickPoll() {
         tp.y = pts[s_stickStop].y;
     }
     if (k1) s_stickShownAt = now ? now : 1;
+    if (!k1 && s_stickKey1Was) s_stickPtsRefresh = 4;   // two passes: poll and cursor, each
     s_stickKey1Was = k1;
     return tp;
 }
@@ -3018,6 +3254,9 @@ void simBootPress() { pocketPress(millis()); }
 #endif
 
 static void applyCpuClock();
+#if defined(TLORA_PAGER)
+static void pagerBacklight(uint8_t duty);
+#endif
 static void applyBrightness() {
     uint8_t duty = s_screenDimmed ? Settings::dimLevel() : Settings::brightness();
 #if defined(SENSE_CYD_APP)
@@ -3045,7 +3284,9 @@ static void applyBrightness() {
         applyCpuClock();   // back to CPU CLOCK
     }
 #endif
-#if defined(CROWPANEL7)
+#if defined(TLORA_PAGER)
+    pagerBacklight(duty);
+#elif defined(CROWPANEL7)
     // No backlight GPIO on this board: an STC8H1K28 helper MCU owns it and
     // takes a bare I2C command byte on an inverted scale. CrowBL::set()
     // keeps the firmware's own 0..255-with-255-brightest convention.
@@ -4627,7 +4868,7 @@ static void performWipe(WipeBoot after) {
     Security::wipeSecrets();
     engine.sd().wipe();
     BlackBox::wipe();        // the log and the crash history kept in flash
-#if defined(TWATCH_S3)
+#if SQW_WARDRIVE
     Wardrive::clear();       // where the watch has been, and everything it heard there
 #elif defined(CYD_GPS)
     Wardrive::sdWipe();      // the WiGLE file is a record of everywhere the board has been
@@ -4799,6 +5040,85 @@ static void twatchPowerUp() {
     Serial.printf("[pmu] AXP2101 up: battery %d%%, %s\n", s_pmu.getBatteryPercent(),
                   s_pmu.isVbusIn() ? "on USB" : "on battery");
 }
+#endif
+
+#if defined(TLORA_PAGER)
+// The Pager's XL9555 expander, on I2C SDA 3 / SCL 2 at 0x20. It switches the
+// supplies of nearly everything that is not the S3 itself, and all of them
+// are off until asked for: the keyboard, the radio and the GPS do not answer
+// before this runs. Port 0: 0 haptic driver, 1 speaker amp, 2 keyboard reset
+// (high is running), 3 radio, 4 GPS, 5 NFC, 7 GPS reset (high is running).
+// Port 1: 8 keyboard, 9 the expansion header, 10 card detect (in), 11 card
+// pull-ups (in), 12 SD card. Which is which from arduino-esp32's
+// variants/lilygo_tlora_pager; LilyGoLib switches on the same set, amp too --
+// left off here, as the StickS3's is, so it does not hiss with nothing to play.
+//
+// Before any of it: every other chip select on the panel's SPI bus held high.
+// The radio, the NFC chip and the card all listen on SCK/MOSI, and a select
+// left floating while the panel is drawn is a chip reading the picture as
+// commands.
+static bool s_pagerIoOk = false;
+// Port 0's outputs as last written. The GPS starts off: the GPS section
+// (gpsPower) switches it on for wardriving or the GPS console command.
+static uint8_t s_pagerIo0 = 0xAD;
+static bool pagerIoWrite(uint8_t reg, uint8_t v) {
+    Wire.beginTransmission(0x20);
+    Wire.write(reg); Wire.write(v);
+    return Wire.endTransmission() == 0;
+}
+static void pagerIoBit0(uint8_t bit, bool on) {
+    s_pagerIo0 = on ? (uint8_t)(s_pagerIo0 | (1u << bit)) : (uint8_t)(s_pagerIo0 & ~(1u << bit));
+    pagerIoWrite(0x02, s_pagerIo0);
+}
+static void pagerPowerUp() {
+    static const uint8_t SHARED_CS[] = { 36 /* LoRa */, 39 /* NFC */, 21 /* SD */, 47 /* LoRa reset */ };
+    for (uint8_t p : SHARED_CS) { pinMode(p, OUTPUT); digitalWrite(p, HIGH); }
+    Wire.begin(3, 2, 400000);
+    // The output latches before the direction, so no pin is ever driven low
+    // on its way to high.
+    bool ok = pagerIoWrite(0x02, s_pagerIo0);  // port 0 high: all but the amp (1), the GPS (4) and the spare (6)
+    ok = pagerIoWrite(0x03, 0x13) && ok;       // port 1 high: keyboard, header, SD
+    ok = pagerIoWrite(0x06, 0x40) && ok;       // port 0 outputs, but the spare
+    ok = pagerIoWrite(0x07, 0xEC) && ok;       // port 1 outputs: 8, 9, 12
+    s_pagerIoOk = ok;
+    delay(50);   // the rails, and the keyboard out of reset
+    Serial.printf("[pmu] XL9555 %s: keyboard, radio, NFC, SD and haptics on; GPS and speaker amp off\n",
+                  ok ? "answered" : "DID NOT ANSWER");
+}
+
+// The AW9364 backlight driver counts pulses on its one pin instead of taking
+// PWM: held low for 2.5 ms it is off; a rising edge from off is full
+// brightness (step 1 of 16); each short low pulse after that is one step
+// dimmer, and step 16 wraps back to 1. So this keeps the step it left the
+// chip at and sends only the difference. A pulse's low half has to stay
+// under 500 us, so the pulses go out with interrupts off.
+static uint8_t s_pagerBlStep = 0;   // 0 off, else 1 (brightest) .. 16 (dimmest)
+static void pagerBacklight(uint8_t duty) {
+    const uint8_t want = duty ? (uint8_t)(16 - (duty * 15u) / 255u) : 0;   // 255 is step 1, 1 is step 16
+    if (want == s_pagerBlStep) return;
+    if (!want) {
+        digitalWrite(BL_PIN_S3, LOW);
+        delay(3);
+        s_pagerBlStep = 0;
+        return;
+    }
+    if (!s_pagerBlStep) {
+        digitalWrite(BL_PIN_S3, HIGH);
+        delayMicroseconds(50);
+        s_pagerBlStep = 1;
+    }
+    const uint8_t pulses = (uint8_t)((want - s_pagerBlStep + 16) % 16);
+    portDISABLE_INTERRUPTS();
+    for (uint8_t i = 0; i < pulses; i++) {
+        digitalWrite(BL_PIN_S3, LOW);
+        delayMicroseconds(2);
+        digitalWrite(BL_PIN_S3, HIGH);
+        delayMicroseconds(2);
+    }
+    portENABLE_INTERRUPTS();
+    s_pagerBlStep = want;
+}
+
 #endif
 
 #if defined(STICKS3)
@@ -4982,6 +5302,73 @@ static GaugeReading gaugeNow() {
             // climbs faster than about 1 %/hour, so the gauge's own jitter
             // at rest is not read as a cable.
             r.charging = gaugeRead16(0x16, crate) && (int16_t)crate > 5;
+        }
+    }
+    return r;
+}
+// The SYSTEM page's BATTERY row: "81% 4.12V", with "+" while it charges.
+void boardBatteryLine(char* out, size_t n) {
+    const GaugeReading g = gaugeNow();
+    if (!s_gaugeOk || !g.ok) { snprintf(out, n, "NO GAUGE"); return; }
+    if (g.mv < 2500)         { snprintf(out, n, "NONE"); return; }
+    snprintf(out, n, "%u%% %u.%02uV%s", (unsigned)g.pct, (unsigned)(g.mv / 1000), (unsigned)(g.mv % 1000 / 10),
+             g.charging ? "+" : "");
+}
+// The home screen's lava lamp (uiClearSetBatterySource).
+static bool boardBatteryState(uint8_t& pct, bool& charging) {
+    const GaugeReading g = gaugeNow();
+    if (!s_gaugeOk || !g.ok || g.mv < 2500) return false;
+    pct = g.pct; charging = g.charging;
+    return true;
+}
+#endif
+
+#if defined(TLORA_PAGER)
+// The Pager's battery: a BQ27220 fuel gauge at 0x55 on the expander's bus
+// (SDA 3 / SCL 2, up from pagerPowerUp()), beside a BQ25896 charger at 0x6B.
+// Like the Marauder's gauge it keeps its own model of the cell, so the
+// percent is its reading, not a voltage table. "On the cable" is the
+// charger's: VBUS_STAT (REG0B bits 7..5) is non-zero while anything feeds
+// it, which stays true once the cell is full and the current has stopped.
+// Registers from TI's datasheet; both chips little-endian, 16 bits.
+static const uint8_t GAUGE_ADDR = 0x55, CHARGER_ADDR = 0x6B;
+static bool s_gaugeOk = false;
+static bool gaugeRead16(uint8_t reg, uint16_t& v) {
+    Wire.beginTransmission(GAUGE_ADDR);
+    Wire.write(reg);
+    if (Wire.endTransmission(false) != 0 || Wire.requestFrom(GAUGE_ADDR, (uint8_t)2) != 2) return false;
+    v = (uint16_t)Wire.read();
+    v |= (uint16_t)(Wire.read() << 8);
+    return true;
+}
+static bool chargerOnCable(bool& cable) {
+    Wire.beginTransmission(CHARGER_ADDR);
+    Wire.write(0x0B);
+    if (Wire.endTransmission(false) != 0 || Wire.requestFrom(CHARGER_ADDR, (uint8_t)1) != 1) return false;
+    cable = (Wire.read() >> 5) != 0;
+    return true;
+}
+static void gaugeBegin() {
+    uint16_t mv = 0;
+    s_gaugeOk = gaugeRead16(0x08, mv);
+    Serial.printf("[batt] BQ27220 %s\n", s_gaugeOk ? "answered" : "DID NOT ANSWER");
+}
+// One reading every two seconds, shared by the lamp and the SYSTEM row.
+struct GaugeReading { bool ok; uint16_t mv; uint8_t pct; bool charging; };
+static GaugeReading gaugeNow() {
+    static uint32_t at = 0;
+    static GaugeReading r = { false, 0, 0, false };
+    const uint32_t now = millis();
+    if (s_gaugeOk && (!at || now - at >= 2000)) {
+        at = now ? now : 1;
+        uint16_t soc = 0, cur = 0;
+        r.ok = gaugeRead16(0x08, r.mv) && gaugeRead16(0x2C, soc);
+        if (r.ok) {
+            r.pct = (uint8_t)min<uint16_t>(soc, 100);
+            bool cable = false;
+            // No answer from the charger: fall back on the current, positive
+            // while the cell takes charge.
+            r.charging = chargerOnCable(cable) ? cable : (gaugeRead16(0x0C, cur) && (int16_t)cur > 10);
         }
     }
     return r;
@@ -5681,7 +6068,7 @@ static void printBootBanner() {
 }
 
 // ---- Arduino setup / loop ----
-#if defined(TWATCH_S3)
+#if SQW_WARDRIVE
 static void wardriveBegin();
 #endif
 #if SQW_BOOT_POWEROFF
@@ -5952,6 +6339,12 @@ void setup() {
 #if SQW_BOOT_BTN
     pinMode(0, INPUT_PULLUP);   // BOOT: see bootButtonTick()
 #endif
+#if defined(TLORA_PAGER)
+    // POWER OFF's sleep left BOOT on the RTC side of its pad; hand it back.
+    rtc_gpio_deinit(GPIO_NUM_0);
+    pinMode(0, INPUT_PULLUP);   // BOOT: see pagerBootTick()
+    pinMode(46, OUTPUT);         // the keyboard backlight, off until asked for
+#endif
 #if SQW_BOOT_POWEROFF
     powerDiaryBoot();
 #endif
@@ -5975,6 +6368,11 @@ void setup() {
 #endif
 #if defined(TDECK_PLUS)
     tdeckPowerUp();
+#elif defined(TLORA_PAGER)
+    pagerPowerUp();
+    gaugeBegin();
+    { char b[20]; boardBatteryLine(b, sizeof b); Serial.printf("[batt] %s\n", b); }
+    uiClearSetBatterySource(boardBatteryState);
 #endif
 #if defined(CYD35) || defined(NM_CYD_C5)
     // On the NM-CYD-C5 this answers a specific open question rather than a
@@ -6150,6 +6548,9 @@ void setup() {
 #elif defined(TDECK_PLUS)
     // No LEDC: GPIO42 is a pulse-counting 16-step driver, and a PWM on it
     // would walk the brightness round and round. tdeckBacklight() steps it.
+#elif defined(TLORA_PAGER)
+    // No LEDC: the AW9364 counts pulses, and PWM on its pin would be read as
+    // thousands of them a second. pagerBacklight() drives it.
 #elif defined(SQW_S3)
     // One backlight, GPIO45, on the first channel. The CYD pins below are
     // flash/PSRAM lines and the power chip's interrupt on an S3.
@@ -6220,6 +6621,8 @@ void setup() {
         tdeckBacklight(24);
 #elif defined(WAVESHARE_C5)
         WsC5::setBacklight(24);
+#elif defined(TLORA_PAGER)
+        pagerBacklight(24);
 #else
         ledcWrite(BL_CH_ORIG, 24);
         ledcWrite(BL_CH_CAP,  24);
@@ -6422,6 +6825,9 @@ void setup() {
 #if defined(CARDPUTER_ADV)
     Serial.printf("Cardputer ADV -- no touch panel; keyboard %s.\n", cardKeysBegin() ? "answered" : "DID NOT ANSWER");
     Sound::begin();   // the ES8311 is on the keyboard's bus
+#elif defined(TLORA_PAGER)
+    Serial.printf("T-LoRa Pager -- no touch panel; wheel on GPIO40/41/7; keyboard %s.\n",
+                  pagerKeysBegin() ? "answered" : "DID NOT ANSWER");
 #else
     Serial.println("StickS3 -- no touch panel; buttons on GPIO11 and GPIO12.");
 #endif
@@ -6631,6 +7037,8 @@ void setup() {
     tdeckBacklight(24);
 #elif defined(WAVESHARE_C5)
     WsC5::setBacklight(24);
+#elif defined(TLORA_PAGER)
+    pagerBacklight(24);
 #else
     ledcWrite(BL_CH_ORIG, 24);
     ledcWrite(BL_CH_CAP,  24);
@@ -6666,7 +7074,7 @@ void setup() {
     bootStage(3);
 #endif
 
-#if defined(TWATCH_S3)
+#if SQW_WARDRIVE
     // The wardrive log, and its GPS if wardriving was left on.
     wardriveBegin();
 #endif
@@ -7082,8 +7490,10 @@ static const char* s_lastScreenName = nullptr;
 static uint32_t    s_lastScreenUs   = 0;
 static uint32_t    s_lastScreenAt   = 0;     // transitionStart of the screen being timed
 
-#if defined(TWATCH_S3)
-// ---- GPS and wardriving (the T-Watch S3 Plus) --------------------------------
+#if SQW_WARDRIVE
+// ---- GPS and wardriving (the T-Watch S3 Plus, and the T-LoRa Pager) ----------
+// The Pager carries the same MIA-M10Q, on our RX 4 / TX 12, powered by the
+// XL9555's GPS_EN (port 0 bit 4) instead of the watch's AXP2101 rails.
 // The S3 Plus carries a u-blox MIA-M10Q (an LS550G on some batches). Its
 // sentences go to Gnss (gnss.h); a fix stamps what Wardrive (wardrive.h)
 // writes. The plain S3 has no GNSS: the probe finds nothing, says so once,
@@ -7120,6 +7530,10 @@ extern volatile uint8_t g_consoleGps;    // 1 on, 2 off, 3 status, 4 fake, 5..7 
 extern volatile int32_t g_consoleFakeLat7, g_consoleFakeLon7;
 
 static void gpsPower(bool on, bool dc4) {
+#if defined(TLORA_PAGER)
+    (void)dc4;
+    pagerIoBit0(4, on);
+#else
     if (on) {
         s_pmu.setBLDO1Voltage(3300); s_pmu.enableBLDO1();
         s_pmu.setDC3Voltage(3300);   s_pmu.enableDC3();
@@ -7127,17 +7541,26 @@ static void gpsPower(bool on, bool dc4) {
     } else {
         s_pmu.disableBLDO1(); s_pmu.disableDC3(); s_pmu.disableDC4();
     }
+#endif
 }
 
 static void gpsOpen(uint32_t baud) {
     Serial1.end();
+#if defined(TLORA_PAGER)
+    Serial1.begin(baud, SERIAL_8N1, 4, 12);    // our RX 4, TX 12
+#else
     Serial1.begin(baud, SERIAL_8N1, 41, 42);   // our RX 41, TX 42
+#endif
     s_gpsTryAt = millis();
     s_gpsGoodAt = Gnss::good();
 }
 
 static void gpsStart(bool summaries) {
+#if defined(TLORA_PAGER)
+    if (!s_pagerIoOk) return;
+#else
     if (!s_pmuOk) return;
+#endif
     s_gpsOn = true; s_gpsFound = false; s_gpsTry = 0;
     s_gpsSummaries = summaries;
     s_gpsOnAt = millis(); s_gpsFirstFixMs = 0;
@@ -7157,8 +7580,8 @@ static void gpsStop() {
     gpsPower(false, false);
 }
 
-#endif  // TWATCH_S3, for a moment: the LoRa pill is the T-Deck's too
-#if SQUACH_LORA && (defined(TWATCH_S3) || defined(TDECK_PLUS))
+#endif  // SQW_WARDRIVE, for a moment: the LoRa pill is the T-Deck's too
+#if SQUACH_LORA && (defined(TWATCH_S3) || defined(TDECK_PLUS) || defined(TLORA_PAGER))
 // New LoRa chat messages: a pink pill at the top of the main screen, under
 // the GPS counter when that is showing, and only while there is something
 // unread. A tap opens LORA CHATS. Drawn with the GPS counter, under the
@@ -7182,7 +7605,7 @@ void twatchLoraBadge(TFT_eSPI& t) {
     t.setTextSize(Theme::uiTextSize(t, 1));
     const int w = t.textWidth(txt) + 10, h = t.fontHeight() + 6;
     const int x = (t.width() - w) / 2;
-#if defined(TWATCH_S3)
+#if SQW_WARDRIVE
     const bool gpsUp = s_gpsOn;
 #else
     const bool gpsUp = Gnss::fresh(millis());   // the CYD GPS counter sits there while it has a fix
@@ -7215,6 +7638,11 @@ static void tdeckLoraSoundTick(uint32_t now) {
     lastUnread = u;
 }
 #endif
+static bool twatchLoraBadgeRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
+    if (s_loraBadgeX < 0) return false;
+    x = s_loraBadgeX; y = s_loraBadgeY; w = s_loraBadgeW; h = s_loraBadgeH;
+    return true;
+}
 // A finger's worth of slack around it: the pill is small on a watch.
 static bool twatchLoraBadgeHit(int x, int y) {
     return s_loraBadgeX >= 0 && x >= s_loraBadgeX - 8 && x < s_loraBadgeX + s_loraBadgeW + 8 &&
@@ -7236,8 +7664,8 @@ static void twatchLoraBuzzTick(uint32_t now) {
     lastUnread = u;
 }
 #endif  // TWATCH_S3
-#endif  // SQUACH_LORA on the watch or the T-Deck
-#if defined(TWATCH_S3)   // and the watch's section carries on
+#endif  // SQUACH_LORA on the watch, the T-Deck or the Pager
+#if SQW_WARDRIVE   // and the watch's (and the Pager's) section carries on
 
 // While the GPS is on, a small counter at the top of the main screen: how
 // many satellites it hears, how many it uses, FIX once it has one -- and,
@@ -7293,7 +7721,11 @@ static void wigleExport(bool includeFake) {
     char buf[512];   // the two header lines run past 330 with a long version string
     struct Ctx { bool fake, ok; uint32_t rows, skipped; char* buf; } c = { includeFake, true, 0, 0, buf };
     usbWriteAll("=== WIGLE BEGIN ===\n", 20);
+#if defined(TLORA_PAGER)
+    const size_t h = Wardrive::headerLines(buf, sizeof buf, FIRMWARE_VERSION, "tlora-pager", "LilyGo T-LoRa Pager", "LilyGo");
+#else
     const size_t h = Wardrive::headerLines(buf, sizeof buf, FIRMWARE_VERSION, "twatch-s3", "LilyGo T-Watch S3 Plus", "LilyGo");
+#endif
     c.ok = usbWriteAll(buf, h);
     if (c.ok) Wardrive::forEach([](const Wardrive::Record& r, void* p) {
         Ctx& c = *(Ctx*)p;
@@ -7379,9 +7811,11 @@ static void gpsTick() {
         if (Gnss::good() - s_gpsGoodAt >= 3) {
             s_gpsFound = true;
             Serial.printf("[gps] a GNSS is talking at %lu baud\n", (unsigned long)GPS_BAUDS[s_gpsTry % 3]);
+#if defined(TWATCH_S3)
             // A GPS answered: this is an S3 Plus, and its bigger cell can
             // take the faster charge from now on.
             if (!Settings::watchPlus()) { Settings::setWatchPlus(); twatchApplyCharge(); }
+#endif
         } else if (now - s_gpsTryAt > 2500) {
             // Three bauds with BLDO1 and DC3, then the same three with DC4 too.
             s_gpsTry++;
@@ -7393,7 +7827,11 @@ static void gpsTick() {
                 // rather than leave a row reading GPS STARTING forever.
                 if (Wardrive::enabled()) {
                     Wardrive::setEnabled(false);
+#if defined(TLORA_PAGER)
+                    Theme::showToast("NO GPS ANSWERED", "Try WARDRIVE again", Theme::AMBER);
+#else
                     Theme::showToast("NO GPS ON THIS WATCH", "Wardriving needs the S3 Plus", Theme::AMBER);
+#endif
                 }
                 return;
             }
@@ -7822,6 +8260,8 @@ static void chargeBacklight(uint8_t duty) {
     Tab5Panel::backlight(duty);
 #elif defined(WAVESHARE_C5)
     WsC5::setBacklight(duty);
+#elif defined(TLORA_PAGER)
+    pagerBacklight(duty);
 #else
     ledcWrite(BL_CH_ORIG, duty);
     ledcWrite(BL_CH_CAP,  duty);
@@ -8116,6 +8556,10 @@ static void terminalRestWait(uint32_t ms) {
 #if defined(CARDPUTER_ADV)
         if (s_cardKeysOk) { const int cnt = cardRead(0x03); if (cnt > 0 && (cnt & 0x0F)) input = true; }
 #endif
+#if defined(TLORA_PAGER)
+        if (s_pagerWheel || s_pagerClick || digitalRead(PAGER_ROT_C) == LOW) input = true;
+        if (s_pagerKeysOk) { const int cnt = pagerKbRead(0x03); if (cnt > 0 && (cnt & 0x0F)) input = true; }
+#endif
         if (input) break;
     }
     // A finger, a key or the ball: full speed for it, and no rest again for a
@@ -8124,6 +8568,79 @@ static void terminalRestWait(uint32_t ms) {
     s_termWokeAt = millis();
     terminalRestSet(false);
 }
+
+#if defined(TLORA_PAGER)
+// ---- POWER OFF on the Pager: BOOT held for three seconds -----------------
+// BOOT is the middle of the three buttons on the bottom edge (GPIO0); RST is
+// left of it and POWER right of it, and neither of those reaches a GPIO.
+// POWER is wired to the BQ25896's QON, which is what brings the charger out
+// of ship mode -- so "off" is ship mode: BATFET_DIS (REG09 bit 5) cuts the
+// cell from the system and everything stops, 26 uA by LilyGo's table, and a
+// one-second press of POWER turns it back on into a fresh boot. On the cable
+// the charger feeds the system from VBUS whatever the BATFET does, so there
+// the expander's rails go off and the S3 sleeps until BOOT is pressed again.
+// POWER OFF on the console does the same.
+volatile bool g_consolePowerOff = false;
+static void pagerPowerOff() {
+    bool cable = false;
+    chargerOnCable(cable);
+    Serial.printf("[power] OFF: %s\n", cable ? "on the cable, so deep sleep; BOOT wakes it"
+                                             : "ship mode; POWER turns it back on");
+    pagerBacklight(0);
+    tft.writecommand(0x28);   // DISPOFF
+    tft.writecommand(0x10);   // SLPIN
+    if (!engine.restRadios(true)) { esp_wifi_set_promiscuous(false); esp_wifi_stop(); }
+    digitalWrite(46, LOW);   // the keyboard backlight
+    delay(120);
+    // The rails: haptics, keyboard, radio, GPS, NFC, header and card, all off.
+    pagerIoWrite(0x02, 0x00);
+    pagerIoWrite(0x03, 0x00);
+    // The press that asked for this is still down, and BOOT low is the wake:
+    // sleeping now would wake at once. Wait for the release (ten seconds at
+    // most, in case the button is stuck), screen already dark.
+    for (uint32_t t0 = millis(); digitalRead(0) == LOW && millis() - t0 < 10000; ) delay(10);
+    delay(50);
+    if (!cable) {
+        // REG09: BATFET_DIS on, BATFET_DLY off (now, not in 10-15 s).
+        Wire.beginTransmission(CHARGER_ADDR);
+        Wire.write(0x09);
+        if (Wire.endTransmission(false) == 0 && Wire.requestFrom(CHARGER_ADDR, (uint8_t)1) == 1) {
+            const uint8_t r09 = (uint8_t)((Wire.read() | 0x20) & ~0x08);
+            Wire.beginTransmission(CHARGER_ADDR);
+            Wire.write(0x09); Wire.write(r09);
+            Wire.endTransmission();
+        }
+        delay(500);
+        // Still here: the cable went in meanwhile, or the charger did not
+        // answer. Fall through to the sleep.
+        Serial.println("[power] still powered after ship mode; deep sleep instead");
+    }
+    // BOOT's pull-up kept through the sleep on the RTC side of the pad, as
+    // the Freenove boards found they had to (it floated and woke them).
+    rtc_gpio_pullup_en(GPIO_NUM_0);
+    rtc_gpio_pulldown_dis(GPIO_NUM_0);
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
+    esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);
+    esp_deep_sleep_start();
+}
+// Polled every pass. A note at 1.2 s, off at 3 s. A press already down when
+// the firmware started -- the one that woke it from the sleep above -- is not
+// a press until it has been let go once.
+static void pagerBootTick(uint32_t now) {
+    static bool armed = false, was = false, warned = false;
+    static uint32_t downAt = 0;
+    const bool down = digitalRead(0) == LOW;
+    if (!down) { armed = true; warned = false; }
+    if (!armed) return;
+    if (down && !was) downAt = now;
+    if (down && !warned && now - downAt >= 1200) {
+        warned = true;
+        Theme::showToast("POWER OFF", "KEEP HOLDING BOOT", Theme::AMBER, 2200);
+    }
+    if (down && now - downAt >= 3000) pagerPowerOff();
+    was = down;
+}
+#endif
 
 
 void loop() {
@@ -8138,6 +8655,10 @@ void loop() {
 #endif
 #if defined(TDECK_PLUS)
     tdeckKeysTick(millis());
+#endif
+#if defined(TLORA_PAGER)
+    pagerBootTick(millis());
+    if (g_consolePowerOff) pagerPowerOff();
 #endif
     if (g_consoleCharge) { g_consoleCharge = false; if (s_chargeMode) exitChargeMode(); else s_chargeWanted = true; }
 #if SQW_BOOT_POWEROFF
@@ -8506,6 +9027,9 @@ void loop() {
             engine.checkHuntBle(d.mac, d.rssi);
         }
     }
+#endif
+#if defined(TLORA_PAGER)
+    gpsTick();   // the watch's: see the GPS and wardriving section
 #endif
 #if SQUACH_LORA && defined(TWATCH_S3)
     twatchLoraBuzzTick(now);
@@ -9706,7 +10230,7 @@ void loop() {
                 lastTouch = now;
                 sqActive  = false;
                 enterMeshCompose();
-#if SQUACH_LORA && (defined(TWATCH_S3) || defined(TDECK_PLUS))
+#if SQUACH_LORA && (defined(TWATCH_S3) || defined(TDECK_PLUS) || defined(TLORA_PAGER))
             } else if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
                        twatchLoraBadgeHit(tp.x, tp.y)) {
                 // The LORA pill: the landing page on the T-Deck, the chats on a watch.
@@ -10813,12 +11337,15 @@ void loop() {
                         case SettingsRow::WATCH_IDLE_CPU: Settings::cycleIdleCpu(); applyCpuClock(); break;
                         case SettingsRow::WATCH_BATTERY: break;   // a reading, not a switch
                         case SettingsRow::WATCH_TEMP: break;   // a reading, not a switch
-                        case SettingsRow::WATCH_SETTINGS: uiSettingsOpenPage(SettingsPage::WATCH); break;
                         case SettingsRow::WATCH_QUIET_TAGS:
                             Settings::toggleQuietTrackers();
                             Theme::showToast("TAGS + RINGS", Settings::quietTrackers() ? "Logged, no wake or buzz" : "Alert like the rest",
                                              Theme::CYAN);
                             break;
+#endif
+#if SQW_WARDRIVE
+                        // The watch's page, and the Pager's LORA + GPS page.
+                        case SettingsRow::WATCH_SETTINGS: uiSettingsOpenPage(SettingsPage::WATCH); break;
                         case SettingsRow::WATCH_WARDRIVE:
                             // Through the console's own path, so the row and
                             // WARDRIVE ON/OFF can never disagree about what
@@ -10828,6 +11355,8 @@ void loop() {
                                              Wardrive::enabled() ? nullptr : "Logging once the GPS has a fix",
                                              Theme::CYAN);
                             break;
+#endif
+#if defined(TWATCH_S3)
                         case SettingsRow::WATCH_BUZZ:
                             // OFF, HIGH, MED, LOW. Each level plays the alert
                             // pattern once, so the choice is made by feel; OFF
@@ -10842,7 +11371,7 @@ void loop() {
                             Serial.printf("[buzz] %s\n", Settings::buzzModeName());
                             break;
 #endif
-                        // The LoRa rows, the watch's and the T-Deck's: outside the
+                        // The LoRa rows, the watch's, the T-Deck's and the Pager's: outside the
                         // watch-only block above, where the T-Deck's taps went nowhere (2026-10-13).
 #if SQUACH_LORA
                         case SettingsRow::WATCH_LORA:
@@ -11057,6 +11586,9 @@ void loop() {
         case AppState::MESH_PHRASE: {
             drawTwoBand([&](TFT_eSPI& t, bool advance) { uiMeshPhraseTick(t, now, engine, advance); });
             if (touchJustDown) uiMeshPhraseTouch(tp.x, tp.y);
+#if defined(TLORA_PAGER)
+            for (char c; (c = pagerTakeTyped()) != 0; ) uiMeshPhraseTypeChar(c);
+#endif
             if (uiMeshPhraseDone()) enterMeshMenu();
             break;
         }
@@ -11275,6 +11807,9 @@ void loop() {
             if (touchJustDown)    uiWifiPassTouch(tp.x, tp.y, now, WifiPassTouch::DOWN);
             else if (tp.valid)    uiWifiPassTouch(tp.x, tp.y, now, WifiPassTouch::MOVE);
             else if (touchJustUp) uiWifiPassTouch(tp.x, tp.y, now, WifiPassTouch::UP);
+#if defined(TLORA_PAGER)
+            for (char c; (c = pagerTakeTyped()) != 0; ) uiWifiPassKey(c, now);
+#endif
             const WifiPassResult r = uiWifiPassResult();
             if (s_alertTyping != AlertTyping::NONE) {
                 if (r != WifiPassResult::NONE) myAlertsTyped(r);
@@ -11530,6 +12065,9 @@ void loop() {
             if (touchJustDown)    uiPhoneTouch(tp.x, tp.y, now, PhoneTouch::DOWN);
             else if (tp.valid)    uiPhoneTouch(tp.x, tp.y, now, PhoneTouch::MOVE);
             else if (touchJustUp) uiPhoneTouch(tp.x, tp.y, now, PhoneTouch::UP);
+#if defined(TLORA_PAGER)
+            for (char c; (c = pagerTakeTyped()) != 0; ) uiPhoneKey(c);
+#endif
             // Back to where it was opened from, not to Settings.
             if (uiPhoneDone()) {
                 // A message goes back to the message screen to be read over
@@ -11714,6 +12252,9 @@ void loop() {
         case AppState::PIN_ENTRY: {
             drawTwoBand([&](TFT_eSPI& t, bool advance) { uiPhoneTick(t, now, engine, advance); });
             if (touchJustDown) uiPhoneTouch(tp.x, tp.y, now, PhoneTouch::DOWN);
+#if defined(TLORA_PAGER)
+            for (char c; (c = pagerTakeTyped()) != 0; ) uiPhoneKey(c);
+#endif
             if (!uiPhoneDone()) break;
             if (!uiPhonePinReady()) { memset(s_pinFirst, 0, sizeof s_pinFirst); enterSecurity(); break; }   // BACK
             char d[9];
@@ -11801,6 +12342,9 @@ void loop() {
 #endif
             drawTwoBand([&](TFT_eSPI& t, bool advance) { uiPhoneTick(t, now, engine, advance); });
             if (touchJustDown) uiPhoneTouch(tp.x, tp.y, now, PhoneTouch::DOWN);
+#if defined(TLORA_PAGER)
+            for (char c; (c = pagerTakeTyped()) != 0; ) uiPhoneKey(c);
+#endif
             if (uiPhonePinForgot()) {
                 // A forgotten PIN: every secret goes, and the PIN with it, and
                 // the board comes back unlocked. Settings and outfits stay.
@@ -12179,6 +12723,8 @@ void loop() {
             info.boardName = "Cardputer ADV LAB";
 #elif defined(TDECK_PLUS)
             info.boardName = "tdeck-plus LAB";
+#elif defined(TLORA_PAGER)
+            info.boardName = "T-LoRa Pager LAB";
 #elif defined(FREENOVE_S3_35)
             info.boardName = "freenove-s3-35 BETA";
 #elif defined(FREENOVE_S3_40)

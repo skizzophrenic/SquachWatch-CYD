@@ -64,17 +64,31 @@ static uint8_t s_dexCaught = 0;
 // has turned off) are filtered out by visibleRows() below rather than
 // removed here, so their SettingsRow values stay stable regardless of
 // which mode is active.
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(MARAUDER_V8) || defined(TDECK_PLUS)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(MARAUDER_V8) || defined(TDECK_PLUS) || defined(TLORA_PAGER)
 void boardBatteryLine(char* out, size_t n);    // main.cpp: the divider on GPIO9
 #endif
 #if defined(TWATCH_S3)
 void twatchBatteryLine(char* out, size_t n);   // main.cpp, where the power chip lives
-uint8_t twatchGpsState();                      // main.cpp: 0 off, 1 starting, 2 no fix, 3 fix
 int  twatchChipC();                            // main.cpp: the chip's temperature, cached
+#endif
+// The watch's own page, and the Pager's: the same page, the rows each has.
+// The Pager has a radio and a GPS but none of the watch's power knobs, so its
+// page is only those -- and is named for them.
+#if defined(TWATCH_S3) || defined(TLORA_PAGER)
+#define SQW_WATCH_PAGE 1
+uint8_t twatchGpsState();                      // main.cpp: 0 off, 1 starting, 2 no fix, 3 fix
+#if defined(TLORA_PAGER)
+#define WATCH_PAGE_NAME "LORA + GPS"
+#else
+#define WATCH_PAGE_NAME "WATCH SETTINGS"
+#endif
+#else
+#define SQW_WATCH_PAGE 0
+#define WATCH_PAGE_NAME "WATCH SETTINGS"
 #endif
 
 static const SettingsRow ALL_ROWS[] = {
-#if defined(TWATCH_S3)
+#if SQW_WATCH_PAGE
     // The watch's own page, first: what only a watch has to think about grew
     // to ten rows, so the main list carries one row that opens it.
     SettingsRow::WATCH_SETTINGS,
@@ -254,7 +268,17 @@ static Settings::FontKind fontKindFor(SettingsRow r) {
     }
 }
 
-#if defined(TWATCH_S3)
+#if defined(TLORA_PAGER)
+// The Pager's LORA + GPS page: the chats first (what you came for), then
+// what the radio listens to, then the GPS and what it logs.
+static const SettingsRow WATCH_ROWS[] = {
+#if SQUACH_LORA
+    SettingsRow::WATCH_LORA_CHATS, SettingsRow::WATCH_LORA,
+#endif
+    SettingsRow::WATCH_WARDRIVE,
+};
+static const uint8_t WATCH_ROWS_N = sizeof(WATCH_ROWS) / sizeof(WATCH_ROWS[0]);
+#elif defined(TWATCH_S3)
 // The WATCH SETTINGS page: the battery first (a reading), then the knobs that
 // decide how long it lasts, then the buzz, then the tools.
 static const SettingsRow WATCH_ROWS[] = {
@@ -272,7 +296,7 @@ static const uint8_t WATCH_ROWS_N = sizeof(WATCH_ROWS) / sizeof(WATCH_ROWS[0]);
 // The SYSTEM page: the rarely-needed machinery, off the main list.
 static const SettingsRow SYSTEM_ROWS[] = {
     SettingsRow::PRIVACY,
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(MARAUDER_V8) || defined(TDECK_PLUS)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(MARAUDER_V8) || defined(TDECK_PLUS) || defined(TLORA_PAGER)
     SettingsRow::BOARD_BATTERY,
 #endif
 #if SQUACH_LORA && defined(TDECK_PLUS)
@@ -317,7 +341,7 @@ static const uint8_t APPEARANCE_ROWS_N = sizeof(APPEARANCE_ROWS) / sizeof(APPEAR
 static const uint8_t LIST_MAX_N = APPEARANCE_ROWS_N > ALL_ROWS_N ? APPEARANCE_ROWS_N : ALL_ROWS_N;
 static_assert(SYSTEM_ROWS_N <= LIST_MAX_N, "the display list is sized off LIST_MAX_N");
 static_assert(DESK_ROWS_N <= LIST_MAX_N, "the display list is sized off LIST_MAX_N");
-#if defined(TWATCH_S3)
+#if SQW_WATCH_PAGE
 static_assert(WATCH_ROWS_N <= LIST_MAX_N, "the display list is sized off LIST_MAX_N");
 #endif
 // Kept as a thin shim over s_page so nothing that reads it has to change.
@@ -490,6 +514,8 @@ static const char* groupName(RowGroupId g) {
         case RowGroupId::JOURNAL:    return "FIELD JOURNAL";
 #if defined(TDECK_PLUS)
         case RowGroupId::WATCH:      return "LORA";    // the T-Deck has the watch's LoRa rows and nothing else of the watch's
+#elif defined(TLORA_PAGER)
+        case RowGroupId::WATCH:      return "LORA + GPS";
 #else
         case RowGroupId::WATCH:      return "WATCH";
 #endif
@@ -543,7 +569,7 @@ static uint8_t buildDisplayList(DisplayItem* out) {
 #if SQUACH_MESH
     else if (s_page == SettingsPage::JOURNAL) { src = JOURNAL_ROWS; srcN = JOURNAL_ROWS_N; }
 #endif
-#if defined(TWATCH_S3)
+#if SQW_WATCH_PAGE
     else if (s_page == SettingsPage::WATCH)  { src = WATCH_ROWS;     srcN = WATCH_ROWS_N; }
 #endif
     // The tracking rows come first on the main page, and only when a target is
@@ -1417,7 +1443,7 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             snprintf(valBuf, valBufN, "%u", (unsigned)IgnoreList::count());
             value = valBuf;
             break;
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(MARAUDER_V8) || defined(TDECK_PLUS)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(MARAUDER_V8) || defined(TDECK_PLUS) || defined(TLORA_PAGER)
         case SettingsRow::BOARD_BATTERY:
             label = "BATTERY"; boardBatteryLine(valBuf, valBufN); value = valBuf;
             break;
@@ -1438,13 +1464,20 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
         case SettingsRow::WATCH_BUZZ:
             label = "BUZZ"; value = Settings::buzzModeName();
             break;
-        case SettingsRow::WATCH_SETTINGS:
-            label = "WATCH SETTINGS"; value = ">";
-            break;
         case SettingsRow::WATCH_TEMP:
             label = "CHIP TEMP"; snprintf(valBuf, valBufN, "%d C", twatchChipC()); value = valBuf;
             break;
+        case SettingsRow::WATCH_QUIET_TAGS:
+            label = "TAGS + RINGS"; value = Settings::quietTrackers() ? "LOG ONLY" : "ALERT";
+            break;
+#endif
+#if SQW_WATCH_PAGE
+        case SettingsRow::WATCH_SETTINGS:
+            label = WATCH_PAGE_NAME; value = ">";
+            break;
+#if defined(TWATCH_S3)
         case SettingsRow::WARDRIVE_PAGE:
+#endif
         case SettingsRow::WATCH_WARDRIVE: {
             // OFF, or what it is doing: finding the GPS, waiting for a fix, or
             // logging, with how many sightings are kept.
@@ -1457,13 +1490,10 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             else { snprintf(valBuf, valBufN, "ON  %lu", (unsigned long)Wardrive::count()); value = valBuf; }
             break;
         }
-        case SettingsRow::WATCH_QUIET_TAGS:
-            label = "TAGS + RINGS"; value = Settings::quietTrackers() ? "LOG ONLY" : "ALERT";
-            break;
 #endif
-        // The LoRa rows: the watch's and the T-Deck's (the T-Deck lists them on
-        // its SYSTEM page), so outside the watch-only block above -- inside it
-        // they fell through to "?" on the T-Deck (2026-10-13).
+        // The LoRa rows: the watch's, the T-Deck's (on its SYSTEM page) and the
+        // Pager's (its LORA + GPS page), so outside the watch-only block above --
+        // inside it they fell through to "?" on the T-Deck (2026-10-13).
 #if SQUACH_LORA
         case SettingsRow::WATCH_LORA:
             label = "LORA"; value = Settings::loraListenName();
@@ -1860,7 +1890,7 @@ if (!Theme::stillBackdrop(t)) switch (Settings::background()) {
     if (s_page == SettingsPage::APPEARANCE) pageTitle = ">> APPEARANCE <<";
     else if (s_page == SettingsPage::SYSTEM) pageTitle = ">> SYSTEM <<";
     else if (s_page == SettingsPage::DESK)   pageTitle = ">> DESK SETTINGS <<";
-    else if (s_page == SettingsPage::WATCH)  pageTitle = ">> WATCH SETTINGS <<";
+    else if (s_page == SettingsPage::WATCH)  pageTitle = ">> " WATCH_PAGE_NAME " <<";
     else if (s_page == SettingsPage::FONTS)  pageTitle = ">> FONTS <<";
     else if (s_page == SettingsPage::ALERT_CARD) pageTitle = ">> ALERT CARD <<";
     else if (s_page == SettingsPage::WARDRIVE) pageTitle = ">> WARDRIVE <<";

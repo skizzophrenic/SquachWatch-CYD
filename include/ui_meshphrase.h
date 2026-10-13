@@ -28,6 +28,10 @@ uint8_t uiMeshPhraseStopRects(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh
 bool    uiMeshPhraseBackRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h);
 // True once BACK is pressed on the first page.
 bool uiMeshPhraseDone();
+// A physical keyboard on the picker: a letter picks that letter (on either
+// step), '\b' is BACK. Words are still chosen with the cursor.
+bool uiMeshPhrasePicking();
+void uiMeshPhraseTypeChar(char c);
 // Emulator only: 0 shows the current phrase, 1 a freshly rolled one, 2 the
 // picker two words in with a letter chosen. Nothing on the device calls it.
 void uiMeshPhraseDemo(uint8_t mode);

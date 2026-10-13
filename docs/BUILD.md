@@ -86,7 +86,8 @@ web flasher offers:
 | `twatch-s3` | LilyGo T-Watch S3 / S3 Plus (BETA) |
 
 The rest are not on the flasher: `freenove-s3-40` is the Freenove
-ESP32-S3 4.0" (FNK0104S), run on one board so far; `waveshare-c5-28` is the
+ESP32-S3 4.0" (FNK0104S), run on one board so far; `tlora-pager` is
+the LilyGo T-LoRa Pager, also run on one board so far; `waveshare-c5-28` is the
 Waveshare ESP32-C5-Touch-LCD-2.8 (see [WAVESHARE-C5-28](WAVESHARE-C5-28.md));
 `cyd-gps`, `cyd-ili9341-gps`, `freenove-s3-gps` and `freenove-s3-35-gps` are
 the GPS builds for a module you wire on (see [PINOUT](PINOUT.md));
