@@ -683,6 +683,35 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bo
     }
 }
 
+uint8_t uiMeshComposeStops(int16_t* xs, int16_t* ys, int16_t* ws, int16_t* hs, uint8_t cap) {
+    uint8_t n = 0;
+    auto put = [&](const Rect& r) {
+        if (r.w <= 0 || n >= cap) return;
+        xs[n] = r.x; ys[n] = r.y; ws[n] = r.w; hs[n] = r.h; n++;
+    };
+    // The same branches as uiMeshComposeTouch(), so a stop is only ever
+    // somewhere a press does something. The buttons are zeroed by every
+    // draw and set again only when shown; the tabs and lines are not, so
+    // they are only listed in the mode that draws them.
+    if (MeshTutor::active()) {
+        for (uint8_t i = 0; i < s_lineN; i++) put(s_lineRect[i]);
+        put(s_back); put(s_send);
+        return n;
+    }
+    if (s_typedOn) { put(s_send); put(s_back); return n; }
+    if (s_emoteOn && s_sel < 0) {
+        for (uint8_t i = 0; i < EmoteScript::PER_TAB; i++) put(s_emoteRect[i]);
+        for (uint8_t i = 0; i < EmoteScript::TABS; i++) put(s_tabRect[i]);
+        put(s_emoteBtn); put(s_random); put(s_back);
+        return n;
+    }
+    put(s_type);
+    for (uint8_t i = 0; i < s_lineN; i++) put(s_lineRect[i]);
+    if (s_sel < 0) for (uint8_t i = 0; i < MeshMsg::CANNED_TABS; i++) put(s_lineTabRect[i]);
+    put(s_send); put(s_fill); put(s_emoteBtn); put(s_help); put(s_back);
+    return n;
+}
+
 ComposeHit uiMeshComposeTouch(int x, int y, uint32_t now) {
     if (MeshTutor::active()) return tutorTouch(x, y);
 

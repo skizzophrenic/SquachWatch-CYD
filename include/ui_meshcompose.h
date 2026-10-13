@@ -19,6 +19,9 @@ void       uiMeshComposeInit(TFT_eSPI& t);
 // than by the clock must sit still for it. Other boards draw once.
 void       uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance = true);
 ComposeHit uiMeshComposeTouch(int x, int y, uint32_t now);
+// Everything a press would act on right now, as rectangles, for a board
+// steered by a cursor. TYPE first. Returns how many were written.
+uint8_t    uiMeshComposeStops(int16_t* xs, int16_t* ys, int16_t* ws, int16_t* hs, uint8_t cap);
 
 // Back from the keyboard with a message: show it large, with EDIT and SEND.
 void        uiMeshComposeSetTyped(const char* text);

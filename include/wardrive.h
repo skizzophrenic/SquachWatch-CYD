@@ -18,6 +18,14 @@
 // tests check the file WiGLE will read, byte for byte.
 #pragma once
 #include <stdint.h>
+
+// The boards that wardrive: the 16 MB S3s with a GPS and the free flash after
+// partitions_twatch.csv's coredump -- the T-Watch S3 Plus and the T-LoRa Pager.
+#if defined(TWATCH_S3) || defined(TLORA_PAGER)
+#define SQW_WARDRIVE 1
+#else
+#define SQW_WARDRIVE 0
+#endif
 #include <stddef.h>
 
 namespace Wardrive {

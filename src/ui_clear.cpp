@@ -1916,10 +1916,10 @@ static void drawBatteryGauge(TFT_eSPI& t, uint32_t now) {
     if (DrawBand::has(oy, oy + (21 * h2 >> 1))) drawLavaLamp(t, now, pct, chg);
 }
 
-#if defined(TWATCH_S3)
+#if defined(TWATCH_S3) || defined(TLORA_PAGER)
 void twatchGpsBadge(TFT_eSPI& t);   // main.cpp: the GPS counter, top centre, while the GPS is on
 #endif
-#if SQUACH_LORA && (defined(TWATCH_S3) || defined(TDECK_PLUS))
+#if SQUACH_LORA && (defined(TWATCH_S3) || defined(TDECK_PLUS) || defined(TLORA_PAGER))
 void twatchLoraBadge(TFT_eSPI& t);  // main.cpp: LORA n NEW, under it, while chats are unread
 #endif
 #if defined(TWATCH_S3)
@@ -2450,6 +2450,14 @@ static void drawMessageUi(TFT_eSPI& t, uint32_t now, int titleBottom, int squach
         drawMessageIcon(t, ix, iy,
                         tut ? showing : m.unread, tut ? false : MeshTalk::sending(now), now);
     }
+}
+
+uint8_t uiClearTapStops(int16_t* xs, int16_t* ys, int16_t* ws, int16_t* hs, uint8_t cap) {
+    uint8_t n = 0;
+    if (Settings::boringMode()) return 0;
+    if (s_bubbleOn && n < cap) { xs[n] = s_bubX; ys[n] = s_bubY; ws[n] = s_bubW; hs[n] = s_bubH; n++; }
+    if (s_badgeOn  && n < cap) { xs[n] = s_badX; ys[n] = s_badY; ws[n] = s_badW; hs[n] = s_badH; n++; }
+    return n;
 }
 
 bool uiClearBubbleHit(int x, int y) {
@@ -3452,6 +3460,8 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
 #if defined(TWATCH_S3)
     // Under everything that moves: see drawCornerClock().
     if (DrawBand::has(0, titleBottom)) s_cornerClockPillR = drawCornerClock(t, w);
+#endif
+#if defined(TWATCH_S3) || defined(TLORA_PAGER)
     twatchGpsBadge(t);   // under the bubbles too
 #if SQUACH_LORA
     twatchLoraBadge(t);
