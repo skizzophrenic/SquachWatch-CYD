@@ -79,6 +79,11 @@ jobs:
       - name: Build Marauder V8 (ESP32-C5)
         run: pio run -e marauder-v8
 
+      # The Waveshare ESP32-C5-Touch-LCD-3.5: the same C5 platform again. Only
+      # the 40 MHz build; -fast differs by one clock define.
+      - name: Build Waveshare ESP32-C5-Touch-LCD-3.5 (ESP32-C5)
+        run: pio run -e waveshare-c5-touch-lcd-35
+
       # The LilyGo T-Deck Plus: an S3 like the watch, on the ordinary platform.
       - name: Build LilyGo T-Deck Plus (ESP32-S3)
         run: pio run -e tdeck-plus
