@@ -34,12 +34,23 @@ static bool writeReg(uint8_t reg, uint8_t value) {
     return Wire.endTransmission() == 0;
 }
 
+// The sound task flips the amp while the loop may be resetting the touch
+// chip: the read-modify-write of the cached byte is the part Wire's own lock
+// does not cover.
+static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
+
 static bool setPin(uint8_t pin, bool high) {
+    portENTER_CRITICAL(&s_mux);
     if (high) s_out |= (uint8_t)(1u << pin);
     else      s_out &= (uint8_t)~(1u << pin);
-    return writeReg(EXIO_REG_OUT, s_out);
+    const uint8_t v = s_out;
+    portEXIT_CRITICAL(&s_mux);
+    return writeReg(EXIO_REG_OUT, v);
 }
 
+void setAmp(bool on) {
+    if (s_ok) setPin(EXIO_PA_CTRL, on);
+}
 bool begin() {
     Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, I2C_HZ);
     delay(10);
