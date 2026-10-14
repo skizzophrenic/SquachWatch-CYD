@@ -2063,11 +2063,15 @@ static bool alertMayInterrupt(const Detection& d) {
         !s_screenDimmed && !Clock::night())
         CrowBuzzer::chirp(BUZZ_CHIRP_MS);
 #endif
-#if SQW_SPEAKER
+#if SQW_SOUND
     // The speaker's version of the same chirp, under the same four rules.
     // The SOUND row, night and the dimmed screen are checked in play().
+    // Two kinds get a voice of their own: a drone swooshes past, and an Axon
+    // body camera oinks.
     if (&d == engine.latest() && engine.latestIsNew())
-        Sound::play(Sound::Id::NEW_DEVICE);
+        Sound::play(d.type == DetectionType::DRONE ? Sound::Id::DRONE
+                  : d.type == DetectionType::AXON  ? Sound::Id::OINK
+                  :                                  Sound::Id::NEW_DEVICE);
 #endif
 #if SQUACH_MESH
     // And the squad, for the serious kinds: the same gate, so what this board
@@ -4748,6 +4752,7 @@ void setup() {
     Cst3530::begin();
     usingCapTouch = true;
     Serial.println("Waveshare C5 -- CST3530 capacitive touch.");
+    Sound::begin();                       // the ES8311 is on the same bus, now up
 #elif defined(TOUCH_ON_DISPLAY_BUS)
     // AWOK's XPT2046 sits on the display's own shared VSPI bus (TOUCH_CS=21,
     // already armed by TFT_eSPI itself once awok_user_setup.h's #define
@@ -6102,8 +6107,10 @@ void loop() {
         }, nullptr);
     }
 #endif
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(WAVESHARE_C5)
+#if !defined(WAVESHARE_C5)   // no battery reading on the Waveshare yet
     if (g_consoleBatt) { g_consoleBatt = false; boardBatteryPrintLog(); }
+#endif
     // The speaker's housekeeping: hushed while the saver has the screen
     // dimmed; a chime for a squad message that just landed (once per
     // message, by its arrival time); and the console's SOUND commands.
@@ -8150,7 +8157,7 @@ void loop() {
                             if (Settings::buzzerOn()) CrowBuzzer::chirp(BUZZ_CHIRP_MS);
                             break;
 #endif
-#if SQW_SPEAKER
+#if SQW_SOUND
                         case SettingsRow::SOUND:
                             // Each level plays something it unlocks: ALERTS
                             // the new-device blips, ALL the squad chime. OFF

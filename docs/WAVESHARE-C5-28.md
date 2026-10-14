@@ -14,6 +14,7 @@ for what differs.
 | Panel reset | board reset | **none**: the CH32V003 helper's EXIO1 |
 | SD card | CS 10, on the display's SPI | **CS 23**, on the display's SPI |
 | Status light | WS2812 on GPIO27 | **none** |
+| Speaker | none | **ES8311 + NS4150B**, I2S BCK 24 / WS 25 / DOUT 26 |
 | BOOT button | — | GPIO28 |
 | USB | CH340 + native | **native only** (USB Serial/JTAG) |
 | Extras | — | QMI8658 IMU, PCF85063 RTC, SHTC3, ES8311 codec + speaker, LiPo charger |
@@ -71,6 +72,27 @@ runs on first boot like every other capacitive board.
 is not "no touch": the board is always treated as capacitive, and every poll
 asks the chip again.
 
+## Speaker
+
+The ES8311 codec (I2C 0x18) and NS4150B amplifier drive the speaker plug
+(Waveshare ship a speaker/microphone combo for it). Same sounds and SOUND /
+VOLUME rows as the Freenove S3 boards (`src/sound.cpp`), with differences:
+
+- **Data out is GPIO26, not 27.** Waveshare's BSP routes `.dout` to GPIO27
+  (`BSP_I2S_DSIN`), and with that the board is silent; on GPIO26 it plays.
+  Found by ear on the board. BCK 24, WS 25.
+- **No MCLK line.** The codec takes its clock from BCK (reg 01 = 0xBF): 16-bit
+  slots, BCK = 32 fs, multiplied x8 in the codec (reg 02 = 0x18) to 256 fs.
+  The codec is set up with esp_codec_dev's own es8311 sequence, as the BSP
+  does, and the I2S clocks never stop between sounds (with BCK as its clock
+  the codec does not survive losing it).
+- **IDF 5's I2S driver** (`i2s_std`), not the legacy one.
+- **Amp enable is the helper's EXIO3**, set once at boot and left on, as the
+  BSP does.
+- The sound task is not pinned to core 1: the C5 has one core.
+
+**EXIO6 is not a spare pin**: driven high, it reset the board.
+
 ## Status
 
 **Tested on hardware 2026-10-13** (one board, USB-powered):
@@ -85,6 +107,8 @@ asks the chip again.
 A poor USB cable browned the board out mid-boot once (screen dark, board gone
 from USB); a good cable fixed it.
 
+- [x] Speaker: every sound, the SOUND and VOLUME rows, alerts from real detections
+
 Not done here: the BOOT button (GPIO28; the firmware's button code assumes
 GPIO0, which is SDA on this board, so it is switched off), the battery level
-(the helper's ADC), the speaker, IMU and RTC.
+(the helper's ADC), the microphone, IMU and RTC.
