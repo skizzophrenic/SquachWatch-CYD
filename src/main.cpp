@@ -1180,6 +1180,7 @@ static bool s_pagerKeysOk = false, s_pagerEnter = false;
 // did, on any click held longer than that: the release's bounce landed after
 // the window and opened a row, then tapped whatever replaced it.
 static volatile bool    s_pagerClick = false;
+static bool             s_keysSwallow = false;   // see smallKeysRead(): the press that woke the screen
 static volatile int64_t s_pagerUpSinceUs = 0;   // when C last went high, 0 while low
 static void IRAM_ATTR pagerClickIsr() {
     const int64_t t = esp_timer_get_time();
@@ -1332,6 +1333,12 @@ static SmallKeys smallKeysRead() {
     }
     k.press = s_pagerEnter || digitalRead(PAGER_ROT_C) == LOW || clickPending;
     clickPending = false;
+    // The press or turn that woke the screen from the GPS's still screen
+    // only wakes it: nothing under it gets pressed, until it is let go.
+    if (s_keysSwallow) {
+        if (!k.press) s_keysSwallow = false;
+        k = SmallKeys{ false, false, false, false };
+    }
     return k;
 }
 #else
@@ -4616,6 +4623,10 @@ volatile bool g_consolePowerLog = false;
 // draw into the frame and push it, once the frame exists. Everywhere else
 // PANEL is the panel and panelShow() is nothing, which is what they did.
 static inline void pushFrame(int x, int y);
+#if defined(TLORA_PAGER)
+static bool s_noPush = false;   // the GPS's still screen is up: frames are drawn but not sent (see gpsScreenTick)
+static bool s_pushSlow = false; // a peek past it: a frame at most every 250 ms, a quarter of the bus noise
+#endif
 #if defined(FREENOVE_S3_35)
 #define PANEL ((TFT_eSPI&)frame)
 static bool panelTextOk() { return frameBufferOk && frame.created(); }
@@ -5517,6 +5528,14 @@ static uint32_t s_bandUs[2] = {0, 0};      // measurement: the 3.5"'s two draw p
 #endif
 
 static inline void pushFrame(int x, int y) {
+#if defined(TLORA_PAGER)
+    if (s_noPush) return;
+    if (s_pushSlow) {
+        static uint32_t at = 0;
+        if (millis() - at < 250) return;   // the panel keeps what it has; push() sends what changed since
+        at = millis();
+    }
+#endif
 #if defined(TWATCH_S3)
     if (s_panelAsleep) return;   // nothing to show it to; see applyBrightness()
 #endif
@@ -5717,13 +5736,38 @@ static const uint32_t GPS_BAUDS[] = { 38400, 9600, 115200 };
 static uint32_t s_gpsOnAt = 0, s_gpsFirstFixMs = 0;
 static uint8_t  s_gpsBestView = 0, s_gpsBestHeard = 0, s_gpsBestUsed = 0;
 static bool     s_gpsSummaries = false;  // the 5 s lines, only when asked for on the console
+static uint8_t  s_gpsScreen = 0;         // the Pager's GPS screen: 0 none, 1 searching, 2 wardriving (see gpsScreenTick)
+static uint32_t s_gpsTripBase = 0;       // Wardrive::written() when the GPS came on
 extern volatile uint8_t g_consoleGps;    // 1 on, 2 off, 3 status, 4 fake, 5..7 wardrive/wigle
 extern volatile int32_t g_consoleFakeLat7, g_consoleFakeLon7;
+
+#if defined(TLORA_PAGER)
+// The Pager's GPS goes into its own backup state instead of losing its rail:
+// cut, the MIA-M10Q forgets the sky and every start is a cold start, 4-6
+// minutes even in the quiet search (measured 2026-10-13); kept, it holds the
+// time, almanac and ephemeris and a restart is warm or hot. UBX-RXM-PMREQ,
+// the 16-byte form: no time limit, backup + force, woken by the UART --
+// gpsOpen() sends the wake-up. A module that never answered gets its rail cut.
+static bool s_gpsBackup = false;
+static void gpsModuleBackup(uint32_t baud) {
+    uint8_t m[24] = { 0xB5, 0x62, 0x02, 0x41, 0x10, 0x00,
+                      0, 0, 0, 0,  0, 0, 0, 0,  0x06, 0, 0, 0,  0x08, 0, 0, 0,  0, 0 };
+    for (int i = 2; i < 22; i++) { m[22] += m[i]; m[23] += m[22]; }
+    Serial1.begin(baud, SERIAL_8N1, 4, 12);
+    Serial1.write(m, sizeof m);
+    Serial1.flush();
+    delay(20);
+    Serial1.end();
+    s_gpsBackup = true;
+}
+#endif
 
 static void gpsPower(bool on, bool dc4) {
 #if defined(TLORA_PAGER)
     (void)dc4;
-    pagerIoBit0(4, on);
+    if (on) pagerIoBit0(4, true);
+    else if (s_gpsFound) gpsModuleBackup(GPS_BAUDS[s_gpsTry % 3]);
+    else { pagerIoBit0(4, false); s_gpsBackup = false; }
 #else
     if (on) {
         s_pmu.setBLDO1Voltage(3300); s_pmu.enableBLDO1();
@@ -5739,6 +5783,15 @@ static void gpsOpen(uint32_t baud) {
     Serial1.end();
 #if defined(TLORA_PAGER)
     Serial1.begin(baud, SERIAL_8N1, 4, 12);    // our RX 4, TX 12
+    if (s_gpsBackup) {
+        // Out of backup: any edge on its RX wakes it; it talks again within ~100 ms.
+        static const uint8_t wake[16] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                                          0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+        Serial1.write(wake, sizeof wake);
+        Serial1.flush();
+        delay(100);
+        s_gpsBackup = false;
+    }
 #else
     Serial1.begin(baud, SERIAL_8N1, 41, 42);   // our RX 41, TX 42
 #endif
@@ -5757,6 +5810,9 @@ static void gpsStart(bool summaries) {
     s_gpsOnAt = millis(); s_gpsFirstFixMs = 0;
     s_gpsResting = false; s_gpsRetried = false; s_gpsSearchFrom = millis(); s_gpsLastFixAt = 0;
     s_gpsBestView = s_gpsBestHeard = s_gpsBestUsed = 0;
+#if defined(TLORA_PAGER)
+    s_gpsTripBase = Wardrive::written();
+#endif
     Gnss::reset();
     gpsPower(true, false);
     delay(50);
@@ -6043,6 +6099,91 @@ static void gpsTick() {
                       Gnss::fresh(now) ? "FIX" : "no fix yet", f.used, k.view, k.heard);
     }
 }
+
+#if defined(TLORA_PAGER)
+// ---- the GPS's still screen ---------------------------------------------------
+// The Pager's own screen keeps its GPS from hearing the sky. Pushing a frame
+// drives the panel's 40 MHz SPI bus about 64 ms of every 85, and the noise it
+// puts into the MIA-M10Q's front end turns its gain down (UBX-MON-RF AGC
+// 558-1488 of 8191, against 2418 with nothing drawn) and has it chasing a
+// dozen false 7-9 dB signals: three tries outside, 9-12 minutes each, no fix.
+// With nothing pushed it fixed in 45 s to 4.5 min -- and lost the fix again
+// within a minute of the animated screen coming back (GPS LOG, 2026-10-13:
+// heard 5, 2, 1, 0 with 10 in view). The WiFi and BLE scans made no
+// measurable difference. So while the GPS is on, the panel gets one still
+// screen instead of frames:
+//   searching (no fix): the loop does nothing but the GPS, the radios rest --
+//     wardriving writes nothing without a fix anyway;
+//   wardriving (a fix): everything runs, frames are drawn but not sent, and a
+//     status line is redrawn every 3 s.
+// A turn or press of the wheel shows the normal screen (that press presses
+// nothing) until 20 s after the wheel was last used, at a quarter of the frame
+// rate: the GPS still loses its fix behind a peek, but it comes back sooner.
+// A fix lost for half a minute goes back to searching.
+static const uint32_t GPS_PEEK_MS = 20000, GPS_LOST_MS = 30000;
+static uint32_t s_gpsPeekUntil = 0, s_gpsFixAt = 0, s_gpsScreenDrawAt = 0;
+
+static void gpsScreenDraw(bool full, uint32_t now) {
+    const bool fix = s_gpsScreen == 2;
+    if (full) {
+        tft.fillScreen(TFT_BLACK);
+        tft.setTextColor(fix ? TFT_GREEN : TFT_YELLOW, TFT_BLACK);
+        tft.drawString(fix ? "WARDRIVING" : "FINDING GPS...", 12, 12, 4);
+        tft.setTextColor(TFT_WHITE, TFT_BLACK);
+        tft.drawString(fix ? "The screen is still so the GPS keeps its fix."
+                           : "The screen is still so the GPS can hear the sky.", 12, 56, 2);
+        tft.drawString(fix ? "Networks are being logged." : "Wardriving starts at the fix.", 12, 78, 2);
+        tft.drawString("Turn or press the wheel to see the normal screen.", 12, 186, 2);
+    }
+    char b[80];
+    if (fix) snprintf(b, sizeof b, "GPS FIX  %u satellites     rows this trip %lu     stored %lu   ",
+                      Gnss::fix().used, (unsigned long)(Wardrive::written() - s_gpsTripBase), (unsigned long)Wardrive::count());
+    else     snprintf(b, sizeof b, "satellites heard %u      searching %lu s   ", Gnss::sky().heard,
+                      (unsigned long)((now - s_gpsSearchFrom) / 1000));
+    tft.setTextColor(TFT_CYAN, TFT_BLACK);
+    tft.drawString(b, 12, 124, 2);
+    s_gpsScreenDrawAt = now;
+}
+
+// True while the search has the loop: the caller returns.
+static bool gpsScreenTick(uint32_t now) {
+    // A bench fix (GPS FAKE) counts too, so the wardriving screen can be checked indoors.
+    const bool fix = s_gpsOn && Gnss::fresh(now);
+    if (fix) s_gpsFixAt = now ? now : 1;
+    else if (s_gpsFixAt && now - s_gpsFixAt > GPS_LOST_MS) s_gpsFixAt = 0;
+    if (!s_gpsOn) s_gpsFixAt = 0;
+    if (s_gpsScreen && (s_pagerWheel != 0 || s_pagerClick || digitalRead(PAGER_ROT_C) == LOW)) {
+        s_gpsPeekUntil = now + GPS_PEEK_MS;
+        noInterrupts(); s_pagerWheel = 0; interrupts();
+        s_pagerClick = false;
+        s_keysSwallow = true;
+    }
+    bool peeking = (int32_t)(s_gpsPeekUntil - now) > 0;
+    // Using the normal screen keeps it up: every turn or press starts the 20 s again.
+    if (peeking && !s_gpsScreen && (s_pagerWheel != 0 || s_pagerClick || digitalRead(PAGER_ROT_C) == LOW))
+        s_gpsPeekUntil = now + GPS_PEEK_MS;
+    s_pushSlow = peeking && s_gpsOn && !s_gpsResting;
+    const uint8_t want = (s_gpsOn && !s_gpsResting && !peeking) ? (s_gpsFixAt ? 2 : 1) : 0;
+    if (want != s_gpsScreen) {
+        const uint8_t was = s_gpsScreen;
+        if (want == 1) engine.restRadios(true);
+        else if (was == 1) engine.wakeRadios();
+        if (want == 2 && was == 1 && Settings::soundMode() != 0) Sound::play(Sound::Id::PLUG_IN, true);
+        s_gpsScreen = want;
+        s_noPush = want != 0;
+        if (want) gpsScreenDraw(true, now);
+        else { FramePush::invalidate(); lastTouch = now; }   // the panel holds the still screen, not the last frame
+        Serial.printf("[gps] screen: %s\n", want == 2 ? "wardriving, a fix" : want == 1 ? "searching, the radios resting"
+                                            : peeking ? "normal while the wheel is in use" : "normal (the GPS is off)");
+    } else if (want && now - s_gpsScreenDrawAt > 3000) {
+        gpsScreenDraw(false, now);
+    }
+    if (s_gpsScreen != 1) return false;
+    gpsTick();
+    delay(5);
+    return true;
+}
+#endif
 
 // For the WARDRIVE row: 0 off, 1 looking for the module, 2 no fix, 3 fix,
 // 4 resting between looks.
@@ -6559,6 +6700,9 @@ void loop() {
 #endif
     if (s_chargeWanted && !s_chargeMode) { s_chargeWanted = false; enterChargeMode(); }
     if (s_chargeMode) { chargeModeTick(millis()); return; }
+#endif
+#if defined(TLORA_PAGER)
+    if (gpsScreenTick(millis())) return;   // the GPS searching: see the GPS's still screen
 #endif
     uint32_t frameStartUs = micros();
     s_loopsSinceSay++;   // the real loop rate, pacing delays included; on the [frame] line
