@@ -5885,11 +5885,12 @@ void twatchLoraBadge(TFT_eSPI& t) {
     t.print(txt);
     s_loraBadgeX = (int16_t)x; s_loraBadgeY = (int16_t)y; s_loraBadgeW = (int16_t)w; s_loraBadgeH = (int16_t)h;
 }
-#if defined(TDECK_PLUS)
-// The T-Deck has a speaker and no buzzer: the squad's ding-dong for a new
-// LoRa chat message, under the same rules as the watch's buzz below (not
-// with the chats open, once in thirty seconds at most; play() applies the
-// SOUND setting, night and the dimmed screen).
+#if defined(TDECK_PLUS) || defined(TLORA_PAGER)
+// The T-Deck and the Pager have a speaker and no buzzer: the squad's
+// ding-dong for a new LoRa chat message, under the same rules as the watch's
+// buzz below (not with the chats or the LORA page open, once in thirty
+// seconds at most; play() applies the SOUND setting, night and the dimmed
+// screen).
 static void tdeckLoraSoundTick(uint32_t now) {
     static uint32_t lastCheck = 0, lastDing = 0;
     static uint16_t lastUnread = 0;
@@ -6874,8 +6875,9 @@ void loop() {
 #endif
 #if SQUACH_LORA && defined(TWATCH_S3)
     twatchLoraBuzzTick(now);
-#elif SQUACH_LORA && defined(TDECK_PLUS)
+#elif SQUACH_LORA && (defined(TDECK_PLUS) || defined(TLORA_PAGER))
     tdeckLoraSoundTick(now);
+#if defined(TDECK_PLUS)
     loraRadioTick(now);
     if (g_consoleLoraSet >= 0) {
         const int8_t c = g_consoleLoraSet;
@@ -6889,6 +6891,7 @@ void loop() {
         }
         else             { enterClear(); Serial.println("[lora] home"); }
     }
+#endif
 #endif
     floodTick();   // nothing outside a FLOOD_BENCH build
     // The heap at the first pass of loop(), for DIAGNOSTICS' BOOT line.
