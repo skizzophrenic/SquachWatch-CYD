@@ -74,7 +74,7 @@ enum class SettingsRow : uint8_t {
     WATCH_QUIET_TAGS, // the T-Watch only: TAGS + RINGS, logged without waking the watch
     WATCH_LORA,      // the T-Watch only: LORA, which networks the LoRa radio listens to
     WATCH_LORA_CHATS, // the T-Watch only: LORA CHATS, what it decoded, one chat per network
-    LORA_TX,         // the T-Deck only: LORA TX, off or the power the chats' compose line sends at
+    LORA_TX,         // the T-Deck and the Pager: LORA TX, off or the power the compose lines send at
 #if defined(CROWPANEL7)
     BUZZER,          // the CrowPanel 7 only, the one board with a buzzer: OFF, or NEW ONLY
 #endif

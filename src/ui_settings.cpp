@@ -186,10 +186,11 @@ static Settings::FontKind fontKindFor(SettingsRow r) {
 
 #if defined(TLORA_PAGER)
 // The Pager's LORA + GPS page: the chats first (what you came for), then
-// what the radio listens to, then the GPS and what it logs.
+// what the radio listens to and sends at (the LORA page's compose line),
+// then the GPS and what it logs.
 static const SettingsRow WATCH_ROWS[] = {
 #if SQUACH_LORA
-    SettingsRow::WATCH_LORA_CHATS, SettingsRow::WATCH_LORA,
+    SettingsRow::WATCH_LORA_CHATS, SettingsRow::WATCH_LORA, SettingsRow::LORA_TX,
 #endif
     SettingsRow::WATCH_WARDRIVE,
 };
