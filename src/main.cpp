@@ -1613,6 +1613,9 @@ static char pagerTakeTyped() {
 static bool pagerPinScreen() { return state == AppState::PIN_ENTRY || state == AppState::LOCKED; }
 static bool pagerTextScreen() {
     return state == AppState::WIFI_PASS || state == AppState::PHONE || pagerPinScreen() ||
+#if SQUACH_LORA
+           state == AppState::LORA_HOME ||   // the LORA page's compose line
+#endif
            (state == AppState::MESH_PHRASE && uiMeshPhrasePicking());
 }
 // One key event in text mode.
@@ -2252,6 +2255,20 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         add(bx, by);
         return n;
 #endif
+    }
+#endif
+#if SQUACH_LORA && defined(TLORA_PAGER)
+    if (state == AppState::LORA_HOME) {
+        // BACK, the three tabs, the open chat, the switch, the channel chip,
+        // CHATS: lit whole, as rectangles read from the page, in its order.
+        int16_t xs[8], ys[8], ws[8], hs[8];
+        const uint8_t k = uiLoraHomeStops(xs, ys, ws, hs, 8);
+        for (uint8_t i = 0; i < k && n < cap; i++) {
+            s_stickRect[n] = { xs[i], ys[i], ws[i], hs[i] };
+            add(xs[i] + ws[i] / 2, ys[i] + hs[i] / 2);
+        }
+        s_stickRectOn = true;
+        return n;
     }
 #endif
     add(w / 2, h - 12);                 // BACK, pinned to the bottom edge
@@ -4925,6 +4942,8 @@ static void enterLoraChat() {
 static void enterLoraHome() {
 #if defined(TDECK_PLUS)
     s_backToLora = AppState::CLEAR;
+#endif
+#if defined(TDECK_PLUS) || defined(TLORA_PAGER)
     state = AppState::LORA_HOME;
     transitionStart = millis();
     uiLoraHomeInit(*canvas);
@@ -7656,11 +7675,12 @@ void twatchLoraBadge(TFT_eSPI& t) {
     s_loraBadgeX = -1;
     const uint16_t u = uiLoraChatUnread();
     if (Settings::loraListen() == 0) return;
-#if defined(TDECK_PLUS)
+#if defined(TDECK_PLUS) || defined(TLORA_PAGER)
     // Up whenever the radio is on, not only with something unread: with
     // nothing new the chats were three taps away through Settings, and the
-    // keyboard is right there (asked for 2026-10-15). The watch keeps the
-    // pill for unread only; its bar is already full.
+    // keyboard is right there (asked for 2026-10-15). The Pager's too: it is
+    // the way to the LORA page, Enter being the cursor's click there. The
+    // watch keeps the pill for unread only; its bar is already full.
 #else
     if (!u) return;
 #endif
@@ -10387,7 +10407,7 @@ void loop() {
 #if SQUACH_LORA && (defined(TWATCH_S3) || defined(TDECK_PLUS) || defined(TLORA_PAGER))
             } else if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
                        twatchLoraBadgeHit(tp.x, tp.y)) {
-                // The LORA pill: the landing page on the T-Deck, the chats on a watch.
+                // The LORA pill: the landing page on the T-Deck and the Pager, the chats on a watch.
                 lastTouch = now;
                 sqActive  = false;
                 enterLoraHome();
@@ -12619,9 +12639,9 @@ void loop() {
                     if (Theme::pinnedBackHit(gestureStartX, gestureStartY, tft.width(), tft.height())) {
                         // Not back to the settings page the chats were opened
                         // from (asked for 2026-10-13): the LORA page on the
-                        // T-Deck, which is where the chats open from now; home
-                        // on a watch.
-#if defined(TDECK_PLUS)
+                        // T-Deck and the Pager, which is where the chats open
+                        // from now; home on a watch.
+#if defined(TDECK_PLUS) || defined(TLORA_PAGER)
                         enterLoraHome();
 #else
                         enterClear();
@@ -12638,10 +12658,17 @@ void loop() {
             }
             break;
         }
-#if defined(TDECK_PLUS)
+#if defined(TDECK_PLUS) || defined(TLORA_PAGER)
         case AppState::LORA_HOME: {
+#if defined(TDECK_PLUS)
             if (loraPageAlertTick(now)) break;   // ON-SCREEN DETECTIONS
+#endif
             drawTwoBand([&](TFT_eSPI& t, bool) { uiLoraHomeTick(t, now); });
+#if defined(TLORA_PAGER)
+            // The keyboard types into the compose line (a text screen, see
+            // pagerTextScreen()); the wheel walks the stops and clicks them.
+            for (char c; (c = pagerTakeTyped()) != 0; ) uiLoraHomeKey(c, now);
+#endif
             static bool gestureActive = false;
             static int  gestureStartX = 0, gestureStartY = 0;
             static uint32_t gestureDownMs = 0;
@@ -12668,7 +12695,9 @@ void loop() {
                             enterLoraChat();
                             break;
                         }
+#if defined(TDECK_PLUS)
                         case LoraHomeHit::SETTINGS:        enterLoraSettings(true); break;
+#endif
                         case LoraHomeHit::CHANNEL:         uiLoraHomeStepChannel(now); break;
                         default: break;
                     }
@@ -12676,6 +12705,7 @@ void loop() {
             }
             break;
         }
+#if defined(TDECK_PLUS)
         case AppState::LORA_SETTINGS: {
             if (loraPageAlertTick(now)) break;   // ON-SCREEN DETECTIONS
             const bool resting = engine.radiosResting();
@@ -12708,6 +12738,7 @@ void loop() {
             }
             break;
         }
+#endif
 #endif
 #endif
         case AppState::STATUS_LIGHT: {
