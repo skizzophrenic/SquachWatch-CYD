@@ -39,8 +39,13 @@ extern TFT_eSPI tft;
 // NM-CYD-C5: CS=10, on the DISPLAY's bus (SCK 6, MISO 2, MOSI 7), from
 // RockBase's connections.md. Not 5 -- GPIO5 on this board is the GPS header's
 // UART, and the card simply never answers.
+// Waveshare ESP32-C5-Touch-LCD-2.8: CS=23, on the display's bus (SCK 6,
+// MISO 8, MOSI 7), per Waveshare's pin table. It takes the NM-CYD-C5's
+// shared-bus branch below.
 #if defined(AWOK)
     #define SD_CS_PIN 14
+#elif defined(WAVESHARE_C5)
+    #define SD_CS_PIN 23
 #elif defined(NM_CYD_C5)
     #define SD_CS_PIN 10
 #elif defined(TDECK_PLUS)
