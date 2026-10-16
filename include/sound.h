@@ -2,7 +2,8 @@
 //
 // The two Freenove S3 boards carry an ES8311 codec on the touch controller's
 // I2C bus and a small mono amplifier behind it, with a speaker plug on the
-// edge. Nothing else in the fleet has a speaker; this header is a set of
+// edge; the Waveshare ESP32-C5-Touch-LCD-2.8 has the same codec, and the
+// T-Deck Plus an I2S amp. Nothing else in the fleet has a speaker; this header is a set of
 // no-ops everywhere else, so the pets and the mascot can ask for a sound
 // without knowing whether anything is listening.
 //
@@ -18,10 +19,19 @@
 #pragma once
 #include <stdint.h>
 
+// SQW_SPEAKER is more than the speaker: on the Freenove and T-Deck boards it
+// also brings POWER OFF, the power diary and their use of GPIO0. SQW_SOUND is
+// the speaker alone -- the Sound API, the SOUND rows -- and adds the Waveshare
+// ESP32-C5-Touch-LCD-2.8, whose GPIO0 is its I2C bus's SDA.
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)
 #define SQW_SPEAKER 1
 #else
 #define SQW_SPEAKER 0
+#endif
+#if SQW_SPEAKER || defined(WAVESHARE_C5)
+#define SQW_SOUND 1
+#else
+#define SQW_SOUND 0
 #endif
 
 namespace Sound {
@@ -40,10 +50,12 @@ namespace Sound {
         LAND_TOASTER,     // ALL: T0@$TY's landing, a tin clank and a rattle
         LAND_YETI,        // ALL: the yeti's landing, a grumpy "OOF"
         HEADS_UP,         // ALERTS: one Bigfoot whoop, a squadmate's serious catch
+        DRONE,            // ALERTS: a swoosh, a drone (Remote ID) goes by
+        OINK,             // ALERTS: a pig's oink, an Axon body camera
         COUNT
     };
 
-#if SQW_SPEAKER
+#if SQW_SOUND
     // Once in setup(), after the touch controller has started the I2C bus.
     // Finds the codec, sets it up for 16 kHz playback and parks the amplifier
     // off. Boots silent: nothing plays until something asks.
