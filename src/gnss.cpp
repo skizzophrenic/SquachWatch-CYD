@@ -237,5 +237,8 @@ void phone(int32_t lat7, int32_t lon7, uint8_t accM, uint32_t epoch, uint32_t no
 }
 
 bool fromPhone() { return s_phone && s_fix.valid; }
+#if defined(WAVESHARE_206)
+void phoneAlt(int16_t altM) { if (s_phone) s_fix.altM = altM; }
+#endif
 
 }  // namespace Gnss

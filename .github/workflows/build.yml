@@ -83,6 +83,12 @@ jobs:
       - name: Build LilyGo T-Deck Plus (ESP32-S3)
         run: pio run -e tdeck-plus
 
+      # The Waveshare ESP32-S3-Touch-AMOLED-2.06: the T-Watch build on an
+      # AMOLED, so it is the check that the watch's code still builds without
+      # LoRa or GPS. Opt-in, not released.
+      - name: Build Waveshare ESP32-S3-Touch-AMOLED-2.06
+        run: pio run -e waveshare-206
+
   tests:
     # The decoders are pure arithmetic over byte buffers, so they run on a
     # desktop with no board and no display. Worth a job of their own: the

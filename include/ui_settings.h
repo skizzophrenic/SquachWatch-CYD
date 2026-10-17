@@ -7,7 +7,7 @@
 // The speaker's two rows: on the boards with one, and in the emulator, where
 // they are listed only with SQUACHSIM_SPEAKER set (for the release clip) so
 // the web emulator never offers a sound it cannot make.
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || !defined(ESP32)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(WAVESHARE_206) || !defined(ESP32)
 #define SQW_SOUND_ROWS 1
 #else
 #define SQW_SOUND_ROWS 0
@@ -100,6 +100,9 @@ enum class SettingsRow : uint8_t {
     FONT_XP,         // on the FONTS page: the XP counter tiles, 1x or 2x
     FONT_PETS,       // on the FONTS page: the pets' balloons
     FONT_PREVIEW,    // on the FONTS page: a sample of the last kind moved, at its size
+#if defined(WAVESHARE_206)
+    WATCH_SCANNING,  // the Waveshare 2.06" only: SCANNING ON, or OFF for just a watch
+#endif
     BACK,
     COUNT,
     NONE = 255

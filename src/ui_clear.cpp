@@ -3451,7 +3451,9 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     drawBatteryGauge(t, now);
 #if defined(TWATCH_S3)
     // Under everything that moves: see drawCornerClock().
+#if !defined(WAVESHARE_206)   // the AMOLED's top band shows the time there, larger
     if (DrawBand::has(0, titleBottom)) s_cornerClockPillR = drawCornerClock(t, w);
+#endif
     twatchGpsBadge(t);   // under the bubbles too
 #if SQUACH_LORA
     twatchLoraBadge(t);

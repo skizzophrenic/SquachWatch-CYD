@@ -69,5 +69,9 @@ bool faked();
 constexpr uint32_t PHONE_FRESH_MS = 60000;
 void phone(int32_t lat7, int32_t lon7, uint8_t accM, uint32_t epoch, uint32_t nowMs);
 bool fromPhone();
+#if defined(WAVESHARE_206)
+// The phone's altitude for the position just given (phone_gps.h).
+void phoneAlt(int16_t altM);
+#endif
 
 }  // namespace Gnss

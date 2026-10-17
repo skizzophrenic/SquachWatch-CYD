@@ -90,6 +90,17 @@ void clear();
 // Mounts the region and finds the newest sector. Call once at boot.
 bool begin();
 
+#if defined(WAVESHARE_206)
+// ---- the Waveshare 2.06's SD writer (wardrive.cpp) ---------------------------
+// No GPS: rows go to /wigle-YYYYMMDD-HHMM.csv on the card with the UTC time
+// and 0,0 for where; tools/wigle_merge.py places them from a phone's GPX track.
+// 0 off, 1 no card, 2 clock not set, 3 logging.
+uint8_t     wsState();
+const char* wsFileName();   // "" until logging starts
+uint32_t    wsWifiRows();   // this boot, of written(): the rest are Bluetooth
+uint32_t    wsPlacedRows(); // this boot: rows that had the phone's position (phone_gps.h)
+#endif
+
 #if defined(CYD_GPS)
 // ---- the CYD GPS builds' SD writer (wardrive_sd.cpp) ------------------------
 // Reads the switch. Call once at boot.

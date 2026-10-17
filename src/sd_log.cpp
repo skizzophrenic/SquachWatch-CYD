@@ -1,13 +1,16 @@
 // SquachWatch-CYD — SD log implementation
 #include "sd_log.h"
 #include "frame_push.h"   // busLock(): the card shares the panel's bus
+#if defined(WAVESHARE_206)
+#include "wardrive.h"
+#endif
 #include "sd_row.h"
 #include "clock.h"
 #if defined(CYD_GPS)
 #include "gnss.h"
 #endif
 #include <SD.h>
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(WAVESHARE_206)
 // The Freenove S3's slot is wired for SDMMC, not SPI: every card call in this
 // file goes through CARD, which is SD_MMC there and SD everywhere else. Both
 // are an fs::FS, so open/remove/cardSize read the same either way.
@@ -58,7 +61,7 @@ static const uint8_t SD_MAX_FILES = 2;
 
 bool SdLog::begin() {
     if (_ready) return true;
-#if defined(TWATCH_S3) || defined(SQW_SMALL)   // the Cardputer has a slot, on pins of its own: not brought up yet
+#if (defined(TWATCH_S3) && !defined(WAVESHARE_206)) || defined(SQW_SMALL)   // the Cardputer has a slot, on pins of its own: not brought up yet
     return false;   // no card slot; GPIO19/20 are the S3's USB pins
 #endif
 #if defined(CROWPANEL7)
@@ -68,7 +71,13 @@ bool SdLog::begin() {
     return false;
 #endif
     Serial.printf("[sd] mounting: heap %lu, largest block %lu\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
+#if defined(WAVESHARE_206)
+    // The Waveshare 2.06"'s slot: SDMMC, one bit wide (CLK 2, CMD 1, D0 3 in
+    // the board's BSP; D1-D3 are not wired).
+    SD_MMC.setPins(2, 1, 3);
+    bool mounted = SD_MMC.begin("/sd", true, false, SDMMC_FREQ_DEFAULT, SD_MAX_FILES);
+    if (!mounted) {
+#elif defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
     // SDMMC on the S3's GPIO matrix. Pins from Freenove's own SDMMC sketch and
     // the schematic: CLK 38, CMD 40, D0 39, D1 41, D2 48, D3 47 on the 2.8",
     // CLK 5, CMD 4, D0 6, D1 7, D2 2, D3 3 on the 3.5", each with a 10K
@@ -174,6 +183,118 @@ bool SdLog::begin() {
     openDaily();
     return true;
 }
+
+#if defined(WAVESHARE_206)
+#include <ff.h>
+#include <driver/sdmmc_host.h>
+#include <sdmmc_cmd.h>
+#include <diskio_impl.h>
+#include <diskio_sdmmc.h>
+// Formatted by hand rather than by the driver's format-on-mount: that one
+// uses one-sector clusters, and on a card of tens of GB the allocation table
+// alone is hundreds of MB to write -- the watch sat in it for minutes. Here:
+// the card brought up on its own, handed to FatFs, FAT32 with 32 KB clusters.
+bool SdLog::format() {
+    if (_ready) { SD_MMC.end(); _ready = false; }
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    host.flags = SDMMC_HOST_FLAG_1BIT;
+    sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
+    slot.clk = GPIO_NUM_2; slot.cmd = GPIO_NUM_1; slot.d0 = GPIO_NUM_3;
+    slot.d1 = slot.d2 = slot.d3 = GPIO_NUM_NC;
+    slot.width = 1;
+    slot.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
+    if (sdmmc_host_init() != ESP_OK) { Serial.println("[sd] format: host would not start"); return false; }
+    bool ok = false;
+    sdmmc_card_t* card = (sdmmc_card_t*)calloc(1, sizeof(sdmmc_card_t));
+    BYTE pdrv = 0xFF;
+    void* work = malloc(4096);
+    if (card && work && sdmmc_host_init_slot(SDMMC_HOST_SLOT_1, &slot) == ESP_OK &&
+        sdmmc_card_init(&host, card) == ESP_OK && ff_diskio_get_drive(&pdrv) == ESP_OK) {
+        const uint64_t mb = (uint64_t)card->csd.capacity * card->csd.sector_size >> 20;
+        Serial.printf("[sd] format: %llu MB card, FAT32 with 32 KB clusters -- erasing it\n", (unsigned long long)mb);
+        ff_diskio_register_sdmmc(pdrv, card);
+        char drv[3] = { (char)('0' + pdrv), ':', 0 };
+        const uint32_t t0 = millis();
+        FRESULT r = f_mkfs(drv, FM_FAT32, 32768, work, 4096);
+        if (r != FR_OK) { Serial.printf("[sd] format: FAT32 refused (%d), trying any FAT\n", (int)r); r = f_mkfs(drv, FM_ANY, 0, work, 4096); }
+        ff_diskio_register(pdrv, NULL);
+        ok = (r == FR_OK);
+        Serial.printf("[sd] format %s in %lu ms (FatFs %d)\n", ok ? "done" : "FAILED", (unsigned long)(millis() - t0), (int)r);
+    } else {
+        Serial.println("[sd] format: no card answered");
+    }
+    free(work);
+    free(card);
+    sdmmc_host_deinit();
+    if (!ok) return false;
+    return begin();
+}
+
+void SdLog::list() {
+    if (!_ready) { Serial.println("[sd] ls: no card mounted"); return; }
+    File dir = CARD.open("/");
+    unsigned n = 0;
+    for (File f = dir.openNextFile(); f; f = dir.openNextFile()) {
+        Serial.printf("[sd] ls: %-32s %8lu%s\n", f.name(), (unsigned long)f.size(), f.isDirectory() ? " <dir>" : "");
+        f.close(); n++;
+    }
+    dir.close();
+    Serial.printf("[sd] ls: %u entries; logging to %s\n", n, _filename);
+    File f = CARD.open(_filename, FILE_READ);
+    if (!f) return;
+    const size_t sz = f.size(), from = sz > 600 ? sz - 600 : 0;
+    f.seek(from);
+    String tail = f.readString();
+    f.close();
+    Serial.printf("[sd] tail of %s:\n%s\n", _filename, tail.c_str());
+    // And the wardrive file being written, if there is one.
+    const char* wd = Wardrive::wsFileName();
+    if (!*wd) return;
+    File w = CARD.open(wd, FILE_READ);
+    if (!w) return;
+    const size_t wsz = w.size();
+    w.seek(wsz > 900 ? wsz - 900 : 0);
+    String wt = w.readString();
+    w.close();
+    Serial.printf("[sd] tail of %s (%lu bytes):\n%s\n", wd, (unsigned long)wsz, wt.c_str());
+}
+
+void SdLog::selfTest() {
+    if (!_ready) { Serial.println("[sd] test: no card mounted"); return; }
+    static const size_t CHUNK = 4096, TOTAL = 256 * 1024;
+    uint8_t* buf = (uint8_t*)malloc(CHUNK);
+    if (!buf) { Serial.println("[sd] test: no memory"); return; }
+    const char* path = "/sqw-test.bin";
+    bool ok = true;
+    uint32_t t0 = millis();
+    File f = CARD.open(path, FILE_WRITE);
+    if (!f) { Serial.println("[sd] test: could not create the file"); free(buf); return; }
+    for (size_t at = 0; at < TOTAL && ok; at += CHUNK) {
+        for (size_t i = 0; i < CHUNK; i++) buf[i] = (uint8_t)((at + i) * 31 + 7);
+        ok = f.write(buf, CHUNK) == CHUNK;
+    }
+    f.close();
+    const uint32_t wMs = millis() - t0;
+    t0 = millis();
+    f = CARD.open(path, FILE_READ);
+    size_t bad = 0;
+    for (size_t at = 0; f && at < TOTAL && ok; at += CHUNK) {
+        if (f.read(buf, CHUNK) != CHUNK) { ok = false; break; }
+        for (size_t i = 0; i < CHUNK; i++) if (buf[i] != (uint8_t)((at + i) * 31 + 7)) bad++;
+    }
+    if (f) f.close();
+    const uint32_t rMs = millis() - t0;
+    CARD.remove(path);
+    free(buf);
+    const char* type = SD_MMC.cardType() == CARD_SDHC ? "SDHC/SDXC" : SD_MMC.cardType() == CARD_SD ? "SD" : SD_MMC.cardType() == CARD_MMC ? "MMC" : "unknown";
+    Serial.printf("[sd] test %s: %s card, %llu MB, %llu MB used of %llu MB; 256 KB written in %lu ms (%lu KB/s), read in %lu ms (%lu KB/s), %u bad bytes\n",
+                  (ok && !bad) ? "PASSED" : "FAILED", type,
+                  (unsigned long long)(CARD.cardSize() >> 20), (unsigned long long)(SD_MMC.usedBytes() >> 20),
+                  (unsigned long long)(SD_MMC.totalBytes() >> 20),
+                  (unsigned long)wMs, (unsigned long)(wMs ? 256000 / wMs : 0),
+                  (unsigned long)rMs, (unsigned long)(rMs ? 256000 / rMs : 0), (unsigned)bad);
+}
+#endif
 
 void SdLog::openDaily() {
     if (!_ready) return;

@@ -22,6 +22,10 @@
 #else
 #define SQW_PUSH_ROWS() FramePush::lastRows()
 #endif
+#if defined(WAVESHARE_206)
+#include "co5300_display.h"
+#include "co5300_qspi.h"
+#endif
 #if defined(FREENOVE_S3_35)
 #include "st77922_display.h"
 #include "st77922_qspi.h"
@@ -81,6 +85,10 @@ static void cydGpsTick(uint32_t now);
 #include "privacy.h"
 #include "lora_sniffer.h"   // the watch's SX1262; inline no-ops elsewhere
 #include "wardrive.h"
+#if defined(WAVESHARE_206)
+#include "phone_gps.h"
+#include <NimBLEDevice.h>
+#endif
 #include "ui_bingo.h"
 #include "bingo.h"
 #include "dex.h"
@@ -356,6 +364,14 @@ static void drawCrashCard(TFT_eSPI& t) {
 #if defined(TWATCH_S3)
 #define XPOWERS_CHIP_AXP2101
 #include <XPowersLib.h>
+// The T-Watch has the power chip, clock, motion sensor and haptics on a bus of
+// their own (SDA 10, SCL 11); the Waveshare 2.06" has all of them on the
+// touch controller's one bus (SDA 15, SCL 14).
+#if defined(WAVESHARE_206)
+#define WATCH_WIRE Wire
+#else
+#define WATCH_WIRE Wire1
+#endif
 #endif
 #include "touch_cal.h"
 #include "settings.h"
@@ -493,7 +509,10 @@ static void drawCrashCard(TFT_eSPI& t) {
 // relative to it. File-scope (not local to setup()) so the Settings >
 // INVERT row handler in loop() can use the same XOR instead of
 // clobbering this baseline with an absolute call.
-#if defined(TWATCH_S3)
+#if defined(WAVESHARE_206)
+// The CO5300 AMOLED: the board's own BSP never sends INVON.
+constexpr bool PANEL_NEEDS_INVERSION = false;
+#elif defined(TWATCH_S3)
 // Confirmed on the watch 2026-09-22: the ST7789 wants inversion on (as
 // LilyGo's own setup says); false showed every colour inverted.
 constexpr bool PANEL_NEEDS_INVERSION = true;
@@ -585,6 +604,9 @@ public:
 // device type and only this hierarchy gives the two a common base. Nothing
 // is ever sent to an SPI display bus on this board -- see the header.
 CrowPanelTFT        tft;
+#elif defined(WAVESHARE_206)
+// Not a TFT_eSPI either: a CO5300 AMOLED on QSPI -- see co5300_display.h.
+Co5300TFT           tft;
 #elif defined(FREENOVE_S3_35)
 // Likewise not a TFT_eSPI: an ST77922 on a four-lane QSPI bus, wearing the
 // library's interface for the same reason -- see st77922_display.h.
@@ -771,6 +793,11 @@ static bool rawReadResistive(int16_t& a, int16_t& b);
 // calibration is needed or wanted.
 static uint16_t CAP_NX_MIN = CROW_CAP_NX_MIN, CAP_NX_MAX = CROW_CAP_NX_MAX;
 static uint16_t CAP_NY_MIN = CROW_CAP_NY_MIN, CAP_NY_MAX = CROW_CAP_NY_MAX;
+#elif defined(WAVESHARE_206)
+// The FT3168 reports panel pixels (410x502, upright); the watch frame is the
+// scaled 400x400 square inside them, so these are its edges.
+static uint16_t CAP_NX_MIN = Co5300::OFF_X, CAP_NX_MAX = Co5300::OFF_X + Co5300::OUT;
+static uint16_t CAP_NY_MIN = Co5300::OFF_Y, CAP_NY_MAX = Co5300::OFF_Y + Co5300::OUT;
 #elif defined(FREENOVE_S3_35)
 // The ST77922's own touch reports panel pixels too: a pass-through.
 static uint16_t CAP_NX_MIN = St77922Touch::NX_MIN, CAP_NX_MAX = St77922Touch::NX_MAX;
@@ -1726,6 +1753,8 @@ static void applyBrightness() {
     ledcWrite(TFT_BL, duty);
 #elif defined(TDECK_PLUS)
     tdeckBacklight(duty);   // a stepped driver chip, not a PWM pin
+#elif defined(WAVESHARE_206)
+    tft.setBrightness(duty);   // an AMOLED: its own brightness register, no backlight
 #else
 #if SQW_BOOT_BTN
     if (s_crownDark && s_screenDimmed) duty = 0;   // the button turns it OFF, whatever DIM LEVEL says
@@ -2020,7 +2049,7 @@ static bool    s_confirmArmed = false;
 // The compiled-in ranges are a 2.8" board's. Anywhere else -- the digitisers
 // on the display's own bus -- they put taps nowhere near the finger, so a
 // board with nothing better has no SKIP to offer.
-#if defined(TOUCH_SHARES_DISPLAY_BUS) || defined(CYD35R) || defined(SQW_S3)
+#if (defined(TOUCH_SHARES_DISPLAY_BUS) || defined(CYD35R) || defined(SQW_S3)) && !defined(WAVESHARE_206)
 static const bool DEFAULT_TOUCH_USABLE = false;
 #else
 static const bool DEFAULT_TOUCH_USABLE = true;
@@ -2253,7 +2282,9 @@ static void enterWatchAlert() {
 #if defined(TWATCH_S3)
     twatchBuzz(Buzz::WATCH);
 #endif
+#if !defined(WAVESHARE_206)   // twatchBuzz() plays it there, through the dark screen
     Sound::play(Sound::Id::WATCH_HIT);   // the one sound that ignores the night
+#endif
     watchAlertStart = millis();
     transitionStart = watchAlertStart;
     uiWatchAlertInit(*canvas);
@@ -2935,8 +2966,29 @@ static void enterLight() {
 static XPowersAXP2101 s_pmu;
 static bool           s_pmuOk = false;
 static void twatchPowerUp() {
-    Wire1.begin(10, 11);
-    s_pmuOk = s_pmu.begin(Wire1, AXP2101_SLAVE_ADDRESS, 10, 11);
+#if defined(WAVESHARE_206)
+    // The Waveshare 2.06": the chip's own factory voltages are the board's,
+    // and its BSP never changes them, so neither does this. ALDO1-4 feed the
+    // panel and touch; the chip keeps its registers across an ESP32 reset, so
+    // they are forced on in case something left them off. The power key is
+    // the crown here too.
+    WATCH_WIRE.begin(15, 14);
+    s_pmuOk = s_pmu.begin(WATCH_WIRE, AXP2101_SLAVE_ADDRESS, 15, 14);
+    if (!s_pmuOk) { Serial.println("[pmu] AXP2101 did not answer -- screen may stay dark"); return; }
+    s_pmu.enableVbusVoltageMeasure();
+    s_pmu.enableSystemVoltageMeasure();
+    s_pmu.enableBattVoltageMeasure();
+    s_pmu.enableALDO1(); s_pmu.enableALDO2(); s_pmu.enableALDO3(); s_pmu.enableALDO4();
+    s_pmu.disableIRQ(XPOWERS_AXP2101_ALL_IRQ);
+    s_pmu.clearIrqStatus();
+    s_pmu.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ);
+    delay(20);
+    Serial.printf("[pmu] AXP2101 up: battery %d%%, %s\n", s_pmu.getBatteryPercent(),
+                  s_pmu.isVbusIn() ? "on USB" : "on battery");
+    return;
+#endif
+    WATCH_WIRE.begin(10, 11);
+    s_pmuOk = s_pmu.begin(WATCH_WIRE, AXP2101_SLAVE_ADDRESS, 10, 11);
     if (!s_pmuOk) { Serial.println("[pmu] AXP2101 did not answer -- screen may stay dark"); return; }
     // The chip's own rail, set rather than assumed: a full power-off (a dead
     // battery) puts the PMU back to its register defaults. It read 3300
@@ -3198,17 +3250,17 @@ static bool s_drvOk = false;
 static uint32_t s_drvAwakeAt = 0;   // when the last buzz woke it; 0 = in standby
 
 static bool drvWrite(uint8_t reg, uint8_t v) {
-    Wire1.beginTransmission(DRV_ADDR);
-    Wire1.write(reg);
-    Wire1.write(v);
-    return Wire1.endTransmission() == 0;
+    WATCH_WIRE.beginTransmission(DRV_ADDR);
+    WATCH_WIRE.write(reg);
+    WATCH_WIRE.write(v);
+    return WATCH_WIRE.endTransmission() == 0;
 }
 static uint8_t drvRead(uint8_t reg) {
-    Wire1.beginTransmission(DRV_ADDR);
-    Wire1.write(reg);
-    if (Wire1.endTransmission(false) != 0) return 0;
-    if (Wire1.requestFrom(DRV_ADDR, (uint8_t)1) != 1) return 0;
-    return Wire1.read();
+    WATCH_WIRE.beginTransmission(DRV_ADDR);
+    WATCH_WIRE.write(reg);
+    if (WATCH_WIRE.endTransmission(false) != 0) return 0;
+    if (WATCH_WIRE.requestFrom(DRV_ADDR, (uint8_t)1) != 1) return 0;
+    return WATCH_WIRE.read();
 }
 
 // BUZZ STRENGTH. Library 1 is the driver's table for a 1.3 V motor and was
@@ -3225,6 +3277,10 @@ static void twatchHapticApply() {
 
 static void twatchHapticBegin() {
     if (!s_pmuOk) return;
+#if defined(WAVESHARE_206)
+    Serial.println("[buzz] no vibration motor on this board");
+    return;
+#endif
     s_drvOk = drvWrite(0x01, 0x00);          // MODE: out of standby, internal trigger
     if (!s_drvOk) { Serial.println("[buzz] DRV2605 did not answer"); return; }
     drvWrite(0x02, 0x00);                    // no real-time input
@@ -3236,6 +3292,22 @@ static void twatchHapticBegin() {
 }
 
 static void twatchBuzz(Buzz kind) {
+#if defined(WAVESHARE_206)
+    // No motor: the speaker. BUZZ still switches alerts off, SOUND says
+    // whether the speaker may speak, and the motor's one-in-ten-seconds for
+    // ordinary alerts holds here too.
+    if (kind == Buzz::SAMPLE) { Sound::play(Sound::Id::NEW_DEVICE, true); return; }
+    if (!Settings::buzz()) { Serial.println("[buzz] alert, but BUZZ is off"); return; }
+    {
+        static uint32_t lastAt = 0;
+        const uint32_t now = millis();
+        if (kind == Buzz::ALERT && lastAt && now - lastAt < 10000) return;
+        lastAt = now;
+    }
+    Sound::alert(kind == Buzz::WATCH ? Sound::Id::WATCH_HIT : kind == Buzz::MESSAGE ? Sound::Id::MESSAGE : Sound::Id::NEW_DEVICE);
+    Serial.printf("[buzz] %s, on the speaker\n", kind == Buzz::WATCH ? "watch alert" : kind == Buzz::MESSAGE ? "message" : "alert");
+    return;
+#endif
     if (!s_drvOk) return;
     if (kind != Buzz::SAMPLE && !Settings::buzz()) { Serial.println("[buzz] alert, but BUZZ is off"); return; }
     // A room of Ring cameras alerts every few seconds. One buzz in ten
@@ -3271,7 +3343,13 @@ static void twatchBuzz(Buzz kind) {
 // what tells a nightstand from a wrist. Raw readings only -- the step counter
 // and tilt features need a program loaded into the chip, and "has it moved"
 // does not. Twice a second, one six-byte read.
+#if defined(WAVESHARE_206)
+// The Waveshare 2.06" has a QMI8658 instead, at 0x6B (0x6A on some boards):
+// the same raw "has it moved" read, its accelerometer alone at +-4 g.
+static uint8_t BMA_ADDR = 0x6B;
+#else
 static const uint8_t BMA_ADDR = 0x19;
+#endif
 static bool     s_bmaOk = false;
 static uint64_t s_moveBits[2] = { 0, 0 };   // one bit a second, the last 128 s; bit 0 is now
 static uint32_t s_moveSec = 0;              // the second bit 0 stands for
@@ -3279,31 +3357,47 @@ static int16_t  s_acc[3];
 static bool     s_accHave = false;
 // A reading this far from the last one is movement. +-4 g at twelve bits is
 // 512 a g, so about 0.06 g: well above the chip's noise, well below a wrist.
+#if defined(WAVESHARE_206)
+static const int16_t  MOVE_LSB = 480;   // the QMI8658's 8192 a g at +-4 g: the same 0.06 g
+#else
 static const int16_t  MOVE_LSB = 30;
+#endif
 // Still is fewer than this many seconds with movement in the last two
 // minutes. A sleeper turning over is a few; a walk is most of them.
 static const uint8_t  MOVE_SECS = 10;
 
 static bool bmaWrite(uint8_t reg, uint8_t v) {
-    Wire1.beginTransmission(BMA_ADDR);
-    Wire1.write(reg);
-    Wire1.write(v);
-    const bool ok = Wire1.endTransmission() == 0;
+    WATCH_WIRE.beginTransmission(BMA_ADDR);
+    WATCH_WIRE.write(reg);
+    WATCH_WIRE.write(v);
+    const bool ok = WATCH_WIRE.endTransmission() == 0;
     delay(1);   // in its power-save mode the chip wants a gap between writes
     return ok;
 }
 static bool bmaRead(uint8_t reg, uint8_t* buf, uint8_t n) {
-    Wire1.beginTransmission(BMA_ADDR);
-    Wire1.write(reg);
-    if (Wire1.endTransmission(false) != 0) return false;
-    if (Wire1.requestFrom(BMA_ADDR, n) != n) return false;
-    for (uint8_t i = 0; i < n; i++) buf[i] = Wire1.read();
+    WATCH_WIRE.beginTransmission(BMA_ADDR);
+    WATCH_WIRE.write(reg);
+    if (WATCH_WIRE.endTransmission(false) != 0) return false;
+    if (WATCH_WIRE.requestFrom(BMA_ADDR, n) != n) return false;
+    for (uint8_t i = 0; i < n; i++) buf[i] = WATCH_WIRE.read();
     return true;
 }
 
 static void twatchMotionBegin() {
     if (!s_pmuOk) return;
     uint8_t id = 0;
+#if defined(WAVESHARE_206)
+    if (!bmaRead(0x00, &id, 1) || id != 0x05) {
+        BMA_ADDR = 0x6A;
+        if (!bmaRead(0x00, &id, 1) || id != 0x05) { Serial.printf("[motion] QMI8658 did not answer (id %02X)\n", id); return; }
+    }
+    bmaWrite(0x02, 0x40);    // CTRL1: register auto-increment, little-endian
+    bmaWrite(0x03, 0x18);    // CTRL2: accelerometer +-4 g, 31.25 Hz
+    bmaWrite(0x08, 0x01);    // CTRL7: accelerometer on, gyro off
+    s_bmaOk = true;
+    Serial.printf("[motion] QMI8658 ready at %02X\n", BMA_ADDR);
+    return;
+#endif
     if (!bmaRead(0x00, &id, 1) || id != 0x13) { Serial.printf("[motion] BMA423 did not answer (id %02X)\n", id); return; }
     bmaWrite(0x7C, 0x00);    // PWR_CONF: power save off while it is set up
     bmaWrite(0x40, 0x15);    // ACC_CONF: averaging mode, 2 samples, 12.5 Hz
@@ -3328,10 +3422,18 @@ static void twatchMotionTick(uint32_t now) {
     if (now - last < 500) return;
     last = now;
     uint8_t b[6];
+#if defined(WAVESHARE_206)
+    if (!bmaRead(0x35, b, 6)) return;   // AX_L..AZ_H
+#else
     if (!bmaRead(0x12, b, 6)) return;
+#endif
     bool moved = false;
     for (uint8_t k = 0; k < 3; k++) {
+#if defined(WAVESHARE_206)
+        const int16_t a = (int16_t)((uint16_t)b[2 * k + 1] << 8 | b[2 * k]);
+#else
         const int16_t a = (int16_t)((uint16_t)b[2 * k + 1] << 8 | b[2 * k]) >> 4;
+#endif
         if (s_accHave && abs(a - s_acc[k]) > MOVE_LSB) moved = true;
         s_acc[k] = a;
     }
@@ -3352,6 +3454,15 @@ static void twatchMotionTick(uint32_t now) {
 // Kept in UTC. Read once at boot, after Clock::begin(); written whenever the
 // clock learns the real time from anywhere, through Clock::onSet().
 static const uint8_t RTC_ADDR = 0x51;
+// The Waveshare 2.06"'s PCF85063 keeps the PCF8563's seven time registers in
+// the same order with the same stop/lost bit on the seconds, but from 0x04
+// rather than 0x02; its free RAM byte (0x03) carries our mark instead of the
+// minute alarm.
+#if defined(WAVESHARE_206)
+static const int RTC_REG_TIME = 0x04, RTC_REG_MARK = 0x03;   // int, as the literals they stand for are
+#else
+static const int RTC_REG_TIME = 0x02, RTC_REG_MARK = 0x09;
+#endif
 // Our mark in the chip's minute-alarm register, with its disabled bit set
 // (and alarm interrupts off in control 2), so nothing acts on it. A chip without it holds somebody else's time:
 // the factory firmware leaves China time in it, eight hours off UTC, and
@@ -3389,22 +3500,38 @@ static void rtcWrite(uint32_t epoch) {
     int y; unsigned mo, d;
     civilFromDays((int32_t)(epoch / 86400u), y, mo, d);
     const uint32_t sod = epoch % 86400u;
-    Wire1.beginTransmission(RTC_ADDR);
-    Wire1.write(0x00);
-    Wire1.write(0x00);                                   // control 1: running
-    Wire1.write(0x00);                                   // control 2: no alarms
-    Wire1.write(bin2bcd((uint8_t)(sod % 60)));           // seconds, VL cleared
-    Wire1.write(bin2bcd((uint8_t)(sod / 60 % 60)));
-    Wire1.write(bin2bcd((uint8_t)(sod / 3600)));
-    Wire1.write(bin2bcd((uint8_t)d));
-    Wire1.write((uint8_t)((epoch / 86400u + 4) % 7));    // 1970-01-01 was a Thursday
-    Wire1.write(bin2bcd((uint8_t)mo));
-    Wire1.write(bin2bcd((uint8_t)(y % 100)));
-    bool ok = Wire1.endTransmission() == 0;
-    Wire1.beginTransmission(RTC_ADDR);
-    Wire1.write(0x09);
-    Wire1.write(RTC_MARK);                               // minute alarm: off, and our mark
-    ok = (Wire1.endTransmission() == 0) && ok;
+#if defined(WAVESHARE_206)
+    {
+        // Control 1: running (STOP clear) and 24-hour, the rest as it was.
+        uint8_t c1 = 0;
+        WATCH_WIRE.beginTransmission(RTC_ADDR);
+        WATCH_WIRE.write(0x00);
+        if (WATCH_WIRE.endTransmission(false) == 0 && WATCH_WIRE.requestFrom(RTC_ADDR, (uint8_t)1) == 1) c1 = WATCH_WIRE.read();
+        WATCH_WIRE.beginTransmission(RTC_ADDR);
+        WATCH_WIRE.write(0x00);
+        WATCH_WIRE.write((uint8_t)(c1 & ~0x22));
+        WATCH_WIRE.endTransmission();
+    }
+    WATCH_WIRE.beginTransmission(RTC_ADDR);
+    WATCH_WIRE.write(RTC_REG_TIME);
+#else
+    WATCH_WIRE.beginTransmission(RTC_ADDR);
+    WATCH_WIRE.write(0x00);
+    WATCH_WIRE.write(0x00);                                   // control 1: running
+    WATCH_WIRE.write(0x00);                                   // control 2: no alarms
+#endif
+    WATCH_WIRE.write(bin2bcd((uint8_t)(sod % 60)));           // seconds, VL cleared
+    WATCH_WIRE.write(bin2bcd((uint8_t)(sod / 60 % 60)));
+    WATCH_WIRE.write(bin2bcd((uint8_t)(sod / 3600)));
+    WATCH_WIRE.write(bin2bcd((uint8_t)d));
+    WATCH_WIRE.write((uint8_t)((epoch / 86400u + 4) % 7));    // 1970-01-01 was a Thursday
+    WATCH_WIRE.write(bin2bcd((uint8_t)mo));
+    WATCH_WIRE.write(bin2bcd((uint8_t)(y % 100)));
+    bool ok = WATCH_WIRE.endTransmission() == 0;
+    WATCH_WIRE.beginTransmission(RTC_ADDR);
+    WATCH_WIRE.write(RTC_REG_MARK);
+    WATCH_WIRE.write(RTC_MARK);                               // our mark (PCF8563: the minute alarm, off)
+    ok = (WATCH_WIRE.endTransmission() == 0) && ok;
     Serial.printf("[rtc] clock chip %s %04d-%02u-%02u %02lu:%02lu UTC\n", ok ? "set to" : "FAILED at",
                   y, mo, d, (unsigned long)(sod / 3600), (unsigned long)(sod / 60 % 60));
 }
@@ -3415,16 +3542,16 @@ static uint32_t rtcRead(bool* lost = nullptr, bool* foreign = nullptr) {
     if (lost) *lost = false;
     if (foreign) *foreign = false;
     if (!s_pmuOk) return 0;
-    Wire1.beginTransmission(RTC_ADDR);
-    Wire1.write(0x09);
-    if (Wire1.endTransmission(false) != 0 || Wire1.requestFrom(RTC_ADDR, (uint8_t)1) != 1) return 0;
-    if (Wire1.read() != RTC_MARK) { if (foreign) *foreign = true; return 0; }
-    Wire1.beginTransmission(RTC_ADDR);
-    Wire1.write(0x02);
-    if (Wire1.endTransmission(false) != 0) return 0;
-    if (Wire1.requestFrom(RTC_ADDR, (uint8_t)7) != 7) return 0;
+    WATCH_WIRE.beginTransmission(RTC_ADDR);
+    WATCH_WIRE.write(RTC_REG_MARK);
+    if (WATCH_WIRE.endTransmission(false) != 0 || WATCH_WIRE.requestFrom(RTC_ADDR, (uint8_t)1) != 1) return 0;
+    if (WATCH_WIRE.read() != RTC_MARK) { if (foreign) *foreign = true; return 0; }
+    WATCH_WIRE.beginTransmission(RTC_ADDR);
+    WATCH_WIRE.write(RTC_REG_TIME);
+    if (WATCH_WIRE.endTransmission(false) != 0) return 0;
+    if (WATCH_WIRE.requestFrom(RTC_ADDR, (uint8_t)7) != 7) return 0;
     uint8_t r[7];
-    for (uint8_t i = 0; i < 7; i++) r[i] = Wire1.read();
+    for (uint8_t i = 0; i < 7; i++) r[i] = WATCH_WIRE.read();
     if (r[0] & 0x80) { if (lost) *lost = true; return 0; }   // VL: the backup ran out
     const int y = 2000 + bcd2bin(r[6]);
     const unsigned mo = bcd2bin(r[5] & 0x1F), d = bcd2bin(r[3] & 0x3F);
@@ -3487,6 +3614,140 @@ static bool twatchBatteryState(uint8_t& pct, bool& charging) {
     return true;
 }
 
+#if defined(WAVESHARE_206)
+// ---- the AMOLED's two spare bands ---------------------------------------------
+// The scaled watch frame is a 400x400 square; the glass is 502 tall, so there
+// are 50 rows above it and 52 below, black and otherwise unused. The time
+// goes in the top one and the date and the battery in the bottom one, drawn
+// at the panel's own resolution -- crisp, not scaled -- into a small sprite
+// and sent only when the text changes or the panel has just woken. Turned
+// half round with the screen in rotation 2, so the time stays on top.
+static const int16_t BAND_W = Co5300::OUT, BAND_H = 42;
+static const int16_t BAND_TOP_Y = 4;                                     // even, inside rows 0..49
+static const int16_t BAND_BOT_Y = Co5300::OFF_Y + Co5300::OUT + 6;      // 456, inside rows 450..501
+static TFT_eSprite* s_band = nullptr;
+static uint16_t*    s_bandDma = nullptr;     // eight panel rows, DMA-capable
+static bool         s_bandsDirty = true;
+
+static void bandSend(int16_t panelY, bool flip) {
+    const uint16_t* img = (const uint16_t*)s_band->getPointer();   // 16-bit sprites keep wire order
+    FramePush::asyncWait();
+    FramePush::busLock();
+    Co5300::setWindow(Co5300::OFF_X, panelY, Co5300::OFF_X + BAND_W - 1, panelY + BAND_H - 1);
+    bool first = true;
+    for (int16_t y = 0; y < BAND_H; y += 8) {
+        const int16_t n = (BAND_H - y) < 8 ? (BAND_H - y) : 8;
+        uint16_t* b = s_bandDma;
+        Co5300::wait();   // the buffer is reused: the last chunk has to be out
+        for (int16_t i = 0; i < n; i++) {
+            const int16_t sy = flip ? (BAND_H - 1 - (y + i)) : (y + i);
+            const uint16_t* row = img + (size_t)sy * BAND_W;
+            uint16_t* d = b + (size_t)i * BAND_W;
+            if (flip) for (int16_t x = 0; x < BAND_W; x++) d[x] = row[BAND_W - 1 - x];
+            else      memcpy(d, row, BAND_W * sizeof(uint16_t));
+        }
+        Co5300::queuePixels(b, (size_t)n * BAND_W, first);
+        first = false;
+    }
+    Co5300::wait();
+    FramePush::busUnlock();
+}
+
+// The phone's GPS link (phone_gps.h) follows WARDRIVE. The first time on,
+// the scan stops for the moment it takes NimBLE to register the service.
+static void wsPhoneGpsTick(uint32_t now) {
+    const bool want = Wardrive::enabled() && !Security::locked() && !Settings::scanningOff();
+    if (want && !PhoneGps::registered()) {
+        static uint32_t triedAt = 0;
+        if (triedAt && now - triedAt < 10000) return;
+        triedAt = now ? now : 1;
+        engine.startUpdateRadio();
+        NimBLEScan* scan = NimBLEDevice::getScan();
+        const uint32_t t0 = millis();
+        while (scan && scan->isScanning() && millis() - t0 < 2000) delay(10);
+        const bool ok = !(scan && scan->isScanning()) && PhoneGps::registerService();
+        engine.stopUpdateRadio();
+        if (!ok) { Serial.println("[phonegps] could not register; trying again in 10 s"); return; }
+    }
+    if (want != PhoneGps::on()) PhoneGps::setOn(want);
+    PhoneGps::tick(now);
+}
+
+static void wsBandsTick(uint32_t now) {
+    if (s_panelAsleep) { s_bandsDirty = true; return; }   // redrawn on the wake
+    static uint32_t at = 0;
+    if (!s_bandsDirty && now - at < 1000) return;
+    at = now;
+    if (!s_band) {
+        s_band = new TFT_eSprite(&tft);
+        s_band->setColorDepth(16);
+        s_band->setAttribute(PSRAM_ENABLE, true);
+        if (!s_band->createSprite(BAND_W, BAND_H)) { delete s_band; s_band = nullptr; }
+        s_bandDma = (uint16_t*)heap_caps_malloc((size_t)BAND_W * 8 * sizeof(uint16_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+        if (!s_band || !s_bandDma) { Serial.println("[bands] no room; the bands stay black"); at = 0xFFFFFFFFu; return; }
+    }
+    if (!s_band || !s_bandDma) return;
+
+    bool pm = false;
+    char tm[12], date[20], batt[12];
+    Clock::formatTime(tm, sizeof tm, !Settings::clock24Hour(), &pm);
+    if (Clock::trusted() && !Settings::clock24Hour()) strncat(tm, pm ? " PM" : " AM", sizeof tm - strlen(tm) - 1);
+    Clock::formatDate(date, sizeof date);
+    uint8_t pct = 0; bool chg = false;
+    const bool haveBatt = twatchBatteryState(pct, chg);
+    if (haveBatt) snprintf(batt, sizeof batt, chg ? "CHG %u%%" : "%u%%", (unsigned)pct);
+    else          snprintf(batt, sizeof batt, "--%%");
+
+    // Wardriving: how many rows are on the card, between the date and the battery.
+    char wd[16] = "";
+    if (Settings::scanningOff()) {
+        snprintf(wd, sizeof wd, "RADIOS OFF");
+    } else if (Wardrive::enabled()) {
+        const uint8_t st = Wardrive::wsState();
+        if (st == 3)      snprintf(wd, sizeof wd, "WD %lu", (unsigned long)Wardrive::written());
+        else if (st == 1) snprintf(wd, sizeof wd, "WD NO SD");
+        else if (st == 2) snprintf(wd, sizeof wd, "WD NO CLK");
+    }
+    static char lastWd[16] = "";
+    static char lastTm[12] = "", lastDate[20] = "", lastBatt[12] = "";
+    static uint8_t lastRot = 0xFF;
+    const uint8_t rot = tft.getRotation();
+    if (!s_bandsDirty && rot == lastRot && !strcmp(tm, lastTm) && !strcmp(date, lastDate) && !strcmp(batt, lastBatt) && !strcmp(wd, lastWd)) return;
+    s_bandsDirty = false; lastRot = rot;
+    strcpy(lastTm, tm); strcpy(lastDate, date); strcpy(lastBatt, batt); strcpy(lastWd, wd);
+    const bool flip = (rot & 2) != 0;
+
+    // The time.
+    s_band->fillSprite(TFT_BLACK);
+    s_band->setTextDatum(MC_DATUM);
+    s_band->setTextColor(Theme::CYAN, TFT_BLACK);
+    s_band->drawString(tm, BAND_W / 2, BAND_H / 2, 4);
+    bandSend(flip ? BAND_BOT_Y : BAND_TOP_Y, flip);
+
+    // The date, and the battery in the watch face's colours.
+    s_band->fillSprite(TFT_BLACK);
+    const uint16_t battCol = !haveBatt ? (uint16_t)TFT_DARKGREY : chg ? (uint16_t)Theme::CYAN
+                           : pct >= 40 ? (uint16_t)TFT_GREEN : pct >= 20 ? (uint16_t)TFT_YELLOW : (uint16_t)TFT_RED;
+    const int16_t gap = 18;
+    s_band->setFreeFont(&FreeSansBold9pt7b);   // a size up from font 2, for the wrist
+    const int16_t wD = s_band->textWidth(date), wB = s_band->textWidth(batt);
+    const int16_t wW = wd[0] ? (int16_t)(s_band->textWidth(wd) + gap) : 0;
+    const int16_t x0 = (BAND_W - (wD + gap + wW + wB)) / 2;
+    s_band->setTextDatum(ML_DATUM);
+    s_band->setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+    s_band->drawString(date, x0, BAND_H / 2);
+    if (wd[0]) {
+        s_band->setTextColor(Settings::scanningOff() ? (uint16_t)TFT_DARKGREY
+                             : Wardrive::wsState() == 3 ? (uint16_t)Theme::AMBER : (uint16_t)TFT_RED, TFT_BLACK);
+        s_band->drawString(wd, x0 + wD + gap, BAND_H / 2);
+    }
+    s_band->setTextColor(battCol, TFT_BLACK);
+    s_band->drawString(batt, x0 + wD + gap + wW, BAND_H / 2);
+    s_band->setFreeFont(nullptr);
+    bandSend(flip ? BAND_TOP_Y : BAND_BOT_Y, flip);
+}
+#endif
+
 // The chip's own temperature sensor, read at most every two seconds: the
 // settings row asks every frame, and each read starts and stops the sensor.
 int twatchChipC() {
@@ -3517,11 +3778,11 @@ static int      s_xtalChipC = 0;
 // change and the new second. False if the chip did not answer or never ticked.
 static bool rtcTick(uint32_t& atUs, uint8_t& sec) {
     auto readSec = [](uint8_t& s) -> bool {
-        Wire1.beginTransmission(RTC_ADDR);
-        Wire1.write(0x02);
-        if (Wire1.endTransmission(false) != 0) return false;
-        if (Wire1.requestFrom(RTC_ADDR, (uint8_t)1) != 1) return false;
-        s = bcd2bin(Wire1.read() & 0x7F);
+        WATCH_WIRE.beginTransmission(RTC_ADDR);
+        WATCH_WIRE.write(RTC_REG_TIME);
+        if (WATCH_WIRE.endTransmission(false) != 0) return false;
+        if (WATCH_WIRE.requestFrom(RTC_ADDR, (uint8_t)1) != 1) return false;
+        s = bcd2bin(WATCH_WIRE.read() & 0x7F);
         return true;
     };
     uint8_t first;
@@ -3569,12 +3830,18 @@ static void twatchXtalTick(uint32_t now) {
 // 200 mA while running (2026-09-29). 400 mA on a watch known to be a Plus.
 static void twatchApplyCharge() {
     if (!s_pmuOk) return;
+#if defined(WAVESHARE_206)
+    return;   // the board's own charge current stays
+#endif
     s_pmu.setChargerConstantCurr(Settings::watchPlus() ? XPOWERS_AXP2101_CHG_CUR_400MA : XPOWERS_AXP2101_CHG_CUR_200MA);
     Serial.printf("[pmu] charge %s\n", Settings::watchPlus() ? "400 mA (S3 Plus)" : "200 mA");
 }
 
 static void twatchApplySteady() {
     if (!s_pmuOk) return;
+#if defined(WAVESHARE_206)
+    return;   // the board's DC1 as it came
+#endif
     s_pmu.settDC1WorkModeToPwm(0);
 }
 
@@ -3643,6 +3910,35 @@ static void twatchRadioTick(uint32_t now) {
     static uint32_t owedMs = 0, arrivalsAt = 0;
     bleArrivalsRoll(now);
     if (now - usbAt >= 2000) { usbAt = now; usb = s_pmuOk && s_pmu.isVbusIn(); s_onUsb = usb; }
+#if defined(WAVESHARE_206)
+    // SCANNING OFF: both radios rest, Bluetooth and the squad's beacon too,
+    // screen on or off, cable or not. A raw scan screen or an update still
+    // gets the radio while it is open; leaving it puts them back to rest.
+    {
+        static bool offApplied = false;
+        const bool off = Settings::scanningOff() && !onRawScanScreen() &&
+                         state != AppState::UPDATE && OtaWifi::state() == OtaWifi::State::OFF;
+        if (off) {
+            if (!offApplied) {
+                // A duty-cycle rest may have left Bluetooth listening: wake, then rest both.
+                if (s_radiosResting) { engine.wakeRadios(); s_radiosResting = false; }
+                if (engine.restRadios(true)) {
+                    s_radiosResting = true; offApplied = true;
+                    Serial.println("[radio] SCANNING OFF: WiFi and Bluetooth off, just a watch");
+                }
+            }
+            phaseAt = now; owedMs = 0;
+            return;
+        }
+        if (offApplied) {
+            offApplied = false;
+            if (s_radiosResting) { engine.wakeRadios(); s_radiosResting = false; }
+            phaseAt = now;
+            Serial.println("[radio] SCANNING ON");
+            return;
+        }
+    }
+#endif
     // BLE LISTEN, on battery; the cable pays for the full 75 either way.
     setScanWindowBase(usb ? 75 : Settings::bleListen());
     // RADIO TEST on the console forces BLE+5/30 whatever the settings say.
@@ -3726,6 +4022,9 @@ static void twatchPowerCycle(uint8_t count, uint8_t why) {
 }
 
 static bool bleShouldHear() {
+#if defined(WAVESHARE_206)
+    if (Settings::scanningOff()) return false;   // switched off, not deaf
+#endif
     // Resting with Bluetooth off (the 5/30 and 10/60 duties), a raw scan, an
     // update: none of those are the radio's fault.
     if (s_radiosResting && Settings::radioDuty() != 3) return false;
@@ -3983,7 +4282,7 @@ volatile bool g_consolePowerLog = false;
 // draw into the frame and push it, once the frame exists. Everywhere else
 // PANEL is the panel and panelShow() is nothing, which is what they did.
 static inline void pushFrame(int x, int y);
-#if defined(FREENOVE_S3_35)
+#if defined(FREENOVE_S3_35) || defined(WAVESHARE_206)
 #define PANEL ((TFT_eSPI&)frame)
 static bool panelTextOk() { return frameBufferOk && frame.created(); }
 // Pushed the plain, waiting way rather than handed to the push task: these
@@ -4096,7 +4395,10 @@ void setup() {
 #if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(CYD32C) && !defined(CYD35C)
     pinMode(21, OUTPUT); digitalWrite(21, HIGH);
 #endif
-#if defined(SQW_S3)
+#if defined(WAVESHARE_206)
+    // No backlight pin at all: the AMOLED's brightness is a panel register.
+    // (GPIO45, the T-Watch's backlight, is this board's I2S word clock.)
+#elif defined(SQW_S3)
     // GPIO27 and GPIO32 are the S3's PSRAM lines: touching either hangs the
     // chip until the watchdog reboots it. Both S3 boards' backlight is GPIO45.
     pinMode(BL_PIN_S3, OUTPUT); digitalWrite(BL_PIN_S3, HIGH);
@@ -4229,7 +4531,9 @@ void setup() {
 #else
     ledcSetup(BL_CH_ORIG, 5000, 8);
 #endif
+#if !defined(WAVESHARE_206)   // a channel with no pin: the shared ledcWrite()s stay harmless
     ledcAttachPin(BL_PIN_S3, BL_CH_ORIG);
+#endif
 #elif defined(NM_CYD_C5)
     // Backlight is TFT_BL (GPIO25) on this board and nothing else is a
     // backlight. The CYD pins below are actively wrong here, not merely
@@ -4284,6 +4588,8 @@ void setup() {
         CrowBL::set(24);
 #elif defined(TDECK_PLUS)
         tdeckBacklight(24);
+#elif defined(WAVESHARE_206)
+        tft.setBrightness(24);
 #else
         ledcWrite(BL_CH_ORIG, 24);
         ledcWrite(BL_CH_CAP,  24);
@@ -4459,6 +4765,30 @@ void setup() {
     { char b[16]; boardBatteryLine(b, sizeof b); Serial.printf("[batt] %s (raw GPIO%d %u mV)\n", b, BOARD_BAT_ADC, (unsigned)analogReadMilliVolts(BOARD_BAT_ADC)); }
     uiClearSetBatterySource(boardBatteryState);
     Sound::begin();                       // the I2S amp; no codec to find
+#elif defined(WAVESHARE_206)
+    // The Waveshare 2.06"'s FT3168, on the power chip's bus (SDA 15 / SCL 14)
+    // at 0x38, reset on GPIO9. Its registers are the FT6336's.
+    CapTouch::begin(15, 14, 9, 0x38);
+    usingCapTouch = CapTouch::probe();
+    if (usingCapTouch) {
+        // ID_G_CTRL 0: never drop into monitor mode. Left on, the chip stops
+        // answering about 15 s after the last touch, and every poll of it is
+        // then a timed-out I2C read: the loop fell from 62 to 12 a second.
+        Wire.beginTransmission(0x38);
+        Wire.write(0x86); Wire.write(0x00);
+        const bool okMon = Wire.endTransmission() == 0;
+        // G_MODE 0: the interrupt line held low for as long as a finger is
+        // down, rather than pulsed per report, so the poll can read it.
+        Wire.beginTransmission(0x38);
+        Wire.write(0xA4); Wire.write(0x00);
+        const bool okMode = Wire.endTransmission() == 0;
+        CapTouch::setIntPin(38);
+        Serial.printf("[touch] FT3168 monitor mode off %s, level interrupt %s, polled on GPIO38\n",
+                      okMon ? "ok" : "NOT acknowledged", okMode ? "ok" : "NOT acknowledged");
+    }
+    Sound::begin();   // the ES8311 shares this bus
+    Serial.println(usingCapTouch ? "Waveshare 2.06 -- FT3168 capacitive touch answered."
+                                 : "Waveshare 2.06 -- FT3168 did not answer; no touch.");
 #elif defined(TWATCH_S3)
     // The T-Watch's FT6336, on I2C SDA 39 / SCL 40 at 0x38. No reset line;
     // the AXP2101 powers it (ALDO3) in twatchPowerUp(), before this runs.
@@ -4611,13 +4941,13 @@ void setup() {
     // injected against the compiled-in ranges -- a calibration screen would
     // just sit there waiting for a finger.
     initTouchFit();
-#if defined(ESP32) && !defined(CROWPANEL7) && !defined(SQW_SMALL) && !defined(FREENOVE_S3_35)   // nothing to calibrate on a stick with no touch
+#if defined(ESP32) && !defined(CROWPANEL7) && !defined(SQW_SMALL) && !defined(FREENOVE_S3_35) && !defined(WAVESHARE_206)   // nothing to calibrate on a stick with no touch
     if (s_calSource != CalSource::SAVED) {
         Serial.println("Touch: no five-target calibration yet -- running it now.");
         runTouchCalibration();
     }
 #endif
-#if defined(CROWPANEL7) || defined(FREENOVE_S3_35)
+#if defined(CROWPANEL7) || defined(FREENOVE_S3_35) || defined(WAVESHARE_206)
     // Never on first boot here. The GT911 (and the ST77922's own touch)
     // reports panel pixels, so the compiled-in fit is already the identity
     // and there is nothing to calibrate -- making someone tap five targets
@@ -4661,6 +4991,8 @@ void setup() {
     CrowBL::set(24);
 #elif defined(TDECK_PLUS)
     tdeckBacklight(24);
+#elif defined(WAVESHARE_206)
+    tft.setBrightness(24);
 #else
     ledcWrite(BL_CH_ORIG, 24);
     ledcWrite(BL_CH_CAP,  24);
@@ -5041,6 +5373,10 @@ extern volatile uint8_t g_consoleGps;    // 1 on, 2 off, 3 status, 4 fake, 5..7 
 extern volatile int32_t g_consoleFakeLat7, g_consoleFakeLon7;
 
 static void gpsPower(bool on, bool dc4) {
+#if defined(WAVESHARE_206)
+    (void)on; (void)dc4;
+    return;   // no GPS, and these rails may feed something else here
+#endif
     if (on) {
         s_pmu.setBLDO1Voltage(3300); s_pmu.enableBLDO1();
         s_pmu.setDC3Voltage(3300);   s_pmu.enableDC3();
@@ -5059,6 +5395,11 @@ static void gpsOpen(uint32_t baud) {
 
 static void gpsStart(bool summaries) {
     if (!s_pmuOk) return;
+#if defined(WAVESHARE_206)
+    (void)summaries;
+    Serial.println("[gps] this board has no GPS");
+    return;
+#endif
     s_gpsOn = true; s_gpsFound = false; s_gpsTry = 0;
     s_gpsSummaries = summaries;
     s_gpsOnAt = millis(); s_gpsFirstFixMs = 0;
@@ -5244,6 +5585,14 @@ static void gpsTick() {
         Serial.printf("[wardrive] %s; %lu rows kept of %lu; this boot %lu written, %lu skipped as repeats, %lu dropped\n",
                       Wardrive::enabled() ? "ON" : "off", (unsigned long)Wardrive::count(), (unsigned long)Wardrive::capacity(),
                       (unsigned long)Wardrive::written(), (unsigned long)Wardrive::skipped(), (unsigned long)Wardrive::dropped());
+#if defined(WAVESHARE_206)
+        static const char* const WS_STATE[] = { "off", "NO SD CARD", "CLOCK NOT SET", "logging" };
+        Serial.printf("[wardrive] SD: %s, file %s; %lu WiFi rows this boot\n", WS_STATE[Wardrive::wsState() & 3],
+                      *Wardrive::wsFileName() ? Wardrive::wsFileName() : "none yet", (unsigned long)Wardrive::wsWifiRows());
+        Serial.printf("[wardrive] phone GPS: %s, %s; %lu rows placed with it this boot\n",
+                      PhoneGps::on() ? "advertising" : "off", PhoneGps::connected() ? "CONNECTED" : "no phone",
+                      (unsigned long)Wardrive::wsPlacedRows());
+#endif
     }
     else if (cmd == 4) {
         const uint32_t e = Clock::isSet() ? Clock::nowEpoch() : 0;
@@ -5488,6 +5837,7 @@ static void cydGpsTick(uint32_t now) {
 // that cannot read its battery, the last note before it died is how long
 // the charge lasted. RUNTIME on the console lists the last eight boots.
 extern volatile bool g_consoleRuntime;   // clock.cpp: RUNTIME
+extern volatile uint8_t g_consoleSd;     // clock.cpp: SD FORMAT / SD TEST / SD MOUNT
 static void runtimeTick(uint32_t now) {
     static uint32_t lastAt = 0;
     static bool first = true;
@@ -5496,6 +5846,19 @@ static void runtimeTick(uint32_t now) {
         lastAt = now;
         Settings::noteRunMinutes(BlackBox::bootNumber(), (uint16_t)(now / 60000UL));
     }
+#if defined(WAVESHARE_206)
+    if (g_consoleSd) {
+        const uint8_t c = g_consoleSd; g_consoleSd = 0;
+        if (c == 1) engine.sd().format();
+        else if (c == 2) engine.sd().selfTest();
+        else if (c == 4) engine.sd().list();
+        else if (c == 5 || c == 6) {
+            if (Settings::scanningOff() != (c == 5)) Settings::toggleScanningOff();
+            Serial.printf("[radio] SCANNING %s (applied on the next radio pass)\n", c == 5 ? "OFF" : "ON");
+        }
+        else { Serial.printf("[sd] mount: %s\n", engine.sd().begin() ? "ok" : "no card"); }
+    }
+#endif
     if (g_consoleRuntime) {
         g_consoleRuntime = false;
         uint16_t b[8], m[8];
@@ -5800,6 +6163,8 @@ void loop() {
 #endif
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
     if (g_consoleBatt) { g_consoleBatt = false; boardBatteryPrintLog(); }
+#endif
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(WAVESHARE_206)
     // The speaker's housekeeping: hushed while the saver has the screen
     // dimmed; a chime for a squad message that just landed (once per
     // message, by its arrival time); and the console's SOUND commands.
@@ -5818,6 +6183,13 @@ void loop() {
         const int8_t c = g_consoleSound; g_consoleSound = -1;
         if (c == 20)      { Sound::ampLow(false); Serial.println("[sound] amp enable is now HIGH = on"); }
         else if (c == 21) { Sound::ampLow(true);  Serial.println("[sound] amp enable is now LOW = on"); }
+#if defined(WAVESHARE_206)
+        else if (c == 22) { Sound::dumpRegs(); }
+        else if (c >= 30 && c <= 40) {
+            Settings::adjustSoundVolume((int8_t)((c - 30) * 10 - (int)Settings::soundVolume()));
+            Serial.printf("[sound] volume %u%%\n", (unsigned)Settings::soundVolume());
+        }
+#endif
         else if (c < (int8_t)Sound::Id::COUNT) { Serial.printf("[sound] play %d\n", c); Sound::play((Sound::Id)c, true); }
     }
 #endif
@@ -6081,16 +6453,19 @@ void loop() {
             char line[80];
             int n = snprintf(line, sizeof line, "[pmu] %02X:", base);
             for (uint8_t k = 0; k < 16; k++) {
-                Wire1.beginTransmission(0x34);
-                Wire1.write((uint8_t)(base + k));
+                WATCH_WIRE.beginTransmission(0x34);
+                WATCH_WIRE.write((uint8_t)(base + k));
                 uint8_t v = 0xEE;
-                if (Wire1.endTransmission(false) == 0 && Wire1.requestFrom((uint8_t)0x34, (uint8_t)1) == 1) v = Wire1.read();
+                if (WATCH_WIRE.endTransmission(false) == 0 && WATCH_WIRE.requestFrom((uint8_t)0x34, (uint8_t)1) == 1) v = WATCH_WIRE.read();
                 n += snprintf(line + n, sizeof line - n, " %02X", v);
             }
             Serial.println(line);
         }
     }
     gpsTick();
+#if defined(WAVESHARE_206)
+    wsPhoneGpsTick(millis());
+#endif
 #endif
 #if defined(CARDPUTER_ADV)
     if (g_consoleExt >= 0) {
@@ -7790,7 +8165,7 @@ void loop() {
                             if (Settings::buzzerOn()) CrowBuzzer::chirp(BUZZ_CHIRP_MS);
                             break;
 #endif
-#if SQW_SPEAKER
+#if SQW_SOUND
                         case SettingsRow::SOUND:
                             // Each level plays something it unlocks: ALERTS
                             // the new-device blips, ALL the squad chime. OFF
@@ -7837,6 +8212,15 @@ void loop() {
                         case SettingsRow::WATCH_BATTERY: break;   // a reading, not a switch
                         case SettingsRow::WATCH_TEMP: break;   // a reading, not a switch
                         case SettingsRow::WATCH_SETTINGS: uiSettingsOpenPage(SettingsPage::WATCH); break;
+#if defined(WAVESHARE_206)
+                        case SettingsRow::WATCH_SCANNING:
+                            // twatchRadioTick() does the switching, on its next pass.
+                            Settings::toggleScanningOff();
+                            Theme::showToast(Settings::scanningOff() ? "SCANNING OFF" : "SCANNING ON",
+                                             Settings::scanningOff() ? "Just a watch: nothing detected" : "Detecting again",
+                                             Theme::CYAN);
+                            break;
+#endif
                         case SettingsRow::WATCH_QUIET_TAGS:
                             Settings::toggleQuietTrackers();
                             Theme::showToast("TAGS + RINGS", Settings::quietTrackers() ? "Logged, no wake or buzz" : "Alert like the rest",
@@ -7848,7 +8232,11 @@ void loop() {
                             // switching it does (the GPS goes with it).
                             g_consoleGps = Wardrive::enabled() ? 6 : 5;
                             Theme::showToast(Wardrive::enabled() ? "WARDRIVE OFF" : "WARDRIVE ON",
+#if defined(WAVESHARE_206)
+                                             Wardrive::enabled() ? nullptr : "Open the GPS page in Bluefy",
+#else
                                              Wardrive::enabled() ? nullptr : "Logging once the GPS has a fix",
+#endif
                                              Theme::CYAN);
                             break;
                         case SettingsRow::WATCH_BUZZ:
@@ -7858,8 +8246,10 @@ void loop() {
                             // that passed while alerts are actually off.
                             Settings::cycleBuzz();
                             if (Settings::buzz()) {
+#if !defined(WAVESHARE_206)   // no motor driver there: the sample is a sound
                                 drvWrite(0x01, 0x00);
                                 twatchHapticApply();
+#endif
                                 twatchBuzz(Buzz::SAMPLE);
                             }
                             Serial.printf("[buzz] %s\n", Settings::buzzModeName());
@@ -9175,6 +9565,9 @@ void loop() {
         FrameProf::lap(FrameProf::POST);
         pushFrame(0, 0);
         FrameProf::lap(FrameProf::PUSH);
+#if defined(WAVESHARE_206)
+        wsBandsTick(now);
+#endif
     }
 #endif
 

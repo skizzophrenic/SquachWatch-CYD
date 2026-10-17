@@ -25,6 +25,8 @@
 
 // RUNTIME: main.cpp lists how long the last few boots ran.
 volatile bool g_consoleRuntime = false;
+// SD FORMAT / TEST / MOUNT / LS: main.cpp acts on it (the Waveshare 2.06" only).
+volatile uint8_t g_consoleSd = 0;
 #if defined(ARDUINO_ARCH_ESP32) && !defined(TWATCH_S3)
 extern volatile bool g_consoleCharge;   // main.cpp: CHARGE, the CYDs' charge mode
 #endif
@@ -641,6 +643,11 @@ void pollSerial() {
         // flips the amplifier enable's polarity for the bench.
         if (strcasecmp(line, "SOUND AMP HIGH") == 0) { g_consoleSound = 20; continue; }
         if (strcasecmp(line, "SOUND AMP LOW") == 0)  { g_consoleSound = 21; continue; }
+#if defined(WAVESHARE_206)
+        // The Waveshare 2.06" bench: the codec's registers, and SOUND VOL 0..100 in tens.
+        if (strcasecmp(line, "SOUND REG") == 0)      { g_consoleSound = 22; continue; }
+        if (strncasecmp(line, "SOUND VOL ", 10) == 0) { int v = atoi(line + 10); if (v < 0) v = 0; if (v > 100) v = 100; g_consoleSound = (int8_t)(30 + (v + 5) / 10); continue; }
+#endif
         if (strncasecmp(line, "SOUND ", 6) == 0) { g_consoleSound = (int8_t)atoi(line + 6); continue; }
         if (strcasecmp(line, "SCREEN") == 0) { g_consoleScreen = true; continue; }
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
@@ -679,6 +686,14 @@ void pollSerial() {
         }
         if (Lora::console(line)) continue;
         if (strcasecmp(line, "RUNTIME") == 0) { g_consoleRuntime = true; continue; }
+#if defined(WAVESHARE_206)
+        if (strcasecmp(line, "SD FORMAT") == 0) { g_consoleSd = 1; continue; }
+        if (strcasecmp(line, "SD TEST") == 0)   { g_consoleSd = 2; continue; }
+        if (strcasecmp(line, "SD MOUNT") == 0)  { g_consoleSd = 3; continue; }
+        if (strcasecmp(line, "SD LS") == 0)     { g_consoleSd = 4; continue; }
+        if (strcasecmp(line, "SCANNING OFF") == 0) { g_consoleSd = 5; continue; }   // the WATCH SETTINGS row's switch
+        if (strcasecmp(line, "SCANNING ON") == 0)  { g_consoleSd = 6; continue; }
+#endif
 #if defined(ARDUINO_ARCH_ESP32) && !defined(TWATCH_S3)
         if (strcasecmp(line, "CHARGE") == 0) { g_consoleCharge = true; continue; }
 #endif

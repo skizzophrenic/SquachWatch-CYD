@@ -12,6 +12,14 @@ namespace CapTouch {
 //   0x05: Y high byte (low nibble = Y[11:8])
 //   0x06: Y low byte
 static uint8_t ADDR = 0x15;
+#if defined(WAVESHARE_206)
+static int     s_int = -1;
+
+void setIntPin(int pin) {
+    s_int = pin;
+    if (pin >= 0) pinMode(pin, INPUT_PULLUP);
+}
+#endif
 
 void begin(int sda, int scl, int rst, uint8_t addr) {
     ADDR = addr;
@@ -31,6 +39,9 @@ bool probe() {
 }
 
 bool read(uint16_t& x, uint16_t& y) {
+#if defined(WAVESHARE_206)
+    if (s_int >= 0 && digitalRead(s_int) == HIGH) return false;
+#endif
     Wire.beginTransmission(ADDR);
     Wire.write(0x02);
     if (Wire.endTransmission(false) != 0) return false;

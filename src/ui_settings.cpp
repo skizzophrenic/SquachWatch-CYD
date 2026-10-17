@@ -174,6 +174,9 @@ static Settings::FontKind fontKindFor(SettingsRow r) {
 // The WATCH SETTINGS page: the battery first (a reading), then the knobs that
 // decide how long it lasts, then the buzz, then the tools.
 static const SettingsRow WATCH_ROWS[] = {
+#if defined(WAVESHARE_206)
+    SettingsRow::WATCH_SCANNING,   // first: the switch that decides the battery most
+#endif
     SettingsRow::WATCH_BATTERY, SettingsRow::WATCH_WARDRIVE, SettingsRow::WATCH_QUIET_TAGS,
 #if SQUACH_LORA
     SettingsRow::WATCH_LORA_CHATS, SettingsRow::WATCH_LORA,
@@ -280,6 +283,9 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::WATCH_LORA_CHATS:
         case SettingsRow::LORA_TX:
         case SettingsRow::WATCH_QUIET_TAGS:
+#if defined(WAVESHARE_206)
+        case SettingsRow::WATCH_SCANNING:
+#endif
             return RowGroupId::WATCH;
         // TIME ZONE sat on the SYSTEM page too, the same setting twice. Only
         // the clock reads it, so it lives with the clock.
@@ -1289,17 +1295,32 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             // OFF, or what it is doing: finding the GPS, waiting for a fix, or
             // logging, with how many sightings are kept.
             label = "WARDRIVE";
+#if defined(WAVESHARE_206)
+            // No GPS here: the card and the clock are what it needs.
+            switch (Wardrive::wsState()) {
+                case 0:  value = "OFF"; break;
+                case 1:  value = "NO SD CARD"; break;
+                case 2:  value = "CLOCK NOT SET"; break;
+                default: snprintf(valBuf, valBufN, "ON  %lu", (unsigned long)Wardrive::written()); value = valBuf; break;
+            }
+#else
             const uint8_t g = twatchGpsState();
             if (!Wardrive::enabled())  value = "OFF";
             else if (g == 4)           value = "GPS RESTING";
             else if (g <= 1)           value = "GPS STARTING";
             else if (g == 2)           value = "NO FIX YET";
             else { snprintf(valBuf, valBufN, "ON  %lu", (unsigned long)Wardrive::count()); value = valBuf; }
+#endif
             break;
         }
         case SettingsRow::WATCH_QUIET_TAGS:
             label = "TAGS + RINGS"; value = Settings::quietTrackers() ? "LOG ONLY" : "ALERT";
             break;
+#if defined(WAVESHARE_206)
+        case SettingsRow::WATCH_SCANNING:
+            label = "SCANNING"; value = Settings::scanningOff() ? "OFF - WATCH ONLY" : "ON";
+            break;
+#endif
 #endif
         // The LoRa rows: the watch's and the T-Deck's (the T-Deck lists them on
         // its SYSTEM page), so outside the watch-only block above -- inside it

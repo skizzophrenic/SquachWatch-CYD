@@ -1,6 +1,9 @@
 // SquachWatch-CYD — DetectionEngine implementation
 #include "detection.h"
 #include "wardrive.h"
+#if defined(WAVESHARE_206)
+#include "phone_gps.h"
+#endif
 #include "wifi_auth.h"
 #include "serial_flush.h"
 #include "signatures.h"
@@ -1204,6 +1207,10 @@ void radioTick(uint32_t now) {
     // Resting radios have nothing to advertise with unless BLE stayed up.
     if (g_rawMode == RawScanMode::UPDATE) return;
     if (g_rawMode == RawScanMode::REST && g_restBle) return;
+#if defined(WAVESHARE_206)
+    // The phone's GPS link has the advertiser while wardriving (phone_gps.h).
+    if (PhoneGps::owner()) { s_advOn = false; return; }
+#endif
     // Our own address goes into the nonce of every message we send, so the
     // runtime needs it -- read once, after the stack is up, and copied out of
     // a named NimBLEAddress rather than through a pointer into a temporary.
