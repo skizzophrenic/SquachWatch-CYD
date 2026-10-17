@@ -735,7 +735,7 @@
       </p>
     </div>
     <ul class="board-help">
-      <li><strong>Cheap Yellow Displays</strong> have a code like <strong>ESP32-2432S028R</strong> on the back. The last letter is the touch: <strong>R</strong> resistive (press), <strong>C</strong> capacitive (tap).</li>
+      <li><strong>Cheap Yellow Displays</strong> have a code like <strong>ESP32-2432S028R</strong> on the back. The last letter is the touch: <strong>R</strong> resistive (press), <strong>C</strong> capacitive (tap). The <strong>JC2432W328C</strong> is also a 2.8&quot; CYD; enter its code to select the 2.8&quot; build.</li>
       <li><strong>Freenove</strong> boards say <strong>FNK0103</strong> or <strong>FNK0104</strong>.</li>
       <li>Not on the list? Tell us what it is on <a href="https://github.com/skizzophrenic/SquachWatch-CYD/issues" target="_blank" rel="noopener">GitHub</a>.</li>
     </ul>
@@ -1683,6 +1683,7 @@
     var codeIn = document.getElementById('boardCode');
     var codeOut = document.getElementById('boardCodeAnswer');
     var CODES = [
+      { re: /JC2432W328C/,           v: './manifest-cyd.json',         say: 'That’s the 2.8" CYD (JC2432W328C), with capacitive touch. Selected the 2.8" ST7789 build.' },
       { re: /2432S028/,             v: './manifest-cyd.json',         say: 'That’s the 2.8" CYD. If the screen goes white, untick 80 MHz first; still white, pick the ILI9341 one.' },
       { re: /E32R28|32E.*240X320|32E.*2\.8|2\.8.*32E/, v: './manifest-cyd-ili9341.json', say: 'That’s the ESP32-32E 2.8" (E32R28T): the 2.8" CYD’s ILI9341 build. Selected below; leave the overclock box unticked.' },
       { re: /E32R35|32E.*320X480|32E.*3\.5|3\.5.*32E/, v: './manifest-cyd35-fast.json', say: 'That’s the ESP32-32E 3.5" (E32R35T), the 3.5" resistive (BETA). Selected below.' },
