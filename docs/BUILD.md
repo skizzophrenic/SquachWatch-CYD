@@ -73,6 +73,7 @@ web flasher offers:
 | `cyd35c-fast` | 3.5" capacitive, ESP32-3248S035C (BETA) |
 | `awok` | AWOK 2.4", ESP32 Marauder v6.1 |
 | `rlphantom-r` | RL Phantom 2.4", ESP32-2432S024R |
+| `cyd24-st7789` | 2.4" CYD, ST7789 resistive touch (ESP32-2432S024R wiring) |
 | `freenove-s3` | Freenove ESP32-S3 2.8", FNK0104 (BETA) |
 | `crowpanel7` | Elecrow CrowPanel Advance 7.0 (BETA) — see below |
 | `nm-cyd-c5` | RockBase NM-CYD-C5, ESP32-C5 (BETA) — see [NM-CYD-C5](NM-CYD-C5.md) |
@@ -86,9 +87,11 @@ ESP32-S3 4.0" (FNK0104S), run on one board so far; `*-crowd`, `*-flood`,
 `cyd35` is the frozen 3.5" build, and `rlphantom` (the Phantom's
 capacitive build) has never run on a real board.
 
-**Don't know which 2.8" screen you have?** Nobody can tell from the
-outside. Start with `cyd-fast`; a solid white screen means try `cyd`,
-then `cyd-ili9341`.
+**Don't know which screen you have?** Nobody can tell from the outside.
+For a 2.8" CYD, start with `cyd-fast`; a solid white screen means try
+`cyd`, then `cyd-ili9341`. For a 2.4" 240×320 CYD with an ST7789 and
+resistive touch, use `cyd24-st7789`; its touch controller shares the
+display bus, unlike the 2.8" profile.
 
 ## Build and flash
 

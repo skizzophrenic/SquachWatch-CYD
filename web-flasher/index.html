@@ -755,6 +755,7 @@
       <option value="./manifest-cyd32c.json" data-ocnote="The 3.2&quot; capacitive already ships at 80MHz.">3.2&quot; &middot; capacitive &mdash; ESP32-2432S032C (NEW)</option>
       <option value="./manifest-cyd35-fast.json" data-ocnote="The 3.5&quot; only ships at 80MHz, so there is no slower build to fall back to.">3.5&quot; &middot; resistive &mdash; ESP32-3248S035R (BETA)</option>
       <option value="./manifest-cyd35c-fast.json" data-ocnote="The 3.5&quot; only ships at 80MHz, so there is no slower build to fall back to.">3.5&quot; &middot; capacitive &mdash; ESP32-3248S035C (BETA)</option>
+      <option value="./manifest-cyd24-st7789.json">2.4&quot; CYD &middot; ST7789 resistive &mdash; ESP32-2432S024R</option>
       </optgroup>
       <optgroup label="OTHER ESP32 BOARDS">
       <option value="./manifest-awok.json">AWOK 2.4&quot; &mdash; ESP32 Marauder v6.1</option>
@@ -1528,7 +1529,7 @@
         // named lab run (the "label" input) puts its name in each one.
         ['./manifest-lab-cyd.json', './manifest-lab-cyd-fast.json',
          './manifest-lab-cyd-ili9341.json', './manifest-lab-cyd-ili9341-fast.json',
-         './manifest-lab-rlphantom-r.json', './manifest-lab-freenove32.json',
+         './manifest-lab-rlphantom-r.json', './manifest-lab-cyd24-st7789.json', './manifest-lab-freenove32.json',
          './manifest-lab-twatch-s3.json', './manifest-lab-freenove-s3.json', './manifest-lab-freenove-s3-35.json',
          './manifest-lab-crowpanel7.json', './manifest-lab-cyd32c.json',
          './manifest-lab-cyd35-fast.json', './manifest-lab-nm-cyd-c5.json', './manifest-lab-marauder-v8.json',
@@ -1691,7 +1692,8 @@
       { re: /FNK0?103|2432S032R?$/, v: './manifest-freenove32.json',  say: 'That’s the 3.2" resistive. Selected below.' },
       { re: /3248S035C/,            v: './manifest-cyd35c-fast.json', say: 'That’s the 3.5" capacitive (BETA). Selected below.' },
       { re: /3248S035/,             v: './manifest-cyd35-fast.json',  say: 'That’s the 3.5" (BETA). Selected below.' },
-      { re: /2432S024R/,            v: './manifest-rlphantom-r.json', say: 'That’s the RL Phantom 2.4". Selected below.' },
+      { re: /2432S024R.*ST7789|ST7789.*2432S024R/, v: './manifest-cyd24-st7789.json', say: 'That’s the 2.4" CYD with an ST7789. Selected below.' },
+      { re: /2432S024R/,            v: './manifest-rlphantom-r.json', say: 'That’s the RL Phantom 2.4" with ILI9341. Selected below.' },
       { re: /2432S024C/,            v: null,                          say: 'The capacitive 2.4" isn’t on the flasher yet.' },
       { re: /AWOK|MARAUDER/,        v: './manifest-awok.json',        say: 'That’s the AWOK 2.4". Selected below.' },
       { re: /FNK0?104N/,            v: './manifest-freenove-s3-35.json', say: 'That’s the Freenove ESP32-S3 3.5" (BETA). Selected below.' },
