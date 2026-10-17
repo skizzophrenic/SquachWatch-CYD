@@ -83,6 +83,26 @@ jobs:
       - name: Build LilyGo T-Deck Plus (ESP32-S3)
         run: pio run -e tdeck-plus
 
+      # The Freenove ESP32-S3 2.8" at 40 MHz, for panels that tear at 80.
+      # Packaged as one image, flashed at 0x0, so it can be tested on
+      # hardware before it goes on the flasher.
+      - name: Build Freenove ESP32-S3 2.8" at 40 MHz
+        run: |
+          pio run -e freenove-s3-40mhz
+          pip install esptool
+          python -m esptool --chip esp32s3 merge_bin \
+            -o firmware-freenove-s3-40mhz-merged.bin \
+            --flash_mode dio --flash_freq 80m --flash_size 16MB \
+            0x0     .pio/build/freenove-s3-40mhz/bootloader.bin \
+            0x8000  .pio/build/freenove-s3-40mhz/partitions.bin \
+            0xe000  "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" \
+            0x10000 .pio/build/freenove-s3-40mhz/firmware.bin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-freenove-s3-40mhz
+          path: firmware-freenove-s3-40mhz-merged.bin
+
   tests:
     # The decoders are pure arithmetic over byte buffers, so they run on a
     # desktop with no board and no display. Worth a job of their own: the
