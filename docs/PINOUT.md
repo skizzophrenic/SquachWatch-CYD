@@ -205,6 +205,31 @@ board 2026-10-12. The console is the native USB port.
 Not used: 43 (GPS RX), 46 (keyboard INT, polled instead), 48/21/47/14 (the
 ES7210 microphones), 19/20 (USB).
 
+## LilyGo T-LoRa Pager — `[env:tlora-pager]`
+
+An ESP32-S3 (16 MB flash, 8 MB **quad** PSRAM, so `qio_qspi`, not the
+watch's octal) with a 480×222 screen, a scroll wheel and a keyboard, no
+touch. Pins from arduino-esp32's `variants/lilygo_tlora_pager/pins_arduino.h`,
+power-up order from LilyGoLib's `LilyGo_LoRa_Pager.cpp`, confirmed on a board
+2026-10-13. The console is the native USB port.
+
+| Part | Pins |
+|---|---|
+| SPI bus (screen, LoRa, NFC, SD) | SCK 35, MOSI 34, MISO 33; every other select (LoRa 36, NFC 39, SD 21) held high before the screen is drawn |
+| ST7796 222×480 | CS 38, DC 37, no reset line; inversion on, 49-column offset (`CGRAM_OFFSET`); 40 MHz; drawn in landscape |
+| Backlight | GPIO 42, an AW9364: HIGH is full, each short low pulse steps it down (not PWM) |
+| I2C | SDA 3, SCL 2 |
+| XL9555 expander, 0x20 | switches every rail. Port 0: 0 haptics, 1 speaker amp (on only while a sound plays), 2 keyboard reset, 3 LoRa, 4 GPS, 5 NFC, 7 GPS reset. Port 1: 8 keyboard, 9 header, 10 card detect, 12 SD |
+| Keyboard | TCA8418 at 0x34, four rows of ten, polled |
+| Scroll wheel | A 40, B 41, push 7 |
+| SX1262 LoRa | CS 36, DIO1 14, RST 47, BUSY 48, on the screen's bus; TCXO 1.8 V. Sends from the LORA page at the LORA TX power (LORA + GPS settings, off by default) |
+| Speaker | ES8311 codec at 0x18 on the same I2C; I2S MCK 10, BCK 11, WS 18, DOUT 45; its amp's enable is expander port 0 bit 1 |
+| GPS (MIA-M10Q) | Serial1, RX 4, TX 12, 38400 baud; powered from expander port 0 bit 4 for wardriving, then kept in its own backup state (UBX-RXM-PMREQ) between uses so the next start is warm. While it is on the screen holds still: the panel's 40 MHz SPI bus, pushing frames, kept it from ever fixing (UBX-MON-RF AGC 558-1488 of 8191 against 2418 with nothing drawn) |
+| Battery | BQ27220 gauge at 0x55; BQ25896 charger at 0x6B (cable sensed from VBUS_STAT, ship mode for power off) |
+| BOOT button | GPIO 0: held 3 s powers off (ship mode on battery, deep sleep on the cable; BOOT wakes it) |
+
+Not used: NFC, SD logging, haptics.
+
 ## Sources
 
 - [witnessmenow/ESP32-Cheap-Yellow-Display](https://github.com/witnessmenow/ESP32-Cheap-Yellow-Display) (MIT)

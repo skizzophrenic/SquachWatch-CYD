@@ -125,7 +125,11 @@ int wrap(TFT_eSPI& t, const char* text, int x, int y, int maxW, int lineH, int y
 
 const char* listenLine() {
     switch (Settings::loraListen()) {
+#if defined(TLORA_PAGER)
+        case 0:  return "LORA IS OFF (LORA + GPS > LORA)";
+#else
         case 0:  return "LORA IS OFF (WATCH SETTINGS > LORA)";
+#endif
         case 1:  return "LISTENING: MESHTASTIC";
         case 2:  return "LISTENING: MESHCORE";
         default: return "LISTENING: BOTH";

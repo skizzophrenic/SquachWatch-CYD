@@ -11,7 +11,7 @@
 #include "regulars.h"
 #include "clock.h"
 #include "sound.h"
-#if SQW_SPEAKER
+#if SQW_POWER_DIARY
 void bootStage(uint8_t s);   // main.cpp: the power diary's steps through setup()
 #define BOOT_STAGE(n) bootStage(n)
 #else
@@ -375,7 +375,7 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
         uint8_t printed[6];
         for (int i = 0; i < 6; i++) printed[i] = mac[5 - i];
         mac = printed;
-#if defined(TWATCH_S3)
+#if SQW_WARDRIVE
         // Wardriving: every device, not just the ones worth an alert. The
         // name and the company ID are only asked for while it is on -- both
         // cost a string on this task.
@@ -852,7 +852,7 @@ bool DetectionEngine::init() {
             // device announcing itself to its own kind, not an access point
             // offering a network, and its SSID is throwaway. Its name goes
             // where the SSID would have.
-#if defined(TWATCH_S3)
+#if SQW_WARDRIVE
             // Wardriving: every access point, with its security read from the
             // RSN and WPA elements (the last four bytes are the FCS).
             if (Wardrive::enabled() && sigLen > 40) {

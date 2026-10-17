@@ -152,12 +152,16 @@ void uiSquadTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // ---- the carousel ---------------------------------------------------
     const int colW  = port ? w : 176;
     const int cx    = colW / 2;
-    const int baseY = 146;
+    // The column is laid out for 240 rows, BACK from the bottom: on a shorter
+    // landscape panel (the T-LoRa Pager's 222) the whole column moves up by the
+    // difference, or BACK lands on INVITE and HUNT.
+    const int dy    = (!port && h < 240) ? h - 240 : 0;
+    const int baseY = 146 + dy;
     s_prev = s_next = s_invite = s_add = s_forget = s_hunt = { 0, 0, 0, 0 };
     if (s_n == 0) {
         t.setTextColor(Theme::W95_LIGHT, Theme::BG);
-        centred(t, s_roster ? "Nobody in your squad" : "Nobody in range", cx, 84);
-        centred(t, s_roster ? "yet. ADD one nearby." : "right now.", cx, 96);
+        centred(t, s_roster ? "Nobody in your squad" : "Nobody in range", cx, 84 + dy);
+        centred(t, s_roster ? "yet. ADD one nearby." : "right now.", cx, 96 + dy);
     } else {
         const Mesh::SquadMember& m = s_members[s_sel];
         Squachy::setOutfitPreview((int8_t)m.peer.outfit);
@@ -185,10 +189,10 @@ void uiSquadTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         Theme::bodyFontOff(t);
 
         if (s_n > 1) {
-            s_prev = { 0, 60, 34, 70 };
-            s_next = { (int16_t)(colW - 34), 60, 34, 70 };
-            t.fillTriangle(22, 84, 8, 95, 22, 106, Theme::VAPOR_PINK);
-            t.fillTriangle(colW - 22, 84, colW - 8, 95, colW - 22, 106, Theme::CYAN);
+            s_prev = { 0, (int16_t)(60 + dy), 34, 70 };
+            s_next = { (int16_t)(colW - 34), (int16_t)(60 + dy), 34, 70 };
+            t.fillTriangle(22, 84 + dy, 8, 95 + dy, 22, 106 + dy, Theme::VAPOR_PINK);
+            t.fillTriangle(colW - 22, 84 + dy, colW - 8, 95 + dy, colW - 22, 106 + dy, Theme::CYAN);
         }
         // Three buttons under the name, 56 wide each: INVITE brings this
         // Squachy onto the screen, HUNT aims the signal gauge at their board
@@ -287,6 +291,23 @@ void uiSquadTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         s_send = { (int16_t)(w - btnW() - 4), (int16_t)(h - btnH() - 6), btnW(), btnH() };
         Theme::drawButton(t, s_send.x, s_send.y, s_send.w, s_send.h, "[ SEND ]", false);
     }
+}
+
+uint8_t uiSquadStops(int16_t* xs, int16_t* ys, int16_t* ws, int16_t* hs, uint8_t cap) {
+    uint8_t n = 0;
+    auto put = [&](const Rect& r) {
+        if (r.w <= 0 || n >= cap) return;
+        xs[n] = r.x; ys[n] = r.y; ws[n] = r.w; hs[n] = r.h; n++;
+    };
+    // The order a hand would go: the messages, the board showing and what to
+    // do with it, then the two buttons along the bottom. Every rect is zeroed
+    // by the draw unless it is shown, the same rule uiSquadTouch() relies on.
+    for (uint8_t i = 0; i < s_rowN; i++) put(s_rows[i]);
+    if (s_n > 1) { put(s_prev); put(s_next); }
+    if (s_n) { put(s_invite); put(s_hunt); put(s_add); put(s_forget); }
+    put(s_send);
+    put(s_back);
+    return n;
 }
 
 SquadHit uiSquadTouch(int x, int y, uint32_t now) {

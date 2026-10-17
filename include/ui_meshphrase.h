@@ -24,6 +24,13 @@ void uiMeshPhraseTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, boo
 void uiMeshPhraseTouch(int x, int y);
 // True once BACK is pressed on the first page.
 bool uiMeshPhraseDone();
+// A physical keyboard on the picker: a letter picks that letter (on either
+// step), '\b' is BACK. Words are still chosen with the cursor.
+// Everything a press would act on right now, as rectangles, for a board
+// steered by a cursor. Returns how many were written.
+uint8_t uiMeshPhraseStops(int16_t* xs, int16_t* ys, int16_t* ws, int16_t* hs, uint8_t cap);
+bool uiMeshPhrasePicking();
+void uiMeshPhraseTypeChar(char c);
 // Emulator only: 0 shows the current phrase, 1 a freshly rolled one, 2 the
 // picker two words in with a letter chosen. Nothing on the device calls it.
 void uiMeshPhraseDemo(uint8_t mode);

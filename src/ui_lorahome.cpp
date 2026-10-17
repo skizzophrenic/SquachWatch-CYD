@@ -1,12 +1,14 @@
-// SquachWatch-CYD — LORA, the T-Deck's landing page. See include/ui_lorahome.h.
+// SquachWatch-CYD — LORA, the T-Deck's and the Pager's landing page. See
+// include/ui_lorahome.h.
 //
-// Laid out for 320x240 exactly: the dish in a 104-wide column on the left,
-// the tiles and the strip in the 210 to its right, one info line at 109,
-// the tabbed chat window from 120 down, the compose line at 213, the bar at
-// 226.
+// Laid out for 320x240 exactly on the T-Deck: the dish in a 104-wide column on
+// the left, the tiles and the strip in the 210 to its right, one info line at
+// 109, the tabbed chat window from 120 down, the compose line at 213, the bar
+// at 226. The Pager's 480x222 is the same page stretched and squeezed: see
+// the layout block.
 // SQUACH_LORA_FAKE: the PC emulator's one-shot renderer, which drives this
 // page off sim/lora_sim.cpp. No board defines it.
-#if (SQUACH_LORA && defined(TDECK_PLUS)) || SQUACH_LORA_FAKE
+#if (SQUACH_LORA && (defined(TDECK_PLUS) || defined(TLORA_PAGER))) || SQUACH_LORA_FAKE
 #include "ui_lorahome.h"
 #include "ui_lorachat.h"
 #include "lora_sniffer.h"
@@ -27,6 +29,24 @@
 namespace {
 
 // ---- the layout ------------------------------------------------------------
+#if defined(TLORA_PAGER)
+// The Pager's 480x222: the same page, the extra width to the instruments and
+// the chat window, and the 18 rows it is short taken from the dish (r 34, its
+// words and legend still clear of the chats) and the strip (36, was 46). The
+// info line sits under both, and the chat window takes the rest down to the
+// compose line, six rows like the T-Deck's.
+const int SCREEN_W = 480;
+const int DISH_CX = 58, DISH_CY = 59, DISH_R = 34;
+const int COL_X = 108, COL_W = 368;            // the right column
+const int TILE_Y = 26, TILE_H = 30, TILE_W = 89, TILE_GAP = 3;
+const int STRIP_Y = 59, STRIP_H = 36;
+const int INFO_Y = 97;
+const int CHAT_Y = 108, CHAT_TAB_H = 14, CHAT_BOTTOM = 197, CHAT_ROW_H = 12;
+const int CHAT_ROWS_Y = CHAT_Y + CHAT_TAB_H + 2;
+const int COMPOSE_Y = 198, COMPOSE_H = 12;
+const int BAR_Y = 211;
+#else
+const int SCREEN_W = 320;
 const int DISH_CX = 58, DISH_CY = 66, DISH_R = 40;
 const int COL_X = 108, COL_W = 210;            // the right column
 const int TILE_Y = 26, TILE_H = 30, TILE_W = 50, TILE_GAP = 3;
@@ -39,6 +59,13 @@ const int CHAT_Y = 120, CHAT_TAB_H = 14, CHAT_BOTTOM = 212, CHAT_ROW_H = 12;
 const int CHAT_ROWS_Y = CHAT_Y + CHAT_TAB_H + 2;
 const int COMPOSE_Y = 213, COMPOSE_H = 12;
 const int BAR_Y = 226;
+#endif
+// The chat window 4 px in from each edge, a tab in each half; the switch at
+// the right end of the compose line, the line taking the rest.
+const int CHAT_X = 4, CHAT_W = SCREEN_W - 8, CHAT_R = CHAT_X + CHAT_W;
+const int TAB_SPLIT = SCREEN_W / 2;
+const int SWITCH_W = 76, SWITCH_X = SCREEN_W - 4 - SWITCH_W;
+const int COMPOSE_W = SWITCH_X - 8;
 
 // ---- state -----------------------------------------------------------------
 uint8_t  s_net = 0;                      // the switch: 0 Meshtastic, 1 MeshCore
@@ -46,8 +73,13 @@ char     s_compose[161] = { 0 };
 uint8_t  s_composeN = 0;
 char     s_status[40] = { 0 };
 uint32_t s_statusAt = 0;
-// Where the chat columns' tap zones are, for uiLoraHomeHit.
-int      s_switchX = 240, s_switchW = 76;
+
+// Where LORA TX lives in Settings, for the compose line's "it is off".
+#if defined(TLORA_PAGER)
+const char* const LORA_TX_PAGE = "LORA + GPS";
+#else
+const char* const LORA_TX_PAGE = "LORA";
+#endif
 
 uint16_t dim(uint16_t col, uint16_t t) { return Theme::blend(Theme::BG, col, t); }
 uint16_t netCol(Lora::Proto p) { return p == Lora::Proto::MESHCORE ? Theme::PINK : Theme::CYAN; }
@@ -116,7 +148,7 @@ void drawHeader(TFT_eSPI& t, uint32_t now) {
     if (!mt[0]) strcpy(mt, "MT off");
     if (!mc[0]) strcpy(mc, "MC off");
     small(t, 14, 14, mt, Settings::loraListen() & 1 ? Theme::CYAN : dim(Theme::CYAN, 110));
-    small(t, 176, 14, mc, Settings::loraListen() & 2 ? Theme::PINK : dim(Theme::PINK, 110));
+    small(t, SCREEN_W / 2 + 16, 14, mc, Settings::loraListen() & 2 ? Theme::PINK : dim(Theme::PINK, 110));
     // The radio-busy dot: lit while the radio is on, at the left end of the
     // preset line (at the right end it sat on MeshCore's bandwidth).
     if (Lora::mode() != Lora::Mode::OFF) t.fillCircle(7, 17, 2, Theme::GREEN);
@@ -258,13 +290,16 @@ void drawTiles(TFT_eSPI& t, const Numbers& n) {
 //   GHOST     the newest packet keeps echoing: its spike repeats fainter for
 //             two minutes. Real.
 const uint32_t QUIET_MS = 8000, GHOST_MS = 120000;
-const int GLOW_W = 208, GLOW_H = 44;              // inside the strip's border
-// The SPECTRUM's grid: 52 cells of 4 x 2 px fill the 208 x 44 inside, and a
-// column every 1.54 s makes 52 columns the strip's own 80 seconds.
-const int SP_COLS = 52, SP_ROWS = 22, SP_CW = 4, SP_CH = 2;
+const int GLOW_W = COL_W - 2, GLOW_H = STRIP_H - 2;   // inside the strip's border
+// The SPECTRUM's grid: 4 x 2 px cells filling the strip's inside (52 x 22 on
+// the T-Deck), one column every 1.54 s: 80 s across on the T-Deck, 140 on
+// the Pager's wider strip.
+const int SP_CW = 4, SP_CH = 2;
+const int SP_COLS = GLOW_W / SP_CW, SP_ROWS = GLOW_H / SP_CH;
 const uint32_t SP_COL_MS = 1540;
+const uint32_t SP_WINDOW_MS = SP_COLS * SP_COL_MS;    // the strip's own seconds
 struct SpecHeat { float heat[SP_COLS][SP_ROWS]; uint8_t kind[SP_COLS][SP_ROWS]; uint8_t glow[SP_COLS][SP_ROWS]; };
-SpecHeat* s_spec = nullptr;                       // PSRAM, ~6.9 KB
+SpecHeat* s_spec = nullptr;                       // PSRAM
 uint32_t  s_colAt = 0, s_hitSeen = 0;
 
 uint8_t* s_glow = nullptr;                        // PHOSPHOR afterglow, PSRAM
@@ -329,7 +364,7 @@ void heatPacket(int col, int16_t rssi, Lora::Proto p, float scale) {
         if (h > s_spec->heat[col][r]) { s_spec->heat[col][r] = h; s_spec->kind[col][r] = k; }
     }
 }
-// The page opening: the last 80 seconds of packets laid down already cooled
+// The page opening: the strip's own window of packets laid down already cooled
 // by their age, so the strip opens with them in it rather than empty.
 void heatPrefill(uint32_t now) {
     if (!s_spec) s_spec = (SpecHeat*)heap_caps_calloc(1, sizeof(SpecHeat), MALLOC_CAP_SPIRAM);
@@ -340,7 +375,7 @@ void heatPrefill(uint32_t now) {
         const Lora::Hit& h = s_pHits[i];
         if (!s_hitSeen || (int32_t)(h.ms - s_hitSeen) > 0) s_hitSeen = h.ms;
         const uint32_t ago = now - h.ms;
-        if (ago >= 80000) continue;
+        if (ago >= SP_WINDOW_MS) continue;
         heatPacket(SP_COLS - 1 - (int)(ago / SP_COL_MS), h.rssi, h.proto, expf(-(float)ago / 12000.0f));
     }
 }
@@ -556,17 +591,19 @@ void drawStrip(TFT_eSPI& t, uint32_t now, const Numbers& n, uint32_t dt) {
         }
     }
 
-    // The packets: a spike each, in its network's colour, on the full scale.
+    // The packets: a spike each, in its network's colour, on the full scale,
+    // over the strip's own window.
     int16_t peakHold[8] = { -128, -128, -128, -128, -128, -128, -128, -128 };
+    const uint32_t bucketMs = SP_WINDOW_MS / 8;
     for (uint8_t i = 0; i < hn; i++) {
         const uint32_t ago = now - hits[i].ms;
-        if (ago > 80000) continue;
-        const int x = x0 + w - 1 - (int)(ago * (uint32_t)w / 80000);
+        if (ago > SP_WINDOW_MS) continue;
+        const int x = x0 + w - 1 - (int)(ago * (uint32_t)w / SP_WINDOW_MS);
         const int y = yForDbm(hits[i].rssi, STRIP_Y, STRIP_H);
         t.fillRect(x - 1, y, 3, STRIP_Y + STRIP_H - 3 - y, netCol(hits[i].proto));
-        const int bucket = (int)(ago / 10000); if (bucket < 8 && hits[i].rssi > peakHold[bucket]) peakHold[bucket] = hits[i].rssi;
+        const int bucket = (int)(ago / bucketMs); if (bucket < 8 && hits[i].rssi > peakHold[bucket]) peakHold[bucket] = hits[i].rssi;
     }
-    // Peak hold: the loudest packet of each ten seconds, in amber.
+    // Peak hold: the loudest packet of each eighth of the window, in amber.
     for (int b = 7; b >= 0; b--) {
         if (peakHold[b] <= -128) continue;
         const int xa = x0 + w - 1 - (int)((b + 1) * w / 8), xb = x0 + w - 1 - (int)(b * w / 8);
@@ -754,22 +791,22 @@ void drawDish(TFT_eSPI& t, uint32_t now) {
         const char* nm = Privacy::name(b.tag, pv, sizeof pv);
         if (b.miles < 10) snprintf(line, sizeof line, "NEAR %s %u.%umi %s", nm, (unsigned)b.miles, (unsigned)(b.miles * 10) % 10, compass(b.bearing));
         else              snprintf(line, sizeof line, "NEAR %s %umi %s", nm, (unsigned)b.miles, compass(b.bearing));
-        smallClip(t, 92, INFO_Y, line, netCol(b.proto), 132);
+        smallClip(t, 92, INFO_Y, line, netCol(b.proto), SCREEN_W - 188);
     } else {
         // Heard, but none has sent a position yet (Meshtastic's default is one
         // every 15-30 min, and many owners turn it off), or no fix to place them.
-        smallClip(t, 92, INFO_Y, !nb ? "NOBODY HEARD YET" : haveFix ? "NO NODE POS YET" : "NEEDS A GPS FIX", dim(Theme::WHITE, 150), 132);
+        smallClip(t, 92, INFO_Y, !nb ? "NOBODY HEARD YET" : haveFix ? "NO NODE POS YET" : "NEEDS A GPS FIX", dim(Theme::WHITE, 150), SCREEN_W - 188);
     }
     // The key: filled heard direct, hollow through relays.
-    t.fillCircle(232, INFO_Y + 3, 1, Theme::WHITE);  small(t, 236, INFO_Y, "DIRECT", dim(Theme::WHITE, 150));
-    t.drawCircle(279, INFO_Y + 3, 2, Theme::WHITE);  small(t, 284, INFO_Y, "RELAY", dim(Theme::WHITE, 150));
+    t.fillCircle(SCREEN_W - 88, INFO_Y + 3, 1, Theme::WHITE);  small(t, SCREEN_W - 84, INFO_Y, "DIRECT", dim(Theme::WHITE, 150));
+    t.drawCircle(SCREEN_W - 41, INFO_Y + 3, 2, Theme::WHITE);  small(t, SCREEN_W - 36, INFO_Y, "RELAY", dim(Theme::WHITE, 150));
 }
 
 // ---- the chats -------------------------------------------------------------------
 // CHAT RAIN: inside the window, under its lines, in the open tab's colour.
 void drawChatRain(TFT_eSPI& t) {
     t.setTextFont(1); t.setTextSize(1);
-    t.setViewport(5, CHAT_ROWS_Y, 310, CHAT_BOTTOM - CHAT_ROWS_Y - 1, false);
+    t.setViewport(CHAT_X + 1, CHAT_ROWS_Y, CHAT_W - 2, CHAT_BOTTOM - CHAT_ROWS_Y - 1, false);
     const uint16_t c = s_net ? Theme::PINK : Theme::CYAN;
     rainDraw(t, s_chatRain, CHAT_RAIN_A, [](int, int) { return true; }, [c](const RainCol&, int) { return c; });
     t.resetViewport();
@@ -783,10 +820,10 @@ void drawChats(TFT_eSPI& t, uint32_t now) {
     const uint16_t cols[2] = { Theme::CYAN, Theme::PINK };
     const char* names[2] = { "MESHTASTIC", "MESHCORE" };
     const uint8_t c = s_net;
-    t.drawRect(4, CHAT_Y, 312, CHAT_BOTTOM - CHAT_Y, dim(cols[c], 110));
+    t.drawRect(CHAT_X, CHAT_Y, CHAT_W, CHAT_BOTTOM - CHAT_Y, dim(cols[c], 110));
     t.setTextFont(1); t.setTextSize(1);
     for (int k = 0; k < 2; k++) {
-        const int x0 = k ? 160 : 4, w = 156;
+        const int x0 = k ? TAB_SPLIT : CHAT_X, w = TAB_SPLIT - CHAT_X;
         const bool on = k == c;
         if (on) t.fillRect(x0 + 1, CHAT_Y + 1, w - 2, CHAT_TAB_H - 1, dim(cols[k], 60));
         else    t.fillRect(x0 + 1, CHAT_Y + 1, w - 2, CHAT_TAB_H - 1, dim(cols[k], 14));
@@ -794,15 +831,15 @@ void drawChats(TFT_eSPI& t, uint32_t now) {
         snprintf(lab, sizeof lab, "%s %u", names[k], (unsigned)s_pCount[k]);
         small(t, x0 + (w - t.textWidth(lab)) / 2, CHAT_Y + 4, lab, on ? Theme::WHITE : dim(cols[k], 150), on ? dim(cols[k], 60) : dim(cols[k], 14));
     }
-    t.drawFastHLine(5, CHAT_Y + CHAT_TAB_H, 310, dim(cols[c], 110));
-    t.drawFastVLine(160, CHAT_Y + 1, CHAT_TAB_H - 1, dim(Theme::WHITE, 40));
+    t.drawFastHLine(CHAT_X + 1, CHAT_Y + CHAT_TAB_H, CHAT_W - 2, dim(cols[c], 110));
+    t.drawFastVLine(TAB_SPLIT, CHAT_Y + 1, CHAT_TAB_H - 1, dim(Theme::WHITE, 40));
     // Something unread: a small badge at the far end of the tabs.
     const uint16_t unread = uiLoraChatUnread();
     if (unread) {
         char badge[12]; snprintf(badge, sizeof badge, "%u NEW", (unsigned)unread);
         const int bw = t.textWidth(badge) + 6;
-        t.fillRect(316 - 3 - bw, CHAT_Y + 2, bw, 10, Theme::VAPOR_YELLOW);
-        small(t, 316 - bw, CHAT_Y + 3, badge, Theme::BLACK, Theme::VAPOR_YELLOW);
+        t.fillRect(CHAT_R - 3 - bw, CHAT_Y + 2, bw, 10, Theme::VAPOR_YELLOW);
+        small(t, CHAT_R - bw, CHAT_Y + 3, badge, Theme::BLACK, Theme::VAPOR_YELLOW);
     }
     if (!s_pKept[c]) {
         small(t, 10, CHAT_ROWS_Y + 4, c ? "no MeshCore messages yet" : "no Meshtastic messages yet", dim(Theme::WHITE, 120));
@@ -811,7 +848,7 @@ void drawChats(TFT_eSPI& t, uint32_t now) {
     for (uint8_t i = 0; i < s_pKept[c]; i++) {
         const Lora::Msgs::Msg& r = s_ps->keep[c][i];
         const int y = CHAT_ROWS_Y + i * CHAT_ROW_H;
-        if (i == 0) t.fillRect(5, y - 1, 310, CHAT_ROW_H, dim(cols[c], 22));
+        if (i == 0) t.fillRect(CHAT_X + 1, y - 1, CHAT_W - 2, CHAT_ROW_H, dim(cols[c], 22));
         char pv[24], ago[8];
         const char* who = Privacy::name(r.sender[0] ? r.sender : "?", pv, sizeof pv);
         age(now, r.ms, ago, sizeof ago);
@@ -821,16 +858,16 @@ void drawChats(TFT_eSPI& t, uint32_t now) {
         const int agoW = t.textWidth(ago);
         char text[64]; snprintf(text, sizeof text, "%s", r.text);
         size_t tn = strlen(text);
-        while (tn && tx + t.textWidth(text) > 316 - 8 - agoW) text[--tn] = '\0';
+        while (tn && tx + t.textWidth(text) > CHAT_R - 8 - agoW) text[--tn] = '\0';
         t.setTextColor(Theme::WHITE, bg); t.setCursor(tx, y + 1); t.print(text);
-        t.setTextColor(dim(Theme::WHITE, 110), bg); t.setCursor(316 - 4 - agoW, y + 1); t.print(ago);
+        t.setTextColor(dim(Theme::WHITE, 110), bg); t.setCursor(CHAT_R - 4 - agoW, y + 1); t.print(ago);
     }
 }
 
 // ---- the compose line and the bar -------------------------------------------------
 void drawCompose(TFT_eSPI& t, uint32_t now) {
     const uint16_t accent = s_net ? Theme::PINK : Theme::CYAN;
-    const int w = 232;
+    const int w = COMPOSE_W;
     t.fillRoundRect(4, COMPOSE_Y, w, COMPOSE_H, 2, dim(Theme::WHITE, 18));
     t.drawRoundRect(4, COMPOSE_Y, w, COMPOSE_H, 2, dim(accent, 150));
     t.setTextFont(1); t.setTextSize(1);
@@ -859,13 +896,12 @@ void drawBar(TFT_eSPI& t) {
 // rather than taking a line from the chats; drawn after the bar for that.
 void drawSwitch(TFT_eSPI& t) {
     const uint16_t accent = s_net ? Theme::PINK : Theme::CYAN;
-    s_switchX = 240; s_switchW = 76;
     const int h = COMPOSE_H * 2;
-    t.fillRoundRect(s_switchX, COMPOSE_Y, s_switchW, h, 3, dim(accent, 40));
-    t.drawRoundRect(s_switchX, COMPOSE_Y, s_switchW, h, 3, accent);
+    t.fillRoundRect(SWITCH_X, COMPOSE_Y, SWITCH_W, h, 3, dim(accent, 40));
+    t.drawRoundRect(SWITCH_X, COMPOSE_Y, SWITCH_W, h, 3, accent);
     const char* lab = s_net ? "> MESHCORE" : "> MESHTASTIC";
     t.setTextFont(1); t.setTextSize(1);
-    small(t, s_switchX + (s_switchW - t.textWidth(lab)) / 2, COMPOSE_Y + (h - 8) / 2, lab, accent, dim(accent, 40));
+    small(t, SWITCH_X + (SWITCH_W - t.textWidth(lab)) / 2, COMPOSE_Y + (h - 8) / 2, lab, accent, dim(accent, 40));
 }
 
 }  // namespace
@@ -894,7 +930,7 @@ void uiLoraHomeTick(TFT_eSPI& t, uint32_t now) {
     const uint32_t dt = s_lastFrame ? (now - s_lastFrame > 200 ? 200 : now - s_lastFrame) : 16;
     s_lastFrame = now;
     // The CHAT RAIN, drawn inside the chat window, clipped.
-    if (!s_chatRain.ready) rainInit(s_chatRain, 7, 313, 6, CHAT_ROWS_Y, CHAT_BOTTOM - CHAT_ROWS_Y, 0.5f, 0xCA75);
+    if (!s_chatRain.ready) rainInit(s_chatRain, CHAT_X + 3, CHAT_R - 3, 6, CHAT_ROWS_Y, CHAT_BOTTOM - CHAT_ROWS_Y, 0.5f, 0xCA75);
     rainStep(s_chatRain, dt, 0.4f);
     const Numbers n = numbers(now);
     drawHeader(t, now);
@@ -915,19 +951,35 @@ LoraHomeHit uiLoraHomeHit(TFT_eSPI& t, int x, int y) {
     // right half does nothing, so a slip below the switch goes nowhere.
     if (y < 14 && x >= t.width() - 80) return LoraHomeHit::BACK;
     // The switch, all of its double height and a little round it.
-    if (y >= COMPOSE_Y - 2 && x >= s_switchX - 6) return LoraHomeHit::SWITCH;
+    if (y >= COMPOSE_Y - 2 && x >= SWITCH_X - 6) return LoraHomeHit::SWITCH;
     if (y >= BAR_Y - 4) return x < 80 ? LoraHomeHit::CHATS : LoraHomeHit::NONE;
     if (y >= COMPOSE_Y - 2) return LoraHomeHit::NONE;
-    if (y >= CHAT_Y - 2 && y < CHAT_Y + CHAT_TAB_H + 2) return x < 160 ? LoraHomeHit::TAB_MESHTASTIC : LoraHomeHit::TAB_MESHCORE;
+    if (y >= CHAT_Y - 2 && y < CHAT_Y + CHAT_TAB_H + 2) return x < TAB_SPLIT ? LoraHomeHit::TAB_MESHTASTIC : LoraHomeHit::TAB_MESHCORE;
     if (y >= CHAT_Y + CHAT_TAB_H + 2 && y < COMPOSE_Y - 2) return s_net ? LoraHomeHit::CHAT_MESHCORE : LoraHomeHit::CHAT_MESHTASTIC;
     return LoraHomeHit::NONE;
+}
+
+uint8_t uiLoraHomeStops(int16_t* xs, int16_t* ys, int16_t* ws, int16_t* hs, uint8_t cap) {
+    // In the order the eye reads them: BACK, the two tabs, the open chat, the
+    // switch, CHATS.
+    const int16_t r[6][4] = {
+        { (int16_t)(SCREEN_W - 6 - 54 - 2), 1, 58, 12 },
+        { (int16_t)CHAT_X, (int16_t)CHAT_Y, (int16_t)(TAB_SPLIT - CHAT_X), (int16_t)(CHAT_TAB_H + 1) },
+        { (int16_t)TAB_SPLIT, (int16_t)CHAT_Y, (int16_t)(CHAT_R - TAB_SPLIT), (int16_t)(CHAT_TAB_H + 1) },
+        { (int16_t)CHAT_X, (int16_t)(CHAT_ROWS_Y - 1), (int16_t)CHAT_W, (int16_t)(CHAT_BOTTOM - CHAT_ROWS_Y + 1) },
+        { (int16_t)SWITCH_X, (int16_t)COMPOSE_Y, (int16_t)SWITCH_W, (int16_t)(COMPOSE_H * 2) },
+        { 2, (int16_t)BAR_Y, 60, 11 },
+    };
+    uint8_t n = 0;
+    for (; n < 6 && n < cap; n++) { xs[n] = r[n][0]; ys[n] = r[n][1]; ws[n] = r[n][2]; hs[n] = r[n][3]; }
+    return n;
 }
 
 void uiLoraHomeKey(char c, uint32_t now) {
     if (c == '\b') { if (s_composeN) s_compose[--s_composeN] = '\0'; return; }
     if (c == '\n') {
         if (!s_composeN) return;
-        if (!Settings::loraTxDbm()) { snprintf(s_status, sizeof s_status, "LORA TX IS OFF: SETTINGS > LORA"); s_statusAt = now; return; }
+        if (!Settings::loraTxDbm()) { snprintf(s_status, sizeof s_status, "LORA TX IS OFF: SETTINGS > %s", LORA_TX_PAGE); s_statusAt = now; return; }
         const char* nick = Squachy::nickname();
         if (!nick || !*nick) nick = "SQUACHY";
         const bool ok = Lora::sendText(s_net ? Lora::Proto::MESHCORE : Lora::Proto::MESHTASTIC, nick, s_compose, (int8_t)Settings::loraTxDbm());
@@ -941,4 +993,4 @@ void uiLoraHomeKey(char c, uint32_t now) {
     if (s_composeN < cap) { s_compose[s_composeN++] = c; s_compose[s_composeN] = '\0'; }
 }
 
-#endif  // (SQUACH_LORA && TDECK_PLUS) || SQUACH_LORA_FAKE
+#endif  // (SQUACH_LORA && (TDECK_PLUS || TLORA_PAGER)) || SQUACH_LORA_FAKE

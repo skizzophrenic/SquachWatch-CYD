@@ -78,7 +78,14 @@ static inline int TWof(TFT_eSPI& t) { return t.width() >= 400 ? 112 : 56; }
 // 120 px at that size, so the box has to lead the label or drawButton just
 // declines the step-up and they stay small. Everything narrower is unchanged.
 static inline int BWof(TFT_eSPI& t) { return t.width() >= 400 ? 128 : 68; }
-static inline int BHof(TFT_eSPI& t) { return t.width() >= 400 ?  36 : 26; }
+// The T-LoRa Pager's 480x222: as wide as the big panels, but under two thirds
+// of their height. Their size-2 lines and 36-px buttons put the last row of
+// phrases under BACK, TYPE and SEND, so it takes font 2 and shorter rows.
+static inline bool shortWide(TFT_eSPI& t) { return t.width() >= 400 && t.height() < 240; }
+static inline int BHof(TFT_eSPI& t) { return t.width() >= 400 ? (shortWide(t) ? 28 : 36) : 26; }
+// The phrases' own letters: font 2 on the short wide panel, else the usual size.
+static inline void lineFontOn(TFT_eSPI& t)  { if (shortWide(t)) { t.setTextFont(2); t.setTextSize(1); } else t.setTextSize(Theme::uiTextSize(t, 1)); }
+static inline void lineFontOff(TFT_eSPI& t) { if (shortWide(t)) t.setTextFont(1); }
 
 // Held to 36 characters. Portrait is 240 wide and these start 8 in, so 38 is
 // the most that fits; the first versions ran to 41 and lost their last words
@@ -453,7 +460,7 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bo
     // The cell grows with the letters, or a size-2 line sits on the border.
     const int cw = (w - 8 - (cols - 1) * 6) / cols;
     const int ch = port ? (Theme::uiTextSize(t, 1) == 1 ? 18 : 24)
-                        : (Theme::uiTextSize(t, 1) == 1 ? 20 : 28);
+                        : (Theme::uiTextSize(t, 1) == 1 || shortWide(t) ? 20 : 28);
     const int y0 = by + bh + 6;
     s_lineN = 0;
     if (s_typedOn) {
@@ -519,7 +526,7 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bo
         }
         Theme::bodyFontOff(t);
     } else if (s_fillOn) {
-        const int LTH = Theme::uiTextSize(t, 1) == 1 ? 18 : 26;
+        const int LTH = Theme::uiTextSize(t, 1) == 1 ? 18 : shortWide(t) ? 20 : 26;
         t.setTextSize(Theme::uiTextSize(t, 1));
         t.setTextColor(Theme::VAPOR_YELLOW, Theme::BG);
         const char* hd = "PICK A START, TYPE THE REST";
@@ -533,17 +540,18 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bo
             s_lineN++;
             t.fillRect(x, y, cw, ch, Theme::BG);
             t.drawRect(x, y, cw, ch, Theme::VAPOR_YELLOW);
-            t.setTextSize(Theme::uiTextSize(t, 1));
+            lineFontOn(t);
             t.setTextColor(Theme::WHITE, Theme::BG);
             t.setCursor(x + 6, y + (ch - t.fontHeight()) / 2);
             t.print(FILL_LINES[i]);
             t.setTextColor(Theme::W95_SHADOW, Theme::BG);
             t.print("___");
+            lineFontOff(t);
         }
     } else {
         // The same tab row the emote half draws, in the same place, so the two
         // pickers read as one control with two halves.
-        const int LTH = Theme::uiTextSize(t, 1) == 1 ? 18 : 26;
+        const int LTH = Theme::uiTextSize(t, 1) == 1 ? 18 : shortWide(t) ? 20 : 26;
         const int ltw = (w - 8 - (MeshMsg::CANNED_TABS - 1) * 3) / MeshMsg::CANNED_TABS;
         Theme::bodyFontOn(t);   // the tab names
         for (uint8_t i = 0; i < MeshMsg::CANNED_TABS; i++) {
@@ -570,10 +578,11 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bo
             const uint16_t bg = sel ? Theme::PURPLE : Theme::BG;
             t.fillRect(x, y, cw, ch, bg);
             t.drawRect(x, y, cw, ch, sel ? Theme::VAPOR_PINK : Theme::CYAN);
-            t.setTextSize(Theme::uiTextSize(t, 1));
+            lineFontOn(t);
             t.setTextColor(sel ? Theme::labelOn(bg) : Theme::WHITE, bg);
             t.setCursor(x + 6, y + (ch - t.fontHeight()) / 2);
             t.print(MeshMsg::CANNED[idx]);
+            lineFontOff(t);
         }
     }
 
@@ -681,6 +690,35 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bo
         }
         MeshTutor::drawCard(t, true);
     }
+}
+
+uint8_t uiMeshComposeStops(int16_t* xs, int16_t* ys, int16_t* ws, int16_t* hs, uint8_t cap) {
+    uint8_t n = 0;
+    auto put = [&](const Rect& r) {
+        if (r.w <= 0 || n >= cap) return;
+        xs[n] = r.x; ys[n] = r.y; ws[n] = r.w; hs[n] = r.h; n++;
+    };
+    // The same branches as uiMeshComposeTouch(), so a stop is only ever
+    // somewhere a press does something. The buttons are zeroed by every
+    // draw and set again only when shown; the tabs and lines are not, so
+    // they are only listed in the mode that draws them.
+    if (MeshTutor::active()) {
+        for (uint8_t i = 0; i < s_lineN; i++) put(s_lineRect[i]);
+        put(s_back); put(s_send);
+        return n;
+    }
+    if (s_typedOn) { put(s_send); put(s_back); return n; }
+    if (s_emoteOn && s_sel < 0) {
+        for (uint8_t i = 0; i < EmoteScript::PER_TAB; i++) put(s_emoteRect[i]);
+        for (uint8_t i = 0; i < EmoteScript::TABS; i++) put(s_tabRect[i]);
+        put(s_emoteBtn); put(s_random); put(s_back);
+        return n;
+    }
+    put(s_type);
+    for (uint8_t i = 0; i < s_lineN; i++) put(s_lineRect[i]);
+    if (s_sel < 0) for (uint8_t i = 0; i < MeshMsg::CANNED_TABS; i++) put(s_lineTabRect[i]);
+    put(s_send); put(s_fill); put(s_emoteBtn); put(s_help); put(s_back);
+    return n;
 }
 
 ComposeHit uiMeshComposeTouch(int x, int y, uint32_t now) {

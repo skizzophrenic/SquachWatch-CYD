@@ -15,3 +15,6 @@ void uiZoneCardDraw(TFT_eSPI& t, uint32_t now);
 
 enum class ZoneHit : uint8_t { NONE, CARD, PREV, NEXT, OK };   // CARD: on it, not on a button
 ZoneHit uiZoneCardHit(int x, int y, int screenW, int screenH);
+// The three buttons as rectangles, < then THIS IS RIGHT then >, for a board
+// that steps a cursor instead of taking a finger. Returns how many (3).
+uint8_t uiZoneCardStops(int screenW, int screenH, int16_t* xs, int16_t* ys, int16_t* ws, int16_t* hs);

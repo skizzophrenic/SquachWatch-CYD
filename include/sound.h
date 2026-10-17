@@ -2,7 +2,8 @@
 //
 // The two Freenove S3 boards carry an ES8311 codec on the touch controller's
 // I2C bus and a small mono amplifier behind it, with a speaker plug on the
-// edge. Nothing else in the fleet has a speaker; this header is a set of
+// edge; the T-LoRa Pager the same codec on its expander's bus; the T-Deck Plus
+// an I2S amplifier. Nothing else in the fleet has a speaker; this header is a set of
 // no-ops everywhere else, so the pets and the mascot can ask for a sound
 // without knowing whether anything is listening.
 //
@@ -18,10 +19,18 @@
 #pragma once
 #include <stdint.h>
 
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(TLORA_PAGER)
 #define SQW_SPEAKER 1
 #else
 #define SQW_SPEAKER 0
+#endif
+// The battery boards' POWER OFF, power diary, wake restart and boot stages
+// (main.cpp) came in with the speaker and share its boards -- all but the
+// Pager, which has a power off of its own (pagerPowerOff).
+#if SQW_SPEAKER && !defined(TLORA_PAGER)
+#define SQW_POWER_DIARY 1
+#else
+#define SQW_POWER_DIARY 0
 #endif
 
 namespace Sound {

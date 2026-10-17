@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Save a T-Watch's wardrive log as a WiGLE file.
+"""Save a board's wardrive log as a WiGLE file (T-Watch S3 Plus, T-LoRa Pager).
 
     python tools/wigle_dump.py COM14                # real rows only
     python tools/wigle_dump.py COM14 --all          # bench (GPS FAKE) rows too
@@ -9,15 +9,16 @@ The watch writes a WigleWifi-1.6 CSV between two marker lines when it is sent
 WIGLE on its console (see wigleExport in src/main.cpp); this keeps what is
 between them. The result uploads to https://wigle.net/uploads as it is.
 
-The port is opened without touching DTR/RTS: on the S3's native USB, the
-default open is a reset, and a reset would lose nothing on flash but would
-drop the GPS fix mid-drive. The port's USB serial number is the watch's MAC,
-so the board is checked before anything is opened.
+The port is opened with DTR up and RTS down: on the S3's native USB, the
+default open can be a reset, and a reset would lose nothing on flash but would
+drop the GPS fix mid-drive. Only an S3's native USB port is opened (its USB
+serial number is its MAC; the known watches are named).
 """
 import csv, os, re, sys, time
 import serial
 import serial.tools.list_ports
 
+ESPRESSIF_VID = 0x303A
 MAC_RE = re.compile(r"^[0-9a-f]{2}(:[0-9a-f]{2}){5},")
 
 WATCHES = {
@@ -36,13 +37,18 @@ def main():
     info = {p.device: p for p in serial.tools.list_ports.comports()}
     p = info.get(port)
     sn = (p.serial_number or "").upper() if p else ""
-    if sn not in WATCHES:
-        print("%s is not a known watch (USB serial %r); nothing opened." % (port, sn or None)); return 1
-    print("%s: %s (%s)" % (port, WATCHES[sn], sn))
+    # Any board on Espressif's own USB (the S3's native port, VID 0x303A) can
+    # be asked; a USB-serial bridge (a CYD's CH340) would be reset by the open.
+    if not p or p.vid != ESPRESSIF_VID:
+        print("%s is not an ESP32-S3's own USB port (USB serial %r); nothing opened." % (port, sn or None)); return 1
+    print("%s: %s (%s)" % (port, WATCHES.get(sn, "an S3 board"), sn))
 
     ser = serial.Serial()
     ser.port = port; ser.baudrate = 115200; ser.timeout = 0.5
-    ser.dsrdtr = False; ser.rtscts = False; ser.rts = False; ser.dtr = False
+    # DTR held up, RTS down, set before the open so the lines never pass through
+    # DTR low with RTS high -- that is the S3's reset (EN), and on the T-LoRa
+    # Pager it also left the port taking nothing more until a reflash.
+    ser.dsrdtr = False; ser.rtscts = False; ser.dtr = True; ser.rts = False
     ser.open()
     ser.reset_input_buffer()
     ser.write(b"WIGLE ALL\n" if every else b"WIGLE\n")

@@ -1,4 +1,4 @@
-// SquachWatch-CYD — LORA, the T-Deck's landing page for its radio.
+// SquachWatch-CYD — LORA, the T-Deck's and the Pager's landing page for the radio.
 //
 // One screen with everything the radio knows right now: a radar of the
 // nodes on the left, the four numbers (NOW, FLOOR, PEAK, MARGIN) and the last
@@ -15,8 +15,8 @@
 // one antenna gives no direction. A filled dot was heard directly, a hollow
 // one only through relays, and signal strength is never drawn as distance.
 //
-// Opened by Enter on the home screen and by the LORA pill. Built only with
-// SQUACH_LORA on the T-Deck.
+// Opened by the LORA pill, and on the T-Deck by Enter on the home screen.
+// Built only with SQUACH_LORA on the T-Deck and the Pager.
 #pragma once
 #include <TFT_eSPI.h>
 #include <stdint.h>
@@ -35,3 +35,7 @@ uint8_t     uiLoraHomeNet();
 // The keyboard while the page is up: printable keys type, '\b' deletes,
 // '\n' sends what is typed on the switch's network.
 void        uiLoraHomeKey(char c, uint32_t now);
+// The Pager's cursor stops, boxed: BACK, the two tabs, the open chat, the
+// switch, CHATS.
+// Fills up to cap rectangles; returns how many.
+uint8_t     uiLoraHomeStops(int16_t* xs, int16_t* ys, int16_t* ws, int16_t* hs, uint8_t cap);

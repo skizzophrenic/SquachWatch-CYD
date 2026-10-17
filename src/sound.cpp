@@ -1,4 +1,5 @@
-// SquachWatch-CYD — the speaker on the Freenove S3 boards. See sound.h.
+// SquachWatch-CYD — the speaker on the Freenove S3 boards, the T-Deck Plus and
+// the T-LoRa Pager. See sound.h.
 //
 // The hardware, from Freenove's schematics and their Sketch_07.1_Music: an
 // ES8311 codec at I2C 0x18 on the touch bus, fed over I2S, driving a small
@@ -31,6 +32,9 @@
 #include <esp_heap_caps.h>
 #include "settings.h"
 #include "clock.h"
+#if defined(TLORA_PAGER)
+void pagerSpeakerAmp(bool on);   // main.cpp: the amp's enable on the XL9555
+#endif
 
 namespace Sound {
 
@@ -44,6 +48,14 @@ static const int PIN_AMP = 1;
 static const int PIN_MCK = -1, PIN_BCK = 7, PIN_WS = 5, PIN_DOUT = 6;
 static const int PIN_AMP = -1;
 #define SOUND_NO_CODEC 1
+#elif defined(TLORA_PAGER)
+// The T-LoRa Pager: the same ES8311 at 0x18, on the expander's bus (SDA 3 /
+// SCL 2), I2S on MCK 10 / BCK 11 / WS 18 / DOUT 45 (arduino-esp32's
+// variants/lilygo_tlora_pager). Its amp's enable is the XL9555's port 0 bit 1,
+// not a GPIO, so amp() goes through main.cpp's pagerSpeakerAmp() -- I2C from
+// this task, which Wire's per-transaction lock allows.
+static const int PIN_MCK = 10, PIN_BCK = 11, PIN_WS = 18, PIN_DOUT = 45;
+static const int PIN_AMP = -1;
 #else
 static const int PIN_MCK = 4,  PIN_BCK = 5,  PIN_WS = 7,  PIN_DOUT = 8;
 static const int PIN_AMP = 1;
@@ -190,7 +202,11 @@ static bool codecInit() {
 }
 
 // ---- the amplifier ---------------------------------------------------------
+#if defined(TLORA_PAGER)
+static void amp(bool on) { ::pagerSpeakerAmp(on); }
+#else
 static void amp(bool on) { if (PIN_AMP >= 0) digitalWrite(PIN_AMP, (on == s_ampLow) ? LOW : HIGH); }
+#endif
 
 // ---- rendering -------------------------------------------------------------
 // The whole sound is rendered into a float buffer in PSRAM first (every board
@@ -477,8 +493,13 @@ void begin() {
     s_q = xQueueCreate(4, sizeof(uint8_t));
     xTaskCreatePinnedToCore(soundTask, "sound", 4096, nullptr, 2, &s_task, 1);
     s_ok = s_q && s_task;
+#if defined(TLORA_PAGER)
+    Serial.printf("[sound] ES8311 id %02X%02X ready: MCK %d BCK %d WS %d DOUT %d, amp on the expander%s\n",
+                  id1, id2, PIN_MCK, PIN_BCK, PIN_WS, PIN_DOUT, s_ok ? "" : " -- task failed");
+#else
     Serial.printf("[sound] ES8311 id %02X%02X ready: MCK %d BCK %d WS %d DOUT %d, amp on GPIO%d%s\n",
                   id1, id2, PIN_MCK, PIN_BCK, PIN_WS, PIN_DOUT, PIN_AMP, s_ok ? "" : " -- task failed");
+#endif
 #endif
 }
 

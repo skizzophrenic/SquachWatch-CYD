@@ -85,6 +85,9 @@ extern volatile bool g_consoleBatt;
 extern volatile bool g_consoleBattLog;
 extern volatile int8_t g_consoleSound;
 extern volatile bool g_consoleScreen;
+#if defined(TLORA_PAGER)
+extern volatile bool g_consolePowerOff;   // main.cpp: POWER OFF, the Pager's ship mode
+#endif
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
 extern volatile bool g_consolePowerOff;   // main.cpp: POWER OFF, the Freenove boards' deep sleep
 extern volatile bool g_consoleNapTest;       // main.cpp: NAPTEST, POWER OFF that wakes itself 3 s later
@@ -643,6 +646,9 @@ void pollSerial() {
         if (strcasecmp(line, "SOUND AMP LOW") == 0)  { g_consoleSound = 21; continue; }
         if (strncasecmp(line, "SOUND ", 6) == 0) { g_consoleSound = (int8_t)atoi(line + 6); continue; }
         if (strcasecmp(line, "SCREEN") == 0) { g_consoleScreen = true; continue; }
+#if defined(TLORA_PAGER)
+        if (strcasecmp(line, "POWER OFF") == 0) { g_consolePowerOff = true; continue; }
+#endif
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
         if (strcasecmp(line, "POWER OFF") == 0) { g_consolePowerOff = true; continue; }
         if (strcasecmp(line, "NAPTEST") == 0)   { g_consoleNapTest = true; g_consolePowerOff = true; continue; }
