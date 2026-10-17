@@ -359,6 +359,7 @@ static void drawCrashCard(TFT_eSPI& t) {
 #endif
 #include "touch_cal.h"
 #include "settings.h"
+#include "board_audio.h"
 #include "signatures.h"
 #include "ota_core.h"
 #include "ota_ble.h"
@@ -1717,6 +1718,8 @@ static void applyBrightness() {
     // takes a bare I2C command byte on an inverted scale. CrowBL::set()
     // keeps the firmware's own 0..255-with-255-brightest convention.
     CrowBL::set(duty);
+#elif defined(CYD40)
+    pinMode(TFT_BL, OUTPUT); digitalWrite(TFT_BL, TFT_BACKLIGHT_ON);
 #elif defined(NM_CYD_C5)
     // One backlight, and a pin-based call. Arduino core 3 dropped the LEDC
     // channel API entirely: ledcWrite takes the PIN now, and the channel is
@@ -4093,7 +4096,7 @@ void setup() {
 // ... and not on the CrowPanel 7, where GPIO21 is the panel's BLUE-0 data
 // line. Driving it high before the panel driver claims it is a stripe down the
 // picture at best.
-#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(CYD32C) && !defined(CYD35C)
+#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(CYD32C) && !defined(CYD35C) && !defined(CYD40)
     pinMode(21, OUTPUT); digitalWrite(21, HIGH);
 #endif
 #if defined(SQW_S3)
@@ -4126,6 +4129,9 @@ void setup() {
 #endif
 #endif
 
+#if defined(CYD40)
+    BoardAudio::begin();
+#endif
     tft.init();
 #if SQW_SPEAKER
     bootStage(1);
@@ -9030,6 +9036,8 @@ void loop() {
             info.boardName = "freenove-s3-40";
 #elif defined(CYD35C)
             info.boardName = "cyd35c BETA";
+#elif defined(CYD40)
+            info.boardName = "Hosyond CYD40";
 #elif defined(CYD35)
             info.boardName = "cyd35 BETA";
 #else
