@@ -51,19 +51,15 @@ namespace IgnoreList {
 
     void clear();
 
-    // SNOOZE: the same thing as IGNORE for one device -- no full-screen
-    // alert, still scanned, counted and logged -- but in RAM only, so it
-    // lasts until the board restarts and not a moment longer. For the
-    // doorbell across the street that keeps coming and going on a walk
-    // past, where IGNORE would be a decision about forever.
-    //
-    // It used to mute the whole TYPE for an hour, and more than the alert:
-    // it switched detection of that type off, so nothing was logged either.
-    // Snoozing a neighbour's AirTag silenced every AirTag, which is the one
-    // thing a tracker detector must never quietly do.
-    //
-    // Thirty-two of them; when full, the oldest snooze makes room.
+    // Timed snoozes expire after 10, 30, or 60 minutes; ALWAYS survives restart.
+    // Detection and logging remain active. Only full-screen alerts are suppressed.
+    enum class SnoozeDuration : uint8_t { MIN_10, MIN_30, HOUR_1, ALWAYS };
+    static const uint8_t SNOOZE_MAX = 32;
+    bool snooze(const uint8_t* mac, SnoozeDuration duration);
     void snooze(const uint8_t* mac);
+    bool unsnooze(const uint8_t* mac);
+    uint8_t snoozeCount();
+    bool snoozeInfo(uint8_t idx, uint8_t mac[6], uint32_t& remainingMs, bool& always);
     bool snoozed(const uint8_t* mac);
     // What every alert gate asks: ignored for good, or snoozed for now.
     bool silenced(const uint8_t* mac);
