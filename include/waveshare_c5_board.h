@@ -33,6 +33,12 @@ namespace WsC5 {
     // The speaker amplifier's enable (EXIO3). Safe from the sound task.
     // (EXIO6 is NOT spare: driven high, it reset the board. Leave it alone.)
     void setAmp(bool on);
+    // The battery, in millivolts: the helper's ADC (register 0x06, 10 bits,
+    // against its 3.3 V supply) on BAT_ADC, which the schematic's R7 200K /
+    // R10 100K divider puts at a third of VBAT. 0 if the helper did not answer.
+    uint16_t batteryMv();
+    // The same reading, unscaled, for checking the scale on a bench.
+    uint16_t batteryRaw();
 }
 
 namespace Cst3530 {

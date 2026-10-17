@@ -3275,7 +3275,7 @@ static void sticksPowerUp() {
 }
 #endif
 
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(WAVESHARE_C5)
 // The Freenove S3's battery: a 1-cell LiPo on its JST, a TP4054 charging it
 // from USB, and a 200K/200K divider from the cell to GPIO9 (ADC1, so WiFi does
 // not take it away) -- GPIO8 on the 3.5", per Freenove's battery sketch. The
@@ -3292,11 +3292,23 @@ static void sticksPowerUp() {
 // GPIO -- so a voltage and an estimate from it, and "charging" only as a guess
 // from the voltage jumping (see boardBatteryState). On the cable the cell
 // reads the charger's ~4.2 V, which is the honest reading.
+#if defined(WAVESHARE_C5)
+// The Waveshare C5 2.8: the same shape -- a cell on the MX1.25 BAT plug, a
+// charger whose only status is an LED -- but read through the CH32 helper's
+// ADC, a third of the cell's voltage (WsC5::batteryMv). Everything below,
+// the lava lamp, the cable sounds and BATT, is the Freenove's.
+static uint16_t boardBatteryMv() {
+    uint32_t sum = 0;
+    for (int i = 0; i < 4; i++) sum += WsC5::batteryMv();
+    return (uint16_t)(sum / 4);
+}
+#else
 static uint16_t boardBatteryMv() {
     uint32_t sum = 0;
     for (int i = 0; i < 8; i++) sum += analogReadMilliVolts(BOARD_BAT_ADC);
     return (uint16_t)(sum / 8 * 2);   // the divider halves it
 }
+#endif
 // Resting LiPo, per cell: rough, but a percent that moves the right way.
 static uint8_t boardBatteryPct(uint16_t mv) {
     static const uint16_t MV[]  = { 3300, 3500, 3600, 3700, 3750, 3800, 3850, 3900, 4000, 4100, 4200 };
@@ -4797,6 +4809,9 @@ void setup() {
     usingCapTouch = true;
     Serial.println("Waveshare C5 -- CST3530 capacitive touch.");
     Sound::begin();                       // the ES8311 is on the same bus, now up
+    { char b[16]; boardBatteryLine(b, sizeof b);
+      Serial.printf("[batt] %s (helper ADC raw %u)\n", b, (unsigned)WsC5::batteryRaw()); }
+    uiClearSetBatterySource(boardBatteryState);
 #elif defined(TOUCH_ON_DISPLAY_BUS)
     // AWOK's XPT2046 sits on the display's own shared VSPI bus (TOUCH_CS=21,
     // already armed by TFT_eSPI itself once awok_user_setup.h's #define
@@ -6175,9 +6190,7 @@ void loop() {
     }
 #endif
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(WAVESHARE_C5)
-#if !defined(WAVESHARE_C5)   // no battery reading on the Waveshare yet
     if (g_consoleBatt) { g_consoleBatt = false; boardBatteryPrintLog(); }
-#endif
     // The speaker's housekeeping: hushed while the saver has the screen
     // dimmed; a chime for a squad message that just landed (once per
     // message, by its arrival time); and the console's SOUND commands.
