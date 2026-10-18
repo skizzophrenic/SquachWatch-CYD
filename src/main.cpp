@@ -9149,6 +9149,8 @@ void loop() {
             info.boardName = "freenove-s3-35 BETA";
 #elif defined(FREENOVE_S3_40)
             info.boardName = "freenove-s3-40";
+#elif defined(WS_C5_35)
+            info.boardName = "Waveshare C5 3.5";
 #elif defined(CYD35C)
             info.boardName = "cyd35c BETA";
 #elif defined(CYD35)
