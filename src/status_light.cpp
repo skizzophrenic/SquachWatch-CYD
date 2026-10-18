@@ -29,8 +29,11 @@
 // status LED" rather than as a bug.
 #if defined(ESP32) && !defined(CYD35) && !defined(AWOK) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(NM_CYD_C5) && !defined(TAB5)
 #define STATUS_LIGHT_HW 1
-#elif defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || (defined(NM_CYD_C5) && !defined(MARAUDER_V8))
+#elif defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || (defined(NM_CYD_C5) && !defined(MARAUDER_V8) && !defined(WS_C5_35))
 #define STATUS_LIGHT_HW 2
+// Not the Waveshare C5 3.5": its GPIO27 is the I2C SDA line (touch, expander,
+// codec, RTC, PMU, IMU all sit on it), NOT a WS2812. A neopixel write there
+// would fight every I2C device, so this board has no status light (HW 0).
 // Not the Marauder V8: Marauder's own build leaves its WS2812 off
 // (HAS_NEOPIXEL_LED commented out) and 27 is a strapping pin on the C5, so it
 // is not driven on a guess.
