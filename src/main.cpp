@@ -1558,11 +1558,27 @@ static bool readTouchRaw(int16_t& a, int16_t& b) {
     return true;
 #elif defined(WS_C5_35)
     // FT6336 on I2C, panel pixels in the native portrait frame (like the GT911
-    // path) -- the per-read C5 bus fix lives inside WsTouch::read().
-    uint16_t x, y;
-    if (!WsTouch::read(x, y)) return false;
-    a = (int16_t)x; b = (int16_t)y;
-    return true;
+    // path) -- the per-read C5 bus fix lives inside WsTouch::read(). The C5's
+    // FT6336 intermittently drops a read (returns no points) even with a finger
+    // held down, which made a grab/drag keep "letting go" and re-latching. Hold
+    // the last good contact for a short grace window so a single missed read
+    // does not read as a finger lift -- a genuine release (no read for longer)
+    // still falls through to "up".
+    {
+        static int16_t  s_lastA = 0, s_lastB = 0;
+        static uint32_t s_lastOk = 0;
+        uint16_t x, y;
+        if (WsTouch::read(x, y)) {
+            s_lastA = (int16_t)x; s_lastB = (int16_t)y; s_lastOk = millis();
+            a = s_lastA; b = s_lastB;
+            return true;
+        }
+        if (s_lastOk && (uint32_t)(millis() - s_lastOk) < 90) {   // bridge a dropout
+            a = s_lastA; b = s_lastB;
+            return true;
+        }
+        return false;
+    }
 #elif defined(FREENOVE_S3_35)
     uint16_t x, y;
     if (!St77922Touch::read(x, y)) return false;
