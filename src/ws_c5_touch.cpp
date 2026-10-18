@@ -59,19 +59,29 @@ bool read(uint16_t& x, uint16_t& y) {
     // reads (writes ACK, reads return 0), so re-open the bus on each read and
     // validate the result (1-2 points, on-panel coords). This was the single
     // hardest bug in the C5 bring-up — do not remove.
-    Wire.end();
-    Wire.begin(SDA_PIN, SCL_PIN, 100000U);
+    //
+    // The read is ALSO intermittently flaky even with the re-open: a finger
+    // held still occasionally comes back as no points / a failed transaction,
+    // which made the mascot grab (a 600 ms still-hold) keep losing its timer.
+    // The glitch is transient, so retry a couple times within this one poll
+    // before reporting "no touch". A genuine finger-up just fails all tries
+    // (a few extra reads at the loop rate, no release latency).
+    for (int attempt = 0; attempt < 3; attempt++) {
+        Wire.end();
+        Wire.begin(SDA_PIN, SCL_PIN, 100000U);
 
-    uint8_t data[7];
-    if (!ftRead(TD_STATUS, data, 7)) return false;
-    const uint8_t points = data[0] & 0x0F;
-    if (points == 0 || points > 2) return false;
-    const uint16_t rx = ((uint16_t)(data[1] & 0x0F) << 8) | data[2];
-    const uint16_t ry = ((uint16_t)(data[3] & 0x0F) << 8) | data[4];
-    if (rx >= TFT_WIDTH || ry >= TFT_HEIGHT) return false;   // off-panel: reject
-    x = rx;
-    y = ry;
-    return true;
+        uint8_t data[7];
+        if (ftRead(TD_STATUS, data, 7)) {
+            const uint8_t points = data[0] & 0x0F;
+            if (points >= 1 && points <= 2) {
+                const uint16_t rx = ((uint16_t)(data[1] & 0x0F) << 8) | data[2];
+                const uint16_t ry = ((uint16_t)(data[3] & 0x0F) << 8) | data[4];
+                if (rx < TFT_WIDTH && ry < TFT_HEIGHT) { x = rx; y = ry; return true; }
+            }
+        }
+        // failed transaction / no or off-panel points: ride out the glitch
+    }
+    return false;
 }
 
 }  // namespace WsTouch
