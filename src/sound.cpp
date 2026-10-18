@@ -344,9 +344,12 @@ static bool codecInit() {
 // ---- the amplifier ---------------------------------------------------------
 #if defined(WAVESHARE_C5)
 // The enable is the helper chip's EXIO3, high = on. Waveshare's BSP turns it
-// on once and leaves it; so does this (begin() below), and the player never
-// touches I2C. Silence between sounds is the clocks' zeros.
-static void amp(bool) {}
+// on once and leaves it, and so did this -- until the battery gauge started
+// reading the same helper every two seconds and the alerts went quiet while
+// the test sounds still played after SOUND AMP HIGH (2026-10-18). So it is
+// sent again at the start of every sound (setAmp() is safe from this task),
+// and never turned off: silence between sounds is the clocks' zeros.
+static void amp(bool on) { if (on) WsC5::setAmp(true); }
 #else
 static void amp(bool on) { if (PIN_AMP >= 0) digitalWrite(PIN_AMP, (on == s_ampLow) ? LOW : HIGH); }
 #endif
