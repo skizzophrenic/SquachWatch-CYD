@@ -55,6 +55,12 @@
 #if defined(WAVESHARE_C5)
 #include "waveshare_c5_board.h"   // the CH32 helper (reset, backlight) and the CST3530
 #endif
+#if defined(WS_C5_35)
+// Waveshare C5 3.5": the 0x24 I/O expander (panel power, LCD/touch reset,
+// backlight) and the FT6336 capacitive touch, both on the shared I2C bus.
+#include "ws_c5_expander.h"
+#include "ws_c5_touch.h"
+#endif
 // The 3.5" comes resistive (ESP32-3248S035R: touch on the display's own bus)
 // and capacitive (ESP32-3248S035C: a GT911, the 3.2" capacitive's chip on the
 // same pins). CYD35 is both, for the panel and its two-band drawing; CYD35R
@@ -577,6 +583,11 @@ constexpr bool PANEL_NEEDS_INVERSION = false;
 // A DSI video panel behind M5GFX; the app's INVERT setting has nothing to
 // send, so false keeps the Settings handler's XOR honest.
 constexpr bool PANEL_NEEDS_INVERSION = false;
+#elif defined(WS_C5_35)
+// The Waveshare C5 3.5" ST7796 wants inversion on (Waveshare's own init sends
+// 0x21), validated on this board. As everywhere, the live control point is this
+// constant, not the header's TFT_INVERSION_ON; INVERT in Settings flips it.
+constexpr bool PANEL_NEEDS_INVERSION = true;
 #else
 constexpr bool PANEL_NEEDS_INVERSION = false;
 #endif
@@ -680,10 +691,11 @@ static uint8_t*     s_frameB = nullptr;
 // into the other buffer once (see pushFrame()).
 static int          s_pushedState = -1;
 #endif
-#if defined(NM_CYD_C5)
+#if defined(NM_CYD_C5) && !defined(WS_C5_35)
 // The touch sample pushFrame() takes while the bus is free, for pollTouch().
 // The C5's touch shares the display's SPI bus; the Freenove S3's is on I2C
-// and reads whenever it likes.
+// and reads whenever it likes. (Not WS_C5_35: its FT6336 is on I2C too, so it
+// reads directly and skips this shared-bus deferral.)
 static bool         s_tsValid = false, s_tsDown = false;
 static int16_t      s_tsA = 0, s_tsB = 0;
 static bool readTouchRaw(int16_t& a, int16_t& b);
@@ -965,7 +977,7 @@ static bool readTouchRaw(int16_t& a, int16_t& b);
 // finishing and the next starting, when the bus is free, and this only
 // consumes it. Everywhere else it is the plain read.
 static bool sampleTouchRaw(int16_t& a, int16_t& b) {
-#if defined(NM_CYD_C5)
+#if defined(NM_CYD_C5) && !defined(WS_C5_35)
     if (s_tsValid) { a = s_tsA; b = s_tsB; return s_tsDown; }
     FramePush::busLock();
     const bool down = readTouchRaw(a, b);
@@ -1586,6 +1598,13 @@ static bool readTouchRaw(int16_t& a, int16_t& b) {
     if (!Gt911::read(x, y)) return false;
     a = (int16_t)x; b = (int16_t)y;
     return true;
+#elif defined(WS_C5_35)
+    // FT6336 on I2C, panel pixels in the native portrait frame (like the GT911
+    // path) -- the per-read C5 bus fix lives inside WsTouch::read().
+    uint16_t x, y;
+    if (!WsTouch::read(x, y)) return false;
+    a = (int16_t)x; b = (int16_t)y;
+    return true;
 #elif defined(FREENOVE_S3_35)
     uint16_t x, y;
     if (!St77922Touch::read(x, y)) return false;
@@ -1843,6 +1862,10 @@ static void applyBrightness() {
 #elif defined(WAVESHARE_C5)
     // No backlight GPIO: the CH32 helper's PWM, over I2C.
     WsC5::setBacklight(duty);
+#elif defined(WS_C5_35)
+    // The backlight is the 0x24 I/O expander's PWM register (EXIO5, reg 0x05),
+    // 0..255 with 255 brightest -- same convention as the slider. No GPIO LEDC.
+    WsExio::backlight(duty);
 #elif defined(NM_CYD_C5)
     // One backlight, and a pin-based call. Arduino core 3 dropped the LEDC
     // channel API entirely: ledcWrite takes the PIN now, and the channel is
@@ -4334,7 +4357,7 @@ void setup() {
 // ... and not on the CrowPanel 7, where GPIO21 is the panel's BLUE-0 data
 // line. Driving it high before the panel driver claims it is a stripe down the
 // picture at best.
-#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(CYD32C) && !defined(CYD35C) && !defined(TAB5) && !defined(WAVESHARE_C5)
+#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(CYD32C) && !defined(CYD35C) && !defined(TAB5) && !defined(WAVESHARE_C5) && !defined(WS_C5_35)
     pinMode(21, OUTPUT); digitalWrite(21, HIGH);
 #endif
 #if defined(SQW_S3)
@@ -4354,7 +4377,7 @@ void setup() {
     // It has to release the panel from reset before tft.init() talks to it
     // (TFT_RST is -1). The backlight stays dark until applyBrightness().
     WsC5::begin();
-#elif defined(NM_CYD_C5)
+#elif defined(NM_CYD_C5) && !defined(WS_C5_35)
     // One backlight, TFT_BL (GPIO25), and ONLY that pin. Confirmed on the
     // board: the branch below drives 27 and 32, and on a C5 that is
     //   GPIO27 -- the WS2812 status light. Held HIGH here it is a stuck data
@@ -4368,6 +4391,12 @@ void setup() {
     // three errors in the first 300 ms of every boot is noise that hides the
     // next real one.
     pinMode(TFT_BL, OUTPUT); digitalWrite(TFT_BL, TFT_BACKLIGHT_ON);
+#elif defined(WS_C5_35)
+    // No backlight GPIO: the 0x24 I/O expander owns panel power, the LCD reset
+    // and the backlight. Bring it up ONCE here, before tft.init() -- it powers
+    // the rail and releases the ST7796 reset, both of which the panel needs
+    // before init. WsExio::begin() is idempotent (the touch init calls it too).
+    WsExio::begin();
 #else
     pinMode(27, OUTPUT); digitalWrite(27, HIGH);
 #if !defined(FREENOVE32) && !defined(CYD32C) && !defined(CYD35C)   // not a spare pin on the Freenove, and the 2432S032C's touch SCL; both light 27 alone
@@ -4483,7 +4512,7 @@ void setup() {
     ledcAttachPin(BL_PIN_S3, BL_CH_ORIG);
 #elif defined(WAVESHARE_C5)
     // No LEDC: the backlight is the CH32 helper's PWM (WsC5::setBacklight).
-#elif defined(NM_CYD_C5)
+#elif defined(NM_CYD_C5) && !defined(WS_C5_35)
     // Backlight is TFT_BL (GPIO25) on this board and nothing else is a
     // backlight. The CYD pins below are actively wrong here, not merely
     // unused: BL_PIN_CAP is 27, which is this board's WS2812 status LED, and
@@ -4495,6 +4524,9 @@ void setup() {
     // ledcAttach(pin, freq, bits) is core 3's replacement for the
     // ledcSetup + ledcAttachPin pair; it picks the channel itself.
     ledcAttach(TFT_BL, 5000, 8);
+#elif defined(WS_C5_35)
+    // No LEDC: the backlight is the 0x24 expander's PWM register, set by
+    // WsExio::backlight() from applyBrightness(). Same shape as CrowPanel 7.
 #else
 #if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(CYD32C) && !defined(CYD35C)
     ledcSetup(BL_CH_ORIG, 5000, 8);
@@ -4678,6 +4710,13 @@ void setup() {
     // CYD35 branch (tft.getTouch()).
     usingCapTouch = false;
     Serial.println("cyd35 build -- XPT2046 on shared VSPI bus via TFT_eSPI.");
+#elif defined(WS_C5_35)
+    // FT6336 on I2C (27/26, 0x38). WsTouch::begin() brings the 0x24 expander up
+    // first (idempotent) for the touch reset, then sets sensitivity. Reports
+    // panel pixels, so the five-target calibration maps them like the GT911.
+    usingCapTouch = WsTouch::begin();
+    Serial.println(usingCapTouch ? "Waveshare C5 3.5 -- FT6336 capacitive touch answered."
+                                 : "Waveshare C5 3.5 -- FT6336 did not answer; no touch.");
 #elif defined(TOUCH_RAW_SHARED_BUS)
     // RL Phantom, resistive variant. The chip sits on the display's own bus
     // (TOUCH_CS=33, armed by TFT_eSPI once rlphantom_r_user_setup.h is in
@@ -4835,10 +4874,13 @@ void setup() {
         uint32_t windowStart = millis();
         while (millis() - windowStart < 1200) {
             int16_t a, b;
-#if defined(CROWPANEL7) || defined(CYD32C) || defined(CYD35C) || defined(SQW_SMALL) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(TAB5) || defined(WAVESHARE_C5)
-            // The GT911 (and the ST77922's touch) is neither of the two
-            // below; the two-way dispatch polled a capacitive controller that
-            // is not on this bus, a hundred bus errors a boot.
+#if defined(CROWPANEL7) || defined(CYD32C) || defined(CYD35C) || defined(SQW_SMALL) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(TAB5) || defined(WAVESHARE_C5) || defined(WS_C5_35)
+            // The GT911 (and the ST77922's touch, and the Waveshare C5's
+            // FT6336) is neither of the two below; the two-way dispatch polled
+            // a capacitive controller that is not on this bus, a hundred bus
+            // errors a boot. For WS_C5_35 that was the boot Error-259 flood:
+            // rawReadCap() hits the generic CapTouch (addr 0x15, never begun,
+            // no C5 per-read fix); readTouchRaw() routes to WsTouch with it.
             bool down = readTouchRaw(a, b);
 #else
             bool down = usingCapTouch ? rawReadCap(a, b) : rawReadResistive(a, b);
@@ -5176,7 +5218,7 @@ static inline void pushFrame(int x, int y) {
         // Between the last push finishing and this one starting the bus is
         // free: the one place touch can be read without waiting on a frame.
         FramePush::asyncWait();
-#if defined(NM_CYD_C5)
+#if defined(NM_CYD_C5) && !defined(WS_C5_35)
         FramePush::busLock();
         s_tsDown  = readTouchRaw(s_tsA, s_tsB);
         s_tsValid = true;
