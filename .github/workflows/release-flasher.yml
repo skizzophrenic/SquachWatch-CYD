@@ -226,7 +226,7 @@ jobs:
           # resistive's pins with an ST7789, confirmed on a real board.
           # cyd32c is the Sunton ESP32-2432S032C: the Freenove 3.2"'s screen with
           # a GT911 capacitive panel, confirmed on a real board (issue #6).
-          pio run -e cyd -e cyd-ili9341 -e awok -e rlphantom-r -e freenove32 -e cyd32c -e cyd-fast -e cyd-ili9341-fast -e cyd35-fast -e cyd35c-fast
+          pio run -e cyd -e cyd-ili9341 -e awok -e rlphantom-r -e cyd24-st7789 -e freenove32 -e cyd32c -e cyd-fast -e cyd-ili9341-fast -e cyd35-fast -e cyd35c-fast
           # twatch-s3 is the LilyGo T-Watch S3: an ESP32-S3, so its own
           # bootloader (at 0x0, not 0x1000) and its own 16 MB partition
           # table. A lab board until the watch work settles; see ?lab=1.
@@ -312,6 +312,12 @@ jobs:
             0x8000  .pio/build/rlphantom-r/partitions.bin \
             0x10000 .pio/build/rlphantom-r/firmware.bin
           python -m esptool --chip esp32 merge_bin \
+            -o firmware-cyd24-st7789-merged.bin \
+            --flash_mode dio --flash_freq 40m --flash_size 4MB \
+            0x1000  .pio/build/cyd24-st7789/bootloader.bin \
+            0x8000  .pio/build/cyd24-st7789/partitions.bin \
+            0x10000 .pio/build/cyd24-st7789/firmware.bin
+          python -m esptool --chip esp32 merge_bin \
             -o firmware-freenove32-merged.bin \
             --flash_mode dio --flash_freq 40m --flash_size 4MB \
             0x1000  .pio/build/freenove32/bootloader.bin \
@@ -373,7 +379,7 @@ jobs:
           # board that looks bricked.
           for f in bootloader partitions; do
             ref="$(sha256sum ".pio/build/cyd/$f.bin" | cut -d' ' -f1)"
-            for v in cyd cyd-ili9341 awok rlphantom-r freenove32 cyd32c cyd-fast cyd-ili9341-fast cyd35-fast cyd35c-fast; do
+            for v in cyd cyd-ili9341 awok rlphantom-r cyd24-st7789 freenove32 cyd32c cyd-fast cyd-ili9341-fast cyd35-fast cyd35c-fast; do
               got="$(sha256sum ".pio/build/$v/$f.bin" | cut -d' ' -f1)"
               if [ "$got" != "$ref" ]; then
                 echo "::error::$v/$f.bin differs from cyd/$f.bin."
@@ -385,7 +391,7 @@ jobs:
               fi
             done
             cp ".pio/build/cyd/$f.bin" "esp32-$f.bin"
-            echo "esp32-$f.bin is identical across all six builds ($ref)"
+            echo "esp32-$f.bin is identical across all ESP32 builds ($ref)"
           done
           # The OTA data partition (0xE000), written blank-but-valid on every
           # USB install. Without it, a board that has taken a Bluetooth update
@@ -424,7 +430,7 @@ jobs:
           # merged image for those on purpose: the merged blob is a
           # manual-recovery artifact, and recovery should land you on the
           # spec-compliant build rather than the overclocked one.
-          for v in cyd cyd-ili9341 awok rlphantom-r freenove32 cyd32c cyd-fast cyd-ili9341-fast cyd35-fast cyd35c-fast twatch-s3 freenove-s3 freenove-s3-35 crowpanel7 tdeck-plus sticks3 cardputer-adv; do
+          for v in cyd cyd-ili9341 awok rlphantom-r cyd24-st7789 freenove32 cyd32c cyd-fast cyd-ili9341-fast cyd35-fast cyd35c-fast twatch-s3 freenove-s3 freenove-s3-35 crowpanel7 tdeck-plus sticks3 cardputer-adv; do
             cp ".pio/build/$v/firmware.bin" "$v-firmware.bin"
           done
 
@@ -442,7 +448,7 @@ jobs:
           fi
           umask 077
           printf '%s\n' "$OTA_SIGNING_KEY" > "$RUNNER_TEMP/ota_key.pem"
-          for v in cyd cyd-ili9341 awok rlphantom-r freenove32 cyd32c cyd-fast cyd-ili9341-fast cyd35-fast cyd35c-fast twatch-s3 freenove-s3 freenove-s3-35 crowpanel7 tdeck-plus sticks3 cardputer-adv; do
+          for v in cyd cyd-ili9341 awok rlphantom-r cyd24-st7789 freenove32 cyd32c cyd-fast cyd-ili9341-fast cyd35-fast cyd35c-fast twatch-s3 freenove-s3 freenove-s3-35 crowpanel7 tdeck-plus sticks3 cardputer-adv; do
             python tools/sign_firmware.py --key "$RUNNER_TEMP/ota_key.pem" \
               --env "$v" --bin "$v-firmware.bin" --out "$v-firmware.sig"
           done
@@ -473,6 +479,7 @@ jobs:
                     "web-flasher/manifest-awok.json", "web-flasher/manifest-cyd-fast.json",
                     "web-flasher/manifest-cyd-ili9341-fast.json",
                     "web-flasher/manifest-rlphantom-r.json",
+                    "web-flasher/manifest-cyd24-st7789.json",
                     "web-flasher/manifest-freenove32.json",
                     "web-flasher/manifest-cyd32c.json",
                     "web-flasher/manifest-cyd35-fast.json",
@@ -508,6 +515,7 @@ jobs:
           cp web-flasher/manifest-cyd-fast.json manifest-cyd-fast.json
           cp web-flasher/manifest-cyd-ili9341-fast.json manifest-cyd-ili9341-fast.json
           cp web-flasher/manifest-rlphantom-r.json manifest-rlphantom-r.json
+          cp web-flasher/manifest-cyd24-st7789.json manifest-cyd24-st7789.json
           cp web-flasher/manifest-freenove32.json manifest-freenove32.json
           cp web-flasher/manifest-cyd32c.json manifest-cyd32c.json
           cp web-flasher/manifest-cyd35-fast.json manifest-cyd35-fast.json
@@ -546,6 +554,7 @@ jobs:
             cyd-ili9341-firmware.bin \
             awok-firmware.bin \
             rlphantom-r-firmware.bin \
+            cyd24-st7789-firmware.bin \
             freenove32-firmware.bin \
             cyd32c-firmware.bin \
             cyd-fast-firmware.bin \
@@ -583,12 +592,14 @@ jobs:
             firmware-cyd-ili9341-merged.bin \
             firmware-awok-merged.bin \
             firmware-rlphantom-r-merged.bin \
+            firmware-cyd24-st7789-merged.bin \
             firmware-freenove32-merged.bin \
             firmware-cyd32c-merged.bin \
             manifest-cyd.json \
             manifest-cyd-ili9341.json \
             manifest-awok.json \
             manifest-rlphantom-r.json \
+            manifest-cyd24-st7789.json \
             manifest-freenove32.json \
             manifest-cyd32c.json \
             manifest-cyd-fast.json \
@@ -657,6 +668,7 @@ jobs:
           cp web-flasher/manifest-cyd-fast.json _site/manifest-cyd-fast.json
           cp web-flasher/manifest-cyd-ili9341-fast.json _site/manifest-cyd-ili9341-fast.json
           cp web-flasher/manifest-rlphantom-r.json _site/manifest-rlphantom-r.json
+          cp web-flasher/manifest-cyd24-st7789.json _site/manifest-cyd24-st7789.json
           cp web-flasher/manifest-freenove32.json _site/manifest-freenove32.json
           cp web-flasher/manifest-cyd32c.json _site/manifest-cyd32c.json
           cp web-flasher/manifest-cyd35-fast.json _site/manifest-cyd35-fast.json
@@ -746,7 +758,7 @@ jobs:
           import json, shutil, os
           label = "${{ steps.ver.outputs.label }}"
           ver   = "${{ steps.ver.outputs.version }}"
-          for board in ("cyd", "cyd-ili9341", "cyd-fast", "cyd-ili9341-fast", "cyd35-fast", "cyd35c-fast", "rlphantom-r", "freenove32", "cyd32c", "twatch-s3", "freenove-s3", "freenove-s3-35", "crowpanel7", "nm-cyd-c5", "marauder-v8", "tdeck-plus", "sticks3", "cardputer-adv"):
+          for board in ("cyd", "cyd-ili9341", "cyd-fast", "cyd-ili9341-fast", "cyd35-fast", "cyd35c-fast", "rlphantom-r", "cyd24-st7789", "freenove32", "cyd32c", "twatch-s3", "freenove-s3", "freenove-s3-35", "crowpanel7", "nm-cyd-c5", "marauder-v8", "tdeck-plus", "sticks3", "cardputer-adv"):
               # The C5 comes from its own runner and may not have come at all.
               if not os.path.exists(board + "-firmware.bin"):
                   print("::warning::no %s build this run; not in the lab list" % board)
@@ -791,7 +803,7 @@ jobs:
             # firmware here: v1.16.0 shipped cyd35-fast to the release and into
             # index.html's <option> list but neither into _site, so the 3.5"
             # appeared in the picker and 404'd when chosen.
-            for board in cyd cyd-ili9341 awok rlphantom-r freenove32 cyd32c cyd-fast cyd-ili9341-fast cyd35-fast cyd35c-fast twatch-s3 freenove-s3 freenove-s3-35 crowpanel7 tdeck-plus sticks3 cardputer-adv; do
+            for board in cyd cyd-ili9341 awok rlphantom-r cyd24-st7789 freenove32 cyd32c cyd-fast cyd-ili9341-fast cyd35-fast cyd35c-fast twatch-s3 freenove-s3 freenove-s3-35 crowpanel7 tdeck-plus sticks3 cardputer-adv; do
               cp "$board-firmware.bin" "_site/$board-firmware.bin"
               # The Bluetooth update page fetches the image and its signature
               # side by side from the site root.
