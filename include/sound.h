@@ -23,6 +23,14 @@
 #else
 #define SQW_SPEAKER 0
 #endif
+// SQW_SPEAKER also carries the Freenove boards' POWER OFF and power diary in
+// main.cpp; SQW_SOUND is only "there is a speaker". The Waveshare 2.06" has
+// the same ES8311 and amplifier, and no use for the rest.
+#if SQW_SPEAKER || defined(WAVESHARE_206)
+#define SQW_SOUND 1
+#else
+#define SQW_SOUND 0
+#endif
 
 namespace Sound {
     enum class Id : uint8_t {
@@ -43,7 +51,7 @@ namespace Sound {
         COUNT
     };
 
-#if SQW_SPEAKER
+#if SQW_SOUND
     // Once in setup(), after the touch controller has started the I2C bus.
     // Finds the codec, sets it up for 16 kHz playback and parks the amplifier
     // off. Boots silent: nothing plays until something asks.
@@ -52,6 +60,15 @@ namespace Sound {
     // Honours the SOUND setting, night and the hush below unless `sample` is
     // set, which is how the Settings rows let the owner hear each level.
     void play(Id id, bool sample = false);
+#if defined(WAVESHARE_206)
+    // The watch's alert, standing in for a vibration motor: the SOUND setting
+    // and the night as play() has them, but not the hush -- a watch's screen
+    // is always timing out, and an alert on the wrist is the one sound meant
+    // for a dark screen.
+    void alert(Id id);
+    // The bench: the codec's registers 0x00-0x45 on the console.
+    void dumpRegs();
+#endif
     // The screen is dimmed by the saver: whoever let it dim wanted the board
     // quiet. Nothing plays while this is set.
     void hush(bool on);

@@ -53,7 +53,9 @@ static uint8_t     s_deskCrowd     = 1;       // the desk's own HOW MANY
 static bool        s_deskFullVisit = false;   // one visitor: the whole visit, not a chat
 // The screen's starting rotation: landscape on every CYD; the watch reads
 // one step round from that with its crown on the right (LilyGo's default).
-#if defined(TWATCH_S3)
+#if defined(WAVESHARE_206)
+static const uint8_t DEFAULT_ROTATION = 0;   // the AMOLED's own portrait is upright on the wrist
+#elif defined(TWATCH_S3)
 static const uint8_t DEFAULT_ROTATION = 2;
 #elif defined(CROWPANEL7)
 static const uint8_t DEFAULT_ROTATION = 0;   // the panel is landscape as wired
@@ -151,6 +153,9 @@ static uint8_t  s_bleIx        = BLE_LISTEN_DEFAULT;
 static uint8_t  s_idleCpuIx    = IDLE_CPU_DEFAULT;
 static bool     s_wakeOnAlert  = true;
 static bool     s_quietTrack   = true;
+#if defined(WAVESHARE_206)
+static bool     s_scanOff      = false;
+#endif
 static bool     s_privacy      = false;
 static bool     s_extScreen    = false;
 struct __attribute__((packed)) RunEntry { uint16_t boot, minutes; };
@@ -179,7 +184,7 @@ static uint8_t  s_radioDutyIx  = RADIO_DUTY_DEFAULT;
 static bool     s_buzzer       = false;
 // The speaker (sound.h): off until somebody finds the row, MED when they do.
 static uint8_t  s_soundMode    = 0;    // 0 OFF, 1 ALERTS, 2 ALL
-static uint8_t  s_soundVol     = 25;   // percent: the speaker is loud, so it starts low
+static uint8_t  s_soundVol     = 25;   // percent: the speaker is loud, so it starts low (70 on the Waveshare 2.06", in load())
 
 // ---- LoRa -----------------------------------------------------------------
 // SURVEY by default: the detector posture, everything in the band. FOCUS is
@@ -256,6 +261,9 @@ uint16_t idleAfterSec()     { return IDLE_AFTER[s_idleAfterIx]; }
 uint16_t cpuMhz()           { return s_powerSaver ? CPU_MHZ[s_cpuIx] : 240; }
 bool     wakeOnAlert()      { return s_wakeOnAlert; }
 bool     quietTrackers()    { return s_quietTrack; }
+#if defined(WAVESHARE_206)
+bool     scanningOff()      { return s_scanOff; }
+#endif
 bool     privacyMode()      { return s_privacy; }
 bool     extScreen()        { return s_extScreen; }
 bool     watchPlus()        { return s_watchPlus; }
@@ -357,6 +365,12 @@ void toggleQuietTrackers() {
     s_quietTrack = !s_quietTrack;
     s_prefs.putBool("qTrack", s_quietTrack);
 }
+#if defined(WAVESHARE_206)
+void toggleScanningOff() {
+    s_scanOff = !s_scanOff;
+    s_prefs.putBool("scanOff", s_scanOff);
+}
+#endif
 void setWatchPlus() {
     if (s_watchPlus) return;
     s_watchPlus = true;
@@ -579,6 +593,9 @@ void load() {
     if (s_idleCpuIx > 2) s_idleCpuIx = IDLE_CPU_DEFAULT;
     s_wakeOnAlert  = s_prefs.getBool("pwrWake", true);
     s_quietTrack   = s_prefs.getBool("qTrack", true);
+#if defined(WAVESHARE_206)
+    s_scanOff      = s_prefs.getBool("scanOff", false);
+#endif
     s_privacy      = s_prefs.getBool("privacy", false);
     s_extScreen    = s_prefs.getBool("extscr", false);
     if (s_prefs.getBytesLength("runs") == sizeof s_runs) s_prefs.getBytes("runs", s_runs, sizeof s_runs);
@@ -591,9 +608,18 @@ void load() {
     // The T-Watch's BUZZ (haptics on an alert) already owns "buzz", and with
     // the opposite default, so the CrowPanel's buzzer keeps its own key.
     s_buzzer       = s_prefs.getBool("buzzer", false);
+#if defined(WAVESHARE_206)
+    // ALERTS by default here: the speaker is this watch's only way to say so.
+    s_soundMode    = s_prefs.getUChar("sndMode", 1);
+#else
     s_soundMode    = s_prefs.getUChar("sndMode", 0);
+#endif
     if (s_soundMode > 2) s_soundMode = 0;
+#if defined(WAVESHARE_206)
+    s_soundVol     = s_prefs.getUChar("sndLvl", 70);
+#else
     s_soundVol     = s_prefs.getUChar("sndLvl", 25);
+#endif
     if (s_soundVol > 100) s_soundVol = 25;
     s_loraMode     = s_prefs.getUChar("loraMode", 2);
     if (s_loraMode > 2) s_loraMode = 2;

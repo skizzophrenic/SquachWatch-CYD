@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SquachWatch GPS Link</title>
+<!--
+  The phone half of the Waveshare 2.06's wardrive (src/phone_gps.cpp).
+  Open in a browser with Web Bluetooth -- on an iPhone that is Bluefy (App Store);
+  Safari and Chrome on iOS do not have it. Served over https (or localhost),
+  since both Bluetooth and location need a secure page.
+  It connects to "SquachWatch GPS", sends the phone's position once a second,
+  and keeps a GPX track of the drive as a backup for tools/wigle_merge.py.
+-->
+<style>
+  /* One screen, read at a glance on a dash mount: status first, numbers big. */
+  :root {
+    --bg: #0d1214; --panel: #151d20; --line: #24323a; --fg: #dbe7ea; --dim: #7f959c;
+    --cyan: #3fd0e0; --ok: #54d38a; --warn: #f2b84b; --bad: #ef6a5b;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    --sans: -apple-system, "Segoe UI", Roboto, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.4 var(--sans); }
+  body { padding: max(16px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+  main { max-width: 520px; margin: 0 auto; display: grid; gap: 14px; }
+  h1 { font-size: 15px; letter-spacing: .14em; text-transform: uppercase; color: var(--cyan); margin: 4px 0 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 10px; }
+  .row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .label { color: var(--dim); font-size: 12px; letter-spacing: .1em; text-transform: uppercase; }
+  .pill { font: 600 13px var(--mono); padding: 3px 10px; border-radius: 99px; border: 1px solid currentColor; white-space: nowrap; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); } .dimc { color: var(--dim); }
+  .big { font: 600 30px/1.1 var(--mono); font-variant-numeric: tabular-nums; }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  button { font: 600 17px var(--sans); padding: 14px; border-radius: 10px; border: 0; background: var(--cyan); color: #04181b; width: 100%; }
+  button.alt { background: transparent; color: var(--fg); border: 1px solid var(--line); font-size: 15px; padding: 11px; }
+  button:disabled { opacity: .45; }
+  button:focus-visible { outline: 2px solid var(--fg); outline-offset: 2px; }
+  .note { color: var(--dim); font-size: 13px; margin: 0; }
+  #log { font: 12px/1.45 var(--mono); color: var(--dim); max-height: 7.5em; overflow: auto; white-space: pre-wrap; margin: 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>SquachWatch GPS Link</h1>
+
+  <section class="card" aria-live="polite">
+    <div class="row"><span class="label">Watch</span><span id="watchPill" class="pill dimc">NOT CONNECTED</span></div>
+    <div class="row"><span class="label">Phone GPS</span><span id="gpsPill" class="pill dimc">OFF</span></div>
+    <div class="row"><span class="label">Wardrive</span><span id="wdPill" class="pill dimc">—</span></div>
+  </section>
+
+  <button id="go">Connect to watch</button>
+
+  <section class="card">
+    <div class="grid2">
+      <div><div class="label">Rows on card</div><div id="rows" class="big">—</div></div>
+      <div><div class="label">WiFi rows</div><div id="wifi" class="big">—</div></div>
+    </div>
+    <div class="row"><span class="label">Position</span><span id="pos" class="mono">—</span></div>
+    <div class="row"><span class="label">Accuracy</span><span id="acc" class="mono">—</span></div>
+    <div class="row"><span class="label">Sent</span><span id="sent" class="mono">0</span></div>
+    <div class="row"><span class="label">File</span><span id="file" class="mono">—</span></div>
+  </section>
+
+  <section class="card">
+    <div class="row"><span class="label">Track kept here</span><span id="pts" class="mono">0 points</span></div>
+    <button id="gpx" class="alt">Save GPX track</button>
+    <p class="note">Keep this page open with the screen on: iOS pauses it in the background or when locked. Set Auto-Lock to Never for the drive, and plug in the phone. Rows written while the link was down go to the card at 0,0. The GPX track lets <span class="mono">tools/wigle_merge.py</span> place them afterwards.</p>
+  </section>
+
+  <pre id="log"></pre>
+</main>
+
+<script>
+"use strict";
+const SVC  = "9d1f0101-2a4b-4c8e-9b1e-5357574f5441";
+const LOC  = "9d1f0102-2a4b-4c8e-9b1e-5357574f5441";
+const STAT = "9d1f0103-2a4b-4c8e-9b1e-5357574f5441";
+const $ = id => document.getElementById(id);
+
+let device = null, locChar = null, wanted = false, writing = false;
+let lastPos = null, lastPosAt = 0, sent = 0, watchId = null, wake = null;
+const track = [];
+
+function log(msg) {
+  const t = new Date().toLocaleTimeString();
+  const el = $("log");
+  el.textContent = (t + "  " + msg + "\n" + el.textContent).slice(0, 4000);
+}
+function pill(id, text, cls) { const el = $(id); el.textContent = text; el.className = "pill " + cls; }
+
+// ---- location ----------------------------------------------------------------
+function startGps() {
+  if (watchId !== null) return;
+  if (!navigator.geolocation) { pill("gpsPill", "NO LOCATION API", "bad"); return; }
+  pill("gpsPill", "WAITING", "warn");
+  watchId = navigator.geolocation.watchPosition(p => {
+    lastPos = p.coords; lastPosAt = Date.now();
+    $("pos").textContent = p.coords.latitude.toFixed(6) + ", " + p.coords.longitude.toFixed(6);
+    $("acc").textContent = "±" + Math.round(p.coords.accuracy) + " m";
+    pill("gpsPill", p.coords.accuracy <= 30 ? "FIX" : "ROUGH FIX", p.coords.accuracy <= 30 ? "ok" : "warn");
+    track.push({ t: p.timestamp || Date.now(), lat: p.coords.latitude, lon: p.coords.longitude, ele: p.coords.altitude });
+    $("pts").textContent = track.length + " points";
+  }, e => {
+    pill("gpsPill", e.code === 1 ? "PERMISSION DENIED" : "NO FIX", "bad");
+    log("location: " + e.message);
+  }, { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 });
+}
+
+// The position packet, 16 bytes little-endian (src/phone_gps.h).
+function packet(c) {
+  const b = new DataView(new ArrayBuffer(16));
+  b.setInt32(0, Math.round(c.latitude * 1e7), true);
+  b.setInt32(4, Math.round(c.longitude * 1e7), true);
+  b.setUint16(8, Math.min(65535, Math.max(1, Math.round(c.accuracy || 50))), true);
+  b.setInt16(10, Math.max(-32768, Math.min(32767, Math.round(c.altitude || 0))), true);
+  b.setUint32(12, Math.floor(Date.now() / 1000), true);
+  return b.buffer;
+}
+
+setInterval(async () => {
+  // A position older than ten seconds is not sent: the watch would stamp
+  // rows with where the phone was, not where it is.
+  if (!locChar || writing || !lastPos || Date.now() - lastPosAt > 10000) return;
+  writing = true;
+  try {
+    const pkt = packet(lastPos);
+    if (locChar.writeValueWithoutResponse) await locChar.writeValueWithoutResponse(pkt);
+    else await locChar.writeValue(pkt);
+    sent++; $("sent").textContent = sent;
+  } catch (e) { log("send: " + e.message); }
+  writing = false;
+}, 1000);
+
+// ---- the watch -----------------------------------------------------------------
+const STATES = ["OFF", "NO SD CARD", "CLOCK NOT SET", "LOGGING"];
+function onStat(ev) {
+  const s = Object.fromEntries(new TextDecoder().decode(ev.target.value).split(";").map(kv => kv.split("=")));
+  $("rows").textContent = s.rows ?? "—";
+  $("wifi").textContent = s.wifi ?? "—";
+  $("file").textContent = s.file || "—";
+  const st = +s.state;
+  pill("wdPill", (STATES[st] || "?") + (st === 3 ? (s.fix === "1" ? " · PLACED" : " · NO POSITION") : ""),
+       st === 3 ? (s.fix === "1" ? "ok" : "warn") : "bad");
+}
+
+async function link() {
+  pill("watchPill", "CONNECTING", "warn");
+  const server = await device.gatt.connect();
+  const svc = await server.getPrimaryService(SVC);
+  locChar = await svc.getCharacteristic(LOC);
+  const stat = await svc.getCharacteristic(STAT);
+  stat.addEventListener("characteristicvaluechanged", onStat);
+  await stat.startNotifications();
+  try { onStat({ target: { value: await stat.readValue() } }); } catch (_) {}
+  pill("watchPill", "CONNECTED", "ok");
+  log("connected to " + (device.name || "watch"));
+}
+
+async function relink() {
+  locChar = null;
+  pill("watchPill", "RECONNECTING", "warn");
+  for (let i = 0; wanted && i < 1000; i++) {
+    try { await link(); return; }
+    catch (e) { await new Promise(r => setTimeout(r, Math.min(10000, 1500 + i * 500))); }
+  }
+}
+
+$("go").addEventListener("click", async () => {
+  if (wanted) {           // the button is Disconnect while linked
+    wanted = false;
+    locChar = null;
+    if (device && device.gatt.connected) device.gatt.disconnect();
+    pill("watchPill", "NOT CONNECTED", "dimc");
+    $("go").textContent = "Connect to watch";
+    return;
+  }
+  if (!navigator.bluetooth) {
+    pill("watchPill", "NO BLUETOOTH", "bad");
+    log("This browser has no Web Bluetooth. On an iPhone, open this page in Bluefy.");
+    return;
+  }
+  startGps();
+  try {
+    device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SVC] }] });
+    device.addEventListener("gattserverdisconnected", () => { log("link dropped"); if (wanted) relink(); });
+    wanted = true;
+    $("go").textContent = "Disconnect";
+    await link();
+  } catch (e) {
+    log(e.message);
+    if (wanted) relink(); else pill("watchPill", "NOT CONNECTED", "dimc");
+  }
+  try { wake = await navigator.wakeLock?.request("screen"); } catch (_) {}
+});
+
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState === "visible" && wanted) {
+    try { wake = await navigator.wakeLock?.request("screen"); } catch (_) {}
+  }
+});
+
+// ---- the GPX backup ----------------------------------------------------------------
+$("gpx").addEventListener("click", () => {
+  if (!track.length) { log("no track points yet"); return; }
+  const pts = track.map(p => `<trkpt lat="${p.lat.toFixed(7)}" lon="${p.lon.toFixed(7)}">` +
+    (p.ele != null ? `<ele>${p.ele.toFixed(1)}</ele>` : "") +
+    `<time>${new Date(p.t).toISOString()}</time></trkpt>`).join("\n");
+  const gpx = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="SquachWatch GPS Link" xmlns="http://www.topografix.com/GPX/1/1">\n<trk><name>SquachWatch wardrive</name><trkseg>\n${pts}\n</trkseg></trk>\n</gpx>\n`;
+  const name = "squachwatch-" + new Date(track[0].t).toISOString().slice(0, 16).replace(/[-:T]/g, "") + ".gpx";
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([gpx], { type: "application/gpx+xml" }));
+  a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  log("saved " + name + " (" + track.length + " points)");
+});
+
+if (!navigator.bluetooth) log("No Web Bluetooth in this browser. On an iPhone, open this page in Bluefy.");
+</script>
+</body>
+</html>

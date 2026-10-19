@@ -100,6 +100,7 @@ whole firmware but has had fewer hours on it. The longer answer is in
 | M5Stack StickS3 | BETA | 1.14" screen, landscape, two buttons |
 | M5Stack Cardputer ADV | BETA | Driven from its keyboard. Not the original Cardputer |
 | LilyGo T-Watch S3 / S3 Plus | BETA | On your wrist, with a battery and a buzz. Listens to **LoRa**; the S3 Plus adds **GPS**. See [On the watch](#on-the-watch) |
+| Waveshare ESP32-S3-Touch-AMOLED-2.06 | BETA (build it yourself) | The T-Watch build on a 410×502 AMOLED watch: alerts on its speaker, time and battery in the bands above and below the picture, SD card, and **wardriving** with the phone's GPS over Bluetooth. `pio run -e waveshare-206 -t upload`. [docs/WAVESHARE-206.md](docs/WAVESHARE-206.md) |
 
 Each board has its own build in `platformio.ini`, one `[env:...]` each, with
 what is and is not confirmed on it.
@@ -588,6 +589,7 @@ SquachWatch-CYD/
 │   ├── DETECTIONS.md             (per-signature provenance)
 │   ├── CROWPANEL7.md             (the 7" CrowPanel: setup and testing)
 │   ├── NM-CYD-C5.md              (the ESP32-C5 board: esptool route, every pin)
+│   ├── WAVESHARE-206.md          (the AMOLED watch: what differs, wardriving with a phone)
 │   ├── LORA.md                   (LoRa research and the decoders behind it)
 │   ├── IDEAS.md                  (things worth building, with their cost)
 │   └── SQUACHWARE-AESTHETIC.md   (CSS → RGB565 mapping)

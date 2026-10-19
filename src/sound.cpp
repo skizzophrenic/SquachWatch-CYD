@@ -23,7 +23,7 @@
 // drawing side never puts a gap in a sound. Four 256-frame buffers is 64 ms
 // of DMA, 4 KB of internal RAM.
 #include "sound.h"
-#if SQW_SPEAKER
+#if SQW_SOUND
 #include <Arduino.h>
 #include <Wire.h>
 #include <math.h>
@@ -37,6 +37,12 @@ namespace Sound {
 #if defined(FREENOVE_S3_35)
 static const int PIN_MCK = 17, PIN_BCK = 18, PIN_WS = 21, PIN_DOUT = 15;
 static const int PIN_AMP = 1;
+#elif defined(WAVESHARE_206)
+// The Waveshare 2.06", from its BSP: ES8311 on the shared I2C bus, the
+// NS4150B amplifier's enable on GPIO46, HIGH to play.
+static const int PIN_MCK = 16, PIN_BCK = 41, PIN_WS = 45, PIN_DOUT = 40;
+static const int PIN_AMP = 46;
+#define SOUND_AMP_HIGH 1
 #elif defined(TDECK_PLUS)
 // The T-Deck Plus: a MAX98357A class-D amp straight on I2S (LilyGo's
 // BOARD_I2S_BCK 7 / WS 5 / DOUT 6). No codec to set up, no master clock, and
@@ -57,7 +63,11 @@ static const i2s_port_t PORT    = I2S_NUM_0;
 static const int        CHUNK   = 256;        // frames per write, 16 ms
 
 static bool          s_ok      = false;
+#if defined(SOUND_AMP_HIGH)
+static bool          s_ampLow  = false;       // this board's amp plays with the pin HIGH
+#else
 static bool          s_ampLow  = true;        // the amp plays with the pin LOW
+#endif
 static volatile bool s_hush    = false;
 static QueueHandle_t s_q       = nullptr;
 static TaskHandle_t  s_task    = nullptr;
@@ -186,6 +196,24 @@ static bool codecInit() {
     wr(0x1C, 0x6A);                         // ADC equalizer bypass
     wr(0x37, 0x08);                         // DAC equalizer bypass
     wr(0x32, 0xD8);                         // DAC volume, 85%
+#if defined(WAVESHARE_206)
+    // What esp_codec_dev's ES8311 driver adds on this board's own firmware,
+    // where the speaker is known to work: system power (0x0B, 0x0C), the
+    // reference and bias (0x10, 0x11) and the analog output's bias (0x14).
+    // Without them the DAC ran and nothing reached the amplifier.
+    wr(0x0B, 0x00);
+    wr(0x0C, 0x00);
+    wr(0x10, 0x1F);
+    wr(0x11, 0x7F);
+    wr(0x14, 0x1A);
+    wr(0x17, 0xBF);
+    wr(0x15, 0x40);
+    wr(0x45, 0x00);
+    // DAC unmuted. 0x31 comes out of reset as 0x60 -- both mute bits set --
+    // and esp_codec_dev clears them in its set_mute(false). Read back on the
+    // board: everything else right, this at 0x60, and not a sound.
+    wr(0x31, 0x00);
+#endif
     return true;
 }
 
@@ -496,6 +524,16 @@ void play(Id id, bool sample) {
     xQueueSend(s_q, &b, 0);        // a full queue drops the sound, not the frame
 }
 
+#if defined(WAVESHARE_206)
+void alert(Id id) {
+    if (!s_ok || id >= Id::COUNT) return;
+    if (Settings::soundMode() == 0) return;
+    if (Clock::night() && id != Id::WATCH_HIT) return;
+    const uint8_t b = (uint8_t)id;
+    xQueueSend(s_q, &b, 0);
+}
+#endif
+
 void hush(bool on) { s_hush = on; }
 
 void quiet() {
@@ -506,7 +544,22 @@ void quiet() {
 
 bool present() { return s_ok; }
 
+#if defined(WAVESHARE_206)
+void dumpRegs() {
+#if !SOUND_NO_CODEC
+    char line[96];
+    for (uint8_t base = 0; base < 0x48; base += 16) {
+        int n = snprintf(line, sizeof line, "[sound] %02X:", base);
+        for (uint8_t k = 0; k < 16 && base + k < 0x48; k++) n += snprintf(line + n, sizeof line - n, " %02X", rd((uint8_t)(base + k)));
+        Serial.println(line);
+    }
+#endif
+    Serial.printf("[sound] amp GPIO%d reads %d (on is %s); volume %u%%\n", PIN_AMP, PIN_AMP >= 0 ? digitalRead(PIN_AMP) : -1,
+                  s_ampLow ? "LOW" : "HIGH", (unsigned)Settings::soundVolume());
+}
+#endif
+
 void ampLow(bool activeLow) { s_ampLow = activeLow; amp(false); }
 
 }  // namespace Sound
-#endif  // SQW_SPEAKER
+#endif  // SQW_SOUND

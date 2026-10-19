@@ -269,6 +269,12 @@ namespace Settings {
     void       togglePrivacyMode();
     bool       quietTrackers();
     void       toggleQuietTrackers();
+#if defined(WAVESHARE_206)
+    // SCANNING OFF: just a watch. WiFi, Bluetooth scanning and the squad's
+    // beacon stay off; the screen, its animations and the clock carry on.
+    bool       scanningOff();
+    void       toggleScanningOff();
+#endif
     // Set the first time this watch's GPS answers: it is an S3 Plus, whose
     // bigger cell takes a faster charge. Never cleared by a GPS that is
     // merely switched off.

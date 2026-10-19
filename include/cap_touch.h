@@ -29,4 +29,12 @@ namespace CapTouch {
     // rotated/calibrated to the display's coordinate space) if a
     // finger is currently down.
     bool read(uint16_t& x, uint16_t& y);
+
+#if defined(WAVESHARE_206)
+    // The controller's interrupt line, active low while a finger is down.
+    // Once set, read() asks the chip only while it is low: the Waveshare
+    // 2.06"'s FT3168 dozes off when idle and does not answer until touched,
+    // and a poll of it then is a timed-out I2C read every frame.
+    void setIntPin(int pin);
+#endif
 }

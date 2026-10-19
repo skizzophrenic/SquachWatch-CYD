@@ -8,7 +8,9 @@
 #include <driver/spi_master.h>
 #include <string.h>
 #endif
-#if SQW_PUSH_QSPI
+#if SQW_PUSH_QSPI && defined(WAVESHARE_206)
+#include "co5300_qspi.h"
+#elif SQW_PUSH_QSPI
 #include "st77922_qspi.h"
 #elif defined(NM_CYD_C5) || SQW_PUSH_DMA_ONLY
 // The driver's device handle: a global in the processor port the library
@@ -277,7 +279,64 @@ static int32_t   s_bounceW  = 0;
 static int8_t    s_dmaState = 0;             // 0 untried, 1 on, -1 not available
 static const int32_t CHUNK_ROWS = 8;
 
-#if SQW_PUSH_QSPI
+#if SQW_PUSH_QSPI && defined(WAVESHARE_206)
+// The Waveshare 2.06": the 240x240 watch frame scaled by 5/3 into the
+// 400x400 square of the CO5300 (Co5300::edge()). Twenty panel rows a chunk,
+// 16 KB a buffer, twelve logical rows of the frame.
+static const int32_t WS_CHUNK_ROWS = 20;
+// Which logical pixel each of the square's 400 panel offsets shows, per
+// rotation: rotation 2 is the same square turned half round.
+static uint8_t s_mapRot0[Co5300::OUT], s_mapRot2[Co5300::OUT];
+
+static bool pushDma(TFT_eSPI&, int32_t) {
+    if (s_dmaState) return s_dmaState > 0;
+    s_dmaState = -1;
+    if (!Co5300::ready()) { Serial.println("[push] QSPI: the panel never came up"); return false; }
+    for (int32_t o = 0; o < Co5300::OUT; o++) {
+        s_mapRot0[o] = (uint8_t)Co5300::logicalOf(o);
+        s_mapRot2[o] = (uint8_t)(Co5300::LOG - 1 - Co5300::logicalOf(Co5300::OUT - 1 - o));
+    }
+    for (int k = 0; k < 2; k++)
+        s_bounce[k] = (uint16_t*)heap_caps_malloc((size_t)Co5300::OUT * WS_CHUNK_ROWS * sizeof(uint16_t),
+                                                  MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
+    if (!s_bounce[0] || !s_bounce[1]) { Serial.println("[push] QSPI: no room for the bounce buffers"); return false; }
+    s_dmaState = 1;
+    Serial.printf("[push] QSPI on: %d-row chunks of %u bytes, scaled 5/3, heap %lu\n",
+                  (int)WS_CHUNK_ROWS, (unsigned)(Co5300::OUT * WS_CHUNK_ROWS * 2), (unsigned long)ESP.getFreeHeap());
+    return true;
+}
+
+// Logical rows [r0, r1) of the 240x240 frame, to the panel. r0 and r1 are
+// multiples of six (the caller's align), so both ends land on even panel
+// rows: six logical rows are exactly ten panel rows.
+static void pushSpanQspi(const uint8_t* src, int32_t w, int32_t h, uint8_t rot, int32_t r0, int32_t r1) {
+    (void)h;
+    const bool flip = (rot & 2) != 0;
+    const uint8_t* map = flip ? s_mapRot2 : s_mapRot0;
+    const int32_t py0 = flip ? Co5300::OUT - Co5300::edge(r1) : Co5300::edge(r0);
+    const int32_t py1 = flip ? Co5300::OUT - Co5300::edge(r0) : Co5300::edge(r1);   // exclusive
+    Co5300::setWindow(Co5300::OFF_X, (int16_t)(Co5300::OFF_Y + py0),
+                      Co5300::OFF_X + Co5300::OUT - 1, (int16_t)(Co5300::OFF_Y + py1 - 1));
+    bool first = true;
+    int  k = 0;
+    for (int32_t py = py0; py < py1; py += WS_CHUNK_ROWS, k++) {
+        const int32_t n = (py1 - py) < WS_CHUNK_ROWS ? (py1 - py) : WS_CHUNK_ROWS;
+        uint16_t* b = s_bounce[k & 1];
+        int32_t lastRow = -1;
+        for (int32_t i = 0; i < n; i++) {
+            uint16_t* d = b + i * Co5300::OUT;
+            const int32_t ly = map[py + i];
+            if (ly == lastRow) { memcpy(d, d - Co5300::OUT, Co5300::OUT * sizeof(uint16_t)); continue; }
+            lastRow = ly;
+            const uint8_t* s = src + (size_t)ly * (size_t)w;
+            for (int32_t o = 0; o < Co5300::OUT; o++) d[o] = s_lut[s[map[o]]];
+        }
+        Co5300::queuePixels(b, (size_t)n * (size_t)Co5300::OUT, first);
+        first = false;
+    }
+    Co5300::wait();
+}
+#elif SQW_PUSH_QSPI
 // Panel rows a chunk: 32 x 320 x 2 bytes, 20 KB a buffer. Wider than the SPI
 // boards' eight because in landscape a chunk of panel rows is a run of 32
 // logical COLUMNS, and 32 bytes of a logical row is one cache line of the
@@ -534,7 +593,13 @@ static bool pushNow(TFT_eSPI& tft, const uint8_t* src, int32_t w, int32_t h, int
     // column wide, or starting on an odd column, came out as a smear across
     // the top of the screen (the title bar's rows, changing every frame).
     // Four rows at a time keeps every window even on both edges.
+#if defined(WAVESHARE_206)
+    // Six logical rows are ten panel rows on the scaled 2.06": every window
+    // then starts and ends on an even row, which the CO5300 needs.
+    const int32_t align = 6;
+#else
     const int32_t align = 4;
+#endif
 #else
     const int32_t align = (int32_t)(PX_PER_BURST / gcd32((uint32_t)w, PX_PER_BURST));
 #endif

@@ -18,6 +18,15 @@
 #define WD_ON_DEVICE 0
 #endif
 
+#if defined(WAVESHARE_206) && defined(ESP32)
+#include <SD_MMC.h>
+#include <time.h>
+#include "clock.h"
+#ifndef FIRMWARE_VERSION
+#define FIRMWARE_VERSION "unknown"
+#endif
+#endif
+
 namespace Wardrive {
 
 namespace {
@@ -177,6 +186,136 @@ bool worthWriting(const Pending& p, const Gnss::Fix& f, uint32_t epoch) {
     return true;
 }
 
+#if defined(WAVESHARE_206) && defined(ESP32)
+// ---- the Waveshare 2.06's SD writer --------------------------------------------
+// No GPS on this watch. Every sighting goes to the card with the watch's UTC
+// clock and blank coordinates (0,0), as a WigleWifi-1.6 file; the phone records
+// a GPX track at the same time, and tools/wigle_merge.py puts the two
+// together by time into the file that uploads. With no place to compare, a
+// device is written again after WS_AGAIN_S rather than after 50 m: a few
+// rows per pass gives WiGLE what it needs to place a network.
+const uint32_t WS_AGAIN_S  = 15;
+const uint16_t WS_ROWS_B   = 4096;
+const uint16_t WS_ROW_MAX  = 320;
+const uint32_t WS_FLUSH_MS = 2000;
+// A position from the phone (phone_gps.h) places a row while it is this
+// fresh; the phone sends one a second. Older, the row goes out at 0,0 for
+// the GPX merge to place.
+const uint32_t WS_FIX_MS   = 5000;
+uint32_t s_wsPlaced = 0;       // rows written with the phone's position, this boot
+char*    s_wsRows = nullptr;
+uint16_t s_wsLen = 0, s_wsCount = 0;
+uint32_t s_wsSince = 0;
+char     s_wsFile[32] = "";
+uint8_t  s_wsState = 0;        // 0 off, 1 no card, 2 no clock, 3 logging
+bool     s_wsWarned = false;
+uint32_t s_wsWifi = 0;         // WiFi rows among those queued for the card, this boot
+
+bool wsCard() { return SD_MMC.cardType() != CARD_NONE; }
+
+void wsFlush() {
+    if (!s_wsRows || !s_wsLen) return;
+    bool ok = false;
+    const bool fresh = !SD_MMC.exists(s_wsFile);
+    File f = SD_MMC.open(s_wsFile, FILE_APPEND);
+    if (f) {
+        ok = true;
+        if (fresh) {
+            char h[512];
+            const size_t n = headerLines(h, sizeof h, FIRMWARE_VERSION, "waveshare-206", "ESP32-S3-Touch-AMOLED-2.06", "Waveshare");
+            ok = n && f.write((const uint8_t*)h, n) == n;
+        }
+        ok = ok && f.write((const uint8_t*)s_wsRows, s_wsLen) == s_wsLen;
+        f.close();
+    }
+    if (ok) s_written += s_wsCount;
+    else {
+        s_dropped += s_wsCount;
+        if (!s_wsWarned) { s_wsWarned = true; Serial.printf("[wardrive] cannot write %s\n", s_wsFile); }
+    }
+    s_wsLen = 0; s_wsCount = 0;
+}
+
+bool wsWorth(const Pending& p, uint32_t epoch) {
+    if (!s_seen) { s_seen = new Seen[SEEN_N]; memset(s_seen, 0, sizeof(Seen) * SEEN_N); }
+    Seen& s = s_seen[slotFor(p.mac, p.kind)];
+    if (s.used && s.kind == p.kind && !memcmp(s.mac, p.mac, 6) && epoch - s.epoch < WS_AGAIN_S) return false;
+    memcpy(s.mac, p.mac, 6); s.kind = p.kind; s.used = 1; s.epoch = epoch;
+    return true;
+}
+
+void wsTick(uint32_t nowMs) {
+    const bool card = s_on && wsCard();
+    const uint32_t epoch = Clock::nowEpoch();
+    s_wsState = !s_on ? 0 : !card ? 1 : !epoch ? 2 : 3;
+    if (s_wsState != 3) {
+        // Off, no card or no clock: what is buffered goes out if it can, the
+        // queues are emptied unwritten, and off ends the session's file.
+        if (card && s_wsLen) wsFlush();
+        Pending p;
+        while (s_wifiQ->pop(p) || s_bleQ->pop(p)) {}
+        if (!s_on) { s_wsFile[0] = 0; s_wsWarned = false; }
+        return;
+    }
+    if (!s_wsRows) { s_wsRows = (char*)ps_malloc(WS_ROWS_B); if (!s_wsRows) return; }
+    if (!s_wsFile[0]) {
+        const time_t t = (time_t)epoch;
+        struct tm tm;
+        gmtime_r(&t, &tm);
+        snprintf(s_wsFile, sizeof s_wsFile, "/wigle-%04d%02d%02d-%02d%02d.csv",
+                 tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min);
+        Serial.printf("[wardrive] logging to %s\n", s_wsFile);
+    }
+    const Gnss::Fix& f = Gnss::fix();
+    // Signed, as Gnss::fresh() is: a fix that landed after nowMs was taken
+    // would otherwise read as 49 days old.
+    const bool placed = f.valid && !Gnss::faked() && (int32_t)(nowMs - f.atMs) < (int32_t)WS_FIX_MS;
+    Pending p;
+    for (int n = 0; n < 2 * QN; n++) {
+        if (!(s_wifiQ->pop(p) || s_bleQ->pop(p))) break;
+        if (!wsWorth(p, epoch)) { s_skipped++; continue; }
+        Record r;
+        memset(&r, 0, sizeof r);
+        r.kind = p.kind; r.flags = p.flags;
+        memcpy(r.mac, p.mac, 6);
+        r.rssi = p.rssi; r.channel = p.channel; r.auth = p.auth;
+        r.epoch = epoch;
+        if (placed) { r.lat7 = f.lat7; r.lon7 = f.lon7; r.altM = f.altM; r.accM = f.accM; s_wsPlaced++; }
+        r.nameLen = p.nameLen; memcpy(r.name, p.name, p.nameLen);
+        if (WS_ROWS_B - s_wsLen < WS_ROW_MAX) wsFlush();
+        const size_t w = csvRow(r, s_wsRows + s_wsLen, WS_ROWS_B - s_wsLen);
+        if (!w) { s_dropped++; continue; }
+        if (!s_wsCount) s_wsSince = nowMs;
+        s_wsLen = (uint16_t)(s_wsLen + w);
+        s_wsCount++;
+        if (r.kind == KIND_WIFI) s_wsWifi++;
+    }
+    if (s_wsCount && nowMs - s_wsSince >= WS_FLUSH_MS) wsFlush();
+}
+
+void wsWipe() {
+    s_wsLen = 0; s_wsCount = 0; s_wsFile[0] = 0;
+    if (!wsCard()) return;
+    for (int pass = 0; pass < 64; pass++) {
+        File dir = SD_MMC.open("/");
+        if (!dir) break;
+        char victims[16][40];
+        int n = 0;
+        for (File f = dir.openNextFile(); f && n < 16; f = dir.openNextFile()) {
+            const char* base = f.name();
+            for (const char* q = base; *q; q++) if (*q == '/') base = q + 1;
+            const size_t len = strlen(base);
+            if (!strncmp(base, "wigle-", 6) && len > 4 && len < 36 && !strcmp(base + len - 4, ".csv"))
+                snprintf(victims[n++], sizeof victims[0], "/%s", base);
+            f.close();
+        }
+        dir.close();
+        for (int i = 0; i < n; i++) SD_MMC.remove(victims[i]);
+        if (n < 16) break;
+    }
+}
+#endif
+
 Preferences s_prefs;
 
 }  // namespace
@@ -237,6 +376,10 @@ void noteBle(const uint8_t* mac, const char* name, int8_t rssi, bool haveMfgr, u
 
 void tick(uint32_t nowMs) {
     if (!s_wifiQ || !s_bleQ) return;        // begin() never ran: nothing can have been queued
+#if defined(WAVESHARE_206) && defined(ESP32)
+    wsTick(nowMs);
+    return;
+#endif
     Pending p;
     // Emptied either way, so a queue filled while there was no fix does not
     // turn into rows stamped with the first fix that arrives later.
@@ -293,7 +436,17 @@ void clear() {
     }
     s_head = -1; s_headSeq = 0; s_used = 0; s_full = 0;
     if (s_seen) memset(s_seen, 0, sizeof(Seen) * SEEN_N);
+#if defined(WAVESHARE_206) && defined(ESP32)
+    wsWipe();
+#endif
 }
+
+#if defined(WAVESHARE_206) && defined(ESP32)
+uint8_t     wsState()    { return s_wsState; }
+const char* wsFileName() { return s_wsFile; }
+uint32_t    wsWifiRows() { return s_wsWifi; }
+uint32_t    wsPlacedRows() { return s_wsPlaced; }
+#endif
 
 }  // namespace Wardrive
 

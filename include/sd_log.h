@@ -21,6 +21,15 @@ public:
     // the phrase and the ignore list live in NVS, but the detection history a
     // wipe must also erase is here. A no-op when no card is mounted.
     void wipe();
+#if defined(WAVESHARE_206)
+    // The console's SD FORMAT: a fresh FAT32 volume on the card (everything
+    // on it gone), then mounted again. SD TEST: a 256 KB file written, read
+    // back and checked, then deleted, with the speeds.
+    bool format();
+    void selfTest();
+    // SD LS: the card's top directory, and the last lines of today's log.
+    void list();
+#endif
 private:
     bool     _ready = false;
     uint32_t _lastFlush = 0;
