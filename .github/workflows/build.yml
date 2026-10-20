@@ -37,7 +37,9 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.x'
+          # PlatformIO requires 3.10-3.14; '3.x' now resolves to 3.15 on the
+          # runners, which its core rejects. Pin to a supported version.
+          python-version: '3.13'
 
       # Both caches matter: the toolchain is a ~200MB download and the
       # framework another large unpack, and neither changes between runs.
