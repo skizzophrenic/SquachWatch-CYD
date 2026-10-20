@@ -391,7 +391,7 @@ static void drawCrashCard(TFT_eSPI& t) {
 #include "ui_security.h"
 #include "squachy.h"
 #include "cap_touch.h"
-#if defined(TWATCH_S3)
+#if defined(TWATCH_S3) || defined(WS_C5_35)
 #define XPOWERS_CHIP_AXP2101
 #include <XPowersLib.h>
 #endif
@@ -3276,6 +3276,54 @@ static bool boardBatteryState(uint8_t& pct, bool& charging) {
 }
 #endif
 
+#if defined(WS_C5_35)
+// The Waveshare C5 3.5" reads its cell through the AXP2101 on the shared touch
+// bus (SDA 27 / SCL 26) -- the same chip the T-Watch uses, on its own bus.
+static XPowersAXP2101 s_c5pmu;
+static bool           s_c5pmuOk = false;
+static void initC5Pmu() {
+    s_c5pmuOk = s_c5pmu.begin(Wire, AXP2101_SLAVE_ADDRESS, 27, 26);
+    if (!s_c5pmuOk) { Serial.println("[pmu] AXP2101 did not answer; no battery readout"); return; }
+    Wire.setClock(400000);                // begin() may have reset it
+    s_c5pmu.enableBattVoltageMeasure();
+    Serial.printf("[pmu] AXP2101 up: %s, battery %s\n", s_c5pmu.isVbusIn() ? "on USB" : "on battery",
+                  s_c5pmu.isBatteryConnect() ? "connected" : "not connected");
+}
+// The SYSTEM page's BATTERY row: "81% 4.12V", "CHG 81%" on the cable, or "NONE".
+void boardBatteryLine(char* out, size_t n) {
+    if (!s_c5pmuOk)                  { snprintf(out, n, "?");    return; }
+    if (!s_c5pmu.isBatteryConnect()) { snprintf(out, n, "NONE"); return; }
+    static uint32_t at = 0;
+    static char     line[16] = "";
+    const uint32_t now = millis();
+    if (!line[0] || now - at >= 2000) {   // two I2C reads, not one per frame
+        at = now;
+        const int pct = s_c5pmu.getBatteryPercent();
+        if (s_c5pmu.isCharging()) snprintf(line, sizeof line, "CHG %d%%", pct);
+        else snprintf(line, sizeof line, "%d%% %u.%02uV", pct, (unsigned)(s_c5pmu.getBattVoltage() / 1000),
+                      (unsigned)(s_c5pmu.getBattVoltage() % 1000 / 10));
+    }
+    snprintf(out, n, "%s", line);
+}
+// The home screen's lava lamp (uiClearSetBatterySource).
+static bool boardBatteryState(uint8_t& pct, bool& charging) {
+    if (!s_c5pmuOk || !s_c5pmu.isBatteryConnect()) return false;
+    static uint32_t at = 0;
+    static int      p = -1;
+    static bool     chg = false;
+    const uint32_t now = millis();
+    if (!at || now - at >= 2000) {        // three I2C reads, every two seconds
+        at = now ? now : 1;
+        p = s_c5pmu.getBatteryPercent();
+        chg = s_c5pmu.isCharging() || s_c5pmu.isVbusIn();
+    }
+    if (p < 0) return false;
+    pct = (uint8_t)(p > 100 ? 100 : p);
+    charging = chg;
+    return true;
+}
+#endif
+
 #if defined(TWATCH_S3)
 // One battery sample into the black box. See BattRecord for what it holds
 // and why. Printed too, so a bench run shows the same line the ring keeps.
@@ -4537,6 +4585,9 @@ void setup() {
     Serial.println(usingCapTouch ? "Waveshare C5 3.5 -- FT6336 capacitive touch answered."
                                  : "Waveshare C5 3.5 -- FT6336 did not answer; no touch.");
     Sound::begin();                       // ES8311 is on the touch bus, now up
+    initC5Pmu();                          // AXP2101 battery readout on the shared bus
+    { char b[16]; boardBatteryLine(b, sizeof b); Serial.printf("[batt] %s\n", b); }
+    uiClearSetBatterySource(boardBatteryState);
 #elif defined(TOUCH_RAW_SHARED_BUS)
     // RL Phantom, resistive variant. The chip sits on the display's own bus
     // (TOUCH_CS=33, armed by TFT_eSPI once rlphantom_r_user_setup.h is in
