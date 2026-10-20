@@ -18,8 +18,8 @@
 #pragma once
 #include <stdint.h>
 
-// SQUACHSIM: the browser emulator's T-Deck build has no speaker to drive.
-#if (defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)) && !defined(SQUACHSIM)
+// The browser emulator has no hardware speaker to drive.
+#if (defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(WS_C5_35)) && !defined(SQUACHSIM)
 #define SQW_SPEAKER 1
 #else
 #define SQW_SPEAKER 0

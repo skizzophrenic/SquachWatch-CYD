@@ -44,6 +44,15 @@ static const int PIN_AMP = 1;
 static const int PIN_MCK = -1, PIN_BCK = 7, PIN_WS = 5, PIN_DOUT = 6;
 static const int PIN_AMP = -1;
 #define SOUND_NO_CODEC 1
+#elif defined(WS_C5_35)
+// Waveshare C5 3.5": ESP32-C5 -> I2S -> ES8311 (0x18 on the shared touch bus)
+// -> NS4150B amp -> onboard speaker. NO external MCLK net: the codec clocks off
+// BCLK (see codecInit's no-MCLK branch). NO software amp/codec enable either --
+// Codec_CE is tied to the power/reset rail, so the chain powers up on its own;
+// the amp quiets when the I2S clocks stop between sounds. Pins from the hardware
+// ref: BCLK 23, LRCK 10, DOUT 25. (Mic/DIN 24 is unused: TX/DAC only.)
+static const int PIN_MCK = -1, PIN_BCK = 23, PIN_WS = 10, PIN_DOUT = 25;
+static const int PIN_AMP = -1;
 #else
 static const int PIN_MCK = 4,  PIN_BCK = 5,  PIN_WS = 7,  PIN_DOUT = 8;
 static const int PIN_AMP = 1;
@@ -153,10 +162,25 @@ static bool wr(uint8_t r, uint8_t v) {
     return Wire.endTransmission() == 0;
 }
 static uint8_t rd(uint8_t r) {
+#if defined(WS_C5_35)
+    // The ES8311 shares the FT6336 touch bus (SDA 27 / SCL 26) over a flex at
+    // 100 kHz. A repeated-start read (endTransmission(false)) errors on the C5
+    // and leaves the bus mid-transaction, which then breaks touch. Send a STOP
+    // between the register-pointer write and the read; if it still errors,
+    // reset the bus and retry once so a bad read never wedges touch.
+    for (int attempt = 0; attempt < 2; attempt++) {
+        Wire.beginTransmission(CODEC); Wire.write(r);
+        if (Wire.endTransmission(true) == 0 && Wire.requestFrom(CODEC, (uint8_t)1) == 1)
+            return (uint8_t)Wire.read();
+        Wire.end(); Wire.begin(27, 26, 100000U);
+    }
+    return 0;
+#else
     Wire.beginTransmission(CODEC); Wire.write(r);
     if (Wire.endTransmission(false) != 0) return 0;
     if (Wire.requestFrom(CODEC, (uint8_t)1) != 1) return 0;
     return (uint8_t)Wire.read();
+#endif
 }
 // Espressif's es8311 driver boiled down to one case: slave on the bus, MCLK
 // from its pin at 256 x 16 kHz, 16-bit I2S in, the DAC on, the ADC left
@@ -168,8 +192,28 @@ static bool codecInit() {
     delay(20);
     wr(0x00, 0x00);
     wr(0x00, 0x80);                         // power on
+#if defined(WS_C5_35)
+    // No external MCLK on this board: the ES8311 clocks off SCLK (BCLK, GPIO23),
+    // which must already be running (begin() installs/starts I2S before this).
+    // REG01 bit7 selects SCLK as the source; 0x3F keeps every clock enabled.
+    // The coeff registers (02-08) below stay on the {4096000, 16000} row
+    // (16 kHz x mclk_div 256), same as the MCLK case. Per the hardware ref;
+    // if sound is silent/distorted on the bench, REG02's clock field is the
+    // first thing to tune (hwref notes use_mclk=false wants its field = 3).
+    wr(0x01, 0x3F | 0x80);                  // clock from SCLK (no MCLK pin)
+#else
     wr(0x01, 0x3F);                         // MCLK from the MCLK pin, every clock on
+#endif
+#if defined(WS_C5_35)
+    // No MCLK pin: the codec clocks off SCLK (BCLK ~512 kHz = 32 x 16 kHz).
+    // REG02 bits[4:3] are the clock pre-multiplier (0=x1,1=x2,2=x4,3=x8); set
+    // x8 so the codec's internal clock is ~4.096 MHz -- the same clock the
+    // coeff registers 03-08 below are tuned for. With x1 the DAC ran at an
+    // eighth of that and produced no usable output.
+    wr(0x02, (uint8_t)((rd(0x02) & 0x07) | (3 << 3)));
+#else
     wr(0x02, (uint8_t)(rd(0x02) & 0x07));   // pre-divider 1, multiplier 1x
+#endif
     wr(0x03, 0x10);                         // single speed, ADC OSR
     wr(0x04, 0x10);                         // DAC OSR
     wr(0x05, 0x00);                         // ADC and DAC dividers 1
@@ -466,7 +510,9 @@ void begin() {
 #if SOUND_NO_CODEC
     i2s_stop(PORT);
     s_q = xQueueCreate(4, sizeof(uint8_t));
-    xTaskCreatePinnedToCore(soundTask, "sound", 4096, nullptr, 2, &s_task, 1);
+    // The C5 is single-core (core 0 only); pinning to core 1 asserts at boot.
+    const BaseType_t core = (portNUM_PROCESSORS > 1) ? 1 : 0;
+    xTaskCreatePinnedToCore(soundTask, "sound", 4096, nullptr, 2, &s_task, core);
     s_ok = s_q && s_task;
     Serial.printf("[sound] I2S amp ready: BCK %d WS %d DOUT %d%s\n", PIN_BCK, PIN_WS, PIN_DOUT, s_ok ? "" : " -- task failed");
 #else
@@ -475,7 +521,9 @@ void begin() {
     i2s_stop(PORT);
     if (!ok) { Serial.println("[sound] ES8311 setup failed"); return; }
     s_q = xQueueCreate(4, sizeof(uint8_t));
-    xTaskCreatePinnedToCore(soundTask, "sound", 4096, nullptr, 2, &s_task, 1);
+    // The C5 is single-core (core 0 only); pinning to core 1 asserts at boot.
+    const BaseType_t core = (portNUM_PROCESSORS > 1) ? 1 : 0;
+    xTaskCreatePinnedToCore(soundTask, "sound", 4096, nullptr, 2, &s_task, core);
     s_ok = s_q && s_task;
     Serial.printf("[sound] ES8311 id %02X%02X ready: MCK %d BCK %d WS %d DOUT %d, amp on GPIO%d%s\n",
                   id1, id2, PIN_MCK, PIN_BCK, PIN_WS, PIN_DOUT, PIN_AMP, s_ok ? "" : " -- task failed");
