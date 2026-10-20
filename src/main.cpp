@@ -8,6 +8,22 @@
 #include <Wire.h>
 #include <TFT_eSPI.h>
 #include "sound.h"          // the Freenove S3 speaker; no-ops everywhere else
+// The software "hold BOOT to power off" feature (cbdPowerOff) deep-sleeps the
+// chip with an ext0 BOOT wake. It was built for the battery boards with no
+// hardware power switch -- the Freenove S3 pair and the T-Deck, which are also
+// the speaker boards, so it rode on SQW_SPEAKER. The Waveshare C5 3.5" is a
+// speaker board too, but it has a PWR button + AXP2101 PMU (so it needs no
+// software off) and is a RISC-V C5 with NO ext0 wakeup (esp_sleep_enable_ext0_
+// wakeup does not even exist there). So split the feature off SQW_SPEAKER:
+// audio stays on SQW_SPEAKER, the power-off/deep-sleep is SQW_SOFT_POWEROFF.
+// The power diary, the boot watchdog and the wake-restart stay on SQW_SPEAKER
+// -- they compile and are harmless on the C5, and detection.cpp's BOOT_STAGE
+// needs bootStage() whenever SQW_SPEAKER.
+#if SQW_SPEAKER && !defined(WS_C5_35)
+#define SQW_SOFT_POWEROFF 1
+#else
+#define SQW_SOFT_POWEROFF 0
+#endif
 #if defined(CROWPANEL7)
 #include "crowpanel7_board.h"
 #include "crowpanel7_display.h"
@@ -4520,6 +4536,7 @@ void setup() {
     usingCapTouch = WsTouch::begin();
     Serial.println(usingCapTouch ? "Waveshare C5 3.5 -- FT6336 capacitive touch answered."
                                  : "Waveshare C5 3.5 -- FT6336 did not answer; no touch.");
+    Sound::begin();                       // ES8311 is on the touch bus, now up
 #elif defined(TOUCH_RAW_SHARED_BUS)
     // RL Phantom, resistive variant. The chip sits on the display's own bus
     // (TOUCH_CS=33, armed by TFT_eSPI once rlphantom_r_user_setup.h is in
@@ -5761,6 +5778,10 @@ volatile bool g_consolePowerOff = false;
 // NAPTEST: the same POWER OFF, plus a timer that wakes it 3 s later -- the
 // wake path, repeatable from the console without a finger on BOOT.
 volatile bool g_consoleNapTest = false;
+// The globals above stay on SQW_SPEAKER: clock.cpp's console "POWER OFF"/"NAPTEST"
+// commands set them on every speaker board. The deep-sleep itself (ext0, absent
+// on the C5) is SQW_SOFT_POWEROFF, so on WS_C5_35 the globals simply go unused.
+#if SQW_SOFT_POWEROFF
 static uint32_t s_offHeldAt = 0;      // when the long press began, 0 = not held
 static void cbdPowerOff() {
     powerDiaryNote(PD_OFF_ASKED, (uint16_t)(g_consolePowerOff ? 1 : 0));
@@ -5808,7 +5829,8 @@ static void cbdPowerOff() {
                   esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0) == ESP_OK ? "armed" : "REFUSED");
     esp_deep_sleep_start();
 }
-#endif
+#endif  // SQW_SOFT_POWEROFF
+#endif  // SQW_SPEAKER
 
 #if SQW_BOOT_BTN
 // BOOT, polled every pass (and every 40 ms in charge mode). Released before
@@ -5832,14 +5854,16 @@ static void bootButtonTick(uint32_t now) {
     if (down && !longDone && now - downAt >= 1200) {
         longDone = true;
         Serial.println("[button] long press");
-#if SQW_SPEAKER
+#if SQW_SOFT_POWEROFF
         if (s_chargeMode) exitChargeMode();
         else { s_offHeldAt = now ? now : 1; Theme::showToast("POWER OFF", "KEEP HOLDING BOOT", Theme::AMBER, 2200); }
 #else
+        // WS_C5_35 lands here too: no software power-off, so a long press starts
+        // CHARGE MODE like the other CYDs (it has a hardware PWR button).
         if (s_chargeMode) exitChargeMode(); else s_chargeWanted = true;
 #endif
     }
-#if SQW_SPEAKER
+#if SQW_SOFT_POWEROFF
     if (s_offHeldAt && down && now - downAt >= 3000) cbdPowerOff();
     if (!down) s_offHeldAt = 0;
 #endif
@@ -5867,8 +5891,10 @@ void loop() {
     tdeckKeysTick(millis());
 #endif
     if (g_consoleCharge) { g_consoleCharge = false; if (s_chargeMode) exitChargeMode(); else s_chargeWanted = true; }
-#if SQW_SPEAKER
+#if SQW_SOFT_POWEROFF
     if (g_consolePowerOff) { cbdPowerOff(); }
+#endif
+#if SQW_SPEAKER
     powerDiaryTick(millis());
     if (g_consolePowerLog) { g_consolePowerLog = false; powerDiaryPrint(); }
 #endif
