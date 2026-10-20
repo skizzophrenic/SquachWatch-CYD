@@ -39,11 +39,36 @@ TaskHandle_t s_task = nullptr;
 volatile bool s_done = false;
 IPAddress s_base;                          // the base station, once found
 char     s_last[96] = "not tried yet";
+char     s_homeNet[33] = "";               // where the base station last answered
+// Saved networks where no base station answered: skipped for two hours, so a
+// phone's hotspot without the Tab5 on it costs one look, not one every visit.
+const uint32_t MISS_MS = 2UL * 3600 * 1000;
+char     s_missNet[4][33];
+uint32_t s_missAt[4] = {};
+bool missed(const char* ssid, uint32_t now) {
+    for (uint8_t i = 0; i < 4; i++)
+        if (s_missAt[i] && now - s_missAt[i] < MISS_MS && !strcmp(s_missNet[i], ssid)) return true;
+    return false;
+}
+void noteMiss(const char* ssid, uint32_t now) {
+    uint8_t slot = 0;
+    for (uint8_t i = 0; i < 4; i++) {
+        if (!strcmp(s_missNet[i], ssid)) { slot = i; break; }
+        if (s_missAt[i] < s_missAt[slot]) slot = i;
+    }
+    strncpy(s_missNet[slot], ssid, 32); s_missNet[slot][32] = 0;
+    s_missAt[slot] = now ? now : 1;
+}
+volatile bool s_missedThis = false;          // the task's word that nobody answered
 
 void load() {
     if (s_loaded) return;
     Preferences p;
-    if (p.begin("homesync", true)) { s_on = p.getBool("on", true); p.end(); }
+    if (p.begin("homesync", true)) {
+        s_on = p.getBool("on", true);
+        strncpy(s_homeNet, p.getString("net", "").c_str(), sizeof s_homeNet - 1);
+        p.end();
+    }
     s_loaded = true;
 }
 
@@ -163,8 +188,16 @@ void syncTask(void*) {
             MDNS.end();
         }
         if (s_base == IPAddress()) {
-            snprintf(s_last, sizeof s_last, "home, but no base station answered (squachbase.local)");
+            snprintf(s_last, sizeof s_last, "on %s, but no base station answered (squachbase.local)", ssid);
+            s_missedThis = true;
         } else {
+            // This is home: other saved networks (a phone's hotspot) are
+            // for updates and the clock, and are not tried for a sync.
+            if (strcmp(s_homeNet, ssid) != 0) {
+                strncpy(s_homeNet, ssid, sizeof s_homeNet - 1);
+                Preferences p;
+                if (p.begin("homesync", false)) { p.putString("net", ssid); p.end(); }
+            }
             uint8_t* buf = (uint8_t*)malloc(CHUNK);
             char names[DAYS][32];
             const uint8_t n = buf ? dayFiles(names) : 0;
@@ -210,7 +243,8 @@ void setEnabled(bool on) {
 void syncSoon() { s_soon = true; }
 void printStatus() {
     load();
-    Serial.printf("[sync] home sync %s; last: %s\n", s_on ? "ON" : "OFF", s_last);
+    Serial.printf("[sync] home sync %s; home network %s; last: %s\n", s_on ? "ON" : "OFF",
+                  s_homeNet[0] ? s_homeNet : "(not found yet)", s_last);
 }
 
 void tick(uint32_t now, bool idle, DetectionEngine& engine) {
@@ -241,16 +275,22 @@ void tick(uint32_t now, bool idle, DetectionEngine& engine) {
         if (n == WIFI_SCAN_RUNNING && now - s_phaseAt < SCAN_MS) return;
         if (n == WIFI_SCAN_RUNNING) { snprintf(s_last, sizeof s_last, "scan did not finish in %lu s", (unsigned long)(SCAN_MS / 1000)); finish(now); return; }
         if (n < 0)                  { snprintf(s_last, sizeof s_last, "scan failed (%d)", n); finish(now); return; }
-        // the strongest saved network heard
+        // The network where the base station last answered, if it is heard;
+        // else the strongest saved one heard that has not just come up empty.
         int bestRssi = -127;
         for (int i = 0; i < n; i++) {
-            const int8_t k = OtaWifi::savedIndexOf(WiFi.SSID(i).c_str());
-            if (k >= 0 && WiFi.RSSI(i) > bestRssi) { bestRssi = WiFi.RSSI(i); s_net = k; }
+            const String name = WiFi.SSID(i);
+            const int8_t k = OtaWifi::savedIndexOf(name.c_str());
+            if (k < 0 || missed(name.c_str(), now)) continue;
+            const int score = WiFi.RSSI(i) + (s_homeNet[0] && name == s_homeNet ? 100 : 0);
+            if (score > bestRssi) { bestRssi = score; s_net = k; }
         }
+        if (bestRssi > 0) bestRssi -= 100;
         if (s_net < 0) { snprintf(s_last, sizeof s_last, "not home (%d networks heard, none saved)", n); finish(now); return; }
         Serial.printf("[sync] home: %s at %d dBm, joining\n", OtaWifi::savedSsidAt((uint8_t)s_net), bestRssi);
         WiFi.scanDelete();
         s_done = false;
+        s_missedThis = false;
         if (xTaskCreatePinnedToCore(syncTask, "homesync", 8192, nullptr, 1, &s_task,
                                     portNUM_PROCESSORS > 1 ? 1 : 0) != pdPASS) {
             s_task = nullptr;
@@ -264,6 +304,7 @@ void tick(uint32_t now, bool idle, DetectionEngine& engine) {
     }
     case Phase::SYNCING:
         if (!s_done) return;
+        if (s_missedThis) noteMiss(OtaWifi::savedSsidAt((uint8_t)s_net), now);
         finish(now);
         return;
     }
