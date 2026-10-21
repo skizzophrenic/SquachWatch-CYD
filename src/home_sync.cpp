@@ -2,6 +2,7 @@
 #include "home_sync.h"
 #if SQW_HOME_SYNC && defined(ARDUINO_ARCH_ESP32)
 #include <Arduino.h>
+#include "esp_heap_caps.h"
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ESPmDNS.h>
@@ -314,7 +315,10 @@ void tick(uint32_t now, bool idle, DetectionEngine& engine) {
         WiFi.scanDelete();
         s_done = false;
         s_missedThis = false;
-        if (xTaskCreatePinnedToCore(syncTask, "homesync", 16384, nullptr, 1, &s_task,
+        Serial.printf("[sync] internal heap: free %u, largest block %u\n",
+                      (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+        if (xTaskCreatePinnedToCore(syncTask, "homesync", 12288, nullptr, 1, &s_task,
                                     portNUM_PROCESSORS > 1 ? 1 : 0) != pdPASS) {
             s_task = nullptr;
             snprintf(s_last, sizeof s_last, "no room for the sync task");
