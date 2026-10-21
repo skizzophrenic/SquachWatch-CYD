@@ -8,6 +8,7 @@
 #include <ESPmDNS.h>
 #include <Preferences.h>
 #include "detection.h"
+#include "wardrive.h"
 #include "ota_wifi.h"
 #include "squachy.h"
 #include "frame_push.h"
@@ -61,6 +62,16 @@ void noteMiss(const char* ssid, uint32_t now) {
     s_missAt[slot] = now ? now : 1;
 }
 volatile bool s_missedThis = false;          // the task's word that nobody answered
+
+// "Only a homecoming is worth a sync." He boots armed, so wardrive data already
+// on the card goes home the first time. A successful delivery disarms him; he
+// re-arms only once the wardrive has logged new rows -- that is, he has been out
+// again. Sitting at home he logs nothing new, never re-arms, and never syncs for
+// nothing. SYNC NOW (s_soon) ignores the arm and forces an attempt.
+bool          s_armed = true;
+uint32_t      s_armWritten = 0;              // Wardrive::written() when he last disarmed
+volatile bool s_deliveredHome = false;       // the task's word that the base answered
+const uint32_t ARM_ROWS = 20;                // new rows that count as "he has been out"
 
 // Crash guard. Armed in RTC RAM before a sync borrows the radio, cleared the
 // moment the attempt ends cleanly. If a sync ever panics the chip, the next
@@ -178,6 +189,7 @@ long sendFrom(const char* board, const char* file, long held, uint8_t* buf, uint
 }
 
 void syncTask(void*) {
+    s_deliveredHome = false;
     char ssid[33] = "", pass[65] = "";
     strncpy(ssid, OtaWifi::savedSsidAt((uint8_t)s_net), sizeof ssid - 1);
     OtaWifi::savedPassAt((uint8_t)s_net, pass, sizeof pass);
@@ -201,6 +213,7 @@ void syncTask(void*) {
             snprintf(s_last, sizeof s_last, "on %s, but no base station answered (squachbase.local)", ssid);
             s_missedThis = true;
         } else {
+            s_deliveredHome = true;          // the base answered: he is home, stand down after
             // This is home: other saved networks (a phone's hotspot) are
             // for updates and the clock, and are not tried for a sync.
             if (strcmp(s_homeNet, ssid) != 0) {
@@ -254,7 +267,8 @@ void setEnabled(bool on) {
 void syncSoon() { s_soon = true; }
 void printStatus() {
     load();
-    Serial.printf("[sync] home sync %s; home network %s; last: %s\n", s_on ? "ON" : "OFF",
+    Serial.printf("[sync] home sync %s; %s; home network %s; last: %s\n", s_on ? "ON" : "OFF",
+                  s_armed ? "armed (has been out)" : "idle (home, nothing new)",
                   s_homeNet[0] ? s_homeNet : "(not found yet)", s_last);
 }
 
@@ -276,6 +290,12 @@ void tick(uint32_t now, bool idle, DetectionEngine& engine) {
     switch (s_phase) {
     case Phase::IDLE: {
         if (!s_on || !idle || !engine.sd().ready() || !OtaWifi::hasSaved()) return;
+        // He has been out again once the wardrive logs new rows since he last
+        // delivered -- then re-arm, so the next time he is home it goes across.
+        if (!s_armed && Wardrive::written() > s_armWritten + ARM_ROWS) s_armed = true;
+        // Not forced, and he has not been away since the last delivery: nothing
+        // to bring home, so no sync -- this is why he sits quiet on the desk.
+        if (!s_soon && !s_armed) return;
         const uint32_t wait = s_lastTry ? EVERY_MS : FIRST_MS;
         if (!s_soon && now - s_lastTry < wait) return;
         s_soon = false;
@@ -332,6 +352,10 @@ void tick(uint32_t now, bool idle, DetectionEngine& engine) {
     case Phase::SYNCING:
         if (!s_done) return;
         if (s_missedThis) noteMiss(OtaWifi::savedSsidAt((uint8_t)s_net), now);
+        if (s_deliveredHome) {               // home and delivered: stand down until he goes out again
+            s_armed = false;
+            s_armWritten = Wardrive::written();
+        }
         finish(now);
         return;
     }
