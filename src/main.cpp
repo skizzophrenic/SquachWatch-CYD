@@ -8403,6 +8403,19 @@ void loop() {
                                              Theme::CYAN);
                             break;
 #endif
+#if SQW_HOME_SYNC
+                        case SettingsRow::HOME_SYNC: {
+                            // Off/on, kept in NVS. Home sync only ever does
+                            // anything with a Tab5 base answering as
+                            // squachbase.local, so the note says so either way.
+                            const bool want = !HomeSync::enabled();
+                            HomeSync::setEnabled(want);
+                            Theme::showToast(want ? "HOME SYNC ON" : "HOME SYNC OFF",
+                                             "Use with a Tab5 SquachWatch base",
+                                             Theme::CYAN);
+                            break;
+                        }
+#endif
                         case SettingsRow::STATUS_LIGHT: enterLight(); break;
                         case SettingsRow::SECURITY:    enterSecurity(); break;
                         case SettingsRow::IGNORED_DEVICES:  enterIgnoreList(); break;

@@ -4,6 +4,7 @@
 #include <stdlib.h>     // getenv: the emulator's SQUACHSIM_SPEAKER
 #endif
 #include "wardrive.h"
+#include "home_sync.h"
 #if SQUACH_LORA
 #include "ui_lorachat.h"
 #endif
@@ -118,6 +119,9 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::POWER_SAVER,
 #if defined(CYD_GPS)
     SettingsRow::WATCH_WARDRIVE,   // the watch's row and setting, on the CYD GPS builds
+#if SQW_HOME_SYNC
+    SettingsRow::HOME_SYNC,        // directly under WARDRIVE: hands the logs to the Tab5 base
+#endif
 #endif
 #if defined(ESP32) && !defined(TWATCH_S3)
     SettingsRow::CHARGE_MODE,
@@ -271,6 +275,9 @@ static RowGroupId groupFor(SettingsRow r) {
 #if defined(CYD_GPS)
     // Under its neighbor's heading: a CYD has no WATCH heading.
     if (r == SettingsRow::WATCH_WARDRIVE) return groupFor(SettingsRow::POWER_SAVER);
+#if SQW_HOME_SYNC
+    if (r == SettingsRow::HOME_SYNC)      return groupFor(SettingsRow::POWER_SAVER);
+#endif
 #endif
     switch (r) {
         case SettingsRow::WATCH_BATTERY:
@@ -1341,6 +1348,11 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
                     value = valBuf;
                     break;
             }
+            break;
+#endif
+#if SQW_HOME_SYNC
+        case SettingsRow::HOME_SYNC:
+            label = "HOME SYNC"; value = HomeSync::enabled() ? "ON" : "OFF";
             break;
 #endif
         case SettingsRow::EXT_SCREEN:

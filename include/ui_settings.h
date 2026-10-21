@@ -71,6 +71,9 @@ enum class SettingsRow : uint8_t {
     WATCH_SETTINGS,  // the T-Watch only: the row on the main list that opens the WATCH SETTINGS page
     WATCH_TEMP,      // the T-Watch only: the chip's temperature, a reading, under WATCH
     WATCH_WARDRIVE,  // the T-Watch only: WARDRIVE, every network and device with where, for WiGLE
+#if SQW_HOME_SYNC
+    HOME_SYNC,       // the GPS builds: hand the wardrive logs to a Tab5 base over home WiFi
+#endif
     WATCH_QUIET_TAGS, // the T-Watch only: TAGS + RINGS, logged without waking the watch
     WATCH_LORA,      // the T-Watch only: LORA, which networks the LoRa radio listens to
     WATCH_LORA_CHATS, // the T-Watch only: LORA CHATS, what it decoded, one chat per network
