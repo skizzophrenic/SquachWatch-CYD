@@ -61,6 +61,15 @@ void noteMiss(const char* ssid, uint32_t now) {
 }
 volatile bool s_missedThis = false;          // the task's word that nobody answered
 
+// Crash guard. Armed in RTC RAM before a sync borrows the radio, cleared the
+// moment the attempt ends cleanly. If a sync ever panics the chip, the next
+// boot finds it still armed and turns sync OFF (persisted), so the board comes
+// up normally instead of looping. RTC RAM survives a reset; the magic tells a
+// real arm from power-on garbage.
+RTC_NOINIT_ATTR static uint32_t s_crashGuard;
+const uint32_t GUARD_ARMED = 0x53594E43;     // "SYNC"
+bool s_guardChecked = false;
+
 void load() {
     if (s_loaded) return;
     Preferences p;
@@ -224,6 +233,7 @@ void syncTask(void*) {
 }
 
 void finish(uint32_t now) {
+    s_crashGuard = 0;                       // the attempt ended without crashing the chip
     WiFi.scanDelete();
     if (s_engine) s_engine->stopUpdateRadio();
     s_phase = Phase::IDLE;
@@ -250,12 +260,25 @@ void printStatus() {
 void tick(uint32_t now, bool idle, DetectionEngine& engine) {
     load();
     s_engine = &engine;
+    // Once per boot: if the last sync never cleared the guard, it crashed the
+    // chip. Keep sync off (persisted) so the board stays up, and say so.
+    if (!s_guardChecked) {
+        s_guardChecked = true;
+        const bool crashed = (s_crashGuard == GUARD_ARMED);
+        s_crashGuard = 0;
+        if (crashed) {
+            setEnabled(false);
+            snprintf(s_last, sizeof s_last, "OFF: a sync crashed the board last boot");
+            Serial.println("[sync] DISABLED -- the previous sync crashed the chip. 'SYNC ON' to retry; send the crash log to debug.");
+        }
+    }
     switch (s_phase) {
     case Phase::IDLE: {
         if (!s_on || !idle || !engine.sd().ready() || !OtaWifi::hasSaved()) return;
         const uint32_t wait = s_lastTry ? EVERY_MS : FIRST_MS;
         if (!s_soon && now - s_lastTry < wait) return;
         s_soon = false;
+        s_crashGuard = GUARD_ARMED;         // if the sync panics the chip, next boot disables sync
         engine.startUpdateRadio();
         WiFi.mode(WIFI_STA);
         s_net = -1;
@@ -291,7 +314,7 @@ void tick(uint32_t now, bool idle, DetectionEngine& engine) {
         WiFi.scanDelete();
         s_done = false;
         s_missedThis = false;
-        if (xTaskCreatePinnedToCore(syncTask, "homesync", 8192, nullptr, 1, &s_task,
+        if (xTaskCreatePinnedToCore(syncTask, "homesync", 16384, nullptr, 1, &s_task,
                                     portNUM_PROCESSORS > 1 ? 1 : 0) != pdPASS) {
             s_task = nullptr;
             snprintf(s_last, sizeof s_last, "no room for the sync task");
