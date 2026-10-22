@@ -42,26 +42,10 @@ volatile bool s_done = false;
 IPAddress s_base;                          // the base station, once found
 char     s_last[96] = "not tried yet";
 char     s_homeNet[33] = "";               // where the base station last answered
-// Saved networks where no base station answered: skipped for two hours, so a
-// phone's hotspot without the Tab5 on it costs one look, not one every visit.
-const uint32_t MISS_MS = 2UL * 3600 * 1000;
-char     s_missNet[4][33];
-uint32_t s_missAt[4] = {};
-bool missed(const char* ssid, uint32_t now) {
-    for (uint8_t i = 0; i < 4; i++)
-        if (s_missAt[i] && now - s_missAt[i] < MISS_MS && !strcmp(s_missNet[i], ssid)) return true;
-    return false;
-}
-void noteMiss(const char* ssid, uint32_t now) {
-    uint8_t slot = 0;
-    for (uint8_t i = 0; i < 4; i++) {
-        if (!strcmp(s_missNet[i], ssid)) { slot = i; break; }
-        if (s_missAt[i] < s_missAt[slot]) slot = i;
-    }
-    strncpy(s_missNet[slot], ssid, 32); s_missNet[slot][32] = 0;
-    s_missAt[slot] = now ? now : 1;
-}
-volatile bool s_missedThis = false;          // the task's word that nobody answered
+// The two-hour "no base here, skip this network" window was removed: the
+// homecoming arm flag already keeps him from syncing for nothing, so there is
+// no need to also blank a network for hours -- that only got in the way of a
+// retry. When armed he simply looks each interval until a base answers.
 
 // "Only a homecoming is worth a sync." He boots armed, so wardrive data already
 // on the card goes home the first time. A successful delivery disarms him; he
@@ -211,7 +195,6 @@ void syncTask(void*) {
         }
         if (s_base == IPAddress()) {
             snprintf(s_last, sizeof s_last, "on %s, but no base station answered (squachbase.local)", ssid);
-            s_missedThis = true;
         } else {
             s_deliveredHome = true;          // the base answered: he is home, stand down after
             // This is home: other saved networks (a phone's hotspot) are
@@ -325,7 +308,7 @@ void tick(uint32_t now, bool idle, DetectionEngine& engine) {
         for (int i = 0; i < n; i++) {
             const String name = WiFi.SSID(i);
             const int8_t k = OtaWifi::savedIndexOf(name.c_str());
-            if (k < 0 || missed(name.c_str(), now)) continue;
+            if (k < 0) continue;
             const int score = WiFi.RSSI(i) + (s_homeNet[0] && name == s_homeNet ? 100 : 0);
             if (score > bestRssi) { bestRssi = score; s_net = k; }
         }
@@ -334,7 +317,6 @@ void tick(uint32_t now, bool idle, DetectionEngine& engine) {
         Serial.printf("[sync] home: %s at %d dBm, joining\n", OtaWifi::savedSsidAt((uint8_t)s_net), bestRssi);
         WiFi.scanDelete();
         s_done = false;
-        s_missedThis = false;
         Serial.printf("[sync] internal heap: free %u, largest block %u\n",
                       (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                       (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
@@ -351,7 +333,6 @@ void tick(uint32_t now, bool idle, DetectionEngine& engine) {
     }
     case Phase::SYNCING:
         if (!s_done) return;
-        if (s_missedThis) noteMiss(OtaWifi::savedSsidAt((uint8_t)s_net), now);
         if (s_deliveredHome) {               // home and delivered: stand down until he goes out again
             s_armed = false;
             s_armWritten = Wardrive::written();
