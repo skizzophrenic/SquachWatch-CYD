@@ -1940,19 +1940,16 @@ static int16_t drawCornerClock(TFT_eSPI& t, int w) {
 }
 #endif
 #if defined(CYD_GPS)
-// The GPS label, left of the right-hand icons in the top bar: dim while a
-// module talks with no fix, green with a fresh fix, amber for a bench fix
-// typed in on the console. Nothing until the first good sentence or a bench
-// fix, so a build with no module plugged in looks like any other. Drawn
+// The GPS label, left of the right-hand icons in the top bar: there only
+// while the GPS has a fresh fix (or a bench fix typed in on the console), and
+// always red, whatever the theme or the rain colour (2026-10-18). Drawn
 // straight after the background like the watch's corner clock. Returns where
 // the WATCH pill's free span must end, or -1.
 static const int GPS_LABEL_W = 22;
-static bool gpsLabelShown() { return Gnss::good() > 0 || Gnss::faked(); }
+static bool gpsLabelShown() { return Gnss::fresh(millis()) || Gnss::faked(); }
 static int16_t drawGpsLabel(TFT_eSPI& t, int w) {
     if (!gpsLabelShown()) return -1;
-    const uint16_t col = Gnss::faked() ? Theme::AMBER
-                       : Gnss::fresh(millis()) ? Theme::GREEN
-                       : Theme::W95_SHADOW;
+    const uint16_t col = 0xF800;          // TFT_RED, not a theme colour
     const int right = Theme::titleBarRightIconsX(w) - 2;
     const int x = right - GPS_LABEL_W;
     t.setTextSize(1);

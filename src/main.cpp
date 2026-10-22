@@ -5522,6 +5522,11 @@ static void wardriveBegin() {
 #define CYD_GPS_SERIAL Serial2
 #endif
 static bool     s_cydGpsClockSet = false;   // set from GPS once this boot
+// Raw bytes off the wire, before the parser: tells "nothing on the pin" apart
+// from "something there the parser does not take" (GPS STATUS prints both).
+static uint32_t s_cydGpsBytes = 0;
+static char     s_cydGpsRaw[48] = {};
+static uint32_t s_cydGpsRawAt = 0;
 static uint32_t s_cydGpsFirstFixMs = 0;     // millis() of the first real fix, 0 until then
 
 // The module's baud is a guess until a sentence arrives. The CYD's ATGM336H
@@ -5531,21 +5536,47 @@ static uint32_t s_cydGpsFirstFixMs = 0;     // millis() of the first real fix, 0
 // parses in twenty seconds, the other one, back and forth until one does.
 static uint32_t s_cydGpsBaud = CYD_GPS_BAUD;
 static uint32_t s_cydGpsBaudAt = 0;
+#if defined(CYD_GPS_RX_SEARCH)
+// A board whose GPS can be wired to more than one pin (the Waveshare C5: the
+// UART header's RXD, or IO3 on the 12-pin cable), and a module whose
+// speed is a guess too. Every pin at every speed, a few seconds each, until a
+// sentence parses -- a GOOD one, since noise at the wrong speed can pass for
+// a bad sentence. The list is the build's: -DCYD_GPS_RX_SEARCH={3,12}.
+static const int8_t   kGpsPins[]  = CYD_GPS_RX_SEARCH;
+static const uint32_t kGpsBauds[] = { CYD_GPS_BAUD, 9600, 38400 };
+static uint8_t        s_cydGpsTry = 0;
+static int8_t         s_cydGpsPin = kGpsPins[0];
+#else
+static int8_t         s_cydGpsPin = CYD_GPS_RX;
+#endif
 static void cydGpsStart() {
     Gnss::reset();
     // TX -1: the module's RX is not wired. The core fills in its default
     // pins only when both are negative, so TX stays unassigned here; the
     // default TX2 is GPIO17, the status light.
-    CYD_GPS_SERIAL.begin(s_cydGpsBaud, SERIAL_8N1, CYD_GPS_RX, -1);
+    CYD_GPS_SERIAL.begin(s_cydGpsBaud, SERIAL_8N1, s_cydGpsPin, -1);
     s_cydGpsBaudAt = millis();
     Wardrive::sdBegin();
 }
 static void cydGpsBaudTick(uint32_t now) {
+#if defined(CYD_GPS_RX_SEARCH)
+    if (Gnss::good() || now - s_cydGpsBaudAt < 6000) return;
+    const uint8_t pins = sizeof kGpsPins / sizeof kGpsPins[0];
+    const uint8_t bauds = sizeof kGpsBauds / sizeof kGpsBauds[0];
+    s_cydGpsTry = (uint8_t)((s_cydGpsTry + 1) % (pins * bauds));
+    s_cydGpsPin  = kGpsPins[s_cydGpsTry % pins];
+    s_cydGpsBaud = kGpsBauds[s_cydGpsTry / pins];
+    s_cydGpsBaudAt = now;
+    CYD_GPS_SERIAL.end();
+    CYD_GPS_SERIAL.begin(s_cydGpsBaud, SERIAL_8N1, s_cydGpsPin, -1);
+    Serial.printf("[gps] nothing heard: trying GPIO%d at %lu baud\n", (int)s_cydGpsPin, (unsigned long)s_cydGpsBaud);
+#else
     if (Gnss::good() + Gnss::bad() || now - s_cydGpsBaudAt < 20000) return;
     s_cydGpsBaud = (s_cydGpsBaud == 9600) ? 38400 : 9600;
     s_cydGpsBaudAt = now;
     CYD_GPS_SERIAL.updateBaudRate(s_cydGpsBaud);
     Serial.printf("[gps] nothing heard: trying %lu baud\n", (unsigned long)s_cydGpsBaud);
+#endif
 }
 
 static const char* cydWardriveStateName(Wardrive::SdState st) {
@@ -5566,8 +5597,19 @@ static void cydGpsTick(uint32_t now) {
     else if (cmd == 3) {
         const Gnss::Sky k = Gnss::sky();
         const Gnss::Fix& f = Gnss::fix();
-        Serial.printf("[gps] status: sentences %lu good, %lu bad; in view %u, heard %u, used %u; ",
+        Serial.printf("[gps] status: GPIO%d at %lu baud; sentences %lu good, %lu bad; in view %u, heard %u, used %u; ",
+                      (int)s_cydGpsPin, (unsigned long)s_cydGpsBaud,
                       (unsigned long)Gnss::good(), (unsigned long)Gnss::bad(), k.view, k.heard, f.used);
+        {
+            char raw[sizeof s_cydGpsRaw + 1];
+            const uint32_t n = s_cydGpsRawAt < sizeof s_cydGpsRaw ? s_cydGpsRawAt : sizeof s_cydGpsRaw;
+            for (uint32_t i = 0; i < n; i++) {
+                const char c = s_cydGpsRaw[(s_cydGpsRawAt - n + i) % sizeof s_cydGpsRaw];
+                raw[i] = (c >= 32 && c < 127) ? c : '.';
+            }
+            raw[n] = ' ';
+            Serial.printf("raw bytes %lu, last \"%s\"; ", (unsigned long)s_cydGpsBytes, raw);
+        }
         if (s_cydGpsFirstFixMs) Serial.printf("first fix %lu s after boot; ", (unsigned long)(s_cydGpsFirstFixMs / 1000));
         else                    Serial.print(Gnss::faked() ? "no real fix yet; " : "no fix yet; ");
         if (f.valid) {
@@ -5608,7 +5650,12 @@ static void cydGpsTick(uint32_t now) {
     // does not go stale while the console test runs.
     if (Gnss::faked()) Gnss::fake(Gnss::fix().lat7, Gnss::fix().lon7, Clock::isSet() ? Clock::nowEpoch() : 0, now);
 
-    while (CYD_GPS_SERIAL.available()) Gnss::feed((char)CYD_GPS_SERIAL.read(), now);
+    while (CYD_GPS_SERIAL.available()) {
+        const char c = (char)CYD_GPS_SERIAL.read();
+        s_cydGpsBytes++;
+        s_cydGpsRaw[s_cydGpsRawAt++ % sizeof s_cydGpsRaw] = c;
+        Gnss::feed(c, now);
+    }
     cydGpsBaudTick(now);
     Wardrive::sdTick(now, engine.sd().ready());
 

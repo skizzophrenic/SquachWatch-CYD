@@ -21,7 +21,15 @@
 #include <string.h>
 #include <time.h>
 #if defined(ESP32)
+// The card is SD_MMC on the Freenove S3 boards (sd_log.cpp mounts it there)
+// and SPI SD everywhere else.
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
+#include <SD_MMC.h>
+#define WD_CARD SD_MMC
+#else
 #include <SD.h>
+#define WD_CARD SD
+#endif
 #include "frame_push.h"
 #endif
 
@@ -82,8 +90,8 @@ bool writeOut(const char* path, const char* buf, size_t len) {
     // Asked before the open: on core 2.0.14 a file that FILE_APPEND creates
     // reports a size() left over from the failed stat(), so the first file on
     // the user's board went out with no header and WiGLE would refuse it.
-    const bool fresh = !SD.exists(path);
-    File f = SD.open(path, FILE_APPEND);
+    const bool fresh = !WD_CARD.exists(path);
+    File f = WD_CARD.open(path, FILE_APPEND);
     if (!f) { FramePush::busUnlock(); return false; }
     bool ok = true;
     if (fresh) {
@@ -327,7 +335,7 @@ void sdWipe() {
     // and passes until one comes back short: a card driven with for months
     // holds more than sixteen.
     for (int pass = 0; pass < 64; pass++) {
-        File dir = SD.open("/");
+        File dir = WD_CARD.open("/");
         if (!dir) break;
         char victims[16][32];
         int  n = 0;
@@ -343,7 +351,7 @@ void sdWipe() {
             f.close();
         }
         dir.close();
-        for (int i = 0; i < n; i++) SD.remove(victims[i]);
+        for (int i = 0; i < n; i++) WD_CARD.remove(victims[i]);
         if (n < 16) break;
     }
     FramePush::busUnlock();
