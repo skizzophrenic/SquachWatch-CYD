@@ -12,6 +12,7 @@ static const int     SDA_PIN = 27;
 static const int     SCL_PIN = 26;
 static const uint8_t ADDR      = 0x38;
 static const uint8_t TD_STATUS = 0x02;   // then 6 bytes of point data from 0x03
+static const int     TP_INT    = 3;      // FT6336 INT line (schematic: TP_INT on GPIO3, 10K pull-up)
 
 static bool s_present = false;
 
@@ -51,10 +52,28 @@ bool begin() {
     Wire.write(0x80);
     Wire.write(12);
     Wire.endTransmission();
+
+    // Touch-present gate for read(): the FT6336's INT is on GPIO3 (schematic).
+    // Put the chip in interrupt-polling mode (reg 0xA4 = 0) so INT is a stable
+    // LEVEL -- low while a finger is down -- then read GPIO3 as an input (there
+    // is an external 10K pull-up). Without this, read() polls the chip blind and
+    // stale reads come back as phantom points (a menu row self-selecting at boot
+    // with no finger; taps landing a couple of rows off).
+    Wire.beginTransmission(ADDR);
+    Wire.write(0xA4);
+    Wire.write((uint8_t)0x00);
+    Wire.endTransmission();
+    pinMode(TP_INT, INPUT);
     return s_present;
 }
 
 bool read(uint16_t& x, uint16_t& y) {
+    // INT-gate (TP_INT = GPIO3, active-low in polling mode): only touch the bus
+    // when a finger is actually down. A blind read with no finger returns stale/
+    // phantom points, which is what made a row self-select at boot and menu taps
+    // land on the wrong row. "No finger" now reports no touch, not a ghost.
+    if (digitalRead(TP_INT) != LOW) return false;
+
     // The C5's early Wire.begin() leaves the I2C controller unable to complete
     // reads (writes ACK, reads return 0), so re-open the bus on each read and
     // validate the result (1-2 points, on-panel coords). This was the single
