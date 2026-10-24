@@ -187,5 +187,6 @@ def patch_tft_espi_for_p4(env):
 
 
 if env["PIOENV"] == "tab5" or env["PIOENV"].startswith("tab5-"):
-    if env["PIOENV"] not in ("tab5-paneltest", "tab5-radiotest"):   # the bench builds have no TFT_eSPI at all
+    # the bench builds and the base station (M5GFX only) have no TFT_eSPI at all
+    if env["PIOENV"] not in ("tab5-paneltest", "tab5-radiotest", "tab5-base"):
         patch_tft_espi_for_p4(env)
