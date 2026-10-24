@@ -46,6 +46,9 @@
 #if defined(CYD32C) || defined(CYD35C) || defined(TDECK_PLUS)
 #include "gt911_touch.h"
 #endif
+#if defined(WAVESHARE_C5)
+#include "waveshare_c5_board.h"   // the CH32 helper (reset, backlight) and the CST3530
+#endif
 // The 3.5" comes resistive (ESP32-3248S035R: touch on the display's own bus)
 // and capacitive (ESP32-3248S035C: a GT911, the 3.2" capacitive's chip on the
 // same pins). CYD35 is both, for the panel and its two-band drawing; CYD35R
@@ -511,7 +514,11 @@ static void drawCrashCard(TFT_eSPI& t) {
 // relative to it. File-scope (not local to setup()) so the Settings >
 // INVERT row handler in loop() can use the same XOR instead of
 // clobbering this baseline with an absolute call.
-#if defined(TWATCH_S3)
+#if defined(WAVESHARE_C5)
+// Waveshare's own ST7789 init sends INVON (0x21). UNCONFIRMED by eye until
+// the board is looked at; INVERT in Settings flips it if wrong.
+constexpr bool PANEL_NEEDS_INVERSION = true;
+#elif defined(TWATCH_S3)
 // Confirmed on the watch 2026-09-22: the ST7789 wants inversion on (as
 // LilyGo's own setup says); false showed every colour inverted.
 constexpr bool PANEL_NEEDS_INVERSION = true;
@@ -805,6 +812,12 @@ static uint16_t CAP_NY_MIN = TAB5_CAP_NY_MIN, CAP_NY_MAX = TAB5_CAP_NY_MAX;
 // The ST77922's own touch reports panel pixels too: a pass-through.
 static uint16_t CAP_NX_MIN = St77922Touch::NX_MIN, CAP_NX_MAX = St77922Touch::NX_MAX;
 static uint16_t CAP_NY_MIN = St77922Touch::NY_MIN, CAP_NY_MAX = St77922Touch::NY_MAX;
+#elif defined(WAVESHARE_C5)
+// The CST3530 is expected to report the panel's own 240x320 pixels (Waveshare's
+// demo hands its numbers to LVGL unscaled). A starting point only: the
+// five-target calibration still runs on first boot.
+static uint16_t CAP_NX_MIN = 0, CAP_NX_MAX = 239;
+static uint16_t CAP_NY_MIN = 0, CAP_NY_MAX = 319;
 #else
 static uint16_t CAP_NX_MIN = 32,  CAP_NX_MAX = 166;
 static uint16_t CAP_NY_MIN = 10,  CAP_NY_MAX = 308;
@@ -1554,6 +1567,9 @@ static bool readTouchRaw(int16_t& a, int16_t& b) {
 #elif defined(TAB5)
     uint16_t x, y;
     if (!Tab5Touch::read(x, y)) return false;
+#elif defined(WAVESHARE_C5)
+    uint16_t x, y;
+    if (!Cst3530::read(x, y)) return false;
     a = (int16_t)x; b = (int16_t)y;
     return true;
 #else
@@ -1663,7 +1679,9 @@ static bool s_screenDimmed = false;
 // screen off or on, a long one starts CHARGE MODE. The S3 boards and the
 // CrowPanel are left out until somebody has pressed theirs -- except the
 // Freenove 3.5", whose one button is GPIO0 like a CYD's.
-#if defined(ESP32) && (!defined(SQW_S3) || defined(FREENOVE_S3_35)) && !defined(CROWPANEL7) && !defined(TAB5)
+// Not the Waveshare C5: its BOOT is GPIO28, and GPIO0 is the I2C bus's SDA --
+// every byte of touch traffic would read as a press.
+#if defined(ESP32) && (!defined(SQW_S3) || defined(FREENOVE_S3_35)) && !defined(CROWPANEL7) && !defined(TAB5) && !defined(WAVESHARE_C5)
 #define SQW_BOOT_BTN 1
 #else
 #define SQW_BOOT_BTN 0
@@ -1756,6 +1774,9 @@ static void applyBrightness() {
 #elif defined(TAB5)
     // M5GFX's brightness: the backlight is a PWM pin it owns.
     Tab5Panel::backlight(duty);
+#elif defined(WAVESHARE_C5)
+    // No backlight GPIO: the CH32 helper's PWM, over I2C.
+    WsC5::setBacklight(duty);
 #elif defined(NM_CYD_C5)
     // One backlight, and a pin-based call. Arduino core 3 dropped the LEDC
     // channel API entirely: ledcWrite takes the PIN now, and the channel is
@@ -1992,11 +2013,15 @@ static bool alertMayInterrupt(const Detection& d) {
         !s_screenDimmed && !Clock::night())
         CrowBuzzer::chirp(BUZZ_CHIRP_MS);
 #endif
-#if SQW_SPEAKER
+#if SQW_SOUND
     // The speaker's version of the same chirp, under the same four rules.
     // The SOUND row, night and the dimmed screen are checked in play().
+    // Two kinds get a voice of their own: a drone swooshes past, and an Axon
+    // body camera oinks.
     if (&d == engine.latest() && engine.latestIsNew())
-        Sound::play(Sound::Id::NEW_DEVICE);
+        Sound::play(d.type == DetectionType::DRONE ? Sound::Id::DRONE
+                  : d.type == DetectionType::AXON  ? Sound::Id::OINK
+                  :                                  Sound::Id::NEW_DEVICE);
 #endif
 #if SQUACH_MESH
     // And the squad, for the serious kinds: the same gate, so what this board
@@ -3156,7 +3181,7 @@ static void sticksPowerUp() {
 }
 #endif
 
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(WAVESHARE_C5)
 // The Freenove S3's battery: a 1-cell LiPo on its JST, a TP4054 charging it
 // from USB, and a 200K/200K divider from the cell to GPIO9 (ADC1, so WiFi does
 // not take it away) -- GPIO8 on the 3.5", per Freenove's battery sketch. The
@@ -3173,11 +3198,23 @@ static void sticksPowerUp() {
 // GPIO -- so a voltage and an estimate from it, and "charging" only as a guess
 // from the voltage jumping (see boardBatteryState). On the cable the cell
 // reads the charger's ~4.2 V, which is the honest reading.
+#if defined(WAVESHARE_C5)
+// The Waveshare C5 2.8: the same shape -- a cell on the MX1.25 BAT plug, a
+// charger whose only status is an LED -- but read through the CH32 helper's
+// ADC, a third of the cell's voltage (WsC5::batteryMv). Everything below,
+// the lava lamp, the cable sounds and BATT, is the Freenove's.
+static uint16_t boardBatteryMv() {
+    uint32_t sum = 0;
+    for (int i = 0; i < 4; i++) sum += WsC5::batteryMv();
+    return (uint16_t)(sum / 4);
+}
+#else
 static uint16_t boardBatteryMv() {
     uint32_t sum = 0;
     for (int i = 0; i < 8; i++) sum += analogReadMilliVolts(BOARD_BAT_ADC);
     return (uint16_t)(sum / 8 * 2);   // the divider halves it
 }
+#endif
 // Resting LiPo, per cell: rough, but a percent that moves the right way.
 static uint8_t boardBatteryPct(uint16_t mv) {
     static const uint16_t MV[]  = { 3300, 3500, 3600, 3700, 3750, 3800, 3850, 3900, 4000, 4100, 4200 };
@@ -4172,7 +4209,7 @@ void setup() {
 #if SQW_SPEAKER
     powerDiaryBoot();
 #endif
-#if defined(SQW_S3) || defined(TAB5)
+#if defined(SQW_S3) || defined(TAB5) || defined(WAVESHARE_C5)
     // Native USB: with nothing reading the port, every print would otherwise
     // wait its full timeout for a host, and after the chatty first-boot
     // calibration the loop crawled so slowly the screen looked frozen black.
@@ -4230,7 +4267,7 @@ void setup() {
 // ... and not on the CrowPanel 7, where GPIO21 is the panel's BLUE-0 data
 // line. Driving it high before the panel driver claims it is a stripe down the
 // picture at best.
-#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(CYD32C) && !defined(CYD35C) && !defined(TAB5)
+#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(CYD32C) && !defined(CYD35C) && !defined(TAB5) && !defined(WAVESHARE_C5)
     pinMode(21, OUTPUT); digitalWrite(21, HIGH);
 #endif
 #if defined(SQW_S3)
@@ -4245,6 +4282,11 @@ void setup() {
 #elif defined(TAB5)
     // Nothing: M5GFX owns the backlight pin, and 21/27/32 are somebody else's
     // on a P4.
+#elif defined(WAVESHARE_C5)
+    // No backlight pin and no reset pin: both are the CH32 helper's, on I2C.
+    // It has to release the panel from reset before tft.init() talks to it
+    // (TFT_RST is -1). The backlight stays dark until applyBrightness().
+    WsC5::begin();
 #elif defined(NM_CYD_C5)
     // One backlight, TFT_BL (GPIO25), and ONLY that pin. Confirmed on the
     // board: the branch below drives 27 and 32, and on a C5 that is
@@ -4372,6 +4414,8 @@ void setup() {
     ledcSetup(BL_CH_ORIG, 5000, 8);
 #endif
     ledcAttachPin(BL_PIN_S3, BL_CH_ORIG);
+#elif defined(WAVESHARE_C5)
+    // No LEDC: the backlight is the CH32 helper's PWM (WsC5::setBacklight).
 #elif defined(NM_CYD_C5)
     // Backlight is TFT_BL (GPIO25) on this board and nothing else is a
     // backlight. The CYD pins below are actively wrong here, not merely
@@ -4428,6 +4472,8 @@ void setup() {
         Tab5Panel::backlight(24);
 #elif defined(TDECK_PLUS)
         tdeckBacklight(24);
+#elif defined(WAVESHARE_C5)
+        WsC5::setBacklight(24);
 #else
         ledcWrite(BL_CH_ORIG, 24);
         ledcWrite(BL_CH_CAP,  24);
@@ -4658,6 +4704,20 @@ void setup() {
     { char b[16]; boardBatteryLine(b, sizeof b); Serial.printf("[batt] %s (raw GPIO%d %u mV)\n", b, BOARD_BAT_ADC, (unsigned)analogReadMilliVolts(BOARD_BAT_ADC)); }
     uiClearSetBatterySource(boardBatteryState);
     Sound::begin();                       // the codec is on the touch bus, now up
+#elif defined(WAVESHARE_C5)
+    // The CST3530, on the helper chip's I2C bus (already up from
+    // WsC5::begin()), reset through the helper's EXIO0. Units are the panel's
+    // own portrait frame, mapped by the five-target calibration like the
+    // other capacitive boards. Capacitive whatever the probe says: the chip
+    // sleeps until touched, so the probe usually fails on a working board,
+    // and usingCapTouch picks the calibration's spread floor.
+    Cst3530::begin();
+    usingCapTouch = true;
+    Serial.println("Waveshare C5 -- CST3530 capacitive touch.");
+    Sound::begin();                       // the ES8311 is on the same bus, now up
+    { char b[16]; boardBatteryLine(b, sizeof b);
+      Serial.printf("[batt] %s (helper ADC raw %u)\n", b, (unsigned)WsC5::batteryRaw()); }
+    uiClearSetBatterySource(boardBatteryState);
 #elif defined(TOUCH_ON_DISPLAY_BUS)
     // AWOK's XPT2046 sits on the display's own shared VSPI bus (TOUCH_CS=21,
     // already armed by TFT_eSPI itself once awok_user_setup.h's #define
@@ -4712,7 +4772,7 @@ void setup() {
         uint32_t windowStart = millis();
         while (millis() - windowStart < 1200) {
             int16_t a, b;
-#if defined(CROWPANEL7) || defined(CYD32C) || defined(CYD35C) || defined(SQW_SMALL) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(TAB5)
+#if defined(CROWPANEL7) || defined(CYD32C) || defined(CYD35C) || defined(SQW_SMALL) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(TAB5) || defined(WAVESHARE_C5)
             // The GT911 (and the ST77922's touch) is neither of the two
             // below; the two-way dispatch polled a capacitive controller that
             // is not on this bus, a hundred bus errors a boot.
@@ -4816,6 +4876,8 @@ void setup() {
     Tab5Panel::backlight(24);
 #elif defined(TDECK_PLUS)
     tdeckBacklight(24);
+#elif defined(WAVESHARE_C5)
+    WsC5::setBacklight(24);
 #else
     ledcWrite(BL_CH_ORIG, 24);
     ledcWrite(BL_CH_CAP,  24);
@@ -5537,6 +5599,11 @@ static void wardriveBegin() {
 #define CYD_GPS_SERIAL Serial2
 #endif
 static bool     s_cydGpsClockSet = false;   // set from GPS once this boot
+// Raw bytes off the wire, before the parser: tells "nothing on the pin" apart
+// from "something there the parser does not take" (GPS STATUS prints both).
+static uint32_t s_cydGpsBytes = 0;
+static char     s_cydGpsRaw[48] = {};
+static uint32_t s_cydGpsRawAt = 0;
 static uint32_t s_cydGpsFirstFixMs = 0;     // millis() of the first real fix, 0 until then
 
 // The module's baud is a guess until a sentence arrives. The CYD's ATGM336H
@@ -5546,21 +5613,47 @@ static uint32_t s_cydGpsFirstFixMs = 0;     // millis() of the first real fix, 0
 // parses in twenty seconds, the other one, back and forth until one does.
 static uint32_t s_cydGpsBaud = CYD_GPS_BAUD;
 static uint32_t s_cydGpsBaudAt = 0;
+#if defined(CYD_GPS_RX_SEARCH)
+// A board whose GPS can be wired to more than one pin (the Waveshare C5: the
+// UART header's RXD, or IO3 on the 12-pin cable), and a module whose
+// speed is a guess too. Every pin at every speed, a few seconds each, until a
+// sentence parses -- a GOOD one, since noise at the wrong speed can pass for
+// a bad sentence. The list is the build's: -DCYD_GPS_RX_SEARCH={3,12}.
+static const int8_t   kGpsPins[]  = CYD_GPS_RX_SEARCH;
+static const uint32_t kGpsBauds[] = { CYD_GPS_BAUD, 9600, 38400 };
+static uint8_t        s_cydGpsTry = 0;
+static int8_t         s_cydGpsPin = kGpsPins[0];
+#else
+static int8_t         s_cydGpsPin = CYD_GPS_RX;
+#endif
 static void cydGpsStart() {
     Gnss::reset();
     // TX -1: the module's RX is not wired. The core fills in its default
     // pins only when both are negative, so TX stays unassigned here; the
     // default TX2 is GPIO17, the status light.
-    CYD_GPS_SERIAL.begin(s_cydGpsBaud, SERIAL_8N1, CYD_GPS_RX, -1);
+    CYD_GPS_SERIAL.begin(s_cydGpsBaud, SERIAL_8N1, s_cydGpsPin, -1);
     s_cydGpsBaudAt = millis();
     Wardrive::sdBegin();
 }
 static void cydGpsBaudTick(uint32_t now) {
+#if defined(CYD_GPS_RX_SEARCH)
+    if (Gnss::good() || now - s_cydGpsBaudAt < 6000) return;
+    const uint8_t pins = sizeof kGpsPins / sizeof kGpsPins[0];
+    const uint8_t bauds = sizeof kGpsBauds / sizeof kGpsBauds[0];
+    s_cydGpsTry = (uint8_t)((s_cydGpsTry + 1) % (pins * bauds));
+    s_cydGpsPin  = kGpsPins[s_cydGpsTry % pins];
+    s_cydGpsBaud = kGpsBauds[s_cydGpsTry / pins];
+    s_cydGpsBaudAt = now;
+    CYD_GPS_SERIAL.end();
+    CYD_GPS_SERIAL.begin(s_cydGpsBaud, SERIAL_8N1, s_cydGpsPin, -1);
+    Serial.printf("[gps] nothing heard: trying GPIO%d at %lu baud\n", (int)s_cydGpsPin, (unsigned long)s_cydGpsBaud);
+#else
     if (Gnss::good() + Gnss::bad() || now - s_cydGpsBaudAt < 20000) return;
     s_cydGpsBaud = (s_cydGpsBaud == 9600) ? 38400 : 9600;
     s_cydGpsBaudAt = now;
     CYD_GPS_SERIAL.updateBaudRate(s_cydGpsBaud);
     Serial.printf("[gps] nothing heard: trying %lu baud\n", (unsigned long)s_cydGpsBaud);
+#endif
 }
 
 static const char* cydWardriveStateName(Wardrive::SdState st) {
@@ -5581,8 +5674,19 @@ static void cydGpsTick(uint32_t now) {
     else if (cmd == 3) {
         const Gnss::Sky k = Gnss::sky();
         const Gnss::Fix& f = Gnss::fix();
-        Serial.printf("[gps] status: sentences %lu good, %lu bad; in view %u, heard %u, used %u; ",
+        Serial.printf("[gps] status: GPIO%d at %lu baud; sentences %lu good, %lu bad; in view %u, heard %u, used %u; ",
+                      (int)s_cydGpsPin, (unsigned long)s_cydGpsBaud,
                       (unsigned long)Gnss::good(), (unsigned long)Gnss::bad(), k.view, k.heard, f.used);
+        {
+            char raw[sizeof s_cydGpsRaw + 1];
+            const uint32_t n = s_cydGpsRawAt < sizeof s_cydGpsRaw ? s_cydGpsRawAt : sizeof s_cydGpsRaw;
+            for (uint32_t i = 0; i < n; i++) {
+                const char c = s_cydGpsRaw[(s_cydGpsRawAt - n + i) % sizeof s_cydGpsRaw];
+                raw[i] = (c >= 32 && c < 127) ? c : '.';
+            }
+            raw[n] = ' ';
+            Serial.printf("raw bytes %lu, last \"%s\"; ", (unsigned long)s_cydGpsBytes, raw);
+        }
         if (s_cydGpsFirstFixMs) Serial.printf("first fix %lu s after boot; ", (unsigned long)(s_cydGpsFirstFixMs / 1000));
         else                    Serial.print(Gnss::faked() ? "no real fix yet; " : "no fix yet; ");
         if (f.valid) {
@@ -5623,7 +5727,12 @@ static void cydGpsTick(uint32_t now) {
     // does not go stale while the console test runs.
     if (Gnss::faked()) Gnss::fake(Gnss::fix().lat7, Gnss::fix().lon7, Clock::isSet() ? Clock::nowEpoch() : 0, now);
 
-    while (CYD_GPS_SERIAL.available()) Gnss::feed((char)CYD_GPS_SERIAL.read(), now);
+    while (CYD_GPS_SERIAL.available()) {
+        const char c = (char)CYD_GPS_SERIAL.read();
+        s_cydGpsBytes++;
+        s_cydGpsRaw[s_cydGpsRawAt++ % sizeof s_cydGpsRaw] = c;
+        Gnss::feed(c, now);
+    }
     cydGpsBaudTick(now);
     Wardrive::sdTick(now, engine.sd().ready());
 
@@ -5690,6 +5799,8 @@ static void chargeBacklight(uint8_t duty) {
     CrowBL::set(duty);
 #elif defined(TAB5)
     Tab5Panel::backlight(duty);
+#elif defined(WAVESHARE_C5)
+    WsC5::setBacklight(duty);
 #else
     ledcWrite(BL_CH_ORIG, duty);
     ledcWrite(BL_CH_CAP,  duty);
@@ -5961,7 +6072,7 @@ void loop() {
         }, nullptr);
     }
 #endif
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(WAVESHARE_C5)
     if (g_consoleBatt) { g_consoleBatt = false; boardBatteryPrintLog(); }
     // The speaker's housekeeping: hushed while the saver has the screen
     // dimmed; a chime for a squad message that just landed (once per
@@ -8006,7 +8117,7 @@ void loop() {
                             if (Settings::buzzerOn()) CrowBuzzer::chirp(BUZZ_CHIRP_MS);
                             break;
 #endif
-#if SQW_SPEAKER
+#if SQW_SOUND
                         case SettingsRow::SOUND:
                             // Each level plays something it unlocks: ALERTS
                             // the new-device blips, ALL the squad chime. OFF
