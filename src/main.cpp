@@ -8,6 +8,22 @@
 #include <Wire.h>
 #include <TFT_eSPI.h>
 #include "sound.h"          // the Freenove S3 speaker; no-ops everywhere else
+// The software "hold BOOT to power off" feature (cbdPowerOff) deep-sleeps the
+// chip with an ext0 BOOT wake. It was built for the battery boards with no
+// hardware power switch -- the Freenove S3 pair and the T-Deck, which are also
+// the speaker boards, so it rode on SQW_SPEAKER. The Waveshare C5 3.5" is a
+// speaker board too, but it has a PWR button + AXP2101 PMU (so it needs no
+// software off) and is a RISC-V C5 with NO ext0 wakeup (esp_sleep_enable_ext0_
+// wakeup does not even exist there). So split the feature off SQW_SPEAKER:
+// audio stays on SQW_SPEAKER, the power-off/deep-sleep is SQW_SOFT_POWEROFF.
+// The power diary, the boot watchdog and the wake-restart stay on SQW_SPEAKER
+// -- they compile and are harmless on the C5, and detection.cpp's BOOT_STAGE
+// needs bootStage() whenever SQW_SPEAKER.
+#if SQW_SPEAKER && !defined(WS_C5_35)
+#define SQW_SOFT_POWEROFF 1
+#else
+#define SQW_SOFT_POWEROFF 0
+#endif
 #if defined(CROWPANEL7)
 #include "crowpanel7_board.h"
 #include "crowpanel7_display.h"
@@ -45,6 +61,12 @@
 #endif
 #if defined(CYD32C) || defined(CYD35C) || defined(TDECK_PLUS)
 #include "gt911_touch.h"
+#endif
+#if defined(WS_C5_35)
+// Waveshare C5 3.5": the 0x24 I/O expander (panel power, LCD/touch reset,
+// backlight) and the FT6336 capacitive touch, both on the shared I2C bus.
+#include "ws_c5_expander.h"
+#include "ws_c5_touch.h"
 #endif
 // The 3.5" comes resistive (ESP32-3248S035R: touch on the display's own bus)
 // and capacitive (ESP32-3248S035C: a GT911, the 3.2" capacitive's chip on the
@@ -370,7 +392,7 @@ static void drawCrashCard(TFT_eSPI& t) {
 #include "ui_security.h"
 #include "squachy.h"
 #include "cap_touch.h"
-#if defined(TWATCH_S3)
+#if defined(TWATCH_S3) || defined(WS_C5_35)
 #define XPOWERS_CHIP_AXP2101
 #include <XPowersLib.h>
 #endif
@@ -564,6 +586,11 @@ constexpr bool PANEL_NEEDS_INVERSION = false;
 // A DSI video panel behind M5GFX; the app's INVERT setting has nothing to
 // send, so false keeps the Settings handler's XOR honest.
 constexpr bool PANEL_NEEDS_INVERSION = false;
+#elif defined(WS_C5_35)
+// The Waveshare C5 3.5" ST7796 wants inversion on (Waveshare's own init sends
+// 0x21), validated on this board. As everywhere, the live control point is this
+// constant, not the header's TFT_INVERSION_ON; INVERT in Settings flips it.
+constexpr bool PANEL_NEEDS_INVERSION = true;
 #else
 constexpr bool PANEL_NEEDS_INVERSION = false;
 #endif
@@ -667,10 +694,11 @@ static uint8_t*     s_frameB = nullptr;
 // into the other buffer once (see pushFrame()).
 static int          s_pushedState = -1;
 #endif
-#if defined(NM_CYD_C5)
+#if defined(NM_CYD_C5) && !defined(WS_C5_35)
 // The touch sample pushFrame() takes while the bus is free, for pollTouch().
 // The C5's touch shares the display's SPI bus; the Freenove S3's is on I2C
-// and reads whenever it likes.
+// and reads whenever it likes. (Not WS_C5_35: its FT6336 is on I2C too, so it
+// reads directly and skips this shared-bus deferral.)
 static bool         s_tsValid = false, s_tsDown = false;
 static int16_t      s_tsA = 0, s_tsB = 0;
 static bool readTouchRaw(int16_t& a, int16_t& b);
@@ -942,7 +970,7 @@ static bool readTouchRaw(int16_t& a, int16_t& b);
 // finishing and the next starting, when the bus is free, and this only
 // consumes it. Everywhere else it is the plain read.
 static bool sampleTouchRaw(int16_t& a, int16_t& b) {
-#if defined(NM_CYD_C5)
+#if defined(NM_CYD_C5) && !defined(WS_C5_35)
     if (s_tsValid) { a = s_tsA; b = s_tsB; return s_tsDown; }
     FramePush::busLock();
     const bool down = readTouchRaw(a, b);
@@ -1546,6 +1574,29 @@ static bool readTouchRaw(int16_t& a, int16_t& b) {
     if (!Gt911::read(x, y)) return false;
     a = (int16_t)x; b = (int16_t)y;
     return true;
+#elif defined(WS_C5_35)
+    // FT6336 on I2C, panel pixels in the native portrait frame (like the GT911
+    // path) -- the per-read C5 bus fix lives inside WsTouch::read(). The C5's
+    // FT6336 intermittently drops a read (returns no points) even with a finger
+    // held down, which made a grab/drag keep "letting go" and re-latching. Hold
+    // the last good contact for a short grace window so a single missed read
+    // does not read as a finger lift -- a genuine release (no read for longer)
+    // still falls through to "up".
+    {
+        static int16_t  s_lastA = 0, s_lastB = 0;
+        static uint32_t s_lastOk = 0;
+        uint16_t x, y;
+        if (WsTouch::read(x, y)) {
+            s_lastA = (int16_t)x; s_lastB = (int16_t)y; s_lastOk = millis();
+            a = s_lastA; b = s_lastB;
+            return true;
+        }
+        if (s_lastOk && (uint32_t)(millis() - s_lastOk) < 90) {   // bridge a dropout
+            a = s_lastA; b = s_lastB;
+            return true;
+        }
+        return false;
+    }
 #elif defined(FREENOVE_S3_35)
     uint16_t x, y;
     if (!St77922Touch::read(x, y)) return false;
@@ -1756,6 +1807,10 @@ static void applyBrightness() {
 #elif defined(TAB5)
     // M5GFX's brightness: the backlight is a PWM pin it owns.
     Tab5Panel::backlight(duty);
+#elif defined(WS_C5_35)
+    // The backlight is the 0x24 I/O expander's PWM register (EXIO5, reg 0x05),
+    // 0..255 with 255 brightest -- same convention as the slider. No GPIO LEDC.
+    WsExio::backlight(duty);
 #elif defined(NM_CYD_C5)
     // One backlight, and a pin-based call. Arduino core 3 dropped the LEDC
     // channel API entirely: ledcWrite takes the PIN now, and the channel is
@@ -3321,6 +3376,54 @@ static bool boardBatteryState(uint8_t& pct, bool& charging) {
 }
 #endif
 
+#if defined(WS_C5_35)
+// The Waveshare C5 3.5" reads its cell through the AXP2101 on the shared touch
+// bus (SDA 27 / SCL 26) -- the same chip the T-Watch uses, on its own bus.
+static XPowersAXP2101 s_c5pmu;
+static bool           s_c5pmuOk = false;
+static void initC5Pmu() {
+    s_c5pmuOk = s_c5pmu.begin(Wire, AXP2101_SLAVE_ADDRESS, 27, 26);
+    if (!s_c5pmuOk) { Serial.println("[pmu] AXP2101 did not answer; no battery readout"); return; }
+    Wire.setClock(400000);                // begin() may have reset it
+    s_c5pmu.enableBattVoltageMeasure();
+    Serial.printf("[pmu] AXP2101 up: %s, battery %s\n", s_c5pmu.isVbusIn() ? "on USB" : "on battery",
+                  s_c5pmu.isBatteryConnect() ? "connected" : "not connected");
+}
+// The SYSTEM page's BATTERY row: "81% 4.12V", "CHG 81%" on the cable, or "NONE".
+void boardBatteryLine(char* out, size_t n) {
+    if (!s_c5pmuOk)                  { snprintf(out, n, "?");    return; }
+    if (!s_c5pmu.isBatteryConnect()) { snprintf(out, n, "NONE"); return; }
+    static uint32_t at = 0;
+    static char     line[16] = "";
+    const uint32_t now = millis();
+    if (!line[0] || now - at >= 2000) {   // two I2C reads, not one per frame
+        at = now;
+        const int pct = s_c5pmu.getBatteryPercent();
+        if (s_c5pmu.isCharging()) snprintf(line, sizeof line, "CHG %d%%", pct);
+        else snprintf(line, sizeof line, "%d%% %u.%02uV", pct, (unsigned)(s_c5pmu.getBattVoltage() / 1000),
+                      (unsigned)(s_c5pmu.getBattVoltage() % 1000 / 10));
+    }
+    snprintf(out, n, "%s", line);
+}
+// The home screen's lava lamp (uiClearSetBatterySource).
+static bool boardBatteryState(uint8_t& pct, bool& charging) {
+    if (!s_c5pmuOk || !s_c5pmu.isBatteryConnect()) return false;
+    static uint32_t at = 0;
+    static int      p = -1;
+    static bool     chg = false;
+    const uint32_t now = millis();
+    if (!at || now - at >= 2000) {        // three I2C reads, every two seconds
+        at = now ? now : 1;
+        p = s_c5pmu.getBatteryPercent();
+        chg = s_c5pmu.isCharging() || s_c5pmu.isVbusIn();
+    }
+    if (p < 0) return false;
+    pct = (uint8_t)(p > 100 ? 100 : p);
+    charging = chg;
+    return true;
+}
+#endif
+
 #if defined(TWATCH_S3)
 // One battery sample into the black box. See BattRecord for what it holds
 // and why. Printed too, so a bench run shows the same line the ring keeps.
@@ -4230,7 +4333,7 @@ void setup() {
 // ... and not on the CrowPanel 7, where GPIO21 is the panel's BLUE-0 data
 // line. Driving it high before the panel driver claims it is a stripe down the
 // picture at best.
-#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(CYD32C) && !defined(CYD35C) && !defined(TAB5)
+#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(CYD32C) && !defined(CYD35C) && !defined(TAB5) && !defined(WS_C5_35)
     pinMode(21, OUTPUT); digitalWrite(21, HIGH);
 #endif
 #if defined(SQW_S3)
@@ -4245,7 +4348,7 @@ void setup() {
 #elif defined(TAB5)
     // Nothing: M5GFX owns the backlight pin, and 21/27/32 are somebody else's
     // on a P4.
-#elif defined(NM_CYD_C5)
+#elif defined(NM_CYD_C5) && !defined(WS_C5_35)
     // One backlight, TFT_BL (GPIO25), and ONLY that pin. Confirmed on the
     // board: the branch below drives 27 and 32, and on a C5 that is
     //   GPIO27 -- the WS2812 status light. Held HIGH here it is a stuck data
@@ -4259,6 +4362,12 @@ void setup() {
     // three errors in the first 300 ms of every boot is noise that hides the
     // next real one.
     pinMode(TFT_BL, OUTPUT); digitalWrite(TFT_BL, TFT_BACKLIGHT_ON);
+#elif defined(WS_C5_35)
+    // No backlight GPIO: the 0x24 I/O expander owns panel power, the LCD reset
+    // and the backlight. Bring it up ONCE here, before tft.init() -- it powers
+    // the rail and releases the ST7796 reset, both of which the panel needs
+    // before init. WsExio::begin() is idempotent (the touch init calls it too).
+    WsExio::begin();
 #else
     pinMode(27, OUTPUT); digitalWrite(27, HIGH);
 #if !defined(FREENOVE32) && !defined(CYD32C) && !defined(CYD35C)   // not a spare pin on the Freenove, and the 2432S032C's touch SCL; both light 27 alone
@@ -4372,7 +4481,7 @@ void setup() {
     ledcSetup(BL_CH_ORIG, 5000, 8);
 #endif
     ledcAttachPin(BL_PIN_S3, BL_CH_ORIG);
-#elif defined(NM_CYD_C5)
+#elif defined(NM_CYD_C5) && !defined(WS_C5_35)
     // Backlight is TFT_BL (GPIO25) on this board and nothing else is a
     // backlight. The CYD pins below are actively wrong here, not merely
     // unused: BL_PIN_CAP is 27, which is this board's WS2812 status LED, and
@@ -4384,6 +4493,9 @@ void setup() {
     // ledcAttach(pin, freq, bits) is core 3's replacement for the
     // ledcSetup + ledcAttachPin pair; it picks the channel itself.
     ledcAttach(TFT_BL, 5000, 8);
+#elif defined(WS_C5_35)
+    // No LEDC: the backlight is the 0x24 expander's PWM register, set by
+    // WsExio::backlight() from applyBrightness(). Same shape as CrowPanel 7.
 #else
 #if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(CYD32C) && !defined(CYD35C)
     ledcSetup(BL_CH_ORIG, 5000, 8);
@@ -4565,6 +4677,17 @@ void setup() {
     // CYD35 branch (tft.getTouch()).
     usingCapTouch = false;
     Serial.println("cyd35 build -- XPT2046 on shared VSPI bus via TFT_eSPI.");
+#elif defined(WS_C5_35)
+    // FT6336 on I2C (27/26, 0x38). WsTouch::begin() brings the 0x24 expander up
+    // first (idempotent) for the touch reset, then sets sensitivity. Reports
+    // panel pixels, so the five-target calibration maps them like the GT911.
+    usingCapTouch = WsTouch::begin();
+    Serial.println(usingCapTouch ? "Waveshare C5 3.5 -- FT6336 capacitive touch answered."
+                                 : "Waveshare C5 3.5 -- FT6336 did not answer; no touch.");
+    Sound::begin();                       // ES8311 is on the touch bus, now up
+    initC5Pmu();                          // AXP2101 battery readout on the shared bus
+    { char b[16]; boardBatteryLine(b, sizeof b); Serial.printf("[batt] %s\n", b); }
+    uiClearSetBatterySource(boardBatteryState);
 #elif defined(TOUCH_RAW_SHARED_BUS)
     // RL Phantom, resistive variant. The chip sits on the display's own bus
     // (TOUCH_CS=33, armed by TFT_eSPI once rlphantom_r_user_setup.h is in
@@ -4712,10 +4835,13 @@ void setup() {
         uint32_t windowStart = millis();
         while (millis() - windowStart < 1200) {
             int16_t a, b;
-#if defined(CROWPANEL7) || defined(CYD32C) || defined(CYD35C) || defined(SQW_SMALL) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(TAB5)
-            // The GT911 (and the ST77922's touch) is neither of the two
-            // below; the two-way dispatch polled a capacitive controller that
-            // is not on this bus, a hundred bus errors a boot.
+#if defined(CROWPANEL7) || defined(CYD32C) || defined(CYD35C) || defined(SQW_SMALL) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(TAB5) || defined(WS_C5_35)
+            // The GT911 (and the ST77922's touch, and the Waveshare C5's
+            // FT6336) is neither of the two below; the two-way dispatch polled
+            // a capacitive controller that is not on this bus, a hundred bus
+            // errors a boot. For WS_C5_35 that was the boot Error-259 flood:
+            // rawReadCap() hits the generic CapTouch (addr 0x15, never begun,
+            // no C5 per-read fix); readTouchRaw() routes to WsTouch with it.
             bool down = readTouchRaw(a, b);
 #else
             bool down = usingCapTouch ? rawReadCap(a, b) : rawReadResistive(a, b);
@@ -5051,7 +5177,7 @@ static inline void pushFrame(int x, int y) {
         // Between the last push finishing and this one starting the bus is
         // free: the one place touch can be read without waiting on a frame.
         FramePush::asyncWait();
-#if defined(NM_CYD_C5)
+#if defined(NM_CYD_C5) && !defined(WS_C5_35)
         FramePush::busLock();
         s_tsDown  = readTouchRaw(s_tsA, s_tsB);
         s_tsValid = true;
@@ -5805,6 +5931,10 @@ volatile bool g_consolePowerOff = false;
 // NAPTEST: the same POWER OFF, plus a timer that wakes it 3 s later -- the
 // wake path, repeatable from the console without a finger on BOOT.
 volatile bool g_consoleNapTest = false;
+// The globals above stay on SQW_SPEAKER: clock.cpp's console "POWER OFF"/"NAPTEST"
+// commands set them on every speaker board. The deep-sleep itself (ext0, absent
+// on the C5) is SQW_SOFT_POWEROFF, so on WS_C5_35 the globals simply go unused.
+#if SQW_SOFT_POWEROFF
 static uint32_t s_offHeldAt = 0;      // when the long press began, 0 = not held
 static void cbdPowerOff() {
     powerDiaryNote(PD_OFF_ASKED, (uint16_t)(g_consolePowerOff ? 1 : 0));
@@ -5852,7 +5982,8 @@ static void cbdPowerOff() {
                   esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0) == ESP_OK ? "armed" : "REFUSED");
     esp_deep_sleep_start();
 }
-#endif
+#endif  // SQW_SOFT_POWEROFF
+#endif  // SQW_SPEAKER
 
 #if SQW_BOOT_BTN
 // BOOT, polled every pass (and every 40 ms in charge mode). Released before
@@ -5876,14 +6007,16 @@ static void bootButtonTick(uint32_t now) {
     if (down && !longDone && now - downAt >= 1200) {
         longDone = true;
         Serial.println("[button] long press");
-#if SQW_SPEAKER
+#if SQW_SOFT_POWEROFF
         if (s_chargeMode) exitChargeMode();
         else { s_offHeldAt = now ? now : 1; Theme::showToast("POWER OFF", "KEEP HOLDING BOOT", Theme::AMBER, 2200); }
 #else
+        // WS_C5_35 lands here too: no software power-off, so a long press starts
+        // CHARGE MODE like the other CYDs (it has a hardware PWR button).
         if (s_chargeMode) exitChargeMode(); else s_chargeWanted = true;
 #endif
     }
-#if SQW_SPEAKER
+#if SQW_SOFT_POWEROFF
     if (s_offHeldAt && down && now - downAt >= 3000) cbdPowerOff();
     if (!down) s_offHeldAt = 0;
 #endif
@@ -5911,8 +6044,10 @@ void loop() {
     tdeckKeysTick(millis());
 #endif
     if (g_consoleCharge) { g_consoleCharge = false; if (s_chargeMode) exitChargeMode(); else s_chargeWanted = true; }
-#if SQW_SPEAKER
+#if SQW_SOFT_POWEROFF
     if (g_consolePowerOff) { cbdPowerOff(); }
+#endif
+#if SQW_SPEAKER
     powerDiaryTick(millis());
     if (g_consolePowerLog) { g_consolePowerLog = false; powerDiaryPrint(); }
 #endif
@@ -9297,6 +9432,8 @@ void loop() {
             info.boardName = "freenove-s3-35 BETA";
 #elif defined(FREENOVE_S3_40)
             info.boardName = "freenove-s3-40";
+#elif defined(WS_C5_35)
+            info.boardName = "Waveshare C5 3.5";
 #elif defined(CYD35C)
             info.boardName = "cyd35c BETA";
 #elif defined(CYD35)
