@@ -27,8 +27,13 @@
 // of mistake as the backlight pins in main.cpp, and silent in the same way:
 // the light would simply never come on, which reads as "this board has no
 // status LED" rather than as a bug.
+//
+// The Waveshare ESP32-C5-Touch-LCD-2.8 has no LED at all, and its GPIO27 is
+// the codec's I2S data in: it gets nothing.
 #if defined(ESP32) && !defined(CYD35) && !defined(AWOK) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(NM_CYD_C5) && !defined(TAB5)
 #define STATUS_LIGHT_HW 1
+#elif defined(WAVESHARE_C5)
+#define STATUS_LIGHT_HW 0
 #elif defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || (defined(NM_CYD_C5) && !defined(MARAUDER_V8))
 #define STATUS_LIGHT_HW 2
 // Not the Marauder V8: Marauder's own build leaves its WS2812 off
