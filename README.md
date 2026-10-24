@@ -97,6 +97,7 @@ whole firmware but has had fewer hours on it. The longer answer is in
 | Elecrow CrowPanel Advance 7.0 | BETA | 800×480, drawn at 400×240 doubled on purpose. Has a buzzer, silent unless you switch it on. [docs/CROWPANEL7.md](docs/CROWPANEL7.md) |
 | RockBase NM-CYD-C5 | BETA | The 2.8" CYD's glass on an ESP32-C5, the first RISC-V chip here. Scans **5 GHz** too (WIFI BANDS in Settings). [docs/NM-CYD-C5.md](docs/NM-CYD-C5.md) |
 | Marauder V8 (justcallmekoko) | BETA | The ESP32-C5 Marauder: 2.8" screen, GPS for **wardriving** to the SD card (a WiGLE file), and a battery gauge. Scans 5 GHz too |
+| Waveshare ESP32-C5-Touch-LCD-2.8 | BETA | An ESP32-C5 with a 2.8" capacitive touchscreen and 32 MB flash. Scans 5 GHz too. Not yet on the flasher: `pio run -e waveshare-c5-28 -t upload`. [docs/WAVESHARE-C5-28.md](docs/WAVESHARE-C5-28.md) |
 | LilyGo T-Deck Plus | BETA | ESP32-S3 handheld: 2.8" screen, capacitive touch, a real keyboard that types into the message and password screens, speaker, GPS for **wardriving**, SD card, 2000 mAh battery, and **LoRa**: it listens to Meshtastic and MeshCore at once like the T-Watch, and can **send** to their public channels from the keyboard (off until you turn on LORA TX). The trackball is not used yet. Pins in [docs/PINOUT.md](docs/PINOUT.md) |
 | M5Stack StickS3 | BETA | 1.14" screen, landscape, two buttons |
 | M5Stack Cardputer ADV | BETA | Driven from its keyboard. Not the original Cardputer |
@@ -593,6 +594,7 @@ SquachWatch-CYD/
 │   ├── CROWPANEL7.md             (the 7" CrowPanel: setup and testing)
 │   ├── NM-CYD-C5.md              (the ESP32-C5 board: esptool route, every pin)
 │   ├── TAB5.md                   (the M5Stack Tab5: P4 + C6, the radio link, status)
+│   ├── WAVESHARE-C5-28.md        (the Waveshare C5 2.8": helper chip, touch, pins)
 │   ├── LORA.md                   (LoRa research and the decoders behind it)
 │   ├── IDEAS.md                  (things worth building, with their cost)
 │   └── SQUACHWARE-AESTHETIC.md   (CSS → RGB565 mapping)
@@ -669,6 +671,7 @@ SquachWatch-CYD/
 - Freenove ESP32-S3 Display 2.8" port: **greasy-electronics**.
 - Freenove 3.2" pin work: **DevOpsDAdams**.
 - 3.5" capacitive (ESP32-3248S035C) build: **VV-B0Y**.
+- Waveshare ESP32-C5-Touch-LCD-2.8 port: **bobsdinner-cell**.
 - The emulator building on macOS, and its incremental build: **aroth**.
 - Testing every single build, boot loops and green skies included: **Houdini**.
 - Bug reports that found real bugs: **rrahmani** (Remote ID never caught a
