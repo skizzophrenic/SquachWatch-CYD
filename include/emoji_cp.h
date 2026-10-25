@@ -36,9 +36,17 @@ inline int indexOf(uint32_t cp) {
     for (uint8_t i = 0; i < COUNT; i++) if (CP[i] == cp) return i;
     return -1;
 }
-inline bool isToken(const char* s) {
-    return (uint8_t)s[0] == TOKEN && (uint8_t)s[1] >= 0x20 && (uint8_t)s[1] < 0x20 + COUNT;
+// An emoji we have no picture for: the same two-byte shape, with this fixed
+// second byte (above the last sprite's, 0x20 + COUNT - 1, which is why COUNT
+// is at most 94). Drawn as a small "?" tile by emoji_draw.cpp.
+static const uint8_t PLACEHOLDER = 0x7E;
+inline bool isPlaceholder(const char* s) {
+    return (uint8_t)s[0] == TOKEN && (uint8_t)s[1] == PLACEHOLDER;
 }
+inline bool isToken(const char* s) {
+    return isPlaceholder(s) || ((uint8_t)s[0] == TOKEN && (uint8_t)s[1] >= 0x20 && (uint8_t)s[1] < 0x20 + COUNT);
+}
+// Only for a token that is not the placeholder.
 inline uint8_t tokenIndex(const char* s) { return (uint8_t)s[1] - 0x20; }
 
 // Tokens back to '?' for a screen that does not draw them (a list preview, a
@@ -58,7 +66,8 @@ inline size_t expand(const char* in, char* out, size_t cap) {
     size_t o = 0;
     if (!cap) return 0;
     for (const char* r = in; *r && o + 5 < cap; ) {
-        if (isToken(r)) {
+        if (isPlaceholder(r)) { out[o++] = '?'; r += 2; }
+        else if (isToken(r)) {
             const uint32_t cp = CP[tokenIndex(r)];
             r += 2;
             if (cp >= 0x10000) { out[o++] = (char)(0xF0 | (cp >> 18)); out[o++] = (char)(0x80 | ((cp >> 12) & 0x3F)); out[o++] = (char)(0x80 | ((cp >> 6) & 0x3F)); out[o++] = (char)(0x80 | (cp & 0x3F)); }

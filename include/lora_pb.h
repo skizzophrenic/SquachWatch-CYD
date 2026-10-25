@@ -75,14 +75,22 @@ struct Reader {
 // vanish, and anything else (an emoji, a CJK character) becomes one '?'. The
 // result is never longer than the input. With `emoji`, the ones in emoji_cp.h
 // (the set the screen draws) become a two-byte token instead of '?'.
+// The blocks emoji live in: pictographs and symbols, dingbats, arrows and stars,
+// and the two double-punctuation marks. A CJK character is not one of them.
+inline bool isEmojiLike(uint32_t cp) {
+    return (cp >= 0x1F000 && cp <= 0x1FAFF) || (cp >= 0x2600 && cp <= 0x27BF) ||
+           (cp >= 0x2B00 && cp <= 0x2BFF) || cp == 0x203C || cp == 0x2049;
+}
 inline void asciiFold(char* s, bool emoji = false) {
     static const char LAT_HI[] = "AAAAAAACEEEEIIIIDNOOOOO*OUUUUYTs";   // U+00C0..DF
     static const char LAT_LO[] = "aaaaaaaceeeeiiiidnooooo/ouuuuyty";   // U+00E0..FF
     const uint8_t* r = (const uint8_t*)s;
     char* w = s;
+    bool joined = false;                       // just after a ZWJ: one emoji, not two
+    bool flagOpen = false;                     // between the two halves of a flag
     while (*r) {
         const uint8_t c = *r;
-        if (c < 0x80) { *w++ = (char)c; r++; continue; }
+        if (c < 0x80) { *w++ = (char)c; r++; joined = false; flagOpen = false; continue; }
         const uint8_t n = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
         uint32_t cp = n == 4 ? (c & 0x07) : n == 3 ? (c & 0x0F) : n == 2 ? (c & 0x1F) : 0;
         uint8_t k = 1;
@@ -96,13 +104,26 @@ inline void asciiFold(char* s, bool emoji = false) {
             case 0x2026: *w++ = '.'; *w++ = '.'; *w++ = '.'; break;
             case 0x2022: *w++ = '*'; break;
             case 0x00A0: *w++ = ' '; break;
-            case 0x200B: case 0x200D: case 0xFE0F: case 0xFEFF: case 0x1F3FB: case 0x1F3FC: case 0x1F3FD: case 0x1F3FE: case 0x1F3FF: break;
+            case 0x200D: joined = true; continue;
+            case 0x200B: case 0xFE0F: case 0xFEFF: case 0x1F3FB: case 0x1F3FC: case 0x1F3FD: case 0x1F3FE: case 0x1F3FF: break;
             default:
                 if (cp >= 0xC0 && cp <= 0xDF) *w++ = LAT_HI[cp - 0xC0];
                 else if (cp >= 0xE0 && cp <= 0xFF) *w++ = LAT_LO[cp - 0xE0];
                 else if (emoji && cp >= 0x2000 && Emoji::indexOf(cp) >= 0) { *w++ = (char)Emoji::TOKEN; *w++ = (char)(0x20 + Emoji::indexOf(cp)); }
+                else if (emoji && isEmojiLike(cp)) {
+                    // No picture for it: one tile in its place. A ZWJ sequence
+                    // (a family, a profession) is one tile, a flag one tile.
+                    const bool ri = cp >= 0x1F1E6 && cp <= 0x1F1FF;
+                    const bool second = ri && flagOpen;
+                    const bool glued = joined && w >= s + 2 && (uint8_t)w[-2] == Emoji::TOKEN && (uint8_t)w[-1] == Emoji::PLACEHOLDER;
+                    if (!second && !glued) { *w++ = (char)Emoji::TOKEN; *w++ = (char)Emoji::PLACEHOLDER; }
+                    flagOpen = ri && !flagOpen;
+                    joined = false;
+                    continue;
+                }
                 else *w++ = '?';
         }
+        joined = false; flagOpen = false;
     }
     *w = '\0';
 }
