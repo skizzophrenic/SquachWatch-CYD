@@ -151,7 +151,7 @@ SIM_SRCS := $(SIM_DIR)/main_sim.cpp $(SIM_DIR)/detection_sim.cpp $(SRC)/touch_ca
 # The chats screen (`lorachat`) and the compose lines' channel chip read the
 # decoders' real channel tables and Lora::Chan's pick, so those come too.
 SIM_SRCS += $(SRC)/ui_lorahome.cpp $(SRC)/ui_lorasettings.cpp $(SIM_DIR)/lora_sim.cpp             $(SRC)/lora_profiles.cpp $(SRC)/lora_crypto.cpp
-SIM_SRCS += $(SRC)/ui_lorachat.cpp $(SRC)/lora_meshtastic.cpp $(SRC)/lora_meshcore.cpp $(SRC)/lora_channels.cpp
+SIM_SRCS += $(SRC)/ui_lorachat.cpp $(SRC)/lora_meshtastic.cpp $(SRC)/lora_meshcore.cpp $(SRC)/lora_channels.cpp $(SRC)/emoji_draw.cpp $(SRC)/emoji_data.cpp
 SIM_FLAGS := -DSQUACH_LORA_FAKE=1
 
 # The interactive target additionally compiles the firmware's real

@@ -1,5 +1,5 @@
 // SquachWatch-CYD -- text with emoji in it. See include/emoji_draw.h.
-#if SQUACH_LORA
+#if SQUACH_LORA || SQUACH_LORA_FAKE
 #include "emoji_draw.h"
 #include <string.h>
 
