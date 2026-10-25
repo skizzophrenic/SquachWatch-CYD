@@ -92,6 +92,7 @@ whole firmware but has had fewer hours on it. The longer answer is in
 | 3.5" resistive / capacitive — ESP32-3248S035R / C | BETA | |
 | ESP32-32E 2.8" / 3.5" — E32R28T / E32R35T | Via another build | Takes the 2.8" CYD ILI9341 build and the 3.5" resistive one; type the code into the flasher's board finder |
 | Freenove ESP32-S3 2.8" — FNK0104B | BETA | Capacitive touch, SDMMC card slot, WS2812 light, battery connector. Torn screen? On the flasher, untick 80 MHz under Advanced for the 40 MHz build. Pins in [docs/PINOUT.md](docs/PINOUT.md) |
+| LCDWiki ESP32-S3 Display 2.8" — ES3C28P / ES3N28P | Build locally | Dedicated `lcdwiki-es3c28p` target based on the supplied manufacturer demo; standard ILI9341 driver and separate display setup |
 | Freenove ESP32-S3 4.0" — FNK0104S | BETA (build it yourself) | The 2.8"'s board with a 320×480 ST7796: `pio run -e freenove-s3-40 -t upload`. Not on the flasher yet |
 | Freenove ESP32-S3 3.5" — FNK0104N | BETA | The black 3.5": a 320×480 panel on its own QSPI driver, capacitive touch, SDMMC card slot, WS2812 light, battery connector. Big text, and pets at double size |
 | Elecrow CrowPanel Advance 7.0 | BETA | 800×480, drawn at 400×240 doubled on purpose. Has a buzzer, silent unless you switch it on. [docs/CROWPANEL7.md](docs/CROWPANEL7.md) |
@@ -693,3 +694,20 @@ Verified on real hardware. There is also a PC emulator in `sim/` that
 compiles the actual `src/` against shims, and a host test suite in `test/`
 (`make -C test`) covering the decoders, the signature tables and the
 emulator's own fidelity to the display library.
+
+
+### LCDWiki 2.8-inch ESP32-S3 Display
+
+The LCDWiki display has a separate PlatformIO target so its initialization
+does not change the Freenove ESP32-S3 setup. Build and upload with:
+
+```sh
+pio run -e lcdwiki-es3c28p -t upload
+```
+
+This target uses `include/lcdwiki_s3_user_setup.h`, based on the LCDWiki
+manufacturer demo supplied with the project. It selects the standard
+`ILI9341_DRIVER`, LCDWiki's CS/DC/SPI/backlight pins, and a conservative
+40 MHz SPI clock. The manufacturer's demo uses low-level SPI writes at
+80 MHz; that does not guarantee TFT_eSPI's normal transfer path will be
+stable at the same speed. Hardware testing is still required.
