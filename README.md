@@ -103,6 +103,11 @@ whole firmware but has had fewer hours on it. The longer answer is in
 | LilyGo T-Watch S3 / S3 Plus | BETA | On your wrist, with a battery and a buzz. Listens to **LoRa**; the S3 Plus adds **GPS**. See [On the watch](#on-the-watch) |
 | M5Stack Tab5 | Test builds only (`?lab=1`) | 5" 1280×720 tablet on an ESP32-P4, whose radio is a separate ESP32-C6. WiFi and Bluetooth detection both work, but the C6 needs our firmware written first. No SD, sound or battery yet. [docs/TAB5.md](docs/TAB5.md) |
 
+**MQTT (T-Deck Plus, in progress):** the LoRa page is gaining Meshtastic MQTT
+support, configured under LORA SETTINGS > MQTT. It connects to the broker
+automatically whenever the board is connected to a WiFi network. It does not
+bring WiFi up itself, and it waits and retries when there is no network.
+
 Board builds and their confirmed hardware support are listed in
 `platformio.ini`. Compatible variants can share an environment when runtime
 detection handles their hardware differences, as with the original CYD and
