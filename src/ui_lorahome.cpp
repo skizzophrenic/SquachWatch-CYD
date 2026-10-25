@@ -9,6 +9,7 @@
 #if (SQUACH_LORA && defined(TDECK_PLUS)) || SQUACH_LORA_FAKE
 #include "ui_lorahome.h"
 #include "ui_lorachat.h"
+#include "emoji_cp.h"
 #include "ui_lorasettings.h"
 #include "lora_sniffer.h"
 #include "lora_profiles.h"
@@ -887,6 +888,7 @@ void drawChats(TFT_eSPI& t, uint32_t now) {
         const int tx = t.getCursorX() + 6;
         const int agoW = t.textWidth(ago);
         char text[64]; snprintf(text, sizeof text, "%s%s", c == 2 && r.mine ? "you: " : "", r.text);
+        Emoji::plain(text);
         size_t tn = strlen(text);
         while (tn && tx + t.textWidth(text) > 316 - 8 - agoW) text[--tn] = '\0';
         t.setTextColor(Theme::WHITE, bg); t.setCursor(tx, y + 1); t.print(text);

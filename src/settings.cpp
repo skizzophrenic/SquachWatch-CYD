@@ -216,6 +216,10 @@ static bool     s_loraAnnounce = true;
 static uint8_t  s_loraDetect   = 0;   // ON
 static bool     s_loraAlerts   = true;
 static uint8_t  s_loraHops     = 3;
+static uint8_t  s_loraRole     = 0;   // CLIENT
+static bool     s_loraOkMq     = false;
+static bool     s_posOn = false, s_posSmart = true, s_telOn = false;
+static uint8_t  s_posInt = 5, s_posDist = 2, s_posMin = 1, s_posPrec = 3, s_telInt = 1;   // 15 min, 100 m, 30 s, 13 bits, 30 min
 static bool     s_loraMsgSnd   = true;
 static char     s_loraMtPre[16] = { 0 };   // "" = LongFast
 static uint8_t  s_loraMtRgn  = 0;          // 0 = from the band plan
@@ -476,6 +480,33 @@ bool loraAlerts()       { return s_loraAlerts; }
 void toggleLoraAlerts() { s_loraAlerts = !s_loraAlerts; s_prefs.putBool("loraAlrt", s_loraAlerts); }
 uint8_t loraHops() { return s_loraHops; }
 void cycleLoraHops() { s_loraHops = (uint8_t)(s_loraHops >= 7 ? 1 : s_loraHops + 1); s_prefs.putUChar("loraHops", s_loraHops); }
+uint8_t loraRole() { return s_loraRole; }
+// The position and telemetry choices are indexes into short tables.
+static const uint32_t POS_INT[]  = { 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 21600, 43200, 86400 };
+static const uint16_t POS_DIST[] = { 25, 50, 100, 200, 500, 1000 };
+static const uint16_t POS_MIN[]  = { 15, 30, 60, 120, 300 };
+static const uint8_t  POS_PREC[] = { 32, 19, 16, 13, 10 };
+static const uint32_t TEL_INT[]  = { 900, 1800, 3600, 7200, 21600, 86400 };
+#define SQ_N(a) (sizeof(a) / sizeof((a)[0]))
+bool posShare() { return s_posOn; }
+void togglePosShare() { s_posOn = !s_posOn; s_prefs.putBool("posOn", s_posOn); }
+uint32_t posIntervalSecs() { return POS_INT[s_posInt]; }
+void cyclePosInterval() { s_posInt = (uint8_t)((s_posInt + 1) % SQ_N(POS_INT)); s_prefs.putUChar("posInt", s_posInt); }
+bool posSmart() { return s_posSmart; }
+void togglePosSmart() { s_posSmart = !s_posSmart; s_prefs.putBool("posSmart", s_posSmart); }
+uint16_t posSmartMeters() { return POS_DIST[s_posDist]; }
+void cyclePosSmartMeters() { s_posDist = (uint8_t)((s_posDist + 1) % SQ_N(POS_DIST)); s_prefs.putUChar("posDist", s_posDist); }
+uint16_t posSmartMinSecs() { return POS_MIN[s_posMin]; }
+void cyclePosSmartMinSecs() { s_posMin = (uint8_t)((s_posMin + 1) % SQ_N(POS_MIN)); s_prefs.putUChar("posMin", s_posMin); }
+uint8_t posPrecision() { return POS_PREC[s_posPrec]; }
+void cyclePosPrecision() { s_posPrec = (uint8_t)((s_posPrec + 1) % SQ_N(POS_PREC)); s_prefs.putUChar("posPrec", s_posPrec); }
+bool telShare() { return s_telOn; }
+void toggleTelShare() { s_telOn = !s_telOn; s_prefs.putBool("telOn", s_telOn); }
+uint32_t telIntervalSecs() { return TEL_INT[s_telInt]; }
+void cycleTelInterval() { s_telInt = (uint8_t)((s_telInt + 1) % SQ_N(TEL_INT)); s_prefs.putUChar("telInt", s_telInt); }
+bool loraOkMqtt() { return s_loraOkMq; }
+void toggleLoraOkMqtt() { s_loraOkMq = !s_loraOkMq; s_prefs.putBool("loraOkMq", s_loraOkMq); }
+void toggleLoraRole() { s_loraRole = s_loraRole ? 0 : 1; s_prefs.putUChar("loraRole", s_loraRole); }
 bool loraMsgSound()       { return s_loraMsgSnd; }
 void toggleLoraMsgSound() { s_loraMsgSnd = !s_loraMsgSnd; s_prefs.putBool("loraMsgSnd", s_loraMsgSnd); }
 const char* loraMtPreset() { return s_loraMtPre; }
@@ -725,6 +756,16 @@ void load() {
     s_loraAlerts   = s_prefs.getBool("loraAlrt", true);
     s_loraHops     = s_prefs.getUChar("loraHops", 3);
     if (s_loraHops < 1 || s_loraHops > 7) s_loraHops = 3;
+    s_loraRole = s_prefs.getUChar("loraRole", 0) ? 1 : 0;
+    s_loraOkMq = s_prefs.getBool("loraOkMq", false);
+    s_posOn    = s_prefs.getBool("posOn", false);
+    s_posSmart = s_prefs.getBool("posSmart", true);
+    s_telOn    = s_prefs.getBool("telOn", false);
+    s_posInt   = s_prefs.getUChar("posInt", 5);   if (s_posInt  >= SQ_N(POS_INT))  s_posInt  = 5;
+    s_posDist  = s_prefs.getUChar("posDist", 2);  if (s_posDist >= SQ_N(POS_DIST)) s_posDist = 2;
+    s_posMin   = s_prefs.getUChar("posMin", 1);   if (s_posMin  >= SQ_N(POS_MIN))  s_posMin  = 1;
+    s_posPrec  = s_prefs.getUChar("posPrec", 3);  if (s_posPrec >= SQ_N(POS_PREC)) s_posPrec = 3;
+    s_telInt   = s_prefs.getUChar("telInt", 1);   if (s_telInt  >= SQ_N(TEL_INT))  s_telInt  = 1;
     s_loraMsgSnd   = s_prefs.getBool("loraMsgSnd", true);
     s_loraMtPre[0] = '\0';
     if (s_prefs.isKey("loraMtPre")) s_prefs.getString("loraMtPre", s_loraMtPre, sizeof s_loraMtPre);

@@ -396,6 +396,40 @@ namespace Settings {
     // sends, texts and the NodeInfo. 1-7, 3 by default. Key "loraHops".
     uint8_t     loraHops();
     void        cycleLoraHops();                 // 3 -> 4 ... 7 -> 1 ... 3
+    // ROLE: the role in our Meshtastic NodeInfo. 0 CLIENT, 1 CLIENT_MUTE; the
+    // routing roles are not offered, this board is not a repeater. Key "loraRole".
+    uint8_t     loraRole();
+    void        toggleLoraRole();
+    // POSITION and TELEMETRY, as the official client's Position and Device
+    // Telemetry settings. Both off by default: sharing where the board is is the
+    // owner's choice. A position needs the board's own GPS to have a fix.
+    //   SHARE: broadcast it on the primary channel. INTERVAL: every this many
+    //   seconds (30 s .. 24 h, 15 min by default). SMART: also send early when
+    //   the board has moved SMART DISTANCE metres (25 m .. 1 km, 100 m) and at
+    //   least SMART MIN INTERVAL seconds (15 s .. 5 min, 30 s) have passed.
+    //   PRECISION: the bits kept of the coordinates (32 exact, 19 ~45 m, 16 ~364 m,
+    //   13 ~2.9 km, 10 ~23 km; 13 by default). Keys "posOn" "posInt" "posSmart"
+    //   "posDist" "posMin" "posPrec"; telemetry "telOn" "telInt" (30 min).
+    bool        posShare();
+    void        togglePosShare();
+    uint32_t    posIntervalSecs();
+    void        cyclePosInterval();
+    bool        posSmart();
+    void        togglePosSmart();
+    uint16_t    posSmartMeters();
+    void        cyclePosSmartMeters();
+    uint16_t    posSmartMinSecs();
+    void        cyclePosSmartMinSecs();
+    uint8_t     posPrecision();
+    void        cyclePosPrecision();
+    bool        telShare();
+    void        toggleTelShare();
+    uint32_t    telIntervalSecs();
+    void        cycleTelInterval();
+    // OK TO MQTT: mark our packets as fine to relay to MQTT-fed services.
+    // Off by default. Key "loraOkMq".
+    bool        loraOkMqtt();
+    void        toggleLoraOkMqtt();
     // MESSAGE SOUND: the ding (T-Deck) or buzz (watch) for a new LoRa chat
     // message. ON by default. Key "loraMsgSnd".
     bool        loraMsgSound();

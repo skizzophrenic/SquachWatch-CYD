@@ -62,6 +62,13 @@ void           setPrimaryKey(const char* presetName, const uint8_t* key, uint8_t
 // the firmware does), a one-byte PSK as the apps show it ("AQ=="), "default"
 // or "none". False for a bad key and for a 32-byte one (AES-256 is not here).
 bool           parsePrimaryKey(const char* text, uint8_t key[16], uint8_t& keyLen);
+// One-byte PSKs have unambiguous spellings that need no '=': "psk77", "PSK 77"
+// or "#77". A bare "77" or "01" is hex (one byte, PSK 0x77 / 1), never base64;
+// base64 for one byte must be written as the apps do ("AQ=="). parsePrimaryKey
+// and addChannel both read keys this way.
+// What the text would be if saved now, for the edit line ("PSK 77: DEFAULT
+// KEY +76", "16-BYTE KEY", "NOT A KEY YET"); false when it would be refused.
+bool           describePrimaryKey(const char* text, char* out, size_t cap);
 // The user's own; false when the table is full, the name is already held, or
 // the key does not parse.
 bool           addChannel(const char* name, const char* keyText);
@@ -110,6 +117,19 @@ uint16_t buildFrame(const Channel& c, uint32_t from, uint32_t id, uint8_t hops, 
 // when asked, request_id when non-zero} into `out` (room for 212); returns
 // its length. buildChannelFrame: that Data under the channel's key, to `to`,
 // want_ack as asked -- an ACK, or a NodeInfo sent to one node.
+// What this board broadcasts about itself. `out` needs room for 40 (position)
+// or 56 (telemetry). The position keeps `precisionBits` of the coordinates
+// (32 = all of them; 0 sends nothing and returns 0).
+size_t   encodePosition(int32_t lat7, int32_t lon7, int32_t altM, bool hasAlt, uint32_t epoch, uint8_t sats,
+                        uint8_t precisionBits, uint8_t* out);
+size_t   encodeDeviceTelemetry(uint32_t epoch, uint8_t batteryPct, float volts, float chanUtil, float airUtilTx,
+                               uint32_t uptimeSecs, uint8_t* out);
+// OK to MQTT, the official client's flag: every Data this file encodes carries
+// the bitfield's bit 0 while it is on, which is how a stock node's gateway
+// knows it may uplink a packet to MQTT (Discord bridges, Meshview and so on).
+// Off by default, as in the official client. A flag only: this board has no
+// MQTT client of its own.
+void     setOkToMqtt(bool on);
 size_t   encodeData(uint8_t port, const uint8_t* payload, size_t plen, bool wantResponse, uint32_t requestId,
                     uint8_t* out);
 uint16_t buildChannelFrame(const Channel& c, uint32_t from, uint32_t to, uint32_t id, uint8_t hops, bool wantAck,

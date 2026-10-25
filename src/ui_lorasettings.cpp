@@ -11,6 +11,7 @@
 #include "lora_myname.h"
 #include "lora_channels.h"
 #include "lora_meshtastic.h"
+#include "gnss.h"
 #include "settings.h"
 #include "theme.h"
 #include "squachy.h"
@@ -33,7 +34,8 @@ enum Id : uint8_t {
     NONE = 0,
     // the main list
     LISTEN, PRESET, MT_REGION, MT_SLOT, MT_KEY, TX, HOPS, REGION, CHANNELS,
-    NAME, SHORTNAME, ANNOUNCE,
+    NAME, SHORTNAME, ANNOUNCE, ROLE, OKMQTT,
+    P_ON, P_INT, P_SMART, P_DIST, P_MIN, P_PREC, T_ON, T_INT,
     MSGSOUND,
     DETECT, ONSCREEN,
     LOOKUPS, LK_CALL, LK_OGN, LK_FEED,
@@ -144,6 +146,13 @@ const char* b64Preview(const uint8_t* key, uint8_t len) {
     full[o] = '\0';
     snprintf(out, sizeof out, "%.4s....%s", full, full + o - 4);
     return out;
+}
+
+// 30 -> "30 s", 900 -> "15 min", 7200 -> "2 h".
+void spanText(char* out, size_t cap, uint32_t secs) {
+    if (secs < 60)        snprintf(out, cap, "%lu s", (unsigned long)secs);
+    else if (secs < 3600) snprintf(out, cap, "%lu min", (unsigned long)(secs / 60));
+    else                  snprintf(out, cap, "%lu h", (unsigned long)(secs / 3600));
 }
 
 void buildMain() {
@@ -261,6 +270,80 @@ void buildMain() {
         Row& r = add(ANNOUNCE, "ANNOUNCE NAME");
         onOff(r, Settings::loraAnnounce());
         snprintf(r.hint, sizeof r.hint, Settings::loraAnnounce() ? "NODEINFO BEFORE THE FIRST TEXT" : "MESHTASTIC SEES A NUMBER");
+    }
+    {
+        // Only the two a handheld can honestly be. The routing roles are not here.
+        Row& r = add(ROLE, "ROLE");
+        const bool mute = Settings::loraRole() != 0;
+        snprintf(r.value, sizeof r.value, "%s", mute ? "CLIENT_MUTE" : "CLIENT");
+        r.valCol = mute ? Theme::AMBER : Theme::CYAN;
+        snprintf(r.hint, sizeof r.hint, mute ? "TELLS THE MESH NOT TO RELAY FOR US" : "A NORMAL MESHTASTIC CLIENT");
+    }
+    {
+        Row& r = add(OKMQTT, "OK TO MQTT");
+        onOff(r, Settings::loraOkMqtt());
+        snprintf(r.hint, sizeof r.hint, Settings::loraOkMqtt() ? "GATEWAYS MAY SHARE OUR PACKETS ONLINE" : "ASKS GATEWAYS NOT TO UPLOAD US");
+    }
+
+
+    section("POSITION");
+    {
+        Row& r = add(P_ON, "SHARE POSITION");
+        onOff(r, Settings::posShare());
+        const bool fix = Gnss::fresh(millis());
+        snprintf(r.hint, sizeof r.hint, fix ? "GPS HAS A FIX. SENT ON THE PRIMARY" : "NO GPS FIX YET: NOTHING SENDS");
+        if (Settings::posShare() && !fix) r.valCol = Theme::AMBER;
+    }
+    {
+        Row& r = add(P_INT, "INTERVAL");
+        r.dim = !Settings::posShare();
+        spanText(r.value, sizeof r.value, Settings::posIntervalSecs());
+        snprintf(r.hint, sizeof r.hint, "AT LEAST THIS OFTEN (15 MIN = STOCK)");
+    }
+    {
+        Row& r = add(P_SMART, "SMART POSITION");
+        r.dim = !Settings::posShare();
+        onOff(r, Settings::posSmart());
+        snprintf(r.hint, sizeof r.hint, "ALSO SEND WHEN YOU HAVE MOVED");
+    }
+    {
+        Row& r = add(P_DIST, "  MOVED FURTHER THAN");
+        r.dim = !Settings::posShare() || !Settings::posSmart();
+        const uint16_t m = Settings::posSmartMeters();
+        if (m >= 1000) snprintf(r.value, sizeof r.value, "%u km", (unsigned)(m / 1000));
+        else           snprintf(r.value, sizeof r.value, "%u m", (unsigned)m);
+        snprintf(r.hint, sizeof r.hint, "100 M = STOCK");
+    }
+    {
+        Row& r = add(P_MIN, "  BUT NOT SOONER THAN");
+        r.dim = !Settings::posShare() || !Settings::posSmart();
+        spanText(r.value, sizeof r.value, Settings::posSmartMinSecs());
+        snprintf(r.hint, sizeof r.hint, "30 S = STOCK");
+    }
+    {
+        Row& r = add(P_PREC, "PRECISION");
+        r.dim = !Settings::posShare();
+        switch (Settings::posPrecision()) {
+            case 32: snprintf(r.value, sizeof r.value, "EXACT"); r.valCol = Theme::AMBER; break;
+            case 19: snprintf(r.value, sizeof r.value, "~45 m"); break;
+            case 16: snprintf(r.value, sizeof r.value, "~364 m"); break;
+            case 13: snprintf(r.value, sizeof r.value, "~2.9 km"); break;
+            default: snprintf(r.value, sizeof r.value, "~23 km"); break;
+        }
+        snprintf(r.hint, sizeof r.hint, "HOW CLOSELY THE MESH SEES YOU");
+    }
+
+    section("TELEMETRY");
+    {
+        Row& r = add(T_ON, "SHARE TELEMETRY");
+        onOff(r, Settings::telShare());
+        snprintf(r.hint, sizeof r.hint, "BATTERY, UPTIME, AIRTIME. PRIMARY");
+    }
+    {
+        Row& r = add(T_INT, "INTERVAL");
+        r.dim = !Settings::telShare();
+        spanText(r.value, sizeof r.value, Settings::telIntervalSecs());
+        snprintf(r.hint, sizeof r.hint, "30 MIN = STOCK");
     }
 
     section("CHATS");
@@ -442,9 +525,19 @@ void drawEditLine(TFT_eSPI& t, const Row& r, int y) {
         case Edit::NAME:      snprintf(hint, sizeof hint, "ENTER SAVES. EMPTY = %s", Squachy::nickname() && *Squachy::nickname() ? "THE NICKNAME" : "SQUACHY"); break;
         case Edit::SHORTNAME: snprintf(hint, sizeof hint, "UP TO 4. ENTER SAVES. EMPTY = DEFAULT"); break;
         case Edit::MT_SLOT:   snprintf(hint, sizeof hint, "SLOT NUMBER. ENTER SAVES. EMPTY = AUTO"); break;
-        case Edit::MT_KEY:    snprintf(hint, sizeof hint, "BASE64 OR HEX, DEFAULT, NONE. EMPTY = DEFAULT"); break;
+        case Edit::MT_KEY: {
+            // What Enter would save, as it is typed: "PSK 77: DEFAULT KEY +76".
+            char d[40];
+            Meshtastic::describePrimaryKey(s_buf, d, sizeof d);
+            snprintf(hint, sizeof hint, "%s", d);
+            break;
+        }
         case Edit::CH_NAME:   snprintf(hint, sizeof hint, s_addProto == Lora::Proto::MESHCORE ? "#TAG OR A NAME, THEN ENTER" : "THE CHANNEL'S NAME, THEN ENTER"); break;
-        default:              snprintf(hint, sizeof hint, s_addProto == Lora::Proto::MESHCORE ? "HEX KEY; EMPTY FOR A #TAG. ENTER" : "BASE64 KEY, THEN ENTER"); break;
+        default:
+            if (s_addProto == Lora::Proto::MESHCORE) { snprintf(hint, sizeof hint, "HEX KEY; EMPTY FOR A #TAG. ENTER"); break; }
+            if (!s_buf[0]) { snprintf(hint, sizeof hint, "KEY: PSK77, DEFAULT, BASE64 OR HEX. ENTER"); break; }
+            { char d[40]; Meshtastic::describePrimaryKey(s_buf, d, sizeof d); snprintf(hint, sizeof hint, "%s", d); }
+            break;
     }
     small(t, 10, y + 17, hint, dim(Theme::WHITE, 150), Theme::BG);
 }
@@ -587,7 +680,7 @@ void commitEdit() {
                 status("CHANNEL KEY BACK TO THE DEFAULT");
             } else {
                 uint8_t key[16], len = 0;
-                if (!Meshtastic::parsePrimaryKey(s_buf, key, len)) { status("BAD KEY (16 BYTES: BASE64 OR HEX)"); return; }
+                if (!Meshtastic::parsePrimaryKey(s_buf, key, len)) { status("BAD KEY (DEFAULT, PSK77, OR 16 BYTES B64/HEX)"); return; }
                 uint8_t def[16];
                 Meshtastic::expandPsk(1, def);
                 if (len == 16 && !memcmp(key, def, 16)) Settings::setLoraMtKey(nullptr, 0);
@@ -662,6 +755,16 @@ void tapRow(const Row& r) {
             Settings::toggleLoraAnnounce();
             if (Settings::loraAnnounce()) Lora::identityChanged();
             break;
+        case P_ON:     Settings::togglePosShare(); break;
+        case P_INT:    Settings::cyclePosInterval(); break;
+        case P_SMART:  Settings::togglePosSmart(); break;
+        case P_DIST:   Settings::cyclePosSmartMeters(); break;
+        case P_MIN:    Settings::cyclePosSmartMinSecs(); break;
+        case P_PREC:   Settings::cyclePosPrecision(); break;
+        case T_ON:     Settings::toggleTelShare(); break;
+        case T_INT:    Settings::cycleTelInterval(); break;
+        case ROLE:     Settings::toggleLoraRole(); Lora::identityChanged(); break;
+        case OKMQTT:   Settings::toggleLoraOkMqtt(); Meshtastic::setOkToMqtt(Settings::loraOkMqtt()); break;
         case MSGSOUND: Settings::toggleLoraMsgSound(); break;
         case DETECT:   Settings::cycleLoraDetect(); break;
         case ONSCREEN: Settings::toggleLoraAlerts(); break;

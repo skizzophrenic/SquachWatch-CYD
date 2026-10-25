@@ -120,6 +120,62 @@ void setPrimaryKey(const char* presetName, const uint8_t* key, uint8_t keyLen) {
     s_priLen = keyLen;
 }
 
+// A one-byte PSK in the unambiguous spellings that need no '=': "psk77",
+// "PSK 77" or "#77" (0..255). -1 when the text is not one of those.
+static int explicitPsk(const char* t) {
+    while (*t == ' ') t++;
+    const char* d;
+    if (!strncasecmp(t, "psk", 3)) d = t + 3;
+    else if (*t == '#')            d = t + 1;
+    else                           return -1;
+    while (*d == ' ') d++;
+    if (!*d) return -1;
+    int v = 0;
+    for (; *d; d++) {
+        if (*d < '0' || *d > '9') return -1;
+        v = v * 10 + (*d - '0');
+        if (v > 255) return -1;
+    }
+    return v;
+}
+
+// The bytes a typed key stands for. The explicit PSK forms first; then base64,
+// where ONE byte only counts when it is written the way the apps write it
+// ("AQ==", four characters, two '='): fromBase64 is lenient, and a bare "77"
+// or "01" would otherwise come out as one base64 byte (0xEF, 0xD3) and never
+// reach the hex reader, giving a PSK nobody typed. Then hex.
+static size_t keyBytes(const char* text, uint8_t* out, size_t cap) {
+    const int p = explicitPsk(text);
+    if (p >= 0) { out[0] = (uint8_t)p; return 1; }
+    size_t n = fromBase64(text, out, cap);
+    const size_t len = strlen(text);
+    if (n == 1 && !(len == 4 && text[2] == '=' && text[3] == '=')) n = 0;
+    if (n != 16 && n != 32 && n != 1) n = fromHex(text, out, cap);
+    return n;
+}
+
+bool describePrimaryKey(const char* text, char* out, size_t cap) {
+    if (!out || !cap) return false;
+    out[0] = '\0';
+    if (!text) text = "";
+    while (*text == ' ') text++;
+    if (!*text)                    { snprintf(out, cap, "EMPTY = THE DEFAULT KEY"); return true; }
+    if (!strcasecmp(text, "default")) { snprintf(out, cap, "DEFAULT KEY (PSK 1)"); return true; }
+    if (!strcasecmp(text, "none") || !strcmp(text, "0")) { snprintf(out, cap, "NONE: IN THE CLEAR"); return true; }
+    uint8_t tmp[32];
+    const size_t n = keyBytes(text, tmp, sizeof tmp);
+    if (n == 1) {
+        if (!tmp[0])      snprintf(out, cap, "PSK 0: NONE, IN THE CLEAR");
+        else if (tmp[0] == 1) snprintf(out, cap, "PSK 1: THE DEFAULT KEY");
+        else              snprintf(out, cap, "PSK %u: DEFAULT KEY +%u", (unsigned)tmp[0], (unsigned)(tmp[0] - 1));
+        return true;
+    }
+    if (n >= 2 && n <= 16) { snprintf(out, cap, n == 16 ? "16-BYTE KEY" : "%u BYTES, ZERO-PADDED TO 16", (unsigned)n); return true; }
+    if (n == 32)           { snprintf(out, cap, "32 BYTES: AES-256 NOT SUPPORTED"); return false; }
+    snprintf(out, cap, "NOT A KEY YET");
+    return false;
+}
+
 bool parsePrimaryKey(const char* text, uint8_t key[16], uint8_t& keyLen) {
     memset(key, 0, 16);
     keyLen = 0;
@@ -129,8 +185,7 @@ bool parsePrimaryKey(const char* text, uint8_t key[16], uint8_t& keyLen) {
     if (!strcasecmp(text, "default")) { expandPsk(1, key); keyLen = 16; return true; }
     if (!strcasecmp(text, "none") || !strcmp(text, "0")) return true;     // in the clear
     uint8_t tmp[32];
-    size_t n = fromBase64(text, tmp, sizeof tmp);
-    if (n != 16 && n != 32 && n != 1) n = fromHex(text, tmp, sizeof tmp);
+    size_t n = keyBytes(text, tmp, sizeof tmp);
     if (n == 1) { expandPsk(tmp[0], key); keyLen = tmp[0] ? 16 : 0; return true; }
     if (n >= 1 && n <= 16) { memcpy(key, tmp, n); keyLen = 16; return true; }   // zero-padded, as the firmware does
     return false;                                  // 32 bytes is AES-256, which this build cannot seal or open
@@ -147,16 +202,18 @@ bool addChannel(const char* name, const char* keyText) {
     memset(&c, 0, sizeof c);
     strncpy(c.name, name, sizeof c.name - 1);
     size_t n = 0;
-    if (keyText && *keyText) {
-        n = fromBase64(keyText, c.key, sizeof c.key);
-        if (n != 16 && n != 32 && n != 1) n = fromHex(keyText, c.key, sizeof c.key);
+    bool zeroOk = false;
+    if (keyText && !strcasecmp(keyText, "default")) { expandPsk(1, c.key); n = 16; }
+    else if (keyText && *keyText) {
+        n = keyBytes(keyText, c.key, sizeof c.key);
+        if (n == 1 && !c.key[0]) zeroOk = true;               // "psk0": asked for no key
         if (n == 1) { expandPsk(c.key[0], c.key); n = c.key[0] ? 16 : 0; }
         else if (n > 0 && n < 16) { memset(c.key + n, 0, 16 - n); n = 16; }   // zero-padded, as the firmware does
         else if (n > 16 && n < 32) { memset(c.key + n, 0, 32 - n); n = 32; }
         else if (n != 16 && n != 32 && n != 0) return false;
     }
     // A key that was given and did not parse is a typo, not "no key".
-    if (keyText && *keyText && n == 0 && !(keyText[0] == '0' && keyText[1] == '\0')) return false;
+    if (keyText && *keyText && n == 0 && !zeroOk && !(keyText[0] == '0' && keyText[1] == '\0')) return false;
     c.keyLen = (uint8_t)n;
     c.hash = channelHash(c.name, c.key, c.keyLen);
     c.enabled = true;
@@ -222,6 +279,62 @@ bool canSend(const Channel& c) {
     return c.enabled && c.name[0] && (c.keyLen == 16 || c.keyLen == 0);
 }
 
+static size_t putVar(uint8_t* o, uint64_t v) {
+    size_t n = 0;
+    while (v >= 0x80) { o[n++] = (uint8_t)(v | 0x80); v >>= 7; }
+    o[n++] = (uint8_t)v;
+    return n;
+}
+
+// Position{latitude_i 1, longitude_i 2 (sfixed32), altitude 3, time 4 (fixed32),
+// location_source 5 = LOC_INTERNAL, sats_in_view 19, precision_bits 23}. With
+// fewer than 32 precision bits the coordinates keep only that many, set to the
+// middle of the cell they name, and the altitude is left out -- as the
+// firmware does for a channel with a position precision.
+size_t encodePosition(int32_t lat7, int32_t lon7, int32_t altM, bool hasAlt, uint32_t epoch, uint8_t sats,
+                      uint8_t precisionBits, uint8_t* out) {
+    if (!out || precisionBits == 0) return 0;
+    if (precisionBits > 32) precisionBits = 32;
+    if (precisionBits < 32) {
+        const uint32_t mask = 0xFFFFFFFFu << (32 - precisionBits);
+        const uint32_t mid  = 1u << (31 - precisionBits);
+        lat7 = (int32_t)(((uint32_t)lat7 & mask) | mid);
+        lon7 = (int32_t)(((uint32_t)lon7 & mask) | mid);
+        hasAlt = false;
+    }
+    uint8_t* q = out;
+    *q++ = 0x0D; wr32le(q, (uint32_t)lat7); q += 4;
+    *q++ = 0x15; wr32le(q, (uint32_t)lon7); q += 4;
+    if (hasAlt) { *q++ = 0x18; q += putVar(q, (uint64_t)(int64_t)altM); }
+    if (epoch)  { *q++ = 0x25; wr32le(q, epoch); q += 4; }
+    *q++ = 0x28; *q++ = 0x01;                                   // location_source: LOC_INTERNAL
+    if (sats)   { *q++ = 0x98; *q++ = 0x01; q += putVar(q, sats); }
+    *q++ = 0xB8; *q++ = 0x01; q += putVar(q, precisionBits);
+    return (size_t)(q - out);
+}
+
+// Telemetry{time 1 (fixed32), device_metrics 2 {battery_level 1, voltage 2,
+// channel_utilization 3, air_util_tx 4 (floats), uptime_seconds 5}}.
+size_t encodeDeviceTelemetry(uint32_t epoch, uint8_t batteryPct, float volts, float chanUtil, float airUtilTx,
+                             uint32_t uptimeSecs, uint8_t* out) {
+    if (!out) return 0;
+    uint8_t m[40];
+    size_t p = 0;
+    m[p++] = 0x08; p += putVar(m + p, batteryPct);
+    uint32_t b;
+    memcpy(&b, &volts, 4);      m[p++] = 0x15; wr32le(m + p, b); p += 4;
+    memcpy(&b, &chanUtil, 4);   m[p++] = 0x1D; wr32le(m + p, b); p += 4;
+    memcpy(&b, &airUtilTx, 4);  m[p++] = 0x25; wr32le(m + p, b); p += 4;
+    m[p++] = 0x28; p += putVar(m + p, uptimeSecs);
+    uint8_t* q = out;
+    if (epoch) { *q++ = 0x0D; wr32le(q, epoch); q += 4; }
+    *q++ = 0x12; *q++ = (uint8_t)p; memcpy(q, m, p); q += p;
+    return (size_t)(q - out);
+}
+
+static bool s_okToMqtt = false;
+void setOkToMqtt(bool on) { s_okToMqtt = on; }
+
 size_t encodeData(uint8_t port, const uint8_t* payload, size_t plen, bool wantResponse, uint32_t requestId,
                   uint8_t* out) {
     if (!out) return 0;
@@ -238,6 +351,7 @@ size_t encodeData(uint8_t port, const uint8_t* payload, size_t plen, bool wantRe
     q += plen;
     if (wantResponse) { *q++ = 0x18; *q++ = 0x01; }          // want_response = true
     if (requestId)    { *q++ = 0x35; wr32le(q, requestId); q += 4; }   // request_id, fixed32
+    if (s_okToMqtt)   { *q++ = 0x48; *q++ = 0x01; }          // bitfield (9): bit 0, OK to MQTT
     return (size_t)(q - out);
 }
 
@@ -651,6 +765,7 @@ bool decode(const Lora::Packet& pk, Decoded& out) {
         case PORT_TEXT: case PORT_RANGE_TEST: case PORT_DETECTION: case PORT_ALERT: {
             const uint8_t m = n < sizeof out.text - 1 ? n : (uint8_t)(sizeof out.text - 1);
             memcpy(out.text, p, m); out.text[m] = '\0';
+            Pb::asciiFold(out.text, true);
             break;
         }
         case PORT_NODEINFO:     parseUser(p, n, out.user); break;

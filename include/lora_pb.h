@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
+#include "emoji_cp.h"
 
 namespace Pb {
 
@@ -67,11 +68,51 @@ struct Reader {
 };
 
 // Copies a string field, NUL-terminated and cut to fit.
+// UTF-8 folded down to what the screen's font can draw, in place. The font has
+// no curly quotes, accents or emoji, and drew each byte of one as its own
+// stray glyph. Curly quotes, dashes, the ellipsis and bullet become their ASCII
+// look-alikes, Latin-1 accents lose the accent, joiners and variation selectors
+// vanish, and anything else (an emoji, a CJK character) becomes one '?'. The
+// result is never longer than the input. With `emoji`, the ones in emoji_cp.h
+// (the set the screen draws) become a two-byte token instead of '?'.
+inline void asciiFold(char* s, bool emoji = false) {
+    static const char LAT_HI[] = "AAAAAAACEEEEIIIIDNOOOOO*OUUUUYTs";   // U+00C0..DF
+    static const char LAT_LO[] = "aaaaaaaceeeeiiiidnooooo/ouuuuyty";   // U+00E0..FF
+    const uint8_t* r = (const uint8_t*)s;
+    char* w = s;
+    while (*r) {
+        const uint8_t c = *r;
+        if (c < 0x80) { *w++ = (char)c; r++; continue; }
+        const uint8_t n = c >= 0xF0 ? 4 : c >= 0xE0 ? 3 : c >= 0xC0 ? 2 : 1;
+        uint32_t cp = n == 4 ? (c & 0x07) : n == 3 ? (c & 0x0F) : n == 2 ? (c & 0x1F) : 0;
+        uint8_t k = 1;
+        while (k < n && (r[k] & 0xC0) == 0x80) cp = (cp << 6) | (r[k++] & 0x3F);
+        r += k;                                  // a cut-off sequence is eaten as far as it goes
+        if (n == 1 || k < n) { *w++ = '?'; continue; }
+        switch (cp) {
+            case 0x2018: case 0x2019: case 0x201B: case 0x02BC: *w++ = '\''; break;
+            case 0x201C: case 0x201D: *w++ = '"'; break;
+            case 0x2013: case 0x2014: case 0x2212: *w++ = '-'; break;
+            case 0x2026: *w++ = '.'; *w++ = '.'; *w++ = '.'; break;
+            case 0x2022: *w++ = '*'; break;
+            case 0x00A0: *w++ = ' '; break;
+            case 0x200B: case 0x200D: case 0xFE0F: case 0xFEFF: case 0x1F3FB: case 0x1F3FC: case 0x1F3FD: case 0x1F3FE: case 0x1F3FF: break;
+            default:
+                if (cp >= 0xC0 && cp <= 0xDF) *w++ = LAT_HI[cp - 0xC0];
+                else if (cp >= 0xE0 && cp <= 0xFF) *w++ = LAT_LO[cp - 0xE0];
+                else if (emoji && cp >= 0x2000 && Emoji::indexOf(cp) >= 0) { *w++ = (char)Emoji::TOKEN; *w++ = (char)(0x20 + Emoji::indexOf(cp)); }
+                else *w++ = '?';
+        }
+    }
+    *w = '\0';
+}
+
 inline void str(const Field& f, char* out, size_t cap) {
     if (!cap) return;
     size_t n = f.len < cap - 1 ? f.len : cap - 1;
     memcpy(out, f.bytes, n);
     out[n] = '\0';
+    asciiFold(out);
 }
 
 // A float carried as fixed32.

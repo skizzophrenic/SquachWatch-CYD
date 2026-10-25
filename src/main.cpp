@@ -3187,6 +3187,13 @@ static uint8_t boardBatteryPct(uint16_t mv) {
         if (mv <= MV[i]) return (uint8_t)(PCT[i-1] + (uint32_t)(PCT[i] - PCT[i-1]) * (mv - MV[i-1]) / (MV[i] - MV[i-1]));
     return 100;
 }
+// For the LoRa telemetry: the cell's millivolts and percent, false with no cell.
+bool boardBatteryMvPct(uint16_t& mv, uint8_t& pct) {
+    mv = boardBatteryMv();
+    if (mv < 2500) return false;
+    pct = boardBatteryPct(mv);
+    return true;
+}
 // The SYSTEM page's BATTERY row: "81% 4.12V". Under 2.5 V there is no cell on
 // the connector at all (the divider just floats), and it says so.
 void boardBatteryLine(char* out, size_t n) {
@@ -4445,7 +4452,7 @@ void setup() {
             PANEL.print(m);
             panelShow();
         }
-        OtaWifi::bootCheck(9000);
+        OtaWifi::bootCheck(20000);
         if (panelTextOk()) { PANEL.fillRect(0, 0, tft.width(), tft.height(), Theme::BG); panelShow(); }
     }
 

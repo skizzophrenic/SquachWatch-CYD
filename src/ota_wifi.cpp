@@ -998,7 +998,9 @@ bool bootCheck(uint32_t budgetMs) {
     const uint32_t tj = millis();
     WiFi.begin(ssid, pass[0] ? pass : nullptr);
     wl_status_t st = WiFi.status();
-    // Two thirds of the budget for the join, the rest for the fetch.
+    // Two thirds of the budget for the join, the rest for the fetch. The
+    // T-Deck Plus took 12 s to associate on the bench (2026-10-25, STA_CONNECTED
+    // 12.2 s after begin(), silent until then), so main.cpp gives this 20 s.
     while (st != WL_CONNECTED && millis() - tj < budgetMs * 2 / 3) {
         if (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL) break;
         delay(50);
