@@ -1124,6 +1124,9 @@ static void broadcastTick(uint32_t now) {
 #if defined(TDECK_PLUS)
         uint8_t bp = 0;
         if (::boardBatteryMvPct(mv, bp)) pct = bp; else mv = 0;
+        // On the cable the pin shows the charger's rail (4.45 V on the bench), above
+        // anything a cell reaches alone (4.2 V): say "powered", as Meshtastic does.
+        if (mv > 4250) pct = 101;
 #endif
         const uint32_t win = s_telAt ? now - s_telAt : now;
         const uint32_t rx = s_stats.airtimeMs - s_telRxAir, tx = s_txAirMs - s_telTxAir;
