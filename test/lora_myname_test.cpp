@@ -86,5 +86,38 @@ int main() {
         ck("US MediumSlow is 914.875 MHz SF10", ms >= 0 && profile((uint8_t)ms).freqHz == 914875000u && profile((uint8_t)ms).sf == 10);
     }
 
+    suite("The Meshtastic override: region, preset, frequency slot");
+    {
+        setRegion(REGION_US);
+        setMeshtasticOverride(0, "", 0);
+        ck("nothing chosen, nothing added", !meshtasticOverrideActive());
+        const uint8_t base = profileCount();
+        // US LongFast on its default slot is the well-known 906.875.
+        setMeshtasticOverride(1, "", 0);
+        ck("a region makes the override row", meshtasticOverrideActive() && profileCount() == base + 1);
+        int16_t i = meshPresetFind(Proto::MESHTASTIC, "");
+        ck("Meshtastic resolves to it, MeshCore does not", i == base && meshPresetFind(Proto::MESHCORE, nullptr) != i);
+        ck("US LongFast default slot is 906.875", profile((uint8_t)i).freqHz == 906875000u);
+        setMeshtasticOverride(1, "", 1);
+        ck("slot 1 is the first, 902.125", profile((uint8_t)meshPresetFind(Proto::MESHTASTIC, "")).freqHz == 902125000u);
+        ck("US LongFast has 104 slots", mtSlotCount(1, "LongFast") == 104);
+        setMeshtasticOverride(1, "LongTurbo", 0);
+        const Profile& t = profile((uint8_t)meshPresetFind(Proto::MESHTASTIC, ""));
+        ck("LongTurbo: 500 kHz SF11, named for the preset", t.bwKhz10 == 5000 && t.sf == 11 && !strcmp(t.name, "MT LongTurbo"));
+        setMeshtasticOverride(3, "LongTurbo", 0);   // EU_868 is 250 kHz wide
+        ck("a preset too wide for the region falls back",
+           profile((uint8_t)meshPresetFind(Proto::MESHTASTIC, "")).bwKhz10 <= 2500 && !mtPresetFits(3, 3));
+        setMeshtasticOverride(3, "", 0);
+        ck("EU_868 LongFast is 869.525", profile((uint8_t)meshPresetFind(Proto::MESHTASTIC, "")).freqHz == 869525000u);
+        setMeshtasticOverride(2, "", 0);
+        ck("EU_433 is below the module's band", (profile((uint8_t)meshPresetFind(Proto::MESHTASTIC, "")).flags & PF_433) != 0);
+        setMeshtasticOverride(0, "LongTurbo", 0);
+        ck("a preset the band plan lacks is an override", meshtasticOverrideActive());
+        setMeshtasticOverride(0, "MediumSlow", 0);
+        ck("one it has is not", !meshtasticOverrideActive() && profileCount() == base);
+        setMeshtasticOverride(0, "", 0);
+        setRegion(REGION_EU);
+    }
+
     return report();
 }

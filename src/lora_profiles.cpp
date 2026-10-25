@@ -3,6 +3,8 @@
 #include "lora_profiles.h"
 #include "lora_crypto.h"
 #include <stdio.h>
+#include <string.h>
+#include <strings.h>
 
 namespace Lora {
 
@@ -107,25 +109,168 @@ static const Profile PROFILES_US[] = {
     { "MT 70cm Narrow", 433650000,  625,  8, 6, 0x2B, 16, PF_CRC|PF_HAM|PF_433, 0, Proto::MESHTASTIC, PG_HAM_433 },
 };
 
-static const Profile* s_tab = PROFILES_EU;
-static uint8_t        s_n   = (uint8_t)(sizeof(PROFILES_EU) / sizeof(PROFILES_EU[0]));
+// ---- the Meshtastic override: region, modem preset and frequency slot ------
+// RegionInfo and modemPresetToParams() from the Meshtastic firmware
+// (RadioInterface.cpp, MeshRadio.h). A region is the band edges its slots are
+// counted in; a preset is a bandwidth, spreading factor and coding rate.
+struct MtRegion { const char* name; uint32_t startHz, endHz; };
+static const MtRegion MT_REGIONS[] = {
+    { "US",     902000000u, 928000000u },
+    { "EU_433", 433000000u, 434000000u },
+    { "EU_868", 869400000u, 869650000u },
+    { "CN",     470000000u, 510000000u },
+    { "JP",     920500000u, 923500000u },
+    { "ANZ",    915000000u, 928000000u },
+    { "RU",     868700000u, 869200000u },
+    { "KR",     920000000u, 923000000u },
+    { "TW",     920000000u, 925000000u },
+    { "IN",     865000000u, 867000000u },
+    { "NZ_865", 864000000u, 868000000u },
+    { "TH",     920000000u, 925000000u },
+    { "UA_433", 433000000u, 434700000u },
+    { "UA_868", 868000000u, 868600000u },
+    { "MY_433", 433000000u, 435000000u },
+    { "MY_919", 919000000u, 924000000u },
+    { "SG_923", 917000000u, 925000000u },
+};
+static const uint8_t N_MT_REGIONS = sizeof MT_REGIONS / sizeof MT_REGIONS[0];
+
+struct MtPreset { const char* name; uint16_t bwKhz10; uint8_t sf, cr; };
+static const MtPreset MT_PRESETS[] = {
+    { "LongFast",    2500, 11, 5 },
+    { "LongSlow",    1250, 12, 8 },
+    { "LongMod",     1250, 11, 8 },
+    { "LongTurbo",   5000, 11, 5 },
+    { "MediumFast",  2500,  9, 5 },
+    { "MediumSlow",  2500, 10, 5 },
+    { "ShortFast",   2500,  7, 5 },
+    { "ShortSlow",   2500,  8, 5 },
+    { "ShortTurbo",  5000,  7, 5 },
+    { "NarrowSlow",   625,  8, 6 },
+};
+static const uint8_t N_MT_PRESETS = sizeof MT_PRESETS / sizeof MT_PRESETS[0];
+
+static const uint8_t MAX_PROFILES = 64;   // the survey mask is a uint64_t
+static Profile        s_ram[MAX_PROFILES];
+static const Profile* s_tab = s_ram;
+static uint8_t        s_n   = 0;
 static uint8_t        s_region = REGION_EU;
+static const Profile* s_base = PROFILES_EU;
+static uint8_t        s_baseN = (uint8_t)(sizeof(PROFILES_EU) / sizeof(PROFILES_EU[0]));
+
+static uint8_t s_ovRegion = 0;               // 0 = from the band plan, else MT_REGIONS[n-1]
+static char    s_ovPreset[16] = { 0 };       // "" = LongFast
+static uint8_t s_ovSlot = 0;                 // 0 = the name's hash, else slot n
+static bool    s_ovActive = false;
+static char    s_ovName[16];
+static Profile s_ovProf;
+
+static uint8_t effRegion() {                 // an index into MT_REGIONS
+    if (s_ovRegion && s_ovRegion <= N_MT_REGIONS) return (uint8_t)(s_ovRegion - 1);
+    return s_region == REGION_US ? 0 : 2;
+}
+static int8_t presetIx(const char* name) {
+    if (!name || !*name) return 0;
+    for (uint8_t i = 0; i < N_MT_PRESETS; i++) if (strcasecmp(MT_PRESETS[i].name, name) == 0) return (int8_t)i;
+    return -1;
+}
+static bool presetFits(uint8_t region, uint8_t preset) {
+    return (uint32_t)MT_PRESETS[preset].bwKhz10 * 100u <= MT_REGIONS[region].endHz - MT_REGIONS[region].startHz;
+}
+static uint32_t slotCount(uint8_t region, uint8_t preset) {
+    const uint32_t bwHz = (uint32_t)MT_PRESETS[preset].bwKhz10 * 100u;
+    const uint32_t n = (MT_REGIONS[region].endHz - MT_REGIONS[region].startHz + bwHz / 2) / bwHz;
+    return n ? n : 1;
+}
+
+static void rebuild() {
+    memcpy(s_ram, s_base, sizeof(Profile) * s_baseN);
+    s_n = s_baseN;
+    s_tab = s_ram;
+    // An override is in force when the user chose a region or a slot, or a
+    // preset this band plan has no row for (the Turbo ones).
+    int8_t pi = presetIx(s_ovPreset);
+    if (pi < 0) pi = 0;
+    bool inTable = false;
+    for (uint8_t i = 0; i < s_baseN; i++) {
+        const Profile& r = s_base[i];
+        if (r.hint == Proto::MESHTASTIC && (r.group == PG_MESH_EU || r.group == PG_MESH_US) &&
+            strcasecmp(r.name + 3, MT_PRESETS[pi].name) == 0) inTable = true;
+    }
+    s_ovActive = s_ovRegion || s_ovSlot || (s_ovPreset[0] && !inTable);
+    if (!s_ovActive || s_n >= MAX_PROFILES) { s_ovActive = false; return; }
+    const uint8_t rg = effRegion();
+    if (!presetFits(rg, (uint8_t)pi)) {            // e.g. Turbo in a 250 kHz region: the firmware refuses it too
+        pi = 0;
+        while (pi < N_MT_PRESETS - 1 && !presetFits(rg, (uint8_t)pi)) pi++;
+    }
+    const MtPreset& pr = MT_PRESETS[pi];
+    const MtRegion& re = MT_REGIONS[rg];
+    snprintf(s_ovName, sizeof s_ovName, "MT %s", pr.name);
+    uint32_t hz;
+    if (s_ovSlot) {
+        const uint32_t k = s_ovSlot > slotCount(rg, (uint8_t)pi) ? slotCount(rg, (uint8_t)pi) : s_ovSlot;
+        hz = re.startHz + (uint32_t)pr.bwKhz10 * 50u + (k - 1) * (uint32_t)pr.bwKhz10 * 100u;
+    } else {
+        hz = meshtasticSlotHz(re.startHz, re.endHz, pr.bwKhz10, 0, 0, pr.name);
+    }
+    const bool low = re.startHz < 470000000u;
+    s_ovProf = { s_ovName, hz, pr.bwKhz10, pr.sf, pr.cr, 0x2B, 16,
+                 (uint8_t)(PF_CRC | (low ? PF_433 : 0)), 0, Proto::MESHTASTIC,
+                 (uint8_t)(re.startHz >= 900000000u ? PG_MESH_US : PG_MESH_EU) };
+    s_ram[s_n++] = s_ovProf;
+}
 
 void setRegion(uint8_t r) {
     s_region = (r == REGION_US) ? REGION_US : REGION_EU;
-    if (s_region == REGION_US) { s_tab = PROFILES_US; s_n = (uint8_t)(sizeof(PROFILES_US) / sizeof(PROFILES_US[0])); }
-    else                       { s_tab = PROFILES_EU; s_n = (uint8_t)(sizeof(PROFILES_EU) / sizeof(PROFILES_EU[0])); }
+    if (s_region == REGION_US) { s_base = PROFILES_US; s_baseN = (uint8_t)(sizeof(PROFILES_US) / sizeof(PROFILES_US[0])); }
+    else                       { s_base = PROFILES_EU; s_baseN = (uint8_t)(sizeof(PROFILES_EU) / sizeof(PROFILES_EU[0])); }
+    rebuild();
 }
 uint8_t     region()     { return s_region; }
 const char* regionName() { return s_region == REGION_US ? "US 915" : "EU 868"; }
 
-const Profile* profiles()     { return s_tab; }
-uint8_t        profileCount() { return s_n; }
-const Profile& profile(uint8_t i) { return s_tab[i < s_n ? i : 0]; }
+void setMeshtasticOverride(uint8_t region, const char* preset, uint8_t slot) {
+    s_ovRegion = region > N_MT_REGIONS ? 0 : region;
+    snprintf(s_ovPreset, sizeof s_ovPreset, "%s", preset ? preset : "");
+    s_ovSlot = slot;
+    rebuild();
+}
+bool    meshtasticOverrideActive() { return s_ovActive; }
+uint8_t mtRegionCount() { return N_MT_REGIONS; }
+const char* mtRegionName(uint8_t i) { return i < N_MT_REGIONS ? MT_REGIONS[i].name : "?"; }
+uint8_t mtPresetCount() { return N_MT_PRESETS; }
+const char* mtPresetName(uint8_t i) { return i < N_MT_PRESETS ? MT_PRESETS[i].name : "?"; }
+bool mtPresetFits(uint8_t region, uint8_t preset) {
+    const uint8_t rg = region && region <= N_MT_REGIONS ? (uint8_t)(region - 1) : effRegion();
+    return preset < N_MT_PRESETS && presetFits(rg, preset);
+}
+uint16_t mtSlotCount(uint8_t region, const char* preset) {
+    const uint8_t rg = region && region <= N_MT_REGIONS ? (uint8_t)(region - 1) : effRegion();
+    int8_t pi = presetIx(preset);
+    if (pi < 0 || !presetFits(rg, (uint8_t)pi)) pi = 0;
+    return (uint16_t)slotCount(rg, (uint8_t)pi);
+}
+uint32_t mtSlotHz(uint8_t region, const char* preset, uint8_t slot) {
+    const uint8_t rg = region && region <= N_MT_REGIONS ? (uint8_t)(region - 1) : effRegion();
+    int8_t pi = presetIx(preset);
+    if (pi < 0 || !presetFits(rg, (uint8_t)pi)) pi = 0;
+    const MtPreset& pr = MT_PRESETS[pi];
+    const MtRegion& re = MT_REGIONS[rg];
+    if (!slot) return meshtasticSlotHz(re.startHz, re.endHz, pr.bwKhz10, 0, 0, pr.name);
+    const uint32_t k = slot > slotCount(rg, (uint8_t)pi) ? slotCount(rg, (uint8_t)pi) : slot;
+    return re.startHz + (uint32_t)pr.bwKhz10 * 50u + (k - 1) * (uint32_t)pr.bwKhz10 * 100u;
+}
+
+const Profile* profiles()     { if (!s_n) rebuild(); return s_tab; }
+uint8_t        profileCount() { if (!s_n) rebuild(); return s_n; }
+const Profile& profile(uint8_t i) { if (!s_n) rebuild(); return s_tab[i < s_n ? i : 0]; }
 uint8_t        defaultProfile() { return 0; }
 
 int16_t meshPresetFind(Proto p, const char* preset) {
     int16_t first = -1;
+    if (!s_n) rebuild();
+    if (s_ovActive && p == Proto::MESHTASTIC) return (int16_t)(s_n - 1);   // the override row is the last
     for (uint8_t i = 0; i < s_n; i++) {
         const Profile& r = s_tab[i];
         if (r.hint != p || (r.group != PG_MESH_EU && r.group != PG_MESH_US)) continue;
@@ -149,6 +294,7 @@ int16_t meshPresetFind(Proto p, const char* preset) {
 
 uint8_t meshPresetRows(Proto p, uint8_t* out, uint8_t cap) {
     uint8_t n = 0;
+    if (!s_n) rebuild();
     for (uint8_t i = 0; i < s_n && n < cap; i++) {
         const Profile& r = s_tab[i];
         if (r.hint == p && (r.group == PG_MESH_EU || r.group == PG_MESH_US)) out[n++] = i;

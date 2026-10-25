@@ -760,6 +760,7 @@ bool begin() {
         }
         setRegion(r == 2 ? REGION_US : REGION_EU);
         Serial.printf("[lora] band plan %s (%s)\n", regionName(), Settings::loraRegion() == 0 ? "from the time zone" : "set by LORA REGION");
+        Chan::applyMeshtastic();   // the override's row follows the band plan
     }
     uint64_t mask = 0;
     for (uint8_t i = 0; i < profileCount() && i < 64; i++)
@@ -941,8 +942,13 @@ static Meshtastic::Channel presetChannelKey(const Profile& prof) {
     Meshtastic::Channel c;
     memset(&c, 0, sizeof c);
     snprintf(c.name, sizeof c.name, "%s", presetChannel(prof));
-    Meshtastic::expandPsk(1, c.key);
-    c.keyLen = 16;
+    if (Settings::loraMtKeyCustom()) {                // LORA SETTINGS' CHANNEL KEY
+        Settings::loraMtKey(c.key);
+        c.keyLen = Settings::loraMtKeyLen();
+    } else {
+        Meshtastic::expandPsk(1, c.key);
+        c.keyLen = 16;
+    }
     c.hash = Meshtastic::channelHash(c.name, c.key, 16);
     c.enabled = true;
     return c;
@@ -963,6 +969,9 @@ static uint16_t meshtasticFrame(uint8_t port, const uint8_t* payload, size_t ple
 // The sniffer parked, the preset applied, the frame out, and back to whatever
 // the radio was doing.
 static bool transmitOn(const Profile& prof, const uint8_t* f, uint16_t n, int8_t dbm) {
+    // A Meshtastic region below the module's band (EU_433 and friends) is
+    // listen-only: see docs/LORA.md section 1.
+    if (prof.flags & PF_433) { Serial.println("[lora] send refused: this region is below the module's band"); return false; }
     const Mode was = s_mode;
     s_parked = false;
     setMode(Mode::OFF);

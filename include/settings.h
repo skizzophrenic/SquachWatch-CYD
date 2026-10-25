@@ -406,6 +406,20 @@ namespace Settings {
     // Key "loraMtPre".
     const char* loraMtPreset();
     void        setLoraMtPreset(const char* name);
+    // MESHTASTIC REGION, FREQUENCY SLOT and CHANNEL KEY (LORA SETTINGS).
+    // Region: 0 follows the band plan, else 1 + an index into
+    // Lora::mtRegionName(). Slot: 0 is Meshtastic's default (a hash of the
+    // preset's name), else 1..N. Keys "loraMtRgn", "loraMtSlot", and the
+    // default channel's key "loraMtKey" -- absent while it is the published
+    // default. The key is 16 bytes, or none at all (in the clear).
+    uint8_t     loraMtRegion();
+    void        setLoraMtRegion(uint8_t r);
+    uint8_t     loraMtSlot();
+    void        setLoraMtSlot(uint8_t s);
+    bool        loraMtKeyCustom();
+    uint8_t     loraMtKeyLen();                               // 16, or 0 for none
+    void        loraMtKey(uint8_t out[16]);
+    void        setLoraMtKey(const uint8_t* key, uint8_t len);   // null: back to the default
     // The CHANNEL CHIP on the T-Deck's compose lines: which channel each
     // network's texts go out on, by NAME ("#hiking", "RidgeCrew"), never by
     // index -- an index shifts when a channel above it is removed on the

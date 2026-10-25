@@ -16,6 +16,25 @@ void        setRegion(uint8_t r);
 uint8_t     region();
 const char* regionName();   // "EU 868", "US 915"
 
+// The Meshtastic override: a region, modem preset and frequency slot of the
+// user's choosing, applied as one extra row at the END of the table (and
+// returned by meshPresetFind for Meshtastic) whenever it differs from the band
+// plan's own rows. `region` is 0 for "follow the band plan", else 1 + an index
+// into the region list; `preset` a name from the preset list ("" = LongFast);
+// `slot` 0 for Meshtastic's default (a hash of the preset's name), else 1..N.
+// A preset too wide for the region falls back to the first that fits, as the
+// firmware refuses it. Rebuilds the table, so call it before the sniffer
+// starts or follow it with Lora::applyListen().
+void        setMeshtasticOverride(uint8_t region, const char* preset, uint8_t slot);
+bool        meshtasticOverrideActive();
+uint8_t     mtRegionCount();                 // the lists the settings page steps through
+const char* mtRegionName(uint8_t i);         // 0-based; override value is i + 1
+uint8_t     mtPresetCount();
+const char* mtPresetName(uint8_t i);
+bool        mtPresetFits(uint8_t region, uint8_t preset);          // region as setMeshtasticOverride's
+uint16_t    mtSlotCount(uint8_t region, const char* preset);       // slots in that region at that preset
+uint32_t    mtSlotHz(uint8_t region, const char* preset, uint8_t slot);   // slot 0 = the default
+
 // The table and its length. Indices are stable within a build and are what
 // a Packet's `profile` field holds, so nothing persists them.
 const Profile* profiles();

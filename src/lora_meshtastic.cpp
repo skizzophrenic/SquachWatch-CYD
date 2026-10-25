@@ -68,6 +68,12 @@ static uint8_t s_nUser = 0;
 // Index-for-index with channel(). A parallel array rather than a field in
 // Channel, because channel() builds each preset from the tables above on every
 // call and a counter in that struct would be reset by its own getter.
+// The primary channel's key, when the user has changed it from the published
+// default: the built-in row of that preset takes it (see channel()).
+static char    s_priName[24] = { 0 };
+static uint8_t s_priKey[16];
+static uint8_t s_priLen = 0;
+static bool    s_priSet = false;
 static uint32_t s_frames[N_BUILTIN + MAX_USER];
 static uint32_t s_lastMs[N_BUILTIN + MAX_USER];
 
@@ -86,7 +92,8 @@ Channel channel(uint8_t i) {
     memset(&c, 0, sizeof c);
     if (i < N_PRESETS) {
         strncpy(c.name, PRESET_NAMES[i], sizeof c.name - 1);
-        memcpy(c.key, DEFAULT_KEY, 16); c.keyLen = 16;
+        if (s_priSet && strcasecmp(c.name, s_priName) == 0) { memcpy(c.key, s_priKey, 16); c.keyLen = s_priLen; }
+        else { memcpy(c.key, DEFAULT_KEY, 16); c.keyLen = 16; }
         c.hash = channelHash(c.name, c.key, 16);
         c.enabled = true;      // built in, never switched off
         return c;
@@ -102,6 +109,31 @@ Channel channel(uint8_t i) {
     i -= N_PRESETS;
     if (i < s_nUser) return s_user[i];
     return c;
+}
+
+void setPrimaryKey(const char* presetName, const uint8_t* key, uint8_t keyLen) {
+    s_priSet = presetName && *presetName && key && (keyLen == 16 || keyLen == 0);
+    if (!s_priSet) { s_priName[0] = '\0'; s_priLen = 0; return; }
+    snprintf(s_priName, sizeof s_priName, "%s", presetName);
+    memset(s_priKey, 0, sizeof s_priKey);
+    memcpy(s_priKey, key, keyLen);
+    s_priLen = keyLen;
+}
+
+bool parsePrimaryKey(const char* text, uint8_t key[16], uint8_t& keyLen) {
+    memset(key, 0, 16);
+    keyLen = 0;
+    if (!text) return false;
+    while (*text == ' ') text++;
+    if (!*text) return false;
+    if (!strcasecmp(text, "default")) { expandPsk(1, key); keyLen = 16; return true; }
+    if (!strcasecmp(text, "none") || !strcmp(text, "0")) return true;     // in the clear
+    uint8_t tmp[32];
+    size_t n = fromBase64(text, tmp, sizeof tmp);
+    if (n != 16 && n != 32 && n != 1) n = fromHex(text, tmp, sizeof tmp);
+    if (n == 1) { expandPsk(tmp[0], key); keyLen = tmp[0] ? 16 : 0; return true; }
+    if (n >= 1 && n <= 16) { memcpy(key, tmp, n); keyLen = 16; return true; }   // zero-padded, as the firmware does
+    return false;                                  // 32 bytes is AES-256, which this build cannot seal or open
 }
 
 bool addChannel(const char* name, const char* keyText) {

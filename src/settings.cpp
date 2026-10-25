@@ -218,6 +218,11 @@ static bool     s_loraAlerts   = true;
 static uint8_t  s_loraHops     = 3;
 static bool     s_loraMsgSnd   = true;
 static char     s_loraMtPre[16] = { 0 };   // "" = LongFast
+static uint8_t  s_loraMtRgn  = 0;          // 0 = from the band plan
+static uint8_t  s_loraMtSlot = 0;          // 0 = the name's hash
+static bool     s_loraMtKeySet = false;
+static uint8_t  s_loraMtKeyLen = 16;
+static uint8_t  s_loraMtKey[16] = { 0 };
 static char     s_loraTxCh[2][24] = { { 0 }, { 0 } };   // [0] Meshtastic, [1] MeshCore; "" = default
 
 // ---- status light --------------------------------------------------------
@@ -481,6 +486,34 @@ void setLoraMtPreset(const char* name) {
     else { s_loraMtPre[0] = '\0'; s_prefs.remove("loraMtPre"); }
 }
 
+uint8_t loraMtRegion() { return s_loraMtRgn; }
+void setLoraMtRegion(uint8_t r) {
+    s_loraMtRgn = r;
+    if (r) s_prefs.putUChar("loraMtRgn", r); else s_prefs.remove("loraMtRgn");
+}
+uint8_t loraMtSlot() { return s_loraMtSlot; }
+void setLoraMtSlot(uint8_t v) {
+    s_loraMtSlot = v;
+    if (v) s_prefs.putUChar("loraMtSlot", v); else s_prefs.remove("loraMtSlot");
+}
+bool loraMtKeyCustom() { return s_loraMtKeySet; }
+uint8_t loraMtKeyLen() { return s_loraMtKeyLen; }
+void loraMtKey(uint8_t out[16]) { memcpy(out, s_loraMtKey, 16); }
+void setLoraMtKey(const uint8_t* key, uint8_t len) {
+    // One byte of length and sixteen of key; the default is the absence.
+    if (!key || (len != 16 && len != 0)) {
+        s_loraMtKeySet = false; s_loraMtKeyLen = 16; memset(s_loraMtKey, 0, 16);
+        s_prefs.remove("loraMtKey");
+        return;
+    }
+    s_loraMtKeySet = true; s_loraMtKeyLen = len;
+    memset(s_loraMtKey, 0, 16); memcpy(s_loraMtKey, key, len);
+    uint8_t rec[17];
+    rec[0] = len;
+    memcpy(rec + 1, s_loraMtKey, 16);
+    s_prefs.putBytes("loraMtKey", rec, sizeof rec);
+}
+
 // Keys 10 characters each, and neither begins "loraChans".
 const char* loraTxChan(bool meshcore) { return s_loraTxCh[meshcore ? 1 : 0]; }
 void setLoraTxChan(bool meshcore, const char* name) {
@@ -695,6 +728,15 @@ void load() {
     s_loraMsgSnd   = s_prefs.getBool("loraMsgSnd", true);
     s_loraMtPre[0] = '\0';
     if (s_prefs.isKey("loraMtPre")) s_prefs.getString("loraMtPre", s_loraMtPre, sizeof s_loraMtPre);
+    s_loraMtRgn  = s_prefs.getUChar("loraMtRgn", 0);
+    s_loraMtSlot = s_prefs.getUChar("loraMtSlot", 0);
+    s_loraMtKeySet = false; s_loraMtKeyLen = 16; memset(s_loraMtKey, 0, 16);
+    if (s_prefs.isKey("loraMtKey")) {
+        uint8_t rec[17];
+        if (s_prefs.getBytes("loraMtKey", rec, sizeof rec) == sizeof rec && (rec[0] == 16 || rec[0] == 0)) {
+            s_loraMtKeySet = true; s_loraMtKeyLen = rec[0]; memcpy(s_loraMtKey, rec + 1, 16);
+        }
+    }
     s_loraTxCh[0][0] = s_loraTxCh[1][0] = '\0';
     if (s_prefs.isKey("loraTxChMt")) s_prefs.getString("loraTxChMt", s_loraTxCh[0], sizeof s_loraTxCh[0]);
     if (s_prefs.isKey("loraTxChMc")) s_prefs.getString("loraTxChMc", s_loraTxCh[1], sizeof s_loraTxCh[1]);

@@ -561,5 +561,34 @@ int main() {
         C::save();
     }
 
+    suite("The default channel's key");
+    {
+        namespace C = Lora::Chan;
+        uint8_t def[16]; Meshtastic::expandPsk(1, def);
+        ck("untouched: LongFast is the published key", Meshtastic::channel(0).keyLen == 16 && !memcmp(Meshtastic::channel(0).key, def, 16));
+        const uint8_t oldHash = Meshtastic::channel(0).hash;
+        uint8_t k[16], n = 0;
+        ck("base64 parses", Meshtastic::parsePrimaryKey("AAECAwQFBgcICQoLDA0ODw==", k, n) && n == 16 && k[15] == 15);
+        ck("a one-byte PSK is the default key bumped", Meshtastic::parsePrimaryKey("Ag==", k, n) && n == 16 && k[15] == (uint8_t)(def[15] + 1));
+        ck("none is in the clear", Meshtastic::parsePrimaryKey("none", k, n) && n == 0);
+        ck("32 bytes is refused", !Meshtastic::parsePrimaryKey("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", k, n));
+        ck("rubbish is refused", !Meshtastic::parsePrimaryKey("not a key!", k, n));
+        Meshtastic::parsePrimaryKey("AAECAwQFBgcICQoLDA0ODw==", k, n);
+        Settings::setLoraMtKey(k, n);
+        C::applyMeshtastic();
+        const Meshtastic::Channel c = Meshtastic::channel(0);
+        ck("LongFast now opens with it, and its hash follows", !memcmp(c.key, k, 16) && c.hash != oldHash &&
+           c.hash == Meshtastic::channelHash("LongFast", k, 16));
+        ck("MediumFast is untouched", !memcmp(Meshtastic::channel(1).key, def, 16));
+        Settings::setLoraMtPreset("MediumFast");
+        C::applyMeshtastic();
+        ck("the key moves to the preset in use", !memcmp(Meshtastic::channel(1).key, k, 16) && !memcmp(Meshtastic::channel(0).key, def, 16));
+        ck("and the compose line still sends on it", C::txDefault(Lora::Proto::MESHTASTIC, C::mtPrimary()) == 1);
+        Settings::setLoraMtKey(nullptr, 0);
+        Settings::setLoraMtPreset("");
+        C::applyMeshtastic();
+        ck("back to the default", !Settings::loraMtKeyCustom() && Meshtastic::channel(0).hash == oldHash);
+    }
+
     return report();
 }
