@@ -1902,11 +1902,18 @@ static char s_confirmName[sizeof(Detection::name)]     = "";
 static char s_alertVendor[16]   = "";
 static char s_alertName[sizeof(Detection::name)]       = "";
 static char    s_confirmLabel[24];
+// True when s_confirmLabel is a device/network self-name (mask in Privacy
+// Mode). False when it is a type/vendor fallback - privacy.h leaves makers
+// and types untouched (#92: RING was shown as RIN*** -> "RIN").
+static bool    s_confirmLabelIsName = false;
 // PRIVACY MODE's view of the two strings the confirm panel and MORE INFO
 // draw. The real ones stay in s_confirmLabel / s_confirmName: they are what
 // WATCH and HUNT hand the engine.
 static const char* privLabel(const char* in) { static char b[40]; return Privacy::name(in, b, sizeof b); }
 static const char* privName(const char* in)  { static char b[40]; return Privacy::name(in, b, sizeof b); }
+static const char* confirmLabelOnScreen() {
+    return s_confirmLabelIsName ? privLabel(s_confirmLabel) : s_confirmLabel;
+}
 // LOG's long-press sets this per-row (BLE vs WiFi isn't implied by a
 // "current mode" the way it is for RAWSCAN, which already knows that
 // from s_rawScanIsBle) -- RAWSCAN's own WATCH/HUNT branches don't
@@ -7480,7 +7487,7 @@ void loop() {
             // Nothing on LOG moves by the call -- the note about
             // drawActiveBackground in ui_log.cpp is a comment, not a call.
             drawTwoBand([&](TFT_eSPI& t, bool) {
-                uiLogTick(t, now, engine, 0, s_confirmPending, privLabel(s_confirmLabel),
+                uiLogTick(t, now, engine, 0, s_confirmPending, confirmLabelOnScreen(),
                           s_infoPending, infoTypeName, infoText,
                           engine.isWatched(s_confirmMac, s_confirmIsBle),
                           engine.isHunted(s_confirmMac, s_confirmIsBle),
@@ -7659,7 +7666,8 @@ void loop() {
                         s_confirmType  = d->type;
                         snprintf(s_confirmVendor, sizeof s_confirmVendor, "%s", vendorText(*d));
                         memcpy(s_confirmName,   d->name,   sizeof s_confirmName);
-                        const char* lbl = d->name[0] ? d->name : vendorText(*d);
+                        s_confirmLabelIsName = d->name[0] != 0;
+                        const char* lbl = s_confirmLabelIsName ? d->name : vendorText(*d);
                         strncpy(s_confirmLabel, lbl, sizeof(s_confirmLabel) - 1);
                         s_confirmLabel[sizeof(s_confirmLabel) - 1] = 0;
                         {
@@ -7677,7 +7685,7 @@ void loop() {
         case AppState::RAWSCAN: {
             bool done = s_rawScanIsBle ? engine.rawBleScanDone() : engine.rawWifiScanDone();
             drawTwoBand([&](TFT_eSPI& t, bool advance) {
-                uiRawScanTick(t, now, engine, s_rawScanIsBle, done, s_confirmPending, privLabel(s_confirmLabel),
+                uiRawScanTick(t, now, engine, s_rawScanIsBle, done, s_confirmPending, confirmLabelOnScreen(),
                               engine.isWatched(s_confirmMac, s_rawScanIsBle),
                               engine.isHunted(s_confirmMac, s_rawScanIsBle),
                               IgnoreList::contains(s_confirmMac), advance);
@@ -7803,6 +7811,7 @@ void loop() {
                             const RawBleResult* r = engine.rawBleAt((uint8_t)row);
                             if (r) {
                                 memcpy(s_confirmMac, r->mac, 6);
+                                s_confirmLabelIsName = true;  // name or placeholder; Privacy::name exempts the latter
                                 strncpy(s_confirmLabel, r->name[0] ? r->name : "Unnamed device",
                                         sizeof(s_confirmLabel) - 1);
                                 haveTarget = true;
@@ -7812,6 +7821,7 @@ void loop() {
                             if (bssid) {
                                 memcpy(s_confirmMac, bssid, 6);
                                 const char* ssid = engine.rawWifiSsid((uint8_t)row);
+                                s_confirmLabelIsName = true;  // SSID / "(hidden)" placeholder
                                 strncpy(s_confirmLabel, ssid[0] ? ssid : "(hidden)", sizeof(s_confirmLabel) - 1);
                                 haveTarget = true;
                             }
