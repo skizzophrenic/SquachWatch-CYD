@@ -67,6 +67,7 @@ web flasher offers:
 |---|---|
 | `cyd-fast` | Original 2.8" CYD, ST7789 screen (ESP32-2432S028R), or DIYmalls 2.8" JC2432W328C; display at 80 MHz. The flasher's default for these options. |
 | `cyd` | The same ST7789 boards at the stock display clock. Use it if `cyd-fast` gives you speckles or a white screen. Runtime touch detection selects capacitive touch on the JC2432W328C or resistive touch on the original CYD. |
+| `cyd-elecrow-gps` | Resistive ST7789 CYD + Elecrow/Biscuit GPS kit (BETA); fixed P1 harness, 40 MHz display, application serial console disabled. Explicit accessory selection; see [setup and acceptance limits](CYD-ELECROW-GPS.md). |
 | `cyd-ili9341` | Original 2.8" CYD with the older ILI9341 screen. The JC2432W328C uses ST7789 and should use `cyd` or `cyd-fast`. (`cyd-ili9341-fast` exists, but this panel usually can't keep up at 80 MHz.) |
 | `freenove32` | 3.2" resistive, Freenove FNK0103 |
 | `cyd32c` | 3.2" capacitive, ESP32-2432S032C (already runs at 80 MHz) |
@@ -127,6 +128,10 @@ The serial console on the CYD builds runs at **2,000,000 baud**
 (`pio device monitor -e cyd-fast` picks that up from `platformio.ini`).
 At 115200 it reads as garbage. The AWOK uses 921600, and the ESP32-S3
 and C5 boards 115200.
+
+Exception: `cyd-elecrow-gps` disables the application serial console because
+GPS receives on GPIO1. Use its touchscreen diagnostics; see
+[CYD-ELECROW-GPS.md](CYD-ELECROW-GPS.md).
 
 ## First boot
 

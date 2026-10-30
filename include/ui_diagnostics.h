@@ -9,6 +9,9 @@
 #include <stdint.h>
 #include "detection.h"
 #include "blackbox.h"
+#if defined(CYD_GPS)
+#include "gnss.h"
+#endif
 
 // Filled in by main.cpp each tick, since gathering these values means
 // touching board-specific globals (which raw touch reader, which
@@ -114,6 +117,7 @@ struct DiagnosticsInfo {
     int32_t  lat7 = 0, lon7 = 0;
     uint32_t fixAgeMs = UINT32_MAX;     // UINT32_MAX: never a fix
     bool     fresh = false, faked = false;
+    Gnss::Source source = Gnss::Source::RECEIVER;
     // Wardriving: the state (Wardrive::SdState as a number), this boot's
     // counts, and the session's file name.
     bool     wdOn = false;
@@ -129,4 +133,5 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
 // Single [ BACK ] button, same shape as the raw-scan screen's.
 // The next page of the report, on a screen too short for all of it.
 void uiDiagnosticsNextPage();
+bool uiDiagnosticsPaged();
 bool uiDiagnosticsHitBack(int x, int y, int screenW, int screenH);

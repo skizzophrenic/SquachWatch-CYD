@@ -18,12 +18,13 @@ SRC  := ../src
 INC  := ../include
 SIM  := ../sim
 OUT  := out
+.DEFAULT_GOAL := all
 
 CXX      ?= g++
 CXXFLAGS := -std=c++17 -O1 -g -Wall -Wextra -Wno-unused-parameter \
             -I$(SIM) -I$(INC)
 
-TESTS := remote_id_test ibeacon_test signatures_test emitter_roundtrip_test ignore_list_test hacker_test pwnagotchi_test shim_fidelity_test squachmesh_test qwerty_test meshmsg_test device_info_test security_test emote_script_test blackbox_test bingo_test hunt_test bgretire_test autoquiet_test framepush_test touchfit_test logindex_test dex_test regulars_test spam_test gnss_test sd_row_test wigle_test wardrive_test wardrive_seen_test lora_survey_test lora_msgs_test lora_json_test lora_feed_test lora_airtime_test lora_ident_test lora_enrich_test lora_channels_test lora_nodes_test lora_crypto_test lora_meshtastic_test lora_dm_test lora_mcdm_test lora_meshcore_test lora_lorawan_test lora_ham_test lora_names_test lora_myname_test mesh_airtime_test mesh_tx_policy_test mesh_appearance_test mesh_primary_transport_test mesh_visit_appearance_test
+TESTS := remote_id_test ibeacon_test signatures_test emitter_roundtrip_test ignore_list_test hacker_test pwnagotchi_test shim_fidelity_test squachmesh_test qwerty_test meshmsg_test device_info_test security_test emote_script_test blackbox_test bingo_test hunt_test bgretire_test autoquiet_test framepush_test touchfit_test logindex_test dex_test regulars_test spam_test gnss_test sd_row_test wigle_test wardrive_test wardrive_seen_test wardrive_sd_test wardrive_sd_phone_test wardrive_sd_failure_test wardrive_sd_esp32_test gnss_snapshot_test lora_survey_test lora_msgs_test lora_json_test lora_feed_test lora_airtime_test lora_ident_test lora_enrich_test lora_channels_test lora_nodes_test lora_crypto_test lora_meshtastic_test lora_dm_test lora_mcdm_test lora_meshcore_test lora_lorawan_test lora_ham_test lora_names_test lora_myname_test mesh_airtime_test mesh_tx_policy_test mesh_appearance_test mesh_primary_transport_test mesh_visit_appearance_test
 
 # Only the units under test get linked in. Pulling the whole firmware
 # would drag in TFT_eSPI, NimBLE and the UI, and a test that needs a
@@ -74,6 +75,10 @@ hunt_test_SRCS               := $(SRC)/settings.cpp $(SRC)/lora_myname.cpp
 # builds its table from is inline in frame_push.h, and the shim under
 # test IS sim/TFT_eSPI.h.
 framepush_test_SRCS          :=
+TESTS += elecrow_battery_test
+TESTS += band_frame_test
+band_frame_test_SRCS := $(SRC)/draw_band.cpp
+band_frame_test_FLAGS := -DCYD_GPS_ELECROW=1
 shim_fidelity_test_SRCS      :=
 # The touch mapping is plain arithmetic in touch_fit.h.
 touchfit_test_SRCS           :=
@@ -81,14 +86,42 @@ touchfit_test_SRCS           :=
 spam_test_SRCS               :=
 # The GPS sentences, and the WiGLE file with the WiFi security it writes.
 gnss_test_SRCS               := $(SRC)/gnss.cpp
+TESTS += cyd_gps_diagnostics_test ordinary_gps_diagnostics_test
+cyd_gps_diagnostics_test_SRCS := $(SRC)/ui_diagnostics.cpp $(SRC)/sd_row.cpp $(SRC)/gnss.cpp $(SRC)/draw_band.cpp
+cyd_gps_diagnostics_test_FLAGS := -DCYD_GPS=1 -DCYD_GPS_ELECROW=1
+ordinary_gps_diagnostics_test_SRCS := $(SRC)/ui_diagnostics.cpp $(SRC)/sd_row.cpp
+ordinary_gps_diagnostics_test_FLAGS := -DCYD_GPS=1
+$(OUT)/ordinary_gps_diagnostics_test: cyd_gps_diagnostics_test.cpp
 # The SD log's row: the time, and the position columns a GPS build adds.
 sd_row_test_SRCS             := $(SRC)/sd_row.cpp
 wigle_test_SRCS              := $(SRC)/wardrive_fmt.cpp $(SRC)/wifi_auth.cpp
 # Wardrive capture and storage, on the emulator's RAM flash.
 wardrive_test_SRCS           := $(SRC)/wardrive.cpp $(SRC)/gnss.cpp
-# The CYD GPS builds' 256-entry repeat table; the file is empty without CYD_GPS.
+# Repeat suppression and eviction for generic CYD and the smaller Elecrow cache.
 wardrive_seen_test_SRCS      := $(SRC)/wardrive_seen.cpp
 wardrive_seen_test_FLAGS     := -DCYD_GPS=1
+TESTS += wardrive_elecrow_seen_test
+wardrive_elecrow_seen_test_SRCS := $(wardrive_seen_test_SRCS)
+wardrive_elecrow_seen_test_FLAGS := -DCYD_GPS=1 -DCYD_GPS_ELECROW=1
+$(OUT)/wardrive_elecrow_seen_test: wardrive_seen_test.cpp
+# Real CYD queue, writer, CSV and parser, with Elecrow vs legacy source policy.
+wardrive_sd_test_SRCS        := $(SRC)/wardrive_sd.cpp $(SRC)/wardrive_seen.cpp $(SRC)/wardrive_fmt.cpp $(SRC)/wifi_auth.cpp $(SRC)/gnss.cpp
+wardrive_sd_test_FLAGS       := -DCYD_GPS=1 -DCYD_GPS_ELECROW=1 -pthread
+wardrive_sd_phone_test_SRCS  := $(wardrive_sd_test_SRCS)
+wardrive_sd_phone_test_FLAGS := -DCYD_GPS=1 -pthread
+# Includes the real writer once, with only libc writes fault-injected.
+wardrive_sd_failure_test_SRCS := $(SRC)/wardrive_seen.cpp $(SRC)/wardrive_fmt.cpp $(SRC)/wifi_auth.cpp $(SRC)/gnss.cpp
+wardrive_sd_failure_test_FLAGS := -DCYD_GPS=1 -DCYD_GPS_ELECROW=1 -pthread
+wardrive_sd_esp32_test_SRCS := $(wardrive_sd_failure_test_SRCS)
+wardrive_sd_esp32_test_FLAGS := $(wardrive_sd_failure_test_FLAGS) -Iwardrive_sd_esp32_shims
+TESTS += wardrive_sd_heap_test
+wardrive_sd_heap_test_SRCS := $(wardrive_sd_failure_test_SRCS)
+wardrive_sd_heap_test_FLAGS := -DCYD_GPS=1 -DCYD_GPS_ELECROW=1 -pthread
+TESTS += wardrive_sd_reserved_test
+wardrive_sd_reserved_test_SRCS := $(wardrive_sd_failure_test_SRCS)
+wardrive_sd_reserved_test_FLAGS := $(wardrive_sd_failure_test_FLAGS)
+gnss_snapshot_test_SRCS      := $(SRC)/gnss.cpp
+gnss_snapshot_test_FLAGS     := -DCYD_GPS=1 -pthread
 # The LoRa decoders' AES, SHA-256, CMAC, HMAC and CRCs, against published vectors.
 lora_crypto_test_SRCS        := $(SRC)/lora_crypto.cpp
 # Meshtastic: the header, the channel hashes, the cipher round trip, the payloads.
@@ -152,8 +185,14 @@ emitter_sync_test_SRCS       := $(SRC)/signatures.cpp $(EMIT)/src/emit_shots.cpp
 emitter_sync_test_FLAGS      := -I$(EMIT)/include
 endif
 
-.PHONY: all clean
-all: $(addprefix run-,$(TESTS))
+.PHONY: all clean run-cyd-gps-uart
+all: $(addprefix run-,$(TESTS)) run-cyd-gps-uart
+
+
+# This host boundary test creates temporary ESP32 API shims and compiles the
+# real ownership/receive helper; no device, SDK download or PlatformIO build.
+run-cyd-gps-uart:
+	@python3 cyd_gps_uart_test.py
 
 $(OUT):
 	@mkdir -p $(OUT)
@@ -168,6 +207,12 @@ run-$(1): $(OUT)/$(1)
 endef
 
 $(foreach t,$(TESTS),$(eval $(call TEST_rule,$(t))))
+
+# The test includes the writer source to isolate libc fault injection.
+$(OUT)/wardrive_sd_failure_test: $(SRC)/wardrive_sd.cpp
+$(OUT)/wardrive_sd_heap_test: $(SRC)/wardrive_sd.cpp
+$(OUT)/wardrive_sd_reserved_test: $(SRC)/wardrive_sd.cpp wardrive_sd_failure_test.cpp
+$(OUT)/wardrive_sd_esp32_test: $(SRC)/wardrive_sd.cpp wardrive_sd_failure_test.cpp wardrive_sd_esp32_shims/SD.h
 
 clean:
 	@rm -rf $(OUT)

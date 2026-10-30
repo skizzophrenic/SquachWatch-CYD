@@ -1,0 +1,17 @@
+{
+  "name": "SquachWatch-CYD (2.8\" ST7789 + Elecrow GPS kit, BETA)",
+  "version": "0.0.0",
+  "funding_url": "https://talkingsasquach.com",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        { "path": "esp32-bootloader.bin", "offset": 4096 },
+        { "path": "esp32-partitions.bin", "offset": 32768 },
+        { "path": "esp32-otadata.bin", "offset": 57344 },
+        { "path": "cyd-elecrow-gps-firmware.bin", "offset": 65536 }
+      ]
+    }
+  ]
+}

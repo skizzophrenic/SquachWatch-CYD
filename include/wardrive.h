@@ -12,7 +12,7 @@
 // written raw, like the black box, so taking it needs no partition-table
 // change -- which an update over the air could never make. The CYD GPS
 // builds have 4 MB and two app slots, so they write sightings straight to
-// the SD card as /wigle-YYYYMMDD-HHMM.csv (wardrive_sd.cpp).
+// the SD card as /wigle-YYYYMMDD-HHMMSS[-NNN].csv (wardrive_sd.cpp).
 //
 // The record and its CSV line are plain C++ (wardrive_fmt.cpp) so the host
 // tests check the file WiGLE will read, byte for byte.
@@ -71,7 +71,7 @@ void noteBle(const uint8_t* mac, const char* name, int8_t rssi, bool haveMfgr, u
 
 uint32_t written();        // this boot
 uint32_t skipped();        // this boot: heard again too soon, same place
-uint32_t dropped();        // this boot: the queue was full, or (CYD) memory ran low
+uint32_t dropped();        // this boot: the queue was full, or (CYD) memory ran low, or SD writing failed
 
 // The watch's flash store. The CYD GPS builds do not have these.
 // From loop(): drains the queue, skips what was written recently from about
@@ -92,14 +92,15 @@ bool begin();
 
 #if defined(CYD_GPS)
 // ---- the CYD GPS builds' SD writer (wardrive_sd.cpp) ------------------------
-// Reads the switch. Call once at boot.
+// Reads the switch. Call once at boot before the display and radios start.
+// Elecrow also reserves buffers here, without starting recording.
 void sdBegin();
-// From loop(): makes the buffers while on with a card in and frees them when
-// off, drains the queues, and appends rows to the session's file.
+// From loop(): drains queues and appends rows. Elecrow reuses its reservation;
+// other profiles allocate/free buffers as recording starts/stops.
 void sdTick(uint32_t nowMs, bool cardMounted);
-enum class SdState : uint8_t { OFF, NO_CARD, LOW_MEMORY, WAITING_FOR_FIX, LOGGING };
+enum class SdState : uint8_t { OFF, NO_CARD, LOW_MEMORY, WAITING_FOR_FIX, LOGGING, WRITE_ERROR };
 SdState sdState(uint32_t nowMs);
-// "/wigle-YYYYMMDD-HHMM.csv", or "" until the session's first row.
+// "/wigle-YYYYMMDD-HHMMSS[-NNN].csv", or "" until the session's first write attempt.
 const char* sdFileName();
 // Deletes every /wigle-*.csv on the card. The duress wipe calls this.
 void sdWipe();

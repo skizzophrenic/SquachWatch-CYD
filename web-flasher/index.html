@@ -795,6 +795,7 @@
     <select class="board-select" id="boardSelect" aria-label="Board select">
       <optgroup label="CHEAP YELLOW DISPLAYS (CYD)">
       <option value="./manifest-cyd.json" data-board-id="cyd-st7789" data-cyd28="1" data-fast="./manifest-cyd-fast.json" data-fastdefault="1" selected>2.8&quot; CYD &middot; ST7789 &mdash; ESP32-2432S028R, the usual screen</option>
+      <option value="./manifest-cyd-elecrow-gps.json" data-board-id="cyd-elecrow-gps" data-elecrow-gps="1" data-ocnote="The Elecrow GPS profile uses the stock 40 MHz display clock; no overclock build is offered.">2.8&quot; CYD &middot; ST7789 + Elecrow GPS/battery kit &mdash; fixed P1 harness, resistive touch (BETA)</option>
       <option value="./manifest-cyd.json" data-board-id="diymalls-jc2432w328c" data-fast="./manifest-cyd-fast.json" data-fastdefault="1">DIYmalls 2.8&quot; &mdash; JC2432W328C (Capacitive)</option>
       <option value="./manifest-cyd-ili9341.json" data-cyd28="1" data-fast="./manifest-cyd-ili9341-fast.json" data-ocdesc="This screen usually can’t keep up at 80 MHz. Leave it unticked unless you want to try your luck.">2.8&quot; CYD &middot; ILI9341 &mdash; ESP32-2432S028R, older screen</option>
       <option value="./manifest-freenove32.json">3.2&quot; &middot; resistive &mdash; Freenove FNK0103</option>
@@ -825,6 +826,11 @@
       </optgroup>
     </select>
       </div>
+      <p class="white-screen-note" id="elecrowGpsNote" hidden>
+        <strong>Experimental Elecrow/Biscuit GPS kit profile:</strong> for the resistive ST7789 CYD with the existing P1/CN1 harness.
+        Uses the stock 40 MHz display clock. GPS receives on GPIO1 at 9600 baud; application USB serial console commands are disabled.
+        Production GPS and SD/WiGLE acceptance is pending. <a href="https://github.com/skizzophrenic/SquachWatch-CYD/blob/master/docs/CYD-ELECROW-GPS.md" target="_blank" rel="noopener">Setup, limits and recovery</a>.
+      </p>
     </section>
 
     <section class="step" aria-labelledby="step2">
@@ -872,7 +878,7 @@
     </div>
     <div class="identify-row">
       <button id="clockBtn" class="identify-btn">[ SET TIME &amp; ZONE ]</button>
-      <p class="tool-desc">Sends this computer's clock and time zone to the board.</p>
+      <p class="tool-desc" id="clockDescription">Sends this computer's clock and time zone to the board.</p>
       <div class="identify-result" id="clockResult"></div>
     </div>
     <div class="identify-row">
@@ -883,7 +889,8 @@
       <details class="advanced">
         <summary>More about these tools</summary>
     <p class="browser-note"><strong>Download WiGLE File</strong> is for a T-Watch S3 Plus with WARDRIVE on (WATCH SETTINGS): it saves every network and device the watch logged, with where, as a WiGLE file you can upload at <a href="https://wigle.net/uploads" target="_blank" rel="noopener">wigle.net/uploads</a>. The log stays on the watch until you clear it.</p>
-    <p class="browser-note">After flashing, <strong>Set Time &amp; Zone</strong> tells the board this computer's clock and time zone over the same cable. The zone is kept for good; the clock lasts until the board is unplugged, and a saved WiFi network puts it back at every boot. A T-Watch has its clock set for it after installing, and keeps the time from then on, even through a flat battery.</p>
+    <p class="browser-note" id="clockHelp">After flashing, <strong>Set Time &amp; Zone</strong> tells the board this computer's clock and time zone over the same cable. The zone is kept for good; the clock lasts until the board is unplugged, and a saved WiFi network puts it back at every boot. A T-Watch has its clock set for it after installing, and keeps the time from then on, even through a flat battery.</p>
+    <p class="browser-note" id="clockGpsHelp" hidden>Set Time &amp; Zone is unavailable for the Elecrow GPS profile: GPS uses GPIO1 and the application serial console is disabled. A valid GPS fix supplies UTC; choose TIME ZONE under DESK MODE on the device. USB installation and Identify My Board remain available.</p>
       </details>
     </section>
   </div>
@@ -1509,6 +1516,7 @@
     var API = 'https://count.squachwatch.com';
     var NAMES = {
       'cyd': '2.8" CYD', 'cyd-fast': '2.8" CYD', 'cyd-ili9341': '2.8" CYD', 'cyd-ili9341-fast': '2.8" CYD',
+      'cyd-elecrow-gps': '2.8" CYD + Elecrow GPS',
       'freenove32': '3.2" Freenove', 'cyd32c': '3.2" CYD', 'cyd35-fast': '3.5" CYD', 'cyd35c-fast': '3.5" CYD',
       'awok': 'AWOK', 'rlphantom-r': 'RL Phantom',
       'freenove-s3': 'Freenove S3 2.8"', 'freenove-s3-35': 'Freenove S3 3.5"', 'crowpanel7': 'CrowPanel 7"',
@@ -1620,10 +1628,35 @@
   // Squachy say the same thing out loud -- but only on an actual user
   // change, not the initial page load, so it doesn't cut into his
   // scripted how-to intro (see nextHowTo() below).
+  var clockBusy = false;
+  function isElecrowGpsSelected() {
+    var btn = document.getElementById('installBtn');
+    var mf = btn ? (btn.getAttribute('manifest') || '') : '';
+    // Includes lab profiles and manifests in historical version directories.
+    return /(?:^|\/)manifest-(?:lab-)?cyd-elecrow-gps\.json$/.test(mf);
+  }
+  function syncClockTool() {
+    var btn = document.getElementById('clockBtn');
+    var desc = document.getElementById('clockDescription');
+    var help = document.getElementById('clockHelp');
+    var gpsHelp = document.getElementById('clockGpsHelp');
+    var elecrow = isElecrowGpsSelected();
+    var serialSupported = 'serial' in navigator;
+    if (btn) {
+      btn.disabled = elecrow || clockBusy || !serialSupported;
+      btn.textContent = '[ SET TIME & ZONE ]' + (serialSupported ? '' : ' (needs a desktop browser)');
+    }
+    if (desc) desc.textContent = elecrow ?
+      'Unavailable: GPS uses GPIO1 and the application serial console is disabled.' :
+      "Sends this computer's clock and time zone to the board.";
+    if (help) help.hidden = elecrow;
+    if (gpsHelp) gpsHelp.hidden = !elecrow;
+  }
   (function () {
     var select = document.getElementById('boardSelect');
     var installBtn = document.getElementById('installBtn');
     var note = document.getElementById('whiteScreenNote');
+    var elecrowNote = document.getElementById('elecrowGpsNote');
     var versionNote = document.getElementById('versionNote');
     var ocRow = document.getElementById('overclockRow');
     var ocChk = document.getElementById('overclockChk');
@@ -1650,6 +1683,7 @@
         // One per board the release workflow's lab branch publishes. A
         // named lab run (the "label" input) puts its name in each one.
         ['./manifest-lab-cyd.json', './manifest-lab-cyd-fast.json',
+         './manifest-lab-cyd-elecrow-gps.json',
          './manifest-lab-cyd-ili9341.json', './manifest-lab-cyd-ili9341-fast.json',
          './manifest-lab-rlphantom-r.json', './manifest-lab-freenove32.json',
          './manifest-lab-twatch-s3.json', './manifest-lab-freenove-s3.json', './manifest-lab-freenove-s3-35.json',
@@ -1665,6 +1699,10 @@
               var o = document.createElement('option');
               o.value = path;
               o.textContent = (m.name || 'LAB — development build') + (m.version ? '  (' + m.version + ')' : '');
+              if (path === './manifest-lab-cyd-elecrow-gps.json') {
+                o.dataset.elecrowGps = '1';
+                o.dataset.ocnote = 'The Elecrow GPS profile uses the stock 40 MHz display clock; no overclock build is offered.';
+              }
               select.appendChild(o);
             })
             .catch(function () { /* not deployed; nothing to add */ });
@@ -1787,8 +1825,10 @@
       // paths then resolve to the binaries beside it.
       var manifest = './' + verDir + (useFast ? fast : opt.value).replace(/^\.\//, '');
       installBtn.setAttribute('manifest', manifest);
+      syncClockTool();
       var isCyd28 = opt.dataset.cyd28 === '1';
       if (note) note.hidden = !isCyd28;
+      if (elecrowNote) elecrowNote.hidden = opt.dataset.elecrowGps !== '1';
       if (announce === 'board' && isCyd28) say(WHITE_SCREEN_LINE, 8000);
       if (announce === 'overclock' && useFast) say(OVERCLOCK_LINE, 8000);
       if (announce === 'version' && verDir) {
@@ -1915,6 +1955,7 @@
         });
       }).observe(document.body, { childList: true });
     }
+    syncClockTool();
   }
 
   // The browser's zone name onto the firmware's short table. Anything
@@ -1982,6 +2023,11 @@
   // console until those are done, so a line sent early would be read late
   // and set the clock minutes slow.
   async function setBoardClock(ev, auto) {
+    if (isElecrowGpsSelected() || clockBusy || !('serial' in navigator)) {
+      syncClockTool();
+      return;
+    }
+    clockBusy = true;
     clockBtn.disabled = true;
     clockResult.className = 'identify-result';
     var port, writer, reader;
@@ -1993,6 +2039,7 @@
         clockResult.textContent = 'Pick the board’s port...';
         port = await navigator.serial.requestPort();
       }
+      if (isElecrowGpsSelected()) throw new Error('the Elecrow GPS profile disables application serial commands');
       var native = isNativeUsb(port);
       // The install dialog lets go of the port as it closes; give it a moment.
       for (var tries = 0; ; tries++) {
@@ -2024,6 +2071,7 @@
       var epoch = Math.floor(Date.now() / 1000);
       // A blank line first: the first byte after an open can go missing.
       var lines = '\nTIME ' + epoch + '\nZONE ' + z.zone + '\n';
+      if (isElecrowGpsSelected()) throw new Error('the Elecrow GPS profile disables application serial commands');
       writer = port.writable.getWriter();
       await writer.write(new TextEncoder().encode(lines));
       writer.releaseLock(); writer = null;
@@ -2060,7 +2108,8 @@
       try { if (reader) { await reader.cancel(); reader.releaseLock(); } } catch (e3) {}
       try { if (port) await port.close(); } catch (e4) {}
     } finally {
-      clockBtn.disabled = false;
+      clockBusy = false;
+      syncClockTool();
     }
   }
 

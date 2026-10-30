@@ -19,6 +19,14 @@ struct Pending {
     uint16_t auth;
     uint8_t nameLen;
     char    name[32];
+#if defined(CYD_GPS)
+    // Eligible location captured at callback time, never substituted at drain.
+    // epoch == 0 means no eligible snapshot; those observations are not queued.
+    uint32_t observedMs, epoch;
+    int32_t lat7, lon7;
+    int16_t altM;
+    uint8_t accM;
+#endif
 };
 // Drained on every pass of loop(), about 38 a second, so a CYD with its
 // heap measured at 5.6 KB largest block keeps 8 of each; the watch keeps 32.
@@ -31,19 +39,17 @@ struct Q {
     Pending item[QN];
     volatile uint8_t head = 0, tail = 0;
     bool push(const Pending& p) {
-        const uint8_t h = head, nx = (uint8_t)((h + 1) % QN);
-        if (nx == tail) return false;
+        const uint8_t h = __atomic_load_n(&head, __ATOMIC_RELAXED), nx = (uint8_t)((h + 1) % QN);
+        if (nx == __atomic_load_n(&tail, __ATOMIC_ACQUIRE)) return false;
         item[h] = p;
-        __sync_synchronize();
-        head = nx;
+        __atomic_store_n(&head, nx, __ATOMIC_RELEASE);
         return true;
     }
     bool pop(Pending& p) {
-        const uint8_t t = tail;
-        if (t == head) return false;
-        __sync_synchronize();
+        const uint8_t t = __atomic_load_n(&tail, __ATOMIC_RELAXED);
+        if (t == __atomic_load_n(&head, __ATOMIC_ACQUIRE)) return false;
         p = item[t];
-        tail = (uint8_t)((t + 1) % QN);
+        __atomic_store_n(&tail, (uint8_t)((t + 1) % QN), __ATOMIC_RELEASE);
         return true;
     }
 };
@@ -64,15 +70,18 @@ inline float metres(int32_t la1, int32_t lo1, int32_t la2, int32_t lo2) {
     return sqrtf(dx * dx + dy * dy);
 }
 
-// The CYD GPS builds' table: 128 entries in two blocks of 64 (1,280 bytes
-// each). On the user's CYD with a card mounted the largest free block was
-// 10,740 bytes, and 256 entries with 32-deep queues left it at 5,620 with
-// wardriving on, under the pause line. No single wardrive allocation goes
-// over about 1.5 KB. When all 128 are in use, the entry written longest ago
-// is replaced.
+// Repeat suppression is a bounded cache, not a limit on captured devices.
+// The Elecrow profile leaves more RAM for scanning: its SD/GPS buffers share
+// a small classic-ESP32 heap with the radios. A full cache replaces its oldest
+// entry, so a smaller cache may write more repeat rows in a busy location.
 struct SeenTable {
+#if defined(CYD_GPS_ELECROW)
+    static const uint8_t  BLOCKS = 1;
+    static const uint16_t PER = 32;
+#else
     static const uint8_t  BLOCKS = 2;
     static const uint16_t PER = 64;
+#endif
     Seen* block[BLOCKS];
 };
 // True when this device is worth a row here and now, and then remembers it.

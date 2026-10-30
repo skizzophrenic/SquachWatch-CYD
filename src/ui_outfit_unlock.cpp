@@ -117,7 +117,7 @@ static void drawRainbowHeadline(TFT_eSPI& t, int cx, int y, const char* s,
     }
 }
 
-void uiOutfitUnlockTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
+void uiOutfitUnlockTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance) {
     const int w = t.width();
     const int h = t.height();
     const uint32_t elapsed = now - s_openedAt;
@@ -133,7 +133,7 @@ void uiOutfitUnlockTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     // The player's own background, dimmed hard: this screen is a
     // portrait of the new costume, so everything behind it is texture.
     Theme::Palette saved = Theme::dimPaletteForOverlay(170);
-    Theme::drawActiveBackground(t, now, 0, h, eng);
+    Theme::drawActiveBackground(t, now, 0, h, eng, advance);
     Theme::restorePalette(saved);
     Theme::dimRegion(t, 0, 0, w, h, 128);
 

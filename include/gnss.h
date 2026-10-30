@@ -38,6 +38,13 @@ void feed(char c, uint32_t nowMs);
 bool sentence(const char* s, uint32_t nowMs);
 
 const Fix& fix();
+#if defined(CYD_GPS)
+// Parser mutations belong to loop(). Radio callbacks read only this published
+// POD copy, including source identity, never fix() or the parser's flags.
+enum class Source : uint8_t { RECEIVER, PHONE, BENCH };
+struct Snapshot { Fix position; Source source = Source::RECEIVER; };
+Snapshot snapshot();
+#endif
 Sky sky();
 // UTC from the last RMC, or 0: set the clock from it once it has a fix.
 uint32_t utcEpoch();

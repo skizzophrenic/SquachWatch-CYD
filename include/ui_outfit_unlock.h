@@ -25,7 +25,7 @@ void uiOutfitUnlockInit(TFT_eSPI& t, uint8_t outfitIdx);
 // until then, which nothing told you about. The footer is that fix.
 void uiPetUnlockInit(TFT_eSPI& t);
 
-void uiOutfitUnlockTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng);
+void uiOutfitUnlockTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance = true);
 
 // True once the popup has been on screen long enough to be dismissable —
 // the reveal animation is short, and letting a touch already in flight
