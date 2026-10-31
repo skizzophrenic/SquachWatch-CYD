@@ -255,6 +255,27 @@ $(error same basename in $(SRC) and $(SIM_DIR), vpath would pick the wrong one: 
 endif
 
 all: $(BIN) $(LIVE_BIN)
+
+# Real alert/unlock UI with its animation boundary observed by the test.
+BAND_TEST_OBJS := $(filter-out $(OBJ_DIR)/ui/ui_alert.o $(OBJ_DIR)/ui/ui_outfit_unlock.o,$(UI_OBJS))
+$(OBJ_DIR)/band/ui_alert.o: $(SRC)/ui_alert.cpp $(wildcard $(INC)/*.h)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -DdrawActiveBackground=recordBackground -c -o $@ $<
+$(OBJ_DIR)/band/ui_outfit_unlock.o: $(SRC)/ui_outfit_unlock.cpp $(wildcard $(INC)/*.h)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -DdrawActiveBackground=recordBackground -c -o $@ $<
+$(OBJ_DIR)/band/test.o: band_advance_test.cpp $(wildcard $(INC)/*.h)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -DCYD_GPS_ELECROW=1 -c -o $@ $<
+$(OBJ_DIR)/band/draw_band.o: $(SRC)/draw_band.cpp $(INC)/draw_band.h $(INC)/frame_layout.h
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -DCYD_GPS_ELECROW=1 -c -o $@ $<
+$(OBJ_DIR)/band/check: $(BAND_TEST_OBJS) $(OBJ_DIR)/sim/detection_sim.o $(OBJ_DIR)/band/ui_alert.o $(OBJ_DIR)/band/ui_outfit_unlock.o $(OBJ_DIR)/band/test.o $(OBJ_DIR)/band/draw_band.o
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lm
+.PHONY: band-advance-check
+band-advance-check: $(OBJ_DIR)/band/check
+	./$(OBJ_DIR)/band/check
+
 live: $(LIVE_BIN)
 wasm: $(WASM_OUT)
 

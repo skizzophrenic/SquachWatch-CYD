@@ -47,7 +47,8 @@ void uiAlertSetPlace(bool has, int32_t lat7, int32_t lon7, bool fake);
 // behind the alert -- SPECTRUM is the one background that reads live
 // radio state. See ALERT_SHOW_BACKGROUND in the implementation.
 void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
-                 bool infoPending, const char* infoTypeName, const char* infoText);
+                 bool infoPending, const char* infoTypeName, const char* infoText,
+                 bool advance = true);
 bool uiAlertTouched();   // any touch since uiAlertInit
 
 // Hit test for the MORE INFO button -- meaningful any time ALERT is

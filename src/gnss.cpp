@@ -2,6 +2,14 @@
 #include "gnss.h"
 #include <string.h>
 #include <stdlib.h>
+#if defined(CYD_GPS)
+#if defined(ESP32)
+#include <freertos/FreeRTOS.h>
+#include <freertos/portmacro.h>
+#else
+#include <mutex>
+#endif
+#endif
 
 namespace Gnss {
 
@@ -11,9 +19,36 @@ namespace {
 
 Fix      s_fix;
 uint32_t s_rmcEpoch = 0;       // date + time from the newest valid RMC
+uint32_t s_rmcAtMs = 0;
+long     s_ggaTod = -1;
 uint32_t s_rmcDay   = 0;       // the date alone, for dating a GGA time
 bool     s_faked    = false;
 uint32_t s_good = 0, s_bad = 0;
+
+#if defined(CYD_GPS)
+Snapshot s_published;
+#if defined(ESP32)
+portMUX_TYPE s_snapshotMux = portMUX_INITIALIZER_UNLOCKED;
+void snapshotLock() { portENTER_CRITICAL(&s_snapshotMux); }
+void snapshotUnlock() { portEXIT_CRITICAL(&s_snapshotMux); }
+#else
+std::mutex s_snapshotMux;
+void snapshotLock() { s_snapshotMux.lock(); }
+void snapshotUnlock() { s_snapshotMux.unlock(); }
+#endif
+// Called by loop after a completed mutation; no parsing or allocation while
+// locked. Publish immediately, rather than waiting for a later SD tick.
+void publish() {
+    Snapshot next;
+    next.position = s_fix;
+    next.source = s_faked ? Source::BENCH : s_phone ? Source::PHONE : Source::RECEIVER;
+    snapshotLock();
+    s_published = next;
+    snapshotUnlock();
+}
+#else
+void publish() {}
+#endif
 
 // In view and heard, per talker, from the GSV cycle in progress and the last
 // complete one. A cycle is messages 1..n of one talker; message 1 restarts it.
@@ -42,22 +77,30 @@ uint8_t split(char* body, char** f, uint8_t max) {
 // ddmm.mmmm (or dddmm.mmmm) and a hemisphere to degrees x 10^7, exactly in
 // integers: a float here would lose the metre the format carries.
 bool coord(const char* v, const char* hemi, int32_t& out) {
-    if (!v[0] || !hemi[0]) return false;
+    const bool lat = hemi[0] == 'N' || hemi[0] == 'S';
+    if (!v[0] || hemi[1] || (!lat && hemi[0] != 'E' && hemi[0] != 'W')) return false;
     const char* dot = strchr(v, '.');
     const int intLen = dot ? (int)(dot - v) : (int)strlen(v);
-    if (intLen < 3) return false;
+    if (intLen != (lat ? 4 : 5)) return false;
     long deg = 0;
-    for (int i = 0; i < intLen - 2; i++) { if (v[i] < '0' || v[i] > '9') return false; deg = deg * 10 + (v[i] - '0'); }
-    // Minutes as an integer in 10^-7 minute units.
+    for (int i = 0; i < intLen - 2; i++) {
+        if (v[i] < '0' || v[i] > '9') return false;
+        deg = deg * 10 + (v[i] - '0');
+    }
     long long minE7 = 0;
-    for (int i = intLen - 2; i < intLen; i++) minE7 = minE7 * 10 + (v[i] - '0');
+    for (int i = intLen - 2; i < intLen; i++) {
+        if (v[i] < '0' || v[i] > '9') return false;
+        minE7 = minE7 * 10 + (v[i] - '0');
+    }
+    if (minE7 >= 60) return false;
     long long frac = 0; int digits = 0;
-    if (dot) for (const char* p = dot + 1; *p && digits < 7; p++, digits++) {
+    if (dot) for (const char* p = dot + 1; *p; p++) {
         if (*p < '0' || *p > '9') return false;
-        frac = frac * 10 + (*p - '0');
+        if (digits < 7) { frac = frac * 10 + (*p - '0'); digits++; }
     }
     for (; digits < 7; digits++) frac *= 10;
     minE7 = minE7 * 10000000LL + frac;
+    if (deg > (lat ? 90 : 180) || (deg == (lat ? 90 : 180) && minE7)) return false;
     long long e7 = (long long)deg * 10000000LL + minE7 / 60;
     if (hemi[0] == 'S' || hemi[0] == 'W') e7 = -e7;
     out = (int32_t)e7;
@@ -71,7 +114,11 @@ long timeOfDay(const char* v) {
     const int h = (v[0] - '0') * 10 + (v[1] - '0');
     const int m = (v[2] - '0') * 10 + (v[3] - '0');
     const int s = (v[4] - '0') * 10 + (v[5] - '0');
-    if (h > 23 || m > 59 || s > 60) return -1;
+    if (h > 23 || m > 59 || s > 59) return -1;
+    if (v[6]) {
+        if (v[6] != '.' || !v[7]) return -1;
+        for (const char* p = v + 7; *p; ++p) if (*p < '0' || *p > '9') return -1;
+    }
     return h * 3600L + m * 60L + s;
 }
 
@@ -84,6 +131,17 @@ uint8_t talker(const char* id) {
     return T_OTHER;
 }
 
+// Date a GGA only from a recent RMC with nearby receiver UTC. Pick the
+// nearest day across midnight, independent of which sentence arrived first.
+uint32_t ggaEpoch(uint32_t nowMs) {
+    if (!s_rmcDay || s_ggaTod < 0 || nowMs - s_rmcAtMs > FRESH_MS) return 0;
+    int32_t delta = (int32_t)s_ggaTod - (int32_t)(s_rmcEpoch % 86400u);
+    if (delta > 43200) delta -= 86400;
+    if (delta < -43200) delta += 86400;
+    if (delta < -5 || delta > 5) return 0;
+    return (uint32_t)((int64_t)s_rmcEpoch + delta);
+}
+
 void onGga(char** f, uint8_t n, uint32_t nowMs) {
     if (n < 10) return;
     const int q = atoi(f[6]);
@@ -91,7 +149,11 @@ void onGga(char** f, uint8_t n, uint32_t nowMs) {
     // No fix from the module: keep a fake or a phone's position rather than drop it.
     if (q <= 0) { s_fix.valid = (s_faked || s_phone) && s_fix.valid; return; }
     int32_t la, lo;
-    if (!coord(f[2], f[3], la) || !coord(f[4], f[5], lo)) return;
+    if (!coord(f[2], f[3], la) || !coord(f[4], f[5], lo) ||
+        (f[3][0] != 'N' && f[3][0] != 'S') || (f[5][0] != 'E' && f[5][0] != 'W')) {
+        if (!s_faked && !s_phone) s_fix.valid = false;
+        return;
+    }
     s_faked = false;
     s_phone = false;
     s_fix.valid = true;
@@ -102,11 +164,15 @@ void onGga(char** f, uint8_t n, uint32_t nowMs) {
     s_fix.accM = (uint8_t)(acc < 1 ? 1 : acc > 255 ? 255 : acc);
     s_fix.atMs = nowMs;
     // The time of this fix, on the date the last RMC gave.
-    const long tod = timeOfDay(f[1]);
-    s_fix.epoch = (s_rmcDay && tod >= 0) ? s_rmcDay + (uint32_t)tod : 0;
+    s_ggaTod = timeOfDay(f[1]);
+    s_fix.epoch = ggaEpoch(nowMs);
 }
 
-void onRmc(char** f, uint8_t n) {
+void onRmc(char** f, uint8_t n, uint32_t nowMs) {
+    if (n >= 3 && f[2][0] == 'V') {
+        if (!s_phone && !s_faked) s_fix.valid = false;
+        return;
+    }
     if (n < 10 || f[2][0] != 'A') return;
     const long tod = timeOfDay(f[1]);
     const char* d = f[9];
@@ -115,9 +181,17 @@ void onRmc(char** f, uint8_t n) {
     const int day = (d[0] - '0') * 10 + (d[1] - '0');
     const int mon = (d[2] - '0') * 10 + (d[3] - '0');
     const int yr  = 2000 + (d[4] - '0') * 10 + (d[5] - '0');
-    if (mon < 1 || mon > 12 || day < 1 || day > 31) return;
+    if (mon < 1 || mon > 12 || day < 1) return;
+    static const uint8_t days[] = {31,28,31,30,31,30,31,31,30,31,30,31};
+    const int maxDay = days[mon - 1] + (mon == 2 && (yr % 4 == 0 && (yr % 100 != 0 || yr % 400 == 0)));
+    if (day > maxDay) return;
     s_rmcDay   = toEpoch(yr, mon, day, 0, 0, 0);
     s_rmcEpoch = s_rmcDay + (uint32_t)tod;
+    s_rmcAtMs = nowMs;
+    // An RMC can complete the date for a preceding, still-fresh GGA. Never
+    // retime a phone/bench position or revive an invalid receiver solution.
+    if (s_fix.valid && !s_phone && !s_faked && nowMs - s_fix.atMs < FRESH_MS)
+        s_fix.epoch = ggaEpoch(nowMs);
 }
 
 void onGsv(const char* id, char** f, uint8_t n) {
@@ -157,8 +231,9 @@ bool sentence(const char* s, uint32_t nowMs) {
     const char* type = f[0] + 2;           // after the talker
     if (strlen(f[0]) != 5) return true;
     if (!strcmp(type, "GGA")) onGga(f, n, nowMs);
-    else if (!strcmp(type, "RMC")) onRmc(f, n);
+    else if (!strcmp(type, "RMC")) onRmc(f, n, nowMs);
     else if (!strcmp(type, "GSV")) onGsv(f[0], f, n);
+    publish();
     return true;
 }
 
@@ -174,6 +249,14 @@ void feed(char c, uint32_t nowMs) {
 }
 
 const Fix& fix() { return s_fix; }
+#if defined(CYD_GPS)
+Snapshot snapshot() {
+    snapshotLock();
+    const Snapshot result = s_published;
+    snapshotUnlock();
+    return result;
+}
+#endif
 
 Sky sky() {
     Sky k;
@@ -193,7 +276,8 @@ bool fresh(uint32_t nowMs) { return s_fix.valid && (int32_t)(nowMs - s_fix.atMs)
 
 void reset() {
     s_fix = Fix();
-    s_rmcEpoch = s_rmcDay = 0;
+    s_rmcEpoch = s_rmcDay = s_rmcAtMs = 0;
+    s_ggaTod = -1;
     s_faked = false;
     s_phone = false;
     s_good = s_bad = 0;
@@ -201,6 +285,7 @@ void reset() {
     memset(s_heardDone, 0, sizeof s_heardDone);
     memset(s_heardNow, 0, sizeof s_heardNow);
     s_len = 0;
+    publish();
 }
 
 uint32_t toEpoch(int y, int m, int d, int h, int mi, int s) {
@@ -222,6 +307,7 @@ void fake(int32_t lat7, int32_t lon7, uint32_t epoch, uint32_t nowMs) {
     s_fix.altM = 0; s_fix.accM = 50; s_fix.used = 0;
     s_fix.epoch = epoch;
     s_fix.atMs = nowMs;
+    publish();
 }
 bool faked() { return s_faked && s_fix.valid; }
 
@@ -234,6 +320,7 @@ void phone(int32_t lat7, int32_t lon7, uint8_t accM, uint32_t epoch, uint32_t no
     s_fix.altM = 0; s_fix.accM = accM ? accM : 1; s_fix.used = 0;
     s_fix.epoch = epoch;
     s_fix.atMs = nowMs;
+    publish();
 }
 
 bool fromPhone() { return s_phone && s_fix.valid; }

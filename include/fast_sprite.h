@@ -32,6 +32,7 @@
 // there this is a plain pass-through and nothing changes.
 #pragma once
 #include <TFT_eSPI.h>
+#include "frame_layout.h"
 
 class FastSprite;
 // The frame every screen draws into, so code that is handed a TFT_eSPI& can
@@ -50,7 +51,7 @@ public:
     // here or it reads straight off the end -- a LoadStoreError panic, found
     // on that board on 2026-09-20 and the reason FramePush::push() takes a
     // buffer and a size rather than a sprite.
-#if defined(CYD35)
+#if SQW_BANDED_FRAME && defined(ESP32)
     // The window-write guard. TFT_eSprite::setWindow() clamps the window it
     // is handed to width()/height(), and those report the VIEWPORT, not the
     // buffer -- so on a 480x160 buffer under a 480x320 viewport it will
@@ -62,8 +63,8 @@ public:
     // RAW start row -- clipWindow() crops the end of the range but never the
     // start -- and feeds it straight to setWindow(). On every other board the
     // viewport IS the buffer and the datum is zero, so raw equals clipped and
-    // this has been correct for years. Only the two-band buffer separates
-    // them, which is why this is built for that board alone.
+    // this has been correct for years. Banded profiles separate those two
+    // coordinate systems and need this guard.
     //
     // The fix is the library's own logic against the right numbers: a window
     // wholly outside the buffer goes to the spare pixel callocSprite() puts

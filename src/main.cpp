@@ -89,6 +89,12 @@
 #include "ui_diagnostics.h"   // CrashReport, used by the breadcrumb below
 #include "blackbox.h"
 #include "gnss.h"
+#include "cyd_gps_uart.h"
+#if defined(CYD_GPS_ELECROW)
+#include <new>
+#include <stdio.h>
+#include "elecrow_battery.h"
+#endif
 #if defined(CYD_GPS)
 #include "sd_row.h"
 static void cydGpsStart();
@@ -345,6 +351,7 @@ static void drawCrashCard(TFT_eSPI& t) {
 #include "ui_ignorelist.h"
 #include "frame_push.h"
 #include "draw_band.h"
+#include "band_frame.h"
 #include "frame_prof.h"
 #include "fast_sprite.h"
 #if SQUACH_MESH
@@ -574,11 +581,13 @@ constexpr bool PANEL_NEEDS_INVERSION = false;
 // its own bookkeeping fields directly -- createSprite() itself does
 // nothing more than this plus the calloc. Both are protected in
 // TFT_eSPI/TFT_eSprite, reachable from a subclass. This only produces
-// a *valid* buffer when the new w*h matches what was actually
-// allocated -- true here because every rotation of a rectangular
+// a *valid* buffer when the new w*h fits what was actually
+// allocated -- normally every rotation of a rectangular
 // panel needs the same total pixel count (320x240 and 240x320 are
 // both 76800 pixels), so one boot-time allocation covers every
 // orientation forever and rotate never needs to free/realloc again.
+// Elecrow reserves 320x160 and uses only complete rows at each width;
+// FrameLayout::bufferHeight() keeps both orientations within that capacity.
 // ...and it sits on FastSprite, which takes over the sprite's slow
 // primitives; see fast_sprite.h.
 class ResizableSprite : public FastSprite {
@@ -638,7 +647,7 @@ ResizableSprite     frame = ResizableSprite(&tft);
 // over to drawing straight into `tft` for the rest of the session,
 // same tradeoff cyd35 already accepts by default -- which needs
 // `canvas` to be reseatable at runtime, not bound once at startup.
-#if defined(CYD35)
+#if SQW_BANDED_FRAME
     TFT_eSPI*        canvas = &tft;
 #else
     TFT_eSPI*        canvas = &frame;
@@ -1770,7 +1779,9 @@ static void applyBrightness() {
     if (s_crownDark && s_screenDimmed) duty = 0;   // the button turns it OFF, whatever DIM LEVEL says
 #endif
     ledcWrite(BL_CH_ORIG, duty);
+#if !defined(CYD_GPS_ELECROW)
     ledcWrite(BL_CH_CAP,  duty);
+#endif
     ledcWrite(BL_CH_AWOK, duty);
 #endif
 }
@@ -2569,6 +2580,10 @@ static void releaseFrameBuffer(const char* who) {
 #if !defined(CYD35)
     if (!frameBufferOk) return;
     FramePush::asyncWait();                   // the push task may still be reading it
+#if defined(CYD_GPS_ELECROW)
+    DrawBand::all();
+    frame.resetViewport();
+#endif
     frame.deleteSprite();
     frameBufferOk = false;
     canvas = &tft;
@@ -2607,14 +2622,20 @@ static void restoreFrameBuffer() {
 #if SQW_FRAME_FORCE_INTERNAL
     heap_caps_malloc_extmem_enable(1u << 20);   // back into internal RAM, see setup()
 #endif
-    const bool back = frame.createSprite(tft.width(), tft.height());
+    const bool back = frame.createSprite(FrameLayout::allocationWidth(tft.width()),
+                                         FrameLayout::allocationHeight(tft.height()));
 #if SQW_FRAME_FORCE_INTERNAL
     heap_caps_malloc_extmem_enable(CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL);
 #endif
     if (back) {
         frame.setTextSize(1);
         frameBufferOk = true;
+#if defined(CYD_GPS_ELECROW)
+        frame.resizeInPlace(tft.width(), FrameLayout::bufferHeight(tft.width(), tft.height()));
+        canvas = &tft;
+#else
         canvas = &frame;
+#endif
         Serial.println("[ota] frame buffer back");
     } else {
         Serial.printf("[ota] frame buffer could not come back (largest block %lu); unbuffered until restart\n",
@@ -3258,6 +3279,32 @@ static void boardBatteryPrintLog() {
         const LampSample& r = s_lampLog[(s_lampLogAt + LAMP_LOG_N - s_lampLogN + i) % LAMP_LOG_N];
         Serial.printf("[batt] %lu %u %u %s\n", (unsigned long)r.sec, (unsigned)r.mv, (unsigned)r.pct, r.chg ? "CABLE" : "-");
     }
+}
+#endif
+
+#if defined(CYD_GPS_ELECROW)
+static ElecrowBattery::Gauge s_elecrowGauge;
+static bool s_elecrowGaugeBus = false;
+static bool elecrowGaugeRead(uint8_t reg, uint16_t& value) {
+    if (!s_elecrowGaugeBus) return false;
+    Wire.beginTransmission(0x36);
+    Wire.write(reg);
+    if (Wire.endTransmission(false) != 0 || Wire.requestFrom((uint8_t)0x36, (uint8_t)2) != 2) return false;
+    const uint8_t hi = (uint8_t)Wire.read(), lo = (uint8_t)Wire.read();
+    value = ((uint16_t)hi << 8) | lo;
+    return true;
+}
+void boardBatteryLine(char* out, size_t n) {
+    const auto& g = s_elecrowGauge.reading();
+    if (!g.valid) { snprintf(out, n, "UNAVAILABLE"); return; }
+    snprintf(out, n, "%u%% %u.%02uV", (unsigned)g.percent,
+             (unsigned)(g.millivolts / 1000), (unsigned)(g.millivolts % 1000 / 10));
+}
+static bool elecrowBatteryState(uint8_t& pct, bool& charging) {
+    const auto& g = s_elecrowGauge.reading();
+    if (!g.valid) return false;
+    pct = g.percent; charging = g.rising;
+    return true;
 }
 #endif
 
@@ -4118,7 +4165,7 @@ volatile bool g_consolePowerLog = false;
 // QSPI bus as a green hash (seen on the board 2026-10-11) -- so there they
 // draw into the frame and push it, once the frame exists. Everywhere else
 // PANEL is the panel and panelShow() is nothing, which is what they did.
-static inline void pushFrame(int x, int y);
+static inline void pushFrame(int x, int y, int rows = 0);
 #if defined(FREENOVE_S3_35)
 #define PANEL ((TFT_eSPI&)frame)
 static bool panelTextOk() { return frameBufferOk && frame.created(); }
@@ -4145,6 +4192,10 @@ static void panelShow()   {}
 #endif
 
 void setup() {
+#if defined(CYD_GPS_ELECROW)
+    // Before crashReportInit or any application output can claim P1 UART0.
+    CydGpsUart::silenceConsole();
+#endif
 #if defined(ARDUINO_ARCH_ESP32) && !defined(CROWPANEL7) && !defined(TAB5)
     g_frameSprite = &frame;
 #endif
@@ -4159,7 +4210,9 @@ void setup() {
     // Before anything else can allocate: the breadcrumb has to be read out
     // while it is still the previous life's, not this one's.
     crashReportInit();
+#if !defined(CYD_GPS_ELECROW)
     Serial.begin(SERIAL_BAUD);
+#endif
 #if SQW_SPEAKER
     // POWER OFF left BOOT's pad on the RTC side for its wake, and a pad on
     // the RTC side reads nothing on the ordinary GPIO path. Hand it back
@@ -4260,7 +4313,9 @@ void setup() {
     // next real one.
     pinMode(TFT_BL, OUTPUT); digitalWrite(TFT_BL, TFT_BACKLIGHT_ON);
 #else
+#if !defined(CYD_GPS_ELECROW)
     pinMode(27, OUTPUT); digitalWrite(27, HIGH);
+#endif
 #if !defined(FREENOVE32) && !defined(CYD32C) && !defined(CYD35C)   // not a spare pin on the Freenove, and the 2432S032C's touch SCL; both light 27 alone
     pinMode(32, OUTPUT); digitalWrite(32, HIGH);  // AWOK's real BL pin; unused GPIO on the other two boards
 #endif
@@ -4389,8 +4444,10 @@ void setup() {
     ledcSetup(BL_CH_ORIG, 5000, 8);
     ledcAttachPin(BL_PIN_ORIG, BL_CH_ORIG);
 #endif
+#if !defined(CYD_GPS_ELECROW)
     ledcSetup(BL_CH_CAP, 5000, 8);
     ledcAttachPin(BL_PIN_CAP, BL_CH_CAP);
+#endif
 #if !defined(FREENOVE32) && !defined(CYD32C) && !defined(CYD35C)   // see the pinMode(32) above; a channel with no pin is harmless to write
     ledcSetup(BL_CH_AWOK, 5000, 8);
     ledcAttachPin(BL_PIN_AWOK, BL_CH_AWOK);
@@ -4430,7 +4487,9 @@ void setup() {
         tdeckBacklight(24);
 #else
         ledcWrite(BL_CH_ORIG, 24);
+#if !defined(CYD_GPS_ELECROW)
         ledcWrite(BL_CH_CAP,  24);
+#endif
         ledcWrite(BL_CH_AWOK, 24);
 #endif
         // The frame does not exist yet on the 3.5", so that board checks
@@ -4450,7 +4509,21 @@ void setup() {
     }
 
 
-#if defined(CYD35)
+#if defined(CYD_GPS_ELECROW)
+    // Keep the allocation's capacity stable across rotation: portrait uses
+    // 240x213 of these 51,200 bytes, landscape uses all 320x160.
+    frame.setColorDepth(8);
+    frameBufferOk = frame.createSprite(FrameLayout::allocationWidth(tft.width()),
+                                       FrameLayout::allocationHeight(tft.height())) != nullptr;
+    if (frameBufferOk) {
+        frame.resizeInPlace(tft.width(), FrameLayout::bufferHeight(tft.width(), tft.height()));
+        frame.setTextSize(1);
+    } else {
+        Serial.println("ERROR: Elecrow band frame allocation failed; drawing unbuffered");
+    }
+    canvas = &tft;
+    canvas->setTextSize(1);
+#elif defined(CYD35)
     // No FULL-screen double buffer on this board — confirmed on real
     // hardware that the 320x480 panel's ~150KB sprite need exceeds the
     // largest contiguous free heap block (~110KB, no PSRAM). `canvas`
@@ -4691,6 +4764,16 @@ void setup() {
     bootStage(2);
 #endif
 
+#if defined(CYD_GPS_ELECROW)
+    // The fixed kit uses CN1 for its gauge. Resistive touch has finished
+    // its capacitive probe and released Wire; GPIO27 belongs to I2C here.
+    if (!usingCapTouch) {
+        s_elecrowGaugeBus = Wire.begin(22, 27, 100000);
+        Wire.setTimeOut(5);
+        s_elecrowGauge.tick(millis(), elecrowGaugeRead);
+    }
+    uiClearSetBatterySource(elecrowBatteryState);
+#endif
 #if defined(MARAUDER_V8)
     gaugeBegin();
     { char b[20]; boardBatteryLine(b, sizeof b); Serial.printf("[batt] %s\n", b); }
@@ -4818,7 +4901,9 @@ void setup() {
     tdeckBacklight(24);
 #else
     ledcWrite(BL_CH_ORIG, 24);
+#if !defined(CYD_GPS_ELECROW)
     ledcWrite(BL_CH_CAP,  24);
+#endif
     ledcWrite(BL_CH_AWOK, 24);
 #endif
 
@@ -4997,7 +5082,9 @@ static uint32_t s_pushAccumUs = 0;   // summed within a frame: cyd35 pushes twic
 static uint32_t s_bandUs[2] = {0, 0};      // measurement: the 3.5"'s two draw passes
 #endif
 
-static inline void pushFrame(int x, int y) {
+static inline void pushFrame(int x, int y, int rows) {
+    if (!frameBufferOk || !frame.created()) return;
+    const int pushH = rows > 0 && rows < frame.bufH() ? rows : frame.bufH();
 #if defined(TWATCH_S3)
     if (s_panelAsleep) return;   // nothing to show it to; see applyBrightness()
 #endif
@@ -5078,8 +5165,9 @@ static inline void pushFrame(int x, int y) {
     FramePush::asyncWait();                   // the ordinary push below needs the panel free
 #endif
     if (frame.getColorDepth() != 8 ||
-        !FramePush::push(tft, frame.buf(), frame.bufW(), frame.bufH(), x, y)) {
-        frame.pushSprite(x, y);
+        !FramePush::push(tft, frame.buf(), frame.bufW(), pushH, x, y)) {
+        if (pushH < frame.bufH()) frame.pushSprite(x, y, 0, 0, frame.bufW(), pushH);
+        else                     frame.pushSprite(x, y);
         FramePush::invalidate();   // the panel now holds something push() did not record
     }
 #endif
@@ -5109,7 +5197,14 @@ static inline void pushFrame(int x, int y) {
 // those boards already did, and loop()'s own push at the end still ships it.
 template <typename F>
 static inline void drawTwoBand(F&& draw) {
-#if defined(CYD35)
+#if defined(CYD_GPS_ELECROW)
+    if (frameBufferOk && frame.created()) {
+        BandFrame::render(frame, tft.width(), tft.height(), Theme::BG,
+                          [&](ResizableSprite& band, bool advance) { draw((TFT_eSPI&)band, advance); },
+                          [&](int y, int rows) { pushFrame(0, y, rows); });
+        return;
+    }
+#elif defined(CYD35)
     if (frameBufferOk) {
         const int halfH = tft.height() / 2;
         // The sprite is cleared before each band. It is ONE half-height
@@ -5512,11 +5607,12 @@ static void wardriveBegin() {
 #endif
 
 #if defined(CYD_GPS)
-// ---- GPS on the CYD (cyd-gps builds) ------------------------------------------
+// ---- GPS on the CYD (CYD_GPS builds) ------------------------------------------
 // An ATGM336H with its TX on GPIO35 (P3), at 9600 baud. Its sentences go to
 // Gnss (gnss.h); a fresh fix puts a position on each SD row and on the alert
 // card, and its time sets a clock that has no network time this boot.
-// No power control (the CYD has none) and no baud search.
+// No power control. The Elecrow profile instead receives the verified fixed
+// P1 harness on UART2 RX1 at 9600, with the application console suppressed.
 //
 // Not behind CYD: the emulator's squachsim-live compiles this file with no
 // board macro, and its Serial2 replays the NMEA file named by SQUACHSIM_NMEA.
@@ -5544,17 +5640,24 @@ static uint32_t s_cydGpsFirstFixMs = 0;     // millis() of the first real fix, 0
 // which is why its GPS sat silent for a two-hour walk on 2026-10-15 (0
 // sentences, not 0 fixes). So: the board's default first, and if nothing
 // parses in twenty seconds, the other one, back and forth until one does.
+#if !defined(CYD_GPS_ELECROW)
 static uint32_t s_cydGpsBaud = CYD_GPS_BAUD;
 static uint32_t s_cydGpsBaudAt = 0;
+#endif
 static void cydGpsStart() {
     Gnss::reset();
+#if defined(CYD_GPS_ELECROW)
+    CydGpsUart::begin();
+#else
     // TX -1: the module's RX is not wired. The core fills in its default
     // pins only when both are negative, so TX stays unassigned here; the
     // default TX2 is GPIO17, the status light.
     CYD_GPS_SERIAL.begin(s_cydGpsBaud, SERIAL_8N1, CYD_GPS_RX, -1);
     s_cydGpsBaudAt = millis();
+#endif
     Wardrive::sdBegin();
 }
+#if !defined(CYD_GPS_ELECROW)
 static void cydGpsBaudTick(uint32_t now) {
     if (Gnss::good() + Gnss::bad() || now - s_cydGpsBaudAt < 20000) return;
     s_cydGpsBaud = (s_cydGpsBaud == 9600) ? 38400 : 9600;
@@ -5562,6 +5665,7 @@ static void cydGpsBaudTick(uint32_t now) {
     CYD_GPS_SERIAL.updateBaudRate(s_cydGpsBaud);
     Serial.printf("[gps] nothing heard: trying %lu baud\n", (unsigned long)s_cydGpsBaud);
 }
+#endif
 
 static const char* cydWardriveStateName(Wardrive::SdState st) {
     switch (st) {
@@ -5570,11 +5674,15 @@ static const char* cydWardriveStateName(Wardrive::SdState st) {
         case Wardrive::SdState::LOW_MEMORY:      return "LOW MEMORY";
         case Wardrive::SdState::WAITING_FOR_FIX: return "WAITING FOR FIX";
         case Wardrive::SdState::LOGGING:         return "ON";
+        case Wardrive::SdState::WRITE_ERROR:     return "WRITE ERROR";
     }
     return "?";
 }
 
 static void cydGpsTick(uint32_t now) {
+#if defined(CYD_GPS_ELECROW)
+    s_elecrowGauge.tick(now, elecrowGaugeRead);
+#endif
     const uint8_t cmd = g_consoleGps;
     if (cmd) g_consoleGps = 0;
     if (cmd == 2) { Gnss::reset(); Serial.println("[gps] reset: any bench fix is gone"); }
@@ -5623,8 +5731,12 @@ static void cydGpsTick(uint32_t now) {
     // does not go stale while the console test runs.
     if (Gnss::faked()) Gnss::fake(Gnss::fix().lat7, Gnss::fix().lon7, Clock::isSet() ? Clock::nowEpoch() : 0, now);
 
+#if defined(CYD_GPS_ELECROW)
+    CydGpsUart::poll(now);
+#else
     while (CYD_GPS_SERIAL.available()) Gnss::feed((char)CYD_GPS_SERIAL.read(), now);
     cydGpsBaudTick(now);
+#endif
     Wardrive::sdTick(now, engine.sd().ready());
 
     const Gnss::Fix& f = Gnss::fix();
@@ -5692,7 +5804,9 @@ static void chargeBacklight(uint8_t duty) {
     Tab5Panel::backlight(duty);
 #else
     ledcWrite(BL_CH_ORIG, duty);
+#if !defined(CYD_GPS_ELECROW)
     ledcWrite(BL_CH_CAP,  duty);
+#endif
     ledcWrite(BL_CH_AWOK, duty);
 #endif
 }
@@ -5901,7 +6015,9 @@ static void bootButtonTick(uint32_t now) {
 void loop() {
     // Cheap and unconditional: available() is a register read, and this
     // is the only way in for the one serial command the firmware takes.
+#if !defined(CYD_GPS_ELECROW)
     Clock::pollSerial();
+#endif
     runtimeTick(millis());
 #if defined(ESP32) && !defined(TWATCH_S3)
 #if SQW_BOOT_BTN
@@ -6466,18 +6582,14 @@ void loop() {
         // allocation -- there's no more free/realloc cycle left to lose
         // the fragmentation gamble against.
         if (frame.created()) {
-#if defined(CYD35)
-            frame.resizeInPlace(tft.width(), tft.height() / 2);
-#else
-            frame.resizeInPlace(tft.width(), tft.height());
-#endif
+            frame.resizeInPlace(tft.width(), FrameLayout::bufferHeight(tft.width(), tft.height()));
         } else if (frameBufferOk) {
             // Never got its one-time boot-time allocation in the first
             // place (see setup()) -- same permanent fallback a failed
             // rotate used to trigger, since there's no buffer to resize.
             Serial.println("[rotate] frame buffer was never allocated -- falling back to unbuffered rendering");
             frameBufferOk = false;
-#if !defined(CYD35)
+#if !SQW_BANDED_FRAME
             canvas = &tft;
 #endif
         }
@@ -6613,7 +6725,12 @@ void loop() {
 #endif
     switch (state) {
         case AppState::BOOT: {
-#if defined(CYD35)
+#if defined(CYD_GPS_ELECROW)
+            drawTwoBand([&](TFT_eSPI& t, bool) {
+                uiBootTick(t, now);
+                if (crashCardWanted()) drawCrashCard(t);
+            });
+#elif defined(CYD35)
             if (frameBufferOk) {
                 // Same two-pass half-height `frame` trick CLEAR uses --
                 // reuses that same already-allocated sprite (see its
@@ -6741,7 +6858,16 @@ void loop() {
             // same frame it becomes due, rather than after one frame of
             // CLEAR flashing up behind it.
             if (maybeEnterOutfitUnlock()) break;
-#if defined(CYD35)
+#if defined(CYD_GPS_ELECROW)
+            drawTwoBand([&](TFT_eSPI& t, bool advance) {
+                uiClearTick(t, now, engine, advance, s_scanPickerOpen);
+                Theme::drawToast(t, now);
+                if (uiZoneCardWanted()) uiZoneCardDraw(t, now);
+#if CROWD_BENCH
+                if (CrowdBench::active()) CrowdBench::drawOver(t, now);
+#endif
+            });
+#elif defined(CYD35)
             if (frameBufferOk) {
                 // Two passes through the half-height `frame` sprite
                 // instead of one direct-to-tft pass -- see the setup()
@@ -6781,12 +6907,16 @@ void loop() {
             // Toasts on the main screen too. They were only drawn on LOG and
             // NEARBY, so SNOOZED and READ, both raised on the way here or while
             // here, went unseen.
+#if !defined(CYD_GPS_ELECROW)
             Theme::drawToast(*canvas, now);
+#endif
             // The clock is set and no zone was ever picked: the card, over
             // everything, until THIS IS RIGHT. A tap on it is the card's; a
             // tap beside it is the main screen's, so he can still be poked.
             if (uiZoneCardWanted()) {
+#if !defined(CYD_GPS_ELECROW)
                 uiZoneCardDraw(*canvas, now);
+#endif
                 if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                     const ZoneHit zh = uiZoneCardHit(tp.x, tp.y, tft.width(), tft.height());
                     if (zh != ZoneHit::NONE) {
@@ -6803,7 +6933,9 @@ void loop() {
             // over everything, a tap moves it on, and nothing else on this
             // screen -- alerts included -- interrupts it while it runs.
             if (CrowdBench::active()) {
+#if !defined(CYD_GPS_ELECROW)
                 CrowdBench::drawOver(*canvas, now);
+#endif
                 if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                     lastTouch = now;
                     CrowdBench::tap();
@@ -7225,7 +7357,11 @@ void loop() {
             // confidence in general, not any one detection type.
             const char* alertInfoTypeName = s_infoShowingPrimer ? nullptr
                                           : DetectionInfo::titleFor(s_confirmType, s_confirmVendor, privName(s_confirmName));
-#if defined(CYD35)
+#if defined(CYD_GPS_ELECROW)
+            drawTwoBand([&](TFT_eSPI& t, bool advance) {
+                uiAlertTick(t, now, engine, s_infoPending, alertInfoTypeName, alertInfoText, advance);
+            });
+#elif defined(CYD35)
             if (frameBufferOk) {
                 // Same two-pass half-height `frame` trick CLEAR/BOOT
                 // use, reusing that same already-allocated sprite.
@@ -7394,7 +7530,9 @@ void loop() {
             break;
         }
         case AppState::OUTFIT_UNLOCK: {
-#if defined(CYD35)
+#if defined(CYD_GPS_ELECROW)
+            drawTwoBand([&](TFT_eSPI& t, bool advance) { uiOutfitUnlockTick(t, now, engine, advance); });
+#elif defined(CYD35)
             if (frameBufferOk) {
                 // Same two-pass half-height `frame` trick the other
                 // full-screen states use. This one draws Squachy, so
@@ -7427,7 +7565,9 @@ void loop() {
             break;
         }
         case AppState::WATCH_ALERT: {
-#if defined(CYD35)
+#if defined(CYD_GPS_ELECROW)
+            drawTwoBand([&](TFT_eSPI& t, bool advance) { uiWatchAlertTick(t, now, engine, advance); });
+#elif defined(CYD35)
             if (frameBufferOk) {
                 // Same two-pass half-height `frame` trick CLEAR/BOOT/
                 // ALERT use -- unlike plain uiAlertTick(), this one
@@ -8421,10 +8561,10 @@ void loop() {
             // The board redraws only what changed, so it is the same with the
             // frame buffer and without it (given up for a download).
             drawTwoBand([&](TFT_eSPI& t, bool) {
-#if defined(CYD35)
+#if SQW_BANDED_FRAME
                 // This screen repaints only what changed, which needs a
-                // buffer that still holds the rest. The 3.5" has half a
-                // buffer shared by two bands, so there it draws everything,
+                // buffer that still holds the rest. Banded profiles reuse
+                // one buffer for both bands, so they draw everything,
                 // every band: the keyboard's top half was being pushed to
                 // the bottom half as well (issue #25).
                 if (frameBufferOk) uiWifiPassRedrawAll();
@@ -9317,7 +9457,8 @@ void loop() {
             info.largestBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
 #if defined(CYD_GPS)
             {
-                const Gnss::Fix& f = Gnss::fix();
+                const Gnss::Snapshot position = Gnss::snapshot();
+                const Gnss::Fix& f = position.position;
                 const Gnss::Sky k = Gnss::sky();
                 const uint32_t nowMs = millis();
                 info.gpsShown = true;
@@ -9325,7 +9466,10 @@ void loop() {
                 info.view = k.view; info.heard = k.heard; info.used = f.used;
                 info.accM = f.accM; info.lat7 = f.lat7; info.lon7 = f.lon7;
                 info.fixAgeMs = f.atMs ? nowMs - f.atMs : UINT32_MAX;
-                info.fresh = Gnss::fresh(nowMs); info.faked = Gnss::faked();
+                info.source = position.source;
+                const uint32_t freshMs = position.source == Gnss::Source::PHONE ? Gnss::PHONE_FRESH_MS : Gnss::FRESH_MS;
+                info.fresh = f.valid && (int32_t)(nowMs - f.atMs) < (int32_t)freshMs;
+                info.faked = f.valid && position.source == Gnss::Source::BENCH;
                 info.wdOn = Wardrive::enabled();
                 info.wdState = (uint8_t)Wardrive::sdState(nowMs);
                 info.wdWritten = Wardrive::written(); info.wdSkipped = Wardrive::skipped();
@@ -9347,7 +9491,7 @@ void loop() {
                 uiDiagnosticsHitBack(tp.x, tp.y, tft.width(), tft.height())) {
                 lastTouch = now;
                 enterSettings();
-            } else if (touchJustDown && Theme::compact()) {
+            } else if (touchJustDown && uiDiagnosticsPaged()) {
                 lastTouch = now;
                 uiDiagnosticsNextPage();
             }
@@ -9421,7 +9565,7 @@ void loop() {
         }
     }
 
-#if !defined(CYD35)
+#if !SQW_BANDED_FRAME
     // Skipped on cyd35: this effect reads back already-drawn pixels to
     // shift them sideways, which is instant/reliable against the sprite
     // in RAM but would mean a live SPI readback from the panel itself

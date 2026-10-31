@@ -1,9 +1,9 @@
 // SquachWatch-CYD: the CYD GPS builds' repeat table, for which devices already
 // have a recent row from about here. See wardrive_capture.h.
 //
-// 256 entries, searched in full, since a CYD hears far fewer devices a minute
-// than it has entries. When all are in use, the entry written longest ago
-// makes room. Every other board compiles this file empty.
+// Search the bounded cache in full. When all entries are in use, the one
+// written longest ago makes room. Lookup never allocates. Every other board
+// compiles this file empty.
 #if defined(CYD_GPS)
 #include "wardrive_capture.h"
 

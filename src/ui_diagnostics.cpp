@@ -11,6 +11,9 @@
 #if defined(CYD_GPS)
 #include "sd_row.h"   // degreesText() for the FIX line
 #endif
+#if defined(CYD_GPS_ELECROW)
+#include "cyd_gps_uart.h"
+#endif
 
 static void backButtonRect(int screenW, int screenH, int& x, int& y, int& w, int& h) {
     Theme::ButtonBarGeom g = Theme::computeButtonBar(screenW, screenH);
@@ -35,6 +38,13 @@ bool uiDiagnosticsHitBack(int x, int y, int screenW, int screenH) {
 // are not drawn. A tap on the body turns the page.
 static int s_page = 0, s_pages = 1, s_clipTop = 0, s_clipBottom = 32767, s_off = 0;
 void uiDiagnosticsNextPage() { s_page = (s_page + 1) % (s_pages > 0 ? s_pages : 1); }
+bool uiDiagnosticsPaged() {
+#if defined(CYD_GPS_ELECROW)
+    return true;
+#else
+    return Theme::compact();
+#endif
+}
 
 static int drawLine(TFT_eSPI& t, int y, uint16_t labelColor, const char* label, const char* fmt, ...) {
     const int fh = t.fontHeight();
@@ -65,12 +75,25 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
 
     Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
     int bodyTop = 16, bodyBottom = bar.y - 4;
+#if defined(CYD_GPS_ELECROW)
+    // Reserve a visible page cue, including on the 320x240 landscape CYD.
+    bodyBottom -= 12;
+#endif
     t.fillRect(0, bodyTop, w, bodyBottom - bodyTop, Theme::BG);
 
+#if defined(CYD_GPS_ELECROW)
+    t.setTextFont(1);
+#endif
     t.setTextSize(1);
     t.setTextWrap(false);
     int y = bodyTop + 2;
-    const bool paged = Theme::compact();
+    const bool paged = uiDiagnosticsPaged();
+#if defined(CYD_GPS_ELECROW)
+    // Whole-row gaps keep rows from falling across two page clip windows.
+    const int sectionGap = t.fontHeight() + 2;
+#else
+    const int sectionGap = 4;
+#endif
     const int pageH = (bodyBottom - bodyTop - 2) / (t.fontHeight() + 2) * (t.fontHeight() + 2);
     s_clipTop = paged ? bodyTop : 0;
     s_clipBottom = paged ? bodyBottom : 32767;
@@ -116,12 +139,56 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
         char clk[32];
         Clock::formatClock(clk, sizeof(clk));
         y = drawLine(t, y, Theme::CYAN, "CLOCK:", "%s%s", clk,
+#if defined(CYD_GPS_ELECROW)
+                     Clock::trusted() ? "" : " (time not set)");
+#else
                      Clock::trusted() ? "" : "  (TIME <epoch> over serial)");
+#endif
     }
     y = drawLine(t, y, Theme::CYAN, "HEAP:", "%lu free / %lu largest",
                  (unsigned long)info.freeHeap, (unsigned long)info.largestBlock);
 #if defined(CYD_GPS)
     if (info.gpsShown) {
+#if defined(CYD_GPS_ELECROW)
+        const uint32_t bytes = CydGpsUart::receivedBytes();
+        const bool uartReady = CydGpsUart::receiving() && CydGpsUart::rxBufferReady();
+        y = drawLine(t, y, Theme::CYAN, "GPS UART:", "%u RX%d %lu 8N1",
+                     CydGpsUart::uartNumber(), CydGpsUart::rxPin(), (unsigned long)CydGpsUart::baud());
+        y = drawLine(t, y, Theme::CYAN, "GPS RX:", "%lu bytes", (unsigned long)bytes);
+        y = drawLine(t, y, Theme::CYAN, "GOOD/BAD:", "%lu / %lu",
+                     (unsigned long)info.gpsGood, (unsigned long)info.gpsBad);
+        const bool receiverPosition = info.source == Gnss::Source::RECEIVER;
+        const char* state = !uartReady ? "UART unavailable" : !bytes ? "no serial bytes" :
+                            !info.gpsGood ? "bytes / no valid NMEA" : !receiverPosition ? "receiving / no receiver fix" :
+                            info.fresh ? "fresh fix" : info.fixAgeMs != UINT32_MAX ? "stale fix" :
+                            "receiving / no fix";
+        y = drawLine(t, y, info.fresh && receiverPosition && uartReady ? Theme::GREEN : Theme::CYAN,
+                     "GPS:", "%s", state);
+        y = drawLine(t, y, Theme::CYAN, "SATS:", "%u view / %u heard / %u used",
+                     info.view, info.heard, info.used);
+        // Position can fall back to a paired phone even while the receiver
+        // has NMEA but no solution. Keep its source and age separate from
+        // receiver health; only the physical receiver can feed this profile's
+        // wardrive export.
+        const char* source = receiverPosition ? "RECEIVER" : info.source == Gnss::Source::PHONE ?
+                             "PHONE (wardrive excluded)" : "BENCH (wardrive excluded)";
+        y = drawLine(t, y, Theme::CYAN, "SOURCE:", "%s", source);
+        y = drawLine(t, y, info.fresh && receiverPosition ? Theme::GREEN : Theme::CYAN,
+                     "POSITION:", "%s", info.fixAgeMs == UINT32_MAX ? "no fix" : info.fresh ? "fresh fix" : "stale fix");
+        if (info.fixAgeMs == UINT32_MAX) {
+            y = drawLine(t, y, Theme::CYAN, "FIX:", "none");
+        } else {
+            y = drawLine(t, y, Theme::CYAN, "FIX:", "%lus; est +-%u m",
+                         (unsigned long)(info.fixAgeMs / 1000), info.accM);
+            // Separate coordinates fit even the longest negative values in
+            // portrait. Accuracy is the existing HDOP estimate, not a survey.
+            char coordinate[16];
+            SdRow::degreesText(coordinate, sizeof coordinate, info.lat7, 5);
+            y = drawLine(t, y, Theme::CYAN, "LAT:", "%s", coordinate);
+            SdRow::degreesText(coordinate, sizeof coordinate, info.lon7, 5);
+            y = drawLine(t, y, Theme::CYAN, "LON:", "%s", coordinate);
+        }
+#else
         if (info.gpsGood == 0)
             y = drawLine(t, y, Theme::CYAN, "GPS:", "no data from the module");
         else
@@ -138,14 +205,27 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
             y = drawLine(t, y, info.fresh ? Theme::GREEN : Theme::CYAN, "FIX:", "%s,%s %s %lus",
                          la, lo, acc, (unsigned long)(info.fixAgeMs / 1000));
         }
+#endif
         // Two lines: the file name does not fit beside the counts at 320 px.
-        static const char* const WD[] = { "OFF", "NO CARD", "LOW MEMORY", "WAITING FOR FIX", "ON" };
+        static const char* const WD[] = { "OFF", "NO CARD", "LOW MEMORY", "WAITING FOR FIX", "ON", "WRITE ERROR" };
+#if defined(CYD_GPS_ELECROW)
+        // A status plus three ten-digit counters cannot fit on either CYD
+        // orientation (or in drawLine's value buffer). Give each a full row.
+        y = drawLine(t, y, Theme::CYAN, "WARDRIVE:", "%s", !info.wdOn ? "off" :
+                     info.wdState < sizeof WD / sizeof WD[0] ? WD[info.wdState] : "?");
+        if (info.wdOn) {
+            y = drawLine(t, y, Theme::CYAN, "WRITTEN:", "%lu", (unsigned long)info.wdWritten);
+            y = drawLine(t, y, Theme::CYAN, "REPEATS:", "%lu", (unsigned long)info.wdSkipped);
+            y = drawLine(t, y, Theme::CYAN, "DROPPED:", "%lu", (unsigned long)info.wdDropped);
+        }
+#else
         if (!info.wdOn)
             y = drawLine(t, y, Theme::CYAN, "WARDRIVE:", "off");
         else
             y = drawLine(t, y, Theme::CYAN, "WARDRIVE:", "%s, %lu written, %lu repeats, %lu dropped",
-                         info.wdState < 5 ? WD[info.wdState] : "?", (unsigned long)info.wdWritten,
+                         info.wdState < sizeof WD / sizeof WD[0] ? WD[info.wdState] : "?", (unsigned long)info.wdWritten,
                          (unsigned long)info.wdSkipped, (unsigned long)info.wdDropped);
+#endif
         y = drawLine(t, y, Theme::CYAN, "WIGLE:", "%s", info.wdFile && *info.wdFile ? info.wdFile : "no file yet");
     }
 #endif
@@ -202,7 +282,7 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
                      (unsigned)info.bbKept, (unsigned)info.bbCrashes, info.bbCrashes == 1 ? "" : "es",
                      when, wide ? " v" : "", wide ? info.bbLast.version : "");
     }
-    y += 4;
+    y += sectionGap;
 
     if (info.hasRaw) {
         y = drawLine(t, y, Theme::VAPOR_PURPLE, "RAW TOUCH:", "%s a=%d b=%d",
@@ -210,14 +290,14 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
     }
     y = drawLine(t, y, Theme::VAPOR_PURPLE, "MAPPED:", "%s x=%d y=%d",
                  info.touchValid ? "valid" : "--", info.mappedX, info.mappedY);
-    y += 4;
+    y += sectionGap;
 
     y = drawLine(t, y, Theme::VAPOR_PINK, "CAL SOURCE:", "%s",
                  info.calSource ? info.calSource
                                 : info.usingSavedCal ? "saved" : "compiled-in default");
     y = drawLine(t, y, Theme::VAPOR_PINK, "CAL RANGE:", "A[%d,%d] B[%d,%d]",
                  info.calA0, info.calA1, info.calB0, info.calB1);
-    y += 4;
+    y += sectionGap;
 
     // Frame cost. The push is a fixed byte count over SPI, so it moves
     // only if the bus clock does -- kept as its own figure so a change to
@@ -248,7 +328,7 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
                          (unsigned long)(info.bgUs / 1000), (unsigned long)((info.bgUs % 1000) / 100));
         }
     }
-    y += 4;
+    y += sectionGap;
 
     y = drawLine(t, y, Theme::GREEN, "LOG:", "%u entries, %lu lifetime",
                  (unsigned)eng.logCount(), (unsigned long)eng.lifetimeTotal());
@@ -259,7 +339,7 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
     // for ten minutes gives ten samples of each rather than one of a good
     // moment and one of a bad one.
     {
-        y += 4;
+        y += sectionGap;
         const MeshProbe::Stats ms = MeshProbe::stats();
         y = drawLine(t, y, ms.advOn ? Theme::GREEN : Theme::CYAN, "BLE SEEN:", "%u.%u /s, %s%s",
                      (unsigned)(ms.offRate / 10), (unsigned)(ms.offRate % 10),
@@ -289,10 +369,17 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
         s_pages = (y - bodyTop - 2 + pageH - 1) / pageH;
         if (s_pages < 1) s_pages = 1;
         if (s_page >= s_pages) s_page = 0;
-        char pg[12];
+        char pg[32];
+#if defined(CYD_GPS_ELECROW)
+        snprintf(pg, sizeof pg, "PAGE %d/%d - tap body", s_page + 1, s_pages);
+        t.fillRect(0, bar.y - 16, w, 12, Theme::BG);
+        t.setTextColor(Theme::CYAN, Theme::BG);
+        t.setCursor((w - t.textWidth(pg)) / 2, bar.y - 12);
+#else
         snprintf(pg, sizeof pg, "%d/%d", s_page + 1, s_pages);
         t.setTextColor(Theme::W95_SHADOW, Theme::BG);
         t.setCursor(6, bar.y + (bar.h - t.fontHeight()) / 2);
+#endif
         t.print(pg);
     }
     s_clipTop = 0; s_clipBottom = 32767; s_off = 0;

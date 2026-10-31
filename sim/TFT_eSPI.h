@@ -105,8 +105,8 @@ public:
         _rotation = r;
     }
     uint8_t getRotation() const { return _rotation; }
-    int16_t width()  const { return _w; }
-    int16_t height() const { return _h; }
+    virtual int16_t width()  const { return _w; }
+    virtual int16_t height() const { return _h; }
     void invertDisplay(bool) {}
     void fillScreen(uint32_t color) { fillRect(0, 0, _w, _h, color); }
 
@@ -590,6 +590,8 @@ public:
     void setColorDepth(uint8_t depth) { _depth = depth; }
     uint8_t getColorDepth() const { return _depth; }
     void* getPointer() { return _created ? (void*)_buf.data() : nullptr; }
+    int16_t width() const override { return _vpActive && _vpDatum ? _vpW : _w; }
+    int16_t height() const override { return _vpActive && _vpDatum ? _vpH : _h; }
 
     // Blits this sprite's buffer onto the parent at (x,y) -- the
     // real device's equivalent of an SPI DMA push to the panel; here
@@ -615,9 +617,12 @@ public:
     // rotation visibly stops resizing here -- a loud failure, not a
     // silently wrong one.
     void setViewport(int32_t x, int32_t y, int32_t w, int32_t h, bool datum = true) override {
-        if (_created && x == 0 && y == 0 && w > 0 && h > 0 && (w != _w || h != _h)) {
-            _w = w; _h = h;
-            _buf.assign((size_t)w * h, 0x0000);
+        if (_created && x == 0 && y == 0 && w > 0 && h > 0 &&
+            (_iwidth != _w || _iheight != _h)) {
+            // resizeInPlace changes the protected buffer geometry first;
+            // a viewport larger than the buffer is only a drawing window.
+            _w = _iwidth; _h = _iheight;
+            _buf.assign((size_t)_w * _h, 0x0000);
             syncGeom();
             _vpActive = false;
             return;
@@ -703,6 +708,11 @@ public:
         for (int32_t i = 0; i < w; i++) drawPixel(x + i, y, src[i]);
     }
     uint16_t readPixel(int32_t x, int32_t y) override {
+        if (_vpActive) {
+            if (_vpDatum) { x += _vpX; y += _vpY; }
+            else if (x < _vpX || y < _vpY) return 0;
+            if (x >= _vpW + _vpX || y >= _vpH + _vpY) return 0;
+        }
         if (x < 0 || y < 0 || x >= _w || y >= _h) return 0;
         return _buf[(size_t)y * _w + x];
     }

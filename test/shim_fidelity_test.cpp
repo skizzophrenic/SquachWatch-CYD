@@ -165,5 +165,23 @@ int main() {
         ck("radius 2 still draws", drawn > 0);
     }
 
+    suite("A logical viewport does not enlarge the sprite allocation");
+    {
+        TFT_eSPI parent(320, 240);
+        TFT_eSprite sprite(&parent);
+        sprite.createSprite(320, 160);
+        void* allocation = sprite.getPointer();
+        sprite.setViewport(0, 0, 320, 240, true);
+        TFT_eSPI& canvas = sprite;
+        ck("drawing sees full-screen dimensions", canvas.width() == 320 && canvas.height() == 240);
+        ck("viewport keeps the original allocation", sprite.getPointer() == allocation);
+        sprite.resetViewport();
+        ck("reset reveals actual buffer height", sprite.height() == 160);
+        sprite.setViewport(0, -160, 320, 240, true);
+        sprite.drawPixel(3, 170, EDGE);
+        ck("readPixel applies the same viewport datum as drawing", sprite.readPixel(3, 170) == EDGE);
+        sprite.resetViewport();
+        ck("pixel was stored inside the physical buffer", sprite.readPixel(3, 10) == EDGE);
+    }
     return report();
 }

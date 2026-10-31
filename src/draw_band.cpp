@@ -1,6 +1,6 @@
 #include "draw_band.h"
 
-#if defined(CYD35)
+#if SQW_BANDED_FRAME
 namespace DrawBand {
 // The whole screen until main() says otherwise, so a screen that has not been
 // taught about bands draws exactly as it always did.

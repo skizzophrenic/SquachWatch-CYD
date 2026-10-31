@@ -6,3 +6,4 @@ __pycache__/
 squachsim.png
 build/
 squachsim-tab5
+build-*/

@@ -329,7 +329,7 @@ bool uiAlertHitMoreInfo(int x, int y, int screenW, int screenH) {
 }
 
 void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
-                 bool infoPending, const char* infoTypeName, const char* infoText) {
+                 bool infoPending, const char* infoTypeName, const char* infoText, bool advance) {
     int w = t.width();
     int h = t.height();
 
@@ -359,7 +359,7 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
         // tunnel rings and planets especially) pack their own literals.
         // The scanline pass catches whatever the palette could not.
         Theme::Palette saved = Theme::dimPaletteForOverlay(ALERT_PALETTE_DIM);
-        Theme::drawActiveBackground(t, now, 0, h, eng);
+        Theme::drawActiveBackground(t, now, 0, h, eng, advance);
         Theme::restorePalette(saved);
         Theme::dimRegion(t, 0, 0, w, h, ALERT_BACKGROUND_DIM);
     } else {
