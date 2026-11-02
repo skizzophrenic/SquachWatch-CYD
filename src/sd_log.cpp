@@ -7,8 +7,8 @@
 #include "gnss.h"
 #endif
 #include <SD.h>
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
-// The Freenove S3's slot is wired for SDMMC, not SPI: every card call in this
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(NMTECH28)
+// The Freenove S3's slot (and the NMTech 2.8's) is wired for SDMMC, not SPI: every card call in this
 // file goes through CARD, which is SD_MMC there and SD everywhere else. Both
 // are an fs::FS, so open/remove/cardSize read the same either way.
 #include <SD_MMC.h>
@@ -68,7 +68,12 @@ bool SdLog::begin() {
     return false;
 #endif
     Serial.printf("[sd] mounting: heap %lu, largest block %lu\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
+#if defined(NMTECH28)
+    // SDMMC, one bit wide: CLK 11, CMD 10, D0 9, as the stock firmware's SD
+    // test mounts it (SD_MMC.setPins(11, 10, 9), then begin in 1-bit mode).
+    SD_MMC.setPins(11, 10, 9);
+    if (!SD_MMC.begin("/sd", true, false, SDMMC_FREQ_DEFAULT, SD_MAX_FILES)) {
+#elif defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
     // SDMMC on the S3's GPIO matrix. Pins from Freenove's own SDMMC sketch and
     // the schematic: CLK 38, CMD 40, D0 39, D1 41, D2 48, D3 47 on the 2.8",
     // CLK 5, CMD 4, D0 6, D1 7, D2 2, D3 3 on the 3.5", each with a 10K

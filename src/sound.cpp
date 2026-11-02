@@ -37,6 +37,14 @@ namespace Sound {
 #if defined(FREENOVE_S3_35)
 static const int PIN_MCK = 17, PIN_BCK = 18, PIN_WS = 21, PIN_DOUT = 15;
 static const int PIN_AMP = 1;
+#elif defined(NMTECH28)
+// The NMTech 2.8: an ES8311 at 0x18 on the touch bus, I2S MCLK 12 / BCK 13 /
+// WS 15 / DOUT 16 (the stock firmware's speaker test), and the amplifier's
+// enable not a GPIO but P7 of the TCA9554 expander, HIGH to play -- set
+// through main.cpp, which owns the expander (P1 of it is the panel's reset).
+static const int PIN_MCK = 12, PIN_BCK = 13, PIN_WS = 15, PIN_DOUT = 16;
+static const int PIN_AMP = -1;
+#define SOUND_AMP_ON_EXPANDER 1
 #elif defined(TDECK_PLUS)
 // The T-Deck Plus: a MAX98357A class-D amp straight on I2S (LilyGo's
 // BOARD_I2S_BCK 7 / WS 5 / DOUT 6). No codec to set up, no master clock, and
@@ -57,7 +65,11 @@ static const i2s_port_t PORT    = I2S_NUM_0;
 static const int        CHUNK   = 256;        // frames per write, 16 ms
 
 static bool          s_ok      = false;
+#if defined(SOUND_AMP_ON_EXPANDER)
+static bool          s_ampLow  = false;       // P7 HIGH plays
+#else
 static bool          s_ampLow  = true;        // the amp plays with the pin LOW
+#endif
 static volatile bool s_hush    = false;
 static QueueHandle_t s_q       = nullptr;
 static TaskHandle_t  s_task    = nullptr;
@@ -164,6 +176,24 @@ static uint8_t rd(uint8_t r) {
 // master, but they are set to the table's 4.096 MHz / 16 kHz row anyway, as
 // the driver does. Volume register 32 sits at the driver's 85%.
 static bool codecInit() {
+#if defined(NMTECH28)
+    // The stock firmware's speaker test, register for register (decompiled
+    // from its flash): the same 16 kHz, MCLK 256x, slave, 16-bit I2S as below,
+    // plus the analog reference and power registers (10, 11, 14, 17, 44) the
+    // shorter sequence leaves at their reset values -- and with those, this
+    // board's speaker stayed silent (2026-10-20).
+    static const uint8_t seq[][2] = {
+        {0x44, 0x08}, {0x44, 0x08}, {0x01, 0x30}, {0x02, 0x00}, {0x03, 0x10}, {0x16, 0x24},
+        {0x04, 0x20}, {0x05, 0x00}, {0x0B, 0x00}, {0x0C, 0x00}, {0x10, 0x1F}, {0x11, 0x7F},
+        {0x00, 0x80}, {0x01, 0x3F}, {0x07, 0x00}, {0x08, 0xFF}, {0x06, 0x03}, {0x09, 0x0C},
+        {0x0A, 0x0C}, {0x13, 0x10}, {0x1B, 0x0A}, {0x1C, 0x6A}, {0x44, 0x58}, {0x17, 0xBF},
+        {0x0E, 0x02}, {0x12, 0x00}, {0x14, 0x1A}, {0x0D, 0x01}, {0x15, 0x40}, {0x31, 0x00},
+        {0x37, 0x08}, {0x45, 0x00}, {0x32, 0xD3},
+    };
+    for (const auto& r : seq)
+        if (!wr(r[0], r[1])) return false;
+    return true;
+#endif
     if (!wr(0x00, 0x1F)) return false;      // reset everything
     delay(20);
     wr(0x00, 0x00);
@@ -190,7 +220,14 @@ static bool codecInit() {
 }
 
 // ---- the amplifier ---------------------------------------------------------
+#if defined(SOUND_AMP_ON_EXPANDER)
+}  // namespace Sound
+void nmtechExpanderSet(uint8_t mask, bool high);   // main.cpp
+namespace Sound {
+static void amp(bool on) { nmtechExpanderSet(0x80, on != s_ampLow); }
+#else
 static void amp(bool on) { if (PIN_AMP >= 0) digitalWrite(PIN_AMP, (on == s_ampLow) ? LOW : HIGH); }
+#endif
 
 // ---- rendering -------------------------------------------------------------
 // The whole sound is rendered into a float buffer in PSRAM first (every board

@@ -53,6 +53,12 @@ class TFT_eSPI;
 #elif defined(ARDUINO_ARCH_ESP32) && (defined(FREENOVE_S3) || defined(TDECK_PLUS))
   // The T-Deck Plus takes the Freenove S3's route: the same chip, an SPI
   // panel, and pushSprite() cost it 40 of every 48 ms (measured 2026-10-12).
+  // NOT the NMTech 2.8, though it is the same shape: its ST7789 has no chip
+  // select and cannot resynchronise, and the DMA route blacks it out --
+  // started at the first push (the bus re-initialised under the panel), and
+  // again started before the panel's reset at boot, so it is the switching
+  // between the library's transactions and the driver's DMA ones, chunk by
+  // chunk, not the start (2026-10-20). It stays on pushSprite(), ~30 fps.
   #define SQW_FRAME_PUSH    1
   #define SQW_PUSH_DMA_ONLY 1
   #define SQW_PUSH_QSPI     0

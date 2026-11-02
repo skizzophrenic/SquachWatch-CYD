@@ -491,6 +491,8 @@ static void drawCrashCard(TFT_eSPI& t) {
 #define BL_PIN_S3   41   // the Freenove 3.5"'s, through a BSS138 (HIGH is on)
 #elif defined(TDECK_PLUS)
 #define BL_PIN_S3   42   // the T-Deck's 16-step driver chip: HIGH is full, pulses step it (tdeckBacklight)
+#elif defined(NMTECH28)
+#define BL_PIN_S3   6    // the NMTech 2.8's (HIGH is on); the stock firmware PWMs it too
 #else
 #define BL_PIN_S3   45   // the T-Watch S3's and the Freenove S3's, both
 #endif
@@ -531,6 +533,10 @@ constexpr bool PANEL_NEEDS_INVERSION = true;
 #elif defined(TDECK_PLUS)
 // LilyGo's T-Deck setup turns inversion on for its ST7789. UNCONFIRMED by
 // eye until the board is looked at; INVERT in Settings flips it if wrong.
+constexpr bool PANEL_NEEDS_INVERSION = true;
+#elif defined(NMTECH28)
+// The stock firmware's init sends 0x21, and red/green/blue/white came out
+// right with it on the bench 2026-10-20.
 constexpr bool PANEL_NEEDS_INVERSION = true;
 #elif defined(CYD32C)
 // The same IPS ST7789 as the Freenove 3.2". UNCONFIRMED until looked at;
@@ -1565,6 +1571,180 @@ static bool readTouchRaw(int16_t& a, int16_t& b) {
 #endif
 #endif
 }
+
+#if defined(NMTECH28)
+// ---- NMTech 2.8: the expander, the panel's reset and tuning, the battery --
+// The ST7789's chip select is tied low, so the panel cannot resynchronise on
+// CS: a single stray clock edge (an ESP reset mid-byte, the SPI pins coming
+// up, the clock's idle level changing to mode 3's, the DMA engine and the
+// library trading the bus) shifts every bit after it for good, and the screen
+// stays black whatever is sent. Found on the bench 2026-10-20: every init
+// without a hardware reset first did nothing at all. The reset line is P1 of the TCA9554 at 0x20; P7 of
+// the same expander is the speaker amplifier's enable (the stock firmware's
+// "PA_CTRL (TCA9554 IO7)"). Those two are its only outputs.
+static const int NMTECH_I2C_SDA = 8, NMTECH_I2C_SCL = 7;
+static const uint8_t NMTECH_EXPANDER = 0x20;
+static const uint8_t NMTECH_EXP_LCD_RST = 0x02, NMTECH_EXP_AMP = 0x80;
+static uint8_t s_nmtechExpOut = NMTECH_EXP_LCD_RST;
+static void nmtechExpanderWrite(uint8_t reg, uint8_t v) {
+    Wire.beginTransmission(NMTECH_EXPANDER);
+    Wire.write(reg);
+    Wire.write(v);
+    Wire.endTransmission();
+}
+// One output bit of the expander, the others left as they are. sound.cpp's
+// amplifier enable comes through here, so the panel's reset is never touched
+// by it.
+void nmtechExpanderSet(uint8_t mask, bool high) {
+    s_nmtechExpOut = high ? (s_nmtechExpOut | mask) : (s_nmtechExpOut & ~mask);
+    nmtechExpanderWrite(1, s_nmtechExpOut);
+}
+static void nmtechPanelReset() {
+    Wire.begin(NMTECH_I2C_SDA, NMTECH_I2C_SCL, 400000);
+    nmtechExpanderWrite(3, (uint8_t)~(NMTECH_EXP_LCD_RST | NMTECH_EXP_AMP));   // those two outputs, the rest inputs
+    nmtechExpanderSet(NMTECH_EXP_LCD_RST, false);   // reset held
+    delay(100);
+    nmtechExpanderSet(NMTECH_EXP_LCD_RST, true);    // released
+    delay(100);
+}
+// The stock firmware's porch, gate, VCOM, power and gamma settings (its init
+// table, read out of the flash). TFT_eSPI's own ST7789 init gets a picture;
+// these are what this panel was tuned with.
+static void nmtechPanelTune() {
+    struct Reg { uint8_t cmd; uint8_t n; uint8_t d[14]; };
+    static const Reg regs[] = {
+        {0xB2, 5,  {0x0C, 0x0C, 0x00, 0x33, 0x33}},
+        {0xB7, 1,  {0x35}},
+        {0xBB, 1,  {0x28}},
+        {0xC0, 1,  {0x0C}},
+        {0xC2, 2,  {0x01, 0xFF}},
+        {0xC3, 1,  {0x10}},
+        {0xC4, 1,  {0x20}},
+        {0xC6, 1,  {0x0F}},
+        {0xD0, 2,  {0xA4, 0xA1}},
+        {0xE0, 14, {0xD0, 0x00, 0x02, 0x07, 0x0A, 0x28, 0x32, 0x44, 0x42, 0x06, 0x0E, 0x12, 0x14, 0x17}},
+        {0xE1, 14, {0xD0, 0x00, 0x02, 0x07, 0x0A, 0x28, 0x31, 0x54, 0x47, 0x0E, 0x1C, 0x17, 0x1B, 0x1E}},
+    };
+    for (const Reg& r : regs) {
+        tft.writecommand(r.cmd);
+        for (uint8_t i = 0; i < r.n; i++) tft.writedata(r.d[i]);
+    }
+}
+// The first init parks the clock at mode 3's idle level, the reset clears
+// whatever bit offset the panel was left at, and the second init is the one
+// it actually hears. No DMA on this board: see frame_push.h.
+static void axpBegin();
+static void nmtechPanelBegin() {
+    // The PMU first: its setup moves rail voltages, and a step on a rail is
+    // as good as a stray clock edge to this panel -- run after the panel was
+    // up, the screen went black (2026-10-21). Before the reset, it cannot.
+    Wire.begin(NMTECH_I2C_SDA, NMTECH_I2C_SCL, 400000);
+    axpBegin();
+    delay(50);
+    tft.init();
+    nmtechPanelReset();
+    tft.init();
+    nmtechPanelTune();
+}
+
+// The battery, through the AXP2101 at 0x34 on the same bus (the stock
+// firmware's PMU page reads these registers): 0x00 bit 5 USB power present,
+// bit 3 a cell on the connector; 0x01 bits 6:5 the current's direction, 01
+// charging; 0x34/0x35 the cell in mV (14 bits); 0xA4 the chip's own fuel
+// gauge percent. The ADC's battery channel and the gauge are switched on in
+// axpBegin(), as the stock firmware does.
+static const uint8_t AXP_ADDR = 0x34;
+static bool s_axpOk = false;
+static bool axpRead(uint8_t reg, uint8_t& v) {
+    Wire.beginTransmission(AXP_ADDR);
+    Wire.write(reg);
+    if (Wire.endTransmission(false) != 0 || Wire.requestFrom(AXP_ADDR, (uint8_t)1) != 1) return false;
+    v = (uint8_t)Wire.read();
+    return true;
+}
+static void axpWrite(uint8_t reg, uint8_t v) {
+    Wire.beginTransmission(AXP_ADDR);
+    Wire.write(reg);
+    Wire.write(v);
+    Wire.endTransmission();
+}
+static void axpBegin() {
+    uint8_t id = 0, v = 0;
+    s_axpOk = axpRead(0x03, id) && (id == 0x4A || id == 0x47);
+    if (s_axpOk) {
+        if (axpRead(0x30, v)) axpWrite(0x30, v | 0x01);   // ADC: battery voltage
+        if (axpRead(0x18, v)) axpWrite(0x18, v | 0x08);   // the fuel gauge
+        // The stock factory test's PMU setup, register for register (each a
+        // read-modify-write of the masked bits): the charger and input
+        // limits, every DC-DC and LDO voltage, and every rail on -- DCDC2-5
+        // and DLDO2 included, which the board comes up without. Its speaker
+        // test runs after this one, and the speaker is silent without it
+        // (2026-10-20: the codec, I2S and amplifier enable all matched the
+        // stock firmware's, and nothing played until these were in).
+        static const uint8_t seq[][3] = {
+            {0x16, 0x07, 0x04}, {0x14, 0x70, 0x00}, {0x28, 0xFF, 0xFF}, {0x29, 0xFF, 0xFF},
+            {0x63, 0x0F, 0x08}, {0x23, 0xFF, 0x00}, {0x15, 0x0F, 0x00}, {0x96, 0x1F, 0x0A},
+            {0x83, 0x7F, 0x32}, {0x84, 0x7F, 0x69}, {0x85, 0x7F, 0x32}, {0x86, 0x1F, 0x13},
+            {0x92, 0x1F, 0x1C}, {0x93, 0x1F, 0x1C}, {0x94, 0x1F, 0x1C}, {0x95, 0x1F, 0x1C},
+            {0x97, 0x1F, 0x17}, {0x98, 0x1F, 0x0A}, {0x99, 0x1F, 0x1C}, {0x9A, 0x1F, 0x1C},
+            {0x80, 0x1E, 0x1E}, {0x90, 0xFF, 0xFF}, {0x91, 0x01, 0x01},
+        };
+        for (const auto& r : seq)
+            if (axpRead(r[0], v)) axpWrite(r[0], (uint8_t)((v & ~r[1]) | (r[1] & r[2])));
+    }
+    Serial.printf("[batt] AXP2101 %s (chip id 0x%02X)\n", s_axpOk ? "answered" : "DID NOT ANSWER", (unsigned)id);
+}
+// One reading every two seconds, shared by the lamp and the SYSTEM row.
+struct AxpReading { bool ok; bool cell; uint16_t mv; uint8_t pct; bool charging; bool usb; };
+static AxpReading axpNow() {
+    static uint32_t at = 0;
+    static AxpReading r = { false, false, 0, 0, false, false };
+    const uint32_t now = millis();
+    if (s_axpOk && (!at || now - at >= 2000)) {
+        at = now ? now : 1;
+        uint8_t st1 = 0, st2 = 0, vh = 0, vl = 0, pct = 0;
+        r.ok = axpRead(0x00, st1) && axpRead(0x01, st2) && axpRead(0x34, vh) && axpRead(0x35, vl) && axpRead(0xA4, pct);
+        if (r.ok) {
+            r.usb      = (st1 & 0x20) != 0;
+            r.cell     = (st1 & 0x08) != 0;
+            r.mv       = (uint16_t)(((vh & 0x3F) << 8) | vl);
+            r.pct      = pct > 100 ? 100 : pct;
+            r.charging = ((st2 >> 5) & 0x03) == 0x01;
+        }
+    }
+    return r;
+}
+// The SYSTEM page's BATTERY row: "81% 4.12V", with "+" while it charges.
+void boardBatteryLine(char* out, size_t n) {
+    const AxpReading a = axpNow();
+    if (!s_axpOk || !a.ok) { snprintf(out, n, "NO PMU"); return; }
+    if (!a.cell)           { snprintf(out, n, "NONE"); return; }
+    snprintf(out, n, "%u%% %u.%02uV%s", (unsigned)a.pct, (unsigned)(a.mv / 1000), (unsigned)(a.mv % 1000 / 10),
+             a.charging ? "+" : "");
+}
+// The home screen's lava lamp (uiClearSetBatterySource), and the speaker's
+// cable sounds and low-battery sigh, as on the Freenove (not in the first
+// minute, once per dip under 10%).
+static bool boardBatteryState(uint8_t& pct, bool& charging) {
+    const AxpReading a = axpNow();
+    if (!s_axpOk || !a.ok || !a.cell) return false;
+    static bool seen = false, wasUsb = false, lowSaid = false;
+    const uint32_t now = millis();
+    if (seen && now > 60000 && a.usb != wasUsb) Sound::play(a.usb ? Sound::Id::PLUG_IN : Sound::Id::UNPLUG);
+    if (!a.usb && a.pct < 10 && !lowSaid && now > 60000) { lowSaid = true; Sound::play(Sound::Id::LOW_BATTERY); }
+    else if (a.pct >= 15 || a.usb) lowSaid = false;
+    seen = true; wasUsb = a.usb;
+    pct = a.pct; charging = a.charging || a.usb;
+    return true;
+}
+// BATT on the console: what the PMU says right now.
+static void boardBatteryPrintLog() {
+    const AxpReading a = axpNow();
+    Serial.printf("[batt] AXP2101 %s: cell %s, %u mV, %u%%, %s, USB %s\n", s_axpOk && a.ok ? "ok" : "unreadable",
+                  a.cell ? "present" : "absent", (unsigned)a.mv, (unsigned)a.pct,
+                  a.charging ? "charging" : "not charging", a.usb ? "in" : "out");
+}
+#endif
 
 #if defined(TDECK_PLUS)
 // ---- T-Deck Plus: power rail, bus tidying, and the stepped backlight ------
@@ -4266,7 +4446,11 @@ void setup() {
 #endif
 #endif
 
+#if defined(NMTECH28)
+    nmtechPanelBegin();   // init, DMA, reset, init again: see its comment
+#else
     tft.init();
+#endif
 #if SQW_SPEAKER
     bootStage(1);
 #endif
@@ -4646,6 +4830,16 @@ void setup() {
     uiClearSetBatterySource(boardBatteryState);
     Sound::begin();                       // the codec is on the touch bus, now up
     Serial.printf("[power] boot: %s, wake cause %d\n", resetReasonName(), (int)(s_wokeFromOff ? s_offWakeCause : esp_sleep_get_wakeup_cause()));
+#elif defined(NMTECH28)
+    // The NMTech 2.8's FT6336U (chip ID 0x64), on I2C SDA 8 / SCL 7 at 0x38,
+    // the bus nmtechPanelReset() already brought up. No reset line of its own.
+    CapTouch::begin(NMTECH_I2C_SDA, NMTECH_I2C_SCL, -1, 0x38);
+    usingCapTouch = CapTouch::probe();
+    Serial.println(usingCapTouch ? "NMTech 2.8 -- FT6336 capacitive touch answered."
+                                 : "NMTech 2.8 -- FT6336 did not answer; no touch.");
+    boardBatteryPrintLog();
+    uiClearSetBatterySource(boardBatteryState);
+    Sound::begin();                       // the ES8311 is on the touch bus, now up
 #elif defined(FREENOVE_S3)
     // The Freenove S3 2.8"'s FT6336, on I2C SDA 16 / SCL 15 at 0x38, reset on
     // GPIO18 (active low). The ES8311 codec shares the bus at 0x18. FNK0104A
@@ -5961,7 +6155,7 @@ void loop() {
         }, nullptr);
     }
 #endif
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(NMTECH28)
     if (g_consoleBatt) { g_consoleBatt = false; boardBatteryPrintLog(); }
     // The speaker's housekeeping: hushed while the saver has the screen
     // dimmed; a chime for a squad message that just landed (once per
@@ -9293,6 +9487,8 @@ void loop() {
             info.boardName = "Cardputer ADV LAB";
 #elif defined(TDECK_PLUS)
             info.boardName = "tdeck-plus LAB";
+#elif defined(NMTECH28)
+            info.boardName = "nmtech28 LAB";
 #elif defined(FREENOVE_S3_35)
             info.boardName = "freenove-s3-35 BETA";
 #elif defined(FREENOVE_S3_40)
