@@ -31,10 +31,20 @@
 #include <esp_heap_caps.h>
 #include "settings.h"
 #include "clock.h"
+#if defined(CORE2)
+#include "core2_power.h"
+#endif
 
 namespace Sound {
 
-#if defined(FREENOVE_S3_35)
+#if defined(CORE2)
+// The M5Stack Core2: an NS4168 class-D amp straight on I2S (M5Unified's Core2
+// speaker pins). No codec and no master clock. Its enable is an output of the
+// power chip -- AXP192 GPIO2 or AXP2101 ALDO3 -- see Core2Power::speaker().
+static const int PIN_MCK = -1, PIN_BCK = 12, PIN_WS = 0, PIN_DOUT = 2;
+static const int PIN_AMP = -1;
+#define SOUND_NO_CODEC 1
+#elif defined(FREENOVE_S3_35)
 static const int PIN_MCK = 17, PIN_BCK = 18, PIN_WS = 21, PIN_DOUT = 15;
 static const int PIN_AMP = 1;
 #elif defined(TDECK_PLUS)
@@ -190,7 +200,11 @@ static bool codecInit() {
 }
 
 // ---- the amplifier ---------------------------------------------------------
+#if defined(CORE2)
+static void amp(bool on) { Core2Power::speaker(on); }
+#else
 static void amp(bool on) { if (PIN_AMP >= 0) digitalWrite(PIN_AMP, (on == s_ampLow) ? LOW : HIGH); }
+#endif
 
 // ---- rendering -------------------------------------------------------------
 // The whole sound is rendered into a float buffer in PSRAM first (every board
