@@ -58,7 +58,7 @@ static uint8_t s_dexCaught = 0;
 // has turned off) are filtered out by visibleRows() below rather than
 // removed here, so their SettingsRow values stay stable regardless of
 // which mode is active.
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(MARAUDER_V8) || defined(TDECK_PLUS)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(MARAUDER_V8) || defined(TDECK_PLUS) || defined(CORE2)
 void boardBatteryLine(char* out, size_t n);    // main.cpp: the divider on GPIO9
 #endif
 #if defined(TWATCH_S3)
@@ -73,7 +73,7 @@ static const SettingsRow ALL_ROWS[] = {
     // to ten rows, so the main list carries one row that opens it.
     SettingsRow::WATCH_SETTINGS,
 #endif
-    SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE, SettingsRow::AUTO_QUIET,
+    SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE, SettingsRow::DESK_FULL, SettingsRow::AUTO_QUIET,
 #if defined(CROWPANEL7)
     // Beside ALERT FILTER and AUTO SNOOZE because it is about alerts: one
     // switch, not a page of knobs like the light. Compiled only for the
@@ -111,6 +111,9 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::REPLAY_INTRO, SettingsRow::SHOW_OFF, SettingsRow::VIEW_DIARY,
     SettingsRow::BINGO, SettingsRow::DEX, SettingsRow::DESK_MODE,
     SettingsRow::POWER_SAVER,
+#if defined(CORE2)
+    SettingsRow::CORE2_BUZZ,
+#endif
 #if defined(CYD_GPS)
     SettingsRow::WATCH_WARDRIVE,   // the watch's row and setting, on the CYD GPS builds
 #endif
@@ -188,7 +191,7 @@ static const uint8_t WATCH_ROWS_N = sizeof(WATCH_ROWS) / sizeof(WATCH_ROWS[0]);
 // The SYSTEM page: the rarely-needed machinery, off the main list.
 static const SettingsRow SYSTEM_ROWS[] = {
     SettingsRow::PRIVACY,
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(MARAUDER_V8) || defined(TDECK_PLUS)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(MARAUDER_V8) || defined(TDECK_PLUS) || defined(CORE2)
     SettingsRow::BOARD_BATTERY,
 #endif
 #if SQUACH_LORA && defined(TDECK_PLUS)
@@ -211,6 +214,7 @@ static const SettingsRow DESK_ROWS[] = {
     SettingsRow::DESK_OPEN, SettingsRow::DESK_BACKGROUND,
     SettingsRow::CLOCK_FONT, SettingsRow::CLOCK_SIZE, SettingsRow::CLOCK_BACKDROP,
     SettingsRow::CLOCK_FORMAT,
+    SettingsRow::DESK_ALERT,
     SettingsRow::TIME_ZONE,
 #if SQUACH_MESH
     SettingsRow::DESK_SQUAD, SettingsRow::DESK_CROWD, SettingsRow::DESK_VISIT,
@@ -290,6 +294,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::CLOCK_SIZE:
         case SettingsRow::CLOCK_BACKDROP:
         case SettingsRow::CLOCK_FORMAT:
+        case SettingsRow::DESK_ALERT:
             return RowGroupId::DESK;
         case SettingsRow::DESK_SQUAD:
         case SettingsRow::DESK_CROWD:
@@ -325,9 +330,13 @@ static RowGroupId groupFor(SettingsRow r) {
             return RowGroupId::FONTS;
         case SettingsRow::BORING_MODE:
         case SettingsRow::CONFIDENCE:
+        case SettingsRow::DESK_FULL:
         case SettingsRow::AUTO_QUIET:
 #if defined(CROWPANEL7)
         case SettingsRow::BUZZER:
+#endif
+#if defined(CORE2)
+        case SettingsRow::CORE2_BUZZ:
 #endif
 #if SQW_SOUND_ROWS
         case SettingsRow::SOUND:
@@ -1173,6 +1182,9 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
         case SettingsRow::CLOCK_FORMAT:
             label = "CLOCK FORMAT"; value = Settings::clock24Hour() ? "24 HOUR" : "12 HOUR";
             break;
+        case SettingsRow::DESK_ALERT:
+            label = "ALERT POPUP"; value = Settings::deskAlertBig() ? "BIG" : "SMALL";
+            break;
 #if SQUACH_MESH
         case SettingsRow::DESK_SQUAD:
             label = "SQUAD ON DESK"; value = Settings::deskSquad() ? "ON" : "OFF";
@@ -1210,6 +1222,9 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             break;
         case SettingsRow::CONFIDENCE:
             label = "ALERT FILTER"; value = Settings::minConfidenceLabel();
+            break;
+        case SettingsRow::DESK_FULL:
+            label = "DESK ALERT"; value = Settings::deskAlertFull() ? "FULL SCREEN" : "POPUP";
             break;
         case SettingsRow::AUTO_QUIET:
             label = "AUTO SNOOZE"; value = Settings::autoQuietLabel();
@@ -1258,7 +1273,7 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             snprintf(valBuf, valBufN, "%u", (unsigned)IgnoreList::count());
             value = valBuf;
             break;
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(MARAUDER_V8) || defined(TDECK_PLUS)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(MARAUDER_V8) || defined(TDECK_PLUS) || defined(CORE2)
         case SettingsRow::BOARD_BATTERY:
             label = "BATTERY"; boardBatteryLine(valBuf, valBufN); value = valBuf;
             break;
@@ -1353,6 +1368,11 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             else { snprintf(valBuf, valBufN, "%uh %02um", (unsigned)(m[1] / 60), (unsigned)(m[1] % 60)); value = valBuf; }
             break;
         }
+#if defined(CORE2)
+        case SettingsRow::CORE2_BUZZ:
+            label = "VIBRATE"; value = Settings::buzzModeName();
+            break;
+#endif
         case SettingsRow::POWER_SAVER:
             label = "POWER SAVER"; value = Settings::powerSaver() ? "ON" : "OFF";
             break;

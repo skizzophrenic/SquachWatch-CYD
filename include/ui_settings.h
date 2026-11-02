@@ -7,7 +7,7 @@
 // The speaker's two rows: on the boards with one, and in the emulator, where
 // they are listed only with SQUACHSIM_SPEAKER set (for the release clip) so
 // the web emulator never offers a sound it cannot make.
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || !defined(ESP32)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(CORE2) || !defined(ESP32)
 #define SQW_SOUND_ROWS 1
 #else
 #define SQW_SOUND_ROWS 0
@@ -61,13 +61,16 @@ enum class SettingsRow : uint8_t {
     DESK_CROWD,      // on the DESK MODE page: how many of them
     DESK_VISIT,      // on the DESK MODE page: one visitor chats, or does the whole visit
     CLOCK_FONT,      // on the DESK MODE page: segments or Bangers
-    CLOCK_SIZE,      // on the DESK MODE page: small, medium, large
+    CLOCK_SIZE,      // on the DESK MODE page: small, medium, large, extra-large
     CLOCK_BACKDROP,  // on the DESK MODE page: what plays inside the clock
+    DESK_FULL,       // beside ALERT FILTER: on the desk, a detection opens the full ALERT, or only the popup
+    DESK_ALERT,      // on the DESK MODE page: a detection is a small card, or a near full-screen box
     WATCH_BATTERY,   // the T-Watch only: charge and voltage, under WATCH
     WATCH_RADIO,     // the T-Watch only: the radio duty cycle, under WATCH
     WATCH_LISTEN,    // the T-Watch only: BLE LISTEN, how much of the time the receiver is open
     WATCH_IDLE_CPU,  // the T-Watch only: SLEEP CPU, the clock while the screen is asleep
     WATCH_BUZZ,      // the T-Watch only: buzz on an alert, OFF / HIGH / MED / LOW
+    CORE2_BUZZ,      // the Core2 only: the vibration motor, OFF / HIGH / MED / LOW, on the main list
     WATCH_SETTINGS,  // the T-Watch only: the row on the main list that opens the WATCH SETTINGS page
     WATCH_TEMP,      // the T-Watch only: the chip's temperature, a reading, under WATCH
     WATCH_WARDRIVE,  // the T-Watch only: WARDRIVE, every network and device with where, for WiGLE

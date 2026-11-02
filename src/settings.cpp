@@ -73,7 +73,9 @@ static bool        s_backgroundLocked = false;
 static uint8_t     s_deskBg     = 255;     // 255: not picked yet, follow s_background
 static bool        s_deskActive = false;
 static uint8_t     s_clockFont     = 0;   // 0 segments, 1 Bangers
-static uint8_t     s_clockSize     = 1;   // 0 small, 1 medium, 2 large
+static uint8_t     s_clockSize     = 1;   // 0 small, 1 medium, 2 large, 3 XL
+static bool        s_deskAlertFull = true;    // a desk detection opens the full ALERT by itself
+static bool        s_deskAlertBig  = false;   // the desk alert: a near full-screen box, not the small card
 static uint8_t     s_clockBackdrop = 0;   // 0 plain, 1 rain, 2 snow, 3 toasters, 4 fire, 5 stars, 6 fireflies
 static bool        s_clock24Hour   = false;
 // FONTS: per kind of text, 0..4 for -2..+2 around the built size (2 is as
@@ -191,8 +193,13 @@ static uint8_t  s_radioDutyIx  = RADIO_DUTY_DEFAULT;
 // stays off until somebody finds the row. Only the CrowPanel 7 shows it.
 static bool     s_buzzer       = false;
 // The speaker (sound.h): off until somebody finds the row, MED when they do.
+#if defined(CORE2)
+static uint8_t  s_soundMode    = 1;    // 0 OFF, 1 ALERTS, 2 ALL; the Core2 starts on ALERTS
+static uint8_t  s_soundVol     = 50;   // percent: the Core2's speaker is small and quiet
+#else
 static uint8_t  s_soundMode    = 0;    // 0 OFF, 1 ALERTS, 2 ALL
 static uint8_t  s_soundVol     = 25;   // percent: the speaker is loud, so it starts low
+#endif
 
 // ---- LoRa -----------------------------------------------------------------
 // SURVEY by default: the detector posture, everything in the band. FOCUS is
@@ -594,6 +601,8 @@ void load() {
     s_deskBg = s_prefs.getUChar("deskBg", 255);
     s_clockFont     = s_prefs.getUChar("clkfont", 0);
     s_clockSize     = s_prefs.getUChar("clksize", 1);
+    s_deskAlertBig  = s_prefs.getBool("dskabig", false);
+    s_deskAlertFull = s_prefs.getBool("dskafull", true);
     for (int i = 0; i < (int)FontKind::COUNT; i++) {
         s_fontStep[i] = s_prefs.getUChar(FONT_KEYS[i], FONT_DEFAULT[i]);
         if (s_fontStep[i] > 4) s_fontStep[i] = FONT_DEFAULT[i];
@@ -603,7 +612,7 @@ void load() {
     s_clockBackdrop = s_prefs.getUChar("clkbg", 0);
     s_clock24Hour   = s_prefs.getBool("clk24", false);
     if (s_clockFont > 1)     s_clockFont = 0;
-    if (s_clockSize > 2)     s_clockSize = 1;
+    if (s_clockSize > 3)     s_clockSize = 1;
     if (s_clockBackdrop >= CLOCK_BG_N) s_clockBackdrop = 0;
     if (s_deskBg != 255 && s_deskBg >= BACKGROUND_COUNT) s_deskBg = 255;
     s_brightness = s_prefs.getUChar("bri", 255);
@@ -663,9 +672,9 @@ void load() {
     // The T-Watch's BUZZ (haptics on an alert) already owns "buzz", and with
     // the opposite default, so the CrowPanel's buzzer keeps its own key.
     s_buzzer       = s_prefs.getBool("buzzer", false);
-    s_soundMode    = s_prefs.getUChar("sndMode", 0);
+    s_soundMode    = s_prefs.getUChar("sndMode", s_soundMode);
     if (s_soundMode > 2) s_soundMode = 0;
-    s_soundVol     = s_prefs.getUChar("sndLvl", 25);
+    s_soundVol     = s_prefs.getUChar("sndLvl", s_soundVol);
     if (s_soundVol > 100) s_soundVol = 25;
     s_loraMode     = s_prefs.getUChar("loraMode", 2);
     if (s_loraMode > 2) s_loraMode = 2;
@@ -792,8 +801,12 @@ uint8_t     clockFont()         { return s_clockFont; }
 const char* clockFontName()     { return s_clockFont ? "BANGERS" : "DIGITAL"; }
 void        cycleClockFont()    { s_clockFont = (uint8_t)((s_clockFont + 1) % 2); s_prefs.putUChar("clkfont", s_clockFont); }
 uint8_t     clockSize()         { return s_clockSize; }
-const char* clockSizeName()     { static const char* const N[3] = { "SMALL", "MEDIUM", "LARGE" }; return N[s_clockSize]; }
-void        cycleClockSize()    { s_clockSize = (uint8_t)((s_clockSize + 1) % 3); s_prefs.putUChar("clksize", s_clockSize); }
+const char* clockSizeName()     { static const char* const N[4] = { "SMALL", "MEDIUM", "LARGE", "X-LARGE" }; return N[s_clockSize]; }
+void        cycleClockSize()    { s_clockSize = (uint8_t)((s_clockSize + 1) % 4); s_prefs.putUChar("clksize", s_clockSize); }
+bool        deskAlertBig()      { return s_deskAlertBig; }
+bool        deskAlertFull()     { return s_deskAlertFull; }
+void        toggleDeskAlertFull(){ s_deskAlertFull = !s_deskAlertFull; s_prefs.putBool("dskafull", s_deskAlertFull); }
+void        toggleDeskAlertBig(){ s_deskAlertBig = !s_deskAlertBig; s_prefs.putBool("dskabig", s_deskAlertBig); }
 uint8_t     clockBackdrop()     { return s_clockBackdrop; }
 const char* clockBackdropName() {
     static const char* const N[CLOCK_BG_N] = { "PLAIN", "RAIN", "SNOW", "TOASTERS", "FIRE", "STARFIELD", "FIREFLIES" };

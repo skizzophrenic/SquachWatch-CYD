@@ -68,7 +68,8 @@ namespace Settings {
     Background deskBackground();
 
     // The desk clock. FONT: 0 the segment digits, 1 Bangers. SIZE: 0 small,
-    // 1 medium (the size it has always been), 2 large. BACKDROP: what plays
+    // 1 medium (the size it has always been), 2 large, 3 X-LARGE (half as big
+    // again as medium, held back where it would not fit). BACKDROP: what plays
     // inside its plate -- 0 plain, 1 digital rain, 2 snow, 3 flying toasters,
     // 4 fire, 5 starfield, 6 fireflies. The time format is 12 or 24 hour.
     uint8_t     clockFont();
@@ -77,6 +78,15 @@ namespace Settings {
     uint8_t     clockSize();
     const char* clockSizeName();
     void        cycleClockSize();
+    // deskAlertBig: a detection on the desk fills most of the screen for its
+    // few seconds, instead of the small card at the bottom left.
+    // deskAlertFull: on the desk, a detection opens the full ALERT screen at
+    // once, as it does on CLEAR (the default). Off, it is the popup above,
+    // and a tap on that opens the full screen.
+    bool        deskAlertFull();
+    void        toggleDeskAlertFull();
+    bool        deskAlertBig();
+    void        toggleDeskAlertBig();
     uint8_t     clockBackdrop();
     const char* clockBackdropName();
     void        cycleClockBackdrop();

@@ -34,7 +34,7 @@ void sayFocus(const char* l, uint32_t now) { s_line = l; s_lineUntil = now + 600
 Detection s_alert       = {};
 uint32_t  s_alertAt     = 0;
 bool      s_alertOn     = false;   // rather than testing s_alertAt, which can be 0
-int       s_cardX = 0, s_cardY = 0, s_cardW = 98;
+int       s_cardX = 0, s_cardY = 0, s_cardW = 98, s_cardH = 40;
 constexpr int      CARD_W = 98, CARD_H = 40;
 constexpr uint32_t CARD_MS = 9000;
 constexpr uint32_t FOCUS_MS = 25u * 60u * 1000u;
@@ -150,7 +150,7 @@ bool uiDeskAlertUp(uint32_t now) { return s_alertOn && now - s_alertAt < CARD_MS
 const Detection* uiDeskAlertDetection() { return &s_alert; }
 bool uiDeskHitAlert(int x, int y, uint32_t now) {
     return uiDeskAlertUp(now) && x >= s_cardX - 4 && x <= s_cardX + s_cardW + 4 &&
-           y >= s_cardY - 4 && y <= s_cardY + CARD_H + 4;
+           y >= s_cardY - 4 && y <= s_cardY + s_cardH + 4;
 }
 
 
@@ -336,6 +336,54 @@ static void drawPolaroid(TFT_eSPI& t, int top, float p, uint32_t now) {
 }
 #endif
 
+// The big alert: most of the screen, between the title bar and the buttons,
+// for the same nine seconds. The icon on the left, the type, the name and the
+// signal beside it, large enough to read from across a desk.
+static void drawAlertBig(TFT_eSPI& t, int barY, uint32_t now) {
+    const Detection& d = s_alert;
+    const uint16_t c = Theme::colorFor(d.type);
+    s_cardX = 8;
+    s_cardY = Theme::TITLE_ICON_BAND_H + 2;
+    s_cardW = t.width() - 16;
+    s_cardH = barY - 6 - s_cardY;
+    const int x = s_cardX, y = s_cardY, cw = s_cardW, ch = s_cardH;
+    const bool lit = (now - s_alertAt > 2000) || ((now / 250) & 1);
+    const uint16_t edge = lit ? c : Theme::W95_SHADOW;
+    t.fillRoundRect(x, y, cw, ch, 6, Theme::BG);
+    t.drawRoundRect(x, y, cw, ch, 6, edge);
+    t.drawRoundRect(x + 1, y + 1, cw - 2, ch - 2, 5, edge);
+    const int s = cw >= 280 ? 30 : 22;                       // the icon's half-size
+    const int iconCx = x + 14 + s;
+    t.fillRect(iconCx - s - 6, y + ch / 2 - s - 6, 2 * s + 12, 2 * s + 12, Theme::BG);
+    Theme::drawTypeIcon(t, d.type, iconCx, y + ch / 2 - 6, s);
+    const int tx = iconCx + s + 14;                           // the text column
+    const int avail = x + cw - 8 - tx;
+    const int sz = avail >= 11 * 18 ? 3 : 2;
+    const int cpl = avail / (6 * 2);                          // size-2 characters per line
+    char ty[16], who[24], pv[40], sig[16];
+    snprintf(ty, sizeof ty, "%.11s", detectionTypeName(d.type));
+    snprintf(who, sizeof who, "%.*s", cpl > 23 ? 23 : cpl,
+             d.name[0] ? Privacy::name(d.name, pv, sizeof pv) : vendorText(d));
+    snprintf(sig, sizeof sig, "%d dBm", d.rssi);
+    const int blockH = sz * 8 + 8 + 16 + 8 + 16;
+    int ty0 = y + (ch - blockH) / 2 - 4;
+    t.setTextSize(sz);
+    t.setTextColor(c, Theme::BG);
+    t.setCursor(tx, ty0); t.print(ty);
+    ty0 += sz * 8 + 8;
+    t.setTextSize(2);
+    t.setTextColor(Theme::WHITE, Theme::BG);
+    t.setCursor(tx, ty0); t.print(who);
+    ty0 += 16 + 8;
+    t.setTextColor(Theme::CYAN, Theme::BG);
+    t.setCursor(tx, ty0); t.print(sig);
+    t.setTextSize(1);
+    const char* hint = "TAP TO OPEN";
+    t.setTextColor(Theme::W95_SHADOW, Theme::BG);
+    t.setCursor(x + (cw - t.textWidth(hint)) / 2, y + ch - 12);
+    t.print(hint);
+}
+
 // compact: the narrow version that fits beside the clock's plate at the
 // top right, for when the message box has the bottom of the screen.
 static void drawAlertCard(TFT_eSPI& t, int barY, uint32_t now, bool compact, int leftX) {
@@ -345,7 +393,9 @@ static void drawAlertCard(TFT_eSPI& t, int barY, uint32_t now, bool compact, int
     // Bottom left, just above the buttons: out of the way of his bubble,
     // which lives at the top over the clock. He is the one thing on this
     // screen that can stand being partly covered for nine seconds.
+    if (Settings::deskAlertBig() && !compact) { drawAlertBig(t, barY, now); return; }
     s_cardW = compact ? 72 : CARD_W;
+    s_cardH = CARD_H;
     s_cardX = compact ? t.width() - s_cardW - 4 : leftX;
     s_cardY = compact ? 18 : barY - CARD_H - 4;
     const int x = s_cardX, y = s_cardY;
@@ -432,8 +482,16 @@ void uiDeskTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adva
     const bool set = Clock::trusted();
     // SIZE scales every measurement of the clock together. LARGE is held back
     // wherever it would not fit across the screen with its selected format.
-    static const float CLOCK_K[3] = { 0.78f, 1.0f, 1.3f };
-    float k = CLOCK_K[Settings::clockSize() < 3 ? Settings::clockSize() : 1];
+    static const float CLOCK_K[4] = { 0.78f, 1.0f, 1.3f, 1.875f };
+    float k = CLOCK_K[Settings::clockSize() < 4 ? Settings::clockSize() : 1];
+    // X-LARGE asks for 1.875x medium and takes as much of it as the screen
+    // allows without crowding Squachy: the digits may not run into the title
+    // bar's corner icons, or leave him under 76 px. Where dropping the plate
+    // to just under the icon row (17 px) buys a clearly bigger clock, it drops;
+    // where it would not, it stays up. Narrow and portrait screens keep 1.5x.
+    const bool xl = Settings::clockSize() == 3 && w >= 300 && !(h * 5 > w * 8);
+    bool lowered = false;
+    if (Settings::clockSize() == 3 && !xl) k = 1.5f;
     const bool bangers = Settings::clockFont() == 1;
     // A backdrop gets a few more pixels of plate round the time, so the
     // digits are framed by it rather than sitting on its edge.
@@ -447,7 +505,19 @@ void uiDeskTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adva
         const float scaled = 4.0f * 30.0f + 3.0f * 6.0f + 10.0f + (twelveHour ? 14.0f : 0.0f);
         const float fixedW = 8.0f + 2.0f * (float)pad;
         const float room   = (float)(w - (2 * Theme::TITLE_ICON_W + 2));
-        if (k * scaled + fixedW > room) k = (room - fixedW) / scaled;
+        if (xl) {
+            const float want = k;
+            float kUp = (room - fixedW) / scaled;                       // plate up: between the icons
+            if (kUp > want) kUp = want;
+            float kLo = ((float)(w - 8) - fixedW) / scaled;             // plate down: the whole width
+            const float kv = (float)((bar.y - 2) - 76 - 25 - 43 - pad) / 42.0f;   // and Squachy's 76 px
+            if (kLo > want) kLo = want;
+            if (kLo > kv) kLo = kv;
+            if (kLo > kUp + 0.1f) { lowered = true; k = kLo; } else k = kUp;
+            if (k < 1.3f) k = 1.3f;
+        } else if (k * scaled + fixedW > room) {
+            k = (room - fixedW) / scaled;
+        }
     }
     const int dh = (int)(42.0f * k + 0.5f), dw = (int)(30.0f * k + 0.5f);
     const int th = (int)(7.0f * k + 0.5f) < 3 ? 3 : (int)(7.0f * k + 0.5f);
@@ -500,7 +570,7 @@ void uiDeskTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adva
     const bool tall    = h * 5 > w * 8;
     const int  tallFeet = h * 4 / 5;
     const int  tallTop  = tallFeet - w * 3 / 4;
-    int yBase = 26;
+    int yBase = lowered ? 43 : 26;
     if (tall) {
         const int skyBottom = tallTop - w * 2 / 5;
         const int c = (16 + skyBottom) / 2 - (dh - 18) / 2;
@@ -783,7 +853,7 @@ uint8_t uiDeskStops(int screenW, int screenH, uint32_t now, int16_t* xs, int16_t
 #if SQUACH_MESH
     if (s_msgX1 > s_msgX0) add((s_msgX0 + s_msgX1) / 2, (s_msgY0 + s_msgY1) / 2);
 #endif
-    if (uiDeskAlertUp(now)) add(s_cardX + s_cardW / 2, s_cardY + CARD_H / 2);
+    if (uiDeskAlertUp(now)) add(s_cardX + s_cardW / 2, s_cardY + s_cardH / 2);
     int tx, ty, tw, th, bx, bw;
     timerRects(screenW, screenH, tx, ty, tw, th, bx, bw);
     add(tx + tw / 2, ty + th / 2);                 // FOCUS

@@ -576,18 +576,18 @@ void pollSerial() {
             continue;
         }
         if (strncasecmp(line, "CLOCK ", 6) == 0) {
-            // CLOCK <font 0-1> <size 0-2> <backdrop 0-6>: the desk clock's
+            // CLOCK <font 0-1> <size 0-3> <backdrop 0-6>: the desk clock's
             // look, set from the bench, so its frame time can be measured for
             // each without a finger on the glass.
             int f = -1, z = -1, b = -1;
-            if (sscanf(line + 6, "%d %d %d", &f, &z, &b) == 3 && f >= 0 && f < 2 && z >= 0 && z < 3 && b >= 0 && b < 7) {
+            if (sscanf(line + 6, "%d %d %d", &f, &z, &b) == 3 && f >= 0 && f < 2 && z >= 0 && z < 4 && b >= 0 && b < 7) {
                 for (int g = 0; g < 2 && Settings::clockFont() != f; g++)     Settings::cycleClockFont();
-                for (int g = 0; g < 3 && Settings::clockSize() != z; g++)     Settings::cycleClockSize();
+                for (int g = 0; g < 4 && Settings::clockSize() != z; g++)     Settings::cycleClockSize();
                 for (int g = 0; g < 7 && Settings::clockBackdrop() != b; g++) Settings::cycleClockBackdrop();
                 Serial.printf("[clock] look: %s, %s, %s\n", Settings::clockFontName(),
                               Settings::clockSizeName(), Settings::clockBackdropName());
             } else {
-                Serial.println("[clock] CLOCK <font 0-1> <size 0-2> <backdrop 0-6>");
+                Serial.println("[clock] CLOCK <font 0-1> <size 0-3> <backdrop 0-6>");
             }
             continue;
         }
