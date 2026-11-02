@@ -10146,6 +10146,7 @@ void loop() {
                             break;
                         }
                         case SettingsRow::CONFIDENCE: Settings::cycleMinConfidence(); break;
+                        case SettingsRow::DESK_FULL:  Settings::toggleDeskAlertFull(); break;
                         case SettingsRow::AUTO_QUIET:  Settings::cycleAutoQuiet(); break;
 #if defined(CROWPANEL7)
                         case SettingsRow::BUZZER:
@@ -10332,6 +10333,7 @@ void loop() {
                         case SettingsRow::CLOCK_SIZE:     Settings::cycleClockSize();     break;
                         case SettingsRow::CLOCK_BACKDROP: Settings::cycleClockBackdrop(); break;
                         case SettingsRow::CLOCK_FORMAT:  Settings::toggleClock24Hour();   break;
+                        case SettingsRow::DESK_ALERT:    Settings::toggleDeskAlertBig();  break;
 #if SQUACH_MESH
                         case SettingsRow::DESK_SQUAD:   Settings::toggleDeskSquad();     break;
                         case SettingsRow::DESK_CROWD:   Settings::cycleDeskCrowd();      break;
@@ -11407,9 +11409,15 @@ void loop() {
                 if (latest &&
                     latest->conf >= Settings::minConfidence() && !IgnoreList::silenced(latest->mac) &&
                     alertMayInterrupt(*latest)) {
-                    uiDeskAlert(*latest, now);
                     lastAlertType = latest->type;
                     squachyCatch(latest->type, latest->mac, latest->hits, latest->rssi, latest->conf);
+                    if (Settings::deskAlertFull()) {
+                        // DESK ALERT = FULL SCREEN: straight to the ALERT screen, as CLEAR does.
+                        uiAlertSetRedacted(false);
+                        enterAlert(*latest);
+                        break;
+                    }
+                    uiDeskAlert(*latest, now);
                 }
             }
             // The toast goes inside: anything drawn after the bands are
