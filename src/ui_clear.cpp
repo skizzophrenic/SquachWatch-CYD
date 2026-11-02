@@ -1917,10 +1917,11 @@ static void drawBatteryGauge(TFT_eSPI& t, uint32_t now) {
 }
 
 #if defined(TWATCH_S3) || defined(TLORA_PAGER)
-void twatchGpsBadge(TFT_eSPI& t);   // main.cpp: the GPS counter, top centre, while the GPS is on
+void twatchGpsBadge(TFT_eSPI& t);   // main.cpp: the GPS counter (centre; top left on the Pager), while the GPS is on
 #endif
 #if SQUACH_LORA && (defined(TWATCH_S3) || defined(TDECK_PLUS) || defined(TLORA_PAGER))
 void twatchLoraBadge(TFT_eSPI& t);  // main.cpp: LORA n NEW, under it, while chats are unread
+bool twatchLoraBadgeRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h);  // main.cpp: its box, false while off
 #endif
 #if defined(TWATCH_S3)
 static int16_t drawCornerClock(TFT_eSPI& t, int w) {
@@ -1968,7 +1969,8 @@ static int16_t s_wpX = 0, s_wpY = 0, s_wpW = 0, s_wpH = 0;
 // spanR: the right end of the free span. -1 keeps the old fixed reserve for
 // the rotate button and the padlock; the watch passes the corner clock's
 // left edge instead, which already sits left of both.
-static void drawWatchPill(TFT_eSPI& t, int screenW, bool watching, bool hunting, int spanR = -1) {
+static void drawWatchPill(TFT_eSPI& t, int screenW, bool watching, bool hunting, int spanR = -1,
+                          int spanL = -1) {
     // HUNT wins the label when both are set: it is the active, look-at-me mode.
     // The two are independent slots (see DetectionEngine), so both can be on.
     const char* txt = hunting ? "HUNT" : "WATCH";
@@ -1977,10 +1979,11 @@ static void drawWatchPill(TFT_eSPI& t, int screenW, bool watching, bool hunting,
     // 16 in a 20px bar: two rows of clearance top and bottom.
     const int bh = 16;
     const int bw = 16 + t.textWidth(txt) + 7;
-    // Left edge of the free span, past the gear. The right limit is the rotate
-    // icon (28) plus the lock (26) -- reserve both whether or not either is
-    // showing, so the pill cannot move when a PIN is set or rotation locked.
-    const int spanL = 32;
+    // The free span: past the gear by default; the Pager hands over what the
+    // LORA pill is holding. The right limit is the rotate icon (28) plus the
+    // lock (26) -- reserve both whether or not either is showing, so the pill
+    // cannot move when a PIN is set or rotation locked.
+    if (spanL < 0) spanL = 32;
     if (spanR < 0) spanR = screenW - 54;
     int x = spanL + ((spanR - spanL) - bw) / 2;
     if (x < spanL) x = spanL;
@@ -2040,6 +2043,11 @@ uint8_t uiClearCounterStops(int16_t* xs, int16_t* ys, uint8_t cap) {
 bool uiClearWatchPillHit(int x, int y) {
     return s_watchPillOn &&
            x >= s_wpX && x < s_wpX + s_wpW && y >= s_wpY && y < s_wpY + s_wpH;
+}
+bool uiClearWatchPillRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
+    if (!s_watchPillOn) return false;
+    x = s_wpX; y = s_wpY; w = s_wpW; h = s_wpH;
+    return true;
 }
 
 bool uiClearSquadHit(int x, int y) {
@@ -3626,7 +3634,18 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
             s_watchPillOn = false;
             // Right of the pill: the watch's corner clock, drawn earlier (see
             // drawCornerClock()); -1 elsewhere, the old fixed reserve.
-            if (watching || hunting) drawWatchPill(t, w, watching, hunting, s_cornerClockPillR);
+#if defined(TLORA_PAGER) && SQUACH_LORA
+            // The LORA pill owns the top centre on the Pager; while it is up
+            // the watch pill sits to its right, not on top of it (the two are
+            // both cursor stops there, and a centred pill lands inside this
+            // one's).
+            int16_t lbx, lby, lbw, lbh;
+            int spanL = -1;
+            if (twatchLoraBadgeRect(lbx, lby, lbw, lbh)) spanL = lbx + lbw + 12;
+#else
+            int spanL = -1;
+#endif
+            if (watching || hunting) drawWatchPill(t, w, watching, hunting, s_cornerClockPillR, spanL);
         }
     }
 

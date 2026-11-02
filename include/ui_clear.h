@@ -59,6 +59,9 @@ bool uiClearSquadHit(int x, int y);
 // named and where REMOVE FROM WATCH LIST lives. Only ever true while a watch
 // or a hunt is actually set -- the pill is not drawn otherwise.
 bool uiClearWatchPillHit(int x, int y);
+// The same target as a rectangle, for the cursor on the boards with buttons:
+// false whenever the pill is not drawn.
+bool uiClearWatchPillRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h);
 // The counter tiles under Squachy: one per kind of thing in range right now,
 // none when it is quiet. True if a tap landed on one, with the column's type
 // (AIRTAG for the trackers, CAMERA for cameras and doorbells, HACKER for

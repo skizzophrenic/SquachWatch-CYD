@@ -1426,7 +1426,7 @@ static bool stickIsList() {
 }
 
 #if SQUACH_LORA && SQW_WARDRIVE
-static bool twatchLoraBadgeRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h);
+bool twatchLoraBadgeRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h);
 #endif
 static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
     const int16_t w = (int16_t)tft.width(), h = (int16_t)tft.height();
@@ -1470,6 +1470,14 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
             }
         }
 #endif
+        {
+            int16_t bx, by, bw, bh;   // the WATCH / HUNT pill, while a target is set
+            if (uiClearWatchPillRect(bx, by, bw, bh)) {
+                add(bx + bw / 2, by + bh / 2);
+                StickPt& p = out[n - 1];
+                p.bx = bx; p.by = by; p.bw = bw; p.bh = bh;
+            }
+        }
         add(w / 2, h * 2 / 5);          // Squachy, and whatever card is over him
         add(w / 2, h * 13 / 20);        // a card's own button
         add(w / 2, h - 16);             // LOG
@@ -5849,10 +5857,13 @@ static void gpsStop() {
 #endif  // SQW_WARDRIVE, for a moment: the LoRa pill is the T-Deck's too
 #if SQUACH_LORA && (defined(TWATCH_S3) || defined(TDECK_PLUS) || defined(TLORA_PAGER))
 // New LoRa chat messages: a pink pill at the top of the main screen, under
-// the GPS counter when that is showing, and only while there is something
-// unread. A tap opens LORA CHATS. Drawn with the GPS counter, under the
-// speech bubbles.
+// the GPS counter when that is showing (the watch and the T-Deck), and only
+// while there is something unread. A tap opens LORA CHATS. Drawn with the
+// GPS counter, under the speech bubbles.
 static int16_t s_loraBadgeX = -1, s_loraBadgeY = 0, s_loraBadgeW = 0, s_loraBadgeH = 0;
+// The Pager's GPS counter sits top left in the title row, not above the pill:
+// its right edge as last drawn, for the pill's yield below. -1 when off.
+static int s_gpsBadgeRight = -1;
 void twatchLoraBadge(TFT_eSPI& t) {
     s_loraBadgeX = -1;
     const uint16_t u = uiLoraChatUnread();
@@ -5871,13 +5882,20 @@ void twatchLoraBadge(TFT_eSPI& t) {
     else   snprintf(txt, sizeof txt, "LORA");
     t.setTextSize(Theme::uiTextSize(t, 1));
     const int w = t.textWidth(txt) + 10, h = t.fontHeight() + 6;
-    const int x = (t.width() - w) / 2;
-#if SQW_WARDRIVE
-    const bool gpsUp = s_gpsOn;
+    int x = (t.width() - w) / 2;
+    int y = 4;
+#if defined(TLORA_PAGER)
+    // The GPS counter is in the title row's left, not above the pill, so the
+    // pill keeps the top centre whether or not the GPS is on, ending where the
+    // counter tiles begin. Its left edge (193 at the longest, "LORA 65535
+    // NEW") clears the counter's right edge (168 at its longest), and the
+    // yield below keeps them clear if a string ever grows past that.
+    if (s_gpsBadgeRight >= 0 && x < s_gpsBadgeRight + 6) x = s_gpsBadgeRight + 6;
+#elif SQW_WARDRIVE
+    if (s_gpsOn) y += h + 3;
 #else
-    const bool gpsUp = Gnss::fresh(millis());   // the CYD GPS counter sits there while it has a fix
+    if (Gnss::fresh(millis())) y += h + 3;   // the CYD GPS counter sits there while it has a fix
 #endif
-    const int y = gpsUp ? 4 + h + 3 : 4;
     t.fillRoundRect(x, y, w, h, 4, Theme::BG);
     t.drawRoundRect(x, y, w, h, 4, Theme::PINK);
     t.setTextColor(Theme::PINK, Theme::BG);
@@ -5906,7 +5924,7 @@ static void tdeckLoraSoundTick(uint32_t now) {
     lastUnread = u;
 }
 #endif
-static bool twatchLoraBadgeRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
+bool twatchLoraBadgeRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
     if (s_loraBadgeX < 0) return false;
     x = s_loraBadgeX; y = s_loraBadgeY; w = s_loraBadgeW; h = s_loraBadgeH;
     return true;
@@ -5940,8 +5958,15 @@ static void twatchLoraBuzzTick(uint32_t now) {
 // wardriving, how many rows are kept. Read without a cable, on a windowsill.
 // Drawn by uiClearTick() straight after the background, like the corner
 // clock, so Squachy's speech bubbles go over it rather than under it.
+//
+// The Pager sits top left, past the gear, rather than centred: its top
+// centre is the LORA pill's, and the pill drops under this counter there, so
+// a centred counter would sit on the pill and the pill on the counter tiles.
+// Top left it clears both -- the pill's left edge never comes inside 193 and
+// this counter's right edge never reaches 168 -- and the tiles begin at its
+// bottom edge, 18.
 void twatchGpsBadge(TFT_eSPI& t) {
-    if (!s_gpsOn) return;
+    if (!s_gpsOn) { s_gpsBadgeRight = -1; return; }
     const Gnss::Sky k = Gnss::sky();
     const Gnss::Fix& f = Gnss::fix();
     const bool fix = Gnss::fresh(millis());
@@ -5953,7 +5978,12 @@ void twatchGpsBadge(TFT_eSPI& t) {
     else                               snprintf(txt, sizeof txt, "GPS %u HEARD  %u USED", k.heard, f.used);
     t.setTextSize(Theme::uiTextSize(t, 1));
     const int w = t.textWidth(txt) + 10, h = t.fontHeight() + 6;
+#if defined(TLORA_PAGER)
+    const int x = 32, y = 4;
+    s_gpsBadgeRight = x + w;
+#else
     const int x = (t.width() - w) / 2, y = 4;
+#endif
     const uint16_t col = fix ? Theme::GREEN : Theme::CYAN;
     t.fillRoundRect(x, y, w, h, 4, Theme::BG);
     t.drawRoundRect(x, y, w, h, 4, col);
