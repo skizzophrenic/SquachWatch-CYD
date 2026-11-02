@@ -36,4 +36,7 @@ void     uiSquadInit(TFT_eSPI& t, bool roster = false);
 // than by the clock must sit still for it. Other boards draw once.
 void     uiSquadTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance = true);
 SquadHit uiSquadTouch(int x, int y, uint32_t now);
+// Everything a press would act on right now, as rectangles, for a board
+// steered by a cursor. Returns how many were written.
+uint8_t  uiSquadStops(int16_t* xs, int16_t* ys, int16_t* ws, int16_t* hs, uint8_t cap);
 #endif

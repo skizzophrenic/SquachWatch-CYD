@@ -53,3 +53,13 @@ int uiRawScanRowAt(TFT_eSPI& t, int x, int y, int screenW, int screenH);
 // instead.
 enum class RawScanConfirmTap { NONE, WATCH, HUNT, IGNORE, CANCEL };
 RawScanConfirmTap uiRawScanHitConfirm(int x, int y, int screenW, int screenH);
+
+// For a board steered by a cursor rather than a finger: every target on the
+// screen as a rect, with a kind -- 0 a button, 1 scroll down, 2 scroll up,
+// 3 a result row (held, not tapped: a hold is what picks one). In reading
+// order. `count` is the number of results; `confirm` whether the WATCH/HUNT
+// panel is up, which then owns the screen. Returns how many were written.
+uint8_t uiRawScanStops(TFT_eSPI& t, int screenW, int screenH, int count, bool confirm,
+                       int16_t* xs, int16_t* ys, int16_t* ws, int16_t* hs, uint8_t* kinds, uint8_t cap);
+// How many result rows the list shows at once: a page, for the arrows.
+int uiRawScanPageRows(TFT_eSPI& t, int screenW, int screenH);

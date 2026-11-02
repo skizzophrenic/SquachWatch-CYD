@@ -59,6 +59,9 @@ bool uiClearSquadHit(int x, int y);
 // named and where REMOVE FROM WATCH LIST lives. Only ever true while a watch
 // or a hunt is actually set -- the pill is not drawn otherwise.
 bool uiClearWatchPillHit(int x, int y);
+// The same target as a rectangle, for the cursor on the boards with buttons:
+// false whenever the pill is not drawn.
+bool uiClearWatchPillRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h);
 // The counter tiles under Squachy: one per kind of thing in range right now,
 // none when it is quiet. True if a tap landed on one, with the column's type
 // (AIRTAG for the trackers, CAMERA for cameras and doorbells, HACKER for
@@ -68,6 +71,10 @@ bool uiClearCounterHit(int x, int y, DetectionType& column);
 bool uiClearColumnHolds(DetectionType column, DetectionType d);
 // The tiles' centres, for the cursor on the boards with buttons.
 uint8_t uiClearCounterStops(int16_t* xs, int16_t* ys, uint8_t cap);
+// The message bubble and the squad badge, as the rectangles their hit tests
+// use, for a board steered by a cursor. Only the ones on screen; returns how
+// many were written.
+uint8_t uiClearTapStops(int16_t* xs, int16_t* ys, int16_t* ws, int16_t* hs, uint8_t cap);
 // The NEARBY headline, drawn only with DETECTIONS set to CLASSIC and while
 // something is live. Long-pressing it opens the closest device -- see
 // main.cpp. False whenever it is not drawn.

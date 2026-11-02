@@ -452,6 +452,33 @@ void uiMeshPhraseTouch(int x, int y) {
     }
 }
 
+uint8_t uiMeshPhraseStops(int16_t* xs, int16_t* ys, int16_t* ws, int16_t* hs, uint8_t cap) {
+    uint8_t n = 0;
+    auto put = [&](const Rect& r) {
+        if (r.w <= 0 || n >= cap) return;
+        xs[n] = r.x; ys[n] = r.y; ws[n] = r.w; hs[n] = r.h; n++;
+    };
+    // The same branches as uiMeshPhraseTouch(): the step on screen, then the
+    // buttons. Letters come last on the letter step -- a keyboard types them.
+    if (s_mode == Mode::SHOW && s_showRow.w) put(s_showRow);
+    if (s_mode == Mode::PICK && s_letter)
+        for (uint8_t i = 0; i < s_wordN; i++) put(s_wordRect[i]);
+    for (int i = 0; i < 3; i++) if (s_btnOn[i]) put(s_btn[i]);
+    if (s_mode == Mode::PICK && !s_letter)
+        for (int i = 0; i < 26; i++) if (s_letterOn[i]) put(s_letterRect[i]);
+    return n;
+}
+
+bool uiMeshPhrasePicking() { return s_mode == Mode::PICK; }
+
+void uiMeshPhraseTypeChar(char c) {
+    if (s_mode != Mode::PICK) return;
+    if (c == '\b') { pickBack(); return; }
+    if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+    if (c < 'A' || c > 'Z' || !s_letterOn[c - 'A']) return;
+    s_letter = c;   // on the word step too: a different letter is a change of mind
+}
+
 void uiMeshPhraseDemo(uint8_t mode) {
     if (mode == 1) {
         MeshTalk::rollPhrase(s_rolled);

@@ -86,6 +86,9 @@ extern volatile bool g_consoleBattLog;
 extern volatile int8_t g_consoleSound;
 extern volatile bool g_consoleScreen;
 extern volatile int8_t g_consoleLoraSet;   // main.cpp: LORASET, the T-Deck's LORA SETTINGS from the bench
+#if defined(TLORA_PAGER)
+extern volatile bool g_consolePowerOff;   // main.cpp: POWER OFF, the Pager's ship mode
+#endif
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
 extern volatile bool g_consolePowerOff;   // main.cpp: POWER OFF, the Freenove boards' deep sleep
 extern volatile bool g_consoleNapTest;       // main.cpp: NAPTEST, POWER OFF that wakes itself 3 s later
@@ -653,6 +656,9 @@ void pollSerial() {
         if (strcasecmp(line, "LORASET DET") == 0)  { g_consoleLoraSet = 1; continue; }
         if (strcasecmp(line, "LORASET HOME") == 0) { g_consoleLoraSet = 2; continue; }
         if (strcasecmp(line, "LORASET PRESET") == 0) { g_consoleLoraSet = 3; continue; }   // the next Meshtastic preset
+#if defined(TLORA_PAGER)
+        if (strcasecmp(line, "POWER OFF") == 0) { g_consolePowerOff = true; continue; }
+#endif
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
         if (strcasecmp(line, "POWER OFF") == 0) { g_consolePowerOff = true; continue; }
         if (strcasecmp(line, "NAPTEST") == 0)   { g_consoleNapTest = true; g_consolePowerOff = true; continue; }
