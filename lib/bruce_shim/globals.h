@@ -7,7 +7,12 @@
 #include <functional>
 #include <string>
 
-// Forward declare the SquatchWatch canvas that Bruce modules draw to
+// Forward declare the SquatchWatch canvas that Bruce modules draw to.
+// NOTE: bruce_tft must be assigned to the live TFT_eSPI before any Bruce
+// module renders, or the `tft` macro below dereferences null. The Bruce
+// modules (bruce_modules/*) are not currently linked into any env — nothing
+// in src/ includes them — so this is dormant. If they are ever wired into the
+// UI, bind the canvas (bruce_tft = &display) at toolbox init first.
 extern TFT_eSPI* bruce_tft;
 
 // Shim: Bruce modules use `tft.` — we provide a reference
@@ -116,7 +121,11 @@ inline uint16_t getColorVariation(uint16_t color) { return color; }
 #endif
 #if ESP_IDF_VERSION_MAJOR < 5
 #include <esp_system.h>
+// IDF 4.x lacks esp_iface_mac_addr_set. Set the MAC on the requested
+// interface rather than the global base MAC (esp_base_mac_addr_set only
+// takes effect before esp_wifi_init and ignores the per-iface request).
 inline esp_err_t esp_iface_mac_addr_set(const uint8_t *mac, esp_mac_type_t type) {
-    return esp_base_mac_addr_set(mac);
+    wifi_interface_t iface = (type == ESP_MAC_WIFI_SOFTAP) ? WIFI_IF_AP : WIFI_IF_STA;
+    return esp_wifi_set_mac(iface, mac);
 }
 #endif

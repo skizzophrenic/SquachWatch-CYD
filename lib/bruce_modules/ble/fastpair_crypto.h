@@ -5,6 +5,7 @@
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/ecdh.h>
 #include <mbedtls/ecp.h>
+#include <mbedtls/entropy.h>
 
 class FastPairCrypto {
 private:
@@ -12,8 +13,12 @@ private:
     mbedtls_mpi d;
     mbedtls_ecp_point Q;
     mbedtls_ctr_drbg_context ctr_drbg;
+    // Entropy source must outlive ctr_drbg: the DRBG stores &entropy and
+    // dereferences it on every automatic reseed, not just the initial seed.
+    mbedtls_entropy_context entropy;
     uint8_t shared_secret[32];
     mbedtls_aes_context aes_ctx;
+    bool valid = false;   // true only if seed + curve load succeeded
 
 public:
     FastPairCrypto();

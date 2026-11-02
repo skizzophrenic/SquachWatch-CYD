@@ -23,6 +23,10 @@
 #endif
 #include "lora_sniffer.h" // LORA ..., the radio (a no-op on a board without one)
 
+// Toolbox CLI entry point (src/cli.cpp), at global scope. Clock::pollSerial is
+// the single serial reader and offers each line here before its own commands.
+extern bool cli_try(const char* line);
+
 // RUNTIME: main.cpp lists how long the last few boots ran.
 volatile bool g_consoleRuntime = false;
 #if defined(ARDUINO_ARCH_ESP32) && !defined(TWATCH_S3)
@@ -543,6 +547,12 @@ void pollSerial() {
             Serial.println("[security] locked -- unlock it on the screen first.");
             continue;
         }
+
+        // Single serial reader lives here now. Offer each line to the toolbox
+        // CLI first; if it recognizes the command we're done, otherwise fall
+        // through to the base commands below. (Previously cli_poll() read the
+        // same stream in parallel and the two parsers raced for the bytes.)
+        if (cli_try(line)) continue;
 
         if (strncasecmp(line, "FLOOD ", 6) == 0) {
             // A thousand a second is five times the loudest room measured;

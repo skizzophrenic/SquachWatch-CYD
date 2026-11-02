@@ -8,6 +8,10 @@
 #include <NimBLEServer.h>
 #include <NimBLEUtils.h>
 
+// Entire implementation requires the BLE peripheral/server role (see
+// BleKeyboard.h). Compile to nothing when that role is disabled.
+#if CONFIG_BT_NIMBLE_ROLE_PERIPHERAL
+
 #if defined(CONFIG_ARDUHAL_ESP_LOG)
 #include "esp32-hal-log.h"
 #define LOG_TAG ""
@@ -462,3 +466,5 @@ void BleKeyboard::delay_ms(uint64_t ms) {
         while (esp_timer_get_time() < e) {}
     }
 }
+
+#endif // CONFIG_BT_NIMBLE_ROLE_PERIPHERAL

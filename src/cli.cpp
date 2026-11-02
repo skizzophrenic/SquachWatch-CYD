@@ -1,5 +1,6 @@
 /* cli.cpp -- Serial command interface for remote operation & test automation */
 #include "cli.h"
+#include "ble_tx_power.h"
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
@@ -26,7 +27,7 @@ static int batch_count = 0;
 static bool sim_touch_active = false;
 static int16_t sim_touch_x = 0, sim_touch_y = 0;
 
-static void cli_exec(const char *line);
+static bool cli_exec(const char *line);
 
 void cli_init(void) {
     cli_pos = 0;
@@ -39,40 +40,37 @@ void cli_set_callbacks(const cli_callbacks_t *callbacks) {
     cb = callbacks;
 }
 
-void cli_poll(void) {
-    while (Serial.available()) {
-        char c = Serial.read();
-        if (c == '\n' || c == '\r') {
-            if (cli_pos > 0) {
-                cli_buf[cli_pos] = '\0';
-
-                if (batch_mode) {
-                    if (strcmp(cli_buf, "end") == 0) {
-                        /* Execute batch */
-                        batch_mode = false;
-                        Serial.printf("[OK] Executing %d commands\n", batch_count);
-                        for (int i = 0; i < batch_count; i++) {
-                            cli_exec(batch_cmds[i]);
-                            free(batch_cmds[i]);
-                        }
-                        batch_count = 0;
-                        Serial.println("[OK] Batch complete");
-                    } else if (batch_count < CLI_BATCH_MAX) {
-                        batch_cmds[batch_count++] = strdup(cli_buf);
-                    } else {
-                        Serial.println("[ERR] Batch full");
-                    }
-                } else {
-                    cli_exec(cli_buf);
-                }
-                cli_pos = 0;
+// Handle one already-read command line. Toolbox-first: returns true if the
+// toolbox CLI recognized and handled the line, false if it did not — in which
+// case the single serial reader (Clock::pollSerial) falls back to the base
+// command set. This replaces cli_poll's own Serial reader so the two parsers
+// no longer race for the same bytes on the shared USB serial stream.
+bool cli_try(const char *line) {
+    if (batch_mode) {
+        if (strcmp(line, "end") == 0) {
+            /* Execute batch */
+            batch_mode = false;
+            Serial.printf("[OK] Executing %d commands\n", batch_count);
+            for (int i = 0; i < batch_count; i++) {
+                cli_exec(batch_cmds[i]);
+                free(batch_cmds[i]);
             }
-        } else if (cli_pos < CLI_BUF_SIZE - 1) {
-            cli_buf[cli_pos++] = c;
+            batch_count = 0;
+            Serial.println("[OK] Batch complete");
+        } else if (batch_count < CLI_BATCH_MAX) {
+            batch_cmds[batch_count++] = strdup(line);
+        } else {
+            Serial.println("[ERR] Batch full");
         }
+        return true;   // batch mode consumes every line
     }
+    return cli_exec(line);
+}
 
-    /* Maintain simulated touch if active */
+void cli_poll(void) {
+    // Serial input is read in exactly one place now (Clock::pollSerial), which
+    // routes each line through cli_try() first. cli_poll only maintains the
+    // injected-touch state used by the tap/hold CLI helpers.
     if (sim_touch_active && cb && cb->inject_touch) {
         cb->inject_touch(sim_touch_x, sim_touch_y);
     }
@@ -369,10 +367,10 @@ static void cmd_hid(const char *args) {
     }
 }
 
-static void cli_exec(const char *line) {
+static bool cli_exec(const char *line) {
     /* Skip leading whitespace */
     while (*line == ' ') line++;
-    if (*line == '\0' || *line == '#') return;  /* empty or comment */
+    if (*line == '\0' || *line == '#') return true;  /* empty or comment: consumed */
 
     if (strcmp(line, "quiet") == 0) {
         cli_quiet_mode = true;
@@ -404,7 +402,7 @@ static void cli_exec(const char *line) {
     // --- Power ---
     else if (strcmp(line, "power max") == 0) {
         esp_wifi_set_max_tx_power(80);
-        NimBLEDevice::setPower(ESP_PWR_LVL_P21);
+        NimBLEDevice::setPower(SQW_BLE_MAX_PWR);
         Serial.println("[OK] WiFi +20dBm, BLE +21dBm");
     }
     else if (strncmp(line, "power wifi ", 11) == 0) {
@@ -476,6 +474,7 @@ static void cli_exec(const char *line) {
         Serial.println("[OK] Batch mode. Send commands, then 'end'.");
     }
     else {
-        Serial.printf("[ERR] Unknown: '%s'. Type 'help'.\n", line);
+        return false;   // not a toolbox command — let the caller try the base set
     }
+    return true;
 }

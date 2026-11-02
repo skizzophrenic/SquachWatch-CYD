@@ -42,7 +42,8 @@ void channelAnalyzerStart() {
         delay(200);  // 200ms dwell per channel
 
         uint32_t airtime_us = (ca_bytes * 8UL) / 6UL + ca_pkts * 60UL;
-        uint32_t util = 200000UL ? (airtime_us * 100UL / 200000UL) : 0;
+        // 200000us = the 200ms dwell window; airtime as a percentage of it.
+        uint32_t util = airtime_us * 100UL / 200000UL;
         if (util > 100) util = 100;
         ca_results[ch] = util;
         ca_rssi[ch] = ca_rssi_peak;
@@ -336,6 +337,11 @@ void netcutStop() {
 // =============================================================================
 //  BADBLE — BLE HID keyboard injection to phones/laptops
 // =============================================================================
+// Requires the BLE peripheral/server role. On builds where that role is
+// disabled (e.g. the classic-ESP32 CYD/AWOK envs, which run NimBLE as
+// observer/broadcaster only) the BleKeyboard class doesn't exist, so the whole
+// feature is compiled out and replaced with stubs that report it's unavailable.
+#if CONFIG_BT_NIMBLE_ROLE_PERIPHERAL
 #include <BleKeyboard.h>
 
 static BleKeyboard* s_bleKb = nullptr;
@@ -381,6 +387,17 @@ void badBleStop() {
     }
     Serial.println("[OK] BadBLE stopped");
 }
+
+#else  // !CONFIG_BT_NIMBLE_ROLE_PERIPHERAL — BadBLE unavailable, stub the API
+static void badBleUnavailable() {
+    Serial.println("[ERR] BadBLE needs the BLE peripheral role (not built for this board)");
+}
+void badBleStart()               { badBleUnavailable(); }
+void badBleType(const char*)     { badBleUnavailable(); }
+void badBleKey(uint8_t)          { badBleUnavailable(); }
+void badBleStatus()              { Serial.println("[DATA] BadBLE: not supported on this board"); }
+void badBleStop()                { /* nothing running */ }
+#endif // CONFIG_BT_NIMBLE_ROLE_PERIPHERAL
 
 // =============================================================================
 //  BLE SNIFFER — capture and parse BLE advertisements
@@ -435,8 +452,11 @@ void bleSnifferRun() {
 }
 
 // =============================================================================
-//  NINEBOT — scooter BLE unlock/tuning
+//  NINEBOT + HFP PROBE — both act as a BLE central (connect out to a device).
+//  Compiled out (with stubs) where the central role is disabled, e.g. the
+//  classic-ESP32 CYD/AWOK envs.
 // =============================================================================
+#if CONFIG_BT_NIMBLE_ROLE_CENTRAL
 static const NimBLEUUID UART_SVC("6E400001-B5A3-F393-E0A9-E50E24DCCA9E");
 static const NimBLEUUID UART_TX("6E400002-B5A3-F393-E0A9-E50E24DCCA9E");
 
@@ -518,3 +538,12 @@ void hfpProbe(const char* addrStr) {
     client->disconnect();
     NimBLEDevice::deleteClient(client);
 }
+
+#else  // !CONFIG_BT_NIMBLE_ROLE_CENTRAL — ninebot/hfp unavailable, stub the API
+void ninebotAttack(const char*, int) {
+    Serial.println("[ERR] ninebot needs the BLE central role (not built for this board)");
+}
+void hfpProbe(const char*) {
+    Serial.println("[ERR] hfp probe needs the BLE central role (not built for this board)");
+}
+#endif // CONFIG_BT_NIMBLE_ROLE_CENTRAL

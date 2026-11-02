@@ -5,12 +5,27 @@
 #include "radio_esp32.h"
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <Arduino.h>
 
-/* FEC context */
-static wspr_ctx_t fec_ctx;
-static int fec_initialized = 0;
+/* FEC reassembly context (~30 KB). Only needed while reassembling a
+ * multi-frame message, which is rare — most mesh traffic fits in one frame.
+ * Allocated lazily on the heap on first FEC chunk, so it costs nothing (and
+ * never sits on the static DRAM segment) in the common single-frame case.
+ * The TX path uses its own stack-local wspr_tx_t and does not need this. */
+static wspr_ctx_t *fec_ctx = nullptr;
 #define FEC_REPETITIONS 3
+
+/* Allocate + init the FEC context on first use. Returns false if the heap
+ * allocation fails, in which case the caller drops the FEC chunk gracefully. */
+static bool fec_ensure(void)
+{
+    if (!fec_ctx) {
+        fec_ctx = (wspr_ctx_t *)calloc(1, sizeof(wspr_ctx_t));
+        if (fec_ctx) wspr_init(fec_ctx, 1);
+    }
+    return fec_ctx != nullptr;
+}
 
 /* Global mesh instance */
 cyd_mesh_t g_mesh;
@@ -94,8 +109,7 @@ void cyd_mesh_init(const char *callsign)
     memset(&g_mesh, 0, sizeof(g_mesh));
     g_mesh.channel = WICHAT_DEFAULT_CH;
     g_mesh.ttl     = WICHAT_DEFAULT_TTL;
-    wspr_init(&fec_ctx, 1);
-    fec_initialized = 1;
+    /* FEC context is allocated lazily (fec_ensure) on first chunk received. */
 
     if (callsign) {
         strncpy(g_mesh.callsign, callsign, WICHAT_MAX_NAME_LEN - 1);
@@ -258,8 +272,8 @@ int cyd_mesh_process_rx(const uint8_t *raw, size_t len, int8_t rssi)
     }
 
     case WICHAT_TYPE_FEC_CHUNK: {
-        if (!fec_initialized) { wspr_init(&fec_ctx, 1); fec_initialized = 1; }
-        int fec_rc = wspr_feed_chunk(&fec_ctx, &frame);
+        if (!fec_ensure()) break;   // low heap: drop the chunk rather than crash
+        int fec_rc = wspr_feed_chunk(fec_ctx, &frame);
         if (fec_rc == 1) {
             uint32_t parent_id = 0;
             if (frame.payload_len >= 4) {
@@ -272,7 +286,7 @@ int cyd_mesh_process_rx(const uint8_t *raw, size_t len, int8_t rssi)
                 cyd_mesh_mark_seen(parent_id);
                 uint8_t msg_buf[WICHAT_MAX_PAYLOAD + 1];
                 memset(msg_buf, 0, sizeof(msg_buf));
-                int msg_len = wspr_get_message(&fec_ctx, parent_id,
+                int msg_len = wspr_get_message(fec_ctx, parent_id,
                                                 msg_buf, WICHAT_MAX_PAYLOAD);
                 if (msg_len > 0) {
                     const char *sender_name = resolve_sender(frame.hdr.sender);

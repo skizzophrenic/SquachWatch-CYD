@@ -1,8 +1,10 @@
 // cli_bridge.cpp — Wires CLI commands to SquatchWatch toolbox functions
 // Every tool accessible from serial command line.
 #include "cli.h"
+#include "ble_tx_power.h"
 #include "ui_toolbox.h"
 #include "badusb_payloads.h"
+#include "mesh.h"   // real cyd_mesh_t + sender prototypes (see note below)
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
@@ -70,17 +72,10 @@ static void cb_ble_list() {
 }
 
 // ---- WiChat callbacks ----
-extern "C" {
-    extern void cyd_mesh_send_chat(const char *text);
-    extern void cyd_mesh_send_ping(void);
-    extern void cyd_mesh_send_beacon(void);
-    extern struct {
-        char callsign[16];
-        uint8_t channel;
-        int node_count;
-        int msg_count;
-    } g_mesh;
-}
+// g_mesh (cyd_mesh_t) and the cyd_mesh_send_* prototypes come from mesh.h.
+// A previous hand-rolled `extern struct { ... } g_mesh;` here declared a
+// DIFFERENT layout than the real cyd_mesh_t, so writes to .channel/.callsign
+// silently corrupted the mesh dedup ring buffer. Always use the header.
 
 static void cb_chat_send(const char *msg) {
     cyd_mesh_send_chat(msg);
@@ -104,7 +99,8 @@ static void cb_chat_set_channel(int ch) {
 }
 
 static void cb_chat_set_name(const char *name) {
-    strncpy(g_mesh.callsign, name, 15);
+    strncpy(g_mesh.callsign, name, sizeof(g_mesh.callsign) - 1);
+    g_mesh.callsign[sizeof(g_mesh.callsign) - 1] = '\0';
     Serial.printf("[OK] Name set to %s\n", g_mesh.callsign);
 }
 
@@ -136,8 +132,9 @@ static void cb_hid_key(uint8_t) { Serial.println("[ERR] USB HID not available");
 
 // ---- System callbacks ----
 static void cb_set_brightness(int level) {
-    // Would need access to TFT backlight pin
-    Serial.printf("[OK] Brightness set to %d\n", level);
+    // Backlight PWM is not wired through the CLI bridge. Report honestly
+    // rather than claiming success for a no-op.
+    Serial.printf("[ERR] brightness not supported via CLI (requested %d)\n", level);
 }
 
 static void cb_reboot() {
@@ -149,7 +146,7 @@ static void cb_reboot() {
 // ---- System: max power at boot ----
 static void maxRadioPower() {
     esp_wifi_set_max_tx_power(80);  // +20 dBm WiFi
-    NimBLEDevice::setPower(ESP_PWR_LVL_P21);  // +21 dBm BLE
+    NimBLEDevice::setPower(SQW_BLE_MAX_PWR);  // +21 dBm BLE
     Serial.println("[OK] Radio power: WiFi +20dBm, BLE +21dBm");
 }
 

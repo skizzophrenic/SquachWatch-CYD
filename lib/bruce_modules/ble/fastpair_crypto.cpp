@@ -12,24 +12,25 @@ FastPairCrypto::FastPairCrypto() {
     mbedtls_ctr_drbg_init(&ctr_drbg);
     mbedtls_aes_init(&aes_ctx);
 
-    mbedtls_entropy_context entropy;
     mbedtls_entropy_init(&entropy);
 
-    mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, (const uint8_t *)"fastpair", 8);
-
-    mbedtls_entropy_free(&entropy);
-    mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_SECP256R1);
+    int seedRet = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
+                                        (const uint8_t *)"fastpair", 8);
+    int grpRet = mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_SECP256R1);
+    valid = (seedRet == 0 && grpRet == 0);
 }
 
 FastPairCrypto::~FastPairCrypto() {
     mbedtls_ecp_group_free(&grp);
     mbedtls_mpi_free(&d);
     mbedtls_ecp_point_free(&Q);
-    mbedtls_ctr_drbg_free(&ctr_drbg);
+    mbedtls_ctr_drbg_free(&ctr_drbg);   // free DRBG before its entropy source
+    mbedtls_entropy_free(&entropy);
     mbedtls_aes_free(&aes_ctx);
 }
 
 bool FastPairCrypto::generateValidKeyPair(uint8_t *public_key, size_t *pub_len) {
+    if (!valid) { return false; }
     int ret = mbedtls_ecdh_gen_public(&grp, &d, &Q, mbedtls_ctr_drbg_random, &ctr_drbg);
     if (ret != 0) { return false; }
 
@@ -48,6 +49,7 @@ bool FastPairCrypto::generateValidKeyPair(uint8_t *public_key, size_t *pub_len) 
 }
 
 bool FastPairCrypto::generateEphemeralKeyPair(uint8_t *public_key, uint8_t *private_key) {
+    if (!valid) { return false; }
     mbedtls_mpi priv;
     mbedtls_ecp_point pub;
 
@@ -78,10 +80,16 @@ bool FastPairCrypto::ecdhComputeSharedSecret(
     mbedtls_mpi_init(&priv);
     mbedtls_ecp_point_init(&peer_pub);
 
-    mbedtls_mpi_read_binary(&priv, private_key, 32);
+    if (!valid || mbedtls_mpi_read_binary(&priv, private_key, 32) != 0) {
+        mbedtls_mpi_free(&priv);
+        mbedtls_ecp_point_free(&peer_pub);
+        return false;
+    }
 
     int ret = mbedtls_ecp_point_read_binary(&grp, &peer_pub, peer_public_key, 65);
-    if (ret != 0) {
+    // Reject points that are not actually on the curve before using them as a
+    // shared-secret input (invalid-curve / small-subgroup attack defense).
+    if (ret != 0 || mbedtls_ecp_check_pubkey(&grp, &peer_pub) != 0) {
         mbedtls_mpi_free(&priv);
         mbedtls_ecp_point_free(&peer_pub);
         return false;
@@ -113,7 +121,7 @@ void FastPairCrypto::generatePlausibleSharedSecret(const uint8_t *their_pubkey, 
 }
 
 void FastPairCrypto::generatePlausibleAccountKey(const uint8_t *nonce, uint8_t *output) {
-    uint8_t buffer[64];
+    uint8_t buffer[64] = {0};   // bytes 60..63 are read by the mix loop below
     memcpy(buffer, nonce, 16);
     esp_fill_random(&buffer[16], 32);
     memcpy(&buffer[48], "account_key", 11);
@@ -148,14 +156,11 @@ bool FastPairCrypto::deriveAccountKey(
 }
 
 void FastPairCrypto::generateValidNonce(uint8_t *nonce) {
-    uint32_t time_part = millis();
-    memcpy(nonce, &time_part, 4);
-    esp_fill_random(&nonce[4], 4);
-
-    for (int i = 8; i < 16; i++) {
-        nonce[i] = esp_random() & 0xFF;
-        if (i == 8) nonce[i] |= 0x80;
-    }
+    // Fill the whole nonce from the hardware RNG. The previous millis() prefix
+    // added no uniqueness and repeated across reboots / every ~49-day wrap —
+    // a reused nonce under a fixed key is catastrophic for CCM/CTR.
+    esp_fill_random(nonce, 16);
+    nonce[8] |= 0x80;   // preserve the format's high-bit marker
 }
 
 bool FastPairCrypto::looksLikeValidPublicKey(const uint8_t *key, size_t len) {
@@ -195,6 +200,8 @@ bool FastPairCrypto::fastPairDecrypt(
         return false;
     }
 
+    // Contract: `ciphertext` holds `len` ciphertext bytes immediately followed
+    // by the 8-byte auth tag, so the caller must allocate len + 8 bytes.
     uint8_t tag[8];
     memcpy(tag, ciphertext + len, 8);
 

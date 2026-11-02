@@ -260,10 +260,10 @@ int wspr_get_message(wspr_ctx_t *ctx, uint32_t parent_msg_id,
 
 void wspr_tick(wspr_ctx_t *ctx, uint32_t now_ms, uint32_t *expired_id)
 {
-    *expired_id = 0;
-
-    if (!ctx)
+    if (!ctx || !expired_id)
         return;
+
+    *expired_id = 0;
 
     /* Find the oldest active, non-complete session that has exceeded timeout */
     uint32_t oldest_seen = 0xFFFFFFFF;

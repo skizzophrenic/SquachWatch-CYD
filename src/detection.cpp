@@ -796,14 +796,17 @@ bool DetectionEngine::init() {
     }
 #endif
     wifi_promiscuous_filter_t filter;
-    filter.filter_mask = WIFI_PROMIS_FILTER_MASK_ALL;  // pass everything — capture tools need EAPOL
+    // Default to MGMT|DATA (covers detection, beacons, probe reqs and EAPOL).
+    // Capture tools widen this to ALL on demand via wichat_set_capture_hook().
+    filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA;
     esp_wifi_set_promiscuous_filter(&filter);
     esp_wifi_set_promiscuous_rx_cb([](void* buf, wifi_promiscuous_pkt_type_t) {
         s_wifiRaw++;
         const wifi_promiscuous_pkt_t* pkt = (const wifi_promiscuous_pkt_t*)buf;
-        // WiChat hook — check every frame for WiChat BSSID
-        { auto h = wichat_get_rx_hook(); if (h) h(pkt, pkt->rx_ctrl.sig_len); }
-        // Capture hook — handshake/pcap tools see ALL frames
+        // WiChat mesh RX parses a fixed 802.11+WiChat header — never hand it a
+        // runt/control frame (<24B) or frame_decode over-reads the header.
+        { auto h = wichat_get_rx_hook(); if (h && pkt->rx_ctrl.sig_len >= 24) h(pkt, pkt->rx_ctrl.sig_len); }
+        // Capture hook — handshake/pcap tools length-check their own frames.
         { auto h = wichat_get_capture_hook(); if (h) h(pkt, pkt->rx_ctrl.sig_len); }
         if (!g_engine) return;
         {

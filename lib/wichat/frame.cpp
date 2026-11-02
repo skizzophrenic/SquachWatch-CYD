@@ -76,5 +76,10 @@ int frame_decode(const uint8_t *raw, size_t raw_len, wichat_frame_t *frame)
 
 uint32_t frame_gen_msg_id(void)
 {
-    return esp_random();
+    // Never return 0: cyd_mesh_is_seen() treats id 0 as "never seen", so a
+    // id-0 frame would bypass dedup and be relayed by every node on every
+    // reception (a mini broadcast storm bounded only by TTL).
+    uint32_t id;
+    do { id = esp_random(); } while (id == 0);
+    return id;
 }

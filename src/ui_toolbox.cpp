@@ -1,6 +1,7 @@
 // SquachWatch-CYD — Bruce Toolbox UI
 // Offensive tools running inside SquatchWatch's visual shell.
 #include "ui_toolbox.h"
+#include "ble_tx_power.h"
 #include "theme.h"
 #include "settings.h"
 #include <Arduino.h>
@@ -875,13 +876,16 @@ static void karmaSniffHook(const wifi_promiscuous_pkt_t* pkt, uint16_t rawLen) {
     const uint8_t* tags = frame + 24;
     int tagLen = len - 24;
     char ssid[33] = {0};
-    for (int i = 0; i < tagLen - 1;) {
-        if (tags[i] == 0 && tags[i+1] > 0 && tags[i+1] <= 32) {
-            memcpy(ssid, tags + i + 2, tags[i+1]);
-            ssid[tags[i+1]] = 0;
+    for (int i = 0; i + 1 < tagLen;) {
+        uint8_t tnum = tags[i];
+        uint8_t tlen = tags[i + 1];
+        if (i + 2 + tlen > tagLen) break;        // tag body runs past the frame
+        if (tnum == 0 && tlen > 0 && tlen <= 32) {
+            memcpy(ssid, tags + i + 2, tlen);
+            ssid[tlen] = 0;
             break;
         }
-        i += 2 + tags[i+1];
+        i += 2 + tlen;
     }
     if (ssid[0] == 0) return;
 
@@ -891,6 +895,7 @@ static void karmaSniffHook(const wifi_promiscuous_pkt_t* pkt, uint16_t rawLen) {
     }
     if (s_karmaCount < MAX_KARMA_SSIDS) {
         strncpy(s_karmaSSIDs[s_karmaCount], ssid, 32);
+        s_karmaSSIDs[s_karmaCount][32] = 0;
         s_karmaCount++;
         Serial.printf("[karma] captured SSID: %s\n", ssid);
     }
@@ -1165,7 +1170,7 @@ void appleSpamStart() {
     s_appleSpamLastMs = 0;
     s_appleDevIdx = 0;
     if (!NimBLEDevice::isInitialized()) NimBLEDevice::init("");
-    NimBLEDevice::setPower(ESP_PWR_LVL_P21);
+    NimBLEDevice::setPower(SQW_BLE_MAX_PWR);
     s_pAdv = NimBLEDevice::getAdvertising();
     Serial.println("[toolbox] Apple BLE spam started");
 }
@@ -1269,7 +1274,7 @@ void samsungSpamStart() {
     s_samsungSpamLastMs = 0;
     s_samsungDevIdx = 0;
     if (!NimBLEDevice::isInitialized()) NimBLEDevice::init("");
-    NimBLEDevice::setPower(ESP_PWR_LVL_P21);
+    NimBLEDevice::setPower(SQW_BLE_MAX_PWR);
     s_pAdv = NimBLEDevice::getAdvertising();
     Serial.println("[toolbox] Samsung BLE spam started");
 }
@@ -1353,7 +1358,7 @@ void swiftPairStart() {
     s_swiftSpamLastMs = 0;
     s_swiftDevIdx = 0;
     if (!NimBLEDevice::isInitialized()) NimBLEDevice::init("");
-    NimBLEDevice::setPower(ESP_PWR_LVL_P21);
+    NimBLEDevice::setPower(SQW_BLE_MAX_PWR);
     s_pAdv = NimBLEDevice::getAdvertising();
     Serial.println("[toolbox] SwiftPair spam started");
 }
@@ -1699,7 +1704,7 @@ void airtagSpoofStart() {
     s_airtagCount = 0;
     s_airtagLastMs = 0;
     if (!NimBLEDevice::isInitialized()) NimBLEDevice::init("");
-    NimBLEDevice::setPower(ESP_PWR_LVL_P21);
+    NimBLEDevice::setPower(SQW_BLE_MAX_PWR);
     s_pAdv = NimBLEDevice::getAdvertising();
     Serial.println("[toolbox] AirTag spoof started");
 }
@@ -1768,7 +1773,7 @@ void haystackStart() {
     for (int i = 0; i < 28; i++) s_haystackKey[i] = random(0, 256);
     s_haystackKey[0] = (s_haystackKey[0] & 0x3F) | 0x40;
     if (!NimBLEDevice::isInitialized()) NimBLEDevice::init("");
-    NimBLEDevice::setPower(ESP_PWR_LVL_P21);
+    NimBLEDevice::setPower(SQW_BLE_MAX_PWR);
     s_pAdv = NimBLEDevice::getAdvertising();
     Serial.println("[toolbox] Haystack beacon started");
     Serial.printf("[haystack] Key: ");
@@ -2371,7 +2376,10 @@ static uint32_t s_hsDataFrames = 0;
 static void hsSniffHook(const wifi_promiscuous_pkt_t* pkt, uint16_t rawLen) {
     s_hsHookCalls++;
     int len = pkt->rx_ctrl.sig_len;
-    if (len <= 0 || len > 2500) return;
+    // Need a full 24-byte MAC header before matchesBssid() reads addr fields
+    // at offsets 4/10/16; this also rejects short control frames (ACK/RTS/CTS)
+    // that would otherwise be over-read.
+    if (len < 24 || len > 2500) return;
 
     // Only process frames from our target BSSID
     if (!matchesBssid(pkt, s_hsBssid)) return;

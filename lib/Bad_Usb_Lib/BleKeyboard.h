@@ -22,6 +22,12 @@
 #include "Print.h"
 #include "keys.h"
 
+// A BLE HID keyboard is a peripheral/server. When the peripheral role is
+// compiled out (nimconfig defines it 1 or 0, never leaves it undefined), the
+// NimBLEServer/HIDDevice types don't exist, so this class must not be defined.
+// Callers of BadBLE are guarded by the same macro in tools_extended.cpp.
+#if CONFIG_BT_NIMBLE_ROLE_PERIPHERAL
+
 #define BLE_KEYBOARD_VERSION "0.0.4"
 #define BLE_KEYBOARD_VERSION_MAJOR 0
 #define BLE_KEYBOARD_VERSION_MINOR 0
@@ -116,5 +122,6 @@ private:
     uint8_t m_subCount{0};
 };
 
+#endif // CONFIG_BT_NIMBLE_ROLE_PERIPHERAL
 #endif // CONFIG_BT_ENABLED
 #endif // ESP32_BLE_KEYBOARD_H
