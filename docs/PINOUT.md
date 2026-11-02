@@ -259,6 +259,51 @@ board 2026-10-12. The console is the native USB port.
 Not used: 43 (GPS RX), 46 (keyboard INT, polled instead), 48/21/47/14 (the
 ES7210 microphones), 19/20 (USB).
 
+## NMTech NM-Display 2.8 — `[env:nmtech28]`
+
+An ESP32-S3 (QFN56, 8 MB octal PSRAM in the package, 16 MB flash) with a
+2.8" ST7789. The silkscreen says "NM-Display 2.8"; the stock firmware calls
+itself "NMTech Display 2.8". No schematic was to be had: the pins were read
+off the running stock firmware (its GPIO matrix over JTAG, then its
+decompiled drivers) and agree with the vendor's pinout card. The console is
+the native USB port.
+
+| Part | Pins |
+|---|---|
+| ST7789 2.8" 240×320 | SCK 5, MOSI 1, DC 3, **no CS** (tied low), no MISO; SPI mode 3; inversion on, BGR |
+| Panel reset | P1 of the TCA9554 expander (I2C 0x20), not a GPIO |
+| Backlight | GPIO 6, high = on |
+| I2C bus | SDA 8, SCL 7 |
+| FT6336U capacitive touch | the I2C bus, address 0x38, no reset or interrupt line |
+| AXP2101 PMU | the I2C bus, address 0x34: battery gauge, charger, every rail |
+| ES8311 codec | the I2C bus, address 0x18; I2S MCLK 12, BCLK 13, LRCK 15, DOUT 16, DIN 14 (microphone) |
+| Speaker amplifier enable | P7 of the TCA9554, high = on |
+| SD card (SDMMC, 1-bit) | CLK 11, CMD 10, D0 9 |
+| QMI8658 IMU / PCF85063 RTC | the I2C bus, 0x6B / 0x51 (not used) |
+| Buttons | BOOT on GPIO 0, RST, and POWDN on the AXP2101 |
+
+Three things this board will not let you skip:
+
+- **The panel has no chip select**, so it never resynchronises after a stray
+  clock edge -- an ESP reset mid-byte, the SPI pins coming up, a rail
+  changing under it. Every init has to follow a hardware reset through the
+  expander, *after* the SPI clock is already parked at mode 3's idle level:
+  `tft.init()`, reset, `tft.init()` again (main.cpp, `nmtechPanelBegin()`).
+  The DMA frame push blacks it out the same way, so this board uses
+  `pushSprite()` (about 30 fps).
+- **The AXP2101 must be set up before the panel.** Out of reset DCDC5 and
+  DLDO2 are off and the speaker is silent; the stock factory test's PMU
+  sequence turns every rail on (main.cpp, `axpBegin()`). It moves rail
+  voltages, which upsets the panel, so it runs first.
+- **The speaker is loud.** The stock firmware's test plays near full scale;
+  this build starts SOUND VOLUME at 12%.
+
+LEDs: LED1 (green, by the UART header) is a hard-wired power light, and CHG
+(red) is the AXP2101's charge light. Neither is a GPIO, so there is no
+status light -- every free GPIO and expander pin was toggled to check.
+
+Free on the 2x16 header: 17, 18, 21, 38-42, 45-48, and 43/44 (UART0).
+
 ## M5Stack Tab5 — `[env:tab5]`
 
 An ESP32-P4 (no radio of its own) with an ESP32-C6 for WiFi and Bluetooth on

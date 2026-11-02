@@ -98,6 +98,7 @@ whole firmware but has had fewer hours on it. The longer answer is in
 | RockBase NM-CYD-C5 | BETA | The 2.8" CYD's glass on an ESP32-C5, the first RISC-V chip here. Scans **5 GHz** too (WIFI BANDS in Settings). [docs/NM-CYD-C5.md](docs/NM-CYD-C5.md) |
 | Marauder V8 (justcallmekoko) | BETA | The ESP32-C5 Marauder: 2.8" screen, GPS for **wardriving** to the SD card (a WiGLE file), and a battery gauge. Scans 5 GHz too |
 | LilyGo T-Deck Plus | BETA | ESP32-S3 handheld: 2.8" screen, capacitive touch, a real keyboard that types into the message and password screens, speaker, GPS for **wardriving**, SD card, 2000 mAh battery, and **LoRa**: it listens to Meshtastic and MeshCore at once like the T-Watch, and can **send** to their public channels from the keyboard (off until you turn on LORA TX). The trackball is not used yet. Pins in [docs/PINOUT.md](docs/PINOUT.md) |
+| NMTech NM-Display 2.8 | BETA (build it yourself) | ESP32-S3, 2.8" ST7789, capacitive touch, SDMMC card slot, speaker, battery through its AXP2101. No status light (the board has none). `pio run -e nmtech28 -t upload`. Not on the flasher yet. Pins in [docs/PINOUT.md](docs/PINOUT.md) |
 | M5Stack StickS3 | BETA | 1.14" screen, landscape, two buttons |
 | M5Stack Cardputer ADV | BETA | Driven from its keyboard. Not the original Cardputer |
 | LilyGo T-Watch S3 / S3 Plus | BETA | On your wrist, with a battery and a buzz. Listens to **LoRa**; the S3 Plus adds **GPS**. See [On the watch](#on-the-watch) |
@@ -667,6 +668,7 @@ SquachWatch-CYD/
 - The Marauder V8 itself, and the Marauder project it comes from:
   **justcallmekoko**.
 - Freenove ESP32-S3 Display 2.8" port: **greasy-electronics**.
+- NMTech NM-Display 2.8 port: **jcarr**.
 - Freenove 3.2" pin work: **DevOpsDAdams**.
 - 3.5" capacitive (ESP32-3248S035C) build: **VV-B0Y**.
 - The emulator building on macOS, and its incremental build: **aroth**.

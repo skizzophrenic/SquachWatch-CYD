@@ -192,7 +192,12 @@ static uint8_t  s_radioDutyIx  = RADIO_DUTY_DEFAULT;
 static bool     s_buzzer       = false;
 // The speaker (sound.h): off until somebody finds the row, MED when they do.
 static uint8_t  s_soundMode    = 0;    // 0 OFF, 1 ALERTS, 2 ALL
-static uint8_t  s_soundVol     = 25;   // percent: the speaker is loud, so it starts low
+#if defined(NMTECH28)
+static const uint8_t SOUND_VOL_DEFAULT = 12;   // its amplifier is louder still
+#else
+static const uint8_t SOUND_VOL_DEFAULT = 25;
+#endif
+static uint8_t  s_soundVol     = SOUND_VOL_DEFAULT;   // percent: the speaker is loud, so it starts low
 
 // ---- LoRa -----------------------------------------------------------------
 // SURVEY by default: the detector posture, everything in the band. FOCUS is
@@ -665,8 +670,8 @@ void load() {
     s_buzzer       = s_prefs.getBool("buzzer", false);
     s_soundMode    = s_prefs.getUChar("sndMode", 0);
     if (s_soundMode > 2) s_soundMode = 0;
-    s_soundVol     = s_prefs.getUChar("sndLvl", 25);
-    if (s_soundVol > 100) s_soundVol = 25;
+    s_soundVol     = s_prefs.getUChar("sndLvl", SOUND_VOL_DEFAULT);
+    if (s_soundVol > 100) s_soundVol = SOUND_VOL_DEFAULT;
     s_loraMode     = s_prefs.getUChar("loraMode", 2);
     if (s_loraMode > 2) s_loraMode = 2;
     s_loraFocus    = s_prefs.getUChar("loraFocus", 0);

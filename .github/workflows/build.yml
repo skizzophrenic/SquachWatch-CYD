@@ -83,6 +83,26 @@ jobs:
       - name: Build LilyGo T-Deck Plus (ESP32-S3)
         run: pio run -e tdeck-plus
 
+      # The NMTech NM-Display 2.8: an S3 on the ordinary platform. Packaged as
+      # one image, flashed at 0x0, so it can be tried on hardware without a
+      # PlatformIO install.
+      - name: Build NMTech NM-Display 2.8 (ESP32-S3)
+        run: |
+          pio run -e nmtech28
+          pip install esptool
+          python -m esptool --chip esp32s3 merge_bin \
+            -o firmware-nmtech28-merged.bin \
+            --flash_mode dio --flash_freq 80m --flash_size 16MB \
+            0x0     .pio/build/nmtech28/bootloader.bin \
+            0x8000  .pio/build/nmtech28/partitions.bin \
+            0xe000  "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" \
+            0x10000 .pio/build/nmtech28/firmware.bin
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-nmtech28
+          path: firmware-nmtech28-merged.bin
+
       # The Freenove ESP32-S3 2.8" at 40 MHz, for panels that tear at 80.
       # Packaged as one image, flashed at 0x0, so it can be tested on
       # hardware before it goes on the flasher.
