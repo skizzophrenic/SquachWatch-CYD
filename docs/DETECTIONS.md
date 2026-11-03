@@ -293,11 +293,23 @@ positives before shipping — it is **not** built, and the UI does not
 show a Low-confidence camera reading in v1.0.
 
 **Since the OUI audit** the rows carry their own grades: the blocks
-registered to Wyze, Hikvision, Verkada, Avigilon and Axis are High;
-Amazon's two are Medium (Amazon makes far more than cameras); Realtek,
-Tuya, Arlo, Blink and Wyze's module block are Low. Two rows were
+registered to Wyze, Hikvision, Verkada, Avigilon, Axis and Arlo are
+High; Amazon's two are Medium (Amazon makes far more than cameras);
+Realtek, Tuya, Blink and Wyze's module block are Low. Two rows were
 relabelled by the audit: `F0:27:2D` was "Hikvision" and is Amazon's,
 and `28:57:BE` was "Reolink" and is Hikvision's.
+
+**And one the audit graded instead of checking.** `BC:DD:C2` was
+labelled "Arlo" and graded Low. It is registered to **Espressif**, so
+it matched ESP32s -- dev boards, ESPHome sensors, smart plugs, and
+SquachWatch itself -- as covert cameras, while no real Arlo was ever
+matched, because none of Arlo Technology's own three blocks
+(`FC:9C:98`, `48:62:64`, `A4:11:62`) were in the table at all. They are
+now, at High, and the Espressif row is gone. Note that this is the
+fallback the paragraph above says is *not* built: one Espressif OUI was
+flagging cameras regardless, because it did not look like Espressif.
+`tools/check_ouis.py` now reads this table against the IEEE registry so
+the next one is caught by a job rather than by a reader.
 
 ---
 

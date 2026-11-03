@@ -114,6 +114,13 @@ jobs:
       - name: Run host tests
         run: make -C test
 
+      # Costs a second and needs no toolchain. The failure it covers is a
+      # scan quietly going back to active -- which compiles, runs, finds
+      # networks, and transmits a probe request on every channel while the
+      # FAQ tells people the WiFi side only listens.
+      - name: Check no WiFi scan transmits
+        run: tools/check_emissions.sh
+
   emulator:
     # Cheap, and it catches the failure mode the merge introduced: the
     # emulator compiles the firmware's own sources against its shims, so a

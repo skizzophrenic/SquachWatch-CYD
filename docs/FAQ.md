@@ -109,7 +109,11 @@ Yes, a little, and I'd rather you hear it from me. Older versions of this FAQ sa
 | **A Bluetooth update server.** S3 boards only. | Only while the UPDATE OVER BLUETOOTH screen is open | Leave that screen. |
 | **SquachMesh adverts.** A Bluetooth advert every 1.5 seconds with a fixed address, your Squachy's name and outfit. Messages, heads-ups and squad updates ride on it. | Only with **TRANSMIT** on | It's **off by default**, behind a warning screen that literally says THIS MAKES YOU TRACKABLE. Settings > SQUACHMESH > TRANSMIT. |
 
-The WiFi detection itself just listens. LoRa on the watches only listens. Nothing else talks.
+The WiFi detection itself just listens, and so does the manual **WIFI SCAN**: both ask the radio for a *passive* sweep, which hears the beacons networks send out anyway without sending anything itself.
+
+That last part is new, and the old behaviour belongs in this table even though it is now gone. Until this release the manual WiFi sweep used Arduino's default scan, which is an **active** one: it sent a probe request on every channel, with this board's address in it, every time you opened that screen. It was never a deliberate choice -- the setting is the third argument of a function that was being called with one -- and this table, which promises you everything that goes out, never mentioned it. It is passive now, and `tools/check_emissions.sh` fails the build if any scan in the firmware goes back to active without a line saying why.
+
+LoRa on the watches only listens. Nothing else talks.
 
 **PRIVACY MODE** (Settings > SYSTEM) is not a radio switch. It's for filming: addresses show as AA:BB:CC:XX:XX:XX and device and network names are cut to three characters, on the screen only. The log keeps the real values.
 

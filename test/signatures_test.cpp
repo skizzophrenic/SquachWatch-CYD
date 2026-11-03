@@ -110,6 +110,40 @@ int main() {
     ck("00:0E:58 no longer matches anything",
        lookup(0x00, 0x0E, 0x58, &conf) == DetectionType::UNKNOWN);
 
+    suite("An ESP32 is not a camera");
+    // BC:DD:C2 sat in the camera block as "Arlo" and is registered to
+    // Espressif. Every ESP32 in that block -- including this one -- read as
+    // a covert camera, and no real Arlo matched, because none of Arlo's own
+    // blocks were in the table. DETECTIONS.md says in as many words that
+    // flagging Espressif OUIs as cameras is NOT built; this is the row that
+    // was doing it anyway, under a brand name. Pinned so it cannot return.
+    ck("Espressif's BC:DD:C2 is not a camera",
+       lookup(0xBC, 0xDD, 0xC2, &conf) == DetectionType::UNKNOWN);
+    ck("Arlo Technology's own FC:9C:98 is a camera",
+       lookup(0xFC, 0x9C, 0x98, &conf) == DetectionType::CAMERA);
+    ck("...and graded HIGH", conf == Confidence::HIGH_CONF);
+    ck("Arlo's 48:62:64 is a camera", lookup(0x48, 0x62, 0x64, &conf) == DetectionType::CAMERA);
+    ck("Arlo's A4:11:62 is a camera", lookup(0xA4, 0x11, 0x62, &conf) == DetectionType::CAMERA);
+
+    // The general property, not just the one row: this board's own radio must
+    // never match anything. A detector that reports itself is worse than one
+    // that misses, because the reading looks exactly like a real find.
+    {
+        static const uint8_t espressif[][3] = {
+            { 0x24, 0x0A, 0xC4 }, { 0x3C, 0x71, 0xBF }, { 0xBC, 0xDD, 0xC2 },
+            { 0x30, 0xAE, 0xA4 }, { 0x7C, 0x9E, 0xBD }, { 0xA4, 0xCF, 0x12 },
+            { 0xC4, 0x4F, 0x33 }, { 0xCC, 0x50, 0xE3 }, { 0xD8, 0xA0, 0x1D },
+            { 0xE0, 0x98, 0x06 }, { 0xEC, 0xFA, 0xBC }, { 0xF4, 0xCF, 0xA2 },
+        };
+        int matched = 0;
+        for (unsigned i = 0; i < sizeof espressif / sizeof espressif[0]; i++)
+            if (lookup(espressif[i][0], espressif[i][1], espressif[i][2], &conf)
+                != DetectionType::UNKNOWN) matched++;
+        char m[80];
+        snprintf(m, sizeof m, "no Espressif block matches any signature (%d did)", matched);
+        ck(m, matched == 0);
+    }
+
     suite("Flock-You's additions (issue #15)");
     ck("a Liteon block from the field list is FLOCK", lookup(0x74, 0x4C, 0xA1, &conf) == DetectionType::FLOCK);
     ck("...graded LOW", conf == Confidence::LOW_CONF);
