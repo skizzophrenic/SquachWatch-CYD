@@ -77,6 +77,51 @@ void bootStage(uint8_t s);   // main.cpp: the power diary's steps through setup(
 #include <SD.h>
 #endif
 
+// -------- which heap the pressure numbers below are about --------
+//
+// Every "largest free block" this file reads is a number about INTERNAL
+// SRAM, and it has to be asked for that way: MALLOC_CAP_8BIT on its own is
+// not a question about internal SRAM at all.
+//
+// On a board with PSRAM -- sticks3, twatch-s3, tdeck-plus, crowpanel7 and
+// the Freenove S3 envs all build with -DBOARD_HAS_PSRAM -- arduino-esp32
+// registers the external RAM into the same capability-aware allocator that
+// holds internal SRAM, and the PSRAM region carries MALLOC_CAP_8BIT too. So
+// heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) walks both pools and
+// hands back the LARGER block, which on those boards is always PSRAM's:
+// megabytes against the few kilobytes the thresholds here are written in.
+// The comparison can then never come out true, so the seatbelt never arms,
+// the early flush never fires and the scan never falls back to passive: a
+// PSRAM board was reading the wrong pool, calling it healthy, and running
+// into the host-task abort those three exist to survive while every number
+// it printed looked fine. Reported by mattjfiorentino, issue #54.
+//
+// Internal SRAM is the pool that matters here whatever the board: the
+// strings NimBLE hands back, the library's per-device records, the WiFi
+// driver's buffers and every FreeRTOS object come out of it, and nothing in
+// this file ever allocates into PSRAM.
+//
+// MALLOC_CAP_8BIT stays in the mask beside MALLOC_CAP_INTERNAL rather than
+// being replaced by it. MALLOC_CAP_INTERNAL alone would also match the
+// IRAM-only region, which is internal but 32-bit-access only and can never
+// serve a byte-addressable allocation -- that would start inflating the
+// number on the classic ESP32 boards whose thresholds were measured. With
+// both bits set a board without PSRAM reads exactly what it read before, so
+// nothing changes on the shipping three.
+//
+// The thresholds themselves are untouched by this. They were measured
+// against MALLOC_CAP_8BIT figures on a 320 KB classic ESP32, and they are
+// what a PSRAM board will now actually be held to for the first time; what
+// the right bar is on a board with a different internal-SRAM budget is a
+// measurement somebody with that hardware still owes.
+//
+// The tree already names MALLOC_CAP_INTERNAL wherever internal SRAM is what
+// is meant: src/crowpanel7_probe.cpp asks for its free size and largest block
+// that way, and src/lora_sniffer.cpp allocates its ring from
+// MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT when PSRAM will not do. This file was
+// the one asking the looser question.
+static const uint32_t HEAP_PRESSURE_CAPS = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+
 // -------- global engine instance (referenced by callbacks) --------
 static DetectionEngine* g_engine = nullptr;
 
@@ -891,11 +936,11 @@ bool DetectionEngine::init() {
     BOOT_STAGE(4);
     Serial.println("[boot] starting WiFi: the C6 over ESP-Hosted");
     serialFlush();
-    Serial.printf("[boot] heap before the link: %lu free, %lu largest\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    Serial.printf("[boot] heap before the link: %lu free, %lu largest\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS));
     if (Tab5Radio::begin()) {
         setSniffChannel(_wifiChannel);
         sniffOn();
-        Serial.printf("[boot] heap with the link up: %lu free, %lu largest\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+        Serial.printf("[boot] heap with the link up: %lu free, %lu largest\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS));
     } else {
         Serial.println("[boot] no radio this boot: WiFi detections are off");
     }
@@ -914,7 +959,7 @@ bool DetectionEngine::init() {
     BOOT_STAGE(4);
     Serial.println("[boot] starting WiFi");
     serialFlush();
-    Serial.printf("[boot] heap before WiFi: %lu free, %lu largest\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    Serial.printf("[boot] heap before WiFi: %lu free, %lu largest\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS));
     WiFi.mode(WIFI_STA);
     BOOT_STAGE(11);
     WiFi.disconnect();
@@ -971,7 +1016,7 @@ bool DetectionEngine::init() {
             WiFi.mode(WIFI_STA);
         }
     }
-    Serial.printf("[boot] heap with WiFi started: %lu free, %lu largest\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    Serial.printf("[boot] heap with WiFi started: %lu free, %lu largest\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS));
     esp_wifi_set_promiscuous(true);
     BOOT_STAGE(14);
 #if SQW_WIFI_5G
@@ -1009,7 +1054,7 @@ bool DetectionEngine::init() {
     // asked for both at once -- see the backlight note in main.cpp's setup().
     delay(150);
     s_bootHeap.wifiFree    = ESP.getFreeHeap();
-    s_bootHeap.wifiLargest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    s_bootHeap.wifiLargest = heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS);
     Serial.printf("[boot] heap with WiFi up: %lu free, %lu largest\n",
                   (unsigned long)s_bootHeap.wifiFree, (unsigned long)s_bootHeap.wifiLargest);
 #if SQW_BLE
@@ -1023,7 +1068,7 @@ bool DetectionEngine::init() {
         Serial.println("[boot] no Bluetooth this boot: BLE detections are off");
         BOOT_STAGE(7);
         s_bootHeap.bleFree    = ESP.getFreeHeap();
-        s_bootHeap.bleLargest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+        s_bootHeap.bleLargest = heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS);
         _sd.begin();
         BOOT_STAGE(8);
         return true;
@@ -1081,7 +1126,7 @@ bool DetectionEngine::init() {
     scan->start(0, false, false);   // forever; not a restart
     BOOT_STAGE(7);
     s_bootHeap.bleFree    = ESP.getFreeHeap();
-    s_bootHeap.bleLargest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    s_bootHeap.bleLargest = heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS);
     Serial.printf("[boot] heap with Bluetooth up: %lu free, %lu largest\n",
                   (unsigned long)s_bootHeap.bleFree, (unsigned long)s_bootHeap.bleLargest);
 
@@ -1155,7 +1200,7 @@ Stats stats() {
     st.advOn  = Mesh::advertising();
     st.advMs  = 1500;
     st.heapFreeKb  = ESP.getFreeHeap() / 1024;
-    st.heapBlockKb = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024;
+    st.heapBlockKb = heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS) / 1024;
     return st;
 }
 
@@ -1208,7 +1253,7 @@ static void txFailure(uint8_t code, const char* stage) {
         Serial.printf("[mesh-tx] FAILED %s (%u), count=%lu, heap=%lu, largest=%lu\n",
                       stage, (unsigned)code, (unsigned long)s_txFailures,
                       (unsigned long)ESP.getFreeHeap(),
-                      (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+                      (unsigned long)heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS));
 }
 
 // The payload we last handed the stack, so an unchanged one is never handed
@@ -1315,7 +1360,7 @@ static void setAdvertising(bool on, uint32_t now) {
     if (out && !s_txWasSending) {
         Serial.printf("[mesh-tx] controller advertising PRIMARY MESSAGE/INVITE (%u-byte frame), heap=%lu, largest=%lu\n",
                       (unsigned)outLen, (unsigned long)ESP.getFreeHeap(),
-                      (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+                      (unsigned long)heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS));
     }
     s_txWasSending = MeshTalk::sending(now);
     memcpy(s_lastAdv, buf, n);
@@ -1517,7 +1562,7 @@ uint32_t advertRate() { return s_advRate; }
 
 static void scanFlushTick() {
     if (!bleLive()) {
-        s_heapLow = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < 1536;
+        s_heapLow = heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS) < 1536;
         return;
     }
     // Printed from here rather than the host task, which should never be kept
@@ -1527,11 +1572,11 @@ static void scanFlushTick() {
         Serial.printf("[scan] restart %lu freed %lu B (%lu total), heap %lu, largest %lu, dropped %lu\n",
                       (unsigned long)s_flush.count, (unsigned long)s_flush.lastFreed,
                       (unsigned long)s_flush.totalFreed, (unsigned long)ESP.getFreeHeap(),
-                      (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+                      (unsigned long)heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS),
                       (unsigned long)s_advertsDropped);
     }
     const uint32_t now = millis();
-    const uint32_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    const uint32_t largest = heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS);
     s_heapLow = largest < 1536;
     bool modeChanged = scanModeTick(now, largest);
     if (s_windowPending) { s_windowPending = false; modeChanged = true; Serial.printf("[scan] window %u from the next restart\n", (unsigned)s_windowReq); }
@@ -1576,7 +1621,7 @@ bool scanPassiveNow()           { return true; }
 ScanFlushStats scanFlushStats() { return ScanFlushStats{ 0, 0, 0 }; }
 uint32_t advertRate()           { return 0; }
 static void scanFlushTick() {
-    s_heapLow = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < 1536;
+    s_heapLow = heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS) < 1536;
 }
 #endif  // SQW_BLE
 
