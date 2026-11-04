@@ -2072,7 +2072,15 @@ void DetectionEngine::startRawWifiScan() {
     // during the scan) before touching the radio.
     g_rawMode = RawScanMode::WIFI;
     esp_wifi_set_promiscuous(false);
-    WiFi.scanNetworks(true /* async */);
+    // PASSIVE, like the detection sweep in radioReport() above. The default
+    // scanNetworks() is an ACTIVE scan: it TRANSMITS a probe request on every
+    // channel, carrying this board's own MAC. A surveillance detector that
+    // announces itself on all thirteen channels is the one emission nobody
+    // asked for, and the FAQ's "everything that goes out" table never listed
+    // it. Passive is also quicker here: 150ms x 13 ~= 2s, against the active
+    // default of up to 300ms x 13. Hidden networks are the only thing a probe
+    // would have added, and this screen never showed them anyway.
+    WiFi.scanNetworks(true /* async */, false /* no hidden */, true /* passive */, 150);
 }
 
 bool DetectionEngine::rawWifiScanDone() const {

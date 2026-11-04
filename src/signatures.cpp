@@ -132,7 +132,24 @@ const OuiEntry kOuiTable[] = {
     // detection stood up while the attribution did not.
     {{0x28, 0x57, 0xBE}, "Hikvision",    DetectionType::CAMERA,     Confidence::HIGH_CONF},
     {{0x00, 0xE0, 0x4C}, "Realtek",      DetectionType::CAMERA,     Confidence::LOW_CONF},
-    {{0xBC, 0xDD, 0xC2}, "Arlo",         DetectionType::CAMERA,     Confidence::LOW_CONF},
+    // Arlo's own MA-L blocks, all three registered to "Arlo Technology",
+    // so High by the rule the other vendor-registered camera rows use.
+    {{0xFC, 0x9C, 0x98}, "Arlo",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    {{0x48, 0x62, 0x64}, "Arlo",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    {{0xA4, 0x11, 0x62}, "Arlo",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    // BC:DD:C2 sat here as "Arlo" and is registered to ESPRESSIF. It was
+    // wrong in both directions: every ESP32 in that block read as a covert
+    // camera, and no real Arlo was ever matched, because none of the three
+    // blocks above were in the table. It also contradicted this project's
+    // own documented decision -- DETECTIONS.md, under the camera section,
+    // says a "flag any Espressif OUI as a possible camera" fallback "would
+    // need a real audit of Espressif's OUI ranges against known false
+    // positives before shipping -- it is NOT built". One was in the table
+    // anyway, mislabelled, so the audit graded it Low as "Arlo" instead of
+    // removing it as Espressif. Same hazard the FLOCK block was cleared of
+    // on 2026-10-14 ("so a SquachWatch is never somebody else's Flock
+    // camera"); a SquachWatch is an ESP32, and this is a SquachWatch
+    // reading another SquachWatch as surveillance.
     {{0x4C, 0x69, 0x05}, "Blink",        DetectionType::CAMERA,     Confidence::LOW_CONF},
     {{0xA4, 0xC1, 0x38}, "Tuya",         DetectionType::CAMERA,     Confidence::LOW_CONF},
     // Blink by Amazon's own blocks (IEEE MA-L, "Blink by Amazon").

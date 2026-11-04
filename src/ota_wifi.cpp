@@ -152,7 +152,10 @@ void fail(Fail f) {
 void startScan() {
     s_netN = 0;
     WiFi.scanDelete();
-    WiFi.scanNetworks(true /* async */, false /* no hidden */);
+    // Passive, for the same reason startRawWifiScan() is: the default is an
+    // active scan that probes on every channel. Every AP you could join
+    // beacons, and hidden ones were already excluded, so nothing is lost.
+    WiFi.scanNetworks(true /* async */, false /* no hidden */, true /* passive */, 150);
     s_state = State::SCANNING;
 }
 
