@@ -149,7 +149,7 @@ static bool takeBootCheckSkip() {
     g_bootCheckSkip = 0;
     return esp_reset_reason() == ESP_RST_SW && v == CHKSKIP_MAGIC;
 }
-#if SQW_SPEAKER
+#if SQW_BOOT_POWEROFF
 // The Freenove boards' wake from POWER OFF restarts once, at the very top of
 // setup(), before anything runs. A deep-sleep wake brings the native USB port
 // up as a new device while the boot carries on, and with nothing on the other
@@ -203,7 +203,7 @@ static void crashReportInit() {
     takeHealCount();
 #endif
     g_resetReason = r;
-#if SQW_SPEAKER
+#if SQW_BOOT_POWEROFF
     takeWakeRestart();
     if (s_wokeFromOff) g_resetReason = ESP_RST_DEEPSLEEP;   // what it really was
 #endif
@@ -4032,7 +4032,7 @@ static void printBootBanner() {
 #if defined(TWATCH_S3)
 static void wardriveBegin();
 #endif
-#if SQW_SPEAKER
+#if SQW_BOOT_POWEROFF
 // ---- the power diary ----------------------------------------------------------
 // The last sixteen power events, kept in NVS so they survive deep sleep and a
 // flat battery: every boot (with what woke it and where BOOT was), the boot
@@ -4178,7 +4178,7 @@ void setup() {
 #if defined(ARDUINO_ARCH_ESP32) && !defined(CROWPANEL7) && !defined(TAB5)
     g_frameSprite = &frame;
 #endif
-#if SQW_SPEAKER
+#if SQW_BOOT_POWEROFF
     // POWER OFF's wake: straight into a restart (see WAKERESTART_MAGIC).
     // Before the breadcrumb is read, so it is still there for the boot after.
     if (esp_reset_reason() == ESP_RST_DEEPSLEEP) {
@@ -4190,7 +4190,7 @@ void setup() {
     // while it is still the previous life's, not this one's.
     crashReportInit();
     Serial.begin(SERIAL_BAUD);
-#if SQW_SPEAKER
+#if SQW_BOOT_POWEROFF
     // POWER OFF left BOOT's pad on the RTC side for its wake, and a pad on
     // the RTC side reads nothing on the ordinary GPIO path. Hand it back
     // before anything reads the button.
@@ -4199,7 +4199,7 @@ void setup() {
 #if SQW_BOOT_BTN
     pinMode(0, INPUT_PULLUP);   // BOOT: see bootButtonTick()
 #endif
-#if SQW_SPEAKER
+#if SQW_BOOT_POWEROFF
     powerDiaryBoot();
 #endif
 #if defined(SQW_S3) || defined(TAB5) || defined(WAVESHARE_C5)
@@ -4302,7 +4302,7 @@ void setup() {
 #endif
 
     tft.init();
-#if SQW_SPEAKER
+#if SQW_BOOT_POWEROFF
     bootStage(1);
 #endif
 
@@ -4736,7 +4736,7 @@ void setup() {
         touch.setRotation(0);
     }
 #endif
-#if SQW_SPEAKER
+#if SQW_BOOT_POWEROFF
     bootStage(2);
 #endif
 
@@ -4898,7 +4898,7 @@ void setup() {
         }
         BlackBox::noteBoot(br);
     }
-#if SQW_SPEAKER
+#if SQW_BOOT_POWEROFF
     bootStage(3);
 #endif
 
@@ -4943,7 +4943,7 @@ void setup() {
     // against a frame built by an independent implementation.
     MeshTalk::begin();
 #endif
-#if SQW_SPEAKER
+#if SQW_BOOT_POWEROFF
     bootStage(9);
 #endif
     applyBrightness();
@@ -4960,7 +4960,7 @@ void setup() {
         Squachy::trigger(Squachy::Event::BOOTED, DetectionType::UNKNOWN, engine.lifetimeTotal());
         enterBoot();
     }
-#if SQW_SPEAKER
+#if SQW_BOOT_POWEROFF
     bootStage(10);
 #endif
 }
@@ -5891,7 +5891,7 @@ static void chargeModeTick(uint32_t now) {
     delay(40);
 }
 
-#if SQW_SPEAKER
+#if SQW_BOOT_POWEROFF
 // ---- POWER OFF, on the boards with a battery ---------------------------------
 // The two Freenove S3 boards have a cell on a connector and no power switch,
 // so BOOT held for three seconds is the switch: a note on the screen at 1.2 s
@@ -5976,14 +5976,14 @@ static void bootButtonTick(uint32_t now) {
     if (down && !longDone && now - downAt >= 1200) {
         longDone = true;
         Serial.println("[button] long press");
-#if SQW_SPEAKER
+#if SQW_BOOT_POWEROFF
         if (s_chargeMode) exitChargeMode();
         else { s_offHeldAt = now ? now : 1; Theme::showToast("POWER OFF", "KEEP HOLDING BOOT", Theme::AMBER, 2200); }
 #else
         if (s_chargeMode) exitChargeMode(); else s_chargeWanted = true;
 #endif
     }
-#if SQW_SPEAKER
+#if SQW_BOOT_POWEROFF
     if (s_offHeldAt && down && now - downAt >= 3000) cbdPowerOff();
     if (!down) s_offHeldAt = 0;
 #endif
@@ -6011,7 +6011,7 @@ void loop() {
     tdeckKeysTick(millis());
 #endif
     if (g_consoleCharge) { g_consoleCharge = false; if (s_chargeMode) exitChargeMode(); else s_chargeWanted = true; }
-#if SQW_SPEAKER
+#if SQW_BOOT_POWEROFF
     if (g_consolePowerOff) { cbdPowerOff(); }
     powerDiaryTick(millis());
     if (g_consolePowerLog) { g_consolePowerLog = false; powerDiaryPrint(); }

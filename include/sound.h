@@ -24,6 +24,19 @@
 #define SQW_SPEAKER 0
 #endif
 
+// The Freenove boards' power switch, which grew up around their speaker:
+// BOOT held three seconds is POWER OFF (deep sleep, BOOT wakes it), the one
+// restart its wake needs, and the power diary (POWERLOG) that follows a board
+// through it. A separate list from the speaker's, because a board can have a
+// speaker and no BOOT button to hold (the Core2), or a BOOT pin that is
+// something else (the Waveshare C5s). Add a board here only once POWER OFF
+// and its wake have been proven on it.
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)
+#define SQW_BOOT_POWEROFF 1
+#else
+#define SQW_BOOT_POWEROFF 0
+#endif
+
 namespace Sound {
     enum class Id : uint8_t {
         NEW_DEVICE = 0,   // ALERTS: three climbing blips
