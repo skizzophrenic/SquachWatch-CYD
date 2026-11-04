@@ -215,6 +215,23 @@ high.
 
 Not usable on an S3: GPIO 26-32 (flash/PSRAM) and 33-37 (octal PSRAM).
 
+### GPS — `[env:freenove-s3-gps]`
+
+The CYD GPS builds' features: a position on each SD row and alert card, the
+clock set from GPS, and WARDRIVE's WiGLE file on the card. The module goes
+on the **UART** port (5V, GND, TXD, RXD, beside the card slot):
+
+| Module | Freenove UART port |
+|---|---|
+| TX  | RXD (GPIO44) |
+| VCC | 5V |
+| GND | GND |
+| RX  | not connected |
+
+The console is the USB, so UART0 is free. The firmware tries 115200, 9600 and
+38400 baud until a sentence parses. The **GPS** label in the top bar shows,
+in red, only while there is a fix.
+
 ## Marauder V8 (justcallmekoko) — `[env:marauder-v8]`
 
 An ESP32-C5 (8 MB flash, 4 MB PSRAM) behind a CP210x. Marauder's own V8
