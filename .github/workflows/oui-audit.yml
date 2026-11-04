@@ -16,9 +16,10 @@
 # when a new row arrives.
 name: OUI audit
 
+# The weekly schedule came off at merge (2026-11-04): a registry that blocks
+# or rate-limits the runner would mail a failure every Monday with nothing
+# wrong in the table. It runs when the table changes and on demand.
 on:
-  schedule:
-    - cron: '17 6 * * 1'   # Mondays, 06:17 UTC
   workflow_dispatch: {}
   pull_request:
     paths:
