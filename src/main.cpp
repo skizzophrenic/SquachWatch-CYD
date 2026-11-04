@@ -1567,6 +1567,8 @@ static bool readTouchRaw(int16_t& a, int16_t& b) {
 #elif defined(TAB5)
     uint16_t x, y;
     if (!Tab5Touch::read(x, y)) return false;
+    a = (int16_t)x; b = (int16_t)y;
+    return true;
 #elif defined(WAVESHARE_C5)
     uint16_t x, y;
     if (!Cst3530::read(x, y)) return false;
