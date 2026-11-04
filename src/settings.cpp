@@ -191,8 +191,13 @@ static uint8_t  s_radioDutyIx  = RADIO_DUTY_DEFAULT;
 // stays off until somebody finds the row. Only the CrowPanel 7 shows it.
 static bool     s_buzzer       = false;
 // The speaker (sound.h): off until somebody finds the row, MED when they do.
+#if defined(CORE2)
+static uint8_t  s_soundMode    = 1;    // 0 OFF, 1 ALERTS, 2 ALL; the Core2 starts on ALERTS
+static uint8_t  s_soundVol     = 50;   // percent: the Core2's speaker is small and quiet
+#else
 static uint8_t  s_soundMode    = 0;    // 0 OFF, 1 ALERTS, 2 ALL
 static uint8_t  s_soundVol     = 25;   // percent: the speaker is loud, so it starts low
+#endif
 
 // ---- LoRa -----------------------------------------------------------------
 // SURVEY by default: the detector posture, everything in the band. FOCUS is
@@ -663,9 +668,9 @@ void load() {
     // The T-Watch's BUZZ (haptics on an alert) already owns "buzz", and with
     // the opposite default, so the CrowPanel's buzzer keeps its own key.
     s_buzzer       = s_prefs.getBool("buzzer", false);
-    s_soundMode    = s_prefs.getUChar("sndMode", 0);
+    s_soundMode    = s_prefs.getUChar("sndMode", s_soundMode);
     if (s_soundMode > 2) s_soundMode = 0;
-    s_soundVol     = s_prefs.getUChar("sndLvl", 25);
+    s_soundVol     = s_prefs.getUChar("sndLvl", s_soundVol);
     if (s_soundVol > 100) s_soundVol = 25;
     s_loraMode     = s_prefs.getUChar("loraMode", 2);
     if (s_loraMode > 2) s_loraMode = 2;

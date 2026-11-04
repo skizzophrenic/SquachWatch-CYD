@@ -146,7 +146,7 @@ static bool takeBootCheckSkip() {
     g_bootCheckSkip = 0;
     return esp_reset_reason() == ESP_RST_SW && v == CHKSKIP_MAGIC;
 }
-#if SQW_SPEAKER
+#if SQW_POWER_OFF
 // The Freenove boards' wake from POWER OFF restarts once, at the very top of
 // setup(), before anything runs. A deep-sleep wake brings the native USB port
 // up as a new device while the boot carries on, and with nothing on the other
@@ -200,7 +200,7 @@ static void crashReportInit() {
     takeHealCount();
 #endif
     g_resetReason = r;
-#if SQW_SPEAKER
+#if SQW_POWER_OFF
     takeWakeRestart();
     if (s_wokeFromOff) g_resetReason = ESP_RST_DEEPSLEEP;   // what it really was
 #endif
@@ -370,6 +370,7 @@ static void drawCrashCard(TFT_eSPI& t) {
 #include "ui_security.h"
 #include "squachy.h"
 #include "cap_touch.h"
+#include "core2_power.h"
 #if defined(TWATCH_S3)
 #define XPOWERS_CHIP_AXP2101
 #include <XPowersLib.h>
@@ -514,6 +515,10 @@ static void drawCrashCard(TFT_eSPI& t) {
 #if defined(TWATCH_S3)
 // Confirmed on the watch 2026-09-22: the ST7789 wants inversion on (as
 // LilyGo's own setup says); false showed every colour inverted.
+constexpr bool PANEL_NEEDS_INVERSION = true;
+#elif defined(CORE2)
+// M5GFX sets invert for the Core2's ILI9342C/E (Panel_M5StackCore2: invert =
+// true). UNCONFIRMED here until looked at; INVERT in Settings flips it if wrong.
 constexpr bool PANEL_NEEDS_INVERSION = true;
 #elif defined(SQW_SMALL)
 // M5GFX sets invert for the StickS3's ST7789P3 and the Cardputer's ST7789V2.
@@ -746,7 +751,14 @@ static const uint8_t MADCTL_BGR = 0x08;
 // ILI9341 and ST7796's tables happen to be identical; ST7789's is its
 // own.
 static uint8_t madctlRotationBits(uint8_t rotation) {
-#if defined(ST7789_DRIVER)
+#if defined(M5STACK)
+    // TFT_eSPI's M5STACK table for the ILI9342C (ILI9341_Rotation.h), whose
+    // native frame is landscape: with TFT_WIDTH 240 it still reads rotation 0
+    // portrait, rotation 1 landscape, like every other board here.
+    static const uint8_t BITS[4] = {
+        MADCTL_MY | MADCTL_MV, 0, MADCTL_MV | MADCTL_MX, MADCTL_MX | MADCTL_MY
+    };
+#elif defined(ST7789_DRIVER)
     static const uint8_t BITS[4] = {
         0, MADCTL_MX | MADCTL_MV, MADCTL_MX | MADCTL_MY, MADCTL_MV | MADCTL_MY
     };
@@ -1473,9 +1485,26 @@ static TouchPoint pollTouch() {
 }
 
 // ---- Raw readers ----
+#if defined(CORE2)
+// Which painted button the finger is on (0 A, 1 B, 2 C), or -1; and when the
+// digitiser was last read, so core2ButtonTick() can read it itself when the
+// screen is dark and nothing else is asking.
+static int8_t   s_core2Btn   = -1;
+static uint32_t s_core2BtnAt = 0;
+#endif
 static bool rawReadCap(int16_t& a, int16_t& b) {
     uint16_t nx, ny;
+#if defined(CORE2)
+    s_core2BtnAt = millis();
+    s_core2Btn = -1;
+#endif
     if (!CapTouch::read(nx, ny)) return false;
+#if defined(CORE2)
+    // The digitiser is taller than the screen: below row 240 are the three
+    // painted button areas A, B and C. A tap there is a button, and must not
+    // land as a tap on the bottom row of the screen.
+    if (ny >= 240) { s_core2Btn = nx < 107 ? 0 : nx < 214 ? 1 : 2; return false; }
+#endif
     a = (int16_t)nx;
     b = (int16_t)ny;
     return true;
@@ -1663,10 +1692,17 @@ static bool s_screenDimmed = false;
 // screen off or on, a long one starts CHARGE MODE. The S3 boards and the
 // CrowPanel are left out until somebody has pressed theirs -- except the
 // Freenove 3.5", whose one button is GPIO0 like a CYD's.
-#if defined(ESP32) && (!defined(SQW_S3) || defined(FREENOVE_S3_35)) && !defined(CROWPANEL7) && !defined(TAB5)
+#if defined(ESP32) && (!defined(SQW_S3) || defined(FREENOVE_S3_35)) && !defined(CROWPANEL7) && !defined(TAB5) && !defined(CORE2)   // GPIO0 is the Core2's speaker clock
 #define SQW_BOOT_BTN 1
 #else
 #define SQW_BOOT_BTN 0
+#endif
+// POCKET MODE (a button turns the screen off and only a button turns it on):
+// the watch's crown, the CYDs' BOOT button, and the Core2's middle button.
+#if defined(TWATCH_S3) || SQW_BOOT_BTN || defined(CORE2)
+#define SQW_POCKET 1
+#else
+#define SQW_POCKET 0
 #endif
 #if defined(TWATCH_S3)
 // A watch goes dark, not dim. When the screen timeout lands, the backlight
@@ -1680,7 +1716,7 @@ static bool s_panelAsleep = false;
 static bool     s_onUsb = true;
 static bool s_radiosResting = false;   // the duty cycle's state; see twatchRadioTick()
 #endif
-#if defined(TWATCH_S3) || SQW_BOOT_BTN
+#if SQW_POCKET
 // POCKET MODE. A crown press (or the CYDs' BOOT button) with the screen on
 // turns it off at once, cable or not, and only another press turns it back
 // on: a touch does not, so a board in a pocket or a bag cannot be woken by
@@ -1695,6 +1731,8 @@ static uint32_t s_pocketNoteUntil = 0;
 static const uint32_t POCKET_NOTE_MS = 4000;
 #if defined(TWATCH_S3)
 static const char* const POCKET_HOW = "Press the crown to wake";
+#elif defined(CORE2)
+static const char* const POCKET_HOW = "Press the middle button to wake";
 #else
 static const char* const POCKET_HOW = "Press BOOT again to wake";
 #endif
@@ -1756,6 +1794,10 @@ static void applyBrightness() {
 #elif defined(TAB5)
     // M5GFX's brightness: the backlight is a PWM pin it owns.
     Tab5Panel::backlight(duty);
+#elif defined(CORE2)
+    // No backlight pin: the power chip's own supply is the light (core2_power.cpp).
+    if (s_crownDark && s_screenDimmed) duty = 0;   // the middle button turns it OFF, whatever DIM LEVEL says
+    Core2Power::setBacklight(duty);
 #elif defined(NM_CYD_C5)
     // One backlight, and a pin-based call. Arduino core 3 dropped the LEDC
     // channel API entirely: ledcWrite takes the PIN now, and the channel is
@@ -1766,7 +1808,7 @@ static void applyBrightness() {
 #elif defined(TDECK_PLUS)
     tdeckBacklight(duty);   // a stepped driver chip, not a PWM pin
 #else
-#if SQW_BOOT_BTN
+#if SQW_POCKET
     if (s_crownDark && s_screenDimmed) duty = 0;   // the button turns it OFF, whatever DIM LEVEL says
 #endif
     ledcWrite(BL_CH_ORIG, duty);
@@ -1819,6 +1861,16 @@ static void initTouchFit() {
     }
 
     s_calSource = CalSource::BUILT_IN;
+#if defined(CORE2)
+    // The FT6336 reports screen pixels in the panel's landscape frame (x 0..319
+    // right, y 0..239 down, upright), which is rotation 1. Native is portrait
+    // (touch_fit.h: rotation 1 is sx = ny, sy = w0 - nx), so nx = w0 - b and
+    // ny = a. No calibration is needed; SETTINGS can still run one.
+    s_touchFit.xa = 0; s_touchFit.xb = -1; s_touchFit.xc = (float)w0;
+    s_touchFit.ya = 1; s_touchFit.yb = 0;  s_touchFit.yc = 0;
+    s_touchFit.w0 = (int16_t)w0; s_touchFit.h0 = (int16_t)h0;
+    return;
+#endif
 #if defined(TOUCH_ON_DISPLAY_BUS) || defined(CYD35R)
     TouchFit::Fit old;
     if (fitFromTftEspiBlobs(old)) {
@@ -2247,6 +2299,22 @@ static const uint32_t SNOOZE_PICK_MS = 3000;
 static uint8_t  s_snoozeStep  = 0;
 static uint32_t s_snoozeTapAt = 0;
 
+#if defined(CORE2)
+// The Core2's vibration motor, under the same VIBRATE setting the watch calls
+// BUZZ. A room of Ring cameras alerts every few seconds, so a plain alert
+// buzzes once in ten; a watch-list hit and a sample always get through.
+enum class Buzz : uint8_t { ALERT, WATCH, SAMPLE, MESSAGE };
+static void core2Buzz(Buzz kind) {
+    if (kind != Buzz::SAMPLE && !Settings::buzz()) return;
+    static uint32_t lastAt = 0;
+    const uint32_t now = millis();
+    if (kind == Buzz::ALERT && lastAt && now - lastAt < 10000) return;
+    if (kind == Buzz::ALERT) lastAt = now;
+    Core2Power::vibrate(kind == Buzz::WATCH ? Core2Power::Pattern::WATCH
+                      : kind == Buzz::MESSAGE ? Core2Power::Pattern::MESSAGE
+                      : Core2Power::Pattern::ALERT, Settings::buzzStrength());
+}
+#endif
 static void enterAlert(const Detection& d) {
     s_snoozeStep = 0;
     s_backToDesk = (state == AppState::DESK);
@@ -2256,6 +2324,8 @@ static void enterAlert(const Detection& d) {
     state = AppState::ALERT;
 #if defined(TWATCH_S3)
     twatchBuzz(Buzz::ALERT);
+#elif defined(CORE2)
+    core2Buzz(Buzz::ALERT);
 #endif
     // FIRST. uiAlertInit() clears the card's banner flags, and it used to run
     // at the END of this function -- after the two uiAlertSet* calls below --
@@ -2331,6 +2401,8 @@ static void enterWatchAlert() {
     state = AppState::WATCH_ALERT;
 #if defined(TWATCH_S3)
     twatchBuzz(Buzz::WATCH);
+#elif defined(CORE2)
+    core2Buzz(Buzz::WATCH);
 #endif
     Sound::play(Sound::Id::WATCH_HIT);   // the one sound that ignores the night
     watchAlertStart = millis();
@@ -4002,7 +4074,7 @@ static void printBootBanner() {
 #if defined(TWATCH_S3)
 static void wardriveBegin();
 #endif
-#if SQW_SPEAKER
+#if SQW_POWER_OFF
 // ---- the power diary ----------------------------------------------------------
 // The last sixteen power events, kept in NVS so they survive deep sleep and a
 // flat battery: every boot (with what woke it and where BOOT was), the boot
@@ -4148,7 +4220,7 @@ void setup() {
 #if defined(ARDUINO_ARCH_ESP32) && !defined(CROWPANEL7) && !defined(TAB5)
     g_frameSprite = &frame;
 #endif
-#if SQW_SPEAKER
+#if SQW_POWER_OFF
     // POWER OFF's wake: straight into a restart (see WAKERESTART_MAGIC).
     // Before the breadcrumb is read, so it is still there for the boot after.
     if (esp_reset_reason() == ESP_RST_DEEPSLEEP) {
@@ -4160,7 +4232,7 @@ void setup() {
     // while it is still the previous life's, not this one's.
     crashReportInit();
     Serial.begin(SERIAL_BAUD);
-#if SQW_SPEAKER
+#if SQW_POWER_OFF
     // POWER OFF left BOOT's pad on the RTC side for its wake, and a pad on
     // the RTC side reads nothing on the ordinary GPIO path. Hand it back
     // before anything reads the button.
@@ -4169,7 +4241,7 @@ void setup() {
 #if SQW_BOOT_BTN
     pinMode(0, INPUT_PULLUP);   // BOOT: see bootButtonTick()
 #endif
-#if SQW_SPEAKER
+#if SQW_POWER_OFF
     powerDiaryBoot();
 #endif
 #if defined(SQW_S3) || defined(TAB5)
@@ -4192,6 +4264,13 @@ void setup() {
 #endif
 #if defined(TDECK_PLUS)
     tdeckPowerUp();
+#endif
+#if defined(CORE2)
+    // The panel's supply and reset, the touch chip's reset and the microSD's
+    // supply all come from the power chip: nothing on the display or touch bus
+    // answers until this has run, so it goes before tft.init().
+    Core2Power::begin();
+    uiClearSetBatterySource(Core2Power::battery);
 #endif
 #if defined(CYD35) || defined(NM_CYD_C5)
     // On the NM-CYD-C5 this answers a specific open question rather than a
@@ -4230,13 +4309,17 @@ void setup() {
 // ... and not on the CrowPanel 7, where GPIO21 is the panel's BLUE-0 data
 // line. Driving it high before the panel driver claims it is a stripe down the
 // picture at best.
-#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(CYD32C) && !defined(CYD35C) && !defined(TAB5)
+#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(CYD32C) && !defined(CYD35C) && !defined(TAB5) && !defined(CORE2)
     pinMode(21, OUTPUT); digitalWrite(21, HIGH);
 #endif
 #if defined(SQW_S3)
     // GPIO27 and GPIO32 are the S3's PSRAM lines: touching either hangs the
     // chip until the watchdog reboots it. Both S3 boards' backlight is GPIO45.
     pinMode(BL_PIN_S3, OUTPUT); digitalWrite(BL_PIN_S3, HIGH);
+#elif defined(CORE2)
+    // Nothing at all. GPIO21 and 22 are the power chip's and the touch chip's
+    // I2C bus, 27 and 32 are on the M-Bus and Port A headers, and the backlight
+    // is the power chip's own supply, switched on in core2PowerUp().
 #elif defined(CROWPANEL7)
     // Nothing at all. This board's backlight is not a GPIO -- it is an I2C
     // command to the helper MCU, sent once Wire is up. GPIO27/32 are the same
@@ -4267,7 +4350,7 @@ void setup() {
 #endif
 
     tft.init();
-#if SQW_SPEAKER
+#if SQW_POWER_OFF
     bootStage(1);
 #endif
 
@@ -4289,6 +4372,13 @@ void setup() {
     // saved rotation instead of always starting from the board default.
     Settings::load();
     Clock::begin();   // after Settings: the zone is applied there, the history here
+#if defined(CORE2)
+    Core2Power::rtcBegin();   // after Clock::begin(): a real time beats the note's guess
+    Core2Power::imuBegin();
+#if defined(CYD_GPS)
+    Core2Power::busPower(true);   // the GNSS module is fed from the M-Bus 5V pin
+#endif
+#endif
 #if defined(CYD_GPS)
     cydGpsStart();
 #endif
@@ -4362,6 +4452,8 @@ void setup() {
 #elif defined(TDECK_PLUS)
     // No LEDC: GPIO42 is a pulse-counting 16-step driver, and a PWM on it
     // would walk the brightness round and round. tdeckBacklight() steps it.
+#elif defined(CORE2)
+    // No LEDC: the backlight is the power chip's, dimmed by voltage.
 #elif defined(SQW_S3)
     // One backlight, GPIO45, on the first channel. The CYD pins below are
     // flash/PSRAM lines and the power chip's interrupt on an S3.
@@ -4428,6 +4520,8 @@ void setup() {
         Tab5Panel::backlight(24);
 #elif defined(TDECK_PLUS)
         tdeckBacklight(24);
+#elif defined(CORE2)
+        Core2Power::setBacklight(24);
 #else
         ledcWrite(BL_CH_ORIG, 24);
         ledcWrite(BL_CH_CAP,  24);
@@ -4476,7 +4570,7 @@ void setup() {
     // 16-bit — the full 16-bit buffer didn't fit in the available
     // contiguous heap on this board.
     frame.setColorDepth(8);
-#if (defined(SQW_S3) && !defined(FREENOVE_S3_35) && !defined(FREENOVE_S3_40)) || SQW_FRAME_FORCE_INTERNAL
+#if (defined(SQW_S3) && !defined(FREENOVE_S3_35) && !defined(FREENOVE_S3_40)) || SQW_FRAME_FORCE_INTERNAL || defined(CORE2)
     // 57.6 KB fits in internal RAM with room to spare (75 KB at 320x240), and a sprite in
     // PSRAM pushes slower and cannot go by DMA. Keep it inside. (Not the
     // Freenove 3.5": its 154 KB frame goes to PSRAM on purpose, and the QSPI
@@ -4619,6 +4713,20 @@ void setup() {
     usingCapTouch = CapTouch::probe();
     Serial.println(usingCapTouch ? "T-Watch S3 -- FT6336 capacitive touch answered."
                                  : "T-Watch S3 -- FT6336 did not answer; no touch.");
+#elif defined(CORE2)
+    // The Core2's FT6336, on I2C SDA 21 / SCL 22 at 0x38 -- the bus Core2Power
+    // already started. No reset line of our own: it is released with the
+    // panel's, by the power chip, in Core2Power::begin().
+    CapTouch::begin(21, 22, -1, 0x38);
+    usingCapTouch = CapTouch::probe();
+    Serial.println(usingCapTouch ? "Core2 -- FT6336 capacitive touch answered."
+                                 : "Core2 -- FT6336 did not answer; no touch.");
+    {
+        uint8_t p; bool c;
+        if (Core2Power::battery(p, c)) Serial.printf("[batt] %u%% (%u mV), %s\n", (unsigned)p, (unsigned)Core2Power::batteryMv(), c ? "on USB" : "on battery");
+        else Serial.println("[batt] no cell");
+    }
+    Sound::begin();                       // the amplifier is behind the power chip, which is up
 #elif defined(SQW_SMALL)
     usingCapTouch = false;
 #if defined(CARDPUTER_ADV)
@@ -4687,7 +4795,7 @@ void setup() {
         touch.setRotation(0);
     }
 #endif
-#if SQW_SPEAKER
+#if SQW_POWER_OFF
     bootStage(2);
 #endif
 
@@ -4764,13 +4872,13 @@ void setup() {
     // injected against the compiled-in ranges -- a calibration screen would
     // just sit there waiting for a finger.
     initTouchFit();
-#if defined(ESP32) && !defined(CROWPANEL7) && !defined(SQW_SMALL) && !defined(FREENOVE_S3_35) && !defined(TAB5)   // nothing to calibrate on a stick with no touch
+#if defined(ESP32) && !defined(CROWPANEL7) && !defined(SQW_SMALL) && !defined(FREENOVE_S3_35) && !defined(TAB5) && !defined(CORE2)   // nothing to calibrate on a stick with no touch
     if (s_calSource != CalSource::SAVED) {
         Serial.println("Touch: no five-target calibration yet -- running it now.");
         runTouchCalibration();
     }
 #endif
-#if defined(CROWPANEL7) || defined(FREENOVE_S3_35) || defined(TAB5)
+#if defined(CROWPANEL7) || defined(FREENOVE_S3_35) || defined(TAB5) || defined(CORE2)
     // Never on first boot here. The GT911 (and the ST77922's own touch)
     // reports panel pixels, so the compiled-in fit is already the identity
     // and there is nothing to calibrate -- making someone tap five targets
@@ -4816,6 +4924,8 @@ void setup() {
     Tab5Panel::backlight(24);
 #elif defined(TDECK_PLUS)
     tdeckBacklight(24);
+#elif defined(CORE2)
+    Core2Power::setBacklight(24);
 #else
     ledcWrite(BL_CH_ORIG, 24);
     ledcWrite(BL_CH_CAP,  24);
@@ -4847,7 +4957,7 @@ void setup() {
         }
         BlackBox::noteBoot(br);
     }
-#if SQW_SPEAKER
+#if SQW_POWER_OFF
     bootStage(3);
 #endif
 
@@ -4892,7 +5002,7 @@ void setup() {
     // against a frame built by an independent implementation.
     MeshTalk::begin();
 #endif
-#if SQW_SPEAKER
+#if SQW_POWER_OFF
     bootStage(9);
 #endif
     applyBrightness();
@@ -4909,7 +5019,7 @@ void setup() {
         Squachy::trigger(Squachy::Event::BOOTED, DetectionType::UNKNOWN, engine.lifetimeTotal());
         enterBoot();
     }
-#if SQW_SPEAKER
+#if SQW_POWER_OFF
     bootStage(10);
 #endif
 }
@@ -5551,7 +5661,11 @@ static void cydGpsStart() {
     // TX -1: the module's RX is not wired. The core fills in its default
     // pins only when both are negative, so TX stays unassigned here; the
     // default TX2 is GPIO17, the status light.
+#if defined(CYD_GPS_TX)
+    CYD_GPS_SERIAL.begin(s_cydGpsBaud, SERIAL_8N1, CYD_GPS_RX, CYD_GPS_TX);
+#else
     CYD_GPS_SERIAL.begin(s_cydGpsBaud, SERIAL_8N1, CYD_GPS_RX, -1);
+#endif
     s_cydGpsBaudAt = millis();
     Wardrive::sdBegin();
 }
@@ -5690,6 +5804,8 @@ static void chargeBacklight(uint8_t duty) {
     CrowBL::set(duty);
 #elif defined(TAB5)
     Tab5Panel::backlight(duty);
+#elif defined(CORE2)
+    Core2Power::setBacklight(duty);
 #else
     ledcWrite(BL_CH_ORIG, duty);
     ledcWrite(BL_CH_CAP,  duty);
@@ -5747,7 +5863,7 @@ static void enterChargeMode() {
 static void exitChargeMode() {
     const uint32_t mins = (millis() - s_chargeAt) / 60000UL;
     s_chargeMode = false;
-#if SQW_BOOT_BTN
+#if SQW_POCKET
     s_crownDark = false;
 #endif
     engine.wakeRadios();
@@ -5791,7 +5907,7 @@ static void chargeModeTick(uint32_t now) {
     delay(40);
 }
 
-#if SQW_SPEAKER
+#if SQW_POWER_OFF
 // ---- POWER OFF, on the boards with a battery ---------------------------------
 // The two Freenove S3 boards have a cell on a connector and no power switch,
 // so BOOT held for three seconds is the switch: a note on the screen at 1.2 s
@@ -5854,6 +5970,48 @@ static void cbdPowerOff() {
 }
 #endif
 
+#if defined(CORE2)
+// The three painted buttons under the Core2's glass, acted on at release:
+//   A  home -- from a browsing screen back to the main one; from the main
+//      one, into SETTINGS. Never out of a lock, an alert, a download or the
+//      boot, which have their own ways out.
+//   B  the screen off, or back on (pocket mode, see pocketPress())
+//   C  brightness, one step brighter and round again from the top
+static void core2ButtonTick(uint32_t now) {
+    static int8_t last = -1;
+    int8_t cur = s_core2Btn;
+    if (now - s_core2BtnAt > 120) {
+        // Nothing has read the digitiser lately (the screen is dark and the
+        // loop is not polling touch): ask it.
+        int16_t a, b;
+        rawReadCap(a, b);
+        cur = s_core2Btn;
+    }
+    if (cur == -1 && last != -1) {
+        const int8_t btn = last;
+        Serial.print("[button] "); Serial.println((char)('A' + btn));
+        if (btn == 1) {
+            pocketPress(now);
+        } else if (!Security::locked() && !s_crownDark && !s_screenDimmed) {
+            lastTouch = now;
+            if (btn == 0) {
+                if (state == AppState::CLEAR) enterSettings();
+                else if (state == AppState::LOG || state == AppState::SETTINGS || state == AppState::DIARY ||
+                         state == AppState::OUTFIT || state == AppState::RAWSCAN || state == AppState::DIAGNOSTICS ||
+                         state == AppState::HUNT || state == AppState::DETECTION_FILTER ||
+                         state == AppState::IGNORE_LIST || state == AppState::POWER_SAVER || state == AppState::DESK)
+                    enterClear();
+            } else {
+                const uint8_t b = Settings::brightness();
+                Settings::adjustBrightness(b >= 224 ? -(int8_t)127 : 64);
+                applyBrightness();
+            }
+        }
+    }
+    last = cur;
+}
+#endif
+
 #if SQW_BOOT_BTN
 // BOOT, polled every pass (and every 40 ms in charge mode). Released before
 // 1.2 s it is a short press: the screen off, or back on. Held past 1.2 s it
@@ -5876,14 +6034,14 @@ static void bootButtonTick(uint32_t now) {
     if (down && !longDone && now - downAt >= 1200) {
         longDone = true;
         Serial.println("[button] long press");
-#if SQW_SPEAKER
+#if SQW_POWER_OFF
         if (s_chargeMode) exitChargeMode();
         else { s_offHeldAt = now ? now : 1; Theme::showToast("POWER OFF", "KEEP HOLDING BOOT", Theme::AMBER, 2200); }
 #else
         if (s_chargeMode) exitChargeMode(); else s_chargeWanted = true;
 #endif
     }
-#if SQW_SPEAKER
+#if SQW_POWER_OFF
     if (s_offHeldAt && down && now - downAt >= 3000) cbdPowerOff();
     if (!down) s_offHeldAt = 0;
 #endif
@@ -5911,7 +6069,7 @@ void loop() {
     tdeckKeysTick(millis());
 #endif
     if (g_consoleCharge) { g_consoleCharge = false; if (s_chargeMode) exitChargeMode(); else s_chargeWanted = true; }
-#if SQW_SPEAKER
+#if SQW_POWER_OFF
     if (g_consolePowerOff) { cbdPowerOff(); }
     powerDiaryTick(millis());
     if (g_consolePowerLog) { g_consolePowerLog = false; powerDiaryPrint(); }
@@ -5937,6 +6095,13 @@ void loop() {
     s_pushAccumUs = 0;
     FramePush::newFrame();
     uint32_t now = millis();
+#if defined(CORE2)
+    Core2Power::tick(now);
+    core2ButtonTick(now);
+    // A shake lights a screen the saver dimmed. Not a pocket-mode screen: a
+    // board in a bag is shaken all day, and pocket mode is the way to say so.
+    if (Core2Power::shaken(now) && s_screenDimmed && !s_crownDark) { lastTouch = now; Serial.println("[imu] shake: wake"); }
+#endif
 #if defined(TWATCH_S3)
     twatchCrownTick(now);
     twatchMotionTick(now);
@@ -6152,6 +6317,8 @@ void loop() {
                 Sound::play(Sound::Id::HEADS_UP);
 #if defined(TWATCH_S3)
                 twatchBuzz(Buzz::MESSAGE);
+#elif defined(CORE2)
+                core2Buzz(Buzz::MESSAGE);
 #endif
             }
         }
@@ -7997,6 +8164,15 @@ void loop() {
                         }
                         case SettingsRow::CONFIDENCE: Settings::cycleMinConfidence(); break;
                         case SettingsRow::AUTO_QUIET:  Settings::cycleAutoQuiet(); break;
+#if defined(CORE2)
+                        case SettingsRow::CORE2_BUZZ:
+                            // OFF, HIGH, MED, LOW. Each level buzzes once so the
+                            // choice is made by feel; OFF stays silent.
+                            Settings::cycleBuzz();
+                            if (Settings::buzz()) core2Buzz(Buzz::SAMPLE);
+                            Serial.println(Settings::buzzModeName());
+                            break;
+#endif
 #if defined(CROWPANEL7)
                         case SettingsRow::BUZZER:
                             // Switching it ON plays the chirp once, the job the
@@ -9287,6 +9463,8 @@ void loop() {
             info.boardName = "Tab5 LAB";
 #elif defined(TOUCH_ON_DISPLAY_BUS)
             info.boardName = "AWOK";
+#elif defined(CORE2)
+            info.boardName = "Core2 LAB";
 #elif defined(STICKS3)
             info.boardName = "StickS3 LAB";
 #elif defined(CARDPUTER_ADV)
@@ -9515,7 +9693,7 @@ void loop() {
         // (see Settings::screenTimeoutSec), unless it is set to NEVER.
         if (s_onUsb) wantDim = false;
 #endif
-#if defined(TWATCH_S3) || SQW_BOOT_BTN
+#if SQW_POCKET
         // POCKET MODE, which beats the cable, the desk and a timeout of NEVER.
         // Only the button ends it (pocketPress); a touch never does.
         //
@@ -9538,7 +9716,7 @@ void loop() {
         if (wantDim != s_screenDimmed) {
             s_screenDimmed = wantDim;
             applyBrightness();
-#if defined(TWATCH_S3) || SQW_BOOT_BTN
+#if SQW_POCKET
             if (s_crownDark) Serial.println(wantDim ? "[pocket] screen dark" : "[pocket] screen lit for an alert");
 #endif
         }

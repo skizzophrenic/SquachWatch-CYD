@@ -18,10 +18,18 @@
 #pragma once
 #include <stdint.h>
 
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(CORE2)
 #define SQW_SPEAKER 1
 #else
 #define SQW_SPEAKER 0
+#endif
+// POWER OFF by holding BOOT, its wake restart and the power diary: what the two
+// Freenove boards have around their speaker. The Core2 has a speaker and none
+// of that (no BOOT button, and its power key belongs to the power chip).
+#if SQW_SPEAKER && !defined(CORE2)
+#define SQW_POWER_OFF 1
+#else
+#define SQW_POWER_OFF 0
 #endif
 
 namespace Sound {

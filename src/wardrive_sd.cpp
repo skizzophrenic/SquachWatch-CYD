@@ -28,6 +28,15 @@
 #ifndef FIRMWARE_VERSION
 #define FIRMWARE_VERSION "sim"
 #endif
+
+// The device named in the WiGLE file header.
+#if defined(CORE2)
+#define WARDRIVE_MODEL "M5Stack Core2"
+#define WARDRIVE_BRAND "M5Stack"
+#else
+#define WARDRIVE_MODEL "ESP32-2432S028R"
+#define WARDRIVE_BRAND "Sunton"
+#endif
 #ifndef SQW_ENV
 #define SQW_ENV "cyd-gps"
 #endif
@@ -88,7 +97,7 @@ bool writeOut(const char* path, const char* buf, size_t len) {
     bool ok = true;
     if (fresh) {
         char h[512];
-        const size_t n = headerLines(h, sizeof h, FIRMWARE_VERSION, SQW_ENV, "ESP32-2432S028R", "Sunton");
+        const size_t n = headerLines(h, sizeof h, FIRMWARE_VERSION, SQW_ENV, WARDRIVE_MODEL, WARDRIVE_BRAND);
         ok = n && f.write((const uint8_t*)h, n) == n;
     }
     ok = ok && f.write((const uint8_t*)buf, len) == len;
@@ -114,7 +123,7 @@ bool writeOut(const char* path, const char* buf, size_t len) {
     fseek(f, 0, SEEK_END);
     if (ftell(f) == 0) {
         char h[512];
-        const size_t n = headerLines(h, sizeof h, FIRMWARE_VERSION, SQW_ENV, "ESP32-2432S028R", "Sunton");
+        const size_t n = headerLines(h, sizeof h, FIRMWARE_VERSION, SQW_ENV, WARDRIVE_MODEL, WARDRIVE_BRAND);
         ok = n && fwrite(h, 1, n, f) == n;
     }
     ok = ok && fwrite(buf, 1, len, f) == len;

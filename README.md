@@ -100,6 +100,7 @@ whole firmware but has had fewer hours on it. The longer answer is in
 | LilyGo T-Deck Plus | BETA | ESP32-S3 handheld: 2.8" screen, capacitive touch, a real keyboard that types into the message and password screens, speaker, GPS for **wardriving**, SD card, 2000 mAh battery, and **LoRa**: it listens to Meshtastic and MeshCore at once like the T-Watch, and can **send** to their public channels from the keyboard (off until you turn on LORA TX). The trackball is not used yet. Pins in [docs/PINOUT.md](docs/PINOUT.md) |
 | M5Stack StickS3 | BETA | 1.14" screen, landscape, two buttons |
 | M5Stack Cardputer ADV | BETA | Driven from its keyboard. Not the original Cardputer |
+| M5Stack Core2 (AXP192 and AXP2101 versions) | BRING-UP (build it yourself) | 320×240, capacitive touch, microSD, battery gauge: `pio run -e core2 -t upload`. No speaker, vibration or IMU use yet. [docs/CORE2.md](docs/CORE2.md) |
 | LilyGo T-Watch S3 / S3 Plus | BETA | On your wrist, with a battery and a buzz. Listens to **LoRa**; the S3 Plus adds **GPS**. See [On the watch](#on-the-watch) |
 | M5Stack Tab5 | Test builds only (`?lab=1`) | 5" 1280×720 tablet on an ESP32-P4, whose radio is a separate ESP32-C6. WiFi and Bluetooth detection both work, but the C6 needs our firmware written first. No SD, sound or battery yet. [docs/TAB5.md](docs/TAB5.md) |
 

@@ -45,6 +45,8 @@ extern TFT_eSPI tft;
     #define SD_CS_PIN 10
 #elif defined(TDECK_PLUS)
     #define SD_CS_PIN 39   // on the display's bus (40/38/41), per LilyGo's utilities.h
+#elif defined(CORE2)
+    #define SD_CS_PIN 4   // the Core2's slot, on the display's bus (CS 5)
 #else
     #define SD_CS_PIN 5
 #endif
@@ -91,7 +93,11 @@ bool SdLog::begin() {
         if (mounted) Serial.println("[sd] 4-bit did not start; mounted 1-bit");
     }
     if (!mounted) {
-#elif defined(CYD35)
+#elif defined(CYD35) || defined(CORE2)
+    // The Core2's card is on the display's own bus too (SCK 18, MISO 38, MOSI
+    // 23, CS 4), so it takes this branch: TFT_eSPI's already-begun SPI instance,
+    // and nothing extra attached to the bus. Its supply (ALDO4 / LDO2) is
+    // switched on in Core2Power::begin().
     // (The RL Phantom used to land here too, and its SD card never worked as
     // a result: the card is on 18/19/23, and the display's SPI engine never
     // clocked those pins. Its display now runs on HSPI -- see its user setup
