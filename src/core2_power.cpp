@@ -168,6 +168,21 @@ void speaker(bool on) {
     }
 }
 
+// The M-Bus 5 V pin, which feeds a stacked module (the GNSS module). Sequences
+// are M5Unified's setExtOutput/setUSBOutput as best recalled -- UNVERIFIED on
+// hardware: read the [gps] lines to see whether the module came up.
+void busPower(bool on) {
+    if (s_chip == 192) {
+        wrMasked(0x10, on ? 0x04 : 0x00, 0xFB);   // EXTEN: the 5 V boost
+        wrMasked(0x91, on ? 0xF0 : 0x00, 0x0F);   // GPIO0 LDO output 3.3 V
+        wrMasked(0x90, on ? 0x02 : 0x07, 0xF8);   // GPIO0: LDO output / floating
+    } else if (s_chip == 2101) {
+        wrMasked(0x90, on ? 0x40 : 0x00, 0xBF);   // BLDO2 (the bus 5 V enable)
+        if (on) wr(0x97, 28);                     // BLDO2 3.3 V
+    }
+    Serial.printf("[pmu] bus 5V %s\n", on ? "on" : "off");
+}
+
 // ---- the clock chip ---------------------------------------------------------
 // The same register map and the same "mark" as the T-Watch's PCF8563 code in
 // main.cpp: our mark in the minute-alarm register, so a chip holding somebody

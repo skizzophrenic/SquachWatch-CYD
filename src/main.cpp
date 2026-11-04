@@ -4375,6 +4375,9 @@ void setup() {
 #if defined(CORE2)
     Core2Power::rtcBegin();   // after Clock::begin(): a real time beats the note's guess
     Core2Power::imuBegin();
+#if defined(CYD_GPS)
+    Core2Power::busPower(true);   // the GNSS module is fed from the M-Bus 5V pin
+#endif
 #endif
 #if defined(CYD_GPS)
     cydGpsStart();
@@ -5658,7 +5661,11 @@ static void cydGpsStart() {
     // TX -1: the module's RX is not wired. The core fills in its default
     // pins only when both are negative, so TX stays unassigned here; the
     // default TX2 is GPIO17, the status light.
+#if defined(CYD_GPS_TX)
+    CYD_GPS_SERIAL.begin(s_cydGpsBaud, SERIAL_8N1, CYD_GPS_RX, CYD_GPS_TX);
+#else
     CYD_GPS_SERIAL.begin(s_cydGpsBaud, SERIAL_8N1, CYD_GPS_RX, -1);
+#endif
     s_cydGpsBaudAt = millis();
     Wardrive::sdBegin();
 }

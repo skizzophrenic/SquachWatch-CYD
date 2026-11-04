@@ -35,6 +35,9 @@ namespace Core2Power {
     // The speaker amplifier's enable: AXP192 GPIO2, AXP2101 ALDO3. Off at boot.
     void speaker(bool on);
 
+    // Feeds the M-Bus 5 V pin for a stacked module (GNSS). AXP192 verified; AXP2101 untried.
+    void busPower(bool on);
+
     // The clock chip (a BM8563, register-compatible with the PCF8563), on the
     // same bus with its own backup cell. Kept in UTC. rtcBegin() runs once after
     // Clock::begin(): the chip's time, when it has one worth believing, sets the
