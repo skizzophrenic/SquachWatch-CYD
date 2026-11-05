@@ -3265,6 +3265,9 @@ bool uiMascotStep(uint32_t now, bool advance) {
     return true;
 }
 
+static bool s_fob = false;
+void uiClearSetFob(bool on) { s_fob = on; }
+
 void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance, bool scanMenu) {
     int w = t.width();
     int h = t.height();
@@ -3290,6 +3293,9 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     const uint8_t counterRows = landscape ? COUNTER_ROWS_LANDSCAPE : COUNTER_ROWS_PORTRAIT;
 
     Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
+    // FOB MODE: no buttons, so the bar's rows belong to the scene. Pushing it
+    // off the bottom moves everything that stands on it down to the floor.
+    if (s_fob) bar.y = h + 2;
     const int lineH          = 14;
     const int countersTop    = bar.y - counterRows * lineH - 6;
     // The counter rows alone sit 9px lower than countersTop, and nothing
@@ -3597,7 +3603,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     Theme::drawBackgroundOverlay(t, now);
 
     // Title bar at the top
-    if (DrawBand::has(0, titleBottom)) Theme::drawTitleBar(t, ">> SQUACHWATCH <<  SCANNING");
+    if (DrawBand::has(0, titleBottom) && !s_fob) Theme::drawTitleBar(t, ">> SQUACHWATCH <<  SCANNING");
 
     // The watch/hunt indicator, in the title bar's empty middle. AFTER the bar
     // itself, which repaints that whole band -- see drawWatchPill()'s comment
@@ -3974,7 +3980,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // Soft buttons, straight over the background: it repaints the whole
     // strip under them every frame, margins and gaps included. Each
     // button fills its own box, so the labels stay on a dark ground.
-    if (DrawBand::has(bar.y, bar.y + bar.h))
+    if (DrawBand::has(bar.y, bar.y + bar.h) && !s_fob)
         Theme::drawButtonBar(t, ButtonId::NONE,
                              scanMenu ? Theme::ButtonBarMode::SCAN_PICKER : Theme::ButtonBarMode::MAIN);
 #if SQUACH_MESH

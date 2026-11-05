@@ -72,6 +72,7 @@ extern volatile bool g_consolePet;
 extern volatile bool g_consoleJail;
 extern volatile bool g_consoleFree;
 #if SQW_DEVTOOLS
+#include "shake.h"
 extern volatile uint8_t  g_devKey;
 extern volatile uint16_t g_devKeyMs;
 extern volatile bool     g_devShot;
@@ -605,6 +606,8 @@ void pollSerial() {
         if (strcasecmp(line, "XYZZY") == 0)  { g_consoleXyzzy = true; continue; }
 #if SQW_DEVTOOLS
         if (strcasecmp(line, "SHOT") == 0)      { g_devShot = true; continue; }
+        if (strcasecmp(line, "IMU") == 0)       { static bool on = false; on = !on; Shake::setTrace(on);
+                                                  Serial.printf("[imu] trace %s\n", on ? "on" : "off"); continue; }
         if (strcasecmp(line, "KEY NEXT") == 0)  { g_devKey = 1; continue; }
         if (strcasecmp(line, "KEY PREV") == 0)  { g_devKey = 2; continue; }
         if (strcasecmp(line, "KEY HOME") == 0)  { g_devKey = 3; continue; }

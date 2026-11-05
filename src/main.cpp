@@ -8,6 +8,7 @@
 #include <Wire.h>
 #include <TFT_eSPI.h>
 #include "sound.h"          // the Freenove S3 speaker; no-ops everywhere else
+#include "shake.h"          // the small boards' BMI270; no-ops everywhere else
 #if defined(CROWPANEL7)
 #include "crowpanel7_board.h"
 #include "crowpanel7_display.h"
@@ -976,6 +977,7 @@ static bool s_confirmPending = false;   // the WATCH/HUNT panel is up
 static bool s_infoPending    = false;   // MORE INFO is up
 static bool s_scanPickerOpen = false;  // CLEAR's SCAN picker [BLE][WIFI][BACK] is up
 static bool s_rawScanIsBle = true;     // RAWSCAN is showing BLE (else WiFi)
+static bool s_fob = false;             // StickS3 FOB MODE: CLEAR with no chrome, no stops
 
 #if defined(CARDPUTER_ADV)
 // ---- EXT SCREEN: a second panel on the Cardputer's EXT header -----------------
@@ -1354,6 +1356,7 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         add(w / 2, h - 17);             // MORE / GOT IT
         return n;
     }
+    if (state == AppState::CLEAR && s_fob) return 0;   // FOB MODE: nothing to point at
     if (state == AppState::CLEAR) {
         // The bar first, left to right, then the menu, the tiles, and any
         // card that is up. Squachy and his pet are not stops on these boards:
@@ -1617,6 +1620,8 @@ static TouchPoint stickPoll() {
         s_stickHome = true;
         Serial.println("[keys] home");
     }
+    // A screen with nothing to point at (FOB MODE) still wakes on a key.
+    if (!n && (keys.next || keys.prev || keys.select)) lastTouch = now;
     // A list step waiting on the redraw: see stickListStep().
     if (s_listPend && stickListSettle(pts, n)) {
         Serial.printf("[keys] stop %u of %u at %d,%d (screen %u)\n", (unsigned)s_stickStop + 1, (unsigned)n,
@@ -2695,6 +2700,8 @@ static bool onRawScanScreen() {
         ;
 }
 static void enterClear() {
+    s_fob = false;
+    uiClearSetFob(false);
     if (Security::locked()) { enterLocked(); return; }
     restoreFrameBuffer();   // lent to a download that did not end in a restart
     if (s_backToDesk) { s_backToDesk = false; enterDesk(); return; }
@@ -2793,7 +2800,7 @@ static uint32_t s_snoozeTapAt = 0;
 
 static void enterAlert(const Detection& d) {
     s_snoozeStep = 0;
-    s_backToDesk = (state == AppState::DESK);
+    s_backToDesk = (state == AppState::DESK) || (state == AppState::CLEAR && s_fob);
 #if SQUACH_LORA && defined(TDECK_PLUS)
     s_backToLora = onLoraPage() ? state : AppState::CLEAR;
 #endif
@@ -2917,6 +2924,19 @@ static void enterSettings() {
 }
 
 static void enterDesk() {
+#if defined(STICKS3)
+    // FOB MODE takes desk mode's place on the StickS3: the main screen with
+    // nothing on it but Squachy, the counters and the alerts. It keeps desk
+    // mode's memory, so HOME, an alert's dismissal and a reboot come back to
+    // it, and leaving it (BACK or HOME) forgets it.
+    s_backToDesk = false;
+    enterClear();
+    if (state != AppState::CLEAR) return;      // the lock screen came first
+    s_fob = true;
+    uiClearSetFob(true);
+    Settings::deskActive(true);
+    return;
+#endif
     Settings::deskActive(true);
     state = AppState::DESK;
     transitionStart = millis();
@@ -5178,6 +5198,10 @@ void setup() {
 #else
     Serial.println("StickS3 -- no touch panel; buttons on GPIO11 and GPIO12.");
 #endif
+    Shake::begin();   // the BMI270 shares the bus the board just brought up
+#if defined(STICKS3)
+    Sound::begin();   // the ES8311 is on that bus too; the amp is the M5PM1's GPIO3
+#endif
 #elif defined(FREENOVE_S3_35)
     // The Freenove S3 3.5"'s touch is in the ST77922 itself, on I2C SDA 38 /
     // SCL 39 at 0x55, reset on GPIO48, interrupt on GPIO47 (unused: polled).
@@ -6612,6 +6636,8 @@ void loop() {
 #endif
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
     if (g_consoleBatt) { g_consoleBatt = false; boardBatteryPrintLog(); }
+#endif
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(STICKS3)
     // The speaker's housekeeping: hushed while the saver has the screen
     // dimmed; a chime for a squad message that just landed (once per
     // message, by its arrival time); and the console's SOUND commands.
@@ -6685,13 +6711,37 @@ void loop() {
 
     TouchPoint tp = pollTouch();
 #if defined(SQW_SMALL)
+    // The case is the finger. A SHAKE wakes a dimmed screen (lastTouch is the
+    // saver's clock) and is the only thing short of a button that does, so a
+    // bump in a pocket does not light it. A TAP on the case, awake on the main
+    // screen, pokes Squachy as a tap on him does on the touch boards.
+    {
+        const Shake::Event ev = Shake::poll(now);
+        if (ev == Shake::Event::WIGGLE) {
+            if (s_screenDimmed) { Serial.println("[imu] wake (wiggle)"); lastTouch = now; }
+        } else if (ev == Shake::Event::SHAKE) {
+            if (s_screenDimmed) Serial.println("[imu] wake");
+            else if (state == AppState::CLEAR && !Settings::boringMode()) {
+                // Awake: shaking the fob shakes him loose. Wheee.
+                Squachy::toss(random(0, 2) ? 1 : -1);
+                Serial.println("[imu] toss");
+            }
+            lastTouch = now;
+        } else if (ev == Shake::Event::TAP && !s_screenDimmed) {
+            lastTouch = now;
+            if (state == AppState::CLEAR && !Settings::boringMode()) {
+                Squachy::trigger(Squachy::Event::PETTED);
+                Serial.println("[imu] poke");
+            }
+        }
+    }
     if (s_stickHome) {
         s_stickHome = false;
         // HOME is the main screen. With desk mode on, home is the desk, so
         // HOME from the desk itself goes on to the main screen. Never out of
         // the lock screen: that would walk past the PIN.
         if (state == AppState::LOCKED || state == AppState::BOOT) {}
-        else if (state == AppState::DESK) enterClear();
+        else if (state == AppState::DESK || (state == AppState::CLEAR && s_fob)) enterClear();
         else if (state != AppState::CLEAR) goHome();
     }
 #endif
@@ -7612,7 +7662,15 @@ void loop() {
             // the whole gesture, from the press to the let-go, which is a
             // poke, a drop or a throw depending on what the finger did.
             static bool clipActive = false;
+            // On the small boards neither he nor Squachy takes a tap: the
+            // cursor never points at them (a knock on the case pokes them),
+            // and their boxes reach down over the buttons on a 135-row
+            // screen, where they took presses meant for DESK and SCAN.
+#if defined(SQW_SMALL)
+            if (false) {
+#else
             if (touchJustDown && !boring && Pet::clippyHit(tp.x, tp.y)) {
+#endif
                 clipActive = true;
                 Pet::clippyGrab(tp.x, tp.y, now);
                 lastTouch = now;
@@ -7625,7 +7683,11 @@ void loop() {
                 break;
             }
             if (touchJustDown) {
+#if defined(SQW_SMALL)
+                sqActive = false;
+#else
                 sqActive = !boring && Squachy::hitTest(tp.x, tp.y);
+#endif
                 sqHeld = false;
                 sqPetting = false;
                 sqStartMs = now;

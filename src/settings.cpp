@@ -139,15 +139,27 @@ static const uint8_t  CPU_MHZ_N         = sizeof(CPU_MHZ) / sizeof(CPU_MHZ[0]);
 // someone changes them.
 #if defined(TWATCH_S3)
 static const bool DEFAULT_POWER_SAVER = true;
+#elif defined(STICKS3)
+// The StickS3 is a keychain on a small cell: a screen and a scan left on
+// all day is not a fob. On by default, with a minute before the screen goes
+// dark, and a shake brings it back (see shake.cpp).
+static const bool DEFAULT_POWER_SAVER = true;
 #else
 static const bool DEFAULT_POWER_SAVER = false;
+#endif
+#if defined(STICKS3)
+static const uint8_t DEFAULT_SCR_TIMEOUT_IX = 3;   // 60 s
+static const uint8_t DEFAULT_DIM_LEVEL      = 0;   // dark: the backlight is the fob's biggest draw
+#else
+static const uint8_t DEFAULT_SCR_TIMEOUT_IX = 2;   // 30 s
+static const uint8_t DEFAULT_DIM_LEVEL      = 16;  // ~6%, dim but not off
 #endif
 static bool     s_powerSaver   = DEFAULT_POWER_SAVER;
 #if SQW_WIFI_5G
 static bool     s_wifi5        = true;
 #endif
-static uint8_t  s_scrTimeoutIx = 2;    // 30 s
-static uint8_t  s_dimLevel     = 16;   // ~6%, dim but not off
+static uint8_t  s_scrTimeoutIx = DEFAULT_SCR_TIMEOUT_IX;
+static uint8_t  s_dimLevel     = DEFAULT_DIM_LEVEL;
 static uint8_t  s_idleFpsIx    = 2;    // 12 fps
 static uint8_t  s_idleAfterIx  = 1;    // 10 s
 static uint8_t  s_cpuIx        = 0;    // 240 MHz, the stock clock
@@ -640,8 +652,8 @@ void load() {
         s_prefs.putBool("pwrWatch1", true);
     }
 #endif
-    s_scrTimeoutIx = s_prefs.getUChar("pwrScrnT", 2);
-    s_dimLevel     = s_prefs.getUChar("pwrDim", 16);
+    s_scrTimeoutIx = s_prefs.getUChar("pwrScrnT", DEFAULT_SCR_TIMEOUT_IX);
+    s_dimLevel     = s_prefs.getUChar("pwrDim", DEFAULT_DIM_LEVEL);
     s_idleFpsIx    = s_prefs.getUChar("pwrFps", 2);
     s_idleAfterIx  = s_prefs.getUChar("pwrIdleT", 1);
     s_cpuIx        = s_prefs.getUChar("pwrCpu", 0);
@@ -726,7 +738,7 @@ void load() {
     if (s_lightBright < 1 || s_lightBright > 7) s_lightBright = 4;
     // A saved index from a build with more steps than this one must not walk
     // off the end of the table.
-    if (s_scrTimeoutIx >= SCREEN_TIMEOUTS_N) s_scrTimeoutIx = 2;
+    if (s_scrTimeoutIx >= SCREEN_TIMEOUTS_N) s_scrTimeoutIx = DEFAULT_SCR_TIMEOUT_IX;
     if (s_idleFpsIx    >= IDLE_FPS_N)        s_idleFpsIx    = 2;
     if (s_idleAfterIx  >= IDLE_AFTER_N)      s_idleAfterIx  = 1;
     if (s_cpuIx        >= CPU_MHZ_N)         s_cpuIx        = 0;

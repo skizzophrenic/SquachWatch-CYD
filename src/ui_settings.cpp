@@ -109,7 +109,10 @@ static const SettingsRow ALL_ROWS[] = {
     // -- see APPEARANCE_ROWS. Everything about how he LOOKS is on one page;
     // what stays here is what he DOES.
     SettingsRow::REPLAY_INTRO, SettingsRow::SHOW_OFF, SettingsRow::VIEW_DIARY,
-    SettingsRow::BINGO, SettingsRow::DEX, SettingsRow::DESK_MODE,
+    SettingsRow::BINGO, SettingsRow::DEX,
+#if !defined(STICKS3)   // the StickS3 has FOB MODE on the main screen in its place
+    SettingsRow::DESK_MODE,
+#endif
     SettingsRow::POWER_SAVER,
 #if defined(CYD_GPS)
     SettingsRow::WATCH_WARDRIVE,   // the watch's row and setting, on the CYD GPS builds

@@ -37,6 +37,12 @@ namespace Sound {
 #if defined(FREENOVE_S3_35)
 static const int PIN_MCK = 17, PIN_BCK = 18, PIN_WS = 21, PIN_DOUT = 15;
 static const int PIN_AMP = 1;
+#elif defined(STICKS3)
+// The StickS3: an ES8311 on the shared I2C bus (SDA 47 / SCL 48, 0x18) and an
+// AW8737 amp whose enable is the M5PM1's GPIO3, not an ESP32 pin (see amp()).
+// Pins from M5Stack's StickS3 page.
+static const int PIN_MCK = 18, PIN_BCK = 17, PIN_WS = 15, PIN_DOUT = 14;
+static const int PIN_AMP = -1;
 #elif defined(TDECK_PLUS)
 // The T-Deck Plus: a MAX98357A class-D amp straight on I2S (LilyGo's
 // BOARD_I2S_BCK 7 / WS 5 / DOUT 6). No codec to set up, no master clock, and
@@ -190,7 +196,22 @@ static bool codecInit() {
 }
 
 // ---- the amplifier ---------------------------------------------------------
+#if defined(STICKS3)
+// The amp's enable is the M5PM1's GPIO3 (output level, register 0x11), high
+// to play. sticksPowerUp() made it a push-pull output and left it low.
+static void amp(bool on) {
+    Wire.beginTransmission(0x6E);
+    Wire.write(0x11);
+    if (Wire.endTransmission(false) != 0 || Wire.requestFrom((uint8_t)0x6E, (uint8_t)1) != 1) return;
+    uint8_t v = Wire.read();
+    v = on ? (uint8_t)(v | (1 << 3)) : (uint8_t)(v & ~(1 << 3));
+    Wire.beginTransmission(0x6E);
+    Wire.write(0x11); Wire.write(v);
+    Wire.endTransmission();
+}
+#else
 static void amp(bool on) { if (PIN_AMP >= 0) digitalWrite(PIN_AMP, (on == s_ampLow) ? LOW : HIGH); }
+#endif
 
 // ---- rendering -------------------------------------------------------------
 // The whole sound is rendered into a float buffer in PSRAM first (every board

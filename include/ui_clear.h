@@ -33,6 +33,9 @@ uint32_t uiMascotStepMs();
 
 void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
                   bool advance = true, bool scanMenu = false);
+// FOB MODE (StickS3): the main screen with no title bar and no buttons, the
+// room they took given to Squachy. Everything else on it carries on as usual.
+void uiClearSetFob(bool on);
 
 // The battery gauge: a lava lamp under the menu icon, filled to the charge.
 // A board with a battery hands over a function that fills in the percent and
