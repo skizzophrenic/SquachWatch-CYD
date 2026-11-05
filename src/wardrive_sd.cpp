@@ -195,8 +195,10 @@ void enqueue(bool wifi, const Pending& p) {
 // paused only a count.
 bool taking() {
     if (!__atomic_load_n(&s_live, __ATOMIC_SEQ_CST)) return false;
+#if defined(CARDPUTER_ADV)
     // Without a fix nothing could be written: not queued, and not a loss.
     if (!s_fixNow) return false;
+#endif
     if (s_paused) { addDropped(1); return false; }
     return true;
 }

@@ -4,10 +4,14 @@
   shot.py PORT out.png                 capture the current screen
   shot.py PORT out.png next next press capture after sending keys
   shot.py PORT - next                  send keys only
+  shot.py --ext PORT out.png           the Cardputer's EXT panel (320x240) instead
 
 Keys: next, prev, home, back, select, press, press:MS (a held press, e.g. press:900).
+Only answers on a dev build (sticks3-dev, cardputer-adv-dev). The state number in the
+output is the AppState the screen was in. See docs/SMALL-BOARDS-DEV.md.
 Needs pyserial (PlatformIO's Python has it).
 """
+import os
 import struct
 import sys
 import time
@@ -21,8 +25,11 @@ def send(s, line):
     s.flush()
 
 
+SHOT_CMD = os.environ.get("SHOT_CMD", "SHOT")
+
+
 def capture(s, timeout=10.0):
-    send(s, "SHOT")
+    send(s, SHOT_CMD)
     buf = b""
     end = time.time() + timeout
     while time.time() < end:
@@ -70,6 +77,10 @@ def write_png(path, w, h, rows):
 
 
 def main():
+    global SHOT_CMD
+    if len(sys.argv) > 1 and sys.argv[1] == "--ext":
+        SHOT_CMD = "SHOT EXT"
+        del sys.argv[1]
     if len(sys.argv) < 3:
         raise SystemExit(__doc__)
     port, out, keys = sys.argv[1], sys.argv[2], sys.argv[3:]
