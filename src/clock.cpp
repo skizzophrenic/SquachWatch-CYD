@@ -76,6 +76,8 @@ extern volatile bool g_consoleFree;
 extern volatile uint8_t  g_devKey;
 extern volatile uint16_t g_devKeyMs;
 extern volatile bool     g_devShot;
+extern volatile bool     g_devQuiet;
+extern volatile uint8_t  g_devImu;
 #endif
 #if defined(CARDPUTER_ADV)
 extern volatile int8_t g_consoleExt;
@@ -606,6 +608,10 @@ void pollSerial() {
         if (strcasecmp(line, "XYZZY") == 0)  { g_consoleXyzzy = true; continue; }
 #if SQW_DEVTOOLS
         if (strcasecmp(line, "SHOT") == 0)      { g_devShot = true; continue; }
+        if (strcasecmp(line, "POKE") == 0)      { g_devImu = 1; continue; }
+        if (strcasecmp(line, "TOSS") == 0)      { g_devImu = 2; continue; }
+        if (strcasecmp(line, "QUIET") == 0)     { g_devQuiet = !g_devQuiet;
+                                                  Serial.printf("[dev] alerts %s\n", g_devQuiet ? "QUIET" : "on"); continue; }
         if (strcasecmp(line, "IMU") == 0)       { static bool on = false; on = !on; Shake::setTrace(on);
                                                   Serial.printf("[imu] trace %s\n", on ? "on" : "off"); continue; }
         if (strcasecmp(line, "KEY NEXT") == 0)  { g_devKey = 1; continue; }

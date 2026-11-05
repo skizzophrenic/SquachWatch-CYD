@@ -745,7 +745,11 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
             // Nothing else on the card says the button counts taps, so once
             // the first one has landed it says so itself, just above.
             // Asked for 2026-10-22: "no way to realize you have to multi tap".
+#if defined(SQW_SMALL)
+            static const char* HINT = "PRESS AGAIN: LONGER";
+#else
             static const char* HINT = "TAP AGAIN: LONGER";
+#endif
             t.setTextFont(wideAlert(w) ? 2 : 1);
             t.setTextSize(1);
             t.setTextWrap(false);

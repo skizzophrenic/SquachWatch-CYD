@@ -89,7 +89,11 @@ const char* const SENDING      = "Sending, for thirty seconds.";
 const char* const SEND_FAILED  = "Could not send. Try again.";
 const char* const NOBODY_HERE  = "Emotes need a visitor on screen.";
 const char* const STILL_ON_AIR = "Your message is still sending.";
+#if defined(SQW_SMALL)
+const char* const EMOTE_HINT   = "Pick one: you both act it out.";
+#else
 const char* const EMOTE_HINT   = "Tap one: you both act it out.";
+#endif
 
 // The reasons a message could not go out, given BEFORE anything is chosen or
 // typed rather than after the person has confirmed it. Null when it can.
@@ -644,7 +648,12 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bo
         Theme::drawButton(t, s_back.x, s_back.y, s_back.w, s_back.h, "[ BACK ]", false);
         // FILL, where the emote half keeps RANDOM: the openings with a blank.
         s_fill = { (int16_t)(w - 4 - BWof(t) - 8), (int16_t)(h - BHof(t) - 6), (int16_t)(BWof(t) + 8), (int16_t)BHof(t) };
+#if defined(STICKS3)
+        // FILL and TYPE both end on a keyboard: not on two buttons.
+        s_fill = { 0, 0, 0, 0 };
+#else
         Theme::drawButton(t, s_fill.x, s_fill.y, s_fill.w, s_fill.h, s_fillOn ? "[ LINES ]" : "[ FILL ]", s_fillOn);
+#endif
         // No page arrows any more: the lines are on labelled tabs, and the
         // emote half never had arrows either.
         int right = w - 4;
@@ -652,7 +661,11 @@ void uiMeshComposeTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bo
         // the count moved up beside "?".
         const int mid = (s_back.x + s_back.w + right) / 2;
         s_type = { (int16_t)(mid - TWof(t) / 2), (int16_t)(h - BHof(t) - 6), (int16_t)TWof(t), (int16_t)BHof(t) };
+#if defined(STICKS3)
+        s_type = { 0, 0, 0, 0 };
+#else
         Theme::drawButton(t, s_type.x, s_type.y, s_type.w, s_type.h, "[ TYPE ]", false);
+#endif
         // "?" replays the tutorial. Top right, level with the title, where
         // nothing else on this screen can be reached for by mistake.
         if (!tut) {
@@ -772,6 +785,28 @@ ComposeHit uiMeshComposeTouch(int x, int y, uint32_t now) {
         return ComposeHit::NONE;
     }
     return ComposeHit::NONE;
+}
+
+
+uint8_t uiMeshComposeStopRects(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint8_t cap) {
+    uint8_t n = 0;
+    auto add = [&](const Rect& r) { if (r.w > 0 && r.h > 0 && n < cap) { rx[n] = r.x; ry[n] = r.y; rw[n] = r.w; rh[n] = r.h; n++; } };
+    if (s_emoteOn) {
+        for (uint8_t i = 0; i < EmoteScript::TABS; i++)    add(s_tabRect[i]);
+        for (uint8_t i = 0; i < EmoteScript::PER_TAB; i++) add(s_emoteRect[i]);
+        add(s_random); add(s_emoteBtn);
+    } else {
+        for (uint8_t i = 0; i < MeshMsg::CANNED_TABS; i++) add(s_lineTabRect[i]);
+        for (uint8_t i = 0; i < s_lineN && i < 12; i++)    add(s_lineRect[i]);
+        add(s_type); add(s_fill); add(s_emoteBtn); add(s_help);
+    }
+    add(s_send); add(s_back);
+    return n;
+}
+
+bool uiMeshComposeBackRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
+    if (s_back.w <= 0) return false;
+    x = s_back.x; y = s_back.y; w = s_back.w; h = s_back.h; return true;
 }
 
 #endif // SQUACH_MESH

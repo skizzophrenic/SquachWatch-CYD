@@ -136,7 +136,9 @@ void uiMeshMenuTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool 
     row(t, w, rowY(6), rowH, "PHRASE",
         MeshTalk::havePhrase() ? "SET >" : "NONE >",
         MeshTalk::havePhrase() ? Theme::VAPOR_YELLOW : Theme::W95_SHADOW);
+#if !defined(STICKS3)   // naming him means a keyboard: not on two buttons
     row(t, w, rowY(7), rowH, "NAME",     nm, Theme::VAPOR_YELLOW);
+#endif
 
     // One line saying what the two switches actually mean together, because
     // "DETECT off, TRANSMIT on" is not self-evidently "they can see you but
@@ -190,6 +192,9 @@ MeshMenuRow uiMeshMenuHitTest(TFT_eSPI& t, int x, int y, int screenW, int screen
     if ((y - top) / rowH >= vis) return MeshMenuRow::NONE;
     const int idx = (y - top) / rowH + g_scroll;
     if (idx < 0 || idx >= (int)ROW_N) return MeshMenuRow::NONE;
+#if defined(STICKS3)
+    if ((MeshMenuRow)idx == MeshMenuRow::NAME) return MeshMenuRow::NONE;
+#endif
     return (MeshMenuRow)idx;
 }
 

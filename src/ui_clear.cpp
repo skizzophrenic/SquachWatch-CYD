@@ -3566,8 +3566,14 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         // so his soles, not his shadow, land on the bar's top line.
         {
             Squachy::setSizeBoost(soloBoost(t, Settings::squachySizePct()));
+#if defined(SQW_SMALL)
+            // At 135 rows he fills his band: a bubble at its top sat on his
+            // face. It hangs from his feet instead.
+            Squachy::setBubbleSinkTo(sqFeet);
+#endif
             Squachy::tick(t, w / 2, sqTop, sqFeet + SQ_FOOT_SINK - sqTop, now, step,
                           1.0f, false, -1, Settings::squachySizePct());
+            Squachy::setBubbleSinkTo(-1);
             Squachy::setSizeBoost(1.0f);
         }
         Squachy::setBubbleRiseTo(-1);

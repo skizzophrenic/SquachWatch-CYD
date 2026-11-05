@@ -22,3 +22,7 @@ void uiBingoTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
 // screen -- for the board's own screen, not back into the settings menu.
 enum class BingoTap : uint8_t { NONE, HANDLED, BACK };
 BingoTap uiBingoHitTest(TFT_eSPI& t, int x, int y, int screenW, int screenH);
+// The boards with buttons for a finger: every target drawn this frame, as
+// rectangles, for the cursor to step through. Only what is live.
+uint8_t uiBingoStopRects(TFT_eSPI& t, int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint8_t cap);
+bool    uiBingoBackRect(TFT_eSPI& t, int16_t& x, int16_t& y, int16_t& w, int16_t& h);

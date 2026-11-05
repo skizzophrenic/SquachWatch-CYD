@@ -1106,6 +1106,8 @@ struct SmallKeys { bool press, next, prev, home, back, select; };
 volatile uint8_t  g_devKey = 0;          // 1 next, 2 prev, 3 home, 4 press, 5 back, 6 select
 volatile uint16_t g_devKeyMs = 0;        // how long PRESS holds
 volatile bool     g_devShot = false;     // SHOT: dump the next frame
+volatile bool     g_devQuiet = false;    // QUIET: alerts never take the screen (bench only)
+volatile uint8_t  g_devImu = 0;          // POKE 1, TOSS 2: a knock or a shake from the console
 static uint32_t   s_devPressUntil = 0;
 static void devKeysMerge(SmallKeys& k) {
     const uint8_t key = g_devKey;
@@ -1286,6 +1288,10 @@ static int stickListId(int x, int y) {
             const DetectionType r = uiDetFilterHitTest(*canvas, x, y, w, h);
             return r == DetectionType::COUNT ? -1 : (int)r;
         }
+        case AppState::IGNORE_LIST: {
+            const uint8_t r = uiIgnoreListHitRemove(*canvas, x, y, w, h);
+            return r == 0xFF ? -1 : (int)r;
+        }
         case AppState::RAWSCAN: {
             if (s_confirmPending) {
                 const RawScanConfirmTap c = uiRawScanHitConfirm(x, y, w, h);
@@ -1308,7 +1314,64 @@ static bool stickIsList() {
     return state == AppState::SETTINGS || state == AppState::POWER_SAVER ||
            state == AppState::SECURITY || state == AppState::DETECTION_FILTER ||
            state == AppState::MESH_MENU || state == AppState::LOG ||
-           state == AppState::RAWSCAN;
+           state == AppState::RAWSCAN || state == AppState::IGNORE_LIST;
+}
+
+// Screens whose every target is found by sweeping one id over the screen:
+// each button, and each row with its index, its own id. The stops come out
+// in reading order and the highlight grows from the same ids. Only hit tests
+// that answer without acting.
+static bool stickIsSweep() {
+    return state == AppState::COLOR_CHECK || state == AppState::UPDATE ||
+           state == AppState::WIFI_NETS || state == AppState::WIFI_ADD
+#if SQUACH_MESH
+           || state == AppState::INVITE || state == AppState::NUDGE ||
+           state == AppState::SQUAD_UPDATE
+#endif
+           || state == AppState::BEACON_WARN;
+}
+static int stickSweepId(int x, int y) {
+    const int w = tft.width(), h = tft.height();
+    switch (state) {
+        case AppState::COLOR_CHECK: {
+            const ColorCheckTap c = uiColorCheckHitTest(x, y, w, h);
+            return c == ColorCheckTap::NONE ? -1 : (int)c;
+        }
+        case AppState::UPDATE: {
+            int net = 0;
+            const UpdateHit u = uiUpdateHitTest(*canvas, x, y, &net);
+            return u == UpdateHit::NONE ? -1 : (int)u * 100 + (u == UpdateHit::NETWORK ? net : 0);
+        }
+        case AppState::WIFI_NETS: {
+            int row = 0;
+            const WifiNetsHit r = uiWifiNetsHit(*canvas, x, y, &row);
+            return r == WifiNetsHit::NONE ? -1 : (int)r * 100 + (r == WifiNetsHit::ROW ? row : 0);
+        }
+        case AppState::WIFI_ADD: {
+            int row = 0;
+            const WifiAddHit r = uiWifiAddHit(*canvas, x, y, engine, &row);
+            return r == WifiAddHit::NONE ? -1 : (int)r * 100 + (r == WifiAddHit::ROW ? row : 0);
+        }
+#if SQUACH_MESH
+        case AppState::INVITE: {
+            const InviteHit r = uiInviteHit(*canvas, x, y);
+            return r == InviteHit::NONE ? -1 : (int)r;
+        }
+        case AppState::NUDGE: {
+            const NudgeHit r = uiNudgeHit(*canvas, x, y);
+            return r == NudgeHit::NONE ? -1 : (int)r;
+        }
+        case AppState::SQUAD_UPDATE: {
+            const SquadUpdateHit r = uiSquadUpdateHit(*canvas, x, y);
+            return r == SquadUpdateHit::NONE ? -1 : (int)r;
+        }
+#endif
+        case AppState::BEACON_WARN: {
+            const BeaconWarnHit r = uiBeaconWarnHitTest(*canvas, x, y);
+            return r == BeaconWarnHit::NONE ? -1 : (int)r;
+        }
+        default: return -1;
+    }
 }
 
 // The middle of everywhere `hit` answers, as a stop; false if nowhere does.
@@ -1346,11 +1409,65 @@ static bool rawSwitchAt(int x, int y) { return uiRawScanHitTest(x, y, tft.width(
 // How many of a list screen's stops are its rows (they come first). The
 // stops after them are BACK, or LOG's button bar.
 static uint8_t s_stickRowsN = 0;
+// Whether the screen has anything worth pointing at yet: a scan's results.
+static bool    s_stickHasRows = false;
+// Screens that hand over their own targets as rectangles (their hit tests
+// act, so they cannot be swept): the stops are the centres, the highlight
+// fills the rectangle itself.
+struct StickRect { int16_t x, y, w, h; };
+static StickRect s_stickRect[STICK_STOPS_MAX];
+static bool      s_stickRectOn = false;
+static bool stickIsRectScreen() {
+    return state == AppState::BINGO
+#if SQUACH_MESH
+        || state == AppState::MESH_COMPOSE || state == AppState::SQUAD || state == AppState::MESH_PHRASE
+#endif
+        ;
+}
+static uint8_t stickScreenRects(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint8_t cap) {
+    switch (state) {
+        case AppState::BINGO:        return uiBingoStopRects(*canvas, rx, ry, rw, rh, cap);
+#if SQUACH_MESH
+        case AppState::MESH_COMPOSE: return uiMeshComposeStopRects(rx, ry, rw, rh, cap);
+        case AppState::SQUAD:        return uiSquadStopRects(rx, ry, rw, rh, cap);
+        case AppState::MESH_PHRASE:  return uiMeshPhraseStopRects(rx, ry, rw, rh, cap);
+#endif
+        default: return 0;
+    }
+}
+
+// How tall `id` is where it is, measured down a column through (cx, cy).
+template <typename F>
+static int stickIdHeight(F idAt, int id, int cx, int cy) {
+    const int h = tft.height();
+    int y0 = cy, y1 = cy;
+    while (y0 > 0 && idAt(cx, y0 - 1) == id) y0--;
+    while (y1 < h - 1 && idAt(cx, y1 + 1) == id) y1++;
+    return y1 - y0 + 1;
+}
+// Rows cut off by the buttons or the top edge are shorter than whole ones.
+// They are not stops: the next step scrolls them into view instead of
+// lighting a sliver half under BACK. `group` puts ids that are rows of one
+// list together (the rest, single buttons, are never dropped).
+struct StickCand { int id; int16_t x, y; int16_t ht; int group; };
+static uint8_t stickDropPartial(StickCand* c, uint8_t n) {
+    uint8_t k = 0;
+    for (uint8_t i = 0; i < n; i++) {
+        int maxH = 0, members = 0;
+        for (uint8_t j = 0; j < n; j++)
+            if (c[j].group == c[i].group && c[i].group >= 0) { members++; if (c[j].ht > maxH) maxH = c[j].ht; }
+        const bool partial = c[i].group >= 0 && members >= 2 && c[i].ht * 4 < maxH * 3;
+        if (!partial) c[k++] = c[i];
+    }
+    return k;
+}
 
 static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
     const int16_t w = (int16_t)tft.width(), h = (int16_t)tft.height();
     uint8_t n = 0;
     s_stickRowsN = 0;
+    s_stickHasRows = false;
+    s_stickRectOn = false;
     auto add = [&](int x, int y, uint8_t kind = 0) { if (n < cap) out[n++] = { (int16_t)x, (int16_t)y, kind }; };
     if (s_infoPending && (state == AppState::LOG || state == AppState::ALERT)) {
         add(w / 2, h - 17);             // MORE / GOT IT
@@ -1391,6 +1508,69 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         add(w - 35, 14);                // IGNORE
         return n;
     }
+    if (state == AppState::OUTFIT_UNLOCK) return 0;   // a card: SELECT or BACK closes it
+    if (stickIsRectScreen()) {
+        int16_t rx[STICK_STOPS_MAX], ry[STICK_STOPS_MAX], rw[STICK_STOPS_MAX], rh[STICK_STOPS_MAX];
+        uint8_t k = stickScreenRects(rx, ry, rw, rh, cap);
+        // Reading order: by row, then left to right (a row is anything whose
+        // tops are within 6 px of each other).
+        uint8_t idx[STICK_STOPS_MAX];
+        for (uint8_t i = 0; i < k; i++) idx[i] = i;
+        for (uint8_t i = 1; i < k; i++)
+            for (uint8_t j = i; j > 0; j--) {
+                const uint8_t a = idx[j - 1], b = idx[j];
+                const bool after = (ry[a] > ry[b] + 6) || (abs(ry[a] - ry[b]) <= 6 && rx[a] > rx[b]);
+                if (!after) break;
+                idx[j - 1] = b; idx[j] = a;
+            }
+        for (uint8_t i = 0; i < k; i++) {
+            const uint8_t s = idx[i];
+            s_stickRect[n] = { rx[s], ry[s], rw[s], rh[s] };
+            add(rx[s] + rw[s] / 2, ry[s] + rh[s] / 2);
+        }
+        s_stickRectOn = true;
+        return n;
+    }
+    if (stickIsSweep()) {
+        // Every id the sweep finds is a stop, at the middle of where it
+        // answered (checked, as below), in the order first met: reading order.
+        struct Acc { int id; int32_t sx, sy; uint16_t c; } acc[STICK_STOPS_MAX];
+        uint8_t an = 0;
+        for (int y = 2; y < h; y += 4)
+            for (int x = 4; x < w; x += 8) {
+                const int id = stickSweepId(x, y);
+                if (id < 0) continue;
+                uint8_t a = 0;
+                while (a < an && acc[a].id != id) a++;
+                if (a == an) { if (an == STICK_STOPS_MAX) continue; acc[an++] = { id, 0, 0, 0 }; }
+                acc[a].sx += x; acc[a].sy += y; acc[a].c++;
+            }
+        StickCand cand[STICK_STOPS_MAX];
+        uint8_t cn = 0;
+        for (uint8_t a = 0; a < an; a++) {
+            int cx = acc[a].sx / acc[a].c, cy = acc[a].sy / acc[a].c;
+            if (stickSweepId(cx, cy) != acc[a].id) {
+                int32_t best = INT32_MAX;
+                for (int y = 2; y < h; y += 4)
+                    for (int x = 4; x < w; x += 8)
+                        if (stickSweepId(x, y) == acc[a].id) {
+                            const int32_t d = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+                            if (d < best) { best = d; cx = x; cy = y; }
+                        }
+            }
+            cand[cn++] = { acc[a].id, (int16_t)cx, (int16_t)cy,
+                           (int16_t)stickIdHeight(stickSweepId, acc[a].id, cx, cy), acc[a].id / 100 };
+        }
+        cn = stickDropPartial(cand, cn);
+        // A row is an id whose kind holds more than one: a list.
+        for (uint8_t i = 0; i < cn; i++) {
+            uint8_t same = 0;
+            for (uint8_t j = 0; j < cn; j++) if (cand[j].group == cand[i].group) same++;
+            if (same >= 2 || (state == AppState::WIFI_ADD && cand[i].group == (int)WifiAddHit::ROW)) s_stickHasRows = true;
+            add(cand[i].x, cand[i].y);
+        }
+        return n;
+    }
     if (stickIsList()) {
         // Each thing the hit test names gets one stop, at the middle of
         // everywhere it answered. In reading order, which for rows is down.
@@ -1407,6 +1587,8 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
             }
         // LOG's and RAWSCAN's rows open their WATCH/HUNT panel on a long press.
         const bool logRows = (state == AppState::LOG || state == AppState::RAWSCAN) && !s_confirmPending;
+        StickCand cand[12];
+        uint8_t cn = 0;
         for (uint8_t a = 0; a < an; a++) {
             int cx = acc[a].sx / acc[a].c, cy = acc[a].sy / acc[a].c;
             if (stickListId(cx, cy) != acc[a].id) {
@@ -1420,7 +1602,15 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
                             if (d < best) { best = d; cx = x; cy = y; }
                         }
             }
-            add(cx, cy, logRows ? 3 : 0);
+            // Ids from 1000 up are panels' buttons and steppers' halves, not
+            // rows: never dropped.
+            cand[cn++] = { acc[a].id, (int16_t)cx, (int16_t)cy,
+                           (int16_t)stickIdHeight(stickListId, acc[a].id, cx, cy), acc[a].id < 1000 ? 0 : -1 };
+        }
+        cn = stickDropPartial(cand, cn);
+        for (uint8_t i = 0; i < cn; i++) {
+            if (cand[i].group == 0) s_stickHasRows = true;
+            add(cand[i].x, cand[i].y, logRows ? 3 : 0);
         }
         const bool panel = (state == AppState::SETTINGS && uiSettingsConfirmRow() != SettingsRow::NONE) ||
                            ((state == AppState::LOG || state == AppState::RAWSCAN) && s_confirmPending);
@@ -1498,6 +1688,11 @@ static uint8_t stickStops(StickPt* out, bool fresh = false) {
 }
 
 static bool stickBackPoint(StickPt& at);   // below, after the scan picker's flag
+#if defined(ESP32) && !defined(TWATCH_S3)
+static bool chargeModeOn();                 // below, with CHARGE MODE
+#else
+static bool chargeModeOn() { return false; }   // no CHARGE MODE (the watch, the emulator)
+#endif
 
 // ---- lists that scroll under the cursor -------------------------------------
 // The rows on screen are the stops. A step off the last row scrolls the list
@@ -1521,6 +1716,7 @@ static bool stickListScroll(int delta) {
         case AppState::DETECTION_FILTER: uiDetFilterScroll(delta); return true;
         case AppState::LOG:              uiLogScroll(delta);       return true;
         case AppState::RAWSCAN:          uiRawScanScroll(delta);   return true;
+        case AppState::IGNORE_LIST:      uiIgnoreListScroll(delta); return true;
 #if SQUACH_MESH
         case AppState::MESH_MENU:        uiMeshMenuScroll(delta);  return true;
 #endif
@@ -1588,6 +1784,10 @@ static bool stickListSettle(StickPt* pts, uint8_t& n) {
 // The highlight is always up on every screen but the main one, which is
 // Squachy's stage: there it shows after a key and fades after STICK_SHOW_MS.
 static bool stickCursorShown(uint32_t now) {
+    // A scan with nothing found yet has nothing worth lighting up: no
+    // highlight until a row arrives, unless a key was just pressed.
+    if ((state == AppState::RAWSCAN || state == AppState::WIFI_ADD) && !s_stickHasRows)
+        return s_stickShownAt && now - s_stickShownAt < STICK_SHOW_MS;
     if (state != AppState::CLEAR) return true;
     return s_stickShownAt && now - s_stickShownAt < STICK_SHOW_MS;
 }
@@ -1605,7 +1805,10 @@ static TouchPoint stickPoll() {
         s_stickDragStep++;
         return tp;
     }
-    if (state != s_stickStopState) { s_stickStopState = state; s_stickStop = 0; s_listPend = 0; }
+    // A new screen starts with its first stop and no "key just pressed": the
+    // key that opened it does not count, so a scan opening on nothing found
+    // shows no highlight.
+    if (state != s_stickStopState) { s_stickStopState = state; s_stickStop = 0; s_listPend = 0; s_stickShownAt = 0; }
     StickPt pts[STICK_STOPS_MAX];
     uint8_t n = stickStops(pts);
     if (s_stickStop >= n) s_stickStop = 0;
@@ -1620,8 +1823,22 @@ static TouchPoint stickPoll() {
         s_stickHome = true;
         Serial.println("[keys] home");
     }
+    // CHARGE MODE wakes on a tap: on these boards, any key is that tap.
+    if (chargeModeOn() && (keys.next || keys.prev || keys.select || keys.back || keys.press)) {
+        s_stickHoldPt = { (int16_t)(w / 2), (int16_t)(h / 2), 0 };
+        s_stickHoldUntil = now + 120;
+        tp.valid = true; tp.x = w / 2; tp.y = h / 2;
+        return tp;
+    }
     // A screen with nothing to point at (FOB MODE) still wakes on a key.
     if (!n && (keys.next || keys.prev || keys.select)) lastTouch = now;
+    // A card that closes on a tap anywhere: SELECT is that tap.
+    if (!n && keys.select && state == AppState::OUTFIT_UNLOCK && !s_stickHoldUntil) {
+        s_stickHoldPt = { (int16_t)(w / 2), (int16_t)(h / 2), 0 };
+        s_stickHoldUntil = now + 120;
+        tp.valid = true; tp.x = w / 2; tp.y = h / 2;
+        return tp;
+    }
     // A list step waiting on the redraw: see stickListStep().
     if (s_listPend && stickListSettle(pts, n)) {
         Serial.printf("[keys] stop %u of %u at %d,%d (screen %u)\n", (unsigned)s_stickStop + 1, (unsigned)n,
@@ -1743,6 +1960,7 @@ static int stickRegionId(int x, int y) {
         for (int b = 0; b < 3; b++)
             if (x >= bar.x[b] && x < bar.x[b] + bar.w[b] && y >= bar.y && y < bar.y + bar.h) return 9100 + b;
     }
+    if (stickIsSweep()) return stickSweepId(x, y);
     if (stickIsList()) {
         const int id = stickListId(x, y);
         if (id >= 0) return id;
@@ -1803,8 +2021,12 @@ static void stickDrawCursor(TFT_eSPI& t, uint32_t now) {
     // The button's rectangle: grown from the cursor while the id holds.
     int x0, x1, y0, y1;
     bool region = false;
-    const int id = (p.kind == 1 || p.kind == 2) ? -1 : stickRegionId(p.x, p.y);
-    if (id >= 0) {
+    const int id = (p.kind == 1 || p.kind == 2 || s_stickRectOn) ? -1 : stickRegionId(p.x, p.y);
+    if (s_stickRectOn) {
+        const StickRect& r = s_stickRect[s_stickStop];
+        x0 = r.x; y0 = r.y; x1 = r.x + r.w - 1; y1 = r.y + r.h - 1;
+        region = r.w >= 6 && r.h >= 6;
+    } else if (id >= 0) {
         x0 = x1 = p.x; y0 = y1 = p.y;
         while (x0 > 0     && stickRegionId(x0 - 1, p.y) == id) x0--;
         while (x1 < w - 1 && stickRegionId(x1 + 1, p.y) == id) x1++;
@@ -1849,15 +2071,24 @@ static void stickDrawCursor(TFT_eSPI& t, uint32_t now) {
     const int bw = frame.bufW();
     if (region && buf && &t == (TFT_eSPI*)&frame) {
         const int rw = x1 - x0 + 1;
+        // The button's own face is its most common colour, dark or light:
+        // everything else in it is text or edge. Brightness alone took the
+        // Win95 buttons' grey face for ink and blacked them out whole.
+        uint8_t face = 0;
+        {
+            static uint16_t hist[256];
+            memset(hist, 0, sizeof hist);
+            for (int y = y0; y <= y1; y++) {
+                const uint8_t* row = buf + y * bw;
+                for (int x = x0; x <= x1; x++) hist[row[x]]++;
+            }
+            for (int c = 1; c < 256; c++) if (hist[c] > hist[face]) face = (uint8_t)c;
+        }
         for (int y = y0; y <= y1; y++) {
             uint8_t* row = buf + y * bw;
             for (int x = x0; x <= x1; x++) {
                 const uint8_t v = row[x];
-                const int r3 = (v >> 5) & 7, g3 = (v >> 2) & 7, b2 = v & 3;
-                // Text and edges: anything bright, or any one channel strong.
-                // Brightness alone missed pure red (OFF values), which then
-                // vanished into the gradient.
-                const bool ink = r3 + g3 + 2 * b2 >= 8 || r3 >= 5 || g3 >= 5 || b2 == 3;
+                const bool ink = v != face;
                 if (ink) { row[x] = 0x00; continue; }
                 if (flash) { row[x] = 0xFF; continue; }
                 int gi = (x - x0) * 24 / rw + (back ? -slide : slide) + (y - y0) / 3;
@@ -1866,12 +2097,15 @@ static void stickDrawCursor(TFT_eSPI& t, uint32_t now) {
             }
         }
     }
-    // The border: 2 px, white and pink by turns, with a cyan halo outside.
+    // The border: a cyan/purple ring, then 2 px white and pink by turns,
+    // all INSIDE the button. A screen repaints its own buttons and often
+    // nothing around them, so a ring drawn outside stayed behind as a ghost.
     const uint16_t edge = (beat & 1) ? TFT_WHITE : Theme::PINK;
-    t.drawRect(x0, y0, x1 - x0 + 1, y1 - y0 + 1, edge);
-    t.drawRect(x0 + 1, y0 + 1, x1 - x0 - 1, y1 - y0 - 1, edge);
-    if (x0 > 0 && y0 > 0 && x1 < w - 1 && y1 < h - 1)
-        t.drawRect(x0 - 1, y0 - 1, x1 - x0 + 3, y1 - y0 + 3, (beat % 3 == 0) ? Theme::CYAN : Theme::PURPLE);
+    t.drawRect(x0, y0, x1 - x0 + 1, y1 - y0 + 1, (beat % 3 == 0) ? Theme::CYAN : Theme::PURPLE);
+    if (x1 - x0 > 6 && y1 - y0 > 6) {
+        t.drawRect(x0 + 1, y0 + 1, x1 - x0 - 1, y1 - y0 - 1, edge);
+        t.drawRect(x0 + 2, y0 + 2, x1 - x0 - 3, y1 - y0 - 3, edge);
+    }
     if (p.kind == 1 || p.kind == 2) {
         // The scroll arrow, drawn bold over its box.
         const bool down = p.kind == 1;
@@ -2416,6 +2650,9 @@ static const uint16_t BUZZ_CHIRP_MS = 80;
 static bool twatchStill();
 #endif
 static bool alertMayInterrupt(const Detection& d) {
+#if SQW_DEVTOOLS
+    if (g_devQuiet) return false;   // QUIET on the console: no alert takes the screen
+#endif
     const bool exempt = engine.isWatched(d.mac, true) || engine.isWatched(d.mac, false);
 #if defined(TWATCH_S3)
     // TAGS + RINGS: logged, never announced. A day's wear was 50 screen
@@ -2625,7 +2862,10 @@ static bool stickBackPoint(StickPt& at) {
         case AppState::SECURITY:
         case AppState::DETECTION_FILTER:
         case AppState::MESH_MENU:
+        case AppState::IGNORE_LIST:
             return put(w / 2, h - Theme::pinnedBackH(w) / 2);
+        case AppState::OUTFIT_UNLOCK:
+            return put(w / 2, h / 2);                                  // the card closes on a tap anywhere
         case AppState::DESK:        return sweep([&](int x, int y) { return uiDeskHitBack(x, y, w, h); });
         case AppState::HUNT:        return sweep([&](int x, int y) { return uiHuntHitBack(x, y, w, h); });
         case AppState::DIAGNOSTICS: return sweep([&](int x, int y) { return uiDiagnosticsHitBack(x, y, w, h); });
@@ -2656,6 +2896,28 @@ static bool stickBackPoint(StickPt& at) {
             return sweep([&](int x, int y) { return uiNudgeHit(*canvas, x, y) == NudgeHit::SKIP; });
         case AppState::COLOR_CHECK:
             return sweep([&](int x, int y) { return uiColorCheckHitTest(x, y, w, h) == ColorCheckTap::DONE; });
+        case AppState::BINGO: {
+            int16_t x, y, bw, bh;
+            if (!uiBingoBackRect(*canvas, x, y, bw, bh)) return false;
+            return put(x + bw / 2, y + bh / 2);
+        }
+#if SQUACH_MESH
+        case AppState::MESH_COMPOSE: {
+            int16_t x, y, bw, bh;
+            if (!uiMeshComposeBackRect(x, y, bw, bh)) return false;
+            return put(x + bw / 2, y + bh / 2);
+        }
+        case AppState::SQUAD: {
+            int16_t x, y, bw, bh;
+            if (!uiSquadBackRect(x, y, bw, bh)) return false;
+            return put(x + bw / 2, y + bh / 2);
+        }
+        case AppState::MESH_PHRASE: {
+            int16_t x, y, bw, bh;
+            if (!uiMeshPhraseBackRect(x, y, bw, bh)) return false;
+            return put(x + bw / 2, y + bh / 2);
+        }
+#endif
         // Everything else has no BACK that can be found without pressing
         // something. Never guess a spot to tap: a guessed point once landed on
         // a confirm button. HOME instead, which every screen already allows.
@@ -6349,6 +6611,7 @@ static void runtimeTick(uint32_t now) {
 // shows it again for five, and a tap while it shows wakes the board. The board cannot tell when the cell is
 // full, so the time is all there is to go on.
 static bool     s_chargeMode = false, s_chargeWasDown = false;
+static bool chargeModeOn() { return s_chargeMode; }
 // Asked for from the Settings row (or CHARGE on the console) and entered at
 // the top of the NEXT loop: entered in the middle of a pass, the rest of
 // that pass went on drawing the Settings screen over the charge screen.
@@ -6380,6 +6643,29 @@ static void chargeDraw(uint32_t now) {
     const uint32_t mins = (now - s_chargeAt) / 60000UL;
     char line[32];
     PANEL.setTextDatum(MC_DATUM);
+#if defined(SQW_SMALL)
+    // 135 rows: the layout below ran a line 330 px wide across a 240 px
+    // screen and put its prompt on the bottom edge.
+    PANEL.setTextColor(Theme::CYAN, TFT_BLACK);
+    PANEL.setTextSize(2);
+    PANEL.drawString("CHARGE MODE", w / 2, 16);
+    PANEL.setTextColor(TFT_WHITE, TFT_BLACK);
+    snprintf(line, sizeof line, "Charging %luh %02lum", (unsigned long)(mins / 60), (unsigned long)(mins % 60));
+    PANEL.drawString(line, w / 2, 44);
+    PANEL.setTextSize(1);
+    PANEL.setTextColor(Theme::blend(TFT_BLACK, TFT_WHITE, 170), TFT_BLACK);
+    PANEL.drawString("Radios off so it fills faster.", w / 2, 72);
+    PANEL.drawString("About 4-6 hours from empty.", w / 2, 86);
+    PANEL.setTextColor(Theme::GREEN, TFT_BLACK);
+    PANEL.setTextSize(2);
+    PANEL.drawString("PRESS TO WAKE UP", w / 2, 114);
+    PANEL.setTextDatum(TL_DATUM);
+#if !defined(FREENOVE_S3_35)
+    FramePush::busUnlock();
+#endif
+    panelShow();
+    return;
+#endif
     PANEL.setTextColor(Theme::CYAN, TFT_BLACK);
     PANEL.setTextSize(3);
     PANEL.drawString("CHARGE MODE", w / 2, h / 2 - 50);
@@ -6716,7 +7002,10 @@ void loop() {
     // bump in a pocket does not light it. A TAP on the case, awake on the main
     // screen, pokes Squachy as a tap on him does on the touch boards.
     {
-        const Shake::Event ev = Shake::poll(now);
+        Shake::Event ev = Shake::poll(now);
+#if SQW_DEVTOOLS
+        if (g_devImu) { ev = g_devImu == 1 ? Shake::Event::TAP : Shake::Event::SHAKE; g_devImu = 0; }
+#endif
         if (ev == Shake::Event::WIGGLE) {
             if (s_screenDimmed) { Serial.println("[imu] wake (wiggle)"); lastTouch = now; }
         } else if (ev == Shake::Event::SHAKE) {

@@ -555,8 +555,8 @@ static bool clipTalking() { return s_cLine && s_cShownMs < CLIP_TALK_MS; }
 // while it shows, so the line still gets all of it, just later.
 static bool clipMayShow() {
 #if defined(SQW_SMALL)
-    int bx, by, bw, bh;
-    return !Squachy::ownBubble(bx, by, bw, bh);
+    // Not just his bubble: a pat or a toss still playing out counts too.
+    return !Squachy::reacting();
 #else
     return true;
 #endif
