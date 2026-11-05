@@ -9,7 +9,8 @@
 namespace Shake {
 namespace {
 
-const uint8_t ADDR = 0x68;
+// 0x68, or 0x69 with the chip's SDO pin pulled high: found at begin().
+uint8_t ADDR = 0x68;
 
 // Registers (BMI270 datasheet).
 const uint8_t REG_CHIP_ID     = 0x00;   // 0x24
@@ -180,10 +181,15 @@ Event feed(uint32_t t, int32_t devMg) {
 
 bool begin() {
     s_ok = false;
+    ADDR = 0x68;
     if (rd(REG_CHIP_ID) != 0x24) {
-        Serial.println("[imu] no BMI270 at 0x68: no shake or tap");
-        return false;
+        ADDR = 0x69;
+        if (rd(REG_CHIP_ID) != 0x24) {
+            Serial.println("[imu] no BMI270 at 0x68 or 0x69: no shake or tap");
+            return false;
+        }
     }
+    Serial.printf("[imu] BMI270 at 0x%02X\n", ADDR);
     wr(REG_CMD, 0xB6);                       // soft reset
     delay(5);
     wr(REG_PWR_CONF, 0x00);                  // advanced power save off, for the upload

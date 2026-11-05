@@ -728,3 +728,11 @@ void uiPhoneTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
 }
 
 #endif // SQUACH_MESH
+
+// BACK's rectangle, when the screen shows BACK. Never the lock screen's
+// FORGOT / WIPE? in the same place: false there, so ESC never wipes.
+bool uiPhoneBackRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
+    if (pin() && !s_pinBack) return false;
+    x = BX; y = (int16_t)s_backY; w = (int16_t)BW_(); h = BH;
+    return s_backY > 0;
+}

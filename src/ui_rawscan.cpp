@@ -10,6 +10,22 @@
 
 static int g_scroll = 0;
 
+#if defined(SQW_SMALL)
+// A name that runs into the dBm column at size 2 drops to size 1, and is
+// cut short only if it still does not fit. 240 wide, many names did.
+static void printName(TFT_eSPI& t, const char* s, int x, int y, int maxW) {
+    if (t.textWidth(s) <= maxW) { t.setCursor(x, y); t.print(s); return; }
+    t.setTextSize(1);
+    char buf[48];
+    snprintf(buf, sizeof buf, "%s", s);
+    size_t n = strlen(buf);
+    while (n > 1 && t.textWidth(buf) > maxW) buf[--n] = '\0';
+    t.setCursor(x, y + 4);
+    t.print(buf);
+    t.setTextSize(2);
+}
+#endif
+
 // Shared by rowLayout() and uiRawScanTick() so the two can never
 // drift apart -- see rowLayout()'s own comment.
 static const int RS_TITLE_BOTTOM = 16;
@@ -357,9 +373,22 @@ if (!Theme::stillBackdrop(t)) switch (Settings::background()) {
             Theme::bodyFontOff(t);
             t.setTextSize(2);
             t.setTextColor(Theme::CYAN, Theme::BG);
-            t.setCursor(4, y + topPad);
             char pv[40];
+#if defined(SQW_SMALL)
+            {
+                char rs[12];
+                snprintf(rs, sizeof rs, "%ddBm", r->rssi);
+                Theme::bodyFontOn(t);
+                const int rsw = t.textWidth(rs);
+                Theme::bodyFontOff(t);
+                t.setTextSize(2);
+                printName(t, r->name[0] ? Privacy::name(r->name, pv, sizeof pv) : "(unnamed)",
+                          4, y + topPad, w - rsw - 14 - 11 - 8);
+            }
+#else
+            t.setCursor(4, y + topPad);
             t.print(r->name[0] ? Privacy::name(r->name, pv, sizeof pv) : "(unnamed)");
+#endif
 
             Theme::bodyFontOn(t);
             t.setTextColor(Theme::WHITE, Theme::BG);
@@ -391,9 +420,22 @@ if (!Theme::stillBackdrop(t)) switch (Settings::background()) {
             Theme::bodyFontOff(t);
             t.setTextSize(2);
             t.setTextColor(Theme::CYAN, Theme::BG);
-            t.setCursor(4, y + topPad);
             char pv[40];
+#if defined(SQW_SMALL)
+            {
+                char rs[12];
+                snprintf(rs, sizeof rs, "%ddBm", eng.rawWifiRssi(idx));
+                Theme::bodyFontOn(t);
+                const int rsw = t.textWidth(rs);
+                Theme::bodyFontOff(t);
+                t.setTextSize(2);
+                printName(t, Privacy::name(eng.rawWifiSsid(idx), pv, sizeof pv),
+                          4, y + topPad, w - rsw - 14 - 8);
+            }
+#else
+            t.setCursor(4, y + topPad);
             t.print(Privacy::name(eng.rawWifiSsid(idx), pv, sizeof pv));
+#endif
 
             Theme::bodyFontOn(t);
             t.setTextColor(Theme::WHITE, Theme::BG);

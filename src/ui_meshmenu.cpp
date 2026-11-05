@@ -175,6 +175,19 @@ void uiMeshMenuTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool 
     if (!below) {
         const bool warn = mnote && strcmp(mnote, "Messages: reading and replying.") != 0;
         const char* one = warn ? mnote : note;
+#if defined(SQW_SMALL)
+        // 240 wide: the long notes ran over the heading. Same news, shorter.
+        if (t.textWidth(one) > w - 16 - 6 * 11) {
+            one = !warn ? (d && x ? "See them. Seen by them."
+                         : d      ? "You see them. Hidden."
+                         : x      ? "They see you. You don't."
+                                  : "Off. Nothing in or out.")
+                : !MeshTalk::selfTestOk()   ? "Msgs: crypto test failed."
+                : !MeshTalk::havePhrase()   ? "Msgs need a phrase."
+                : !Settings::meshDetect()   ? "Msgs need DETECT on."
+                                            : "Msgs: read only.";
+        }
+#endif
         t.setTextColor(warn ? Theme::AMBER : Theme::W95_LIGHT, Theme::BG);
         t.setCursor(w - 8 - t.textWidth(one), Theme::listHeadingY(t));
         t.print(one);

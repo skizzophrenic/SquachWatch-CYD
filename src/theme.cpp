@@ -887,7 +887,28 @@ void drawScanline(TFT_eSPI& t, int y, uint16_t color) {
 void drawScrollbar(TFT_eSPI& t, int x, int y, int h,
                    int totalItems, int visibleItems, int scrollOffset) {
     if (totalItems <= visibleItems || visibleItems <= 0) return;
-    t.drawFastVLine(x, y, h, PURPLE);
+#if defined(SQW_SMALL)
+    // Shown while the list moves, then gone: on a 240x135 screen a bar that
+    // never leaves is one more thing in the way. A new list, or the same
+    // list scrolled, brings it back for SB_SHOW_MS and it fades out over
+    // the last SB_FADE_MS.
+    static const uint32_t SB_SHOW_MS = 1200, SB_FADE_MS = 400;
+    static int sbX = -1, sbY = -1, sbH = -1, sbTotal = -1, sbOff = -1;
+    static uint32_t sbAt = 0;
+    const uint32_t nowMs = millis();
+    if (x != sbX || y != sbY || h != sbH || totalItems != sbTotal || scrollOffset != sbOff) {
+        sbX = x; sbY = y; sbH = h; sbTotal = totalItems; sbOff = scrollOffset;
+        sbAt = nowMs;
+    }
+    const uint32_t age = nowMs - sbAt;
+    if (age >= SB_SHOW_MS + SB_FADE_MS) return;
+    const uint16_t fade = age <= SB_SHOW_MS ? 0 : (uint16_t)((age - SB_SHOW_MS) * 256 / SB_FADE_MS);
+    const uint16_t lineCol  = blend(PURPLE, BG, fade);
+    const uint16_t thumbCol = blend(CYAN, BG, fade);
+#else
+    const uint16_t lineCol = PURPLE, thumbCol = CYAN;
+#endif
+    t.drawFastVLine(x, y, h, lineCol);
     int thumbH = h * visibleItems / totalItems;
     if (thumbH < 6) thumbH = 6;
     int maxScroll = totalItems - visibleItems;
@@ -895,7 +916,7 @@ void drawScrollbar(TFT_eSPI& t, int x, int y, int h,
     if (scrollOffset < 0) scrollOffset = 0;
     int travel = h - thumbH;
     int thumbY = y + (maxScroll > 0 ? (travel * scrollOffset / maxScroll) : 0);
-    t.fillRect(x - 1, thumbY, 3, thumbH, CYAN);
+    t.fillRect(x - 1, thumbY, 3, thumbH, thumbCol);
 }
 
 // The per-type artwork. Positionable, because the ALERT screen now draws it

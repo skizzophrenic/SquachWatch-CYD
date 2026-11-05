@@ -118,9 +118,14 @@ void uiWifiNetsTick(TFT_eSPI& t, uint32_t now) {
     const uint8_t n = OtaWifi::savedCount();
     const Bar b = bar(t, 4);
     if (!n) {
+#if defined(SQW_SMALL)
+        // Two lines is all there is above the buttons at 135 rows.
+        paragraph(t, ROW_Y0 + 4, Theme::WHITE, "No networks saved. ADD picks one from a scan.");
+#else
         paragraph(t, ROW_Y0 + 4, Theme::WHITE,
                   "No networks saved. ADD picks one from a scan. The password is checked at the next boot, "
                   "and this list says how that went.");
+#endif
     }
     const int fit = rowsThatFit(t, b.y[0]);
     for (int i = 0; i < n && i < fit; i++) {

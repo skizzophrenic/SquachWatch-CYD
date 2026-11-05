@@ -1098,7 +1098,9 @@ static const int      STICK_KEY1 = 11, STICK_KEY2 = 12;
 // held is held -- and the rest happen once.
 // `select` and `back` are one-shot: each becomes a scripted tap (see
 // stickPoll), at the cursor or at the screen's own way back.
-struct SmallKeys { bool press, next, prev, home, back, select; };
+// `ch` is a character typed on the Cardputer's keyboard while a text screen
+// is up; `hot` a letter pressed anywhere else, for the hotkeys.
+struct SmallKeys { bool press, next, prev, home, back, select; char ch, hot; };
 #if SQW_DEVTOOLS
 // Dev builds only: keys typed on the serial console (KEY NEXT / PREV / HOME /
 // PRESS [ms]), so a screen can be reached without a hand on the device. Set by
@@ -1108,7 +1110,12 @@ volatile uint16_t g_devKeyMs = 0;        // how long PRESS holds
 volatile bool     g_devShot = false;     // SHOT: dump the next frame
 volatile bool     g_devQuiet = false;    // QUIET: alerts never take the screen (bench only)
 volatile uint8_t  g_devImu = 0;          // POKE 1, TOSS 2: a knock or a shake from the console
+char              g_devType[48] = "";    // TYPE text: keys from the console, one a poll
+volatile uint8_t  g_devTypeAt = 0, g_devTypeN = 0;
 static uint32_t   s_devPressUntil = 0;
+#if defined(CARDPUTER_ADV)
+static bool cardTyping();   // with the keyboard, below
+#endif
 static void devKeysMerge(SmallKeys& k) {
     const uint8_t key = g_devKey;
     if (key) {
@@ -1124,6 +1131,16 @@ static void devKeysMerge(SmallKeys& k) {
         if ((int32_t)(millis() - s_devPressUntil) < 0) k.press = true;
         else s_devPressUntil = 0;
     }
+#if defined(CARDPUTER_ADV)
+    // TYPE: as if typed on the keyboard, a character a poll. '~' is ENTER
+    // and '^' is DEL (a console line cannot carry them).
+    if (g_devTypeAt < g_devTypeN) {
+        char c = g_devType[g_devTypeAt++];
+        if (c == '~') c = '\n'; else if (c == '^') c = '\b';
+        if (cardTyping()) k.ch = c;
+        else if (c >= 'a' && c <= 'z') k.hot = c;
+    }
+#endif
 }
 #endif
 #if defined(CARDPUTER_ADV)
@@ -1158,6 +1175,26 @@ static bool cardKeysBegin() {
 static bool     s_cardEscDown = false, s_cardEscFired = false;
 static uint32_t s_cardEscAt = 0;
 static const uint32_t CARD_ESC_HOME_MS = 3000;
+static bool     s_cardShift = false, s_cardFn = false;
+// M5's own layout (M5Cardputer's Keyboard_def.h): four rows of fourteen,
+// each key's plain and shifted character. 0 marks a key that types nothing:
+// DEL, TAB, FN, SHIFT, ENTER, CTRL, OPT, ALT (handled by position below).
+static const char CARD_KEYMAP[4][14][2] = {
+    { {'`','~'}, {'1','!'}, {'2','@'}, {'3','#'}, {'4','$'}, {'5','%'}, {'6','^'}, {'7','&'}, {'8','*'}, {'9','('}, {'0',')'}, {'-','_'}, {'=','+'}, {0,0} },
+    { {0,0},     {'q','Q'}, {'w','W'}, {'e','E'}, {'r','R'}, {'t','T'}, {'y','Y'}, {'u','U'}, {'i','I'}, {'o','O'}, {'p','P'}, {'[','{'}, {']','}'}, {'\\','|'} },
+    { {0,0},     {0,0},     {'a','A'}, {'s','S'}, {'d','D'}, {'f','F'}, {'g','G'}, {'h','H'}, {'j','J'}, {'k','K'}, {'l','L'}, {';',':'}, {'\'','"'}, {0,0} },
+    { {0,0},     {0,0},     {0,0},     {'z','Z'}, {'x','X'}, {'c','C'}, {'v','V'}, {'b','B'}, {'n','N'}, {'m','M'}, {',','<'}, {'.','>'}, {'/','?'}, {' ',' '} },
+};
+// A text screen is up: letters type, and the arrow keys (; , . /) type their
+// own characters unless FN is held. ESC still goes back, and held, home.
+static char s_cardHot = 0;   // a hotkey letter, for loop()
+static bool cardTyping() {
+    return state == AppState::WIFI_PASS || state == AppState::PIN_ENTRY || state == AppState::LOCKED
+#if SQUACH_MESH
+        || state == AppState::PHONE
+#endif
+        ;
+}
 #if defined(SQUACHSIM)
 // The browser emulator's Cardputer keyboard (sw_cardkey in sim/main_wasm.cpp):
 // 0 ENTER (a level, as the real key's is), 1 next, 2 previous, 3 ESC or DEL.
@@ -1192,6 +1229,22 @@ static SmallKeys smallKeysRead() {
         const bool down = (ev & 0x80) != 0;
         const int  code = (ev & 0x7F) - 1;
         const int  row = (code % 10) % 4, col = (code / 10) * 2 + ((code % 10) > 3 ? 1 : 0);
+        if (row == 2 && col == 1) { s_cardShift = down; continue; }       // SHIFT
+        if (row == 2 && col == 0) { s_cardFn = down; continue; }          // FN
+        const bool typing = cardTyping();
+        if (typing && !(row == 0 && col == 0)) {
+            if (!down) continue;
+            const bool arrow = (row == 2 && col == 11) || (row == 3 && col >= 10 && col <= 12);
+            if (arrow && s_cardFn) {                                      // FN + arrow still moves
+                if (row == 3 && col >= 11) k.next = true; else k.prev = true;
+                continue;
+            }
+            if (row == 0 && col == 13)      k.ch = '\b';                     // DEL
+            else if (row == 2 && col == 13) k.ch = '\n';                     // ENTER
+            else if (row == 1 && col == 0)  k.ch = '\t';                     // TAB: SHOW/HIDE
+            else if (CARD_KEYMAP[row][col][0]) k.ch = CARD_KEYMAP[row][col][s_cardShift ? 1 : 0];
+            continue;
+        }
         const bool enter = (row == 2 && col == 13) || (row == 3 && col == 13);     // ENTER, or the space bar
         if (enter) { s_cardEnter = down; continue; }
         if (row == 0 && col == 0) {                                          // ESC
@@ -1206,6 +1259,7 @@ static SmallKeys smallKeysRead() {
         if ((row == 3 && (col == 11 || col == 12)) || (row == 1 && col == 0)) k.next = true;   // down, right, TAB
         else if ((row == 2 && col == 11) || (row == 3 && col == 10))          k.prev = true;   // up, left
         else if (row == 0 && col == 13)                                       k.back = true;   // DEL
+        else if (CARD_KEYMAP[row][col][0] >= 'a' && CARD_KEYMAP[row][col][0] <= 'z') k.hot = CARD_KEYMAP[row][col][0];
         Serial.printf("[keys] key %d,%d\n", row, col);
     }
     cardReg(0x02, 0x0F);
@@ -1509,6 +1563,9 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         return n;
     }
     if (state == AppState::OUTFIT_UNLOCK) return 0;   // a card: SELECT or BACK closes it
+#if defined(CARDPUTER_ADV)
+    if (cardTyping()) return 0;   // the keyboard types; ESC is BACK; nothing to point at
+#endif
     if (stickIsRectScreen()) {
         int16_t rx[STICK_STOPS_MAX], ry[STICK_STOPS_MAX], rw[STICK_STOPS_MAX], rh[STICK_STOPS_MAX];
         uint8_t k = stickScreenRects(rx, ry, rw, rh, cap);
@@ -1525,8 +1582,25 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
             }
         for (uint8_t i = 0; i < k; i++) {
             const uint8_t s = idx[i];
+            // A screen laid out for a taller panel keeps rectangles for buttons
+            // it placed below the bottom edge: never a stop nobody can see.
+            const int cx = rx[s] + rw[s] / 2, cy = ry[s] + rh[s] / 2;
+            if (cx < 0 || cx >= w || cy < 0 || cy >= h) continue;
+            // At least three quarters of it on the screen, both ways.
+            const int visH = std::min<int>(ry[s] + rh[s], h) - std::max<int>(ry[s], 0);
+            const int visW = std::min<int>(rx[s] + rw[s], w) - std::max<int>(rx[s], 0);
+            if (visH * 4 < rh[s] * 3 || visW * 4 < rw[s] * 3) continue;
+            // ...or one with a smaller button drawn over its middle (compose's
+            // third row of lines sits under BACK / TYPE at 135 rows).
+            bool covered = false;
+            for (uint8_t j = 0; j < k && !covered; j++) {
+                if (j == s) continue;
+                const bool in = cx >= rx[j] && cx < rx[j] + rw[j] && cy >= ry[j] && cy < ry[j] + rh[j];
+                if (in && (int32_t)rw[j] * rh[j] < (int32_t)rw[s] * rh[s]) covered = true;
+            }
+            if (covered) continue;
             s_stickRect[n] = { rx[s], ry[s], rw[s], rh[s] };
-            add(rx[s] + rw[s] / 2, ry[s] + rh[s] / 2);
+            add(cx, cy);
         }
         s_stickRectOn = true;
         return n;
@@ -1818,6 +1892,16 @@ static TouchPoint stickPoll() {
 #else
     const SmallKeys keys = smallKeysRead();
 #endif
+#if defined(CARDPUTER_ADV)
+    // The keyboard: a character goes to the text screen that is up, a letter
+    // anywhere else is a hotkey, done by loop() where the screens are.
+    if (keys.ch) {
+        lastTouch = now;
+        if (state == AppState::WIFI_PASS) uiWifiPassKey(keys.ch, now);
+        else                              uiPhoneKey(keys.ch);
+    }
+    if (keys.hot) s_cardHot = keys.hot;
+#endif
     const bool k1 = keys.press;
     if (keys.home) {
         s_stickHome = true;
@@ -1830,15 +1914,17 @@ static TouchPoint stickPoll() {
         tp.valid = true; tp.x = w / 2; tp.y = h / 2;
         return tp;
     }
-    // A screen with nothing to point at (FOB MODE) still wakes on a key.
-    if (!n && (keys.next || keys.prev || keys.select)) lastTouch = now;
-    // A card that closes on a tap anywhere: SELECT is that tap.
+    // A card that closes on a tap anywhere: SELECT is that tap. Before the
+    // wake below, which sets lastTouch: the card debounces against it and
+    // would throw its own tap away.
     if (!n && keys.select && state == AppState::OUTFIT_UNLOCK && !s_stickHoldUntil) {
         s_stickHoldPt = { (int16_t)(w / 2), (int16_t)(h / 2), 0 };
         s_stickHoldUntil = now + 120;
         tp.valid = true; tp.x = w / 2; tp.y = h / 2;
         return tp;
     }
+    // A screen with nothing to point at (FOB MODE) still wakes on a key.
+    if (!n && (keys.next || keys.prev || keys.select)) lastTouch = now;
     // A list step waiting on the redraw: see stickListStep().
     if (s_listPend && stickListSettle(pts, n)) {
         Serial.printf("[keys] stop %u of %u at %d,%d (screen %u)\n", (unsigned)s_stickStop + 1, (unsigned)n,
@@ -2896,6 +2982,21 @@ static bool stickBackPoint(StickPt& at) {
             return sweep([&](int x, int y) { return uiNudgeHit(*canvas, x, y) == NudgeHit::SKIP; });
         case AppState::COLOR_CHECK:
             return sweep([&](int x, int y) { return uiColorCheckHitTest(x, y, w, h) == ColorCheckTap::DONE; });
+        case AppState::WIFI_PASS: {
+            int16_t x, y, bw, bh;
+            if (!uiWifiPassBackRect(x, y, bw, bh)) return false;
+            return put(x + bw / 2, y + bh / 2);
+        }
+        case AppState::PIN_ENTRY:
+#if SQUACH_MESH
+        case AppState::PHONE:
+#endif
+        {
+            int16_t x, y, bw, bh;
+            if (!uiPhoneBackRect(x, y, bw, bh)) return false;
+            return put(x + bw / 2, y + bh / 2);
+        }
+        case AppState::LOCKED: return false;   // no way back but the PIN; HOME will not leave it either
         case AppState::BINGO: {
             int16_t x, y, bw, bh;
             if (!uiBingoBackRect(*canvas, x, y, bw, bh)) return false;
@@ -7024,6 +7125,27 @@ void loop() {
             }
         }
     }
+#if defined(CARDPUTER_ADV)
+    // Hotkeys (hotkey-table.txt): S scan, L log, D desk, E the EXT screen.
+    // Never on the boot or lock screens; never while typing (those letters
+    // are typed instead, see cardTyping()).
+    if (s_cardHot) {
+        const char c = s_cardHot;
+        s_cardHot = 0;
+        if (state != AppState::BOOT && state != AppState::LOCKED) {
+            lastTouch = now;
+            if (c == 'l')      { Serial.println("[keys] hotkey LOG");  enterLog(); }
+            else if (c == 'd') { Serial.println("[keys] hotkey DESK"); enterDesk(); }
+            else if (c == 's') { Serial.println("[keys] hotkey SCAN"); if (state != AppState::CLEAR) enterClear(); s_scanPickerOpen = true; }
+            else if (c == 'e') {
+                Serial.println("[keys] hotkey EXT");
+                Settings::toggleExtScreen();
+                Theme::showToast(Settings::extScreen() ? "EXT SCREEN ON" : "EXT SCREEN OFF",
+                                 Settings::extScreen() ? "Squachy is on the big one" : nullptr, Theme::CYAN);
+            }
+        }
+    }
+#endif
     if (s_stickHome) {
         s_stickHome = false;
         // HOME is the main screen. With desk mode on, home is the desk, so

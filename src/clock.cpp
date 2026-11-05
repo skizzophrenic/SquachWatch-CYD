@@ -78,6 +78,8 @@ extern volatile uint16_t g_devKeyMs;
 extern volatile bool     g_devShot;
 extern volatile bool     g_devQuiet;
 extern volatile uint8_t  g_devImu;
+extern char              g_devType[48];
+extern volatile uint8_t  g_devTypeAt, g_devTypeN;
 #endif
 #if defined(CARDPUTER_ADV)
 extern volatile int8_t g_consoleExt;
@@ -609,6 +611,13 @@ void pollSerial() {
 #if SQW_DEVTOOLS
         if (strcasecmp(line, "SHOT") == 0)      { g_devShot = true; continue; }
         if (strcasecmp(line, "POKE") == 0)      { g_devImu = 1; continue; }
+        if (strncasecmp(line, "TYPE ", 5) == 0) {
+            g_devTypeN = 0;
+            strncpy(g_devType, line + 5, sizeof g_devType - 1);
+            g_devType[sizeof g_devType - 1] = 0;
+            g_devTypeAt = 0; g_devTypeN = (uint8_t)strlen(g_devType);
+            continue;
+        }
         if (strcasecmp(line, "TOSS") == 0)      { g_devImu = 2; continue; }
         if (strcasecmp(line, "QUIET") == 0)     { g_devQuiet = !g_devQuiet;
                                                   Serial.printf("[dev] alerts %s\n", g_devQuiet ? "QUIET" : "on"); continue; }

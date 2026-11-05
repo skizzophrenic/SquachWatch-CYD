@@ -39,9 +39,17 @@ Rect     s_rows[ROWS_MAX];
 uint8_t  s_rowN = 0;
 
 // The corner buttons, a size up on the large panels so their labels can be.
+#if defined(SQW_SMALL)
+// 135 rows: everything has to sit above the BACK/SEND row, so the buttons
+// are shorter and Squachy is about half size.
+int16_t btnW() { return 68; }
+int16_t btnH() { return 20; }
+const float SCALE = 0.7f;
+#else
 int16_t btnW() { return Theme::large() ? 96 : 68; }
 int16_t btnH() { return Theme::large() ? 34 : 26; }
 const float SCALE = 1.5f;
+#endif
 
 const char* memberName(const SquachMesh::Peer& p) {
     return (p.custom && p.name[0]) ? p.name : Squachy::nicknameAt(p.nick);
@@ -133,7 +141,11 @@ void uiSquadTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     t.setTextWrap(false);
     t.setTextSize(2);
     t.setTextColor(Theme::VAPOR_PINK, Theme::BG);
+#if defined(SQW_SMALL)
+    t.setCursor(4, 4);
+#else
     t.setCursor(8, 6);
+#endif
     t.print("SQUAD");
     char cnt[24];
     if (s_roster) {
@@ -145,19 +157,34 @@ void uiSquadTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     }
     Theme::bodyFontOn(t);
     t.setTextColor(Theme::CYAN, Theme::BG);
+#if defined(SQW_SMALL)
+    t.setCursor(w - 4 - t.textWidth(cnt), 10);   // top right, clear of Squachy
+#else
     t.setCursor(80, Theme::large() ? 6 : 12);   // level with SQUAD
+#endif
     t.print(cnt);
     Theme::bodyFontOff(t);
 
     // ---- the carousel ---------------------------------------------------
+#if defined(SQW_SMALL)
+    // Left column: Squachy, name, buttons. Inbox on the right.
+    const int colW  = 152;
+    const int baseY = 62;
+#else
     const int colW  = port ? w : 176;
-    const int cx    = colW / 2;
     const int baseY = 146;
+#endif
+    const int cx    = colW / 2;
     s_prev = s_next = s_invite = s_add = s_forget = s_hunt = { 0, 0, 0, 0 };
     if (s_n == 0) {
         t.setTextColor(Theme::W95_LIGHT, Theme::BG);
-        centred(t, s_roster ? "Nobody in your squad" : "Nobody in range", cx, 84);
-        centred(t, s_roster ? "yet. ADD one nearby." : "right now.", cx, 96);
+#if defined(SQW_SMALL)
+        const int ny = 50;
+#else
+        const int ny = 84;
+#endif
+        centred(t, s_roster ? "Nobody in your squad" : "Nobody in range", cx, ny);
+        centred(t, s_roster ? "yet. ADD one nearby." : "right now.", cx, ny + 12);
     } else {
         const Mesh::SquadMember& m = s_members[s_sel];
         Squachy::setOutfitPreview((int8_t)m.peer.outfit);
@@ -168,7 +195,13 @@ void uiSquadTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         Squachy::setShadesPreview(-1);
         Squachy::setOutfitPreview(-1);
 
+#if defined(SQW_SMALL)
+        t.setTextSize(1);
+        const int nameH = 10;
+#else
         t.setTextSize(2);
+        const int nameH = 18;
+#endif
         t.setTextColor(Theme::WHITE, Theme::BG);
         centred(t, memberName(m.peer), cx, baseY + 4);
         Theme::bodyFontOn(t);
@@ -181,14 +214,19 @@ void uiSquadTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         else
             snprintf(sub, sizeof sub, "%s  %u/%u", Squachy::outfitNameAt(m.peer.outfit),
                      (unsigned)(s_sel + 1), (unsigned)s_n);
-        centred(t, sub, cx, baseY + 22);
+        centred(t, sub, cx, baseY + 4 + nameH);
         Theme::bodyFontOff(t);
 
         if (s_n > 1) {
-            s_prev = { 0, 60, 34, 70 };
-            s_next = { (int16_t)(colW - 34), 60, 34, 70 };
-            t.fillTriangle(22, 84, 8, 95, 22, 106, Theme::VAPOR_PINK);
-            t.fillTriangle(colW - 22, 84, colW - 8, 95, colW - 22, 106, Theme::CYAN);
+#if defined(SQW_SMALL)
+            const int ay = 26, ah = 34, am = ay + ah / 2;
+#else
+            const int ay = 60, ah = 70, am = 95;
+#endif
+            s_prev = { 0, (int16_t)ay, 34, (int16_t)ah };
+            s_next = { (int16_t)(colW - 34), (int16_t)ay, 34, (int16_t)ah };
+            t.fillTriangle(22, am - 11, 8, am, 22, am + 11, Theme::VAPOR_PINK);
+            t.fillTriangle(colW - 22, am - 11, colW - 8, am, colW - 22, am + 11, Theme::CYAN);
         }
         // Three buttons under the name, 56 wide each: INVITE brings this
         // Squachy onto the screen, HUNT aims the signal gauge at their board
@@ -198,10 +236,18 @@ void uiSquadTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         const bool vis  = visiting(m.mac);
         const bool here = !s_roster || s_here[s_sel];
         const bool hunt = eng.isHunted(m.mac, true);
+#if defined(SQW_SMALL)
+        // 150 px for three: INVITE's box is the widest, for VISITING.
+        const int by = baseY + 8 + nameH + subH;
+        s_invite = { 2,   (int16_t)by, 54, 18 };
+        s_hunt   = { 58,  (int16_t)by, 46, 18 };
+        s_add    = { 106, (int16_t)by, 46, 18 };
+#else
         const int  by   = baseY + 26 + subH;   // under the line above: 34 in the system font
         s_invite = { (int16_t)(cx - 88), (int16_t)by, 56, 22 };
         s_hunt   = { (int16_t)(cx - 28), (int16_t)by, 56, 22 };
         s_add    = { (int16_t)(cx + 32), (int16_t)by, 56, 22 };
+#endif
         Theme::drawButton(t, s_invite.x, s_invite.y, s_invite.w, s_invite.h,
                           !here ? "AWAY" : vis ? "VISITING" : "INVITE", vis || !here);
         if (!here) s_invite = { 0, 0, 0, 0 };
@@ -225,9 +271,17 @@ void uiSquadTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
 
     // ---- the inbox ------------------------------------------------------
     const int ix = port ? 4 : colW + 2;
+#if defined(SQW_SMALL)
+    const int iy = 24;
+#else
     const int iy = port ? baseY + 62 : 28;
+#endif
     const int iw = port ? w - 8 : w - colW - 6;
+#if defined(SQW_SMALL)
+    const int ih = (h - btnH() - 4) - iy;
+#else
     const int ih = (h - btnH() - 12) - iy;
+#endif
     t.fillRect(ix, iy, iw, ih, Theme::BG);
     t.drawRect(ix, iy, iw, ih, Theme::PURPLE);
     // The inbox in the body font: 16-row lines on the large panels, the
@@ -247,7 +301,13 @@ void uiSquadTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     if (!have) {
         t.setTextColor(Theme::W95_SHADOW, Theme::BG);
         t.setCursor(ix + 4, iy + fh + 10);
-        t.print("No messages yet.");
+        if (t.textWidth("No messages yet.") <= iw - 8) {
+            t.print("No messages yet.");
+        } else {
+            t.print("No messages");
+            t.setCursor(ix + 4, iy + 2 * fh + 12);
+            t.print("yet.");
+        }
     }
     for (uint8_t i = 0; i < have && i < rows; i++) {
         const MeshTalk::Message& msg = MeshTalk::inboxAt(i);
@@ -277,14 +337,19 @@ void uiSquadTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     }
     Theme::bodyFontOff(t);
 
-    s_back = { 4, (int16_t)(h - btnH() - 6), btnW(), btnH() };
+#if defined(SQW_SMALL)
+    const int16_t barY = (int16_t)(h - btnH() - 2);
+#else
+    const int16_t barY = (int16_t)(h - btnH() - 6);
+#endif
+    s_back = { 4, barY, btnW(), btnH() };
     Theme::drawButton(t, s_back.x, s_back.y, s_back.w, s_back.h, "[ BACK ]", false);
     // SEND, bottom right under the inbox: write to the squad from here,
     // rather than only by tapping a message to reply to it. The in-range
     // page only; the roster is for managing members, not talking to them.
     s_send = { 0, 0, 0, 0 };
     if (!s_roster) {
-        s_send = { (int16_t)(w - btnW() - 4), (int16_t)(h - btnH() - 6), btnW(), btnH() };
+        s_send = { (int16_t)(w - btnW() - 4), barY, btnW(), btnH() };
         Theme::drawButton(t, s_send.x, s_send.y, s_send.w, s_send.h, "[ SEND ]", false);
     }
 }

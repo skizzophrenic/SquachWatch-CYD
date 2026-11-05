@@ -466,7 +466,14 @@ if (!Theme::stillBackdrop(t)) switch (Settings::background()) {
             else { char mac[24]; Privacy::mac(mac, sizeof mac, d->mac); const size_t ml = strlen(mac);
                    snprintf(nm, sizeof nm, "%s", ml > 8 ? mac + ml - 8 : mac); }
             if (IgnoreList::contains(d->mac)) { char tmp[40]; snprintf(tmp, sizeof tmp, "(IGN) %s", nm); snprintf(nm, sizeof nm, "%s", tmp); }
+#if defined(SQW_SMALL)
+            // After the type, whichever is wider: GOOGLE_TAG ran into the name.
+            int typeW = t.textWidth(detectionTypeName(d->type));
+            if (typeW < t.textWidth("EVIL TWIN")) typeW = t.textWidth("EVIL TWIN");
+            const int nx = 6 + typeW + 6, nmax = rsX - 6 - nx;
+#else
             const int nx = 6 + t.textWidth("EVIL TWIN") + 6, nmax = rsX - 6 - nx;
+#endif
             while (nm[0] && t.textWidth(nm) > nmax) nm[strlen(nm) - 1] = '\0';
             t.setTextColor(kept ? dim : (reg ? Theme::VAPOR_PINK : Theme::WHITE), Theme::BG);
             t.setCursor(nx, ty);

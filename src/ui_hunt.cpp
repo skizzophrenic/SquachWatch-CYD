@@ -134,17 +134,37 @@ void uiHuntTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adva
     const bool tiny = Theme::compact();
     const int colX = tiny ? 70 : 0, colW = w - colX;
     const int sqH = tiny ? bodyBottom - bodyTop - 6 : 44;
+#if defined(SQW_SMALL)
+    // His bubble gets a band of its own across the top (over the title),
+    // and the name and gauge start under it: at the band's usual place it
+    // sat on both.
+    const int BAND = 27;
+    Squachy::setBubbleSinkTo(BAND);
+    Squachy::tick(t, 36, bodyTop, sqH, now, advance, 0.6f, true);
+    Squachy::setBubbleSinkTo(-1);
+#else
     Squachy::tick(t, tiny ? 36 : w / 2, bodyTop, sqH, now, advance, 0.6f, true);
+#endif
 
     Theme::bodyFontOn(t);
     t.setTextWrap(false);
     t.setTextColor(Theme::CYAN, Theme::BG);
+#if defined(SQW_SMALL)
+    int labelY = BAND + 1;
+#else
     int labelY = tiny ? bodyTop + 2 : bodyTop + sqH + 2;
+#endif
     char pv[40];
     const char* label = Privacy::name(eng.huntLabel(), pv, sizeof pv);
     int lw = t.textWidth(label);
     int maxLw = colW - 16;
     t.setCursor(colX + (colW - (lw < maxLw ? lw : maxLw)) / 2, labelY);
+#if defined(SQW_SMALL)
+    // A two-line bubble reaches past the band: the name waits it out
+    // rather than printing through his words.
+    int bbx, bby, bbw, bbh;
+    if (!(Squachy::ownBubble(bbx, bby, bbw, bbh) && bby + bbh > labelY))
+#endif
     t.print(label);
 
     uint8_t rssiN = eng.huntRssiCount();
@@ -165,13 +185,21 @@ void uiHuntTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adva
     }
 
     // Taller on the large panels: a size-3 readout over a body-font trend.
+#if defined(SQW_SMALL)
+    int textBlockH = 29;   // readout + trend, clear of the buttons
+#else
     int textBlockH = tiny ? 26 : Theme::large() ? 52 : 36;
+#endif
     int gaugeTop = labelY + t.fontHeight() + 4;
     int gaugeBottom = bodyBottom - textBlockH;
     int r = gaugeBottom - gaugeTop;
     int maxRw = (colW - 40) / 2;
     if (r > maxRw) r = maxRw;
+#if defined(SQW_SMALL)
+    if (r < 24) r = 24;
+#else
     if (r < 30) r = 30;
+#endif
     int cx = colX + colW / 2, cy = gaugeBottom;
 
     float frac = 0.0f;
