@@ -31,6 +31,9 @@
 #include <esp_heap_caps.h>
 #include "settings.h"
 #include "clock.h"
+#if defined(M5TOUGH)
+#include "m5tough_board.h"
+#endif
 
 namespace Sound {
 
@@ -42,6 +45,15 @@ static const int PIN_AMP = 1;
 // BOARD_I2S_BCK 7 / WS 5 / DOUT 6). No codec to set up, no master clock, and
 // no enable pin of its own -- it sleeps when the clocks stop.
 static const int PIN_MCK = -1, PIN_BCK = 7, PIN_WS = 5, PIN_DOUT = 6;
+static const int PIN_AMP = -1;
+#define SOUND_NO_CODEC 1
+#elif defined(M5TOUGH)
+// The M5Stack Tough: an NS4168 class-D amp straight on I2S, no codec and no
+// master clock (M5GFX's board setup: BCLK 12, LRCK 0, DATA 2). Its enable is
+// the power chip's GPIO2, not a pin of ours: M5Tough::speaker(), switched on
+// once in begin() and left on (see amp() below). GPIO0 and GPIO12 are strapping
+// pins, which only matters at reset; the I2S driver takes them after boot.
+static const int PIN_MCK = -1, PIN_BCK = 12, PIN_WS = 0, PIN_DOUT = 2;
 static const int PIN_AMP = -1;
 #define SOUND_NO_CODEC 1
 #else
@@ -190,7 +202,15 @@ static bool codecInit() {
 }
 
 // ---- the amplifier ---------------------------------------------------------
+#if defined(M5TOUGH)
+// The Tough's enable lives on the power chip, over I2C -- and the loop task owns
+// that bus (touch is polled on it), while this runs on the sound task. So begin()
+// enables the amp once, from setup(), and it stays enabled; "off" is the I2S
+// clocks stopping, which every other board here does as well.
+static void amp(bool on) { (void)on; }
+#else
 static void amp(bool on) { if (PIN_AMP >= 0) digitalWrite(PIN_AMP, (on == s_ampLow) ? LOW : HIGH); }
+#endif
 
 // ---- rendering -------------------------------------------------------------
 // The whole sound is rendered into a float buffer in PSRAM first (every board
@@ -433,6 +453,9 @@ static void soundTask(void*) {
 void begin() {
     if (PIN_AMP >= 0) pinMode(PIN_AMP, OUTPUT);
     amp(false);
+#if defined(M5TOUGH)
+    M5Tough::speaker(true);               // once, here, in setup(): the loop task has the bus
+#endif
 #if !SOUND_NO_CODEC
     Wire.beginTransmission(CODEC);
     if (Wire.endTransmission() != 0) { Serial.println("[sound] ES8311 did not answer; no speaker"); return; }
@@ -469,6 +492,10 @@ void begin() {
     xTaskCreatePinnedToCore(soundTask, "sound", 4096, nullptr, 2, &s_task, 1);
     s_ok = s_q && s_task;
     Serial.printf("[sound] I2S amp ready: BCK %d WS %d DOUT %d%s\n", PIN_BCK, PIN_WS, PIN_DOUT, s_ok ? "" : " -- task failed");
+#if defined(M5TOUGH)
+    // No PSRAM in this build: a sound is rendered into the ordinary heap, so say how much there is.
+    Serial.printf("[sound] heap %u free, largest block %u; PSRAM %u free\n", (unsigned)ESP.getFreeHeap(), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), (unsigned)ESP.getFreePsram());
+#endif
 #else
     const bool ok = codecInit();
     const uint8_t id1 = rd(0xFD), id2 = rd(0xFE);

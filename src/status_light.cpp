@@ -27,7 +27,10 @@
 // of mistake as the backlight pins in main.cpp, and silent in the same way:
 // the light would simply never come on, which reads as "this board has no
 // status LED" rather than as a bug.
-#if defined(ESP32) && !defined(CYD35) && !defined(AWOK) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(NM_CYD_C5) && !defined(TAB5)
+// Not the M5Stack Tough: the CYD's three LED pins (4, 16, 17) are its SD card's
+// chip select and its PSRAM's chip select and clock. Its one LED is on the power
+// chip, and is left alone.
+#if defined(ESP32) && !defined(CYD35) && !defined(AWOK) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(NM_CYD_C5) && !defined(TAB5) && !defined(M5TOUGH)
 #define STATUS_LIGHT_HW 1
 #elif defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || (defined(NM_CYD_C5) && !defined(MARAUDER_V8))
 #define STATUS_LIGHT_HW 2

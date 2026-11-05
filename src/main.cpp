@@ -46,6 +46,9 @@
 #if defined(CYD32C) || defined(CYD35C) || defined(TDECK_PLUS)
 #include "gt911_touch.h"
 #endif
+#if defined(M5TOUGH)
+#include "m5tough_board.h"   // the AXP192: screen power, reset, backlight, battery
+#endif
 // The 3.5" comes resistive (ESP32-3248S035R: touch on the display's own bus)
 // and capacitive (ESP32-3248S035C: a GT911, the 3.2" capacitive's chip on the
 // same pins). CYD35 is both, for the panel and its two-band drawing; CYD35R
@@ -528,6 +531,11 @@ constexpr bool PANEL_NEEDS_INVERSION = true;
 // Freenove's own setup for the S3 2.8" (FNK0104AB) turns inversion on, and
 // confirmed on an FNK0104B 2026-09-25: colours right with INVERT untouched.
 constexpr bool PANEL_NEEDS_INVERSION = true;
+#elif defined(M5TOUGH)
+// M5GFX's Panel_M5StackCore2 (which the Tough shares) sets invert = true for the
+// ILI9342C. UNCONFIRMED here until the board is looked at; INVERT in Settings
+// flips it if the colours come up negative.
+constexpr bool PANEL_NEEDS_INVERSION = true;
 #elif defined(TDECK_PLUS)
 // LilyGo's T-Deck setup turns inversion on for its ST7789. UNCONFIRMED by
 // eye until the board is looked at; INVERT in Settings flips it if wrong.
@@ -746,7 +754,21 @@ static const uint8_t MADCTL_BGR = 0x08;
 // ILI9341 and ST7796's tables happen to be identical; ST7789's is its
 // own.
 static uint8_t madctlRotationBits(uint8_t rotation) {
-#if defined(ST7789_DRIVER)
+#if defined(M5TOUGH)
+    // The table TFT_eSPI itself uses under -DM5STACK (ILI9341_Rotation.h), which
+    // is the one the ILI9342C wants. The stock-ILI9341 rows below would be written
+    // over it by applyColorOrder() and come out mirrored on this panel.
+    // TOUGH_MADCTL_XOR is a bench knob: if the picture is STILL mirrored or
+    // upside down, build with -DTOUGH_MADCTL_XOR=0x40 (or 0x80, 0xC0) to flip
+    // the X / Y / both memory directions in every rotation.
+#ifndef TOUGH_MADCTL_XOR
+#define TOUGH_MADCTL_XOR 0x00
+#endif
+    static const uint8_t BITS[4] = {
+        MADCTL_MY | MADCTL_MV, 0, MADCTL_MV | MADCTL_MX, MADCTL_MX | MADCTL_MY
+    };
+    return (uint8_t)(BITS[rotation % 4] ^ TOUGH_MADCTL_XOR);
+#elif defined(ST7789_DRIVER)
     static const uint8_t BITS[4] = {
         0, MADCTL_MX | MADCTL_MV, MADCTL_MX | MADCTL_MY, MADCTL_MV | MADCTL_MY
     };
@@ -1663,7 +1685,9 @@ static bool s_screenDimmed = false;
 // screen off or on, a long one starts CHARGE MODE. The S3 boards and the
 // CrowPanel are left out until somebody has pressed theirs -- except the
 // Freenove 3.5", whose one button is GPIO0 like a CYD's.
-#if defined(ESP32) && (!defined(SQW_S3) || defined(FREENOVE_S3_35)) && !defined(CROWPANEL7) && !defined(TAB5)
+// Nor the M5Stack Tough: it has no BOOT button, and GPIO0 there is the speaker's
+// I2S word clock -- reading it as a button is a button nobody pressed.
+#if defined(ESP32) && (!defined(SQW_S3) || defined(FREENOVE_S3_35)) && !defined(CROWPANEL7) && !defined(TAB5) && !defined(M5TOUGH)
 #define SQW_BOOT_BTN 1
 #else
 #define SQW_BOOT_BTN 0
@@ -1765,6 +1789,8 @@ static void applyBrightness() {
     ledcWrite(TFT_BL, duty);
 #elif defined(TDECK_PLUS)
     tdeckBacklight(duty);   // a stepped driver chip, not a PWM pin
+#elif defined(M5TOUGH)
+    M5Tough::backlight(duty);   // a voltage on the power chip, not a PWM pin
 #else
 #if SQW_BOOT_BTN
     if (s_crownDark && s_screenDimmed) duty = 0;   // the button turns it OFF, whatever DIM LEVEL says
@@ -3947,7 +3973,11 @@ static void printBootBanner() {
     char rst[40];
     snprintf(rst, sizeof(rst), "last reset: %s", resetReasonName());
     Serial.printf ("║  \\  \\_/  /     %-34s║\n", rst);
+#if defined(M5TOUGH)
+    Serial.println("║   )     (      2.4 GHz  .  ESP32  .  TOUGH       ║");
+#else
     Serial.println("║   )     (      2.4 GHz  .  ESP32  .  CYD         ║");
+#endif
     Serial.println("║  /_/   \\_\\                                       ║");
     Serial.println("╚══════════════════════════════════════════════════╝");
 
@@ -4172,6 +4202,12 @@ void setup() {
     twatchPowerUp();
     uiClearSetBatterySource(twatchBatteryState);
 #endif
+#if defined(M5TOUGH)
+    // First, and before tft.init(): until the AXP192 has switched the LCD rail on
+    // and released the panel's reset, nothing on the bus answers.
+    M5Tough::powerUp();
+    uiClearSetBatterySource(M5Tough::batteryState);
+#endif
 #if defined(STICKS3)
     sticksPowerUp();
 #endif
@@ -4215,7 +4251,7 @@ void setup() {
 // ... and not on the CrowPanel 7, where GPIO21 is the panel's BLUE-0 data
 // line. Driving it high before the panel driver claims it is a stripe down the
 // picture at best.
-#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(CYD32C) && !defined(CYD35C) && !defined(TAB5)
+#if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(CYD32C) && !defined(CYD35C) && !defined(TAB5) && !defined(M5TOUGH)   // the Tough: GPIO21 is I2C SDA
     pinMode(21, OUTPUT); digitalWrite(21, HIGH);
 #endif
 #if defined(SQW_S3)
@@ -4230,6 +4266,10 @@ void setup() {
 #elif defined(TAB5)
     // Nothing: M5GFX owns the backlight pin, and 21/27/32 are somebody else's
     // on a P4.
+#elif defined(M5TOUGH)
+    // Nothing at all. The backlight is LDO3 on the power chip (M5Tough::backlight),
+    // and every GPIO the CYD boards light here is a Tough's: 21 is I2C SDA,
+    // 27 and 32 are the Port B and Port A Grove connectors' lines.
 #elif defined(NM_CYD_C5)
     // One backlight, TFT_BL (GPIO25), and ONLY that pin. Confirmed on the
     // board: the branch below drives 27 and 32, and on a C5 that is
@@ -4344,6 +4384,8 @@ void setup() {
     // here would only take them away from something that has a pin.
 #elif defined(TAB5)
     // No LEDC here either: M5GFX set the backlight's PWM up with the panel.
+#elif defined(M5TOUGH)
+    // No LEDC: the backlight is a voltage on the power chip's LDO3, set over I2C.
 #elif defined(TDECK_PLUS)
     // No LEDC: GPIO42 is a pulse-counting 16-step driver, and a PWM on it
     // would walk the brightness round and round. tdeckBacklight() steps it.
@@ -4413,6 +4455,8 @@ void setup() {
         Tab5Panel::backlight(24);
 #elif defined(TDECK_PLUS)
         tdeckBacklight(24);
+#elif defined(M5TOUGH)
+        M5Tough::backlight(24);
 #else
         ledcWrite(BL_CH_ORIG, 24);
         ledcWrite(BL_CH_CAP,  24);
@@ -4461,7 +4505,7 @@ void setup() {
     // 16-bit — the full 16-bit buffer didn't fit in the available
     // contiguous heap on this board.
     frame.setColorDepth(8);
-#if (defined(SQW_S3) && !defined(FREENOVE_S3_35) && !defined(FREENOVE_S3_40)) || SQW_FRAME_FORCE_INTERNAL
+#if (defined(SQW_S3) && !defined(FREENOVE_S3_35) && !defined(FREENOVE_S3_40)) || SQW_FRAME_FORCE_INTERNAL || defined(M5TOUGH)
     // 57.6 KB fits in internal RAM with room to spare (75 KB at 320x240), and a sprite in
     // PSRAM pushes slower and cannot go by DMA. Keep it inside. (Not the
     // Freenove 3.5": its 154 KB frame goes to PSRAM on purpose, and the QSPI
@@ -4489,6 +4533,15 @@ void setup() {
     const bool frameOk = frame.createSprite(tft.width(), tft.height());
 #if SQW_FRAME_FORCE_INTERNAL
     heap_caps_malloc_extmem_enable(CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL);
+#endif
+#if defined(M5TOUGH)
+    {   // The Tough's PSRAM is on for the speaker. A frame in it draws slower, so say where this one is.
+        const uintptr_t a = (uintptr_t)frame.buf();
+        Serial.printf("[tough] PSRAM %s (%u bytes); frame buffer %s; heap %u free, largest block %u\n",
+                      psramFound() ? "found" : "NOT found", (unsigned)ESP.getPsramSize(),
+                      !frameOk ? "FAILED" : (a >= 0x3F800000u && a < 0x3FC00000u) ? "IN PSRAM" : "internal",
+                      (unsigned)ESP.getFreeHeap(), (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    }
 #endif
 #if SQW_FRAME_FORCE_INTERNAL || SQW_PUSH_ASYNC
     // Say where it landed: a frame in the wrong memory is the CrowPanel's
@@ -4596,6 +4649,19 @@ void setup() {
                                  : "T-Deck Plus -- GT911 did not answer; no touch.");
     { char b[16]; boardBatteryLine(b, sizeof b); Serial.printf("[batt] %s (raw GPIO%d %u mV)\n", b, BOARD_BAT_ADC, (unsigned)analogReadMilliVolts(BOARD_BAT_ADC)); }
     uiClearSetBatterySource(boardBatteryState);
+    Sound::begin();                       // the I2S amp; no codec to find
+#elif defined(M5TOUGH)
+    // The Tough's CHSC6540, on the power chip's I2C bus (SDA 21 / SCL 22) at 0x2E,
+    // interrupt on GPIO39 (unused: polled). Its reset is AXP192 GPIO1, pulsed in
+    // M5Tough::powerUp(); CapTouch::begin() sends the 5A 5A wake and takes no reset
+    // of its own. Same register layout as the FT6336, in the panel's landscape
+    // frame; the five-target calibration maps it like any capacitive CYD.
+    CapTouch::begin(21, 22, -1, 0x2E);
+    usingCapTouch = CapTouch::probe();
+    Serial.println(usingCapTouch ? "M5Stack Tough -- CHSC6540 capacitive touch answered."
+                                 : "M5Stack Tough -- CHSC6540 did not answer; no touch.");
+    { uint8_t pc = 0; bool ch = false; const bool ok = M5Tough::batteryState(pc, ch);
+      Serial.printf("[batt] %s %u%% %d mV%s\n", ok ? "cell" : "no cell", (unsigned)pc, M5Tough::batteryMv(), ch ? " (on the cable)" : ""); }
     Sound::begin();                       // the I2S amp; no codec to find
 #elif defined(TWATCH_S3)
     // The T-Watch's FT6336, on I2C SDA 39 / SCL 40 at 0x38. No reset line;
@@ -4801,6 +4867,8 @@ void setup() {
     Tab5Panel::backlight(24);
 #elif defined(TDECK_PLUS)
     tdeckBacklight(24);
+#elif defined(M5TOUGH)
+    M5Tough::backlight(24);
 #else
     ledcWrite(BL_CH_ORIG, 24);
     ledcWrite(BL_CH_CAP,  24);
@@ -5675,6 +5743,8 @@ static void chargeBacklight(uint8_t duty) {
     CrowBL::set(duty);
 #elif defined(TAB5)
     Tab5Panel::backlight(duty);
+#elif defined(M5TOUGH)
+    M5Tough::backlight(duty);
 #else
     ledcWrite(BL_CH_ORIG, duty);
     ledcWrite(BL_CH_CAP,  duty);
@@ -6352,7 +6422,11 @@ void loop() {
     if (g_consolePins) {
         g_consolePins = false;
         static bool once = false;
+#if !defined(M5TOUGH)   // GPIO22 is the Tough's I2C clock: a pull-up there is not a spare
         if (!once) { once = true; pinMode(22, INPUT_PULLUP); }
+#else
+        (void)once;
+#endif
         const uint8_t pins[] = { 0, 22, 5, 18, 19, 23, 26, 35, 36, 39 };
         char line[120]; int n = snprintf(line, sizeof line, "[pins]");
         for (uint8_t p : pins) n += snprintf(line + n, sizeof line - n, " %u=%d", p, digitalRead(p));

@@ -23,6 +23,15 @@ void begin(int sda, int scl, int rst, uint8_t addr) {
         delay(50);  // chip boot time after reset release
     }
     Wire.begin(sda, scl);
+    if (addr == 0x2E) {
+        // The CHSC6540 (M5Stack Tough). M5GFX sends it 5A 5A at init, which
+        // puts it in the report mode the 0x02..0x06 registers below belong to.
+        // Its register layout is otherwise the FT6336's: count, then X and Y.
+        Wire.beginTransmission(addr);
+        Wire.write((uint8_t)0x5A);
+        Wire.write((uint8_t)0x5A);
+        Wire.endTransmission();
+    }
 }
 
 bool probe() {
