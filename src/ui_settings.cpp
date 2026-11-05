@@ -1,5 +1,6 @@
 // SquachWatch-CYD — settings screen implementation
 #include "ui_settings.h"
+#include "gnss.h"
 #if !defined(ESP32)
 #include <stdlib.h>     // getenv: the emulator's SQUACHSIM_SPEAKER
 #endif
@@ -121,6 +122,9 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::POWER_SAVER,
 #if defined(CYD_GPS)
     SettingsRow::WATCH_WARDRIVE,   // the watch's row and setting, on the CYD GPS builds
+#if defined(CARDPUTER_ADV)
+    SettingsRow::WARDRIVE_SOUND,
+#endif
 #endif
 #if defined(ESP32) && !defined(TWATCH_S3)
     SettingsRow::CHARGE_MODE,
@@ -285,6 +289,9 @@ static RowGroupId groupFor(SettingsRow r) {
 #if defined(CYD_GPS)
     // Under its neighbor's heading: a CYD has no WATCH heading.
     if (r == SettingsRow::WATCH_WARDRIVE) return groupFor(SettingsRow::POWER_SAVER);
+#if defined(CARDPUTER_ADV)
+    if (r == SettingsRow::WARDRIVE_SOUND) return groupFor(SettingsRow::POWER_SAVER);
+#endif
 #endif
     switch (r) {
         case SettingsRow::WATCH_BATTERY:
@@ -1361,12 +1368,22 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
                 case Wardrive::SdState::OFF:             value = "OFF"; break;
                 case Wardrive::SdState::NO_CARD:         value = "NO CARD"; break;
                 case Wardrive::SdState::LOW_MEMORY:      value = "LOW MEMORY"; break;
+#if defined(CARDPUTER_ADV)
+                // Why it is waiting: NO GPS, FINDING 3 SATS.
+                case Wardrive::SdState::WAITING_FOR_FIX: value = Gnss::status(millis(), valBuf, valBufN); break;
+#else
                 case Wardrive::SdState::WAITING_FOR_FIX: value = "WAITING FOR FIX"; break;
+#endif
                 case Wardrive::SdState::LOGGING:
                     snprintf(valBuf, valBufN, "ON  %lu", (unsigned long)Wardrive::written());
                     value = valBuf;
                     break;
             }
+            break;
+#endif
+#if defined(CARDPUTER_ADV) && defined(CYD_GPS)
+        case SettingsRow::WARDRIVE_SOUND:
+            label = "WARDRIVE SOUND"; value = Wardrive::soundOn() ? "ON" : "OFF";
             break;
 #endif
         case SettingsRow::EXT_SCREEN:

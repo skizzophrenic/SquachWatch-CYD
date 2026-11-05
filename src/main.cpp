@@ -1110,6 +1110,8 @@ struct SmallKeys { bool press, next, prev, home, back, select; char ch, hot; };
 // clock.cpp's console, merged into the real keys by stickPoll().
 volatile uint8_t  g_devKey = 0;          // 1 next, 2 prev, 3 home, 4 press, 5 back, 6 select
 volatile uint16_t g_devKeyMs = 0;        // how long PRESS holds
+char              g_devSdPath[48] = "";  // SD CAT: the file to print
+volatile bool     g_devGpsLogRearm = false;  // FORGET CLOCK: fill in placeholders again
 volatile bool     g_devShot = false;     // SHOT: dump the next frame
 volatile bool     g_devShotExt = false;  // SHOT EXT: the Cardputer's EXT panel instead
 volatile bool     g_devQuiet = false;    // QUIET: alerts never take the screen (bench only)
@@ -1123,6 +1125,8 @@ static bool cardTyping();   // with the keyboard, below
 static bool s_devHots = false;   // HOTS: list each stop's hotkey
 static bool s_devGpsProbe = false;
 static bool s_devExtId = false;
+static bool s_devSdCat = false;   // SD CAT: print a file
+static bool s_devSdLs = false;    // SD LS: list the card
 static bool s_devSdTry = false;   // SDTRY: mount the card at a few speeds   // EXTID: read the EXT panel's ID registers   // GPSPROBE: which pin and baud the GPS talks on
 static void devKeysMerge(SmallKeys& k) {
     const uint8_t key = g_devKey;
@@ -1138,6 +1142,8 @@ static void devKeysMerge(SmallKeys& k) {
         else if (key == 8) s_devGpsProbe = true;
         else if (key == 9) s_devExtId = true;
         else if (key == 10) s_devSdTry = true;
+        else if (key == 11) s_devSdLs = true;
+        else if (key == 12) s_devSdCat = true;
     }
     if (s_devPressUntil) {
         if ((int32_t)(millis() - s_devPressUntil) < 0) k.press = true;
@@ -1540,6 +1546,13 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         return n;
     }
     if (state == AppState::CLEAR && s_fob) return 0;   // FOB MODE: nothing to point at
+    if (state == AppState::CLEAR && uiZoneCardWanted()) {
+        // The time zone card is up over everything: its buttons are the stops.
+        int16_t xs[3], ys[3];
+        uiZoneCardStops(w, h, xs, ys);
+        for (int i = 0; i < 3; i++) add(xs[i], ys[i]);
+        return n;
+    }
     if (state == AppState::CLEAR) {
         // The bar first, left to right, then the menu, the tiles, and any
         // card that is up. Squachy and his pet are not stops on these boards:
@@ -3017,6 +3030,10 @@ static bool stickBackPoint(StickPt& at) {
     switch (state) {
         case AppState::CLEAR:
             if (s_scanPickerOpen) return put(w * 5 / 6 - 4, h - 16);   // the picker's BACK, in DESK's place
+#if defined(CARDPUTER_ADV)
+            // Home has nowhere to go back to: ESC opens the menu instead.
+            if (!s_fob) return put(13, 11);
+#endif
             return false;
         case AppState::LOG:
             if (s_confirmPending)
@@ -6643,6 +6660,11 @@ static void cydGpsStart() {
     // TX -1: the module's RX is not wired. The core fills in its default
     // pins only when both are negative, so TX stays unassigned here; the
     // default TX2 is GPIO17, the status light.
+#if defined(CARDPUTER_ADV)
+    // 115200 baud is about 11 KB a second at most; the default 256-byte
+    // buffer overflows in one slow frame and the lost bytes break sentences.
+    CYD_GPS_SERIAL.setRxBufferSize(2048);
+#endif
     CYD_GPS_SERIAL.begin(s_cydGpsBaud, SERIAL_8N1, s_cydGpsPin, -1);
     s_cydGpsBaudAt = millis();
     Wardrive::sdBegin();
@@ -6683,6 +6705,147 @@ static const char* cydWardriveStateName(Wardrive::SdState st) {
     }
     return "?";
 }
+
+#if defined(CARDPUTER_ADV)
+// While wardrive is on: one line a minute in /gps-status.log of whatever the
+// GPS is saying, so a run that never got a fix can be read afterwards.
+static uint32_t s_gpsLogAt = 0, s_gpsLogGood = 0, s_gpsLogBad = 0, s_gpsLogBytes = 0, s_gpsLogDropped = 0;
+static bool     s_gpsLogWasOn = false;
+// Until the clock is trusted a line starts with a placeholder exactly as
+// wide as a date; when the time arrives, this boot's lines are rewritten in
+// place from their uptime.
+static const char GPSLOG_WAIT[] = "waiting for GPS time";   // 20, as "2026-11-05 00:01 UTC"
+static int32_t  s_gpsLogBootOff = -1;   // where this boot's lines start in the file
+static bool     s_gpsLogFixed = false;  // this boot's placeholders are filled in
+static void gpsLogStamp(char* out, uint32_t epoch) {
+    time_t t = (time_t)epoch;
+    struct tm tmv;
+    gmtime_r(&t, &tmv);
+    strftime(out, 21, "%Y-%m-%d %H:%M UTC", &tmv);
+}
+static void cydGpsLogBackfill(uint32_t nowMs) {
+#if SQW_DEVTOOLS
+    if (g_devGpsLogRearm) { g_devGpsLogRearm = false; s_gpsLogFixed = false; }
+#endif
+    if (s_gpsLogFixed || !Clock::trusted() || s_gpsLogBootOff < 0) return;
+    if (!engine.sd().ready()) return;
+    s_gpsLogFixed = true;
+    const uint32_t nowEpoch = Clock::nowEpoch(), upNow = nowMs / 1000;
+    FramePush::busLock();
+    File fl = SD.open("/gps-status.log", "r+");
+    int fixed = 0;
+    if (fl) {
+        uint32_t pos = (uint32_t)s_gpsLogBootOff;
+        char head[40];
+        while (pos < fl.size()) {
+            fl.seek(pos);
+            const int got = fl.read((uint8_t*)head, sizeof head - 1);
+            if (got <= 0) break;
+            head[got] = 0;
+            if (got > 30 && !memcmp(head, GPSLOG_WAIT, 20) && !memcmp(head + 20, "  up ", 5)) {
+                unsigned h = 0, m = 0, sec = 0;
+                if (sscanf(head + 25, "%u:%u:%u", &h, &m, &sec) == 3) {
+                    const uint32_t u = h * 3600u + m * 60u + sec;
+                    char stamp[21];
+                    gpsLogStamp(stamp, nowEpoch - (upNow > u ? upNow - u : 0));
+                    fl.seek(pos);
+                    fl.write((const uint8_t*)stamp, 20);
+                    fixed++;
+                }
+            }
+            // On to the next line.
+            fl.seek(pos);
+            int c;
+            while ((c = fl.read()) >= 0 && c != '\n') pos++;
+            pos++;
+        }
+        fl.close();
+    }
+    FramePush::busUnlock();
+    Serial.printf("[gpslog] clock set: %d earlier lines given the time\n", fixed);
+}
+static void cydGpsLogLine(uint32_t now, const char* note) {
+    char when[24];
+    if (Clock::trusted()) gpsLogStamp(when, Clock::nowEpoch());
+    else                  snprintf(when, sizeof when, "%s", GPSLOG_WAIT);
+    const uint32_t up = now / 1000;
+    char line[320];
+    int k = snprintf(line, sizeof line, "%s  up %lu:%02lu:%02lu  ", when,
+                     (unsigned long)(up / 3600), (unsigned long)(up / 60 % 60), (unsigned long)(up % 60));
+    if (note) {
+        snprintf(line + k, sizeof line - k, "%s", note);
+    } else {
+        char st[24];
+        Gnss::status(now, st, sizeof st);
+        const Gnss::Sky sky = Gnss::sky();
+        const Gnss::Fix& f = Gnss::fix();
+        uint32_t txtAt = 0;
+        const char* txt = Gnss::text(&txtAt);
+        const bool txtNew = txtAt && now - txtAt < 60000;
+        k += snprintf(line + k, sizeof line - k,
+                      "%s | last min %lu bytes, %lu ok, %lu bad at %lu baud | sats view %u heard %u used %u",
+                      st, (unsigned long)(Gnss::bytes() - s_gpsLogBytes),
+                      (unsigned long)(Gnss::good() - s_gpsLogGood), (unsigned long)(Gnss::bad() - s_gpsLogBad),
+                      (unsigned long)s_cydGpsBaud, sky.view, sky.heard, f.used);
+        if (k < (int)sizeof line && Gnss::fresh(now) && !Gnss::faked()) {
+            char la[16], lo[16];
+            SdRow::degreesText(la, sizeof la, f.lat7, 7);
+            SdRow::degreesText(lo, sizeof lo, f.lon7, 7);
+            k += snprintf(line + k, sizeof line - k, " | at %s,%s about %u m", la, lo, f.accM);
+        }
+        if (k < (int)sizeof line && txtNew && *txt)
+            k += snprintf(line + k, sizeof line - k, " | module says %s", txt);
+        if (k < (int)sizeof line)
+            k += snprintf(line + k, sizeof line - k, " | wardrive %s, %lu rows, %lu lost last min",
+                          cydWardriveStateName(Wardrive::sdState(now)), (unsigned long)Wardrive::written(),
+                          (unsigned long)(Wardrive::dropped() - s_gpsLogDropped));
+        if (k < (int)sizeof line)
+            snprintf(line + k, sizeof line - k, " | heap %lu free, %lu block",
+                     (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    }
+    s_gpsLogGood = Gnss::good(); s_gpsLogBad = Gnss::bad(); s_gpsLogBytes = Gnss::bytes();
+    s_gpsLogDropped = Wardrive::dropped();
+    Serial.printf("[gpslog] %s\n", line);
+    if (!engine.sd().ready()) return;
+    FramePush::busLock();
+    File fl = SD.open("/gps-status.log", FILE_APPEND);
+    if (fl) {
+        if (s_gpsLogBootOff < 0) s_gpsLogBootOff = (int32_t)fl.size();
+        fl.println(line);
+        fl.close();
+    }
+    FramePush::busUnlock();
+}
+// WARDRIVE SOUND: two rising beeps when a fix arrives, a falling slide when
+// it has been gone ten seconds, and a soft tick, at most every 1.5 s, while
+// new rows are being written. Its own switch, so not the SOUND row's.
+static void cydWardriveSoundTick(uint32_t now) {
+    static bool     had = false;
+    static uint32_t lostAt = 0, tickAt = 0, rowsWas = 0;
+    const uint32_t rows = Wardrive::written();
+    if (!Wardrive::enabled() || !Wardrive::soundOn()) { had = false; lostAt = 0; rowsWas = rows; return; }
+    const bool fix = Gnss::fresh(now) && !Gnss::faked();
+    if (fix) {
+        lostAt = 0;
+        if (!had) { had = true; Sound::play(Sound::Id::WD_FIX, true); }
+    } else if (had) {
+        if (!lostAt) lostAt = now ? now : 1;
+        else if (now - lostAt >= 10000) { had = false; lostAt = 0; Sound::play(Sound::Id::WD_LOST, true); }
+    }
+    if (rows != rowsWas && now - tickAt >= 1500) { tickAt = now; rowsWas = rows; Sound::play(Sound::Id::WD_TICK, true); }
+}
+static void cydGpsLogTick(uint32_t now) {
+    cydGpsLogBackfill(now);
+    const bool on = Wardrive::enabled();
+    if (on != s_gpsLogWasOn) {
+        s_gpsLogWasOn = on;
+        cydGpsLogLine(now, on ? "WARDRIVE ON" : "WARDRIVE OFF");
+        s_gpsLogAt = now;
+        return;
+    }
+    if (on && now - s_gpsLogAt >= 60000) { s_gpsLogAt = now; cydGpsLogLine(now, nullptr); }
+}
+#endif
 
 static void cydGpsTick(uint32_t now) {
     const uint8_t cmd = g_consoleGps;
@@ -6738,6 +6901,7 @@ static void cydGpsTick(uint32_t now) {
         const char* fn = Wardrive::sdFileName();
         Serial.printf("[wardrive] the WiGLE file is on the SD card: %s\n", *fn ? fn : "none yet");
     }
+    else if (cmd == 10) { Gnss::echo(now + 4000); Serial.println("[gps] raw lines for 4 s:"); }
     else if (cmd) Serial.println("[gps] not on this board");
 
     // A bench fix is held until a real one replaces it; refreshed here so it
@@ -6752,6 +6916,10 @@ static void cydGpsTick(uint32_t now) {
     }
     cydGpsBaudTick(now);
     Wardrive::sdTick(now, engine.sd().ready());
+#if defined(CARDPUTER_ADV)
+    if (now > 10000) cydGpsLogTick(now);
+    cydWardriveSoundTick(now);
+#endif
 
     const Gnss::Fix& f = Gnss::fix();
     if (f.valid && !Gnss::faked() && !s_cydGpsFirstFixMs) {
@@ -7493,6 +7661,33 @@ void loop() {
     gpsTick();
 #endif
 #if defined(CARDPUTER_ADV) && SQW_DEVTOOLS
+    if (s_devSdCat) {
+        s_devSdCat = false;
+        FramePush::busLock();
+        File fl = SD.open(g_devSdPath);
+        if (!fl) Serial.printf("[sdcat] cannot open %s\n", g_devSdPath);
+        else {
+            Serial.printf("[sdcat] %s %lu bytes\n", g_devSdPath, (unsigned long)fl.size());
+            uint8_t b[256];
+            int got;
+            while ((got = fl.read(b, sizeof b)) > 0) { Serial.write(b, got); Serial.flush(); }
+            fl.close();
+            Serial.println("\n[sdcat] end");
+        }
+        FramePush::busUnlock();
+    }
+    if (s_devSdLs) {
+        s_devSdLs = false;
+        FramePush::busLock();
+        Serial.printf("[sdls] card %llu MB, used %llu KB\n", SD.cardSize() >> 20, SD.usedBytes() >> 10);
+        File dir = SD.open("/");
+        int n = 0;
+        if (!dir) Serial.println("[sdls] no card mounted");
+        for (File f = dir ? dir.openNextFile() : File(); f && n < 80; f = dir.openNextFile(), n++)
+            Serial.printf("[sdls] %s%s  %lu bytes\n", f.name(), f.isDirectory() ? "/" : "", (unsigned long)f.size());
+        Serial.printf("[sdls] %d entries\n", n);
+        FramePush::busUnlock();
+    }
     if (s_devSdTry) {
         s_devSdTry = false;
         pinMode(EXT_CS, OUTPUT); digitalWrite(EXT_CS, HIGH);
@@ -9460,6 +9655,15 @@ void loop() {
                                                  : "Logging once the GPS has a fix",
                                              Theme::CYAN);
                             break;
+#if defined(CARDPUTER_ADV)
+                        case SettingsRow::WARDRIVE_SOUND:
+                            Wardrive::toggleSound();
+                            if (Wardrive::soundOn()) Sound::play(Sound::Id::WD_FIX, true);
+                            Theme::showToast(Wardrive::soundOn() ? "WARDRIVE SOUND ON" : "WARDRIVE SOUND OFF",
+                                             Wardrive::soundOn() ? "Beeps on fix and loss, ticks for new rows" : nullptr,
+                                             Theme::CYAN);
+                            break;
+#endif
 #endif
                         case SettingsRow::STATUS_LIGHT: enterLight(); break;
                         case SettingsRow::SECURITY:    enterSecurity(); break;

@@ -68,6 +68,7 @@ uint32_t   s_rowSince = 0;          // millis() of the oldest unflushed row
 // the pushes in flight.
 volatile bool s_live = false;
 volatile bool s_paused = false;
+volatile bool s_fixNow = false;     // a real fix on the last tick: nothing is queued without one
 int           s_users = 0;
 
 bool     s_card = false;            // the last sdTick saw a card
@@ -194,6 +195,8 @@ void enqueue(bool wifi, const Pending& p) {
 // paused only a count.
 bool taking() {
     if (!__atomic_load_n(&s_live, __ATOMIC_SEQ_CST)) return false;
+    // Without a fix nothing could be written: not queued, and not a loss.
+    if (!s_fixNow) return false;
     if (s_paused) { addDropped(1); return false; }
     return true;
 }
@@ -258,6 +261,21 @@ void setEnabled(bool on) {
 }
 bool enabled() { return s_on; }
 
+static int8_t s_sound = -1;   // -1 not read yet
+bool soundOn() {
+    if (s_sound < 0) {
+        Preferences prefs;
+        s_sound = 1;
+        if (prefs.begin("wardrive", true)) { s_sound = prefs.getBool("snd", true) ? 1 : 0; prefs.end(); }
+    }
+    return s_sound == 1;
+}
+void toggleSound() {
+    s_sound = soundOn() ? 0 : 1;
+    Preferences prefs;
+    if (prefs.begin("wardrive", false)) { prefs.putBool("snd", s_sound == 1); prefs.end(); }
+}
+
 void noteWifi(const uint8_t* bssid, const char* ssid, uint16_t auth, uint8_t channel, int8_t rssi) {
     if (!bssid || !taking()) return;
     Pending p;
@@ -306,6 +324,7 @@ void sdTick(uint32_t nowMs, bool cardMounted) {
         s_heapAt = nowMs ? nowMs : 1;
         s_paused = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < PAUSE_BLOCK_B;
     }
+    s_fixNow = realFix(nowMs);
     drain(nowMs);
     if (s_rowCount && nowMs - s_rowSince >= FLUSH_MS) flush();
 }

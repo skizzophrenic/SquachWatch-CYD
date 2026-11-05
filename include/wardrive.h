@@ -99,6 +99,9 @@ void sdBegin();
 void sdTick(uint32_t nowMs, bool cardMounted);
 enum class SdState : uint8_t { OFF, NO_CARD, LOW_MEMORY, WAITING_FOR_FIX, LOGGING };
 SdState sdState(uint32_t nowMs);
+// WARDRIVE SOUND (the Cardputer): beeps for fix and loss, a tick for new rows.
+bool soundOn();
+void toggleSound();
 // "/wigle-YYYYMMDD-HHMM.csv", or "" until the session's first row.
 const char* sdFileName();
 // Deletes every /wigle-*.csv on the card. The duress wipe calls this.

@@ -55,6 +55,9 @@ namespace Sound {
         LAND_TOASTER,     // ALL: T0@$TY's landing, a tin clank and a rattle
         LAND_YETI,        // ALL: the yeti's landing, a grumpy "OOF"
         HEADS_UP,         // ALERTS: one Bigfoot whoop, a squadmate's serious catch
+        WD_FIX,           // WARDRIVE SOUND: two rising beeps, the GPS has a fix
+        WD_LOST,          // WARDRIVE SOUND: a falling slide, the fix is gone
+        WD_TICK,          // WARDRIVE SOUND: a soft tick, new rows written
         COUNT
     };
 

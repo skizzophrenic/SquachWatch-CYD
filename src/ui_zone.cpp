@@ -82,3 +82,14 @@ ZoneHit uiZoneCardHit(int tx, int ty, int screenW, int screenH) {
     if (tx >= nx - 3)       return ZoneHit::NEXT;
     return ZoneHit::OK;
 }
+
+void uiZoneCardStops(int screenW, int screenH, int16_t xs[3], int16_t ys[3]) {
+    int x, y;
+    cardRect(screenW, screenH, x, y);
+    int px, okx, okw, nx, by;
+    buttonRects(x, y, px, okx, okw, nx, by);
+    const int cy = by + btnH() / 2;
+    xs[0] = (int16_t)(px + 17);         ys[0] = (int16_t)cy;
+    xs[1] = (int16_t)(okx + okw / 2);   ys[1] = (int16_t)cy;
+    xs[2] = (int16_t)(nx + 17);         ys[2] = (int16_t)cy;
+}

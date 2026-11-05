@@ -75,6 +75,8 @@ extern volatile bool g_consoleFree;
 #include "shake.h"
 extern volatile uint8_t  g_devKey;
 extern volatile uint16_t g_devKeyMs;
+extern char g_devSdPath[48];
+extern volatile bool g_devGpsLogRearm;
 extern volatile bool     g_devShot;
 extern volatile bool g_devShotExt;
 extern volatile bool     g_devQuiet;
@@ -634,6 +636,11 @@ void pollSerial() {
         if (strcasecmp(line, "GPSPROBE") == 0)  { g_devKey = 8; continue; }
         if (strcasecmp(line, "EXTID") == 0)     { g_devKey = 9; continue; }
         if (strcasecmp(line, "SDTRY") == 0)     { g_devKey = 10; continue; }
+        if (strcasecmp(line, "SD LS") == 0)     { g_devKey = 11; continue; }
+        if (strncasecmp(line, "SD CAT ", 7) == 0) {
+            snprintf(g_devSdPath, sizeof g_devSdPath, "%s%s", line[7] == '/' ? "" : "/", line + 7);
+            g_devKey = 12; continue;
+        }
         if (strncasecmp(line, "KEY PRESS", 9) == 0) {
             g_devKeyMs = (uint16_t)atoi(line + 9);
             g_devKey = 4;
@@ -705,6 +712,7 @@ void pollSerial() {
         if (strcasecmp(line, "GPS") == 0)    { g_consoleGps = 1; continue; }
         if (strcasecmp(line, "GPS OFF") == 0) { g_consoleGps = 2; continue; }
         if (strcasecmp(line, "GPS STATUS") == 0) { g_consoleGps = 3; continue; }
+        if (strcasecmp(line, "GPS RAW") == 0)    { g_consoleGps = 10; continue; }
         if (strncasecmp(line, "GPS FAKE ", 9) == 0) {
             // Decimal degrees, e.g. GPS FAKE 40.7128 -74.0060.
             const double la = atof(line + 9);
@@ -783,6 +791,17 @@ void pollSerial() {
                 for (uint8_t i = 0; i < zoneCount(); i++) Serial.printf(" %s,", zoneName(i));
                 Serial.println();
             }
+#if defined(SQW_DEVTOOLS)
+        } else if (strcasecmp(line, "UNCHOOSE ZONE") == 0) {
+            Settings::unmarkTimeZoneChosen();
+            Serial.println("[zone] not chosen: the card will ask again");
+        } else if (strcasecmp(line, "FORGET CLOCK") == 0) {
+            // As after a power-off: the time stays, marked a guess, until a
+            // real source sets it again.
+            setGuess(true);
+            g_devGpsLogRearm = true;
+            Serial.println("[clock] marked a guess until a real source sets it");
+#endif
         } else if (strncasecmp(line, "TIME ", 5) == 0) {
             const uint32_t e = (uint32_t)strtoul(line + 5, nullptr, 10);
             if (setEpoch(e)) {

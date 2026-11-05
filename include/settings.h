@@ -485,6 +485,9 @@ namespace Settings {
     void        stepTimeZone(int dir);      // the card's arrows: steps without choosing
     void        setTimeZone(uint8_t i);     // from the ZONE serial command
     void        markTimeZoneChosen();       // THIS IS RIGHT on the card
+#if defined(SQW_DEVTOOLS)
+    void        unmarkTimeZoneChosen();     // dev: the card asks again
+#endif
     bool        timeZoneChosen();
 
     // SHOW PHRASE: whether this board ever prints its five words. OFF makes

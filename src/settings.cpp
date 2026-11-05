@@ -995,6 +995,9 @@ bool        timeZoneChosen(){ return s_tzChosen; }
 void markTimeZoneChosen() {
     if (!s_tzChosen) { s_tzChosen = true; s_prefs.putBool("tzSet", true); }
 }
+#if defined(SQW_DEVTOOLS)
+void unmarkTimeZoneChosen() { s_tzChosen = false; s_prefs.putBool("tzSet", false); }
+#endif
 void setTimeZone(uint8_t i) {
     if (i >= Clock::zoneCount()) return;
     s_timeZone = i;
