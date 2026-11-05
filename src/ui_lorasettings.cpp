@@ -156,7 +156,7 @@ void buildMain() {
         snprintf(r.value, sizeof r.value, "%s", Settings::loraTxName());
         r.valCol = Settings::loraTxDbm() ? Theme::AMBER : dim(Theme::WHITE, 150);
         if (!Settings::loraTxDbm())                                  snprintf(r.hint, sizeof r.hint, "OFF: THE CHATS CANNOT SEND");
-        else if (Lora::region() == Lora::REGION_EU && Settings::loraTxDbm() > 14) snprintf(r.hint, sizeof r.hint, "EU 868: SENT AT 14 dBm");
+        else if (Lora::region() == Lora::REGION_EU && Settings::loraTxDbm() > 14) snprintf(r.hint, sizeof r.hint, "EU 869: KEEP UNDER 10% DUTY CYCLE");
         else                                                         snprintf(r.hint, sizeof r.hint, "WHAT THE CHATS SEND AT");
     }
     {

@@ -441,10 +441,10 @@ const char* loraListenName() {
 }
 uint8_t loraTxDbm() { return s_loraTx; }
 void cycleLoraTx() {
-    s_loraTx = s_loraTx == 0 ? 10 : s_loraTx == 10 ? 20 : 0;
+    s_loraTx = s_loraTx == 0 ? 10 : s_loraTx == 10 ? 20 : s_loraTx == 20 ? 22 : 0;
     s_prefs.putUChar("loraTx", s_loraTx);
 }
-const char* loraTxName() { return s_loraTx == 0 ? "OFF" : s_loraTx == 10 ? "10 dBm" : "20 dBm"; }
+const char* loraTxName() { return s_loraTx == 0 ? "OFF" : s_loraTx == 10 ? "10 dBm" : s_loraTx == 20 ? "20 dBm" : "22 dBm"; }
 uint8_t loraRegion() { return s_loraRegion; }
 void setLoraRegion(uint8_t r) { s_loraRegion = r > 2 ? 0 : r; s_prefs.putUChar("loraRgn", s_loraRegion); }
 uint8_t loraFocus() { return s_loraFocus; }

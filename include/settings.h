@@ -345,7 +345,7 @@ namespace Settings {
     // LORA TX (the T-Deck): what the chats' compose line sends at. 0 = off,
     // else dBm. Off by default: a sniffer that talks is opt-in.
     uint8_t     loraTxDbm();
-    void        cycleLoraTx();         // OFF -> 10 dBm -> 20 dBm -> OFF
+    void        cycleLoraTx();         // OFF -> 10 dBm -> 20 dBm -> 22 dBm -> OFF
     const char* loraTxName();
     uint8_t     loraRegion();
     void        setLoraRegion(uint8_t r);
