@@ -550,6 +550,17 @@ void noteCatch(uint8_t type) {
 static uint32_t s_cShownMs = 0, s_cLastNow = 0;
 static bool     s_cFlung = false;           // this flight began with a throw, not a drop
 static bool clipTalking() { return s_cLine && s_cShownMs < CLIP_TALK_MS; }
+// Squachy talks first. On the small boards the two balloons land on top of
+// each other, so C1iPPY's waits while Squachy's is up. His time only runs
+// while it shows, so the line still gets all of it, just later.
+static bool clipMayShow() {
+#if defined(SQW_SMALL)
+    int bx, by, bw, bh;
+    return !Squachy::ownBubble(bx, by, bw, bh);
+#else
+    return true;
+#endif
+}
 
 static void clipSay(const char* line, uint32_t now, bool caught) {
     s_cShownMs = 0;
@@ -990,7 +1001,7 @@ static void clippyTick(TFT_eSPI& t, uint32_t now, int screenW, int floorY) {
             s_cX = (int16_t)lroundf(s_cF.x);
             s_cY = (int16_t)lroundf(s_cF.y);
             clipDraw(t, s_cX, s_cY, now, tf);
-            if (clipTalking() && s_cTh == ClipThrow::SIT) {
+            if (clipTalking() && s_cTh == ClipThrow::SIT && clipMayShow()) {
                 clipBalloon(t, s_cLine, s_cX, s_cY, screenW, t.height());
                 s_cShownMs += seenMs;
             }
@@ -1018,7 +1029,7 @@ static void clippyTick(TFT_eSPI& t, uint32_t now, int screenW, int floorY) {
     s_cX = (int16_t)lroundf(x);
     s_cY = (int16_t)(bot - 44 + (int)lroundf(hop));
     clipDraw(t, s_cX, s_cY, now, face);
-    if (talking && !inHop) {
+    if (talking && !inHop && clipMayShow()) {
         clipBalloon(t, s_cLine, s_cX, s_cY, screenW, t.height());
         s_cShownMs += seenMs;
     }

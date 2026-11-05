@@ -13,7 +13,13 @@ static int g_scroll = 0;
 // Shared by rowLayout() and uiRawScanTick() so the two can never
 // drift apart -- see rowLayout()'s own comment.
 static const int RS_TITLE_BOTTOM = 16;
+#if defined(SQW_SMALL)
+// No mini Squachy on the small boards: a 70 px strip on a 135 px screen left
+// 19 px for a list whose rows are 27, so no result ever showed.
+static const int RS_SQ_H         = 0;
+#else
 static const int RS_SQ_H         = 70;
+#endif
 
 // Two buttons in place of the normal three-slot bar: BACK (left) and
 // the opposite scan mode (right) -- reuses computeButtonBar()'s y/h so
@@ -271,6 +277,11 @@ if (!Theme::stillBackdrop(t)) switch (Settings::background()) {
         default:                               Theme::drawDigitalRain(t, now, bgTop, bodyBottom, true); break;
     }
     Theme::restorePalette(saved);
+#if defined(SQW_SMALL)
+    // The 4 px between the list and the buttons: no background reaches it,
+    // and at 135 rows the TRACK panel draws there, so it stayed behind.
+    t.fillRect(0, bodyBottom, w, Theme::computeButtonBar(w, h).y - bodyBottom, Theme::BG);
+#endif
     char title[32];
     snprintf(title, sizeof(title), ">> %s SCAN <<", isBle ? "BLE" : "WIFI");
     Theme::drawTitleBar(t, title);
@@ -279,7 +290,7 @@ if (!Theme::stillBackdrop(t)) switch (Settings::background()) {
     // this whole strip directly at its real screen position -- drawn
     // straight on top of it, same as ui_hunt.cpp/ui_watchalert.cpp's
     // mini cameos already do.
-    Squachy::tick(t, w / 2, sqTop, sqH, now, advance, 0.8f, !done);
+    if (sqH > 0) Squachy::tick(t, w / 2, sqTop, sqH, now, advance, 0.8f, !done);
 
     if (!done) {
         float pulse = 0.55f + 0.45f * sinf((float)(now % 2000) / 2000.0f * 6.2831853f);

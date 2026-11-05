@@ -974,6 +974,8 @@ static bool sampleTouchRaw(int16_t& a, int16_t& b) {
 // the LOG and ALERT screens for what they mean.
 static bool s_confirmPending = false;   // the WATCH/HUNT panel is up
 static bool s_infoPending    = false;   // MORE INFO is up
+static bool s_scanPickerOpen = false;  // CLEAR's SCAN picker [BLE][WIFI][BACK] is up
+static bool s_rawScanIsBle = true;     // RAWSCAN is showing BLE (else WiFi)
 
 #if defined(CARDPUTER_ADV)
 // ---- EXT SCREEN: a second panel on the Cardputer's EXT header -----------------
@@ -1082,7 +1084,7 @@ static void extPush() {
 // everything, slowly.
 static bool           s_stickKey2Was = false, s_stickKey2Long = false, s_stickKey1Was = false;
 static uint32_t       s_stickKey2At = 0;
-static const uint32_t STICK_HOLD_MS = 700, STICK_SHOW_MS = 5000;
+static const uint32_t STICK_HOLD_MS = 600, STICK_SHOW_MS = 8000;
 // kind 0 presses; 1 scrolls the list down, 2 up; 3 presses and holds
 // for a long press (a LOG row's WATCH/HUNT panel opens on a hold).
 struct StickPt { int16_t x, y; uint8_t kind; };
@@ -1092,7 +1094,34 @@ static StickPt       s_stickHoldPt;
 static const int      STICK_KEY1 = 11, STICK_KEY2 = 12;
 // What a board's keys ask of the cursor this frame. `press` is a level --
 // held is held -- and the rest happen once.
-struct SmallKeys { bool press, next, prev, home; };
+// `select` and `back` are one-shot: each becomes a scripted tap (see
+// stickPoll), at the cursor or at the screen's own way back.
+struct SmallKeys { bool press, next, prev, home, back, select; };
+#if SQW_DEVTOOLS
+// Dev builds only: keys typed on the serial console (KEY NEXT / PREV / HOME /
+// PRESS [ms]), so a screen can be reached without a hand on the device. Set by
+// clock.cpp's console, merged into the real keys by stickPoll().
+volatile uint8_t  g_devKey = 0;          // 1 next, 2 prev, 3 home, 4 press, 5 back, 6 select
+volatile uint16_t g_devKeyMs = 0;        // how long PRESS holds
+volatile bool     g_devShot = false;     // SHOT: dump the next frame
+static uint32_t   s_devPressUntil = 0;
+static void devKeysMerge(SmallKeys& k) {
+    const uint8_t key = g_devKey;
+    if (key) {
+        g_devKey = 0;
+        if (key == 1) k.next = true;
+        else if (key == 2) k.prev = true;
+        else if (key == 3) k.home = true;
+        else if (key == 4) s_devPressUntil = millis() + (g_devKeyMs ? g_devKeyMs : 120);
+        else if (key == 5) k.back = true;
+        else if (key == 6) k.select = true;
+    }
+    if (s_devPressUntil) {
+        if ((int32_t)(millis() - s_devPressUntil) < 0) k.press = true;
+        else s_devPressUntil = 0;
+    }
+}
+#endif
 #if defined(CARDPUTER_ADV)
 // The Cardputer ADV's keyboard: a TCA8418 at 0x34 on SDA 8 / SCL 9, scanning
 // a 7x8 matrix that M5 lays out as four rows of fourteen (their own remap,
@@ -1121,26 +1150,36 @@ static bool cardKeysBegin() {
     s_cardKeysOk = ok;
     return ok;
 }
+// ESC: a tap is BACK, held for CARD_ESC_HOME_MS it is HOME, from anywhere.
+static bool     s_cardEscDown = false, s_cardEscFired = false;
+static uint32_t s_cardEscAt = 0;
+static const uint32_t CARD_ESC_HOME_MS = 3000;
 #if defined(SQUACHSIM)
 // The browser emulator's Cardputer keyboard (sw_cardkey in sim/main_wasm.cpp):
-// the four things smallKeysRead() makes of the real one's events. ENTER is a
-// level, as the real key's is; the others happen once.
-static SmallKeys s_simKeys = { false, false, false, false };
+// 0 ENTER (a level, as the real key's is), 1 next, 2 previous, 3 ESC or DEL.
+// ESC is BACK, as a tap of the real one is. The page sends no key-up for it,
+// so there is no hold for HOME; BACK on a screen with no back goes home.
+static SmallKeys s_simKeys = {};
 void simCardKey(int what, bool down) {
     if (what == 0) s_simKeys.press = down;
     else if (down && what == 1) s_simKeys.next = true;
     else if (down && what == 2) s_simKeys.prev = true;
-    else if (down && what == 3) s_simKeys.home = true;
+    else if (down && what == 3) s_simKeys.back = true;
 }
 #endif
 static SmallKeys smallKeysRead() {
-    SmallKeys k = { false, false, false, false };
+    SmallKeys k = {};
 #if defined(SQUACHSIM)
     k = s_simKeys;
-    s_simKeys.next = s_simKeys.prev = s_simKeys.home = false;
+    s_simKeys.next = s_simKeys.prev = s_simKeys.back = false;
     return k;
 #endif
     if (!s_cardKeysOk) return k;
+    const uint32_t now = millis();
+    if (s_cardEscDown && !s_cardEscFired && now - s_cardEscAt >= CARD_ESC_HOME_MS) {
+        s_cardEscFired = true;
+        k.home = true;
+    }
     for (int i = 0; i < 10; i++) {
         const int cnt = cardRead(0x03);
         if (cnt < 0 || (cnt & 0x0F) == 0) break;
@@ -1151,10 +1190,18 @@ static SmallKeys smallKeysRead() {
         const int  row = (code % 10) % 4, col = (code / 10) * 2 + ((code % 10) > 3 ? 1 : 0);
         const bool enter = (row == 2 && col == 13) || (row == 3 && col == 13);     // ENTER, or the space bar
         if (enter) { s_cardEnter = down; continue; }
+        if (row == 0 && col == 0) {                                          // ESC
+            if (down) { s_cardEscDown = true; s_cardEscFired = false; s_cardEscAt = now; }
+            else {
+                if (s_cardEscDown && !s_cardEscFired) k.back = true;
+                s_cardEscDown = false;
+            }
+            continue;
+        }
         if (!down) continue;
         if ((row == 3 && (col == 11 || col == 12)) || (row == 1 && col == 0)) k.next = true;   // down, right, TAB
         else if ((row == 2 && col == 11) || (row == 3 && col == 10))          k.prev = true;   // up, left
-        else if ((row == 0 && col == 0) || (row == 0 && col == 13))           k.home = true;   // ESC, or DEL
+        else if (row == 0 && col == 13)                                       k.back = true;   // DEL
         Serial.printf("[keys] key %d,%d\n", row, col);
     }
     cardReg(0x02, 0x0F);
@@ -1162,17 +1209,25 @@ static SmallKeys smallKeysRead() {
     return k;
 }
 #else
-// The StickS3: KEY1 presses, KEY2 steps on a short press and goes home on a
-// held one. Nothing steps backwards; there are two buttons.
+// The StickS3, the same scheme as FUD: FRONT (KEY1) click steps to the next
+// stop, FRONT held selects. SIDE (KEY2) click is BACK, SIDE held is HOME.
+// A click acts on release, so a hold never also counts as a click.
+static bool     s_stickFrontWas = false, s_stickFrontLong = false;
+static uint32_t s_stickFrontAt = 0;
+static const uint32_t STICK_SELECT_MS = 500;
 static SmallKeys smallKeysRead() {
-    SmallKeys k = { false, false, false, false };
+    SmallKeys k = {};
     const uint32_t now = millis();
+    const bool k1 = digitalRead(STICK_KEY1) == LOW;
+    if (k1 && !s_stickFrontWas) { s_stickFrontAt = now; s_stickFrontLong = false; }
+    if (k1 && !s_stickFrontLong && now - s_stickFrontAt >= STICK_SELECT_MS) { s_stickFrontLong = true; k.select = true; }
+    if (!k1 && s_stickFrontWas && !s_stickFrontLong && now - s_stickFrontAt > 25) k.next = true;
+    s_stickFrontWas = k1;
     const bool k2 = digitalRead(STICK_KEY2) == LOW;
     if (k2 && !s_stickKey2Was) { s_stickKey2At = now; s_stickKey2Long = false; }
-    if (k2 && !s_stickKey2Long && now - s_stickKey2At > STICK_HOLD_MS) { s_stickKey2Long = true; k.home = true; }
-    if (!k2 && s_stickKey2Was && !s_stickKey2Long && now - s_stickKey2At > 25) k.next = true;
+    if (k2 && !s_stickKey2Long && now - s_stickKey2At >= STICK_HOLD_MS) { s_stickKey2Long = true; k.home = true; }
+    if (!k2 && s_stickKey2Was && !s_stickKey2Long && now - s_stickKey2At > 25) k.back = true;
     s_stickKey2Was = k2;
-    k.press = digitalRead(STICK_KEY1) == LOW;
     return k;
 }
 #endif
@@ -1193,7 +1248,9 @@ static int stickListId(int x, int y) {
     switch (state) {
         case AppState::SETTINGS: {
             if (uiSettingsConfirmRow() != SettingsRow::NONE) {
-                const SettingsConfirmTap c = uiSettingsHitConfirm(x, y, w, h);
+                // The drawn buttons only: the hit test also cancels on a tap
+                // outside the panel, and a stop out there lands nowhere visible.
+                const SettingsConfirmTap c = uiSettingsConfirmButtonAt(x, y, w, h);
                 return c == SettingsConfirmTap::NONE ? -1 : 1000 + (int)c;
             }
             const SettingsRow r = uiSettingsHitTest(*canvas, x, y, w, h);
@@ -1227,6 +1284,15 @@ static int stickListId(int x, int y) {
             const DetectionType r = uiDetFilterHitTest(*canvas, x, y, w, h);
             return r == DetectionType::COUNT ? -1 : (int)r;
         }
+        case AppState::RAWSCAN: {
+            if (s_confirmPending) {
+                const RawScanConfirmTap c = uiRawScanHitConfirm(x, y, w, h);
+                return c == RawScanConfirmTap::NONE ? -1 : 4000 + (int)c;
+            }
+            const int r = uiRawScanRowAt(*canvas, x, y, w, h);
+            const int count = s_rawScanIsBle ? engine.rawBleCount() : engine.rawWifiCount();
+            return (r >= 0 && r < count) ? r : -1;
+        }
 #if SQUACH_MESH
         case AppState::MESH_MENU: {
             const MeshMenuRow r = uiMeshMenuHitTest(*canvas, x, y, w, h);
@@ -1239,31 +1305,72 @@ static int stickListId(int x, int y) {
 static bool stickIsList() {
     return state == AppState::SETTINGS || state == AppState::POWER_SAVER ||
            state == AppState::SECURITY || state == AppState::DETECTION_FILTER ||
-           state == AppState::MESH_MENU || state == AppState::LOG;
+           state == AppState::MESH_MENU || state == AppState::LOG ||
+           state == AppState::RAWSCAN;
 }
+
+// The middle of everywhere `hit` answers, as a stop; false if nowhere does.
+template <typename F>
+static bool stickSweep(F hit, StickPt& at) {
+    const int w = tft.width(), h = tft.height();
+    int32_t sx = 0, sy = 0, c = 0;
+    for (int y = 1; y < h; y += 3)
+        for (int x = 2; x < w; x += 4)
+            if (hit(x, y)) { sx += x; sy += y; c++; }
+    if (!c) return false;
+    int cx = sx / c, cy = sy / c;
+    // The middle of a region that is not one rectangle can fall outside it,
+    // on something else. Never aim there: take the nearest point that does
+    // answer.
+    if (!hit(cx, cy)) {
+        int32_t best = INT32_MAX; int bx = cx, by = cy;
+        for (int y = 1; y < h; y += 3)
+            for (int x = 2; x < w; x += 4)
+                if (hit(x, y)) {
+                    const int32_t d = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+                    if (d < best) { best = d; bx = x; by = y; }
+                }
+        cx = bx; cy = by;
+    }
+    at = { (int16_t)cx, (int16_t)cy, 0 };
+    return true;
+}
+static bool clearBubbleAt(int x, int y)   { return uiClearBubbleHit(x, y); }
+static bool clearSquadAt(int x, int y)    { return uiClearSquadHit(x, y); }
+static bool clearWatchAt(int x, int y)    { return uiClearWatchPillHit(x, y); }
+static bool rawBackAt(int x, int y)   { return uiRawScanHitTest(x, y, tft.width(), tft.height()) == RawScanTap::BACK; }
+static bool rawSwitchAt(int x, int y) { return uiRawScanHitTest(x, y, tft.width(), tft.height()) == RawScanTap::SWITCH; }
+
+// How many of a list screen's stops are its rows (they come first). The
+// stops after them are BACK, or LOG's button bar.
+static uint8_t s_stickRowsN = 0;
 
 static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
     const int16_t w = (int16_t)tft.width(), h = (int16_t)tft.height();
     uint8_t n = 0;
+    s_stickRowsN = 0;
     auto add = [&](int x, int y, uint8_t kind = 0) { if (n < cap) out[n++] = { (int16_t)x, (int16_t)y, kind }; };
     if (s_infoPending && (state == AppState::LOG || state == AppState::ALERT)) {
         add(w / 2, h - 17);             // MORE / GOT IT
         return n;
     }
     if (state == AppState::CLEAR) {
-        add(w / 2, h * 2 / 5);          // Squachy, and whatever card is over him
-        add(w / 2, h * 13 / 20);        // a card's own button
+        // The bar first, left to right, then the menu, the tiles, and any
+        // card that is up. Squachy and his pet are not stops on these boards:
+        // a cursor parked on him is clutter, and he gets poked by a shake.
+        add(w / 6 + 2, h - 16);         // SCAN
         add(w / 2, h - 16);             // LOG
         add(w * 5 / 6 - 4, h - 16);     // DESK
-        add(w / 6 + 2, h - 16);         // SCAN
         add(13, 11);                    // the menu
         {
             int16_t xs[8], ys[8];        // the counter tiles
             const uint8_t k = uiClearCounterStops(xs, ys, 8);
             for (uint8_t i = 0; i < k; i++) add(xs[i], ys[i]);
         }
-        int px0, py0;
-        if (Pet::clippyCenter(px0, py0)) add(px0, py0);   // C1iPPY, for a poke
+        StickPt c;
+        if (stickSweep(clearBubbleAt, c)) add(c.x, c.y);   // a visitor's speech bubble
+        if (stickSweep(clearSquadAt, c))  add(c.x, c.y);   // the squad badge
+        if (stickSweep(clearWatchAt, c))  add(c.x, c.y);   // the watch / hunt pill
         return n;
     }
     if (state == AppState::SYS_PROPS) {
@@ -1273,9 +1380,10 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         return n;
     }
     if (state == AppState::ALERT) {
-        add(w / 3, h / 2);              // the plate: anywhere dismisses
-        add(w / 2, h - 15);             // SNOOZE
+        // No stop on the plate: a box over it hid the text, and BACK
+        // dismisses it already.
         add(37, h - 15);                // HUNT
+        add(w / 2, h - 15);             // SNOOZE
         add(w - 37, h - 15);            // INFO
         add(w - 35, 14);                // IGNORE
         return n;
@@ -1294,20 +1402,39 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
                 if (a == an) { if (an == 12) continue; acc[an++] = { id, 0, 0, 0 }; }
                 acc[a].sx += x; acc[a].sy += y; acc[a].c++;
             }
-        const bool logRows = state == AppState::LOG && !s_confirmPending;
-        for (uint8_t a = 0; a < an; a++) add(acc[a].sx / acc[a].c, acc[a].sy / acc[a].c, logRows ? 3 : 0);
+        // LOG's and RAWSCAN's rows open their WATCH/HUNT panel on a long press.
+        const bool logRows = (state == AppState::LOG || state == AppState::RAWSCAN) && !s_confirmPending;
+        for (uint8_t a = 0; a < an; a++) {
+            int cx = acc[a].sx / acc[a].c, cy = acc[a].sy / acc[a].c;
+            if (stickListId(cx, cy) != acc[a].id) {
+                // The middle missed (an L-shaped or split region): the nearest
+                // point that is really this thing.
+                int32_t best = INT32_MAX;
+                for (int y = 2; y < h; y += 4)
+                    for (int x = 6; x < w; x += 12)
+                        if (stickListId(x, y) == acc[a].id) {
+                            const int32_t d = (x - cx) * (x - cx) + (y - cy) * (y - cy);
+                            if (d < best) { best = d; cx = x; cy = y; }
+                        }
+            }
+            add(cx, cy, logRows ? 3 : 0);
+        }
         const bool panel = (state == AppState::SETTINGS && uiSettingsConfirmRow() != SettingsRow::NONE) ||
-                           (state == AppState::LOG && s_confirmPending);
-        if (logRows) {
+                           ((state == AppState::LOG || state == AppState::RAWSCAN) && s_confirmPending);
+        // No scroll arrows: stepping past the last row scrolls the list
+        // (see stickListStep), so the rows are all the cursor needs.
+        if (!panel) s_stickRowsN = n;
+        if (state == AppState::RAWSCAN) {
+            if (!panel) {
+                StickPt c;
+                if (stickSweep(rawBackAt, c))   add(c.x, c.y);    // BACK
+                if (stickSweep(rawSwitchAt, c)) add(c.x, c.y);    // WIFI / BLE
+            }
+        } else if (logRows) {
             const Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
-            add(w - 9, bar.y - 12, 1);
-            add(w - 9, Theme::LIST_TOP + 9, 2);
             for (int b = 0; b < 3; b++) add(bar.x[b] + bar.w[b] / 2, bar.y + bar.h / 2);   // SCAN, LOG, CLR
         } else if (!panel) {
-            const int backH = Theme::pinnedBackH(w);
-            add(w - 9, h - backH - 9, 1);                                   // more, below
-            add(w - 9, Theme::LIST_TOP + Theme::listHeadingH() + 7, 2);     // and above
-            add(w / 2, h - backH / 2);                                      // BACK
+            add(w / 2, h - Theme::pinnedBackH(w) / 2);                      // BACK
         }
         return n;
     }
@@ -1367,6 +1494,100 @@ static uint8_t stickStops(StickPt* out, bool fresh = false) {
     return s_stickPtsN;
 }
 
+static bool stickBackPoint(StickPt& at);   // below, after the scan picker's flag
+
+// ---- lists that scroll under the cursor -------------------------------------
+// The rows on screen are the stops. A step off the last row scrolls the list
+// one item and keeps the cursor on the bottom row; a step off the first row
+// does the same upwards. At the true end the cursor goes on to BACK (or LOG's
+// bar), and a step past that jumps to the other end of the list: the whole
+// list loops. Whether the list moved is only known after it redraws, so a
+// step is left pending and settled a few frames later.
+static int8_t   s_listPend = 0;          // +1/-1 a step, +2 jump to the top, -2 to the bottom
+static int      s_listPendId = -1;       // the edge row's id before the step
+static int16_t  s_listPendY = 0;         // ...and where it was
+static uint32_t s_listPendAt = 0;       // when the scroll was asked for
+static uint8_t  s_listPendTries = 0;
+static const uint32_t LIST_SETTLE_MS = 150;   // several redraws: the hit tests read the last draw
+
+static bool stickListScroll(int delta) {
+    switch (state) {
+        case AppState::SETTINGS:         uiSettingsScroll(delta);  return true;
+        case AppState::POWER_SAVER:      uiPowerScroll(delta);     return true;
+        case AppState::SECURITY:         uiSecurityScroll(delta);  return true;
+        case AppState::DETECTION_FILTER: uiDetFilterScroll(delta); return true;
+        case AppState::LOG:              uiLogScroll(delta);       return true;
+        case AppState::RAWSCAN:          uiRawScanScroll(delta);   return true;
+#if SQUACH_MESH
+        case AppState::MESH_MENU:        uiMeshMenuScroll(delta);  return true;
+#endif
+        default: return false;
+    }
+}
+
+// Starts a list step if this press is one. False if it is an ordinary move.
+static bool stickListStep(bool down, const StickPt* pts, uint8_t n) {
+    const uint8_t rows = s_stickRowsN;
+    if (!stickIsList() || !rows || rows > n) return false;
+    const uint8_t s = s_stickStop;
+    int8_t pend = 0;
+    if (down && s == rows - 1)      pend = 1;    // off the bottom row
+    else if (!down && s == 0)       pend = -1;   // off the top row
+    else if (down && s == n - 1)    pend = 2;    // past the last stop: to the top
+    else if (!down && s == rows)    pend = -2;   // back from BACK: to the bottom
+    if (!pend) return false;
+    // The edge row as it is now: the hit tests follow the scroll at once,
+    // so this has to be read before the list is moved.
+    const StickPt& e = pts[pend > 0 ? rows - 1 : 0];
+    s_listPendId = stickListId(e.x, e.y);
+    s_listPendY = e.y;
+    if (!stickListScroll(pend == 1 ? 1 : pend == -1 ? -1 : pend == 2 ? -10000 : 10000)) return false;
+    s_listPend = pend;
+    s_listPendAt = millis();
+    s_listPendTries = 0;
+    s_stickPtsAt = 0;
+    return true;
+}
+
+// After the redraw: where the cursor lands. True once it has.
+static bool stickListSettle(StickPt* pts, uint8_t& n) {
+    if (!stickIsList()) { s_listPend = 0; return false; }
+    if (millis() - s_listPendAt < LIST_SETTLE_MS) return false;
+    n = stickStops(pts, true);
+    const uint8_t rows = s_stickRowsN;
+    if (!n) { s_listPend = 0; return false; }
+    if (s_listPend == 2)  { s_stickStop = 0; s_listPend = 0; return true; }
+    if (s_listPend == -2) { s_stickStop = rows ? rows - 1 : 0; s_listPend = 0; return true; }
+    const bool down = s_listPend > 0;
+    bool moved = true;
+    for (uint8_t i = 0; i < rows; i++)
+        if (stickListId(pts[i].x, pts[i].y) == s_listPendId) { moved = pts[i].y != s_listPendY; break; }
+    if (moved && rows) {
+        const uint8_t edge = down ? rows - 1 : 0;
+        // Only a heading came into view: the same row is still at the edge.
+        // One more item, up to a few times.
+        if (stickListId(pts[edge].x, pts[edge].y) == s_listPendId && s_listPendTries < 4) {
+            s_listPendY = pts[edge].y;
+            stickListScroll(down ? 1 : -1);
+            s_listPendAt = millis();
+            s_listPendTries++;
+            s_stickPtsAt = 0;
+            return false;
+        }
+        s_stickStop = edge;
+    } else {
+        // The list was already at its end: on to BACK, or round to it.
+        s_stickStop = down ? (rows < n ? rows : 0) : (uint8_t)(n - 1);
+    }
+    s_listPend = 0;
+    return true;
+}
+// The highlight is always up on every screen but the main one, which is
+// Squachy's stage: there it shows after a key and fades after STICK_SHOW_MS.
+static bool stickCursorShown(uint32_t now) {
+    if (state != AppState::CLEAR) return true;
+    return s_stickShownAt && now - s_stickShownAt < STICK_SHOW_MS;
+}
 static TouchPoint stickPoll() {
     TouchPoint tp = { false, 0, 0 };
     const uint32_t now = millis();
@@ -1381,24 +1602,76 @@ static TouchPoint stickPoll() {
         s_stickDragStep++;
         return tp;
     }
-    if (state != s_stickStopState) { s_stickStopState = state; s_stickStop = 0; }
+    if (state != s_stickStopState) { s_stickStopState = state; s_stickStop = 0; s_listPend = 0; }
     StickPt pts[STICK_STOPS_MAX];
-    const uint8_t n = stickStops(pts);
+    uint8_t n = stickStops(pts);
     if (s_stickStop >= n) s_stickStop = 0;
+#if SQW_DEVTOOLS
+    SmallKeys keys = smallKeysRead();
+    devKeysMerge(keys);
+#else
     const SmallKeys keys = smallKeysRead();
+#endif
     const bool k1 = keys.press;
     if (keys.home) {
         s_stickHome = true;
         Serial.println("[keys] home");
     }
-    if (keys.next || keys.prev) {
-        // The first press only shows where the cursor is; the next ones move it.
-        if (now - s_stickShownAt < STICK_SHOW_MS)
-            s_stickStop = (uint8_t)((s_stickStop + (keys.next ? 1 : n - 1)) % n);
-        s_stickShownAt = now ? now : 1;
-        lastTouch = now;
+    // A list step waiting on the redraw: see stickListStep().
+    if (s_listPend && stickListSettle(pts, n)) {
         Serial.printf("[keys] stop %u of %u at %d,%d (screen %u)\n", (unsigned)s_stickStop + 1, (unsigned)n,
                       (int)pts[s_stickStop].x, (int)pts[s_stickStop].y, (unsigned)state);
+    }
+    if ((keys.next || keys.prev) && n && !s_listPend) {
+        // A hidden cursor (only ever on the main screen) just reappears.
+        // Everywhere else every press moves.
+        if (!stickCursorShown(now)) {
+        } else if (!stickListStep(keys.next, pts, n)) {
+            s_stickStop = (uint8_t)((s_stickStop + (keys.next ? 1 : n - 1)) % n);
+        }
+        s_stickShownAt = now ? now : 1;
+        lastTouch = now;
+        if (!s_listPend)
+            Serial.printf("[keys] stop %u of %u at %d,%d (screen %u)\n", (unsigned)s_stickStop + 1, (unsigned)n,
+                          (int)pts[s_stickStop].x, (int)pts[s_stickStop].y, (unsigned)state);
+    }
+    // BACK: a tap on the screen's own way back. A screen with none goes home.
+    if (keys.back && !s_stickHoldUntil && !s_stickDrag) {
+        // Not lastTouch: the screens debounce a tap against it, and this IS
+        // the tap. It sets lastTouch itself when the screen takes it.
+        StickPt at = { 0, 0, 0 };
+        if (stickBackPoint(at)) {
+            s_stickHoldPt = at;
+            s_stickHoldUntil = now + 120;
+            Serial.printf("[keys] back at %d,%d (screen %u)\n", (int)at.x, (int)at.y, (unsigned)state);
+            tp.valid = true; tp.x = at.x; tp.y = at.y;
+            return tp;
+        }
+        s_stickHome = true;
+        Serial.println("[keys] back: no way back here, going home");
+    }
+    // SELECT: a tap at the cursor (a hold on a long-press stop, a scroll on an
+    // arrow). With the cursor hidden it only shows where it is.
+    if (keys.select && n && !s_stickHoldUntil && !s_stickDrag) {
+        if (!stickCursorShown(now)) {
+            s_stickShownAt = now ? now : 1;
+        } else {
+            const StickPt at = pts[s_stickStop];
+            s_stickShownAt = now ? now : 1;
+            Serial.printf("[keys] select %u at %d,%d (screen %u)\n", (unsigned)s_stickStop + 1, (int)at.x, (int)at.y, (unsigned)state);
+            if (at.kind == 1 || at.kind == 2) {
+#if SQUACH_MESH
+                if (state == AppState::MESH_MENU) { uiMeshMenuScroll(at.kind == 1 ? 3 : -3); s_stickPtsAt = 0; return tp; }
+#endif
+                s_stickDrag = at.kind == 1 ? 1 : -1;
+                s_stickDragStep = 0;
+                return tp;
+            }
+            s_stickHoldPt = at;
+            s_stickHoldUntil = now + (at.kind == 3 ? 650 : 120);
+            tp.valid = true; tp.x = at.x; tp.y = at.y;
+            return tp;
+        }
     }
     if (s_stickHoldUntil) {
         if ((int32_t)(now - s_stickHoldUntil) < 0) {
@@ -1443,31 +1716,166 @@ static TouchPoint stickPoll() {
 
 // The cursor: amber brackets round the stop, or an arrow on the two that
 // scroll, drawn last, over the frame.
+// ---- the focus highlight ---------------------------------------------------
+// The whole button under the cursor lights up: a purple > cyan > pink
+// gradient sliding through its background, its text and edges knocked to
+// black on top, a border flashing white and pink, and a stutter every few
+// frames. Squachware's own palette (docs/SQUACHWARE-AESTHETIC.md), turned up.
+//
+// What counts as "the button" is asked of the screen itself: whatever its own
+// hit test names at the cursor, grown outwards until the answer changes.
+
+// What is at (x,y) on this screen, as an id: the same id across one button,
+// a different one on the next, -1 where nothing answers. Only hit tests that
+// answer without acting.
+static int stickRegionId(int x, int y) {
+    const int w = tft.width(), h = tft.height();
+    // HUNT is not one: its BACK and STOP are a centred pair of their own.
+    const bool barScreen = state == AppState::CLEAR || state == AppState::LOG ||
+                           state == AppState::DIAGNOSTICS;
+    if (barScreen && !(state == AppState::LOG && s_confirmPending)) {
+        const Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
+        for (int b = 0; b < 3; b++)
+            if (x >= bar.x[b] && x < bar.x[b] + bar.w[b] && y >= bar.y && y < bar.y + bar.h) return 9100 + b;
+    }
+    if (stickIsList()) {
+        const int id = stickListId(x, y);
+        if (id >= 0) return id;
+        if (state == AppState::RAWSCAN) {
+            const RawScanTap r = uiRawScanHitTest(x, y, w, h);
+            return r == RawScanTap::NONE ? -1 : 9200 + (int)r;
+        }
+        if (state != AppState::LOG && uiSettingsTapPinnedBack(*canvas, x, y, w, h)) return 9000;
+        return -1;
+    }
+    switch (state) {
+        case AppState::CLEAR: {
+            if (s_scanPickerOpen) return -1;
+            DetectionType col;
+            if (uiClearCounterHit(x, y, col)) return 9500 + (int)col;
+            if (uiClearBubbleHit(x, y))      return 9600;
+            if (uiClearSquadHit(x, y))       return 9601;
+            if (uiClearWatchPillHit(x, y))   return 9602;
+            return -1;
+        }
+        case AppState::RAWSCAN: {
+            const RawScanTap r = uiRawScanHitTest(x, y, w, h);
+            return r == RawScanTap::NONE ? -1 : 9200 + (int)r;
+        }
+        case AppState::ALERT:
+            if (s_infoPending) return -1;
+            if (uiAlertHitSnooze(x, y, w, h))   return 9400;
+            if (uiAlertHitHunt(x, y, w, h))     return 9401;
+            if (uiAlertHitMoreInfo(x, y, w, h)) return 9402;
+            if (uiAlertHitIgnore(x, y, w, h))   return 9403;
+            return -1;
+        case AppState::HUNT:
+            if (uiHuntHitBack(x, y, w, h)) return 9700;
+            if (uiHuntHitStop(x, y, w, h)) return 9701;
+            return -1;
+        case AppState::DESK:
+            if (uiDeskHitBack(x, y, w, h))     return 9300;
+            if (uiDeskHitTimer(x, y, w, h))    return 9301;
+            if (uiDeskHitSettings(x, y, w, h)) return 9302;
+            return -1;
+        default: return -1;
+    }
+}
+
+// RGB332 from 8-bit channels: the frame sprite's own pixel format.
+static inline uint8_t rgb332(uint8_t r, uint8_t g, uint8_t b) {
+    return (uint8_t)((r & 0xE0) | ((g & 0xE0) >> 3) | (b >> 6));
+}
+
 static void stickDrawCursor(TFT_eSPI& t, uint32_t now) {
-    if (!s_stickShownAt || now - s_stickShownAt > STICK_SHOW_MS) return;
+    if (!stickCursorShown(now)) return;
     StickPt pts[STICK_STOPS_MAX];
     const uint8_t n = stickStops(pts);
     if (s_stickStop >= n) return;
-    const int x = pts[s_stickStop].x, y = pts[s_stickStop].y, r = 9, a = 5;
-    if (pts[s_stickStop].kind == 1 || pts[s_stickStop].kind == 2) {
-        const bool down = pts[s_stickStop].kind == 1;
-        t.fillRect(x - 8, y - 7, 17, 15, Theme::BG);
-        t.drawRect(x - 8, y - 7, 17, 15, Theme::AMBER);
-        for (int i = 0; i < 6; i++) {
-            const int half = down ? 5 - i : i;
-            t.drawFastHLine(x - half, y - 3 + i, 2 * half + 1, Theme::AMBER);
+    const StickPt p = pts[s_stickStop];
+    const int w = tft.width(), h = tft.height();
+
+    // The button's rectangle: grown from the cursor while the id holds.
+    int x0, x1, y0, y1;
+    bool region = false;
+    const int id = (p.kind == 1 || p.kind == 2) ? -1 : stickRegionId(p.x, p.y);
+    if (id >= 0) {
+        x0 = x1 = p.x; y0 = y1 = p.y;
+        while (x0 > 0     && stickRegionId(x0 - 1, p.y) == id) x0--;
+        while (x1 < w - 1 && stickRegionId(x1 + 1, p.y) == id) x1++;
+        while (y0 > 0     && stickRegionId(p.x, y0 - 1) == id) y0--;
+        while (y1 < h - 1 && stickRegionId(p.x, y1 + 1) == id) y1++;
+        region = (x1 - x0) >= 6 && (y1 - y0) >= 6;
+    }
+    if (!region) {
+        // No button to ask about (Squachy, a tile, an icon, a scroll arrow):
+        // a box round the point, frame only, the thing inside left alone.
+        const int rx = (p.kind == 1 || p.kind == 2) ? 9 : 14, ry = (p.kind == 1 || p.kind == 2) ? 8 : 11;
+        x0 = p.x - rx; x1 = p.x + rx; y0 = p.y - ry; y1 = p.y + ry;
+    }
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > w - 1) x1 = w - 1;
+    if (y1 > h - 1) y1 = h - 1;
+
+    // The gradient, built once: purple > cyan > pink > purple, 24 steps.
+    static uint8_t grad[24];
+    static bool gradOk = false;
+    if (!gradOk) {
+        static const uint8_t K[4][3] = { { 0xB4, 0x00, 0xFF }, { 0x00, 0xFF, 0xF5 }, { 0xFF, 0x2E, 0xC8 }, { 0xB4, 0x00, 0xFF } };
+        for (int i = 0; i < 24; i++) {
+            const int seg = i / 8, f = i % 8;
+            uint8_t c[3];
+            for (int k = 0; k < 3; k++) c[k] = (uint8_t)(K[seg][k] + (K[seg + 1][k] - K[seg][k]) * f / 8);
+            grad[i] = rgb332(c[0], c[1], c[2]);
         }
-        return;
+        gradOk = true;
     }
-    for (int k = 0; k < 2; k++) {
-        const int q = r - k;
-        const uint16_t c = k ? Theme::BG : Theme::AMBER;
-        t.drawFastHLine(x - q, y - q, a, c); t.drawFastVLine(x - q, y - q, a, c);
-        t.drawFastHLine(x + q - a + 1, y - q, a, c); t.drawFastVLine(x + q, y - q, a, c);
-        t.drawFastHLine(x - q, y + q, a, c); t.drawFastVLine(x - q, y + q - a + 1, a, c);
-        t.drawFastHLine(x + q - a + 1, y + q, a, c); t.drawFastVLine(x + q, y + q - a + 1, a, c);
+
+    // The flicker: a new beat every 70 ms. Most beats slide the gradient,
+    // about one in six flashes it white-hot, one in seven runs it backwards.
+    const uint32_t beat = now / 70;
+    const uint32_t mix = beat * 2654435761u;
+    const bool flash = (mix >> 26) % 6 == 0;
+    const bool back = (mix >> 24) % 7 == 0;
+    const int slide = (int)((now / 35) % 24);
+
+    uint8_t* buf = (frame.getColorDepth() == 8) ? frame.buf() : nullptr;
+    const int bw = frame.bufW();
+    if (region && buf && &t == (TFT_eSPI*)&frame) {
+        const int rw = x1 - x0 + 1;
+        for (int y = y0; y <= y1; y++) {
+            uint8_t* row = buf + y * bw;
+            for (int x = x0; x <= x1; x++) {
+                const uint8_t v = row[x];
+                const int r3 = (v >> 5) & 7, g3 = (v >> 2) & 7, b2 = v & 3;
+                // Text and edges: anything bright, or any one channel strong.
+                // Brightness alone missed pure red (OFF values), which then
+                // vanished into the gradient.
+                const bool ink = r3 + g3 + 2 * b2 >= 8 || r3 >= 5 || g3 >= 5 || b2 == 3;
+                if (ink) { row[x] = 0x00; continue; }
+                if (flash) { row[x] = 0xFF; continue; }
+                int gi = (x - x0) * 24 / rw + (back ? -slide : slide) + (y - y0) / 3;
+                gi %= 24; if (gi < 0) gi += 24;
+                row[x] = grad[gi];
+            }
+        }
     }
-    t.fillRect(x - 1, y - 1, 3, 3, Theme::AMBER);
+    // The border: 2 px, white and pink by turns, with a cyan halo outside.
+    const uint16_t edge = (beat & 1) ? TFT_WHITE : Theme::PINK;
+    t.drawRect(x0, y0, x1 - x0 + 1, y1 - y0 + 1, edge);
+    t.drawRect(x0 + 1, y0 + 1, x1 - x0 - 1, y1 - y0 - 1, edge);
+    if (x0 > 0 && y0 > 0 && x1 < w - 1 && y1 < h - 1)
+        t.drawRect(x0 - 1, y0 - 1, x1 - x0 + 3, y1 - y0 + 3, (beat % 3 == 0) ? Theme::CYAN : Theme::PURPLE);
+    if (p.kind == 1 || p.kind == 2) {
+        // The scroll arrow, drawn bold over its box.
+        const bool down = p.kind == 1;
+        t.fillRect(x0 + 2, y0 + 2, x1 - x0 - 3, y1 - y0 - 3, (beat & 2) ? Theme::CYAN : Theme::PINK);
+        for (int i = 0; i < 7; i++) {
+            const int half = down ? 6 - i : i;
+            t.drawFastHLine(p.x - half, p.y - 3 + i, 2 * half + 1, TFT_BLACK);
+        }
+    }
 }
 #endif
 
@@ -2185,7 +2593,72 @@ static void enterBoot() {
 // anywhere else never leaves a stale picker showing.
 // The column of the counter tile a tap just landed on.
 static DetectionType s_tileColumn = DetectionType::UNKNOWN;
-static bool s_scanPickerOpen = false;
+
+#if defined(SQW_SMALL)
+// Where BACK taps on this screen: its own BACK / CANCEL / UP, found with the
+// screen's own hit test where that test only answers and never acts, and at
+// a fixed point where the screen closes on a tap anywhere. False when the
+// screen has no way back of its own; the caller goes home instead.
+static bool stickBackPoint(StickPt& at) {
+    const int w = tft.width(), h = tft.height();
+    auto put = [&](int x, int y) { at = { (int16_t)x, (int16_t)y, 0 }; return true; };
+#define sweep(fn) stickSweep(fn, at)
+    if (s_infoPending && (state == AppState::LOG || state == AppState::ALERT)) return put(w / 2, h - 17);   // GOT IT
+    switch (state) {
+        case AppState::CLEAR:
+            if (s_scanPickerOpen) return put(w * 5 / 6 - 4, h - 16);   // the picker's BACK, in DESK's place
+            return false;
+        case AppState::LOG:
+            if (s_confirmPending)
+                return sweep([&](int x, int y) { return uiLogHitConfirm(x, y, w, h) == LogConfirmTap::CANCEL; });
+            return false;
+        case AppState::SETTINGS:
+            if (uiSettingsConfirmRow() != SettingsRow::NONE)
+                return sweep([&](int x, int y) { return uiSettingsConfirmButtonAt(x, y, w, h) == SettingsConfirmTap::CANCEL; });
+            return sweep([&](int x, int y) { return uiSettingsTapPinnedBack(*canvas, x, y, w, h); });
+        case AppState::POWER_SAVER:
+        case AppState::SECURITY:
+        case AppState::DETECTION_FILTER:
+        case AppState::MESH_MENU:
+            return put(w / 2, h - Theme::pinnedBackH(w) / 2);
+        case AppState::DESK:        return sweep([&](int x, int y) { return uiDeskHitBack(x, y, w, h); });
+        case AppState::HUNT:        return sweep([&](int x, int y) { return uiHuntHitBack(x, y, w, h); });
+        case AppState::DIAGNOSTICS: return sweep([&](int x, int y) { return uiDiagnosticsHitBack(x, y, w, h); });
+        case AppState::RAWSCAN:
+            if (s_confirmPending)
+                return sweep([&](int x, int y) { return uiRawScanHitConfirm(x, y, w, h) == RawScanConfirmTap::CANCEL; });
+            return sweep([&](int x, int y) { return uiRawScanHitTest(x, y, w, h) == RawScanTap::BACK; });
+        case AppState::ALERT:       return put(w / 3, h / 2);   // the plate: a tap anywhere dismisses
+        case AppState::WATCH_ALERT: return put(w / 2, h / 3);
+        case AppState::DIARY:
+        case AppState::OUTFIT:      return put(w / 2, h / 2);   // a tap away from the arrows goes back
+        // Screens whose BACK is only found by a test that answers without
+        // acting. The choice on a question screen is the safe one.
+        case AppState::WIFI_NETS:
+            return sweep([&](int x, int y) { return uiWifiNetsHit(*canvas, x, y, nullptr) == WifiNetsHit::BACK; });
+        case AppState::WIFI_ADD:
+            return sweep([&](int x, int y) { return uiWifiAddHit(*canvas, x, y, engine, nullptr) == WifiAddHit::BACK; });
+        case AppState::UPDATE:
+            return sweep([&](int x, int y) { return uiUpdateHitTest(*canvas, x, y, nullptr) == UpdateHit::BACK; });
+        case AppState::SQUAD_UPDATE:
+            return sweep([&](int x, int y) { return uiSquadUpdateHit(*canvas, x, y) == SquadUpdateHit::BACK; });
+        case AppState::INVITE:
+            if (sweep([&](int x, int y) { return uiInviteHit(*canvas, x, y) == InviteHit::BACK; })) return true;
+            return sweep([&](int x, int y) { return uiInviteHit(*canvas, x, y) == InviteHit::CANCEL; });
+        case AppState::BEACON_WARN:
+            return sweep([&](int x, int y) { return uiBeaconWarnHitTest(*canvas, x, y) == BeaconWarnHit::KEEP_OFF; });
+        case AppState::NUDGE:
+            return sweep([&](int x, int y) { return uiNudgeHit(*canvas, x, y) == NudgeHit::SKIP; });
+        case AppState::COLOR_CHECK:
+            return sweep([&](int x, int y) { return uiColorCheckHitTest(x, y, w, h) == ColorCheckTap::DONE; });
+        // Everything else has no BACK that can be found without pressing
+        // something. Never guess a spot to tap: a guessed point once landed on
+        // a confirm button. HOME instead, which every screen already allows.
+        default:                    return false;
+    }
+#undef sweep
+}
+#endif
 
 static void enterLocked();
 // The frame buffer lent to a WiFi download, and taken back; defined with the update code below.
@@ -2420,7 +2893,6 @@ static void enterLog() {
     uiLogInit(*canvas);
 }
 
-static bool    s_rawScanIsBle = true;
 
 static void enterRawScan(bool isBle) {
     state = AppState::RAWSCAN;
@@ -5089,7 +5561,43 @@ static uint32_t s_pushAccumUs = 0;   // summed within a frame: cyd35 pushes twic
 static uint32_t s_bandUs[2] = {0, 0};      // measurement: the 3.5"'s two draw passes
 #endif
 
+#if SQW_DEVTOOLS
+// SHOT: the frame as it is about to go out, cursor and all, as hex rows of
+// the 8-bit (RGB332) sprite. tools/shot.py turns it into a PNG.
+static void devShotDump() {
+    const int w = frame.bufW(), h = frame.bufH();
+    const uint8_t* p = frame.buf();
+    if (!p || frame.getColorDepth() != 8) { Serial.println("[shot] no 8-bit frame"); return; }
+    static const char HEX_[] = "0123456789abcdef";
+    // Each row is "R<y>:<hex>" so a log line from another task landing in the
+    // middle costs nothing. The USB CDC drops what does not fit, so every
+    // write is retried until it has all gone.
+    char* row = (char*)malloc(2 * w + 12);
+    if (!row) { Serial.println("[shot] no memory"); return; }
+    Serial.printf("\n[shot] BEGIN %d %d %u\n", w, h, (unsigned)state);
+    for (int y = 0; y < h; y++) {
+        int n = snprintf(row, 12, "R%d:", y);
+        for (int x = 0; x < w; x++) {
+            const uint8_t v = p[y * w + x];
+            row[n++] = HEX_[v >> 4]; row[n++] = HEX_[v & 15];
+        }
+        row[n++] = '\n';
+        const uint8_t* q = (const uint8_t*)row;
+        const uint32_t give = millis() + 500;
+        while (n > 0 && (int32_t)(millis() - give) < 0) {
+            const size_t sent = Serial.write(q, (size_t)n);
+            q += sent; n -= (int)sent;
+            if (!sent) delay(1);
+        }
+    }
+    Serial.println("[shot] END");
+    free(row);
+}
+#endif
 static inline void pushFrame(int x, int y) {
+#if SQW_DEVTOOLS
+    if (g_devShot) { g_devShot = false; devShotDump(); }
+#endif
 #if defined(TWATCH_S3)
     if (s_panelAsleep) return;   // nothing to show it to; see applyBrightness()
 #endif
@@ -6179,7 +6687,12 @@ void loop() {
 #if defined(SQW_SMALL)
     if (s_stickHome) {
         s_stickHome = false;
-        if (state != AppState::CLEAR && state != AppState::BOOT) goHome();
+        // HOME is the main screen. With desk mode on, home is the desk, so
+        // HOME from the desk itself goes on to the main screen. Never out of
+        // the lock screen: that would walk past the PIN.
+        if (state == AppState::LOCKED || state == AppState::BOOT) {}
+        else if (state == AppState::DESK) enterClear();
+        else if (state != AppState::CLEAR) goHome();
     }
 #endif
     // True only on the exact frame a touch begins/ends -- unlike

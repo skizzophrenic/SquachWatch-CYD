@@ -1533,8 +1533,14 @@ static void ensurePrefsLoaded() {
     // see it, not to go and find a switch.
     // "petSel" is the one to read; a board from before there were two
     // companions has only the old on/off bool, which becomes SHAGGY or OFF.
+#if defined(SQW_SMALL)
+    // The small boards start with no pet: a second animal on a 240x135
+    // screen is clutter until somebody asks for it in Settings > PET.
+    s_petSel             = s_petPrefs.getUChar("petSel", 0u);
+#else
     s_petSel             = s_petPrefs.getUChar("petSel",
                                s_petPrefs.getBool("petOn", true) ? (uint8_t)PetId::SHAGGY : 0u);
+#endif
     if (s_petSel >= (uint8_t)PetId::COUNT) s_petSel = (uint8_t)PetId::SHAGGY;
     s_wolfPeltUnlocked   = s_petPrefs.getBool("wolfPelt", false);
     s_chromeWingUnlocked = s_petPrefs.getBool("chromeWing", false);
@@ -2742,6 +2748,14 @@ static bool petOutNow() {
     return false;
 }
 
+// The small boards never put a newly earned pet out by themselves: the
+// toast says where to find him, and Settings > PET puts him out.
+#if defined(SQW_SMALL)
+static constexpr bool kSmallBoard = true;
+#else
+static constexpr bool kSmallBoard = false;
+#endif
+
 void unlockClippy(const char* why) {
     ensurePrefsLoaded();
     if (s_clippyUnlocked) return;
@@ -2750,7 +2764,7 @@ void unlockClippy(const char* why) {
     // On at once when no pet is out: he is the kind of help that does not
     // wait to be asked. Somebody walking VAPOR SHAGGY or the yeti keeps
     // them, and is told where he is instead.
-    if (!petOutNow()) {
+    if (!petOutNow() && !kSmallBoard) {
         s_petSel = (uint8_t)PetId::CLIPPY;
         s_petPrefs.putUChar("petSel", s_petSel);
         s_clippyIntro = why;
@@ -2768,7 +2782,7 @@ void unlockToaster(const char* why) {
     s_petPrefs.putBool("toaster", true);
     // The same manners as C1iPPY: on at once when nobody else is out,
     // otherwise a toast saying where he went.
-    if (!petOutNow()) {
+    if (!petOutNow() && !kSmallBoard) {
         s_petSel = (uint8_t)PetId::TOASTER;
         s_petPrefs.putUChar("petSel", s_petSel);
         s_toasterIntro = why;
@@ -2785,7 +2799,7 @@ void unlockMeaty(const char* why) {
     s_meatyUnlocked = true;
     s_petPrefs.putBool("meaty", true);
     // The same manners as the other two: on at once when nobody else is out.
-    if (!petOutNow()) {
+    if (!petOutNow() && !kSmallBoard) {
         s_petSel = (uint8_t)PetId::MEATY;
         s_petPrefs.putUChar("petSel", s_petSel);
         s_meatyIntro = why;

@@ -199,7 +199,10 @@ static const SettingsRow SYSTEM_ROWS[] = {
 #if defined(ESP32) && !defined(TWATCH_S3)
     SettingsRow::LAST_RUN,
 #endif
-    SettingsRow::CALIBRATE, SettingsRow::CHECK_COLORS,
+#if !defined(SQW_SMALL)   // no touch panel to calibrate on the StickS3 or the Cardputer
+    SettingsRow::CALIBRATE,
+#endif
+    SettingsRow::CHECK_COLORS,
     SettingsRow::DIAGNOSTICS, SettingsRow::UPDATE_FIRMWARE, SettingsRow::UPDATE_CHECK, SettingsRow::WIFI_NETWORKS,
     SettingsRow::RESET_STATS,
 };
@@ -845,6 +848,17 @@ SettingsConfirmTap uiSettingsHitConfirm(int x, int y, int screenW, int screenH) 
     // trying to think about.
     if (x >= px && x <= px + pw && y >= py && y <= py + ph) return SettingsConfirmTap::NONE;
     return SettingsConfirmTap::CANCEL;
+}
+
+// The two drawn buttons only, nothing around them: for the boards that aim a
+// cursor, where "outside the panel cancels" is a tap target nobody can see.
+SettingsConfirmTap uiSettingsConfirmButtonAt(int x, int y, int screenW, int screenH) {
+    if (s_confirmRow == SettingsRow::NONE) return SettingsConfirmTap::NONE;
+    int px, py, pw, ph, okX, okY, okW, okH, cnX, cnY, cnW, cnH;
+    settingsConfirmRects(screenW, screenH, px, py, pw, ph, okX, okY, okW, okH, cnX, cnY, cnW, cnH);
+    if (x >= okX && x <= okX + okW && y >= okY && y <= okY + okH) return SettingsConfirmTap::CONFIRM;
+    if (x >= cnX && x <= cnX + cnW && y >= cnY && y <= cnY + cnH) return SettingsConfirmTap::CANCEL;
+    return SettingsConfirmTap::NONE;
 }
 
 static void drawSettingsConfirm(TFT_eSPI& t, int w, int h) {

@@ -71,6 +71,11 @@ extern volatile bool g_consoleMeaty;
 extern volatile bool g_consolePet;
 extern volatile bool g_consoleJail;
 extern volatile bool g_consoleFree;
+#if SQW_DEVTOOLS
+extern volatile uint8_t  g_devKey;
+extern volatile uint16_t g_devKeyMs;
+extern volatile bool     g_devShot;
+#endif
 #if defined(CARDPUTER_ADV)
 extern volatile int8_t g_consoleExt;
 #endif
@@ -598,6 +603,19 @@ void pollSerial() {
         if (strcasecmp(line, "INVERT") == 0) { g_consoleInvert = true; continue; }
         if (strcasecmp(line, "ADC") == 0)    { g_consoleAdc = true; continue; }
         if (strcasecmp(line, "XYZZY") == 0)  { g_consoleXyzzy = true; continue; }
+#if SQW_DEVTOOLS
+        if (strcasecmp(line, "SHOT") == 0)      { g_devShot = true; continue; }
+        if (strcasecmp(line, "KEY NEXT") == 0)  { g_devKey = 1; continue; }
+        if (strcasecmp(line, "KEY PREV") == 0)  { g_devKey = 2; continue; }
+        if (strcasecmp(line, "KEY HOME") == 0)  { g_devKey = 3; continue; }
+        if (strcasecmp(line, "KEY BACK") == 0)  { g_devKey = 5; continue; }
+        if (strcasecmp(line, "KEY SELECT") == 0) { g_devKey = 6; continue; }
+        if (strncasecmp(line, "KEY PRESS", 9) == 0) {
+            g_devKeyMs = (uint16_t)atoi(line + 9);
+            g_devKey = 4;
+            continue;
+        }
+#endif
         if (strcasecmp(line, "LEGEND") == 0) { g_consoleLegend = true; continue; }
 #if defined(CARDPUTER_ADV)
         if (strcasecmp(line, "EXT ON") == 0)  { g_consoleExt = 1; continue; }
