@@ -338,6 +338,18 @@ namespace Theme {
     void drawButton(TFT_eSPI& t, int x, int y, int w, int h,
                     const char* label, bool pressed, uint8_t textSize = 1);
 
+#if defined(CARDPUTER_ADV)
+    // Context hotkeys: every drawButton()/drawWin95Button() records its box
+    // and the first letter of its label. The newest drawing of a box
+    // replaces the old one, and a box not drawn for 400 ms is gone (every
+    // screen redraws each frame). The caller checks the box is a live stop.
+    struct HotButton { int16_t x, y, w, h; char c; uint32_t seq, at; };
+    uint8_t hotButtons(const HotButton** out);
+#endif
+    // A button not drawn by drawButton() names itself for the hotkeys (a
+    // no-op off the Cardputer). Also overrides a label that is not its name.
+    void hotButton(int x, int y, int w, int h, const char* label);
+
     // A real Windows 95/98 push button: silver face, two-pixel bevel, black
     // system-font label. `sunken` inverts the bevel and nudges the label a
     // pixel down and right, which is what Win95 itself did and is the whole

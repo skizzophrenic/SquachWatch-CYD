@@ -703,8 +703,50 @@ static void labelFaceStep(TFT_eSPI& t, const char* label, uint8_t& font, uint8_t
     t.setTextSize(size);
 }
 
+#if defined(CARDPUTER_ADV)
+static const uint8_t HOT_MAX = 32;
+static HotButton s_hot[HOT_MAX];
+static uint8_t   s_hotN = 0;
+static uint32_t  s_hotSeq = 0;
+
+void hotButton(int x, int y, int w, int h, const char* label) {
+    if (!label) return;
+    char c = 0;
+    for (const char* p = label; *p; p++) {
+        const char u = (*p >= 'a' && *p <= 'z') ? (char)(*p - 32) : *p;
+        if (u >= 'A' && u <= 'Z') { c = (char)(u + 32); break; }
+    }
+    uint8_t slot = HOT_MAX;
+    for (uint8_t i = 0; i < s_hotN; i++)
+        if (s_hot[i].x == x && s_hot[i].y == y && s_hot[i].w == w && s_hot[i].h == h) { slot = i; break; }
+    if (slot == HOT_MAX) {
+        if (s_hotN < HOT_MAX) slot = s_hotN++;
+        else {
+            slot = 0;
+            for (uint8_t i = 1; i < HOT_MAX; i++) if (s_hot[i].seq < s_hot[slot].seq) slot = i;
+        }
+    }
+    s_hot[slot] = { (int16_t)x, (int16_t)y, (int16_t)w, (int16_t)h, c, ++s_hotSeq, millis() };
+}
+
+uint8_t hotButtons(const HotButton** out) {
+    const uint32_t now = millis();
+    uint8_t k = 0;
+    for (uint8_t i = 0; i < s_hotN; i++)
+        if (now - s_hot[i].at <= 400) s_hot[k++] = s_hot[i];
+    s_hotN = k;
+    *out = s_hot;
+    return s_hotN;
+}
+#else
+void hotButton(int, int, int, int, const char*) {}
+#endif
+
 void drawButton(TFT_eSPI& t, int x, int y, int w, int h,
                 const char* label, bool pressed, uint8_t textSize) {
+#if defined(CARDPUTER_ADV)
+    hotButton(x, y, w, h, label);
+#endif
     uint16_t fill = pressed ? PURPLE : BG;
     uint16_t fg   = pressed ? labelOn(PURPLE) : CYAN;
     t.fillRect(x, y, w, h, fill);
@@ -745,6 +787,9 @@ void drawButton(TFT_eSPI& t, int x, int y, int w, int h,
 
 void drawWin95Button(TFT_eSPI& t, int x, int y, int w, int h,
                      const char* label, bool sunken, bool bold) {
+#if defined(CARDPUTER_ADV)
+    hotButton(x, y, w, h, label);
+#endif
     // Face first, inset by the two bevel rings so the edges below draw over
     // nothing they need to keep.
     t.fillRect(x + 2, y + 2, w - 4, h - 4, W95_FACE);

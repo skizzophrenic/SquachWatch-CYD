@@ -43,6 +43,15 @@ static const int PIN_AMP = 1;
 // Pins from M5Stack's StickS3 page.
 static const int PIN_MCK = 18, PIN_BCK = 17, PIN_WS = 15, PIN_DOUT = 14;
 static const int PIN_AMP = -1;
+#elif defined(CARDPUTER_ADV)
+// The Cardputer ADV: an ES8311 on the keyboard's bus (SDA 8 / SCL 9, 0x18)
+// with no master clock pin (it makes one from BCLK), and an NS4150B amp with
+// no enable of its own (a headphone plug turns it off). Pins and the clock
+// registers from M5Unified's Cardputer ADV setup. No PSRAM here, so the
+// sounds are tones made on the fly (see playNow).
+static const int PIN_MCK = -1, PIN_BCK = 41, PIN_WS = 43, PIN_DOUT = 42;
+static const int PIN_AMP = -1;
+#pragma GCC diagnostic ignored "-Wunused-function"
 #elif defined(TDECK_PLUS)
 // The T-Deck Plus: a MAX98357A class-D amp straight on I2S (LilyGo's
 // BOARD_I2S_BCK 7 / WS 5 / DOUT 6). No codec to set up, no master clock, and
@@ -176,6 +185,10 @@ static bool codecInit() {
     wr(0x00, 0x80);                         // power on
     wr(0x01, 0x3F);                         // MCLK from the MCLK pin, every clock on
     wr(0x02, (uint8_t)(rd(0x02) & 0x07));   // pre-divider 1, multiplier 1x
+#if defined(CARDPUTER_ADV)
+    wr(0x01, 0xBF);                         // MCLK made from BCLK, every clock on
+    wr(0x02, 0x18);                         // BCLK x8 = 256 x 16 kHz
+#endif
     wr(0x03, 0x10);                         // single speed, ADC OSR
     wr(0x04, 0x10);                         // DAC OSR
     wr(0x05, 0x00);                         // ADC and DAC dividers 1
@@ -368,6 +381,82 @@ static void* bigAlloc(size_t bytes) {
     return p ? p : malloc(bytes);
 }
 
+#if defined(CARDPUTER_ADV)
+// Tones only, made as they play: no whole-sound buffer (no PSRAM here). Each
+// part is a pitch glide on its own: a TONE as written, a VOICE as a triangle
+// through the same pitches, a BELL as a ringing sine at its pitch. Noise and
+// air are left out, and so is the echo. Parts that overlap are added.
+static void playNow(Id id) {
+    const Sound& snd = SOUNDS[(int)id];
+    const uint8_t parts = snd.n < 8 ? snd.n : 8;
+    int at[8], len[8], t = 0, last = 0;
+    float ph[8] = {};
+    for (uint8_t i = 0; i < parts; i++) {
+        const Part& st = snd.p[i];
+        const int ms = ((st.flags & WITH) ? last : t) + st.off;
+        last = ms;
+        if (ms + st.ms + st.gap > t) t = ms + st.ms + st.gap;
+        at[i] = ms * (int)RATE / 1000;
+        len[i] = (st.kind == NOISE || st.kind == AIR) ? 0 : st.ms * (int)RATE / 1000;
+    }
+    const int total = (t + 30) * (int)RATE / 1000;
+    const float pct = (float)Settings::soundVolume() / 100.0f;
+    const float vol = pct * pct * 32000.0f, g = snd.gain > 0 ? snd.gain : 1.0f;
+    int16_t buf[CHUNK * 2];
+
+    i2s_start(PORT);
+    silence(buf, 24);
+    amp(true);
+    silence(buf, 16);
+    for (int s = 0; s < total; ) {
+        const int n = (total - s) < CHUNK ? (total - s) : CHUNK;
+        for (int k = 0; k < n; k++, s++) {
+            float v = 0;
+            for (uint8_t i = 0; i < parts; i++) {
+                const int j = s - at[i], N = len[i];
+                if (j < 0 || j >= N) continue;
+                const Part& st = snd.p[i];
+                const float tt = (float)j / RATE, lv = st.lv / 100.0f;
+                float f, e, x;
+                if (st.kind == BELL) {
+                    f = st.p[0];
+                    e = envRing(st, j, N, st.k[2] / 1000.0f);
+                    x = sinf(ph[i] * TAU_F) * 0.55f;
+                } else {
+                    f = along(st.p, (float)j / N);
+                    if (st.kind == VOICE) {
+                        if (st.k[3] > 0) f *= 1 + st.k[3] * sinf(TAU_F * 6 * tt);
+                        x = (ph[i] < 0.5f ? (ph[i] * 4.0f - 1.0f) : (3.0f - ph[i] * 4.0f)) * 0.8f;
+                    } else {
+                        if (st.k[0] > 0) f *= 1 + st.k[0] * sinf(TAU_F * st.k[1] * tt) * (st.k[2] > 0 ? expf(-tt * 1000 / st.k[2]) : 1);
+                        switch (st.wave) {
+                            case SQ:  x = ph[i] < 0.5f ? 0.35f : -0.35f; break;
+                            case TRI: x = (ph[i] < 0.5f ? (ph[i] * 4.0f - 1.0f) : (3.0f - ph[i] * 4.0f)) * 0.7f; break;
+                            case SIN: x = sinf(ph[i] * TAU_F) * 0.7f; break;
+                            default:  x = (ph[i] * 2.0f - 1.0f) * 0.4f; break;
+                        }
+                    }
+                    e = envLin(st, j, N);
+                }
+                v += x * e * lv;
+                ph[i] += f / RATE;
+                if (ph[i] >= 1.0f) ph[i] -= 1.0f;
+            }
+            v *= g;
+            const float a = fabsf(v);
+            const float o = a < 0.7f ? v : copysignf(0.7f + 0.3f * tanhf((a - 0.7f) / 0.3f), v);
+            const int16_t q = (int16_t)(o * vol);
+            buf[k * 2] = q; buf[k * 2 + 1] = q;
+        }
+        writeFrames(buf, n);
+    }
+    silence(buf, 16);
+    amp(false);
+    silence(buf, 24);
+    i2s_zero_dma_buffer(PORT);
+    i2s_stop(PORT);
+}
+#else
 static void playNow(Id id) {
     const Sound& snd = SOUNDS[(int)id];
     // Lay the parts out in time, the way the Lab did.
@@ -441,6 +530,8 @@ static void playNow(Id id) {
     i2s_zero_dma_buffer(PORT);
     i2s_stop(PORT);
 }
+
+#endif
 
 static void soundTask(void*) {
     uint8_t id;

@@ -76,6 +76,7 @@ extern volatile bool g_consoleFree;
 extern volatile uint8_t  g_devKey;
 extern volatile uint16_t g_devKeyMs;
 extern volatile bool     g_devShot;
+extern volatile bool g_devShotExt;
 extern volatile bool     g_devQuiet;
 extern volatile uint8_t  g_devImu;
 extern char              g_devType[48];
@@ -610,6 +611,7 @@ void pollSerial() {
         if (strcasecmp(line, "XYZZY") == 0)  { g_consoleXyzzy = true; continue; }
 #if SQW_DEVTOOLS
         if (strcasecmp(line, "SHOT") == 0)      { g_devShot = true; continue; }
+        if (strcasecmp(line, "SHOT EXT") == 0)  { g_devShotExt = true; continue; }
         if (strcasecmp(line, "POKE") == 0)      { g_devImu = 1; continue; }
         if (strncasecmp(line, "TYPE ", 5) == 0) {
             g_devTypeN = 0;
@@ -628,6 +630,10 @@ void pollSerial() {
         if (strcasecmp(line, "KEY HOME") == 0)  { g_devKey = 3; continue; }
         if (strcasecmp(line, "KEY BACK") == 0)  { g_devKey = 5; continue; }
         if (strcasecmp(line, "KEY SELECT") == 0) { g_devKey = 6; continue; }
+        if (strcasecmp(line, "HOTS") == 0)      { g_devKey = 7; continue; }
+        if (strcasecmp(line, "GPSPROBE") == 0)  { g_devKey = 8; continue; }
+        if (strcasecmp(line, "EXTID") == 0)     { g_devKey = 9; continue; }
+        if (strcasecmp(line, "SDTRY") == 0)     { g_devKey = 10; continue; }
         if (strncasecmp(line, "KEY PRESS", 9) == 0) {
             g_devKeyMs = (uint16_t)atoi(line + 9);
             g_devKey = 4;

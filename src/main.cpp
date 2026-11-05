@@ -5,6 +5,9 @@
 #include <Arduino.h>
 #include "serial_flush.h"
 #include <SPI.h>
+#if defined(ESP32)
+#include <SD.h>          // the Cardputer's card; the emulator has none
+#endif
 #include <Wire.h>
 #include <TFT_eSPI.h>
 #include "sound.h"          // the Freenove S3 speaker; no-ops everywhere else
@@ -988,7 +991,7 @@ static bool s_fob = false;             // StickS3 FOB MODE: CLEAR with no chrome
 // and sent as 16-bit rows. With it on, Squachy lives on the big screen and
 // the built-in one is left for the menus.
 static const int   EXT_CS = 5, EXT_RST = 3, EXT_DC = 6, EXT_MOSI = 14, EXT_SCK = 40;
-static SPIClass    s_extSpi(HSPI);
+SPIClass           g_cardSpi(HSPI);   // shared with the SD slot (sd_log.cpp)
 static TFT_eSprite frameExt = TFT_eSprite(&tft);
 static bool        s_extOk = false;        // the panel was set up and its frame allocated
 static bool        s_extOn = false;        // and it is being drawn
@@ -999,15 +1002,15 @@ volatile int8_t    g_consoleExt = -1;      // EXT ON / EXT OFF / EXT ROT, for th
 static void extCmd(uint8_t c, const uint8_t* d = nullptr, size_t n = 0) {
     digitalWrite(EXT_DC, LOW);
     digitalWrite(EXT_CS, LOW);
-    s_extSpi.write(c);
+    g_cardSpi.write(c);
     digitalWrite(EXT_DC, HIGH);
-    if (n) s_extSpi.writeBytes(d, n);
+    if (n) g_cardSpi.writeBytes(d, n);
     digitalWrite(EXT_CS, HIGH);
 }
 static void extMadctl() {
-    s_extSpi.beginTransaction(SPISettings(27000000, MSBFIRST, SPI_MODE0));
+    g_cardSpi.beginTransaction(SPISettings(27000000, MSBFIRST, SPI_MODE0));
     extCmd(0x36, &s_extMad, 1);
-    s_extSpi.endTransaction();
+    g_cardSpi.endTransaction();
 }
 static bool extBegin() {
     if (s_extOk) return true;
@@ -1017,7 +1020,7 @@ static bool extBegin() {
     digitalWrite(EXT_RST, HIGH); delay(5);
     digitalWrite(EXT_RST, LOW);  delay(20);
     digitalWrite(EXT_RST, HIGH); delay(150);
-    s_extSpi.begin(EXT_SCK, -1, EXT_MOSI, -1);
+    g_cardSpi.begin(EXT_SCK, 39, EXT_MOSI, -1);   // MISO 39 is the SD card's, on the same bus
     // The init list its owner's project sends, command then data.
     static const uint8_t INIT[] = {
         0xEF, 3, 0x03, 0x80, 0x02,
@@ -1039,12 +1042,12 @@ static bool extBegin() {
         0xE0, 15, 0x0F,0x31,0x2B,0x0C,0x0E,0x08,0x4E,0xF1,0x37,0x07,0x10,0x03,0x0E,0x09,0x00,
         0xE1, 15, 0x00,0x0E,0x14,0x03,0x11,0x07,0x31,0xC1,0x48,0x08,0x0F,0x0C,0x31,0x36,0x0F,
     };
-    s_extSpi.beginTransaction(SPISettings(27000000, MSBFIRST, SPI_MODE0));
+    g_cardSpi.beginTransaction(SPISettings(27000000, MSBFIRST, SPI_MODE0));
     for (size_t i = 0; i < sizeof INIT; i += 2 + INIT[i + 1]) extCmd(INIT[i], INIT + i + 2, INIT[i + 1]);
     extCmd(0x36, &s_extMad, 1);
     extCmd(0x11); delay(120);
     extCmd(0x29); delay(20);
-    s_extSpi.endTransaction();
+    g_cardSpi.endTransaction();
     for (int i = 0; i < 256; i++) {
         const uint16_t c = tft.color8to16((uint8_t)i);
         s_extLut[i] = (uint16_t)((c >> 8) | (c << 8));
@@ -1060,19 +1063,19 @@ static void extPush() {
     const uint8_t* src = (const uint8_t*)frameExt.getPointer();
     if (!src) return;
     static const uint8_t CA[4] = { 0, 0, (319 >> 8), (319 & 0xFF) }, PA[4] = { 0, 0, 0, 239 };
-    s_extSpi.beginTransaction(SPISettings(27000000, MSBFIRST, SPI_MODE0));
+    g_cardSpi.beginTransaction(SPISettings(27000000, MSBFIRST, SPI_MODE0));
     extCmd(0x2A, CA, 4);
     extCmd(0x2B, PA, 4);
     digitalWrite(EXT_DC, LOW); digitalWrite(EXT_CS, LOW);
-    s_extSpi.write(0x2C);
+    g_cardSpi.write(0x2C);
     digitalWrite(EXT_DC, HIGH);
     for (int y = 0; y < 240; y += 8) {
         const uint8_t* p = src + (size_t)y * 320;
         for (int i = 0; i < 320 * 8; i++) rows[i] = s_extLut[p[i]];
-        s_extSpi.writeBytes((const uint8_t*)rows, sizeof rows);
+        g_cardSpi.writeBytes((const uint8_t*)rows, sizeof rows);
     }
     digitalWrite(EXT_CS, HIGH);
-    s_extSpi.endTransaction();
+    g_cardSpi.endTransaction();
 }
 #endif
 
@@ -1108,6 +1111,7 @@ struct SmallKeys { bool press, next, prev, home, back, select; char ch, hot; };
 volatile uint8_t  g_devKey = 0;          // 1 next, 2 prev, 3 home, 4 press, 5 back, 6 select
 volatile uint16_t g_devKeyMs = 0;        // how long PRESS holds
 volatile bool     g_devShot = false;     // SHOT: dump the next frame
+volatile bool     g_devShotExt = false;  // SHOT EXT: the Cardputer's EXT panel instead
 volatile bool     g_devQuiet = false;    // QUIET: alerts never take the screen (bench only)
 volatile uint8_t  g_devImu = 0;          // POKE 1, TOSS 2: a knock or a shake from the console
 char              g_devType[48] = "";    // TYPE text: keys from the console, one a poll
@@ -1116,6 +1120,10 @@ static uint32_t   s_devPressUntil = 0;
 #if defined(CARDPUTER_ADV)
 static bool cardTyping();   // with the keyboard, below
 #endif
+static bool s_devHots = false;   // HOTS: list each stop's hotkey
+static bool s_devGpsProbe = false;
+static bool s_devExtId = false;
+static bool s_devSdTry = false;   // SDTRY: mount the card at a few speeds   // EXTID: read the EXT panel's ID registers   // GPSPROBE: which pin and baud the GPS talks on
 static void devKeysMerge(SmallKeys& k) {
     const uint8_t key = g_devKey;
     if (key) {
@@ -1126,6 +1134,10 @@ static void devKeysMerge(SmallKeys& k) {
         else if (key == 4) s_devPressUntil = millis() + (g_devKeyMs ? g_devKeyMs : 120);
         else if (key == 5) k.back = true;
         else if (key == 6) k.select = true;
+        else if (key == 7) s_devHots = true;
+        else if (key == 8) s_devGpsProbe = true;
+        else if (key == 9) s_devExtId = true;
+        else if (key == 10) s_devSdTry = true;
     }
     if (s_devPressUntil) {
         if ((int32_t)(millis() - s_devPressUntil) < 0) k.press = true;
@@ -1899,6 +1911,76 @@ static TouchPoint stickPoll() {
         lastTouch = now;
         if (state == AppState::WIFI_PASS) uiWifiPassKey(keys.ch, now);
         else                              uiPhoneKey(keys.ch);
+    }
+    // A letter on a button of this screen presses it (E and B are always
+    // the EXT screen and the background). Two buttons with one letter: the
+    // key steps between them and ENTER presses. No button: a global hotkey.
+#if SQW_DEVTOOLS
+    if (s_devHots) {
+        s_devHots = false;
+        const Theme::HotButton* hb = nullptr;
+        const uint8_t hn = Theme::hotButtons(&hb);
+        Serial.printf("[hots] screen %u, %u stops:", (unsigned)state, (unsigned)n);
+        for (uint8_t i = 0; i < n; i++) {
+            const Theme::HotButton* best = nullptr;
+            for (uint8_t j = 0; j < hn; j++) {
+                const Theme::HotButton& b = hb[j];
+                if (pts[i].x < b.x || pts[i].x >= b.x + b.w || pts[i].y < b.y || pts[i].y >= b.y + b.h) continue;
+                if (!best || b.seq > best->seq) best = &b;
+            }
+            Serial.printf(" %u@%d,%d=%c", (unsigned)i + 1, (int)pts[i].x, (int)pts[i].y, best && best->c ? best->c : '-');
+        }
+        Serial.println();
+    }
+#endif
+    // In the open SCAN picker B is BLE, not the background. So it is on a
+    // raw scan, whose BLE button sits right of BACK.
+    const bool rawB    = keys.hot == 'b' && state == AppState::RAWSCAN;
+    // LOG's CLR wipes the log with no confirm: never one stray key away.
+    if (keys.hot == 'c' && state == AppState::LOG) return tp;
+    const bool pickerB = (keys.hot == 'b' && state == AppState::CLEAR && s_scanPickerOpen) || rawB;
+    if (keys.hot && keys.hot != 'e' && (keys.hot != 'b' || pickerB) && n && !s_stickHoldUntil && !s_stickDrag &&
+        state != AppState::BOOT && state != AppState::LOCKED) {
+        const Theme::HotButton* hb = nullptr;
+        const uint8_t hn = Theme::hotButtons(&hb);
+        uint8_t hit[STICK_STOPS_MAX]; uint8_t hits = 0;
+        for (uint8_t i = 0; i < n; i++) {
+            if (pts[i].kind == 1 || pts[i].kind == 2) continue;
+            const Theme::HotButton* best = nullptr;
+            for (uint8_t j = 0; j < hn; j++) {
+                const Theme::HotButton& b = hb[j];
+                if (pts[i].x < b.x || pts[i].x >= b.x + b.w || pts[i].y < b.y || pts[i].y >= b.y + b.h) continue;
+                if (!best || b.seq > best->seq) best = &b;
+            }
+            if (best && best->c == keys.hot) hit[hits++] = i;
+        }
+        if (rawB) {
+            // BACK and BLE both start with B: BLE is the right one. On the
+            // BLE scan the button says WIFI, and B does nothing at all.
+            uint8_t r = 0;
+            for (uint8_t k = 1; k < hits; k++) if (pts[hit[k]].x > pts[hit[r]].x) r = k;
+            if (hits < 2) return tp;
+            hit[0] = hit[r]; hits = 1;
+        }
+        else if (hits && pickerB) hits = 1;   // BLE, the first; never its BACK
+        if (hits) {
+            // Not lastTouch: the screens debounce the tap against it.
+            s_stickShownAt = now ? now : 1;
+            uint8_t pick = hit[0];
+            for (uint8_t k = 0; k < hits; k++) if (hit[k] == s_stickStop) { pick = hit[(k + 1) % hits]; break; }
+            s_stickStop = pick;
+            if (hits > 1) {
+                lastTouch = now;
+                Serial.printf("[keys] hotkey %c: stop %u, one of %u\n", keys.hot, (unsigned)pick + 1, (unsigned)hits);
+                return tp;
+            }
+            const StickPt at = pts[pick];
+            Serial.printf("[keys] hotkey %c presses stop %u at %d,%d (screen %u)\n", keys.hot, (unsigned)pick + 1, (int)at.x, (int)at.y, (unsigned)state);
+            s_stickHoldPt = at;
+            s_stickHoldUntil = now + (at.kind == 3 ? 650 : 120);
+            tp.valid = true; tp.x = at.x; tp.y = at.y;
+            return tp;
+        }
     }
     if (keys.hot) s_cardHot = keys.hot;
 #endif
@@ -5558,6 +5640,7 @@ void setup() {
     usingCapTouch = false;
 #if defined(CARDPUTER_ADV)
     Serial.printf("Cardputer ADV -- no touch panel; keyboard %s.\n", cardKeysBegin() ? "answered" : "DID NOT ANSWER");
+    Sound::begin();   // the ES8311 is on the keyboard's bus
 #else
     Serial.println("StickS3 -- no touch panel; buttons on GPIO11 and GPIO12.");
 #endif
@@ -5951,10 +6034,8 @@ static uint32_t s_bandUs[2] = {0, 0};      // measurement: the 3.5"'s two draw p
 #if SQW_DEVTOOLS
 // SHOT: the frame as it is about to go out, cursor and all, as hex rows of
 // the 8-bit (RGB332) sprite. tools/shot.py turns it into a PNG.
-static void devShotDump() {
-    const int w = frame.bufW(), h = frame.bufH();
-    const uint8_t* p = frame.buf();
-    if (!p || frame.getColorDepth() != 8) { Serial.println("[shot] no 8-bit frame"); return; }
+static void devShotDump(const uint8_t* p, int w, int h, uint8_t depth) {
+    if (!p || depth != 8) { Serial.println("[shot] no 8-bit frame"); return; }
     static const char HEX_[] = "0123456789abcdef";
     // Each row is "R<y>:<hex>" so a log line from another task landing in the
     // middle costs nothing. The USB CDC drops what does not fit, so every
@@ -5980,6 +6061,12 @@ static void devShotDump() {
     Serial.println("[shot] END");
     free(row);
 }
+static void devShotDump() { devShotDump(frame.buf(), frame.bufW(), frame.bufH(), frame.getColorDepth()); }
+#if defined(CARDPUTER_ADV)
+static void devShotDump(TFT_eSprite& f) {
+    devShotDump((const uint8_t*)f.getPointer(), f.width(), f.height(), f.getColorDepth());
+}
+#endif
 #endif
 static inline void pushFrame(int x, int y) {
 #if SQW_DEVTOOLS
@@ -6574,7 +6661,12 @@ static void cydGpsBaudTick(uint32_t now) {
     Serial.printf("[gps] nothing heard: trying GPIO%d at %lu baud\n", (int)s_cydGpsPin, (unsigned long)s_cydGpsBaud);
 #else
     if (Gnss::good() + Gnss::bad() || now - s_cydGpsBaudAt < 20000) return;
+#if defined(CARDPUTER_ADV)
+    // M5's Unit GPS v1.1 talks at 115200, the older one at 9600: all three.
+    s_cydGpsBaud = (s_cydGpsBaud == 115200) ? 9600 : (s_cydGpsBaud == 9600) ? 38400 : 115200;
+#else
     s_cydGpsBaud = (s_cydGpsBaud == 9600) ? 38400 : 9600;
+#endif
     s_cydGpsBaudAt = now;
     CYD_GPS_SERIAL.updateBaudRate(s_cydGpsBaud);
     Serial.printf("[gps] nothing heard: trying %lu baud\n", (unsigned long)s_cydGpsBaud);
@@ -7024,7 +7116,7 @@ void loop() {
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
     if (g_consoleBatt) { g_consoleBatt = false; boardBatteryPrintLog(); }
 #endif
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(STICKS3)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(STICKS3) || defined(CARDPUTER_ADV)
     // The speaker's housekeeping: hushed while the saver has the screen
     // dimmed; a chime for a squad message that just landed (once per
     // message, by its arrival time); and the console's SOUND commands.
@@ -7126,7 +7218,8 @@ void loop() {
         }
     }
 #if defined(CARDPUTER_ADV)
-    // Hotkeys (hotkey-table.txt): S scan, L log, D desk, E the EXT screen.
+    // Hotkeys (hotkey-table.txt): S scan, L log, D desk, E the EXT screen,
+    // B the background.
     // Never on the boot or lock screens; never while typing (those letters
     // are typed instead, see cardTyping()).
     if (s_cardHot) {
@@ -7134,9 +7227,25 @@ void loop() {
         s_cardHot = 0;
         if (state != AppState::BOOT && state != AppState::LOCKED) {
             lastTouch = now;
-            if (c == 'l')      { Serial.println("[keys] hotkey LOG");  enterLog(); }
+            // S, L and D only from the home screen: elsewhere those letters
+            // belong to the screen's own buttons.
+            const bool home = state == AppState::CLEAR || state == AppState::DESK;
+            if (!home && (c == 'l' || c == 'd' || c == 's')) {}
+            else if (c == 'l') { Serial.println("[keys] hotkey LOG");  enterLog(); }
             else if (c == 'd') { Serial.println("[keys] hotkey DESK"); enterDesk(); }
+            else if (c == 's' && state == AppState::CLEAR && s_scanPickerOpen) {
+                Serial.println("[keys] hotkey SCAN closed");
+                s_scanPickerOpen = false;
+            }
             else if (c == 's') { Serial.println("[keys] hotkey SCAN"); if (state != AppState::CLEAR) enterClear(); s_scanPickerOpen = true; }
+            else if (c == 'b') {
+                if (Settings::backgroundLocked()) Theme::showToast("BACKGROUND LOCKED", "LOCK BACKGROUND is ON", Theme::CYAN);
+                else {
+                    Settings::cycleBackground();
+                    Serial.printf("[keys] hotkey BACKGROUND %s\n", Settings::backgroundName(Settings::background()));
+                    if (state != AppState::CLEAR) Theme::showToast("BACKGROUND", Settings::backgroundName(Settings::background()), Theme::CYAN);
+                }
+            }
             else if (c == 'e') {
                 Serial.println("[keys] hotkey EXT");
                 Settings::toggleExtScreen();
@@ -7382,6 +7491,88 @@ void loop() {
         }
     }
     gpsTick();
+#endif
+#if defined(CARDPUTER_ADV) && SQW_DEVTOOLS
+    if (s_devSdTry) {
+        s_devSdTry = false;
+        pinMode(EXT_CS, OUTPUT); digitalWrite(EXT_CS, HIGH);
+        pinMode(39, INPUT_PULLUP);
+        Serial.printf("[sdtry] G39 idle reads %d\n", digitalRead(39));
+        g_cardSpi.begin(EXT_SCK, 39, EXT_MOSI, -1);
+        SD.end();
+        for (int pass = 0; pass < (s_extOk ? 1 : 2); pass++) {   // never a reset under a live panel
+            // pass 1 holds the EXT panel in reset, off the bus entirely
+            if (!s_extOk) { pinMode(EXT_RST, OUTPUT); digitalWrite(EXT_RST, pass ? LOW : HIGH); }
+            pinMode(12, OUTPUT); digitalWrite(12, HIGH);
+            g_cardSpi.beginTransaction(SPISettings(400000, MSBFIRST, SPI_MODE0));
+            for (int i = 0; i < 10; i++) g_cardSpi.transfer(0xFF);
+            digitalWrite(12, LOW);
+            static const uint8_t CMD0[] = { 0x40, 0, 0, 0, 0, 0x95 };
+            for (uint8_t b : CMD0) g_cardSpi.transfer(b);
+            char out[64]; int n = 0;
+            for (int i = 0; i < 10; i++) n += snprintf(out + n, sizeof out - n, " %02X", g_cardSpi.transfer(0xFF));
+            digitalWrite(12, HIGH); g_cardSpi.transfer(0xFF);
+            g_cardSpi.endTransaction();
+            Serial.printf("[sdtry] raw CMD0%s:%s\n", pass ? " (panel in reset)" : "", out);
+        }
+        if (!s_extOk) digitalWrite(EXT_RST, HIGH);
+        static const uint32_t HZ[] = { 400000, 4000000 };
+        for (uint32_t hz : HZ) {
+            SD.end();
+            const bool ok = SD.begin(12, g_cardSpi, hz, "/sd", 2);
+            Serial.printf("[sdtry] %lu Hz: %s", (unsigned long)hz, ok ? "MOUNTED" : "failed");
+            if (ok) Serial.printf(", type %u, %llu MB", (unsigned)SD.cardType(), (unsigned long long)(SD.cardSize() >> 20));
+            Serial.println();
+            if (ok) break;
+        }
+    }
+    if (s_devExtId) {
+        s_devExtId = false;
+        pinMode(EXT_CS, OUTPUT); digitalWrite(EXT_CS, HIGH);
+        pinMode(EXT_DC, OUTPUT); digitalWrite(EXT_DC, HIGH);
+        pinMode(12, OUTPUT); digitalWrite(12, HIGH);   // the SD card stays off the bus
+        // Never a reset under a panel that is in use: it would lose its
+        // setup and sit blank until a power cycle.
+        if (!s_extOk) {
+            pinMode(EXT_RST, OUTPUT);
+            digitalWrite(EXT_RST, LOW); delay(20); digitalWrite(EXT_RST, HIGH); delay(150);
+        }
+        pinMode(39, INPUT_PULLDOWN);   // a pin nobody drives reads 00, not FF
+        g_cardSpi.begin(EXT_SCK, 39, EXT_MOSI, -1);
+        static const uint8_t CMDS[] = { 0x04, 0x09, 0x0A, 0xD3, 0xDA, 0xDB, 0xDC };
+        for (uint8_t c : CMDS) {
+            g_cardSpi.beginTransaction(SPISettings(1000000, MSBFIRST, SPI_MODE0));
+            digitalWrite(EXT_CS, LOW);
+            digitalWrite(EXT_DC, LOW); g_cardSpi.transfer(c); digitalWrite(EXT_DC, HIGH);
+            uint8_t r[4];
+            for (int i = 0; i < 4; i++) r[i] = g_cardSpi.transfer(0);
+            digitalWrite(EXT_CS, HIGH);
+            g_cardSpi.endTransaction();
+            Serial.printf("[extid] %02X: %02X %02X %02X %02X\n", c, r[0], r[1], r[2], r[3]);
+        }
+    }
+    if (s_devGpsProbe) {
+        s_devGpsProbe = false;
+        static const int PINS[] = { 1, 2, 13, 15 };
+        static const uint32_t BAUDS[] = { 9600, 38400, 115200 };
+        for (int p : PINS) for (uint32_t b : BAUDS) {
+            Serial2.begin(b, SERIAL_8N1, p, -1);
+            const uint32_t t0 = millis();
+            int bytes = 0, starts = 0; char prev = 0, sample[40] = {}; int sn = 0;
+            while (millis() - t0 < 1300) {
+                while (Serial2.available()) {
+                    const char c = (char)Serial2.read();
+                    bytes++;
+                    if (prev == '$' && c == 'G') starts++;
+                    if (starts && sn < 39 && c >= ' ' && c <= '~') sample[sn++] = c;
+                    prev = c;
+                }
+                delay(5);
+            }
+            Serial2.end();
+            Serial.printf("[gpsprobe] RX G%d %lu baud: %d bytes, %d sentences %s\n", p, (unsigned long)b, bytes, starts, sample);
+        }
+    }
 #endif
 #if defined(CARDPUTER_ADV)
     if (g_consoleExt >= 0) {
@@ -7703,27 +7894,59 @@ void loop() {
         s_extOn = Settings::extScreen() && s_extOk;
         Theme::setStillBackdrop(s_extOn);
     }
-    const bool extFrame = s_extOn && state != AppState::BOOT;
-    // With him on the big screen the built-in one has no main screen to
-    // show -- two moving pictures is more than this chip pushes -- so its
-    // home is the settings list, which sits still. A catch still takes it
-    // over: the same gate the main screen uses, asked from here because
-    // nothing is ever on the main screen to ask it.
-    if (extFrame && state == AppState::CLEAR && !Security::locked()) enterSettings();
-    if (extFrame && state == AppState::SETTINGS) {
-        const Detection* latest = engine.latest();
-        if (latest && (now - latest->firstSeen) < 200 &&
-            latest->conf >= Settings::minConfidence() && !IgnoreList::silenced(latest->mac) &&
-            alertMayInterrupt(*latest)) {
-            uiAlertSetRedacted(false);
-            enterAlert(*latest);
-        }
+    // POWER SAVER dims only the built-in screen. The XL mod's backlight is on
+    // 5 V, so the big panel cannot go dark: it gets one black frame and no
+    // more drawing or pushing until the screen wakes.
+    const bool extRest = s_extOn && s_screenDimmed;
+    {
+        static bool rested = false;
+        if (extRest && !rested) { frameExt.fillRect(0, 0, frameExt.width(), frameExt.height(), TFT_BLACK); extPush(); }
+        rested = extRest;
     }
+    const bool extHome  = s_extOn && state != AppState::BOOT;   // the built-in screen is the still home
+    const bool extFrame = extHome && !extRest;
+    // With him on the big screen the built-in one keeps the main screen's
+    // tiles, menu and buttons but no scene (two moving pictures is more than
+    // this chip pushes): the counts and the hotkeys instead, see
+    // uiClearInfoOnly(). It was the settings list, which left no way home.
     if (extFrame) {
         uiClearTick(frameExt, now, engine, true, false);
         static bool odd = false;
         odd = !odd;
         if (odd) extPush();             // 46 ms a push: every other frame
+#if SQW_DEVTOOLS
+        if (g_devShotExt) { g_devShotExt = false; devShotDump(frameExt); }
+#endif
+    }
+    // Switched off: one last picture, so the panel does not sit frozen on
+    // whatever frame it had. Squachy, and how to bring him back.
+    {
+        static bool was = false;
+        bool card = was && !s_extOn && s_extOk;
+#if SQW_DEVTOOLS
+        if (!s_extOn && s_extOk && g_devShotExt) card = true;
+#endif
+        was = s_extOn;
+        if (card) {
+            frameExt.fillRect(0, 0, frameExt.width(), frameExt.height(), Theme::BG);
+            Squachy::drawWaving(frameExt, 160, 158, now, 2.0f, nullptr, false, 0, false);
+            frameExt.setTextFont(1); frameExt.setTextWrap(false);
+            frameExt.setTextSize(2);
+            frameExt.setTextColor(Theme::AMBER, Theme::BG);
+            const char* a = "EXT SCREEN OFF";
+            frameExt.setCursor((320 - frameExt.textWidth(a)) / 2, 180); frameExt.print(a);
+            frameExt.setTextColor(Theme::CYAN, Theme::BG);
+            const char* b = "On home, press E";
+            frameExt.setCursor((320 - frameExt.textWidth(b)) / 2, 204); frameExt.print(b);
+            frameExt.setTextSize(1);
+            frameExt.setTextColor(Theme::WHITE, Theme::BG);
+            const char* c = "to bring Squachy back";
+            frameExt.setCursor((320 - frameExt.textWidth(c)) / 2, 224); frameExt.print(c);
+            extPush();
+#if SQW_DEVTOOLS
+            if (g_devShotExt) { g_devShotExt = false; devShotDump(frameExt); }
+#endif
+        }
     }
 #endif
     switch (state) {
@@ -7888,7 +8111,9 @@ void loop() {
                 uiClearTick(tft, now, engine, true, s_scanPickerOpen);
             }
 #elif defined(CARDPUTER_ADV)
-            uiClearTick(*canvas, now, engine, !extFrame, s_scanPickerOpen);
+            uiClearInfoOnly(extHome);
+            uiClearTick(*canvas, now, engine, !extHome, s_scanPickerOpen);
+            uiClearInfoOnly(false);
 #else
             uiClearTick(*canvas, now, engine, true, s_scanPickerOpen);
 #endif

@@ -688,6 +688,7 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
     {
         int bx, by, bw, bh;
         moreInfoBtnRect(w, h, bx, by, bw, bh);
+        Theme::hotButton(bx, by, bw, bh, tinyAlert(h) ? "INFO" : "MORE INFO");
         t.fillRect(bx, by, bw, bh, Theme::BG);
         t.drawRect(bx, by, bw, bh, Theme::PURPLE);
         t.setTextSize(2);
@@ -720,6 +721,7 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
     {
         int bx, by, bw, bh;
         huntBtnRect(w, h, bx, by, bw, bh);
+        Theme::hotButton(bx, by, bw, bh, "HUNT");
         t.fillRect(bx, by, bw, bh, Theme::BG);
         t.drawRect(bx, by, bw, bh, Theme::PURPLE);
         t.setTextSize(2);
@@ -738,6 +740,7 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
         snoozeBtnRect(w, h, bx, by, bw, bh);
         Theme::drawButton(t, bx, by, bw, bh, s_snzLabel ? s_snzLabel : "SNOOZE",
                           s_snzLabel != nullptr);
+        Theme::hotButton(bx, by, bw, bh, "SNOOZE");   // its name, whatever it says
         if (s_snzLabel) {
             const int barW = (int)((int32_t)(bw - 6) * s_snzLeft / 1000);
             t.fillRect(bx + 3, by + bh - 4, bw - 6, 2, Theme::BG);

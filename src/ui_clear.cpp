@@ -3267,6 +3267,11 @@ bool uiMascotStep(uint32_t now, bool advance) {
 
 static bool s_fob = false;
 void uiClearSetFob(bool on) { s_fob = on; }
+// The Cardputer ADV with the EXT screen on: the built-in screen is the main
+// screen's buttons, tiles and menu with no scene, and in the middle the
+// counts and the hotkeys (Squachy is on the big one).
+static bool s_infoOnly = false;
+void uiClearInfoOnly(bool on) { s_infoOnly = on; }
 
 void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance, bool scanMenu) {
     int w = t.width();
@@ -3446,7 +3451,8 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // from the space he is given, so telling him about these rows would make
     // him a tenth bigger and move everything hanging off him.
     FrameProf::lap(FrameProf::CHROME);   // the counting and geometry above
-    Theme::drawActiveBackground(t, now, 0, h, eng, advance);
+    if (s_infoOnly) t.fillRect(0, 0, w, h, Theme::BG);
+    else Theme::drawActiveBackground(t, now, 0, h, eng, advance);
     Theme::clearBackgroundFloor();
     FrameProf::lap(FrameProf::BG);
     // The battery lamp, under everything that moves for the same reason as
@@ -3501,11 +3507,11 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
 #if CROWD_BENCH
     // A test build: the crowd benchmark stands in for the Squachys while it
     // runs, and the visit machine sits it out.
-    if (CrowdBench::active() && !Settings::boringMode())
+    if (CrowdBench::active() && !Settings::boringMode() && !s_infoOnly)
         CrowdBench::draw(t, now, sqTop, squachyBottom);
     else
 #endif
-    if (!Settings::boringMode()) {
+    if (!Settings::boringMode() && !s_infoOnly) {
         // The last argument is the SIZE row in Settings. CLEAR is the only
         // screen that passes it: everywhere else he is a cameo in a box
         // somebody sized deliberately, and shrinking him there would just
@@ -3595,7 +3601,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // mid-lesson would be more distraction than delight.
     FrameProf::lap(FrameProf::SQUACHY);
     Squachy::setBubbleRiseTo(-1);   // boring mode skips the one above
-    if (!Settings::boringMode() && !Squachy::onboardingActive()) {
+    if (!Settings::boringMode() && !s_infoOnly && !Squachy::onboardingActive()) {
         IdleEvents::tick(t, now, 0, bandTop, w, squachyBottom, step);
     }
     FrameProf::lap(FrameProf::IDLE);
@@ -3940,7 +3946,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         }
         s_tileN = 0;
         int bX = 0, bY = 0, bW = 0, bH = 0;
-        const bool bub = !Settings::boringMode() && Squachy::ownBubble(bX, bY, bW, bH);
+        const bool bub = !Settings::boringMode() && !s_infoOnly && Squachy::ownBubble(bX, bY, bW, bH);
         if (counterN) {
             const uint8_t bse = counterN / rowsUsed, rem = counterN % rowsUsed;
             uint8_t st = 0;
@@ -3981,7 +3987,29 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
 
     // The pet, last of the scene: over the counters, under the buttons.
     Pet::setGround(sqFeet);
-    if (!Settings::boringMode()) drawPets(t, now, w, h, bandTop, petFloor);
+    if (!Settings::boringMode() && !s_infoOnly) drawPets(t, now, w, h, bandTop, petFloor);
+    if (s_infoOnly) {
+        const int top = (s_tileRowsLast ? tilesTop + s_tileRowsLast * tileLineH : 18) + 6;
+        int y = top;
+        t.setTextFont(1); t.setTextSize(1); t.setTextWrap(false);
+        t.setTextColor(Theme::AMBER, Theme::BG);
+        t.setCursor(6, y); t.print("SQUACHY IS ON THE BIG SCREEN"); y += 13;
+        char line[48];
+        snprintf(line, sizeof line, "Seen this boot: %u   In the log: %u",
+                 (unsigned)s_hitsThisBoot, (unsigned)eng.logCount());
+        t.setTextColor(Theme::WHITE, Theme::BG);
+        t.setCursor(6, y); t.print(line); y += 16;
+        static const char* const KEYS[] = {
+            "S scan   L log   D desk   B background",
+            "E turns the EXT screen off",
+            "ESC back   arrows move   ENTER press",
+        };
+        t.setTextColor(Theme::CYAN, Theme::BG);
+        for (const char* k : KEYS) {
+            if (y + 8 > bar.y - 3) break;
+            t.setCursor(6, y); t.print(k); y += 11;
+        }
+    }
 
     // Soft buttons, straight over the background: it repaints the whole
     // strip under them every frame, margins and gaps included. Each
