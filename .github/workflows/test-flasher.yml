@@ -1,8 +1,9 @@
 name: Test flasher (build a board, flash it from the browser)
 
-# Builds one board from whichever branch you pick and publishes it on a test
-# page, so an unmerged branch can be flashed from the browser. It never touches
-# the release flasher or release-flasher.yml.
+# Builds one board from whichever branch you pick and publishes it on the real
+# web flasher (web-flasher/index.html, from that branch), under its ?lab=1
+# "TEST BUILDS" list, so an unmerged branch can be flashed from the browser. It
+# never touches release-flasher.yml, and the page's hit counter is switched off.
 #
 # The page lives on the gh-pages branch and is served by GitHub Pages from
 # there. One-time setup, in the repository's Settings > Pages:
@@ -11,8 +12,8 @@ name: Test flasher (build a board, flash it from the browser)
 # deploy uses; a repository serves Pages from one source at a time.)
 #
 # Each board keeps its latest test build on the page; a new run for the same
-# board replaces it. gh-pages is rewritten as a single commit every time, so it
-# does not grow.
+# board replaces it, and the page itself is the one from the branch just built.
+# gh-pages is rewritten as a single commit every time, so it does not grow.
 on:
   workflow_dispatch:
     inputs:
@@ -77,7 +78,6 @@ jobs:
         env:
           BOARD: ${{ inputs.board }}
           REF_NAME: ${{ github.ref_name }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -e
           # The chip and where its bootloader sits, as release-flasher.yml's
@@ -92,27 +92,18 @@ jobs:
             *)
               CHIP=ESP32-S3; BOOT=0x0 ;;
           esac
-          OUT="out/builds/$BOARD"
+          OUT="out/$BOARD"
           mkdir -p "$OUT"
           cp ".pio/build/$BOARD/bootloader.bin" ".pio/build/$BOARD/partitions.bin" ".pio/build/$BOARD/firmware.bin" "$OUT/"
           cp "$(find ~/.platformio/packages -path '*framework-arduinoespressif32*/tools/partitions/boot_app0.bin' | head -1)" "$OUT/boot_app0.bin"
-          python tools/test_flasher.py manifest "$OUT" "$CHIP" "$BOOT" "$BOARD"
-          python - "$OUT/info.json" <<'PY'
-          import json, os, subprocess, sys, datetime
-          json.dump({
-              "board": os.environ["BOARD"],
-              "ref": os.environ["REF_NAME"],
-              "sha": subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], text=True).strip(),
-              "built": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-              "run": os.environ["RUN_URL"],
-          }, open(sys.argv[1], "w"))
-          PY
+          SHA="$(git rev-parse --short HEAD)"
+          python tools/test_flasher.py manifest "$OUT" "$CHIP" "$BOOT" "$BOARD" "$REF_NAME" "$SHA"
           ls -l "$OUT"
 
       - uses: actions/upload-artifact@v4
         with:
           name: test-flasher-${{ inputs.board }}
-          path: out/
+          path: out/${{ inputs.board }}/
           retention-days: 3
 
   publish:
@@ -145,10 +136,14 @@ jobs:
           else
             mkdir site
           fi
-          mkdir -p site/builds
-          rm -rf "site/builds/$BOARD"
-          cp -r "new/builds/$BOARD" site/builds/
-          python tools/test_flasher.py index site
+          # This board's previous test build goes; the other boards' stay.
+          rm -rf site/builds site/index.html
+          # Exact names: "lab-cyd-*" would also match cyd-fast's and cyd-ili9341's.
+          rm -f "site/manifest-lab-$BOARD.json"
+          for part in bootloader partitions boot_app0 firmware; do rm -f "site/lab-$BOARD-$part.bin"; done
+          cp new/* site/
+          # The real web flasher, from the branch just built.
+          python tools/test_flasher.py page web-flasher site
           touch site/.nojekyll
           cd site
           rm -rf .git

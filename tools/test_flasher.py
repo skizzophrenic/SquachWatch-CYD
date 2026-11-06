@@ -1,105 +1,93 @@
 #!/usr/bin/env python3
-"""The test flasher's two small jobs (see .github/workflows/test-flasher.yml).
+"""The test flasher's helper (see .github/workflows/test-flasher.yml).
 
-    test_flasher.py manifest DIR CHIP BOOT_OFFSET BOARD
+    test_flasher.py manifest DIR CHIP BOOT_OFFSET BOARD LABEL VERSION
         DIR holds bootloader.bin, partitions.bin, boot_app0.bin and firmware.bin
-        for one board. Writes DIR/manifest.json for ESP Web Tools: the four
+        for one board. They are renamed lab-<BOARD>-<part>.bin and
+        DIR/manifest-lab-<BOARD>.json is written for ESP Web Tools: the four
         parts a USB install writes, and nothing over 0x9000-0xdfff, which is
-        where the board keeps its settings.
+        where the board keeps its settings. The names are the ones the real web
+        flasher's ?lab=1 list looks for (web-flasher/index.html).
 
-    test_flasher.py index SITE
-        Writes SITE/index.html: one install button for each SITE/builds/<board>/
-        that has an info.json.
-
-Everything that came from a branch name or a commit is HTML-escaped.
+    test_flasher.py page WEB_FLASHER_DIR SITE
+        Copies the real web flasher (index.html, emulator/, update/) into SITE,
+        changed in three ways and no other:
+          * its hit counter is pointed at nothing. It posts the board of every finished
+            flash to the project's public "in the wild" count, and a test flash
+            is not one. A page that cannot be switched off is not published.
+          * it opens with ?lab=1, which is where the test builds are listed.
+          * freenove-s3-40mhz joins the lab list, which the page leaves out.
 """
-import html
 import json
 import os
+import shutil
 import sys
 
 APP = 0x10000
 PARTITIONS = 0x8000
 OTADATA = 0xE000
+PARTS = ("bootloader", "partitions", "boot_app0", "firmware")
 
 
-def manifest(d, chip, boot_offset, board):
-    parts = [
-        ("bootloader.bin", int(boot_offset, 0)),
-        ("partitions.bin", PARTITIONS),
-        ("boot_app0.bin", OTADATA),
-        ("firmware.bin", APP),
-    ]
-    for name, _ in parts:
-        if not os.path.isfile(os.path.join(d, name)):
-            sys.exit("missing %s in %s" % (name, d))
+def manifest(d, chip, boot_offset, board, label, version):
+    for p in PARTS:
+        if not os.path.isfile(os.path.join(d, p + ".bin")):
+            sys.exit("missing %s.bin in %s" % (p, d))
+    names = {}
+    for p in PARTS:
+        names[p] = "lab-%s-%s.bin" % (board, p)
+        os.replace(os.path.join(d, p + ".bin"), os.path.join(d, names[p]))
+    offsets = {"bootloader": int(boot_offset, 0), "partitions": PARTITIONS,
+               "boot_app0": OTADATA, "firmware": APP}
     m = {
-        "name": "SquachWatch test build (%s)" % board,
-        "version": "test",
+        "name": "TEST %s -- %s" % (label, board),
+        "version": version,
         "new_install_prompt_erase": False,
         "builds": [{
             "chipFamily": chip,
-            "parts": [{"path": n, "offset": o} for n, o in parts],
+            "parts": [{"path": names[p], "offset": offsets[p]} for p in PARTS],
         }],
     }
-    with open(os.path.join(d, "manifest.json"), "w") as f:
+    with open(os.path.join(d, "manifest-lab-%s.json" % board), "w") as f:
         json.dump(m, f, indent=2)
         f.write("\n")
 
 
-PAGE = """<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SquachWatch test builds</title>
-<style>
-  body {{ font: 16px/1.5 system-ui, sans-serif; max-width: 46rem; margin: 2rem auto; padding: 0 1rem; }}
-  .b {{ border: 1px solid #8884; border-radius: 8px; padding: .8rem 1rem; margin: .8rem 0; }}
-  .b h2 {{ margin: 0 0 .2rem; font-size: 1.1rem; }}
-  .m {{ color: #888; font-size: .85rem; margin-bottom: .5rem; }}
-  code {{ background: #8882; padding: 0 .3em; border-radius: 4px; }}
-</style></head><body>
-<h1>SquachWatch test builds</h1>
-<p>Unreleased builds, for trying on a device. Plug the board in over USB and press
-Install (Chrome or Edge). The install writes the program and leaves the settings on the
-board alone, unless you tick erase. Each board shows its latest test build only.</p>
-{cards}
-<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
-</body></html>
-"""
-
-CARD = """<div class="b"><h2>{board}</h2>
-<div class="m">branch <code>{ref}</code> &middot; commit <code>{sha}</code> &middot; {built} &middot; <a href="{run}">build log</a></div>
-<esp-web-install-button manifest="builds/{board}/manifest.json"></esp-web-install-button></div>"""
+def replace_once(text, old, new, what, required):
+    if text.count(old) != 1:
+        if required:
+            sys.exit("web-flasher/index.html no longer has the %s this script changes; not publishing" % what)
+        print("warning: %s not found; left as it is" % what)
+        return text
+    return text.replace(old, new)
 
 
-def index(site):
-    cards = []
-    root = os.path.join(site, "builds")
-    for board in sorted(os.listdir(root)) if os.path.isdir(root) else []:
-        info = os.path.join(root, board, "info.json")
-        if not os.path.isfile(info):
-            continue
-        with open(info) as f:
-            i = json.load(f)
-        run = str(i.get("run", ""))
-        if not run.startswith("https://github.com/"):
-            run = "#"
-        cards.append(CARD.format(
-            board=html.escape(board, quote=True),
-            ref=html.escape(str(i.get("ref", "")), quote=True),
-            sha=html.escape(str(i.get("sha", "")), quote=True),
-            built=html.escape(str(i.get("built", "")), quote=True),
-            run=html.escape(run, quote=True)))
-    if not cards:
-        cards = ["<p>No test builds yet.</p>"]
-    with open(os.path.join(site, "index.html"), "w") as f:
-        f.write(PAGE.format(cards="\n".join(cards)))
+def page(src, site):
+    with open(os.path.join(src, "index.html"), encoding="utf-8") as f:
+        t = f.read()
+    t = replace_once(t, "var API = 'https://count.squachwatch.com';", "var API = 'about:blank';",
+                     "hit counter address", True)
+    t = replace_once(t, "<head>",
+                     "<head>\n<script>if(!/(?:^|[?&])lab=1(?:&|$)/.test(location.search))"
+                     "location.replace(location.pathname+(location.search?location.search+'&':'?')+'lab=1'+location.hash);</script>",
+                     "<head> tag", False)
+    t = replace_once(t, "'./manifest-lab-tab5.json']",
+                     "'./manifest-lab-tab5.json', './manifest-lab-freenove-s3-40mhz.json']",
+                     "lab board list", False)
+    os.makedirs(site, exist_ok=True)
+    with open(os.path.join(site, "index.html"), "w", encoding="utf-8") as f:
+        f.write(t)
+    for sub in ("emulator", "update"):
+        s = os.path.join(src, sub)
+        if os.path.isdir(s):
+            shutil.rmtree(os.path.join(site, sub), ignore_errors=True)
+            shutil.copytree(s, os.path.join(site, sub))
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 6 and sys.argv[1] == "manifest":
-        manifest(*sys.argv[2:6])
-    elif len(sys.argv) == 3 and sys.argv[1] == "index":
-        index(sys.argv[2])
+    if len(sys.argv) == 8 and sys.argv[1] == "manifest":
+        manifest(*sys.argv[2:8])
+    elif len(sys.argv) == 4 and sys.argv[1] == "page":
+        page(*sys.argv[2:4])
     else:
         sys.exit(__doc__)
