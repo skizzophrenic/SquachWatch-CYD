@@ -10,11 +10,15 @@
 #include "lora_profiles.h"
 #include "lora_myname.h"
 #include "lora_channels.h"
+#include "lora_meshtastic.h"
+#include "gnss.h"
 #include "settings.h"
 #include "theme.h"
 #include "squachy.h"
 #include <Arduino.h>
 #include <string.h>
+#include <strings.h>
+#include <stdlib.h>
 #include <stdio.h>
 
 namespace {
@@ -29,8 +33,9 @@ const int PILL_R = 310;                       // the value pills' right edge
 enum Id : uint8_t {
     NONE = 0,
     // the main list
-    LISTEN, PRESET, TX, HOPS, REGION, CHANNELS,
-    NAME, SHORTNAME, ANNOUNCE,
+    LISTEN, PRESET, MT_REGION, MT_SLOT, MT_KEY, TX, HOPS, REGION, CHANNELS,
+    NAME, SHORTNAME, ANNOUNCE, ROLE, OKMQTT,
+    P_ON, P_INT, P_SMART, P_DIST, P_MIN, P_PREC, T_ON, T_INT, N_ON, N_INT,
     MSGSOUND,
     DETECT, ONSCREEN,
     LOOKUPS, LK_CALL, LK_OGN, LK_FEED,
@@ -65,7 +70,7 @@ int      s_scroll[2] = { 0, 0 };
 int      s_contentH = 0;
 
 // The edit line.
-enum class Edit : uint8_t { NONE, NAME, SHORTNAME, CH_NAME, CH_KEY };
+enum class Edit : uint8_t { NONE, NAME, SHORTNAME, CH_NAME, CH_KEY, MT_SLOT, MT_KEY };
 Edit     s_edit = Edit::NONE;
 char     s_buf[81] = { 0 };
 uint8_t  s_bufN = 0;
@@ -126,6 +131,30 @@ void onOff(Row& r, bool on) {
     r.valCol = on ? Theme::GREEN : dim(Theme::WHITE, 150);
 }
 
+// A key as the apps show it, first and last four characters only.
+const char* b64Preview(const uint8_t* key, uint8_t len) {
+    static const char B64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    static char out[16];
+    char full[48];
+    size_t o = 0;
+    for (uint8_t k = 0; k < len; k += 3) {
+        const uint32_t v = ((uint32_t)key[k] << 16) | (k + 1 < len ? (uint32_t)key[k + 1] << 8 : 0) | (k + 2 < len ? key[k + 2] : 0);
+        full[o++] = B64[(v >> 18) & 63]; full[o++] = B64[(v >> 12) & 63];
+        full[o++] = k + 1 < len ? B64[(v >> 6) & 63] : '=';
+        full[o++] = k + 2 < len ? B64[v & 63] : '=';
+    }
+    full[o] = '\0';
+    snprintf(out, sizeof out, "%.4s....%s", full, full + o - 4);
+    return out;
+}
+
+// 30 -> "30 s", 900 -> "15 min", 7200 -> "2 h".
+void spanText(char* out, size_t cap, uint32_t secs) {
+    if (secs < 60)        snprintf(out, cap, "%lu s", (unsigned long)secs);
+    else if (secs < 3600) snprintf(out, cap, "%lu min", (unsigned long)(secs / 60));
+    else                  snprintf(out, cap, "%lu h", (unsigned long)(secs / 3600));
+}
+
 void buildMain() {
     s_rowN = 0;
     section("NETWORK");
@@ -150,6 +179,45 @@ void buildMain() {
             snprintf(r.hint, sizeof r.hint, "NO MESHTASTIC IN THIS BAND PLAN");
         }
         r.valCol = Theme::CYAN;
+    }
+    {
+        Row& r = add(MT_REGION, "MESHTASTIC REGION");
+        const uint8_t g = Settings::loraMtRegion();
+        if (g) { snprintf(r.value, sizeof r.value, "%s", Lora::mtRegionName((uint8_t)(g - 1))); r.valCol = Theme::CYAN; }
+        else   { snprintf(r.value, sizeof r.value, "AUTO"); r.valCol = dim(Theme::WHITE, 150); }
+        if (g) snprintf(r.hint, sizeof r.hint, "SET BY YOU. TAP FOR THE NEXT");
+        else   snprintf(r.hint, sizeof r.hint, "FOLLOWS THE BAND PLAN: %s", Lora::regionName());
+    }
+    {
+        Row& r = add(MT_SLOT, "FREQUENCY SLOT");
+        r.editable = true;
+        const int16_t i = Lora::meshPresetFind(Lora::Proto::MESHTASTIC, Settings::loraMtPreset());
+        char mhz[12] = "-";
+        if (i >= 0) Lora::formatMHz(Lora::profile((uint8_t)i).freqHz, mhz, sizeof mhz);
+        const uint8_t sl = Settings::loraMtSlot();
+        if (sl) { snprintf(r.value, sizeof r.value, "#%u", (unsigned)sl); r.valCol = Theme::CYAN; }
+        else    { snprintf(r.value, sizeof r.value, "AUTO"); r.valCol = dim(Theme::WHITE, 150); }
+        snprintf(r.hint, sizeof r.hint, "%s MHz  TAP TO TYPE 1-%u", mhz,
+                 (unsigned)Lora::mtSlotCount(Settings::loraMtRegion(), Settings::loraMtPreset()));
+    }
+    {
+        Row& r = add(MT_KEY, "CHANNEL KEY");
+        r.editable = true;
+        if (!Settings::loraMtKeyCustom()) {
+            snprintf(r.value, sizeof r.value, "DEFAULT");
+            r.valCol = dim(Theme::WHITE, 150);
+            snprintf(r.hint, sizeof r.hint, "THE PUBLISHED KEY. TAP TO CHANGE");
+        } else if (!Settings::loraMtKeyLen()) {
+            snprintf(r.value, sizeof r.value, "NONE");
+            r.valCol = Theme::AMBER;
+            snprintf(r.hint, sizeof r.hint, "IN THE CLEAR. TAP TO CHANGE");
+        } else {
+            uint8_t k[16];
+            Settings::loraMtKey(k);
+            snprintf(r.value, sizeof r.value, "CUSTOM");
+            r.valCol = Theme::GREEN;
+            snprintf(r.hint, sizeof r.hint, "%s. TAP TO CHANGE", b64Preview(k, 16));
+        }
     }
     {
         Row& r = add(TX, "TX POWER");
@@ -202,6 +270,93 @@ void buildMain() {
         Row& r = add(ANNOUNCE, "ANNOUNCE NAME");
         onOff(r, Settings::loraAnnounce());
         snprintf(r.hint, sizeof r.hint, Settings::loraAnnounce() ? "NODEINFO BEFORE THE FIRST TEXT" : "MESHTASTIC SEES A NUMBER");
+    }
+    {
+        // Only the two a handheld can honestly be. The routing roles are not here.
+        Row& r = add(ROLE, "ROLE");
+        const bool mute = Settings::loraRole() != 0;
+        snprintf(r.value, sizeof r.value, "%s", mute ? "CLIENT_MUTE" : "CLIENT");
+        r.valCol = mute ? Theme::AMBER : Theme::CYAN;
+        snprintf(r.hint, sizeof r.hint, mute ? "TELLS THE MESH NOT TO RELAY FOR US" : "A NORMAL MESHTASTIC CLIENT");
+    }
+    {
+        Row& r = add(OKMQTT, "OK TO MQTT");
+        onOff(r, Settings::loraOkMqtt());
+        snprintf(r.hint, sizeof r.hint, Settings::loraOkMqtt() ? "GATEWAYS MAY SHARE OUR PACKETS ONLINE" : "ASKS GATEWAYS NOT TO UPLOAD US");
+    }
+
+
+    section("POSITION");
+    {
+        Row& r = add(P_ON, "SHARE POSITION");
+        onOff(r, Settings::posShare());
+        const bool fix = Gnss::fresh(millis());
+        snprintf(r.hint, sizeof r.hint, fix ? "GPS HAS A FIX. SENT ON THE PRIMARY" : "NO GPS FIX YET: NOTHING SENDS");
+        if (Settings::posShare() && !fix) r.valCol = Theme::AMBER;
+    }
+    {
+        Row& r = add(P_INT, "INTERVAL");
+        r.dim = !Settings::posShare();
+        spanText(r.value, sizeof r.value, Settings::posIntervalSecs());
+        snprintf(r.hint, sizeof r.hint, "AT LEAST THIS OFTEN (15 MIN = STOCK)");
+    }
+    {
+        Row& r = add(P_SMART, "SMART POSITION");
+        r.dim = !Settings::posShare();
+        onOff(r, Settings::posSmart());
+        snprintf(r.hint, sizeof r.hint, "ALSO SEND WHEN YOU HAVE MOVED");
+    }
+    {
+        Row& r = add(P_DIST, "  MOVED FURTHER THAN");
+        r.dim = !Settings::posShare() || !Settings::posSmart();
+        const uint16_t m = Settings::posSmartMeters();
+        if (m >= 1000) snprintf(r.value, sizeof r.value, "%u km", (unsigned)(m / 1000));
+        else           snprintf(r.value, sizeof r.value, "%u m", (unsigned)m);
+        snprintf(r.hint, sizeof r.hint, "100 M = STOCK");
+    }
+    {
+        Row& r = add(P_MIN, "  BUT NOT SOONER THAN");
+        r.dim = !Settings::posShare() || !Settings::posSmart();
+        spanText(r.value, sizeof r.value, Settings::posSmartMinSecs());
+        snprintf(r.hint, sizeof r.hint, "30 S = STOCK");
+    }
+    {
+        Row& r = add(P_PREC, "PRECISION");
+        r.dim = !Settings::posShare();
+        switch (Settings::posPrecision()) {
+            case 32: snprintf(r.value, sizeof r.value, "EXACT"); r.valCol = Theme::AMBER; break;
+            case 19: snprintf(r.value, sizeof r.value, "~45 m"); break;
+            case 16: snprintf(r.value, sizeof r.value, "~364 m"); break;
+            case 13: snprintf(r.value, sizeof r.value, "~2.9 km"); break;
+            default: snprintf(r.value, sizeof r.value, "~23 km"); break;
+        }
+        snprintf(r.hint, sizeof r.hint, "HOW CLOSELY THE MESH SEES YOU");
+    }
+
+    section("TELEMETRY");
+    {
+        Row& r = add(T_ON, "SHARE TELEMETRY");
+        onOff(r, Settings::telShare());
+        snprintf(r.hint, sizeof r.hint, "BATTERY, UPTIME, AIRTIME. PRIMARY");
+    }
+    {
+        Row& r = add(T_INT, "INTERVAL");
+        r.dim = !Settings::telShare();
+        spanText(r.value, sizeof r.value, Settings::telIntervalSecs());
+        snprintf(r.hint, sizeof r.hint, "30 MIN = STOCK");
+    }
+
+    section("NEIGHBOR INFO");
+    {
+        Row& r = add(N_ON, "SHARE NEIGHBORS");
+        onOff(r, Settings::nbrShare());
+        snprintf(r.hint, sizeof r.hint, Settings::loraMtKeyCustom() ? "NODES WE HEAR DIRECTLY. PRIMARY" : "BEST ON A PRIVATE CHANNEL KEY");
+    }
+    {
+        Row& r = add(N_INT, "INTERVAL");
+        r.dim = !Settings::nbrShare();
+        spanText(r.value, sizeof r.value, Settings::nbrIntervalSecs());
+        snprintf(r.hint, sizeof r.hint, "6 H = STOCK, 4 H IS THE MINIMUM");
     }
 
     section("CHATS");
@@ -345,6 +500,8 @@ bool editOn(const Row& r) {
     switch (s_edit) {
         case Edit::NAME:      return r.id == NAME;
         case Edit::SHORTNAME: return r.id == SHORTNAME;
+        case Edit::MT_SLOT:   return r.id == MT_SLOT;
+        case Edit::MT_KEY:    return r.id == MT_KEY;
         case Edit::CH_NAME:
         case Edit::CH_KEY:    return r.id == (s_addProto == Lora::Proto::MESHCORE ? ADD_MC : ADD_MT);
         default:              return false;
@@ -363,7 +520,7 @@ void drawPill(TFT_eSPI& t, int y, const char* v, uint16_t col) {
 int pillX(TFT_eSPI& t, const char* v) { t.setTextFont(1); t.setTextSize(1); return PILL_R - (t.textWidth(v) + 12); }
 
 void drawEditLine(TFT_eSPI& t, const Row& r, int y) {
-    const char* lab = s_edit == Edit::CH_NAME ? "NAME" : s_edit == Edit::CH_KEY ? "KEY" : r.label;
+    const char* lab = s_edit == Edit::CH_NAME ? "NAME" : s_edit == Edit::CH_KEY ? "KEY" : s_edit == Edit::MT_SLOT ? "SLOT" : s_edit == Edit::MT_KEY ? "KEY" : r.label;
     t.setTextFont(1); t.setTextSize(1);
     const uint16_t acc = s_edit == Edit::CH_NAME || s_edit == Edit::CH_KEY
                          ? (s_addProto == Lora::Proto::MESHCORE ? Theme::PINK : Theme::CYAN) : Theme::VAPOR_YELLOW;
@@ -380,8 +537,20 @@ void drawEditLine(TFT_eSPI& t, const Row& r, int y) {
     switch (s_edit) {
         case Edit::NAME:      snprintf(hint, sizeof hint, "ENTER SAVES. EMPTY = %s", Squachy::nickname() && *Squachy::nickname() ? "THE NICKNAME" : "SQUACHY"); break;
         case Edit::SHORTNAME: snprintf(hint, sizeof hint, "UP TO 4. ENTER SAVES. EMPTY = DEFAULT"); break;
+        case Edit::MT_SLOT:   snprintf(hint, sizeof hint, "SLOT NUMBER. ENTER SAVES. EMPTY = AUTO"); break;
+        case Edit::MT_KEY: {
+            // What Enter would save, as it is typed: "PSK 77: DEFAULT KEY +76".
+            char d[40];
+            Meshtastic::describePrimaryKey(s_buf, d, sizeof d);
+            snprintf(hint, sizeof hint, "%s", d);
+            break;
+        }
         case Edit::CH_NAME:   snprintf(hint, sizeof hint, s_addProto == Lora::Proto::MESHCORE ? "#TAG OR A NAME, THEN ENTER" : "THE CHANNEL'S NAME, THEN ENTER"); break;
-        default:              snprintf(hint, sizeof hint, s_addProto == Lora::Proto::MESHCORE ? "HEX KEY; EMPTY FOR A #TAG. ENTER" : "BASE64 KEY, THEN ENTER"); break;
+        default:
+            if (s_addProto == Lora::Proto::MESHCORE) { snprintf(hint, sizeof hint, "HEX KEY; EMPTY FOR A #TAG. ENTER"); break; }
+            if (!s_buf[0]) { snprintf(hint, sizeof hint, "KEY: PSK77, DEFAULT, BASE64 OR HEX. ENTER"); break; }
+            { char d[40]; Meshtastic::describePrimaryKey(s_buf, d, sizeof d); snprintf(hint, sizeof hint, "%s", d); }
+            break;
     }
     small(t, 10, y + 17, hint, dim(Theme::WHITE, 150), Theme::BG);
 }
@@ -481,8 +650,17 @@ uint8_t editMax() {
         case Edit::NAME:      return (uint8_t)Lora::MyName::NAME_LEN;
         case Edit::SHORTNAME: return (uint8_t)Lora::MyName::SHORT_LEN;
         case Edit::CH_NAME:   return 23;
+        case Edit::MT_SLOT:   return 3;
         default:              return 80;
     }
+}
+
+// After the region, preset, slot or key changed: the band plan and the
+// decoder follow, the radio is re-tuned, and the mesh hears the name again.
+void retuneMeshtastic() {
+    Lora::Chan::applyMeshtastic();
+    Lora::applyListen(Settings::loraListen());
+    Lora::identityChanged();
 }
 
 void commitEdit() {
@@ -499,6 +677,35 @@ void commitEdit() {
             status(Settings::loraShortName()[0] ? "SHORT NAME SAVED" : "SHORT NAME BACK TO THE DEFAULT");
             cancelEdit();
             break;
+        case Edit::MT_SLOT: {
+            const unsigned want = (unsigned)atoi(s_buf);
+            const uint16_t n = Lora::mtSlotCount(Settings::loraMtRegion(), Settings::loraMtPreset());
+            if (s_buf[0] && (want < 1 || want > n)) { char m[40]; snprintf(m, sizeof m, "SLOT 1 TO %u", (unsigned)n); status(m); return; }
+            Settings::setLoraMtSlot(s_buf[0] ? (uint8_t)want : 0);
+            retuneMeshtastic();
+            status(s_buf[0] ? "SLOT SAVED, RADIO RE-TUNED" : "SLOT BACK TO AUTO");
+            cancelEdit();
+            break;
+        }
+        case Edit::MT_KEY: {
+            if (!s_buf[0]) {
+                Settings::setLoraMtKey(nullptr, 0);
+                status("CHANNEL KEY BACK TO THE DEFAULT");
+            } else {
+                uint8_t key[16], len = 0;
+                if (!Meshtastic::parsePrimaryKey(s_buf, key, len)) { status("BAD KEY (DEFAULT, PSK77, OR 16 BYTES B64/HEX)"); return; }
+                uint8_t def[16];
+                Meshtastic::expandPsk(1, def);
+                if (len == 16 && !memcmp(key, def, 16)) Settings::setLoraMtKey(nullptr, 0);
+                else                                    Settings::setLoraMtKey(key, len);
+                status(len ? "CHANNEL KEY SAVED" : "CHANNEL KEY: NONE, IN THE CLEAR");
+                memset(key, 0, sizeof key);
+            }
+            memset(s_buf, 0, sizeof s_buf);
+            retuneMeshtastic();
+            cancelEdit();
+            break;
+        }
         case Edit::CH_NAME: {
             // Spaces end a name on the console (LORA CHAN MT <name> <key>), so
             // they are not part of one here either.
@@ -538,6 +745,15 @@ void tapRow(const Row& r) {
             Lora::applyListen(Settings::loraListen());
             break;
         case PRESET:   uiLoraSettingsNextPreset(); break;
+        case MT_REGION: {
+            const uint8_t g = Settings::loraMtRegion();
+            Settings::setLoraMtRegion(g >= Lora::mtRegionCount() ? 0 : (uint8_t)(g + 1));
+            Settings::setLoraMtSlot(0);       // slot numbers mean something else in another region
+            retuneMeshtastic();
+            break;
+        }
+        case MT_SLOT:  startEdit(Edit::MT_SLOT, Settings::loraMtSlot() ? (snprintf(s_addName, sizeof s_addName, "%u", (unsigned)Settings::loraMtSlot()), s_addName) : ""); break;
+        case MT_KEY:   startEdit(Edit::MT_KEY, ""); break;      // never shows the key it replaces
         case TX:       Settings::cycleLoraTx(); break;
         case HOPS:     Settings::cycleLoraHops(); break;
         case REGION: {
@@ -552,6 +768,18 @@ void tapRow(const Row& r) {
             Settings::toggleLoraAnnounce();
             if (Settings::loraAnnounce()) Lora::identityChanged();
             break;
+        case P_ON:     Settings::togglePosShare(); break;
+        case P_INT:    Settings::cyclePosInterval(); break;
+        case P_SMART:  Settings::togglePosSmart(); break;
+        case P_DIST:   Settings::cyclePosSmartMeters(); break;
+        case P_MIN:    Settings::cyclePosSmartMinSecs(); break;
+        case P_PREC:   Settings::cyclePosPrecision(); break;
+        case T_ON:     Settings::toggleTelShare(); break;
+        case T_INT:    Settings::cycleTelInterval(); break;
+        case N_ON:     Settings::toggleNbrShare(); break;
+        case N_INT:    Settings::cycleNbrInterval(); break;
+        case ROLE:     Settings::toggleLoraRole(); Lora::identityChanged(); break;
+        case OKMQTT:   Settings::toggleLoraOkMqtt(); Meshtastic::setOkToMqtt(Settings::loraOkMqtt()); break;
         case MSGSOUND: Settings::toggleLoraMsgSound(); break;
         case DETECT:   Settings::cycleLoraDetect(); break;
         case ONSCREEN: Settings::toggleLoraAlerts(); break;
@@ -595,17 +823,22 @@ void tapRow(const Row& r) {
 
 // ---- the API -------------------------------------------------------------------------
 void uiLoraSettingsNextPreset() {
-    uint8_t rows[24];
-    const uint8_t n = Lora::meshPresetRows(Lora::Proto::MESHTASTIC, rows, 24);
-    if (!n) return;
+    // Round the ten Meshtastic presets, skipping any too wide for the region.
+    const uint8_t n = Lora::mtPresetCount();
     const int16_t cur = Lora::meshPresetFind(Lora::Proto::MESHTASTIC, Settings::loraMtPreset());
-    uint8_t k = 0;
-    for (uint8_t i = 0; i < n; i++) if (rows[i] == cur) { k = (uint8_t)((i + 1) % n); break; }
-    const Lora::Profile& p = Lora::profile(rows[k]);
-    Settings::setLoraMtPreset(strncmp(p.name, "MT ", 3) == 0 ? p.name + 3 : p.name);
+    const char* curName = cur >= 0 ? Lora::profile((uint8_t)cur).name : "";
+    if (strncmp(curName, "MT ", 3) == 0) curName += 3;
+    uint8_t at = 0;
+    for (uint8_t i = 0; i < n; i++) if (!strcasecmp(Lora::mtPresetName(i), curName)) { at = i; break; }
+    for (uint8_t k = 1; k <= n; k++) {
+        const uint8_t j = (uint8_t)((at + k) % n);
+        if (!Lora::mtPresetFits(Settings::loraMtRegion(), j)) continue;
+        Settings::setLoraMtPreset(Lora::mtPresetName(j));
+        Settings::setLoraMtSlot(0);       // a slot number belongs to one preset's bandwidth
+        break;
+    }
     // Re-tuned now, and the new mesh hears the name before the first text.
-    Lora::applyListen(Settings::loraListen());
-    Lora::identityChanged();
+    retuneMeshtastic();
 }
 
 const char* uiLoraMyName() {

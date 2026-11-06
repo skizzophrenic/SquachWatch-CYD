@@ -1656,7 +1656,14 @@ static void tdeckKeysTick(uint32_t now) {
     if (Wire.requestFrom((int)TDECK_KBD, 1) != 1) return;
     const uint8_t k = (uint8_t)Wire.read();
     if (k == 0 || k == 0x0C) return;             // nothing, or alt+C (its own)
-    const char c = k == 0x0D ? '\n' : k == 0x08 ? '\b' : (char)k;
+    // SHIFT+$ comes back from the helper chip as 0x04, which no screen has any
+    // use for: it types the "=" the LoRa channel keys end in. (SYM+$ cannot be
+    // used: the chip answers 0x00 for it, the same byte as "no key".) Any other
+    // byte it sends that no screen can use is logged, so a key that does
+    // nothing can be looked up.
+    char c = k == 0x0D ? '\n' : k == 0x08 ? '\b' : (char)k;
+    if (k == 0x04) c = '=';
+    else if (k >= 0x7F || (k < 0x20 && k != 0x0D && k != 0x08)) Serial.printf("[kbd] key 0x%02X has no mapping\n", (unsigned)k);
     if (state == AppState::WIFI_PASS) uiWifiPassKey(c, now);
 #if SQUACH_MESH
     else if (state == AppState::PHONE) uiPhoneKey(c);
@@ -3216,6 +3223,13 @@ static uint8_t boardBatteryPct(uint16_t mv) {
     for (uint8_t i = 1; i < sizeof MV / sizeof MV[0]; i++)
         if (mv <= MV[i]) return (uint8_t)(PCT[i-1] + (uint32_t)(PCT[i] - PCT[i-1]) * (mv - MV[i-1]) / (MV[i] - MV[i-1]));
     return 100;
+}
+// For the LoRa telemetry: the cell's millivolts and percent, false with no cell.
+bool boardBatteryMvPct(uint16_t& mv, uint8_t& pct) {
+    mv = boardBatteryMv();
+    if (mv < 2500) return false;
+    pct = boardBatteryPct(mv);
+    return true;
 }
 // The SYSTEM page's BATTERY row: "81% 4.12V". Under 2.5 V there is no cell on
 // the connector at all (the divider just floats), and it says so.

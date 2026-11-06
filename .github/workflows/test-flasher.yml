@@ -1,0 +1,156 @@
+name: Test flasher (build a board, flash it from the browser)
+
+# Builds one board from whichever branch you pick and publishes it on the real
+# web flasher (web-flasher/index.html, from that branch), under its ?lab=1
+# "TEST BUILDS" list, so an unmerged branch can be flashed from the browser. It
+# never touches release-flasher.yml, and the page's hit counter is switched off.
+#
+# The page lives on the gh-pages branch and is served by GitHub Pages from
+# there. One-time setup, in the repository's Settings > Pages:
+#     Source: Deploy from a branch, Branch: gh-pages, folder: / (root)
+# (That is the other choice from "GitHub Actions", which the release flasher's
+# deploy uses; a repository serves Pages from one source at a time.)
+#
+# Each board keeps its latest test build on the page; a new run for the same
+# board replaces it, and the page itself is the one from the branch just built.
+# gh-pages is rewritten as a single commit every time, so it does not grow.
+on:
+  workflow_dispatch:
+    inputs:
+      board:
+        description: "Which board to build"
+        type: choice
+        default: tdeck-plus
+        options:
+          - tdeck-plus
+          - twatch-s3
+          - cyd
+          - cyd-ili9341
+          - cyd-fast
+          - cyd-ili9341-fast
+          - cyd35-fast
+          - cyd35c-fast
+          - cyd32c
+          - awok
+          - rlphantom-r
+          - freenove32
+          - freenove-s3
+          - freenove-s3-40mhz
+          - freenove-s3-35
+          - crowpanel7
+          - sticks3
+          - cardputer-adv
+          - nm-cyd-c5
+          - marauder-v8
+          - tab5
+
+permissions:
+  contents: write   # to push the gh-pages branch
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"   # pioarduino (C5, P4) refuses newer
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ inputs.board }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-${{ inputs.board }}-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build
+        env:
+          BOARD: ${{ inputs.board }}
+        run: pio run -e "$BOARD"
+
+      - name: Make the page files
+        env:
+          BOARD: ${{ inputs.board }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -e
+          # The chip and where its bootloader sits, as release-flasher.yml's
+          # manifests have them.
+          case "$BOARD" in
+            cyd|cyd-ili9341|cyd-fast|cyd-ili9341-fast|cyd35-fast|cyd35c-fast|cyd32c|awok|rlphantom-r|freenove32)
+              CHIP=ESP32; BOOT=0x1000 ;;
+            nm-cyd-c5|marauder-v8)
+              CHIP=ESP32-C5; BOOT=0x2000 ;;
+            tab5)
+              CHIP=ESP32-P4; BOOT=0x2000 ;;
+            *)
+              CHIP=ESP32-S3; BOOT=0x0 ;;
+          esac
+          OUT="out/$BOARD"
+          mkdir -p "$OUT"
+          cp ".pio/build/$BOARD/bootloader.bin" ".pio/build/$BOARD/partitions.bin" ".pio/build/$BOARD/firmware.bin" "$OUT/"
+          cp "$(find ~/.platformio/packages -path '*framework-arduinoespressif32*/tools/partitions/boot_app0.bin' | head -1)" "$OUT/boot_app0.bin"
+          SHA="$(git rev-parse --short HEAD)"
+          python tools/test_flasher.py manifest "$OUT" "$CHIP" "$BOOT" "$BOARD" "$REF_NAME" "$SHA"
+          ls -l "$OUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-flasher-${{ inputs.board }}
+          path: out/${{ inputs.board }}/
+          retention-days: 3
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # One publisher at a time: two boards finishing together must not race
+    # over gh-pages. Queued, never cancelled.
+    concurrency:
+      group: test-flasher-publish
+      cancel-in-progress: false
+    steps:
+      - name: Check out (for the page script)
+        uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: test-flasher-${{ inputs.board }}
+          path: new
+
+      - name: Update the gh-pages branch
+        env:
+          BOARD: ${{ inputs.board }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -e
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          if git ls-remote --exit-code --heads "$REMOTE" gh-pages >/dev/null 2>&1; then
+            git clone --quiet --depth 1 --branch gh-pages "$REMOTE" site
+          else
+            mkdir site
+          fi
+          # This board's previous test build goes; the other boards' stay.
+          rm -rf site/builds site/index.html
+          # Exact names: "lab-cyd-*" would also match cyd-fast's and cyd-ili9341's.
+          rm -f "site/manifest-lab-$BOARD.json"
+          for part in bootloader partitions boot_app0 firmware; do rm -f "site/lab-$BOARD-$part.bin"; done
+          cp new/* site/
+          # The real web flasher, from the branch just built.
+          python tools/test_flasher.py page web-flasher site
+          touch site/.nojekyll
+          cd site
+          rm -rf .git
+          git init --quiet -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit --quiet -m "Test build: $BOARD"
+          git push --quiet --force "$REMOTE" gh-pages
+          echo "Published. Page: https://${REPO%%/*}.github.io/${REPO#*/}/" >> "$GITHUB_STEP_SUMMARY"

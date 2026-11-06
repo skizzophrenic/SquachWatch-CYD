@@ -102,6 +102,11 @@ uint8_t     txPick(Proto p, const char* mtPrimary);
 uint8_t     txStep(Proto p, const char* mtPrimary);
 // A stored pick whose channel is no longer in the list goes back to "".
 void        txPrune();
+// Pushes the LORA SETTINGS page's Meshtastic region, preset, frequency slot and
+// default-channel key into the band plan (Lora::setMeshtasticOverride) and the
+// decoder (Meshtastic::setPrimaryKey). Run at boot -- restore() does -- and
+// after any of the four changes; follow it with Lora::applyListen() to re-tune.
+void        applyMeshtastic();
 // Meshtastic's own preset channel from the MESHTASTIC PRESET setting and the
 // band plan ("LongFast" when the plan has no such preset), and the calls above
 // with it filled in -- what the screens use.

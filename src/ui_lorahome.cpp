@@ -9,6 +9,7 @@
 #if (SQUACH_LORA && defined(TDECK_PLUS)) || SQUACH_LORA_FAKE
 #include "ui_lorahome.h"
 #include "ui_lorachat.h"
+#include "emoji_cp.h"
 #include "ui_lorasettings.h"
 #include "lora_sniffer.h"
 #include "lora_profiles.h"
@@ -112,8 +113,16 @@ void drawHeader(TFT_eSPI& t, uint32_t now) {
     snprintf(line, sizeof line, "LORA  %s  %u NODES",
              Settings::loraListen() == 3 ? "BOTH" : Settings::loraListen() == 2 ? "MESHCORE" : "MESHTASTIC", (unsigned)nodes);
     t.setTextFont(1); t.setTextSize(1);
-    small(t, (t.width() - t.textWidth(line)) / 2, 3, line, Theme::WHITE);
-    if (Lora::mode() != Lora::Mode::OFF && (now / 600) % 2) small(t, 60, 3, "LIVE", Theme::GREEN);
+    const int titleX = (t.width() - t.textWidth(line)) / 2;
+    small(t, titleX, 3, line, Theme::WHITE);
+    // LIVE sits at x 60, but the title is centred and grows with the listen name
+    // and the node count ("MESHTASTIC" and 39 nodes begins at x 82, and a third
+    // digit comes in further): it steps left to stay clear, no further than the
+    // settings icon.
+    int liveX = titleX - 6 - t.textWidth("LIVE");
+    if (liveX > 60) liveX = 60;
+    if (liveX < 24) liveX = 24;
+    if (Lora::mode() != Lora::Mode::OFF && (now / 600) % 2) small(t, liveX, 3, "LIVE", Theme::GREEN);
     // BACK in the top-right corner, away from the compose line's switch: at
     // the bottom it was a thumb's slip from MESHCORE (asked for 2026-10-15).
     small(t, t.width() - 6 - 54, 3, "[ BACK ]", Theme::PURPLE);
@@ -887,6 +896,7 @@ void drawChats(TFT_eSPI& t, uint32_t now) {
         const int tx = t.getCursorX() + 6;
         const int agoW = t.textWidth(ago);
         char text[64]; snprintf(text, sizeof text, "%s%s", c == 2 && r.mine ? "you: " : "", r.text);
+        Emoji::plain(text);
         size_t tn = strlen(text);
         while (tn && tx + t.textWidth(text) > 316 - 8 - agoW) text[--tn] = '\0';
         t.setTextColor(Theme::WHITE, bg); t.setCursor(tx, y + 1); t.print(text);

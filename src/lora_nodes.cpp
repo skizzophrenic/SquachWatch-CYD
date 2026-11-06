@@ -8,6 +8,7 @@
 #include "lora_profiles.h"
 #include "lora_survey.h"
 #include "lora_msgs.h"
+#include "lora_pb.h"
 #include "lora_names.h"
 #include <stdio.h>
 #include <string.h>
@@ -191,10 +192,17 @@ static void noteMeshCore(const Packet& pk, uint32_t now, uint32_t epoch) {
     // A GRP_DATA opened and did not: it is counted by noteChannelHeard above
     // and kept nowhere, which include/lora_msgs.h explains. The sender name is
     // a string the sender typed -- the frame carries no signature over it.
-    if (d.haveGroup)
+    if (d.haveGroup) {
+        // Shown folded to ASCII like Meshtastic's text (a newline would spill
+        // onto the next row; an emoji is a token or a tile), but keyed on what
+        // came over the air, which is what a relay's copy of our own send hashes.
+        char shown[sizeof d.grp.text];
+        memcpy(shown, d.grp.text, sizeof shown);
+        Pb::asciiFold(shown, true);
         Msgs::note(Proto::MESHCORE, d.channelIdx, MeshCore::TYPE_GRP_TXT, d.grp.sender, 0,
-                   d.grp.text, pk, now, flood && f.hops == 0, f.hops,
+                   shown, pk, now, flood && f.hops == 0, f.hops,
                    Msgs::meshCoreKey(d.grp.sender, d.grp.text, d.grp.timestamp));
+    }
     // Adverts name their sender in full. Everything else names only the
     // last relay (the path's newest hash) or a destination, which is not
     // the sender -- so those count against the relay's row, as relayed.

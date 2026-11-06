@@ -29,6 +29,10 @@
 #include "lora_myname.h"
 #include "lora_dm.h"
 #include "lora_mcdm.h"
+#include "emoji_cp.h"
+#include "lora_pb.h"
+#include "gnss.h"
+#include <math.h>
 #include "squachy.h"
 #include "clock.h"
 #include <Preferences.h>
@@ -42,6 +46,10 @@
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
+
+#if defined(TDECK_PLUS)
+bool boardBatteryMvPct(uint16_t& mv, uint8_t& pct);      // main.cpp, global
+#endif
 
 namespace Lora {
 
@@ -526,6 +534,7 @@ static void namesSave(uint32_t now) {
 static const char* DM_NS = "loradm";
 static void dmTick(uint32_t now);
 static void mcTick(uint32_t now);
+static void broadcastTick(uint32_t now);
 static uint32_t    s_dmKeysSavedAt = 0;
 
 static uint32_t myMeshtasticNum() { return 0x5A5A0000u | (uint32_t)(ESP.getEfuseMac() & 0xFFFF); }
@@ -586,7 +595,10 @@ static void mcOnText(uint32_t peer, const char* name, const MeshCore::DirectText
     pk.proto = Proto::MESHCORE; pk.ms = now;
     char who[32];
     if (name && name[0]) snprintf(who, sizeof who, "%s", name); else snprintf(who, sizeof who, "%08lx", (unsigned long)peer);
-    Msgs::noteDm(peer, false, 0, 0, who, t.text, pk, now, true, 0, Msgs::meshCoreKey(who, t.text, t.timestamp), Proto::MESHCORE);
+    char shown[sizeof t.text];                     // folded to ASCII for the screen; the key is of the raw text
+    memcpy(shown, t.text, sizeof shown);
+    Pb::asciiFold(shown, true);
+    Msgs::noteDm(peer, false, 0, 0, who, shown, pk, now, true, 0, Msgs::meshCoreKey(who, t.text, t.timestamp), Proto::MESHCORE);
     Serial.printf("[lora] MeshCore DM from %s: %s" "\n", who, t.text);
 }
 static void mcHook(const MeshCore::Decoded& d, uint32_t now) { McDm::onFrame(d, now); }
@@ -760,6 +772,7 @@ bool begin() {
         }
         setRegion(r == 2 ? REGION_US : REGION_EU);
         Serial.printf("[lora] band plan %s (%s)\n", regionName(), Settings::loraRegion() == 0 ? "from the time zone" : "set by LORA REGION");
+        Chan::applyMeshtastic();   // the override's row follows the band plan
     }
     uint64_t mask = 0;
     for (uint8_t i = 0; i < profileCount() && i < 64; i++)
@@ -774,6 +787,8 @@ bool begin() {
     // The watch (and the T-Deck) has no sysop screen: its one knob is which networks.
     applyListen(Settings::loraListen());
 #endif
+
+    Meshtastic::setOkToMqtt(Settings::loraOkMqtt());
 
     // Chan::restore() ran at the top of this function, which is also before
     // xTaskCreatePinnedToCore below - the task is the only thing that feeds
@@ -856,6 +871,7 @@ void tick(uint32_t now) {
     mcSave(now);
     dmTick(now);
     mcTick(now);
+    broadcastTick(now);
     enrichScan(now);
     // Starts a short-lived worker when there is something to ask and WiFi is
     // already up for another reason; does nothing at all otherwise.
@@ -941,8 +957,13 @@ static Meshtastic::Channel presetChannelKey(const Profile& prof) {
     Meshtastic::Channel c;
     memset(&c, 0, sizeof c);
     snprintf(c.name, sizeof c.name, "%s", presetChannel(prof));
-    Meshtastic::expandPsk(1, c.key);
-    c.keyLen = 16;
+    if (Settings::loraMtKeyCustom()) {                // LORA SETTINGS' CHANNEL KEY
+        Settings::loraMtKey(c.key);
+        c.keyLen = Settings::loraMtKeyLen();
+    } else {
+        Meshtastic::expandPsk(1, c.key);
+        c.keyLen = 16;
+    }
     c.hash = Meshtastic::channelHash(c.name, c.key, 16);
     c.enabled = true;
     return c;
@@ -962,7 +983,11 @@ static uint16_t meshtasticFrame(uint8_t port, const uint8_t* payload, size_t ple
 
 // The sniffer parked, the preset applied, the frame out, and back to whatever
 // the radio was doing.
+static uint32_t s_txAirMs = 0;
 static bool transmitOn(const Profile& prof, const uint8_t* f, uint16_t n, int8_t dbm) {
+    // A Meshtastic region below the module's band (EU_433 and friends) is
+    // listen-only: see docs/LORA.md section 1.
+    if (prof.flags & PF_433) { Serial.println("[lora] send refused: this region is below the module's band"); return false; }
     const Mode was = s_mode;
     s_parked = false;
     setMode(Mode::OFF);
@@ -971,6 +996,8 @@ static bool transmitOn(const Profile& prof, const uint8_t* f, uint16_t n, int8_t
     const bool ok = LoraRadio::transmit(f, (uint8_t)n, dbm);
     LoraRadio::standby();
     setMode(was);
+    // Our own airtime, for the telemetry's AirUtilTX (16 preamble symbols, CRC on).
+    if (ok) s_txAirMs += timeOnAirUs(prof.sf, prof.bwKhz10, 5, 16, (uint8_t)n, true, false, false) / 1000;
     return ok;
 }
 
@@ -1014,7 +1041,14 @@ static size_t ourUser(const char* name, uint8_t* user /* room for 120 */) {
     user[u++] = 0x0A; user[u++] = (uint8_t)strlen(idStr); memcpy(user + u, idStr, strlen(idStr)); u += strlen(idStr);
     user[u++] = 0x12; user[u++] = (uint8_t)ln;          memcpy(user + u, name, ln);              u += ln;
     user[u++] = 0x1A; user[u++] = (uint8_t)sn;          memcpy(user + u, shortName, sn);         u += sn;
+#if defined(TDECK_PLUS)
+    // hw_model 50, T_DECK: Meshtastic has one model for the LilyGo T-Deck and the
+    // T-Deck Plus (the Plus is the same board with a GPS and a battery).
+    user[u++] = 0x28; user[u++] = 0x32;
+#else
     user[u++] = 0x28; user[u++] = 0xFF; user[u++] = 0x01;   // hw_model 255, PRIVATE_HW
+#endif
+    if (Settings::loraRole()) { user[u++] = 0x38; user[u++] = Settings::loraRole(); }   // role: CLIENT_MUTE (CLIENT is the default, left out)
     if (Dm::ready()) { user[u++] = 0x42; user[u++] = 32; memcpy(user + u, Dm::publicKey(), 32); u += 32; }   // public_key
     return u;
 }
@@ -1038,8 +1072,129 @@ static void announceIfDue(const Profile& prof, const char* name, int8_t dbm) {
     vTaskDelay(pdMS_TO_TICKS(400));
 }
 
+// ---- what this board says about itself: position and telemetry ---------------------
+// The official client's Position and Device Telemetry broadcasts, on the primary
+// channel. Neither goes without its switch on LORA SETTINGS, and the position
+// needs the board's own GPS to have a fresh fix. SMART POSITION sends early when
+// the board has moved far enough and long enough has passed (the firmware's
+// smart_position_min_distance / min_interval_secs), on top of the plain interval.
+static uint32_t s_posAt = 0, s_posRetry = 0, s_telAt = 0, s_telRetry = 0;
+static int32_t  s_posLat = 0, s_posLon = 0;
+static uint32_t s_telRxAir = 0, s_telTxAir = 0;
+static uint32_t s_nbrAt = 0, s_nbrRetry = 0;
+
+static float metresBetween(int32_t la1, int32_t lo1, int32_t la2, int32_t lo2) {
+    const float dy = (float)(la2 - la1) * 0.011132f;                       // 1e-7 degree is 1.1132 cm
+    const float dx = (float)(lo2 - lo1) * 0.011132f * cosf((float)la1 * 1e-7f * 0.0174533f);
+    return sqrtf(dx * dx + dy * dy);
+}
+
+static bool sendOwn(uint8_t port, const uint8_t* payload, size_t n, const char* what) {
+    uint8_t idx = 0;
+    if (!s_present || !Settings::loraTxDbm() || !meshProfile(Proto::MESHTASTIC, idx)) return false;
+    const Profile& prof = profile(idx);
+    int8_t dbm = (int8_t)Settings::loraTxDbm();
+    if (prof.group == PG_MESH_EU && dbm > 14) dbm = 14;
+    announceIfDue(prof, MyName::longName(Settings::loraName(), Squachy::nickname()), dbm);
+    uint8_t f[256]; uint32_t id = 0;
+    const uint16_t len = meshtasticFrame(port, payload, n, f, id, presetChannelKey(prof));
+    if (!len) return false;
+    const bool ok = transmitOn(prof, f, len, dbm);
+    Serial.printf("[lora] %s sent on %s: %s\n", what, prof.name, ok ? "ok" : "FAILED");
+    return ok;
+}
+
+// The Meshtastic nodes heard directly -- a frame of their own, not a relayed copy
+// -- within two intervals, the ten most recent, with the SNR they were heard at.
+static uint8_t directNeighbors(uint32_t now, uint32_t windowMs, uint32_t* ids, float* snr, uint32_t* seen) {
+    static Nodes::Node rows[8];
+    uint8_t n = 0;
+    for (uint8_t page = 0; ; ) {
+        const uint8_t got = nodeSnapshot(rows, (uint8_t)(sizeof rows / sizeof rows[0]), page);
+        for (uint8_t i = 0; i < got; i++) {
+            const Nodes::Node& r = rows[i];
+            if (r.proto != Proto::MESHTASTIC || !r.directPackets || r.rssi <= -200) continue;
+            if (r.id == myMeshtasticNum() || now - r.lastMs > windowMs) continue;
+            // Keep the ten most recent: replace the oldest held when full.
+            uint8_t at = n;
+            if (n == 10) {
+                at = 0;
+                for (uint8_t k = 1; k < n; k++) if (seen[k] < seen[at]) at = k;
+                if (seen[at] >= r.lastMs) continue;
+            } else n++;
+            ids[at] = (uint32_t)r.id; snr[at] = r.snr4 / 4.0f; seen[at] = r.lastMs;
+        }
+        if (got < sizeof rows / sizeof rows[0]) break;
+        page = (uint8_t)(page + got);
+    }
+    return n;
+}
+
+static void broadcastTick(uint32_t now) {
+    if (now < 20000) return;                                        // the boot is busy; nothing urgent
+    if (Settings::nbrShare() && now >= s_nbrRetry &&
+        (s_nbrAt ? now - s_nbrAt >= Settings::nbrIntervalSecs() * 1000u : now > 180000)) {   // a first look after three minutes of listening
+        uint32_t ids[10], seen[10];
+        float snr[10];
+        const uint8_t n = directNeighbors(now, Settings::nbrIntervalSecs() * 2000u, ids, snr, seen);
+        if (!n) {
+            s_nbrRetry = now + 600000;                              // nobody to name yet; look again in ten minutes
+        } else {
+            uint8_t p[160];
+            const uint32_t me = myMeshtasticNum();
+            const size_t len = Meshtastic::encodeNeighborInfo(me, me, Settings::nbrIntervalSecs(), ids, snr, n, p);
+            if (len && sendOwn((uint8_t)Meshtastic::PORT_NEIGHBORINFO, p, len, "neighbor info")) s_nbrAt = now;
+            else s_nbrRetry = now + 30000;
+        }
+    }
+    if (Settings::posShare() && Gnss::fresh(now) && !Gnss::faked() && now >= s_posRetry) {
+        const Gnss::Fix& g = Gnss::fix();
+        bool due = !s_posAt || now - s_posAt >= Settings::posIntervalSecs() * 1000u;
+        if (!due && Settings::posSmart() && now - s_posAt >= Settings::posSmartMinSecs() * 1000u &&
+            metresBetween(s_posLat, s_posLon, g.lat7, g.lon7) >= (float)Settings::posSmartMeters())
+            due = true;
+        if (due) {
+            uint8_t p[40];
+            const uint32_t epoch = g.epoch ? g.epoch : (Clock::trusted() ? Clock::nowEpoch() : 0);
+            const size_t n = Meshtastic::encodePosition(g.lat7, g.lon7, g.altM, true, epoch, g.used, Settings::posPrecision(), p);
+            if (n && sendOwn((uint8_t)Meshtastic::PORT_POSITION, p, n, "position")) {
+                s_posAt = now; s_posLat = g.lat7; s_posLon = g.lon7;
+            } else {
+                s_posRetry = now + 30000;                           // TX off, no preset, or the air was busy
+            }
+        }
+    }
+    if (Settings::telShare() && now >= s_telRetry && (s_telAt ? now - s_telAt >= Settings::telIntervalSecs() * 1000u : now > 60000)) {
+        uint16_t mv = 0;
+        uint8_t pct = 101;                                          // 101: powered, no battery to report
+#if defined(TDECK_PLUS)
+        uint8_t bp = 0;
+        if (::boardBatteryMvPct(mv, bp)) pct = bp; else mv = 0;
+        // On the cable the pin shows the charger's rail (4.45 V on the bench), above
+        // anything a cell reaches alone (4.2 V): say "powered", as Meshtastic does.
+        if (mv > 4250) pct = 101;
+#endif
+        const uint32_t win = s_telAt ? now - s_telAt : now;
+        const uint32_t rx = s_stats.airtimeMs - s_telRxAir, tx = s_txAirMs - s_telTxAir;
+        const float chan = win ? (float)rx * 100.0f / (float)win : 0.0f;
+        const float air  = win ? (float)tx * 100.0f / (float)win : 0.0f;
+        uint8_t p[56];
+        const uint32_t epoch = Clock::trusted() ? Clock::nowEpoch() : 0;
+        const size_t n = Meshtastic::encodeDeviceTelemetry(epoch, pct, mv / 1000.0f, chan > 100 ? 100 : chan, air > 100 ? 100 : air, now / 1000, p);
+        if (n && sendOwn((uint8_t)Meshtastic::PORT_TELEMETRY, p, n, "telemetry")) {
+            s_telAt = now; s_telRxAir = s_stats.airtimeMs; s_telTxAir = s_txAirMs;
+        } else {
+            s_telRetry = now + 30000;
+        }
+    }
+}
+
 bool sendText(Proto p, const char* name, const char* text, int8_t dbm, int16_t chan) {
     if (!s_present || !text || !*text || !name) return false;
+    // The compose line holds emoji as two-byte tokens (emoji_cp.h); the air gets
+    // UTF-8, the chat keeps the tokens so it draws the sprite.
+    char wire[300];
+    Emoji::expand(text, wire, sizeof wire);
     if (p != Proto::MESHCORE && p != Proto::MESHTASTIC) return false;
     uint8_t idx = 0;
     if (!meshProfile(p, idx)) return false;
@@ -1066,7 +1221,7 @@ bool sendText(Proto p, const char* name, const char* text, int8_t dbm, int16_t c
         snprintf(chName, sizeof chName, "%s", ch.name);
         const uint32_t stamp = Clock::trusted() ? Clock::nowEpoch() : 1790000000u;
         MeshCore::GroupText g;
-        n = MeshCore::sealGroupText(ch, stamp, name, text, f, &g);
+        n = MeshCore::sealGroupText(ch, stamp, name, wire, f, &g);
         if (!n) return false;
         // What a relay's copy decodes to: the name, the text as it fitted, the stamp.
         key = Lora::Msgs::meshCoreKey(g.sender, g.text, g.timestamp);
@@ -1076,7 +1231,7 @@ bool sendText(Proto p, const char* name, const char* text, int8_t dbm, int16_t c
         const Meshtastic::Channel ch = ci == def ? presetChannelKey(prof) : Meshtastic::channel(ci);
         snprintf(chName, sizeof chName, "%s", ch.name);
         uint32_t id = 0;
-        n = meshtasticFrame((uint8_t)Meshtastic::PORT_TEXT, (const uint8_t*)text, strlen(text), f, id, ch);
+        n = meshtasticFrame((uint8_t)Meshtastic::PORT_TEXT, (const uint8_t*)wire, strlen(wire), f, id, ch);
         if (!n) return false;
         key = Lora::Msgs::meshtasticKey(0x5A5A0000u | (uint32_t)(ESP.getEfuseMac() & 0xFFFF), id);
         announceIfDue(prof, name, dbm);
@@ -1165,8 +1320,10 @@ uint32_t sendDm(Proto p, uint32_t to, const char* text) {
     uint32_t id = esp_random() | 1u;
     if (!s_lock || xSemaphoreTake(s_lock, pdMS_TO_TICKS(200)) != pdTRUE) return 0;
     uint8_t st = 0;
-    if (p == Proto::MESHCORE) { id = McDm::send(to, text, id, now); st = (uint8_t)McDm::state(id); }
-    else                      { id = Dm::send(to, text, id, now);   st = (uint8_t)Dm::state(id); }
+    char wire[300];                       // emoji tokens to UTF-8 for the air (see sendText)
+    Emoji::expand(text, wire, sizeof wire);
+    if (p == Proto::MESHCORE) { id = McDm::send(to, wire, id, now); st = (uint8_t)McDm::state(id); }
+    else                      { id = Dm::send(to, wire, id, now);   st = (uint8_t)Dm::state(id); }
     if (id) {
         Packet pk; memset(&pk, 0, sizeof pk);
         pk.proto = p; pk.ms = now;

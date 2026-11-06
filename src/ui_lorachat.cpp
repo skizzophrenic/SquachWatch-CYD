@@ -31,6 +31,7 @@
 #else
 #define LORACHAT_COMPOSE 0
 #endif
+#include "emoji_draw.h"
 #include <Arduino.h>
 #include <string.h>
 
@@ -101,6 +102,13 @@ uint32_t s_statusAt = 0;
 // uiLoraChatHit; the longest name it shows before it cuts one and ends "..".
 int      s_chipX = 0, s_chipY = -100, s_chipW = 0, s_chipH = 0;
 const size_t CHIP_CHARS = 14;
+// The emoji button left of the chip, and the picker it opens: a grid of every
+// sprite, one tap puts that emoji (as its two-byte token) in the compose line.
+int      s_emoX = 0, s_emoY = -100, s_emoW = 22, s_emoH = 0;
+bool     s_pick = false;
+int      s_pickX0 = 0, s_pickY0 = 0, s_pickCell = 24;
+const int PICK_COLS = 12;
+uint8_t composeCap();
 #endif
 
 uint16_t dmCol() { return Theme::VAPOR_YELLOW; }
@@ -204,18 +212,20 @@ int wrap(TFT_eSPI& t, const char* text, int x, int y, int maxW, int lineH, int y
         if (!*p) break;
         size_t len = 0, lastBreak = 0;
         const char* q = p;
-        while (*q && len < sizeof line - 1) {
-            line[len] = *q; line[len + 1] = '\0';
-            if (t.textWidth(line) > maxW) break;
+        // An emoji token is two bytes and one sprite: never cut between them.
+        while (*q && len < sizeof line - 2) {
+            const size_t step = Emoji::isToken(q) ? 2 : 1;
+            memcpy(line + len, q, step); line[len + step] = '\0';
+            if (Emoji::width(t, line, len + step) > maxW) break;
             if (*q == ' ') lastBreak = len;
-            len++; q++;
+            len += step; q += step;
         }
-        if (*q && lastBreak && len < sizeof line - 1) len = lastBreak;
-        if (!len) len = 1;
+        if (*q && lastBreak && len < sizeof line - 2) len = lastBreak;
+        if (!len) len = Emoji::isToken(p) ? 2 : 1;
         line[len] = '\0';
         if (draw && y + lines * lineH + lineH <= yMax) {
-            t.setCursor(x, y + lines * lineH + Theme::bubbleAscent());
-            t.print(line);
+            const int top = y + lines * lineH;
+            Emoji::draw(t, x, top + Theme::bubbleAscent(), top + (Theme::bubbleTextH() - Emoji::PX) / 2, line, len);
         }
         lines++;
         p += len;
@@ -295,8 +305,17 @@ void drawCompose(TFT_eSPI& t, int w, int y, uint32_t now) {
     t.setCursor(s_chipX + (s_chipW - t.textWidth(chip)) / 2, ty);
     t.print(chip);
 
-    // The text, kept left of the chip.
-    const int maxW = s_chipX - 6 - 10;
+    // The emoji button, a smiley, just left of the chip.
+    s_emoW = Emoji::PX + 8;
+    s_emoH = s_chipH;
+    s_emoX = s_chipX - 8 - s_emoW;
+    s_emoY = s_chipY;
+    t.drawRoundRect(s_emoX, s_emoY, s_emoW, s_emoH, 3, s_pick ? Theme::VAPOR_YELLOW : Theme::blend(Theme::BG, Theme::WHITE, 110));
+    { const char tok[3] = { (char)Emoji::TOKEN, (char)0x20, 0 };
+      Emoji::draw(t, s_emoX + 4, 0, s_emoY + (s_emoH - Emoji::PX) / 2, tok, 2); }
+
+    // The text, kept left of the emoji button.
+    const int maxW = s_emoX - 6 - 10;
     char line[168];
     const char* msg = nullptr;
     uint16_t col = Theme::WHITE;
@@ -313,9 +332,33 @@ void drawCompose(TFT_eSPI& t, int w, int y, uint32_t now) {
     }
     snprintf(line, sizeof line, "%s_", s_compose);
     const char* q = line;
-    while (*q && t.textWidth(q) > maxW) q++;           // the tail that fits
+    while (*q && Emoji::width(t, q, strlen(q)) > maxW) q += Emoji::isToken(q) ? 2 : 1;   // the tail that fits
     t.setTextColor(Theme::WHITE, bg);
-    t.setCursor(10, ty); t.print(q);
+    Emoji::draw(t, 10, ty, y + (COMPOSE_H - Emoji::PX) / 2, q, strlen(q));
+}
+
+// MeshCore's group text is shorter; a DM takes 160 on either.
+uint8_t composeCap() { return s_tab == 1 ? 120 : 160; }
+
+// Every emoji in a grid below the tabs, to `bottom`.
+void drawPicker(TFT_eSPI& t, int w, int top, int bottom) {
+    t.fillRect(0, top, w, bottom - top, Theme::BG);
+    t.setTextFont(1); t.setTextSize(1);
+    t.setTextColor(Theme::VAPOR_YELLOW, Theme::BG);
+    t.setCursor(6, top + 2);
+    t.print("TAP AN EMOJI.  TAP BLANK SPACE TO CLOSE");
+    int cell = (bottom - (top + 12)) / 8;
+    if (cell > 24) cell = 24;
+    if (cell < Emoji::PX + 2) cell = Emoji::PX + 2;
+    s_pickCell = cell;
+    s_pickX0 = (w - PICK_COLS * cell) / 2;
+    s_pickY0 = top + 12;
+    for (uint8_t i = 0; i < Emoji::COUNT; i++) {
+        const int cx = s_pickX0 + (i % PICK_COLS) * cell, cy = s_pickY0 + (i / PICK_COLS) * cell;
+        t.drawRect(cx, cy, cell, cell, Theme::blend(Theme::BG, Theme::WHITE, 24));
+        const char tok[3] = { (char)Emoji::TOKEN, (char)(0x20 + i), 0 };
+        Emoji::draw(t, cx + (cell - Emoji::PX) / 2, 0, cy + (cell - Emoji::PX) / 2, tok, 2);
+    }
 }
 #endif
 
@@ -329,6 +372,9 @@ void uiLoraChatInit(TFT_eSPI& t) {
 }
 
 void uiLoraChatSelect(uint8_t tab) {
+#if LORACHAT_COMPOSE
+    s_pick = false;
+#endif
     if (tab > 2) tab = 2;
     if (tab != s_tab) { s_tab = tab; s_scroll = 0; }
     if (tab != 2) s_peer = 0;
@@ -434,6 +480,9 @@ void uiLoraChatTick(TFT_eSPI& t, uint32_t now) {
                                 : "No Meshtastic messages yet. The public LongFast channel shows up here.";
         wrap(t, msg, 8, y + 6, w - 16, Theme::bubbleTextH() + 2, bodyBottom, true);
         Theme::bubbleFontOff(t);
+#if LORACHAT_COMPOSE
+        if (s_pick) drawPicker(t, w, tabY + TAB_H + 4, bodyBottom);
+#endif
         Theme::drawPinnedBack(t, "[ BACK ]");
         return;
     }
@@ -459,6 +508,7 @@ void uiLoraChatTick(TFT_eSPI& t, uint32_t now) {
             y += t.fontHeight() + 2;
             Theme::bubbleFontOn(t);
             char one[64]; snprintf(one, sizeof one, "%s", r.text);
+            Emoji::plain(one);
             size_t n = strlen(one);
             while (n && t.textWidth(one) > w - 20) one[--n] = '\0';
             t.setTextColor(Theme::WHITE, rb);
@@ -486,11 +536,28 @@ void uiLoraChatTick(TFT_eSPI& t, uint32_t now) {
         if (s_rowsDrawn < KEEP) { s_rowTop[s_rowsDrawn] = top - 2; s_rowBot[s_rowsDrawn] = y - 3; s_rowsDrawn++; }
         if (y < bodyBottom) t.drawFastHLine(6, y - 3, w - 12, Theme::blend(Theme::BG, accent, 60));
     }
+#if LORACHAT_COMPOSE
+    if (s_pick) drawPicker(t, w, tabY + TAB_H + 4, bodyBottom);
+#endif
     Theme::drawPinnedBack(t, "[ BACK ]");
 }
 
 bool uiLoraChatTap(int x, int y, uint32_t now) {
-    (void)x; (void)now;
+    (void)now;
+#if LORACHAT_COMPOSE
+    if (s_pick) {
+        const int c = (x - s_pickX0) / s_pickCell, r = (y - s_pickY0) / s_pickCell;
+        const int idx = r * PICK_COLS + c;
+        if (x >= s_pickX0 && y >= s_pickY0 && c < PICK_COLS && r >= 0 && idx < (int)Emoji::COUNT && s_composeN + 2 <= composeCap()) {
+            s_compose[s_composeN++] = (char)Emoji::TOKEN;
+            s_compose[s_composeN++] = (char)(0x20 + idx);
+            s_compose[s_composeN] = '\0';
+        }
+        s_pick = false;
+        return true;
+    }
+    if (x >= s_emoX - 4 && x < s_emoX + s_emoW + 4 && y >= s_emoY - 4 && y < s_emoY + s_emoH + 4) { s_pick = true; return true; }
+#endif
     // "< ALL DMs": back to the list.
     if (s_tab == 2 && s_peer && y >= s_headY - 4 && y < s_headY + 12) { s_peer = 0; s_scroll = 0; s_sig = 0xFFFFFFFFu; return true; }
     for (uint8_t k = 0; k < s_rowsDrawn; k++) {
@@ -523,7 +590,11 @@ void uiLoraChatStepChannel(uint32_t now) {
 }
 
 void uiLoraChatKey(char c, uint32_t now) {
-    if (c == '\b') { if (s_composeN) s_compose[--s_composeN] = '\0'; return; }
+    if (s_pick) { s_pick = false; if (c != '\n') return; }       // a key closes the picker; Enter then sends as ever
+    if (c == '\b') {
+        if (s_composeN) { s_composeN -= (s_composeN >= 2 && Emoji::isToken(s_compose + s_composeN - 2)) ? 2 : 1; s_compose[s_composeN] = '\0'; }
+        return;
+    }
     if (c == '\n') {
         if (!s_composeN) return;
         if (!Settings::loraTxDbm()) { snprintf(s_status, sizeof s_status, "LORA TX IS OFF: SETTINGS"); s_statusAt = now; return; }
@@ -551,7 +622,7 @@ void uiLoraChatKey(char c, uint32_t now) {
         return;
     }
     if (c < 32 || c > 126) return;
-    const uint8_t cap = s_tab == 1 ? 120 : 160;      // MeshCore's group text is shorter; a DM takes 160 on either
+    const uint8_t cap = composeCap();
     if (s_composeN < cap) { s_compose[s_composeN++] = c; s_compose[s_composeN] = '\0'; }
 }
 #else

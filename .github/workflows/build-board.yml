@@ -1,0 +1,183 @@
+name: Build firmware (pick a board)
+
+# Build one board, or every board, without the release machinery: no Release,
+# no notes, no GitHub Pages deploy, no manifests. Each board is its own job
+# and uploads its own artifact, so testing one board costs one build (a few
+# minutes) and not the whole release run in release-flasher.yml, which stays
+# as it is for tagged releases and the web flasher's ?lab=1 list.
+#
+# Run it from the Actions tab: choose a board, or "Build All Firmware".
+#
+# Each artifact holds, per board:
+#   <board>-firmware.bin    the app alone. Flash this at 0x10000 to keep the
+#                           settings already on the board (see the run summary
+#                           for the command).
+#   firmware-<board>-merged.bin   bootloader + table + app in one file, for a
+#                           board with nothing on it. It starts at 0x0, so it
+#                           also overwrites the settings. Not made for the C5
+#                           and P4 boards, which are flashed in four parts
+#                           (docs/NM-CYD-C5.md, docs/TAB5.md).
+on:
+  workflow_dispatch:
+    inputs:
+      board:
+        description: "Which board to build"
+        type: choice
+        default: tdeck-plus
+        options:
+          - tdeck-plus
+          - Build All Firmware
+          - twatch-s3
+          - cyd
+          - cyd-ili9341
+          - cyd-fast
+          - cyd-ili9341-fast
+          - cyd35-fast
+          - cyd35c-fast
+          - cyd32c
+          - awok
+          - rlphantom-r
+          - freenove32
+          - freenove-s3
+          - freenove-s3-40mhz
+          - freenove-s3-35
+          - crowpanel7
+          - sticks3
+          - cardputer-adv
+          - nm-cyd-c5
+          - marauder-v8
+          - tab5
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      boards: ${{ steps.pick.outputs.boards }}
+    steps:
+      - name: Work out the board list
+        id: pick
+        env:
+          BOARD: ${{ inputs.board }}
+        run: |
+          # The boards release-flasher.yml builds and offers, in the same
+          # order. rlphantom (capacitive) is compiled by the release run but
+          # has never run on a real board, so it is not here.
+          ALL='["cyd","cyd-ili9341","cyd-fast","cyd-ili9341-fast","cyd35-fast","cyd35c-fast","cyd32c","awok","rlphantom-r","freenove32","twatch-s3","freenove-s3","freenove-s3-40mhz","freenove-s3-35","crowpanel7","tdeck-plus","sticks3","cardputer-adv","nm-cyd-c5","marauder-v8","tab5"]'
+          if [ "$BOARD" = "Build All Firmware" ]; then
+            echo "boards=$ALL" >> "$GITHUB_OUTPUT"
+          else
+            # Only a name from the list: the input is a choice, but a value
+            # that reaches a shell is checked anyway.
+            if ! echo "$ALL" | grep -q "\"$BOARD\""; then
+              echo "::error::Unknown board '$BOARD'."
+              exit 1
+            fi
+            echo "boards=[\"$BOARD\"]" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        board: ${{ fromJSON(needs.plan.outputs.boards) }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"   # pioarduino (C5, P4) refuses newer
+
+      - name: Cache PlatformIO packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ matrix.board }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: pio-${{ runner.os }}-${{ matrix.board }}-
+
+      - name: Install PlatformIO and esptool
+        run: pip install --upgrade platformio esptool
+
+      - name: Build ${{ matrix.board }}
+        run: pio run -e "${{ matrix.board }}"
+
+      - name: Collect the files
+        id: collect
+        env:
+          B: ${{ matrix.board }}
+        run: |
+          set -e
+          mkdir -p out
+          BUILD=".pio/build/$B"
+          APP="$B-firmware.bin"
+          cp "$BUILD/firmware.bin" "out/$APP"
+          BOOT_APP0="$(find ~/.platformio/packages -path '*framework-arduinoespressif32*/tools/partitions/boot_app0.bin' | head -1)"
+
+          # Which flash layout this board uses, as release-flasher.yml merges
+          # it. The C5 and P4 boards have no merged image on purpose: it would
+          # start at 0x0 and the bootloader of those chips sits at 0x2000.
+          case "$B" in
+            cyd|cyd-ili9341|cyd-fast|cyd-ili9341-fast|cyd35-fast|cyd35c-fast|cyd32c|awok|rlphantom-r|freenove32)
+              CLASS=esp32 ;;
+            sticks3|cardputer-adv)
+              CLASS=s3-8mb ;;
+            nm-cyd-c5|marauder-v8|tab5)
+              CLASS=four-part ;;
+            *)
+              CLASS=s3-16mb ;;
+          esac
+
+          case "$CLASS" in
+            esp32)
+              python -m esptool --chip esp32 merge_bin -o "out/firmware-$B-merged.bin" \
+                --flash_mode dio --flash_freq 40m --flash_size 4MB \
+                0x1000 "$BUILD/bootloader.bin" 0x8000 "$BUILD/partitions.bin" 0x10000 "$BUILD/firmware.bin"
+              CHIP=esp32; OFFSET=0x10000 ;;
+            s3-16mb|s3-8mb)
+              SIZE=16MB; [ "$CLASS" = s3-8mb ] && SIZE=8MB
+              python -m esptool --chip esp32s3 merge_bin -o "out/firmware-$B-merged.bin" \
+                --flash_mode dio --flash_freq 80m --flash_size "$SIZE" \
+                0x0 "$BUILD/bootloader.bin" 0x8000 "$BUILD/partitions.bin" 0xe000 "$BOOT_APP0" 0x10000 "$BUILD/firmware.bin"
+              CHIP=esp32s3; OFFSET=0x10000 ;;
+            four-part)
+              for f in bootloader partitions; do cp "$BUILD/$f.bin" "out/$B-$f.bin"; done
+              cp "$BOOT_APP0" "out/$B-boot_app0.bin"
+              CHIP=""; OFFSET=0x10000 ;;
+          esac
+          echo "class=$CLASS" >> "$GITHUB_OUTPUT"
+          echo "chip=$CHIP" >> "$GITHUB_OUTPUT"
+          ls -l out
+
+          {
+            echo "### $B"
+            echo
+            echo "Artifact: \`firmware-$B\`"
+            echo
+            if [ "$CLASS" = four-part ]; then
+              echo "This chip is flashed in four parts and has no merged image; the bootloader, table and boot_app0 are in the artifact. The offsets and the command are in docs/NM-CYD-C5.md (C5 boards) and docs/TAB5.md (Tab5)."
+            else
+              echo "Update the app only, keeping the board's settings:"
+              echo
+              echo '```'
+              echo "python -m esptool --chip $CHIP write_flash $OFFSET $APP"
+              echo '```'
+              echo
+              echo "A board with nothing on it (this overwrites the settings):"
+              echo
+              echo '```'
+              echo "python -m esptool --chip $CHIP write_flash 0x0 firmware-$B-merged.bin"
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.board }}
+          path: out/
+          retention-days: 14
