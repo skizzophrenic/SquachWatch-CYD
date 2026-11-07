@@ -18,7 +18,7 @@
 #pragma once
 #include <stdint.h>
 
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(WS_C5_35)
 #define SQW_SPEAKER 1
 #else
 #define SQW_SPEAKER 0
