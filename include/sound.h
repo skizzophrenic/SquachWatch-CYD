@@ -19,7 +19,7 @@
 #include <stdint.h>
 
 // SQUACHSIM: the browser emulator's T-Deck build has no speaker to drive.
-#if (defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)) && !defined(SQUACHSIM)
+#if (defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(JC3248W535) || defined(TDECK_PLUS)) && !defined(SQUACHSIM)
 #define SQW_SPEAKER 1
 #else
 #define SQW_SPEAKER 0

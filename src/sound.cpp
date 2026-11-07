@@ -37,6 +37,12 @@ namespace Sound {
 #if defined(FREENOVE_S3_35)
 static const int PIN_MCK = 17, PIN_BCK = 18, PIN_WS = 21, PIN_DOUT = 15;
 static const int PIN_AMP = 1;
+#elif defined(JC3248W535)
+// The JC3248W535 has an NS4168 class-D amp on I2S (no codec). The amp has
+// no software enable pin — it is hardwired on. MCLK on GPIO0 (BOOT pin).
+static const int PIN_MCK = 0,  PIN_BCK = 42, PIN_WS = 2, PIN_DOUT = 41;
+static const int PIN_AMP = -1;
+#define SOUND_NO_CODEC 1
 #elif defined(TDECK_PLUS)
 // The T-Deck Plus: a MAX98357A class-D amp straight on I2S (LilyGo's
 // BOARD_I2S_BCK 7 / WS 5 / DOUT 6). No codec to set up, no master clock, and

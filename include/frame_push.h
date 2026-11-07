@@ -43,10 +43,11 @@ class TFT_eSPI;
 // Cardputer stay on pushSprite() until each has been measured on that
 // route. And not the CrowPanel 7, which has no SPI display at all: CrowBlit
 // writes rows into its RGB framebuffer (crowpanel7_blit.h).
-#if defined(ARDUINO_ARCH_ESP32) && defined(FREENOVE_S3_35)
-  // The Freenove 3.5": no SPI panel at all. The same hashing, spans and
-  // push task, but every span goes to the ST77922 over its four-lane QSPI
-  // bus, with the rotation done as each chunk converts (st77922_qspi.h).
+#if defined(ARDUINO_ARCH_ESP32) && (defined(FREENOVE_S3_35) || defined(JC3248W535))
+  // The Freenove 3.5" (ST77922) and the JC3248W535 (AXS15231B): no SPI
+  // panel at all. The same hashing, spans and push task, but every span
+  // goes to the panel over its four-lane QSPI bus, with the rotation done
+  // as each chunk converts.
   #define SQW_FRAME_PUSH    1
   #define SQW_PUSH_DMA_ONLY 1
   #define SQW_PUSH_QSPI     1

@@ -46,7 +46,7 @@ extern TFT_eSPI tft;
     #define SD_CS_PIN 14
 #elif defined(WAVESHARE_C5)
     #define SD_CS_PIN 23
-#elif defined(NM_CYD_C5)
+#elif defined(NM_CYD_C5) || defined(JC3248W535)
     #define SD_CS_PIN 10
 #elif defined(TDECK_PLUS)
     #define SD_CS_PIN 39   // on the display's bus (40/38/41), per LilyGo's utilities.h
@@ -158,6 +158,11 @@ bool SdLog::begin() {
     // as the C5 above, TFT_eSPI's own instance and nothing extra attached.
     if (!SD.begin(SD_CS_PIN, tft.getSPIinstance(), 4000000, "/sd", SD_MAX_FILES)) {
 #elif defined(AWOK)
+    if (!SD.begin(SD_CS_PIN, SPI, 4000000, "/sd", SD_MAX_FILES)) {
+#elif defined(JC3248W535)
+    // The JC3248W535's SD card is on a dedicated SPI bus (not the display's
+    // QSPI): MOSI=11, SCLK=12, MISO=13, CS=10. Its own bus, own begin().
+    SPI.begin(12, 13, 11, SD_CS_PIN);  // SCK, MISO, MOSI, CS
     if (!SD.begin(SD_CS_PIN, SPI, 4000000, "/sd", SD_MAX_FILES)) {
 #else
     // Original board only: a genuinely separate, dedicated SD bus (not

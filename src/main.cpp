@@ -42,6 +42,10 @@
 #include "st77922_display.h"
 #include "st77922_qspi.h"
 #include "st77922_touch.h"
+#elif defined(JC3248W535)
+#include "axs15231b_display.h"
+#include "axs15231b_qspi.h"
+#include "axs15231b_touch.h"
 #endif
 #if defined(CYD32C) || defined(CYD35C) || defined(TDECK_PLUS)
 #include "gt911_touch.h"
@@ -492,6 +496,8 @@ static void drawCrashCard(TFT_eSPI& t) {
 #define BL_PIN_S3   38   // the StickS3's and the Cardputer ADV's
 #elif defined(FREENOVE_S3_35)
 #define BL_PIN_S3   41   // the Freenove 3.5"'s, through a BSS138 (HIGH is on)
+#elif defined(JC3248W535)
+#define BL_PIN_S3    1   // the JC3248W535's backlight (HIGH is on)
 #elif defined(TDECK_PLUS)
 #define BL_PIN_S3   42   // the T-Deck's 16-step driver chip: HIGH is full, pulses step it (tdeckBacklight)
 #else
@@ -531,6 +537,10 @@ constexpr bool PANEL_NEEDS_INVERSION = true;
 // what St77922TFT::invertDisplay(true) sends. UNCONFIRMED by eye until the
 // board is looked at; INVERT in Settings flips it if wrong.
 constexpr bool PANEL_NEEDS_INVERSION = true;
+#elif defined(JC3248W535)
+// The AXS15231B's init does not include 0x21; try without inversion first.
+// INVERT in Settings flips it if colours look wrong.
+constexpr bool PANEL_NEEDS_INVERSION = false;
 #elif defined(FREENOVE_S3)
 // Freenove's own setup for the S3 2.8" (FNK0104AB) turns inversion on, and
 // confirmed on an FNK0104B 2026-09-25: colours right with INVERT untouched.
@@ -622,6 +632,10 @@ Tab5TFT             tft;
 // Likewise not a TFT_eSPI: an ST77922 on a four-lane QSPI bus, wearing the
 // library's interface for the same reason -- see st77922_display.h.
 St77922TFT          tft;
+#elif defined(JC3248W535)
+// Likewise not a TFT_eSPI: an AXS15231B on a four-lane QSPI bus, wearing
+// the library's interface for the same reason -- see axs15231b_display.h.
+Axs15231bTFT        tft;
 #else
 TFT_eSPI            tft = TFT_eSPI();
 #endif
@@ -812,6 +826,10 @@ static uint16_t CAP_NY_MIN = TAB5_CAP_NY_MIN, CAP_NY_MAX = TAB5_CAP_NY_MAX;
 // The ST77922's own touch reports panel pixels too: a pass-through.
 static uint16_t CAP_NX_MIN = St77922Touch::NX_MIN, CAP_NX_MAX = St77922Touch::NX_MAX;
 static uint16_t CAP_NY_MIN = St77922Touch::NY_MIN, CAP_NY_MAX = St77922Touch::NY_MAX;
+#elif defined(JC3248W535)
+// The AXS15231B's touch reports panel pixels: a pass-through.
+static uint16_t CAP_NX_MIN = Axs15231bTouch::NX_MIN, CAP_NX_MAX = Axs15231bTouch::NX_MAX;
+static uint16_t CAP_NY_MIN = Axs15231bTouch::NY_MIN, CAP_NY_MAX = Axs15231bTouch::NY_MAX;
 #elif defined(WAVESHARE_C5)
 // The CST3530 is expected to report the panel's own 240x320 pixels (Waveshare's
 // demo hands its numbers to LVGL unscaled). A starting point only: the
@@ -1585,6 +1603,11 @@ static bool readTouchRaw(int16_t& a, int16_t& b) {
     if (!St77922Touch::read(x, y)) return false;
     a = (int16_t)x; b = (int16_t)y;
     return true;
+#elif defined(JC3248W535)
+    uint16_t x, y;
+    if (!Axs15231bTouch::read(x, y)) return false;
+    a = (int16_t)x; b = (int16_t)y;
+    return true;
 #elif defined(TAB5)
     uint16_t x, y;
     if (!Tab5Touch::read(x, y)) return false;
@@ -1718,7 +1741,7 @@ static bool s_screenDimmed = false;
 // every byte of touch traffic would read as a press.
 // SQUACHSIM_BOOT is the browser emulator's drawn BOOT button (simBootPress
 // below); no board defines it.
-#if (defined(ESP32) && (!defined(SQW_S3) || defined(FREENOVE_S3_35)) && !defined(CROWPANEL7) && !defined(TAB5) && !defined(WAVESHARE_C5)) || defined(SQUACHSIM_BOOT)
+#if (defined(ESP32) && (!defined(SQW_S3) || defined(FREENOVE_S3_35) || defined(JC3248W535)) && !defined(CROWPANEL7) && !defined(TAB5) && !defined(WAVESHARE_C5)) || defined(SQUACHSIM_BOOT)
 #define SQW_BOOT_BTN 1
 #else
 #define SQW_BOOT_BTN 0
@@ -4190,7 +4213,7 @@ volatile bool g_consolePowerLog = false;
 // draw into the frame and push it, once the frame exists. Everywhere else
 // PANEL is the panel and panelShow() is nothing, which is what they did.
 static inline void pushFrame(int x, int y);
-#if defined(FREENOVE_S3_35)
+#if defined(FREENOVE_S3_35) || defined(JC3248W535)
 #define PANEL ((TFT_eSPI&)frame)
 static bool panelTextOk() { return frameBufferOk && frame.created(); }
 // Pushed the plain, waiting way rather than handed to the push task: these
@@ -4556,7 +4579,7 @@ void setup() {
     // 16-bit — the full 16-bit buffer didn't fit in the available
     // contiguous heap on this board.
     frame.setColorDepth(8);
-#if (defined(SQW_S3) && !defined(FREENOVE_S3_35) && !defined(FREENOVE_S3_40)) || SQW_FRAME_FORCE_INTERNAL
+#if (defined(SQW_S3) && !defined(FREENOVE_S3_35) && !defined(FREENOVE_S3_40) && !defined(JC3248W535)) || SQW_FRAME_FORCE_INTERNAL
     // 57.6 KB fits in internal RAM with room to spare (75 KB at 320x240), and a sprite in
     // PSRAM pushes slower and cannot go by DMA. Keep it inside. (Not the
     // Freenove 3.5": its 154 KB frame goes to PSRAM on purpose, and the QSPI
@@ -4726,6 +4749,14 @@ void setup() {
     uiClearSetBatterySource(boardBatteryState);
     Sound::begin();                       // the codec is on the touch bus, now up
     Serial.printf("[power] boot: %s, wake cause %d\n", resetReasonName(), (int)(s_wokeFromOff ? s_offWakeCause : esp_sleep_get_wakeup_cause()));
+#elif defined(JC3248W535)
+    // The JC3248W535's AXS15231B has a built-in touch controller at I2C
+    // SDA 4 / SCL 8 at 0x3B, interrupt on GPIO3 (unused: polled).
+    // No reset line — the touch is always on.
+    Axs15231bTouch::begin(4, 8, 3);
+    usingCapTouch = Axs15231bTouch::probe();
+    Serial.println(usingCapTouch ? "JC3248W535 -- AXS15231B touch answered."
+                                 : "JC3248W535 -- AXS15231B touch did not answer; no touch.");
 #elif defined(FREENOVE_S3)
     // The Freenove S3 2.8"'s FT6336, on I2C SDA 16 / SCL 15 at 0x38, reset on
     // GPIO18 (active low). The ES8311 codec shares the bus at 0x18. FNK0104A
@@ -4802,10 +4833,10 @@ void setup() {
         uint32_t windowStart = millis();
         while (millis() - windowStart < 1200) {
             int16_t a, b;
-#if defined(CROWPANEL7) || defined(CYD32C) || defined(CYD35C) || defined(SQW_SMALL) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(TAB5) || defined(WAVESHARE_C5)
-            // The GT911 (and the ST77922's touch) is neither of the two
-            // below; the two-way dispatch polled a capacitive controller that
-            // is not on this bus, a hundred bus errors a boot.
+#if defined(CROWPANEL7) || defined(CYD32C) || defined(CYD35C) || defined(SQW_SMALL) || defined(FREENOVE_S3_35) || defined(JC3248W535) || defined(TDECK_PLUS) || defined(TAB5) || defined(WAVESHARE_C5)
+            // The GT911 (and the ST77922's / AXS15231B's touch) is neither
+            // of the two below; the two-way dispatch polled a capacitive
+            // controller that is not on this bus, a hundred bus errors a boot.
             bool down = readTouchRaw(a, b);
 #else
             bool down = usingCapTouch ? rawReadCap(a, b) : rawReadResistive(a, b);
@@ -4854,17 +4885,17 @@ void setup() {
     // injected against the compiled-in ranges -- a calibration screen would
     // just sit there waiting for a finger.
     initTouchFit();
-#if defined(ESP32) && !defined(CROWPANEL7) && !defined(SQW_SMALL) && !defined(FREENOVE_S3_35) && !defined(TAB5)   // nothing to calibrate on a stick with no touch
+#if defined(ESP32) && !defined(CROWPANEL7) && !defined(SQW_SMALL) && !defined(FREENOVE_S3_35) && !defined(JC3248W535) && !defined(TAB5)   // nothing to calibrate on a stick with no touch
     if (s_calSource != CalSource::SAVED) {
         Serial.println("Touch: no five-target calibration yet -- running it now.");
         runTouchCalibration();
     }
 #endif
-#if defined(CROWPANEL7) || defined(FREENOVE_S3_35) || defined(TAB5)
-    // Never on first boot here. The GT911 (and the ST77922's own touch)
-    // reports panel pixels, so the compiled-in fit is already the identity
-    // and there is nothing to calibrate -- making someone tap five targets
-    // would only replace an exact mapping with a hand-aimed one. SETTINGS
+#if defined(CROWPANEL7) || defined(FREENOVE_S3_35) || defined(JC3248W535) || defined(TAB5)
+    // Never on first boot here. The GT911 (and the ST77922's / AXS15231B's
+    // own touch) reports panel pixels, so the compiled-in fit is already the
+    // identity and there is nothing to calibrate -- making someone tap five
+    // targets would only replace an exact mapping with a hand-aimed one. SETTINGS
     // can still run it.
     Serial.println("Touch: the panel reports pixels; no calibration needed.");
 #endif
@@ -5840,7 +5871,7 @@ static void chargeBacklight(uint8_t duty) {
 
 static void chargeDraw(uint32_t now) {
     s_chargeDrawnAt = now;
-#if !defined(FREENOVE_S3_35)
+#if !defined(FREENOVE_S3_35) && !defined(JC3248W535)
     FramePush::busLock();                     // straight to the panel: not while a push is in flight
 #endif
     const int w = tft.width(), h = tft.height();
@@ -5863,7 +5894,7 @@ static void chargeDraw(uint32_t now) {
     PANEL.setTextSize(2);
     PANEL.drawString("TAP TO WAKE UP", w / 2, h / 2 + 64);
     PANEL.setTextDatum(TL_DATUM);
-#if !defined(FREENOVE_S3_35)
+#if !defined(FREENOVE_S3_35) && !defined(JC3248W535)
     FramePush::busUnlock();
 #endif
     panelShow();
@@ -5961,6 +5992,9 @@ static void cbdPowerOff() {
 #if defined(FREENOVE_S3_35)
     St77922::writeReg(0x28, nullptr, 0);   // DISPOFF
     St77922::writeReg(0x10, nullptr, 0);   // SLPIN
+#elif defined(JC3248W535)
+    Axs15231b::writeReg(0x28, nullptr, 0); // DISPOFF
+    Axs15231b::writeReg(0x10, nullptr, 0); // SLPIN
 #else
     tft.writecommand(0x28);
     tft.writecommand(0x10);
@@ -9439,6 +9473,8 @@ void loop() {
             info.boardName = "tdeck-plus LAB";
 #elif defined(FREENOVE_S3_35)
             info.boardName = "freenove-s3-35 BETA";
+#elif defined(JC3248W535)
+            info.boardName = "jc3248w535 PORT";
 #elif defined(FREENOVE_S3_40)
             info.boardName = "freenove-s3-40";
 #elif defined(CYD35C)

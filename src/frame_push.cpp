@@ -9,7 +9,13 @@
 #include <string.h>
 #endif
 #if SQW_PUSH_QSPI
-#include "st77922_qspi.h"
+  #if defined(JC3248W535)
+    #include "axs15231b_qspi.h"
+    namespace QspiPanel = Axs15231b;
+  #else
+    #include "st77922_qspi.h"
+    namespace QspiPanel = St77922;
+  #endif
 #elif defined(NM_CYD_C5) || SQW_PUSH_DMA_ONLY
 // The driver's device handle: a global in the processor port the library
 // compiles in, outside any namespace.
@@ -289,14 +295,14 @@ static const int32_t QSPI_CHUNK_ROWS = 32;
 static bool pushDma(TFT_eSPI&, int32_t) {
     if (s_dmaState) return s_dmaState > 0;
     s_dmaState = -1;
-    if (!St77922::ready()) { Serial.println("[push] QSPI: the panel never came up"); return false; }
+    if (!QspiPanel::ready()) { Serial.println("[push] QSPI: the panel never came up"); return false; }
     for (int k = 0; k < 2; k++)
-        s_bounce[k] = (uint16_t*)heap_caps_malloc((size_t)St77922::PANEL_W * QSPI_CHUNK_ROWS * sizeof(uint16_t),
+        s_bounce[k] = (uint16_t*)heap_caps_malloc((size_t)QspiPanel::PANEL_W * QSPI_CHUNK_ROWS * sizeof(uint16_t),
                                                   MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     if (!s_bounce[0] || !s_bounce[1]) { Serial.println("[push] QSPI: no room for the bounce buffers"); return false; }
     s_dmaState = 1;
     Serial.printf("[push] QSPI on: %d-row chunks of %u bytes, heap %lu\n",
-                  (int)QSPI_CHUNK_ROWS, (unsigned)(St77922::PANEL_W * QSPI_CHUNK_ROWS * 2), (unsigned long)ESP.getFreeHeap());
+                  (int)QSPI_CHUNK_ROWS, (unsigned)(QspiPanel::PANEL_W * QSPI_CHUNK_ROWS * 2), (unsigned long)ESP.getFreeHeap());
     return true;
 }
 
@@ -309,7 +315,7 @@ static bool pushDma(TFT_eSPI&, int32_t) {
 // rectangles, so a tap lands where the pixel went in all four rotations.
 static void pushSpanQspi(const uint8_t* src, int32_t w, int32_t h, uint8_t rot, int32_t r0, int32_t r1) {
     (void)h;
-    const int32_t W = St77922::PANEL_W, H = St77922::PANEL_H;
+    const int32_t W = QspiPanel::PANEL_W, H = QspiPanel::PANEL_H;
     int32_t px0, py0, px1, py1;
     switch (rot & 3) {
         case 0:  px0 = 0;      px1 = w - 1;      py0 = r0;     py1 = r1 - 1;     break;
@@ -317,7 +323,7 @@ static void pushSpanQspi(const uint8_t* src, int32_t w, int32_t h, uint8_t rot, 
         case 2:  px0 = 0;      px1 = w - 1;      py0 = H - r1; py1 = H - 1 - r0; break;
         default: px0 = r0;     px1 = r1 - 1;     py0 = 0;      py1 = w - 1;      break;
     }
-    St77922::setWindow((int16_t)px0, (int16_t)py0, (int16_t)px1, (int16_t)py1);
+    QspiPanel::setWindow((int16_t)px0, (int16_t)py0, (int16_t)px1, (int16_t)py1);
     const int32_t wOut = px1 - px0 + 1;
     bool first = true;
     int  k = 0;
@@ -359,10 +365,10 @@ static void pushSpanQspi(const uint8_t* src, int32_t w, int32_t h, uint8_t rot, 
                 }
                 break;
         }
-        St77922::queuePixels(b, (size_t)n * (size_t)wOut, first);
+        QspiPanel::queuePixels(b, (size_t)n * (size_t)wOut, first);
         first = false;
     }
-    St77922::wait();
+    QspiPanel::wait();
 }
 #else
 
