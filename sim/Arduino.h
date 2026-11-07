@@ -98,7 +98,11 @@ inline int  digitalRead(uint8_t) { return 0; }
 inline int  analogRead(uint8_t) { return 0; }
 inline void ledcSetup(uint8_t, double, uint8_t) {}
 inline void ledcAttachPin(uint8_t, uint8_t) {}
-inline void ledcWrite(uint8_t, uint32_t) {}
+// The backlight's channel (BL_CH_ORIG, 0 on the CYDs) is remembered, so the
+// browser emulator can show the screen going dark (sw_backlight). -1 until
+// the firmware first sets it.
+inline int g_simBacklight = -1;
+inline void ledcWrite(uint8_t ch, uint32_t duty) { if (ch == 0) g_simBacklight = (int)duty; }
 
 // Interrupt masking around the firmware's IRAM queues -- single-
 // threaded here, so there's nothing to mask.

@@ -210,9 +210,11 @@ WASM_OUT  := $(WASM_DIR)/squachsim.js
 # -DSQUACH_MESH=1 as the native build has it. It was missing, so the web
 # emulator compiled every SquachMesh screen out and never showed the feature
 # that every shipping board has had since v1.5.23.
+# -DSQUACHSIM_BOOT=1 compiles POCKET MODE in and gives the page sw_boot, so
+# the BOOT button drawn on the board does what the real one does.
 # -Os keeps the website's download small; the phone app builds with -O3 for speed.
 WASM_OPT ?= -Os
-WASM_FLAGS := -std=c++17 $(WASM_OPT) -I$(SIM_DIR) -I$(INC) -DSQUACH_MESH=1 \
+WASM_FLAGS := -std=c++17 $(WASM_OPT) -I$(SIM_DIR) -I$(INC) -DSQUACH_MESH=1 -DSQUACHSIM_BOOT=1 \
               -Wno-unused-parameter \
               -include $(SIM_DIR)/Arduino.h \
               -include $(INC)/cyd_user_setup.h \

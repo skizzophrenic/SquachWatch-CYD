@@ -1,0 +1,659 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 84 54" data-w-mm="84" data-h-mm="54" font-family="sans-serif">
+<defs>
+<linearGradient id="gBody" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#dedede"/><stop offset="0.45" stop-color="#d6d6d6"/><stop offset="1" stop-color="#cbcbcb"/></linearGradient>
+<linearGradient id="gEdgeX" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity="0.05"/><stop offset="0.02" stop-color="#000" stop-opacity="0"/><stop offset="0.98" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.10"/></linearGradient>
+<linearGradient id="gDeck" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e4e4e4"/><stop offset="0.08" stop-color="#d9d9d9"/><stop offset="1" stop-color="#d2d2d2"/></linearGradient>
+<linearGradient id="gLedge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a9a9a9"/><stop offset="0.5" stop-color="#b9b9b9"/><stop offset="1" stop-color="#9f9f9f"/></linearGradient>
+<linearGradient id="gChamf" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#cbcbcb"/><stop offset="1" stop-color="#a7a7a7"/></linearGradient>
+<linearGradient id="gRecess" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a9a9a9"/><stop offset="0.25" stop-color="#c4c4c4"/><stop offset="1" stop-color="#e6e6e6"/></linearGradient>
+<linearGradient id="gGlass" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1d1f21"/><stop offset="0.5" stop-color="#070707"/><stop offset="1" stop-color="#121314"/></linearGradient>
+<linearGradient id="gKey" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3c3c3c"/><stop offset="0.35" stop-color="#232323"/><stop offset="1" stop-color="#0e0e0e"/></linearGradient>
+<linearGradient id="gKeyHi" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.22"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<linearGradient id="gHole" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8e8e8e"/><stop offset="1" stop-color="#c9c9c9"/></linearGradient>
+<linearGradient id="gStrip" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f1f1f1"/><stop offset="0.5" stop-color="#e9e9e9"/><stop offset="1" stop-color="#e2e2e2"/></linearGradient>
+<linearGradient id="gPlate" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c4c4c4"/><stop offset="0.05" stop-color="#d4d4d4"/><stop offset="1" stop-color="#d6d6d6"/></linearGradient>
+<radialGradient id="gScrew" cx="0.4" cy="0.35" r="0.75"><stop offset="0" stop-color="#ffffff"/><stop offset="0.55" stop-color="#d4d6d8"/><stop offset="1" stop-color="#8c8f92"/></radialGradient>
+<linearGradient id="gScrewPit" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#9a9a9a"/><stop offset="1" stop-color="#e2e2e2"/></linearGradient>
+<linearGradient id="gUsb" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8d9091"/><stop offset="0.35" stop-color="#e4e6e7"/><stop offset="0.7" stop-color="#c3c6c7"/><stop offset="1" stop-color="#7e8182"/></linearGradient>
+<linearGradient id="gSticker" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2f2f2"/><stop offset="1" stop-color="#e6e6e6"/></linearGradient>
+</defs>
+<path id="body" d="M1.2,0 H82.8 A1.2,1.2 0 0 1 84,1.2 V51.4 A2.6,2.6 0 0 1 81.4,54 H2.6 A2.6,2.6 0 0 1 0,51.4 V1.2 A1.2,1.2 0 0 1 1.2,0 Z" fill="url(#gBody)"/>
+<rect x="0.25" y="0.25" width="83.5" height="18.6" rx="1" fill="url(#gDeck)"/>
+<path d="M0.3,18.55 H17.25 L19.55,20.05 H49.4 L51.7,18.55 H83.7 V21.45 H0.3 Z" fill="url(#gLedge)"/>
+<path d="M17.25,18.55 L19.55,20.05 H49.4 L51.7,18.55 Z" fill="#d7d7d7"/>
+<path d="M19.55,20.05 H49.4 L50.2,20.95 H18.75 Z" fill="url(#gChamf)"/>
+<rect x="0.3" y="20.95" width="83.4" height="0.5" fill="#9a9a9a" opacity="0.55"/>
+<path d="M1.3,0.3 H82.7" stroke="#f6f6f6" stroke-width="0.25" stroke-linecap="round"/>
+<rect x="1.6" y="1.45" width="17.65" height="15.15" rx="0.8" fill="url(#gSticker)" stroke="#c4c4c4" stroke-width="0.12"/>
+<path d="M2.41,3.6 V2.5 M2.25,2.66 H3.35" stroke="#14c2ef" stroke-width="0.32" fill="none"/>
+<path d="M18.54,3.6 V2.5 M18.7,2.66 H17.6" stroke="#14c2ef" stroke-width="0.32" fill="none"/>
+<path d="M2.41,10.7 V11.8 M2.25,11.64 H3.35" stroke="#14c2ef" stroke-width="0.32" fill="none"/>
+<path d="M18.54,10.7 V11.8 M18.7,11.64 H17.6" stroke="#14c2ef" stroke-width="0.32" fill="none"/>
+<text x="4.75" y="5.63" font-size="2.153" fill="#1b1b1b" font-weight="400" textLength="11.45" lengthAdjust="spacing">SQUACH</text>
+<text x="3.55" y="10.67" font-size="5.028" fill="#111" font-weight="900" textLength="13.7" lengthAdjust="spacingAndGlyphs">WATCH</text>
+<rect x="8.25" y="12.3" width="1.15" height="2.3" rx="0.575" fill="#f4622d"/>
+<path d="M7.75,13.95 A1.08,1.08 0 0 0 9.9,13.95" stroke="#151515" stroke-width="0.28" fill="none"/>
+<path d="M8.825,15.05 V15.5 M8.35,16.0 L8.825,15.4 L9.3,16.0 Z" stroke="#151515" stroke-width="0.26" fill="#151515" stroke-linejoin="round"/>
+<circle cx="13.04" cy="17.89" r="2.75" fill="url(#gDeck)"/>
+<circle cx="13.04" cy="17.89" r="2.05" fill="url(#gScrewPit)"/>
+<circle cx="13.04" cy="17.89" r="1.55" fill="url(#gScrew)" stroke="#9fa2a5" stroke-width="0.08"/>
+<polygon points="13.49,18.15 13.04,18.41 12.59,18.15 12.59,17.63 13.04,17.37 13.49,17.63" fill="#6f7276" stroke="#55585b" stroke-width="0.06"/>
+<circle cx="13.04" cy="17.89" r="0.22" fill="#4d5053"/>
+<circle cx="54.5" cy="17.89" r="2.75" fill="url(#gDeck)"/>
+<circle cx="54.5" cy="17.89" r="2.05" fill="url(#gScrewPit)"/>
+<circle cx="54.5" cy="17.89" r="1.55" fill="url(#gScrew)" stroke="#9fa2a5" stroke-width="0.08"/>
+<polygon points="54.95,18.15 54.5,18.41 54.05,18.15 54.05,17.63 54.5,17.37 54.95,17.63" fill="#6f7276" stroke="#55585b" stroke-width="0.06"/>
+<circle cx="54.5" cy="17.89" r="0.22" fill="#4d5053"/>
+<rect x="8.08" y="18.55" width="0.44" height="1.85" rx="0.22" fill="#151515"/>
+<rect x="9.03" y="18.55" width="0.44" height="1.85" rx="0.22" fill="#151515"/>
+<rect x="20.2" y="2.4" width="26.15" height="16.1" rx="0.9" fill="url(#gRecess)"/>
+<rect x="20.42" y="2.62" width="25.68" height="15.6" rx="0.7" fill="#2a2a2a"/>
+<rect x="20.58" y="2.82" width="25.36" height="15.22" rx="0.55" fill="url(#gGlass)"/>
+<rect id="screen" x="20.795" y="3.33" width="24.91" height="14.012" fill="#000"/>
+<path d="M20.9,2.95 H45.7" stroke="#ffffff" stroke-opacity="0.10" stroke-width="0.18"/>
+<path d="M58.75,1.1 H80.65 L81.8,2.25 V18.3 L80.65,19.45 H58.75 L57.6,18.3 V2.25 Z" fill="#2b2e2d" stroke="#1a1c1b" stroke-width="0.12"/>
+<rect x="58.82" y="1.18" width="0.76" height="0.42" rx="0.15" fill="#4a4d4c"/>
+<rect x="58.82" y="18.95" width="0.76" height="0.42" rx="0.15" fill="#4a4d4c"/>
+<rect x="61.36" y="1.18" width="0.76" height="0.42" rx="0.15" fill="#4a4d4c"/>
+<rect x="61.36" y="18.95" width="0.76" height="0.42" rx="0.15" fill="#4a4d4c"/>
+<rect x="63.9" y="1.18" width="0.76" height="0.42" rx="0.15" fill="#4a4d4c"/>
+<rect x="63.9" y="18.95" width="0.76" height="0.42" rx="0.15" fill="#4a4d4c"/>
+<rect x="66.44" y="1.18" width="0.76" height="0.42" rx="0.15" fill="#4a4d4c"/>
+<rect x="66.44" y="18.95" width="0.76" height="0.42" rx="0.15" fill="#4a4d4c"/>
+<rect x="68.98" y="1.18" width="0.76" height="0.42" rx="0.15" fill="#4a4d4c"/>
+<rect x="68.98" y="18.95" width="0.76" height="0.42" rx="0.15" fill="#4a4d4c"/>
+<rect x="71.52" y="1.18" width="0.76" height="0.42" rx="0.15" fill="#4a4d4c"/>
+<rect x="71.52" y="18.95" width="0.76" height="0.42" rx="0.15" fill="#4a4d4c"/>
+<rect x="74.06" y="1.18" width="0.76" height="0.42" rx="0.15" fill="#4a4d4c"/>
+<rect x="74.06" y="18.95" width="0.76" height="0.42" rx="0.15" fill="#4a4d4c"/>
+<rect x="76.6" y="1.18" width="0.76" height="0.42" rx="0.15" fill="#4a4d4c"/>
+<rect x="76.6" y="18.95" width="0.76" height="0.42" rx="0.15" fill="#4a4d4c"/>
+<rect x="79.14" y="1.18" width="0.76" height="0.42" rx="0.15" fill="#4a4d4c"/>
+<rect x="79.14" y="18.95" width="0.76" height="0.42" rx="0.15" fill="#4a4d4c"/>
+<path d="M59.3,1.9 H80.7 L81.55,2.75 V18.05 L80.7,18.9 H59.3 L58.45,18.05 V2.75 Z" fill="#f3f3f1"/>
+<rect x="58.97" y="2.19" width="4.86" height="13.18" rx="0.35" fill="none" stroke="#a8a8a8" stroke-width="0.07" stroke-dasharray="0.14 0.12"/>
+<text transform="translate(60.8,14.95) rotate(-90)" font-size="2.306" fill="#1d1d1d" font-weight="400" textLength="6.42" lengthAdjust="spacingAndGlyphs">SQUACH</text>
+<text transform="translate(61.7,8.37) rotate(-90)" font-size="3.208" fill="#e4252f" font-weight="800" textLength="5.85" lengthAdjust="spacingAndGlyphs">WATCH</text>
+<text transform="translate(62.15,12.15) rotate(-90)" font-size="1.389" fill="#d9606a" font-weight="400" textLength="3.4" lengthAdjust="spacingAndGlyphs">ESP32</text>
+<text transform="translate(63.65,12.15) rotate(-90)" font-size="2.014" fill="#1e8ad6" font-weight="800" textLength="3.6" lengthAdjust="spacingAndGlyphs">S3FN8</text>
+<text transform="translate(63.4,8) rotate(-90)" font-size="1.736" fill="#262626" font-weight="400" textLength="5.23" lengthAdjust="spacingAndGlyphs">3D-ANT</text>
+<rect x="61" y="12.57" width="2.67" height="2.47" rx="0.35" fill="#e8501f"/>
+<rect x="61.72" y="13.22" width="1.23" height="1.17" rx="0.12" fill="none" stroke="#fff" stroke-width="0.16"/>
+<path d="M61.5,13.5 h0.22 M61.5,13.8 h0.22 M61.5,14.1 h0.22 M62.95,13.5 h0.22 M62.95,13.8 h0.22 M62.95,14.1 h0.22" stroke="#fff" stroke-width="0.1"/>
+<text transform="translate(65.95,4.9) rotate(-90)" font-size="2.25" fill="#1e8ad6" font-weight="800" textLength="2.63" lengthAdjust="spacingAndGlyphs">SQUACH</text>
+<text transform="translate(66.62,4.05) rotate(-90)" font-size="0.792" fill="#1d1d1d" font-weight="900" textLength="1.75" lengthAdjust="spacingAndGlyphs">WATCH</text>
+<text transform="translate(64.8,14.95) rotate(-90)" font-size="0.653" fill="#333" font-weight="600" textLength="8.55" lengthAdjust="spacingAndGlyphs">Squachy inside</text>
+<text transform="translate(65.55,14.95) rotate(-90)" font-size="0.653" fill="#333" font-weight="600" textLength="8.55" lengthAdjust="spacingAndGlyphs">Cryptid detector</text>
+<path d="M68.45,12.85 H69.9 L70.15,14.55 H68.2 Z M68.15,12.6 V14.8 M68.0,13.35 H68.15" stroke="#333" stroke-width="0.1" fill="none" stroke-linejoin="round"/>
+<path d="M67.95,12.4 L70.6,14.95 M70.6,12.4 L67.95,14.95" stroke="#333" stroke-width="0.1"/>
+<text transform="translate(69.43,15.28) rotate(180)" font-size="0.972" fill="#111" font-weight="800" textLength="5.27" lengthAdjust="spacingAndGlyphs">GPIO+ADC</text>
+<path d="M59.7,16.35 V16.0 H63.95" stroke="#9a9a9a" stroke-width="0.07" stroke-dasharray="0.14 0.12" fill="none"/>
+<path d="M69.7,15.65 H70.65 L71.0,16.1" stroke="#9a9a9a" stroke-width="0.07" stroke-dasharray="0.14 0.12" fill="none"/>
+<rect x="60.86" y="16.85" width="0.34" height="1.85" rx="0.12" fill="#d3d3d3"/>
+<rect x="63.42" y="16.85" width="0.34" height="1.85" rx="0.12" fill="#d3d3d3"/>
+<rect x="65.97" y="16.85" width="0.34" height="1.85" rx="0.12" fill="#d3d3d3"/>
+<rect x="68.52" y="16.85" width="0.34" height="1.85" rx="0.12" fill="#d3d3d3"/>
+<rect x="70.91" y="17" width="0.34" height="1.7" rx="0.12" fill="#d3d3d3"/>
+<circle cx="59.72" cy="18.08" r="0.69" fill="#22c0ee"/>
+<text transform="translate(60.03,18.08) rotate(-90)" font-size="0.861" fill="#13406b" font-weight="700" text-anchor="middle">1</text>
+<circle cx="61.03" cy="16.85" r="0.69" fill="#22c0ee"/>
+<text transform="translate(61.34,16.85) rotate(-90)" font-size="0.861" fill="#13406b" font-weight="700" text-anchor="middle">2</text>
+<circle cx="62.27" cy="18.08" r="0.69" fill="#22c0ee"/>
+<text transform="translate(62.58,18.08) rotate(-90)" font-size="0.861" fill="#13406b" font-weight="700" text-anchor="middle">3</text>
+<circle cx="63.59" cy="16.85" r="0.69" fill="#22c0ee"/>
+<text transform="translate(63.9,16.85) rotate(-90)" font-size="0.861" fill="#13406b" font-weight="700" text-anchor="middle">4</text>
+<circle cx="64.82" cy="18.08" r="0.69" fill="#22c0ee"/>
+<text transform="translate(65.13,18.08) rotate(-90)" font-size="0.861" fill="#13406b" font-weight="700" text-anchor="middle">5</text>
+<circle cx="66.14" cy="16.85" r="0.69" fill="#22c0ee"/>
+<text transform="translate(66.45,16.85) rotate(-90)" font-size="0.861" fill="#13406b" font-weight="700" text-anchor="middle">6</text>
+<circle cx="67.37" cy="18.08" r="0.69" fill="#22c0ee"/>
+<text transform="translate(67.68,18.08) rotate(-90)" font-size="0.861" fill="#13406b" font-weight="700" text-anchor="middle">7</text>
+<circle cx="68.69" cy="16.85" r="0.69" fill="#22c0ee"/>
+<text transform="translate(69,16.85) rotate(-90)" font-size="0.861" fill="#13406b" font-weight="700" text-anchor="middle">8</text>
+<circle cx="69.93" cy="18.08" r="0.69" fill="#22c0ee"/>
+<text transform="translate(70.24,18.08) rotate(-90)" font-size="0.861" fill="#13406b" font-weight="700" text-anchor="middle">9</text>
+<circle cx="71.08" cy="17" r="0.69" fill="#22c0ee"/>
+<text transform="translate(71.39,17) rotate(-90)" font-size="0.861" fill="#13406b" font-weight="700" text-anchor="middle">10</text>
+<g id="btn-g0">
+<rect x="67.95" y="4.9" width="2.65" height="6.92" rx="1.32" fill="#0e3b34" stroke="#0a2a25" stroke-width="0.06"/>
+<circle cx="69.27" cy="6.22" r="0.92" fill="#f26b2b"/>
+<text transform="translate(69.745,6.22) rotate(-90)" font-size="1.319" fill="#ffe0cc" font-weight="400" text-anchor="middle">0</text>
+<text transform="translate(69.25,10.84) rotate(-90)" font-size="1.458" fill="#ffffff" font-weight="800" textLength="3.14" lengthAdjust="spacingAndGlyphs">BTN</text>
+<text transform="translate(69.98,10.4) rotate(-90)" font-size="0.597" fill="#e6d33a" font-weight="800" textLength="2.9" lengthAdjust="spacingAndGlyphs">DOWNLOAD</text>
+<text transform="translate(70.45,9.8) rotate(-90)" font-size="0.556" fill="#e6d33a" font-weight="800" textLength="1.6" lengthAdjust="spacingAndGlyphs">MODE</text>
+</g>
+<rect x="66.8" y="2.19" width="1.15" height="2.14" rx="0.57" fill="#d8471c"/>
+<text transform="translate(67.7,4.05) rotate(-90)" font-size="0.903" fill="#fff" font-weight="800" textLength="1.6" lengthAdjust="spacingAndGlyphs">3V3</text>
+<text transform="translate(69.02,3.1) rotate(-90)" font-size="0.556" fill="#1d1d1d" font-weight="800" textLength="0.7" lengthAdjust="spacingAndGlyphs">GP</text>
+<text transform="translate(69.92,4.15) rotate(-90)" font-size="0.444" fill="#1d1d1d" font-weight="700" textLength="0.6" lengthAdjust="spacingAndGlyphs">U0</text>
+<text transform="translate(70.27,4.15) rotate(-90)" font-size="0.444" fill="#1d1d1d" font-weight="700" textLength="0.6" lengthAdjust="spacingAndGlyphs">TX</text>
+<text transform="translate(71.64,3.8) rotate(-90)" font-size="0.5" fill="#1d1d1d" font-weight="800" textLength="1.2" lengthAdjust="spacingAndGlyphs">MMS</text>
+<text transform="translate(72.78,5.4) rotate(-90)" font-size="0.639" fill="#1d1d1d" font-weight="800" textLength="1.45" lengthAdjust="spacingAndGlyphs">U0RX</text>
+<text transform="translate(74.04,4.05) rotate(-90)" font-size="0.639" fill="#1d1d1d" font-weight="800" textLength="1.25" lengthAdjust="spacingAndGlyphs">MDI</text>
+<text transform="translate(76.58,3.9) rotate(-90)" font-size="0.639" fill="#1d1d1d" font-weight="800" textLength="1.3" lengthAdjust="spacingAndGlyphs">MDO</text>
+<rect x="74.55" y="2.1" width="1.14" height="3.35" rx="0.57" fill="#f2a3ea"/>
+<text transform="translate(75.38,4.7) rotate(-90)" font-size="0.736" fill="#3a1440" font-weight="800" textLength="1.25" lengthAdjust="spacingAndGlyphs">RST</text>
+<rect x="77.1" y="2.1" width="1.14" height="3.65" rx="0.57" fill="#f2aaa3"/>
+<text transform="translate(77.92,5.45) rotate(-90)" font-size="0.694" fill="#3a1a16" font-weight="800" textLength="1.75" lengthAdjust="spacingAndGlyphs">GPIO</text>
+<rect x="78.85" y="3.65" width="1.25" height="1.5" rx="0.15" fill="#f7ecb0"/>
+<text transform="translate(79.28,4.98) rotate(-90)" font-size="0.528" fill="#1d1d1d" font-weight="600" textLength="1.23" lengthAdjust="spacingAndGlyphs">G21</text>
+<text transform="translate(79.68,4.98) rotate(-90)" font-size="0.53" font-weight="800" textLength="1.2" lengthAdjust="spacingAndGlyphs"><tspan fill="#e0262c">R</tspan><tspan fill="#24a548">G</tspan><tspan fill="#2a64c9">B</tspan></text>
+<text transform="translate(80.08,5) rotate(-90)" font-size="0.361" fill="#333" font-weight="600" textLength="1.4" lengthAdjust="spacingAndGlyphs">STATUS</text>
+<path d="M80.0,1.95 L80.75,3.45" stroke="#333" stroke-width="0.07"/>
+<rect x="80.3" y="3.43" width="1.16" height="2.14" rx="0.58" fill="#262626"/>
+<text transform="translate(81.2,5.3) rotate(-90)" font-size="0.903" fill="#fff" font-weight="800" textLength="1.6" lengthAdjust="spacingAndGlyphs">GND</text>
+<circle cx="68.77" cy="4" r="0.69" fill="#33c27f"/>
+<text transform="translate(69.08,4) rotate(-90)" font-size="0.861" fill="#0f2e1d" font-weight="700" text-anchor="middle">46</text>
+<circle cx="69.93" cy="2.68" r="0.69" fill="#5aa2ec"/>
+<text transform="translate(70.24,2.68) rotate(-90)" font-size="0.861" fill="#fff" font-weight="700" text-anchor="middle">43</text>
+<circle cx="71.25" cy="4.74" r="0.69" fill="#d4d93c"/>
+<text transform="translate(71.56,4.74) rotate(-90)" font-size="0.861" fill="#3b3b10" font-weight="700" text-anchor="middle">42</text>
+<circle cx="72.56" cy="2.85" r="0.69" fill="#5aa2ec"/>
+<text transform="translate(72.87,2.85) rotate(-90)" font-size="0.861" fill="#fff" font-weight="700" text-anchor="middle">44</text>
+<circle cx="73.8" cy="4.99" r="0.69" fill="#d4d93c"/>
+<text transform="translate(74.11,4.99) rotate(-90)" font-size="0.861" fill="#3b3b10" font-weight="700" text-anchor="middle">41</text>
+<circle cx="75.12" cy="2.77" r="0.69" fill="#9a2bbf"/>
+<text transform="translate(75.43,2.77) rotate(-90)" font-size="0.861" fill="#fff" font-weight="700" text-anchor="middle">EN</text>
+<circle cx="76.35" cy="4.99" r="0.69" fill="#d4d93c"/>
+<text transform="translate(76.66,4.99) rotate(-90)" font-size="0.861" fill="#3b3b10" font-weight="700" text-anchor="middle">40</text>
+<circle cx="77.67" cy="2.77" r="0.69" fill="#f58a3c"/>
+<text transform="translate(77.98,2.77) rotate(-90)" font-size="0.861" fill="#fff" font-weight="700" text-anchor="middle">0</text>
+<circle cx="79.15" cy="3.01" r="0.69" fill="#d4d93c"/>
+<text transform="translate(79.46,3.01) rotate(-90)" font-size="0.861" fill="#3b3b10" font-weight="700" text-anchor="middle">39</text>
+<text transform="translate(73.3,12.3) rotate(-90)" font-size="2.847" fill="#1a1a1a" font-weight="800" textLength="6.24" lengthAdjust="spacingAndGlyphs">SQW</text>
+<text transform="translate(72.4,14.95) rotate(-90)" font-size="0.458" fill="#555" font-weight="400" textLength="2.75" lengthAdjust="spacingAndGlyphs" font-style="italic">SquachWatch</text>
+<text transform="translate(72.8,14.95) rotate(-90)" font-size="0.458" fill="#555" font-weight="400" textLength="2.75" lengthAdjust="spacingAndGlyphs" font-style="italic">open source</text>
+<text transform="translate(73.2,14.95) rotate(-90)" font-size="0.458" fill="#555" font-weight="400" textLength="2.75" lengthAdjust="spacingAndGlyphs" font-style="italic">firmware</text>
+<text transform="translate(75.5,14.95) rotate(-90)" font-size="2.708" fill="#141414" font-weight="900" textLength="4.95" lengthAdjust="spacingAndGlyphs">USB</text>
+<text transform="translate(74.5,9.7) rotate(-90)" font-size="1.083" fill="#222" font-weight="400" textLength="3.45" lengthAdjust="spacingAndGlyphs">D-:G19</text>
+<text transform="translate(75.55,9.7) rotate(-90)" font-size="1.25" fill="#222" font-weight="400" textLength="3.45" lengthAdjust="spacingAndGlyphs">D+:G20</text>
+<rect x="75.6" y="9.85" width="0.92" height="5.1" rx="0.46" fill="#e6177f"/>
+<text transform="translate(76.33,14.65) rotate(-90)" font-size="0.736" fill="#fff" font-weight="700" textLength="4.5" lengthAdjust="spacingAndGlyphs">OTG/SERIAL</text>
+<rect x="76.1" y="6.14" width="5.36" height="8.65" rx="0.25" stroke="#9a9a9a" stroke-width="0.07" stroke-dasharray="0.14 0.12" fill="none"/>
+<rect x="80.3" y="6.39" width="1.07" height="5.76" rx="0.12" fill="#f5a3ad"/>
+<text transform="translate(81.15,11.7) rotate(-90)" font-size="0.833" fill="#7a1622" font-weight="800" textLength="4.8" lengthAdjust="spacingAndGlyphs">LCD.PORT</text>
+<rect x="80.3" y="12.15" width="1.07" height="2.47" rx="0.12" fill="#f9d3d7"/>
+<text transform="translate(81.1,14.2) rotate(-90)" font-size="0.764" fill="#7a1622" font-weight="800" textLength="1.6" lengthAdjust="spacingAndGlyphs">Ext.</text>
+<text transform="translate(80.13,6.4) rotate(180)" font-size="0.667" fill="#3a6fb0" font-weight="700" textLength="3.1" lengthAdjust="spacingAndGlyphs">12-G37/CS</text>
+<text transform="translate(80.13,7.105) rotate(180)" font-size="0.667" fill="#d9541e" font-weight="700" textLength="2" lengthAdjust="spacingAndGlyphs">11-3V3</text>
+<text transform="translate(80.13,7.81) rotate(180)" font-size="0.667" fill="#3a6fb0" font-weight="700" textLength="3.55" lengthAdjust="spacingAndGlyphs">10-G36/SCK</text>
+<text transform="translate(80.13,8.515) rotate(180)" font-size="0.667" fill="#3a6fb0" font-weight="700" textLength="3.2" lengthAdjust="spacingAndGlyphs">9-G35/DAT</text>
+<text transform="translate(80.13,9.22) rotate(180)" font-size="0.667" fill="#3a6fb0" font-weight="700" textLength="2.8" lengthAdjust="spacingAndGlyphs">8-G34/RS</text>
+<text transform="translate(80.13,9.925) rotate(180)" font-size="0.667" fill="#3a6fb0" font-weight="700" textLength="3.2" lengthAdjust="spacingAndGlyphs">7-G33/RST</text>
+<text transform="translate(80.13,10.63) rotate(180)" font-size="0.667" fill="#262626" font-weight="700" textLength="1.95" lengthAdjust="spacingAndGlyphs">6-GND</text>
+<text transform="translate(80.13,11.335) rotate(180)" font-size="0.667" fill="#9b3fa0" font-weight="700" textLength="2.8" lengthAdjust="spacingAndGlyphs">5-BL-G38</text>
+<text transform="translate(80.13,12.04) rotate(180)" font-size="0.667" fill="#2a9d5c" font-weight="700" textLength="1.75" lengthAdjust="spacingAndGlyphs">4-G16</text>
+<text transform="translate(80.13,12.745) rotate(180)" font-size="0.667" fill="#2a9d5c" font-weight="700" textLength="1.75" lengthAdjust="spacingAndGlyphs">3-G17</text>
+<text transform="translate(80.13,13.45) rotate(180)" font-size="0.667" fill="#2a9d5c" font-weight="700" textLength="1.75" lengthAdjust="spacingAndGlyphs">2-G18</text>
+<text transform="translate(80.13,14.155) rotate(180)" font-size="0.667" fill="#d9541e" font-weight="700" textLength="1.4" lengthAdjust="spacingAndGlyphs">1-5V</text>
+<text transform="translate(77.62,13.31) rotate(-57)" font-size="0.62" font-weight="700" fill="#3b74c4" text-anchor="middle" textLength="3.0" lengthAdjust="spacingAndGlyphs">BACKSIDE</text>
+<rect x="71.74" y="16.27" width="1.32" height="2.47" rx="0.66" fill="#262626"/>
+<text transform="translate(72.75,18.4) rotate(-90)" font-size="0.903" fill="#fff" font-weight="800" textLength="1.8" lengthAdjust="spacingAndGlyphs">GND</text>
+<rect x="74.54" y="16.27" width="1.15" height="2.47" rx="0.57" fill="#d84315"/>
+<text transform="translate(75.45,18.15) rotate(-90)" font-size="0.833" fill="#fff" font-weight="800" textLength="1.3" lengthAdjust="spacingAndGlyphs">5V</text>
+<rect x="77" y="15.28" width="1.25" height="3.46" rx="0.62" fill="#f6cf1c"/>
+<text transform="translate(77.9,16.75) rotate(-90)" font-size="0.764" fill="#2b2300" font-weight="800" textLength="1.15" lengthAdjust="spacingAndGlyphs">SDA</text>
+<text transform="translate(77.93,18.05) rotate(-90)" font-size="0.861" fill="#2b2300" font-weight="700" text-anchor="middle">13</text>
+<text transform="translate(80.28,16.7) rotate(-90)" font-size="0.667" fill="#1d1d1d" font-weight="800" textLength="1.1" lengthAdjust="spacingAndGlyphs">SCL</text>
+<text transform="translate(74.02,18.25) rotate(-90)" font-size="0.75" fill="#1d1d1d" font-weight="800" textLength="1.65" lengthAdjust="spacingAndGlyphs">GPIO</text>
+<text transform="translate(76.57,18.25) rotate(-90)" font-size="0.75" fill="#1d1d1d" font-weight="800" textLength="1.65" lengthAdjust="spacingAndGlyphs">GPIO</text>
+<text transform="translate(79.17,18.25) rotate(-90)" font-size="0.75" fill="#1d1d1d" font-weight="800" textLength="1.65" lengthAdjust="spacingAndGlyphs">GPIO</text>
+<circle cx="73.8" cy="15.7" r="0.69" fill="#2fc07a"/>
+<text transform="translate(74.11,15.7) rotate(-90)" font-size="0.861" fill="#0f2e1d" font-weight="700" text-anchor="middle">11</text>
+<circle cx="76.35" cy="15.86" r="0.69" fill="#2fc07a"/>
+<text transform="translate(76.66,15.86) rotate(-90)" font-size="0.861" fill="#0f2e1d" font-weight="700" text-anchor="middle">12</text>
+<circle cx="78.9" cy="15.8" r="0.69" fill="#2fc07a"/>
+<text transform="translate(79.21,15.8) rotate(-90)" font-size="0.861" fill="#0f2e1d" font-weight="700" text-anchor="middle">14</text>
+<circle cx="79.98" cy="18.08" r="0.69" fill="#c9c9c9"/>
+<text transform="translate(80.29,18.08) rotate(-90)" font-size="0.861" fill="#333" font-weight="700" text-anchor="middle">15</text>
+<rect x="81.65" y="4.85" width="2.3" height="10.1" rx="0.35" fill="#9a9a9a"/>
+<rect id="usb" x="81.8" y="5.05" width="2.2" height="9.7" rx="0.3" data-dir="right" fill="url(#gUsb)"/>
+<rect x="82" y="7.75" width="0.8" height="0.7" rx="0.12" fill="#2a2c2d"/>
+<rect x="82" y="11.55" width="0.8" height="0.7" rx="0.12" fill="#2a2c2d"/>
+<path d="M82.0,5.25 H83.9 M82.0,14.55 H83.9" stroke="#6f7273" stroke-width="0.08"/>
+<rect x="0.3" y="21.45" width="83.4" height="32.25" rx="0.5" fill="url(#gPlate)"/>
+<rect x="1.5" y="21.74" width="81.1" height="3.72" rx="0.55" fill="#b4b4b4" opacity="0.7"/>
+<rect x="1.45" y="21.62" width="81.15" height="3.72" rx="0.55" fill="url(#gStrip)" stroke="#c6c6c6" stroke-width="0.08"/>
+<rect x="0.6" y="25.46" width="82.8" height="0.18" fill="#000" opacity="0.06"/>
+<rect x="1.5" y="29.07" width="81.1" height="3.72" rx="0.55" fill="#b4b4b4" opacity="0.7"/>
+<rect x="1.45" y="28.95" width="81.15" height="3.72" rx="0.55" fill="url(#gStrip)" stroke="#c6c6c6" stroke-width="0.08"/>
+<rect x="0.6" y="32.79" width="82.8" height="0.18" fill="#000" opacity="0.06"/>
+<rect x="1.5" y="36.39" width="81.1" height="3.72" rx="0.55" fill="#b4b4b4" opacity="0.7"/>
+<rect x="1.45" y="36.27" width="81.15" height="3.72" rx="0.55" fill="url(#gStrip)" stroke="#c6c6c6" stroke-width="0.08"/>
+<rect x="0.6" y="40.11" width="82.8" height="0.18" fill="#000" opacity="0.06"/>
+<rect x="1.5" y="44.07" width="81.1" height="3.72" rx="0.55" fill="#b4b4b4" opacity="0.7"/>
+<rect x="1.45" y="43.95" width="81.15" height="3.72" rx="0.55" fill="url(#gStrip)" stroke="#c6c6c6" stroke-width="0.08"/>
+<rect x="0.6" y="47.79" width="82.8" height="0.18" fill="#000" opacity="0.06"/>
+<g class="key" data-key="`">
+<rect x="1.65" y="21.62" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<polygon points="2.48,21.67 7.24,21.67 7.15,22.74 2.48,23.6" fill="#f4622d"/>
+<text x="4.35" y="22.8" font-size="1.45" fill="#fff" text-anchor="middle" font-weight="700" letter-spacing="0.03">esc</text>
+<path d="M4.3,24.12 L5.3,24.6" stroke="#141414" stroke-width="0.36" stroke-linecap="round"/>
+<path d="M5.35,23.67 q0.3,-0.45 0.6,-0.12 t0.6,-0.12" stroke="#2f68ad" stroke-width="0.22" fill="none" stroke-linecap="round"/>
+<rect x="2.415" y="25.67" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="2.575" y="25.79" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="2.925" y="25.91" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="1">
+<rect x="7.412" y="21.62" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<text x="10.462" y="24.24" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">1</text>
+<text x="11.212" y="23.4" font-size="1.75" fill="#2f68ad" text-anchor="start" font-weight="700">!</text>
+<rect x="8.177" y="25.67" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="8.337" y="25.79" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="8.687" y="25.91" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="2">
+<rect x="13.174" y="21.62" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<text x="16.224" y="24.24" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">2</text>
+<text x="16.974" y="23.4" font-size="1.75" fill="#2f68ad" text-anchor="start" font-weight="700">@</text>
+<rect x="13.939" y="25.67" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="14.099" y="25.79" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="14.449" y="25.91" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="3">
+<rect x="18.936" y="21.62" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<text x="21.986" y="24.24" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">3</text>
+<text x="22.736" y="23.4" font-size="1.75" fill="#2f68ad" text-anchor="start" font-weight="700">#</text>
+<rect x="19.701" y="25.67" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="19.861" y="25.79" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="20.211" y="25.91" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="4">
+<rect x="24.698" y="21.62" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<text x="27.748" y="24.24" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">4</text>
+<text x="28.498" y="23.4" font-size="1.75" fill="#2f68ad" text-anchor="start" font-weight="700">$</text>
+<rect x="25.463" y="25.67" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="25.623" y="25.79" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="25.973" y="25.91" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="5">
+<rect x="30.46" y="21.62" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<text x="33.51" y="24.24" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">5</text>
+<text x="34.26" y="23.4" font-size="1.75" fill="#2f68ad" text-anchor="start" font-weight="700">%</text>
+<rect x="31.225" y="25.67" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="31.385" y="25.79" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="31.735" y="25.91" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="6">
+<rect x="36.222" y="21.62" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<text x="39.272" y="24.24" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">6</text>
+<text x="40.022" y="23.4" font-size="1.75" fill="#2f68ad" text-anchor="start" font-weight="700">^</text>
+<rect x="36.987" y="25.67" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="37.147" y="25.79" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="37.497" y="25.91" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="7">
+<rect x="41.984" y="21.62" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<text x="45.034" y="24.24" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">7</text>
+<text x="45.784" y="23.4" font-size="1.75" fill="#2f68ad" text-anchor="start" font-weight="700">&amp;</text>
+<rect x="42.749" y="25.67" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="42.909" y="25.79" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="43.259" y="25.91" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="8">
+<rect x="47.746" y="21.62" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<text x="50.796" y="24.24" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">8</text>
+<text x="51.546" y="23.4" font-size="1.75" fill="#2f68ad" text-anchor="start" font-weight="700">*</text>
+<rect x="48.511" y="25.67" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="48.671" y="25.79" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="49.021" y="25.91" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="9">
+<rect x="53.508" y="21.62" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<text x="56.558" y="24.24" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">9</text>
+<text x="57.308" y="23.4" font-size="1.75" fill="#2f68ad" text-anchor="start" font-weight="700">(</text>
+<rect x="54.273" y="25.67" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="54.433" y="25.79" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="54.783" y="25.91" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="0">
+<rect x="59.27" y="21.62" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<text x="62.32" y="24.24" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">0</text>
+<text x="63.07" y="23.4" font-size="1.75" fill="#2f68ad" text-anchor="start" font-weight="700">)</text>
+<rect x="60.035" y="25.67" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="60.195" y="25.79" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="60.545" y="25.91" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="-">
+<rect x="65.032" y="21.62" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<rect x="67.532" y="24.3" width="1.0" height="0.3" fill="#141414"/>
+<rect x="69.132" y="22.57" width="0.6" height="0.22" fill="#2f68ad"/>
+<rect x="65.797" y="25.67" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="65.957" y="25.79" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="66.307" y="25.91" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="=">
+<rect x="70.794" y="21.62" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<text x="73.844" y="24.24" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">=</text>
+<text x="74.594" y="23.4" font-size="1.75" fill="#2f68ad" text-anchor="start" font-weight="700">+</text>
+<rect x="71.559" y="25.67" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="71.719" y="25.79" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="72.069" y="25.91" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="backspace">
+<rect x="76.556" y="21.62" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<rect x="77.05" y="21.67" width="4.75" height="3.55" fill="#0a0a0a"/>
+<polygon points="77.05,21.67 81.8,21.67 81.8,24.12 77.05,22.22" fill="#f4622d"/>
+<text x="80.35" y="22.89" font-size="1.5" fill="#fff" text-anchor="middle" font-weight="700">del</text>
+<path d="M77.35,23.97 L78.45,23.22 V23.57 H79.65 V24.42 H78.45 V24.74 Z" fill="#fff"/>
+<rect x="77.321" y="25.67" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="77.481" y="25.79" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="77.831" y="25.91" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="tab">
+<rect x="1.65" y="28.95" width="5.7" height="6.62" fill="#000" fill-opacity="0"/>
+<rect x="2.5" y="28.99" width="4.65" height="3.58" fill="#cdcdcd"/>
+<text x="4.825" y="31.33" font-size="1.62" fill="#222" text-anchor="middle" font-weight="700" letter-spacing="0.04">tab</text>
+<rect x="2.415" y="33.08" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="2.575" y="33.2" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="2.925" y="33.32" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="q">
+<rect x="7.412" y="28.95" width="5.7" height="6.62" fill="#000" fill-opacity="0"/>
+<text x="10.462" y="31.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">Q</text>
+<rect x="8.177" y="33.08" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="8.337" y="33.2" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="8.687" y="33.32" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="w">
+<rect x="13.174" y="28.95" width="5.7" height="6.62" fill="#000" fill-opacity="0"/>
+<text x="16.224" y="31.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">W</text>
+<rect x="13.939" y="33.08" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="14.099" y="33.2" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="14.449" y="33.32" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="e">
+<rect x="18.936" y="28.95" width="5.7" height="6.62" fill="#000" fill-opacity="0"/>
+<text x="21.986" y="31.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">E</text>
+<rect x="19.701" y="33.08" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="19.861" y="33.2" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="20.211" y="33.32" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="r">
+<rect x="24.698" y="28.95" width="5.7" height="6.62" fill="#000" fill-opacity="0"/>
+<text x="27.748" y="31.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">R</text>
+<rect x="25.463" y="33.08" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="25.623" y="33.2" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="25.973" y="33.32" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="t">
+<rect x="30.46" y="28.95" width="5.7" height="6.62" fill="#000" fill-opacity="0"/>
+<text x="33.51" y="31.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">T</text>
+<rect x="31.225" y="33.08" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="31.385" y="33.2" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="31.735" y="33.32" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="y">
+<rect x="36.222" y="28.95" width="5.7" height="6.62" fill="#000" fill-opacity="0"/>
+<text x="39.272" y="31.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">Y</text>
+<rect x="36.987" y="33.08" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="37.147" y="33.2" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="37.497" y="33.32" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="u">
+<rect x="41.984" y="28.95" width="5.7" height="6.62" fill="#000" fill-opacity="0"/>
+<text x="45.034" y="31.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">U</text>
+<rect x="42.749" y="33.08" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="42.909" y="33.2" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="43.259" y="33.32" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="i">
+<rect x="47.746" y="28.95" width="5.7" height="6.62" fill="#000" fill-opacity="0"/>
+<text x="50.796" y="31.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">I</text>
+<rect x="48.511" y="33.08" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="48.671" y="33.2" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="49.021" y="33.32" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="o">
+<rect x="53.508" y="28.95" width="5.7" height="6.62" fill="#000" fill-opacity="0"/>
+<text x="56.558" y="31.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">O</text>
+<rect x="54.273" y="33.08" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="54.433" y="33.2" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="54.783" y="33.32" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="p">
+<rect x="59.27" y="28.95" width="5.7" height="6.62" fill="#000" fill-opacity="0"/>
+<text x="62.32" y="31.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">P</text>
+<rect x="60.035" y="33.08" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="60.195" y="33.2" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="60.545" y="33.32" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="[">
+<rect x="65.032" y="28.95" width="5.7" height="6.62" fill="#000" fill-opacity="0"/>
+<text x="68.082" y="31.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">[</text>
+<text x="68.832" y="30.73" font-size="1.75" fill="#2f68ad" text-anchor="start" font-weight="700">{</text>
+<rect x="65.797" y="33.08" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="65.957" y="33.2" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="66.307" y="33.32" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="]">
+<rect x="70.794" y="28.95" width="5.7" height="6.62" fill="#000" fill-opacity="0"/>
+<text x="73.844" y="31.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">]</text>
+<text x="74.594" y="30.73" font-size="1.75" fill="#2f68ad" text-anchor="start" font-weight="700">}</text>
+<rect x="71.559" y="33.08" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="71.719" y="33.2" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="72.069" y="33.32" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="\">
+<rect x="76.556" y="28.95" width="5.7" height="6.62" fill="#000" fill-opacity="0"/>
+<text x="79.606" y="31.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">\</text>
+<text x="80.356" y="30.73" font-size="1.75" fill="#2f68ad" text-anchor="start" font-weight="700">|</text>
+<rect x="77.321" y="33.08" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="77.481" y="33.2" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="77.831" y="33.32" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="fn">
+<rect x="1.65" y="36.27" width="5.7" height="6.81" fill="#000" fill-opacity="0"/>
+<rect x="2.5" y="36.31" width="4.7" height="3.58" fill="#f4622d"/>
+<text x="4.85" y="38.65" font-size="1.8" fill="#fff" text-anchor="middle" font-weight="700" letter-spacing="0.04">fn</text>
+<rect x="2.415" y="40.59" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="2.575" y="40.71" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="2.925" y="40.83" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="shift">
+<rect x="7.412" y="36.27" width="5.7" height="6.81" fill="#000" fill-opacity="0"/>
+<rect x="8.2" y="36.31" width="4.75" height="3.58" fill="#32659c"/>
+<text x="10.575" y="38.65" font-size="1.8" fill="#fff" text-anchor="middle" font-weight="700" letter-spacing="0.04">Aa</text>
+<rect x="8.177" y="40.59" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="8.337" y="40.71" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="8.687" y="40.83" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="a">
+<rect x="13.174" y="36.27" width="5.7" height="6.81" fill="#000" fill-opacity="0"/>
+<text x="16.224" y="38.89" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">A</text>
+<rect x="13.939" y="40.59" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="14.099" y="40.71" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="14.449" y="40.83" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="s">
+<rect x="18.936" y="36.27" width="5.7" height="6.81" fill="#000" fill-opacity="0"/>
+<text x="21.986" y="38.89" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">S</text>
+<rect x="19.701" y="40.59" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="19.861" y="40.71" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="20.211" y="40.83" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="d">
+<rect x="24.698" y="36.27" width="5.7" height="6.81" fill="#000" fill-opacity="0"/>
+<text x="27.748" y="38.89" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">D</text>
+<rect x="25.463" y="40.59" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="25.623" y="40.71" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="25.973" y="40.83" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="f">
+<rect x="30.46" y="36.27" width="5.7" height="6.81" fill="#000" fill-opacity="0"/>
+<text x="33.51" y="38.89" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">F</text>
+<rect x="31.225" y="40.59" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="31.385" y="40.71" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="31.735" y="40.83" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="g">
+<rect x="36.222" y="36.27" width="5.7" height="6.81" fill="#000" fill-opacity="0"/>
+<text x="39.272" y="38.89" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">G</text>
+<rect x="36.987" y="40.59" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="37.147" y="40.71" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="37.497" y="40.83" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="h">
+<rect x="41.984" y="36.27" width="5.7" height="6.81" fill="#000" fill-opacity="0"/>
+<text x="45.034" y="38.89" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">H</text>
+<rect x="42.749" y="40.59" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="42.909" y="40.71" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="43.259" y="40.83" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="j">
+<rect x="47.746" y="36.27" width="5.7" height="6.81" fill="#000" fill-opacity="0"/>
+<text x="50.796" y="38.89" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">J</text>
+<rect x="48.511" y="40.59" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="48.671" y="40.71" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="49.021" y="40.83" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="k">
+<rect x="53.508" y="36.27" width="5.7" height="6.81" fill="#000" fill-opacity="0"/>
+<text x="56.558" y="38.89" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">K</text>
+<rect x="54.273" y="40.59" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="54.433" y="40.71" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="54.783" y="40.83" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="l">
+<rect x="59.27" y="36.27" width="5.7" height="6.81" fill="#000" fill-opacity="0"/>
+<text x="62.32" y="38.89" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">L</text>
+<rect x="60.035" y="40.59" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="60.195" y="40.71" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="60.545" y="40.83" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key=";">
+<rect x="65.032" y="36.27" width="5.7" height="6.81" fill="#000" fill-opacity="0"/>
+<polygon points="65.982,39.6 69.832,39.6 67.932,37.69" fill="#f4622d"/>
+<text x="67.962" y="39.09" font-size="2.2" fill="#141414" text-anchor="middle" font-weight="700">;</text>
+<text x="69.632" y="38.12" font-size="2" fill="#2f68ad" text-anchor="middle" font-weight="700">:</text>
+<rect x="65.797" y="40.59" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="65.957" y="40.71" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="66.307" y="40.83" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="'">
+<rect x="70.794" y="36.27" width="5.7" height="6.81" fill="#000" fill-opacity="0"/>
+<text x="73.444" y="40.02" font-size="3.4" fill="#141414" text-anchor="middle" font-weight="700">‘</text>
+<text x="75.644" y="39.02" font-size="3" fill="#2f68ad" text-anchor="middle" font-weight="700">“</text>
+<rect x="71.559" y="40.59" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="71.719" y="40.71" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="72.069" y="40.83" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="enter">
+<rect x="76.556" y="36.27" width="5.7" height="6.81" fill="#000" fill-opacity="0"/>
+<rect x="77.05" y="36.3" width="4.7" height="3.57" fill="#050505"/>
+<text x="77.45" y="37.6" font-size="1.35" fill="#fff" text-anchor="start" font-weight="700">ok</text>
+<path d="M80.55,37.42 H81.1 V39.12 H79.05 V39.57 L78.05,38.77 L79.05,37.97 V38.42 H80.55 Z" fill="#fff"/>
+<rect x="77.321" y="40.59" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="77.481" y="40.71" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="77.831" y="40.83" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="control">
+<rect x="1.65" y="43.95" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<rect x="2.3" y="43.99" width="4.6" height="3.58" fill="#cdcdcd"/>
+<text x="4.6" y="46.33" font-size="1.62" fill="#222" text-anchor="middle" font-weight="700" letter-spacing="0.04">ctrl</text>
+<rect x="2.415" y="48" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="2.575" y="48.12" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="2.925" y="48.24" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="opt">
+<rect x="7.412" y="43.95" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<rect x="7.1" y="43.99" width="5.6" height="3.58" fill="#2fcd98"/>
+<text x="9.9" y="46.33" font-size="1.62" fill="#10241c" text-anchor="middle" font-weight="700" letter-spacing="0.04">opt</text>
+<rect x="8.177" y="48" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="8.337" y="48.12" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="8.687" y="48.24" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="alt">
+<rect x="13.174" y="43.95" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<rect x="13.8" y="43.99" width="4.65" height="3.58" fill="#cdcdcd"/>
+<text x="16.125" y="46.33" font-size="1.62" fill="#222" text-anchor="middle" font-weight="700" letter-spacing="0.04">alt</text>
+<rect x="13.939" y="48" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="14.099" y="48.12" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="14.449" y="48.24" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="z">
+<rect x="18.936" y="43.95" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<text x="21.986" y="46.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">Z</text>
+<rect x="19.701" y="48" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="19.861" y="48.12" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="20.211" y="48.24" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="x">
+<rect x="24.698" y="43.95" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<text x="27.748" y="46.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">X</text>
+<rect x="25.463" y="48" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="25.623" y="48.12" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="25.973" y="48.24" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="c">
+<rect x="30.46" y="43.95" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<text x="33.51" y="46.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">C</text>
+<rect x="31.225" y="48" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="31.385" y="48.12" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="31.735" y="48.24" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="v">
+<rect x="36.222" y="43.95" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<text x="39.272" y="46.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">V</text>
+<rect x="36.987" y="48" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="37.147" y="48.12" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="37.497" y="48.24" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="b">
+<rect x="41.984" y="43.95" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<text x="45.034" y="46.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">B</text>
+<rect x="42.749" y="48" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="42.909" y="48.12" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="43.259" y="48.24" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="n">
+<rect x="47.746" y="43.95" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<text x="50.796" y="46.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">N</text>
+<rect x="48.511" y="48" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="48.671" y="48.12" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="49.021" y="48.24" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="m">
+<rect x="53.508" y="43.95" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<text x="56.558" y="46.57" font-size="2.3" fill="#141414" text-anchor="middle" font-weight="700">M</text>
+<rect x="54.273" y="48" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="54.433" y="48.12" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="54.783" y="48.24" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key=",">
+<rect x="59.27" y="43.95" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<polygon points="60.7,45.95 62.85,44.8 62.85,46.9" fill="#f4622d"/>
+<text x="62.1" y="46.55" font-size="2.6" fill="#141414" text-anchor="middle" font-weight="700">,</text>
+<text x="63.7" y="45.55" font-size="1.6" fill="#2f68ad" text-anchor="middle" font-weight="700">&lt;</text>
+<rect x="60.035" y="48" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="60.195" y="48.12" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="60.545" y="48.24" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key=".">
+<rect x="65.032" y="43.95" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<polygon points="65.97,45.35 69.86,45.35 67.92,47.3" fill="#f4622d"/>
+<circle cx="67.95" cy="46.5" r="0.36" fill="#141414"/>
+<text x="69.45" y="45.6" font-size="1.6" fill="#2f68ad" text-anchor="middle" font-weight="700">&gt;</text>
+<rect x="65.797" y="48" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="65.957" y="48.12" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="66.307" y="48.24" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key="/">
+<rect x="70.794" y="43.95" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<polygon points="73.06,44.6 75.2,45.75 73.06,46.9" fill="#f4622d"/>
+<path d="M73.15,47.2 L74.0,45.1" stroke="#141414" stroke-width="0.36" stroke-linecap="butt"/>
+<text x="75.65" y="45.9" font-size="1.6" fill="#2f68ad" text-anchor="middle" font-weight="700">?</text>
+<rect x="71.559" y="48" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="71.719" y="48.12" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="72.069" y="48.24" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<g class="key" data-key=" ">
+<rect x="76.556" y="43.95" width="5.7" height="6.54" fill="#000" fill-opacity="0"/>
+<path d="M77.9,46 V46.8 H81.05 V46" stroke="#141414" stroke-width="0.34" fill="none"/>
+<rect x="77.321" y="48" width="4.17" height="2.67" rx="1.15" fill="url(#gHole)"/>
+<rect x="77.481" y="48.12" width="3.85" height="2.37" rx="1" fill="url(#gKey)"/>
+<rect x="77.831" y="48.24" width="3.15" height="0.75" rx="0.4" fill="url(#gKeyHi)"/>
+</g>
+<path d="M1.2,0 H82.8 A1.2,1.2 0 0 1 84,1.2 V51.4 A2.6,2.6 0 0 1 81.4,54 H2.6 A2.6,2.6 0 0 1 0,51.4 V1.2 A1.2,1.2 0 0 1 1.2,0 Z" fill="url(#gEdgeX)" pointer-events="none"/>
+<path d="M1.2,0 H82.8 A1.2,1.2 0 0 1 84,1.2 V51.4 A2.6,2.6 0 0 1 81.4,54 H2.6 A2.6,2.6 0 0 1 0,51.4 V1.2 A1.2,1.2 0 0 1 1.2,0 Z" fill="none" stroke="#a9a9a9" stroke-width="0.18" pointer-events="none"/>
+</svg>

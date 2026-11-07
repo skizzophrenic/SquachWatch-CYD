@@ -1683,7 +1683,9 @@ static bool s_screenDimmed = false;
 // Freenove 3.5", whose one button is GPIO0 like a CYD's.
 // Not the Waveshare C5: its BOOT is GPIO28, and GPIO0 is the I2C bus's SDA --
 // every byte of touch traffic would read as a press.
-#if defined(ESP32) && (!defined(SQW_S3) || defined(FREENOVE_S3_35)) && !defined(CROWPANEL7) && !defined(TAB5) && !defined(WAVESHARE_C5)
+// SQUACHSIM_BOOT is the browser emulator's drawn BOOT button (simBootPress
+// below); no board defines it.
+#if (defined(ESP32) && (!defined(SQW_S3) || defined(FREENOVE_S3_35)) && !defined(CROWPANEL7) && !defined(TAB5) && !defined(WAVESHARE_C5)) || defined(SQUACHSIM_BOOT)
 #define SQW_BOOT_BTN 1
 #else
 #define SQW_BOOT_BTN 0
@@ -1741,6 +1743,12 @@ static void pocketPress(uint32_t now) {
         Serial.println("[pocket] on");
     }
 }
+#if defined(SQUACHSIM_BOOT)
+// The browser emulator's BOOT button (sw_boot in sim/main_wasm.cpp): the
+// short press bootButtonTick() hands over on a board. That code reads GPIO0,
+// which the emulator has not got.
+void simBootPress() { pocketPress(millis()); }
+#endif
 #endif
 
 static void applyCpuClock();

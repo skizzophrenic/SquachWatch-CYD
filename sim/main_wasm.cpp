@@ -69,6 +69,7 @@ extern AppState state;
 extern uint8_t  screenRotation;
 extern DetectionEngine engine;
 extern volatile bool g_consoleRotate;
+void simBootPress();
 
 // pollTouch()'s XPT2046 defaults. Static inside main.cpp, but the
 // Preferences shim starts empty in the browser so loadOrDefaultCal()
@@ -237,6 +238,14 @@ EMSCRIPTEN_KEEPALIVE void sw_panel(int w, int h) {
 // frame buffer, the saved rotation and Squachy's reaction all happen as
 // they do for a tap on the icon.
 EMSCRIPTEN_KEEPALIVE void sw_rotate() { g_consoleRotate = true; }
+
+// The BOOT button: one short press, as a board's bootButtonTick() reports it
+// -- POCKET MODE on, or off. The page draws the board's button and calls this.
+EMSCRIPTEN_KEEPALIVE void sw_boot() { simBootPress(); }
+
+// The backlight's last duty, 0-255 (-1: not set yet), so the page can show
+// POCKET MODE, the power saver's dim and the BRIGHT setting on the canvas.
+EMSCRIPTEN_KEEPALIVE int sw_backlight() { return g_simBacklight; }
 
 // A new panel while running, `w` x `h` AS SHOWN: the phone app's band is the
 // board's own screen upright (240x320), its SQUACHY tab is phone-shaped. A

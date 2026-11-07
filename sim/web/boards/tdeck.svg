@@ -1,0 +1,478 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 120.7" data-w-mm="72" data-h-mm="120.7">
+<title>Handheld keyboard device, front</title>
+<defs>
+<linearGradient id="shellG" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2e3033"/><stop offset=".05" stop-color="#5d6064"/><stop offset=".12" stop-color="#4a4d51"/><stop offset=".5" stop-color="#55585c"/><stop offset=".88" stop-color="#4a4d51"/><stop offset=".95" stop-color="#5f6266"/><stop offset="1" stop-color="#2c2e31"/></linearGradient>
+<linearGradient id="shellV" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset=".04" stop-color="#fff" stop-opacity=".05"/><stop offset=".5" stop-color="#000" stop-opacity="0"/><stop offset=".97" stop-color="#000" stop-opacity=".25"/><stop offset="1" stop-color="#000" stop-opacity=".4"/></linearGradient>
+<pattern id="grain" width="1.1" height="1.1" patternUnits="userSpaceOnUse"><circle cx=".15" cy=".2" r=".07" fill="#fff" opacity=".10"/><circle cx=".7" cy=".45" r=".06" fill="#000" opacity=".22"/><circle cx=".4" cy=".85" r=".07" fill="#fff" opacity=".07"/><circle cx=".95" cy=".95" r=".05" fill="#000" opacity=".18"/><circle cx=".55" cy=".1" r=".05" fill="#000" opacity=".15"/><circle cx=".9" cy=".25" r=".06" fill="#fff" opacity=".08"/><circle cx=".2" cy=".6" r=".05" fill="#000" opacity=".2"/></pattern>
+<linearGradient id="glassG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1a1b1d"/><stop offset=".15" stop-color="#0f1011"/><stop offset="1" stop-color="#0b0b0c"/></linearGradient>
+<linearGradient id="glassSheen" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".10"/><stop offset=".35" stop-color="#fff" stop-opacity=".02"/><stop offset=".36" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<linearGradient id="chinG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#121214"/><stop offset=".6" stop-color="#0c0c0d"/><stop offset="1" stop-color="#19191b"/></linearGradient>
+<linearGradient id="clearG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4a4c50"/><stop offset=".08" stop-color="#2b2c2f"/><stop offset=".5" stop-color="#232427"/><stop offset=".92" stop-color="#2a2b2e"/><stop offset="1" stop-color="#46484c"/></linearGradient>
+<linearGradient id="clearSide" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#55575c" stop-opacity=".9"/><stop offset=".5" stop-color="#2a2b2e" stop-opacity=".9"/><stop offset="1" stop-color="#3c3e42" stop-opacity=".9"/></linearGradient>
+<linearGradient id="chev" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e9eaec"/><stop offset=".5" stop-color="#b9bcc0"/><stop offset=".52" stop-color="#9a9ea3"/><stop offset="1" stop-color="#d4d6d9"/></linearGradient>
+<linearGradient id="keyG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b3c3f"/><stop offset=".45" stop-color="#2c2d30"/><stop offset="1" stop-color="#1d1e20"/></linearGradient>
+<linearGradient id="keyArc" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#000" stop-opacity=".35"/><stop offset=".7" stop-color="#000" stop-opacity=".05"/><stop offset="1" stop-color="#fff" stop-opacity=".10"/></linearGradient>
+<linearGradient id="barG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5a5d61"/><stop offset=".18" stop-color="#f4f5f6"/><stop offset=".45" stop-color="#c3c6ca"/><stop offset=".6" stop-color="#aeb2b7"/><stop offset=".82" stop-color="#eef0f1"/><stop offset="1" stop-color="#3f4245"/></linearGradient>
+<radialGradient id="ballG" cx=".38" cy=".33" r=".75"><stop offset="0" stop-color="#fffbe9"/><stop offset=".12" stop-color="#e6ddbd"/><stop offset=".55" stop-color="#b7ad8a"/><stop offset=".9" stop-color="#7d755c"/><stop offset="1" stop-color="#5e5845"/></radialGradient>
+<radialGradient id="ringG" cx=".5" cy=".5" r=".5"><stop offset=".78" stop-color="#6d7075"/><stop offset=".86" stop-color="#f3f4f5"/><stop offset=".93" stop-color="#9da1a6"/><stop offset="1" stop-color="#2d2f32"/></radialGradient>
+<linearGradient id="goldG" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8a6a1e"/><stop offset=".3" stop-color="#f3d77a"/><stop offset=".5" stop-color="#d6ae45"/><stop offset=".8" stop-color="#fbe9a6"/><stop offset="1" stop-color="#7b5c17"/></linearGradient>
+<linearGradient id="earG" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3a3c3f"/><stop offset=".5" stop-color="#8d9095"/><stop offset="1" stop-color="#55585c"/></linearGradient>
+</defs>
+<g id="antenna">
+<rect x="13.8" y="6.55" width="8.6" height="1.6" rx=".15" fill="url(#goldG)" stroke="#6b5214" stroke-width=".08"/>
+<rect x="15.2" y="1.25" width="5.8" height="5.4" fill="url(#goldG)"/>
+<rect x="15.2" y="1.72" width="5.8" height=".2" fill="#6e5216" opacity=".75"/>
+<rect x="15.2" y="1.45" width="5.8" height=".12" fill="#fff4c4" opacity=".55"/>
+<rect x="15.2" y="2.24" width="5.8" height=".2" fill="#6e5216" opacity=".75"/>
+<rect x="15.2" y="1.97" width="5.8" height=".12" fill="#fff4c4" opacity=".55"/>
+<rect x="15.2" y="2.76" width="5.8" height=".2" fill="#6e5216" opacity=".75"/>
+<rect x="15.2" y="2.49" width="5.8" height=".12" fill="#fff4c4" opacity=".55"/>
+<rect x="15.2" y="3.28" width="5.8" height=".2" fill="#6e5216" opacity=".75"/>
+<rect x="15.2" y="3.01" width="5.8" height=".12" fill="#fff4c4" opacity=".55"/>
+<rect x="15.2" y="3.8" width="5.8" height=".2" fill="#6e5216" opacity=".75"/>
+<rect x="15.2" y="3.53" width="5.8" height=".12" fill="#fff4c4" opacity=".55"/>
+<rect x="15.2" y="4.32" width="5.8" height=".2" fill="#6e5216" opacity=".75"/>
+<rect x="15.2" y="4.05" width="5.8" height=".12" fill="#fff4c4" opacity=".55"/>
+<rect x="15.2" y="4.84" width="5.8" height=".2" fill="#6e5216" opacity=".75"/>
+<rect x="15.2" y="4.57" width="5.8" height=".12" fill="#fff4c4" opacity=".55"/>
+<rect x="15.2" y="5.36" width="5.8" height=".2" fill="#6e5216" opacity=".75"/>
+<rect x="15.2" y="5.09" width="5.8" height=".12" fill="#fff4c4" opacity=".55"/>
+<rect x="15.2" y="5.88" width="5.8" height=".2" fill="#6e5216" opacity=".75"/>
+<rect x="15.2" y="5.61" width="5.8" height=".12" fill="#fff4c4" opacity=".55"/>
+<rect x="15.2" y="6.4" width="5.8" height=".2" fill="#6e5216" opacity=".75"/>
+<rect x="15.2" y="6.13" width="5.8" height=".12" fill="#fff4c4" opacity=".55"/>
+<rect x="15.65" y="0" width="4.9" height="1.4" rx=".2" fill="url(#goldG)" stroke="#7a5c18" stroke-width=".06"/>
+<rect x="17.2" y=".18" width="1.2" height="1.0" fill="#fff8d8" opacity=".35"/>
+</g>
+<path d="M0.9,20.9 L0.25,21.5 Q0,21.6 0,22.3 L0,68.3 Q0,69 0.25,69.1 L0.9,69.7 Z" fill="#3b3d40"/>
+<path d="M71.1,20.9 L71.75,21.5 Q72,21.6 72,22.3 L72,68.3 Q72,69 71.75,69.1 L71.1,69.7 Z" fill="#3b3d40"/>
+<rect x="0.12" y="22.1" width=".35" height="46.4" fill="#6a6d71" opacity=".6"/>
+<rect x="71.53" y="22.1" width=".35" height="46.4" fill="#6a6d71" opacity=".5"/>
+<path d="M0.9,20 C0.9,13.37 6.27,8 12.9,8 L59.1,8 C65.73,8 71.1,13.37 71.1,20 L71.1,106.7 C71.1,114.43 59.01,120.7 44.1,120.7 L27.9,120.7 C12.99,120.7 0.9,114.43 0.9,106.7 Z" fill="url(#shellG)"/>
+<path d="M0.9,20 C0.9,13.37 6.27,8 12.9,8 L59.1,8 C65.73,8 71.1,13.37 71.1,20 L71.1,106.7 C71.1,114.43 59.01,120.7 44.1,120.7 L27.9,120.7 C12.99,120.7 0.9,114.43 0.9,106.7 Z" fill="url(#grain)"/>
+<path d="M0.9,20 C0.9,13.37 6.27,8 12.9,8 L59.1,8 C65.73,8 71.1,13.37 71.1,20 L71.1,106.7 C71.1,114.43 59.01,120.7 44.1,120.7 L27.9,120.7 C12.99,120.7 0.9,114.43 0.9,106.7 Z" fill="url(#shellV)"/>
+<clipPath id="lowerClip"><rect x="0" y="69.2" width="72" height="52"/></clipPath>
+<path d="M0.9,20 C0.9,13.37 6.27,8 12.9,8 L59.1,8 C65.73,8 71.1,13.37 71.1,20 L71.1,106.7 C71.1,114.43 59.01,120.7 44.1,120.7 L27.9,120.7 C12.99,120.7 0.9,114.43 0.9,106.7 Z" fill="#2a2b2e" clip-path="url(#lowerClip)"/>
+<path d="M0.9,20 C0.9,13.37 6.27,8 12.9,8 L59.1,8 C65.73,8 71.1,13.37 71.1,20 L71.1,106.7 C71.1,114.43 59.01,120.7 44.1,120.7 L27.9,120.7 C12.99,120.7 0.9,114.43 0.9,106.7 Z" fill="none" stroke="#000" stroke-opacity=".55" stroke-width=".18"/>
+<path d="M2.25,69.75 L2.25,20.3 C2.25,14.56 6.91,9.9 12.65,9.9 L59.35,9.9 C65.09,9.9 69.75,14.56 69.75,20.3 L69.75,69.75 Z" fill="#08090a" stroke="#7d8085" stroke-opacity=".55" stroke-width=".22"/>
+<path d="M2.25,69.75 L2.25,20.3 C2.25,14.56 6.91,9.9 12.65,9.9 L59.35,9.9 C65.09,9.9 69.75,14.56 69.75,20.3 L69.75,69.75 Z" fill="url(#glassG)" transform="translate(0 .15)"/>
+<path d="M2.25,69.75 L2.25,20.3 C2.25,14.56 6.91,9.9 12.65,9.9 L59.35,9.9 C65.09,9.9 69.75,14.56 69.75,20.3 L69.75,69.75 Z" fill="none" stroke="#c9ccd1" stroke-opacity=".28" stroke-width=".12" transform="translate(.35 .35) scale(0.99 1)"/>
+<rect x="28.68" y="13.55" width="15.15" height="1.28" rx=".64" fill="url(#earG)"/>
+<rect x="31.85" y="13.8" width="8.6" height=".78" rx=".39" fill="#111214"/>
+<rect x="28.9" y="13.62" width="14.7" height=".25" rx=".12" fill="#fff" opacity=".18"/>
+<rect x="6.75" y="23.65" width="58.6" height="44.1" fill="#121316" stroke="#1d1f23" stroke-width=".12"/>
+<rect id="screen" x="7.25" y="24.1" width="57.6" height="43.2" fill="#000"/>
+<path d="M2.55,12.9 L30,10 L44,10 L2.55,23.5 Z" fill="#fff" opacity=".035"/>
+<path d="M2.3,69.75 L69.7,69.75 L69.7,107.4 L2.3,107.4 Z" fill="url(#clearSide)"/>
+<clipPath id="chinClip"><rect x="0" y="104.6" width="72" height="20"/></clipPath>
+<path d="M2.1,44 C2.1,41.79 3.89,40 6.1,40 L65.9,40 C68.11,40 69.9,41.79 69.9,44 L69.9,106.65 C69.9,113.77 58.44,119.55 44.3,119.55 L27.7,119.55 C13.56,119.55 2.1,113.77 2.1,106.65 Z" fill="url(#chinG)" clip-path="url(#chinClip)"/>
+<path d="M2.1,44 C2.1,41.79 3.89,40 6.1,40 L65.9,40 C68.11,40 69.9,41.79 69.9,44 L69.9,106.65 C69.9,113.77 58.44,119.55 44.3,119.55 L27.7,119.55 C13.56,119.55 2.1,113.77 2.1,106.65 Z" fill="none" stroke="#5a5c60" stroke-opacity=".45" stroke-width=".15" clip-path="url(#chinClip)"/>
+<rect x="2.3" y="69.75" width=".35" height="37" fill="#8a8d92" opacity=".35"/>
+<rect x="69.35" y="69.75" width=".35" height="37" fill="#8a8d92" opacity=".3"/>
+<rect x="3.0" y="69.75" width="67.3" height="11.9" fill="url(#clearG)"/>
+<rect x="3.0" y="69.75" width="67.3" height=".25" fill="#9b9ea3" opacity=".55"/>
+<g fill="none" stroke="#c9ccd0" stroke-width=".16" opacity=".75">
+<path d="M8.6,76.8 L11.2,72.6 L25.6,72.6"/>
+<path d="M9.6,76.8 L12.0,73.3 L14.2,73.3"/>
+<path d="M26.4,75.3 L29.0,75.3"/>
+<path d="M64.4,76.8 L61.8,72.6 L47.6,72.6"/>
+<path d="M44.6,75.3 L47.0,75.3"/>
+<path d="M66.2,70.6 L66.2,80.9 M67.8,70.6 L67.8,80.9"/>
+</g>
+<circle cx="67.0" cy="75.5" r="1.05" fill="none" stroke="#c9ccd0" stroke-width=".12" opacity=".55"/>
+<path d="M10.2,77.8 h1.0 l.4,-.6 h-1.0 z M11.9,77.8 h1.0 l.4,-.6 h-1.0 z M13.6,77.8 h1.0 l.4,-.6 h-1.0 z" fill="#d7d9dc" opacity=".8"/>
+<path d="M15,73.15 L16.75,73.15 L18.6,75.45 L16.75,77.75 L15,77.75 L16.85,75.45 Z" fill="url(#chev)" stroke="#55585c" stroke-width=".06"/>
+<path d="M52.1,73.15 L50.35,73.15 L48.5,75.45 L50.35,77.75 L52.1,77.75 L50.25,75.45 Z" fill="url(#chev)" stroke="#55585c" stroke-width=".06"/>
+<path d="M18.55,73.15 L20.3,73.15 L22.15,75.45 L20.3,77.75 L18.55,77.75 L20.4,75.45 Z" fill="url(#chev)" stroke="#55585c" stroke-width=".06"/>
+<path d="M55.65,73.15 L53.9,73.15 L52.05,75.45 L53.9,77.75 L55.65,77.75 L53.8,75.45 Z" fill="url(#chev)" stroke="#55585c" stroke-width=".06"/>
+<path d="M22.1,73.15 L23.85,73.15 L25.7,75.45 L23.85,77.75 L22.1,77.75 L23.95,75.45 Z" fill="url(#chev)" stroke="#55585c" stroke-width=".06"/>
+<path d="M59.2,73.15 L57.45,73.15 L55.6,75.45 L57.45,77.75 L59.2,77.75 L57.35,75.45 Z" fill="url(#chev)" stroke="#55585c" stroke-width=".06"/>
+<circle cx="5.5" cy="71.65" r="1.15" fill="url(#goldG)"/><circle cx="5.5" cy="71.65" r=".62" fill="#151617"/>
+<circle cx="4.7" cy="77.38" r=".52" fill="url(#goldG)"/><circle cx="4.7" cy="77.38" r=".27" fill="#141516"/>
+<circle cx="4.7" cy="79.25" r=".52" fill="url(#goldG)"/><circle cx="4.7" cy="79.25" r=".27" fill="#141516"/>
+<circle cx="4.7" cy="81.13" r=".52" fill="url(#goldG)"/><circle cx="4.7" cy="81.13" r=".27" fill="#141516"/>
+<circle cx="4.7" cy="85.07" r=".52" fill="url(#goldG)"/><circle cx="4.7" cy="85.07" r=".27" fill="#141516"/>
+<circle cx="4.7" cy="87.08" r=".52" fill="url(#goldG)"/><circle cx="4.7" cy="87.08" r=".27" fill="#141516"/>
+<g fill="none" stroke="#c4c7cb" stroke-width=".13" opacity=".55">
+<path d="M29.66,70.1 A9.4,9.4 0 0 0 29.66,81.2"/>
+<path d="M44.86,70.1 A9.4,9.4 0 0 1 44.86,81.2"/>
+<path d="M31.86,70.6 A7.2,7.2 0 0 0 31.86,80.6"/>
+<path d="M42.66,70.6 A7.2,7.2 0 0 1 42.66,80.6"/>
+</g>
+<circle cx="30.66" cy="72.95" r=".13" fill="#0a0a0b" opacity=".8"/>
+<circle cx="30.66" cy="75.55" r=".13" fill="#0a0a0b" opacity=".8"/>
+<circle cx="30.66" cy="78.15" r=".13" fill="#0a0a0b" opacity=".8"/>
+<circle cx="31.96" cy="72.95" r=".13" fill="#0a0a0b" opacity=".8"/>
+<circle cx="31.96" cy="75.55" r=".13" fill="#0a0a0b" opacity=".8"/>
+<circle cx="31.96" cy="78.15" r=".13" fill="#0a0a0b" opacity=".8"/>
+<circle cx="42.56" cy="72.95" r=".13" fill="#0a0a0b" opacity=".8"/>
+<circle cx="42.56" cy="75.55" r=".13" fill="#0a0a0b" opacity=".8"/>
+<circle cx="42.56" cy="78.15" r=".13" fill="#0a0a0b" opacity=".8"/>
+<circle cx="43.86" cy="72.95" r=".13" fill="#0a0a0b" opacity=".8"/>
+<circle cx="43.86" cy="75.55" r=".13" fill="#0a0a0b" opacity=".8"/>
+<circle cx="43.86" cy="78.15" r=".13" fill="#0a0a0b" opacity=".8"/>
+<polygon points="32.61,73.55 34.66,71.5 39.86,71.5 41.91,73.55 41.91,77.55 39.86,79.6 34.66,79.6 32.61,77.55" fill="#3a3c40" fill-opacity=".75" stroke="#d9dbde" stroke-width=".22"/>
+<rect x="33.26" y="70.0" width=".8" height="11.4" fill="#8f9297" fill-opacity=".35" stroke="#d0d2d5" stroke-width=".08" stroke-opacity=".7"/>
+<rect x="40.46" y="70.0" width=".8" height="11.4" fill="#8f9297" fill-opacity=".35" stroke="#d0d2d5" stroke-width=".08" stroke-opacity=".7"/>
+<circle cx="35.26" cy="71.95" r=".85" fill="none" stroke="#c9ccd0" stroke-width=".12" opacity=".6"/>
+<circle cx="39.26" cy="71.95" r=".85" fill="none" stroke="#c9ccd0" stroke-width=".12" opacity=".6"/>
+<circle cx="35.26" cy="79.15" r=".85" fill="none" stroke="#c9ccd0" stroke-width=".12" opacity=".6"/>
+<circle cx="39.26" cy="79.15" r=".85" fill="none" stroke="#c9ccd0" stroke-width=".12" opacity=".6"/>
+<circle cx="37.26" cy="75.55" r="3.25" fill="url(#ringG)"/>
+<g id="trackball">
+<circle cx="37.26" cy="75.55" r="2.5" fill="url(#ballG)"/>
+<ellipse cx="36.41" cy="74.5" rx=".8" ry=".5" fill="#fff" opacity=".55" transform="rotate(-30 36.41 74.5)"/>
+</g>
+<rect x="5.6" y="81.9" width="63.7" height=".92" rx=".3" fill="url(#barG)"/>
+<rect x="5.6" y="89.66" width="63.7" height=".92" rx=".3" fill="url(#barG)"/>
+<rect x="5.6" y="97.43" width="63.7" height=".92" rx=".3" fill="url(#barG)"/>
+<rect x="5.6" y="105.19" width="63.7" height=".92" rx=".3" fill="url(#barG)"/>
+<g class="key" data-key="q">
+<rect x="5.89" y="82.78" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="6.01" y="82.83" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M9.59,82.98 Q8.39,86.55 9.39,89.49 L11.54,89.49 Q11.74,86.21 11.54,82.98 Z" fill="url(#keyArc)"/>
+<path d="M9.59,83.03 Q8.39,86.55 9.39,89.44" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="6.41" y="82.93" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="6.51" y="87.28" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">Q</text>
+<text x="6.56" y="85.08" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">#</text>
+<text x="9.01" y="86.78" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ๆ</text>
+<text x="9.56" y="88.88" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">ไ</text>
+</g>
+<g class="key" data-key="w">
+<rect x="12.07" y="82.78" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="12.19" y="82.83" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M15.77,82.98 Q14.57,86.55 15.57,89.49 L17.72,89.49 Q17.92,86.21 17.72,82.98 Z" fill="url(#keyArc)"/>
+<path d="M15.77,83.03 Q14.57,86.55 15.57,89.44" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="12.59" y="82.93" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="12.69" y="87.28" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">W</text>
+<text x="12.74" y="85.08" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">1</text>
+<text x="15.19" y="86.78" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ภ</text>
+<text x="15.74" y="88.88" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">ๅท</text>
+</g>
+<g class="key" data-key="e">
+<rect x="18.25" y="82.78" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="18.37" y="82.83" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M21.95,82.98 Q20.75,86.55 21.75,89.49 L23.9,89.49 Q24.1,86.21 23.9,82.98 Z" fill="url(#keyArc)"/>
+<path d="M21.95,83.03 Q20.75,86.55 21.75,89.44" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="18.77" y="82.93" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="18.87" y="87.28" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">E</text>
+<text x="18.92" y="85.08" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">2</text>
+<text x="21.37" y="86.78" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ฎ</text>
+<text x="21.92" y="88.88" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">พถ</text>
+</g>
+<g class="key" data-key="r">
+<rect x="24.43" y="82.78" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="24.55" y="82.83" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M28.13,82.98 Q26.93,86.55 27.93,89.49 L30.08,89.49 Q30.28,86.21 30.08,82.98 Z" fill="url(#keyArc)"/>
+<path d="M28.13,83.03 Q26.93,86.55 27.93,89.44" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="24.95" y="82.93" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="25.05" y="87.28" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">R</text>
+<text x="25.1" y="85.08" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">3</text>
+<text x="27.55" y="86.78" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ธ</text>
+<text x="28.1" y="88.88" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">ะจ</text>
+</g>
+<g class="key" data-key="t">
+<rect x="30.61" y="82.78" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="30.73" y="82.83" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M34.31,82.98 Q33.11,86.55 34.11,89.49 L36.26,89.49 Q36.46,86.21 36.26,82.98 Z" fill="url(#keyArc)"/>
+<path d="M34.31,83.03 Q33.11,86.55 34.11,89.44" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="31.13" y="82.93" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="31.23" y="87.28" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">T</text>
+<text x="31.28" y="85.08" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">(</text>
+</g>
+<g class="key" data-key="y">
+<rect x="36.79" y="82.78" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="36.91" y="82.83" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M40.49,82.98 Q39.29,86.55 40.29,89.49 L42.44,89.49 Q42.64,86.21 42.44,82.98 Z" fill="url(#keyArc)"/>
+<path d="M40.49,83.03 Q39.29,86.55 40.29,89.44" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="37.31" y="82.93" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="37.41" y="87.28" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">Y</text>
+<text x="37.46" y="85.08" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">)</text>
+<text x="40.46" y="88.88" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">ค</text>
+</g>
+<g class="key" data-key="u">
+<rect x="42.97" y="82.78" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="43.09" y="82.83" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M46.67,82.98 Q45.47,86.55 46.47,89.49 L48.62,89.49 Q48.82,86.21 48.62,82.98 Z" fill="url(#keyArc)"/>
+<path d="M46.67,83.03 Q45.47,86.55 46.47,89.44" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="43.49" y="82.93" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="43.59" y="87.28" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">U</text>
+<text x="43.64" y="85.08" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">_</text>
+<text x="46.09" y="86.78" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ณ</text>
+<text x="46.64" y="88.88" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">รด</text>
+</g>
+<g class="key" data-key="i">
+<rect x="49.15" y="82.78" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="49.27" y="82.83" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M52.85,82.98 Q51.65,86.55 52.65,89.49 L54.8,89.49 Q55,86.21 54.8,82.98 Z" fill="url(#keyArc)"/>
+<path d="M52.85,83.03 Q51.65,86.55 52.65,89.44" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="49.67" y="82.93" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="49.77" y="87.28" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">I</text>
+<text x="49.82" y="85.08" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">-</text>
+<text x="52.27" y="86.78" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ฯ</text>
+<text x="52.82" y="88.88" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">นจ</text>
+</g>
+<g class="key" data-key="o">
+<rect x="55.33" y="82.78" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="55.45" y="82.83" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M59.03,82.98 Q57.83,86.55 58.83,89.49 L60.98,89.49 Q61.18,86.21 60.98,82.98 Z" fill="url(#keyArc)"/>
+<path d="M59.03,83.03 Q57.83,86.55 58.83,89.44" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="55.85" y="82.93" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="55.95" y="87.28" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">O</text>
+<text x="56" y="85.08" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">+</text>
+<text x="58.45" y="86.78" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ญ</text>
+<text x="59" y="88.88" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">ยข</text>
+</g>
+<g class="key" data-key="p">
+<rect x="61.51" y="82.78" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="61.63" y="82.83" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M65.21,82.98 Q64.01,86.55 65.01,89.49 L67.16,89.49 Q67.36,86.21 67.16,82.98 Z" fill="url(#keyArc)"/>
+<path d="M65.21,83.03 Q64.01,86.55 65.01,89.44" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="62.03" y="82.93" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="62.13" y="87.28" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">P</text>
+<text x="62.18" y="85.08" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">@</text>
+<text x="64.63" y="86.78" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ฐ</text>
+<text x="65.18" y="88.88" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">บช</text>
+</g>
+<g class="key" data-key="a">
+<rect x="5.89" y="90.54" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="6.01" y="90.59" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M9.59,90.74 Q8.39,94.31 9.39,97.25 L11.54,97.25 Q11.74,93.97 11.54,90.74 Z" fill="url(#keyArc)"/>
+<path d="M9.59,90.79 Q8.39,94.31 9.39,97.2" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="6.41" y="90.69" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="6.51" y="95.04" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">A</text>
+<text x="6.56" y="92.84" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">*</text>
+<text x="9.01" y="94.54" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ฤ</text>
+<text x="9.56" y="96.64" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">ฟห</text>
+</g>
+<g class="key" data-key="s">
+<rect x="12.07" y="90.54" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="12.19" y="90.59" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M15.77,90.74 Q14.57,94.31 15.57,97.25 L17.72,97.25 Q17.92,93.97 17.72,90.74 Z" fill="url(#keyArc)"/>
+<path d="M15.77,90.79 Q14.57,94.31 15.57,97.2" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="12.59" y="90.69" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="12.69" y="95.04" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">S</text>
+<text x="12.74" y="92.84" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">4</text>
+<text x="15.19" y="94.54" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ฆ</text>
+<text x="15.74" y="96.64" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">กด</text>
+</g>
+<g class="key" data-key="d">
+<rect x="18.25" y="90.54" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="18.37" y="90.59" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M21.95,90.74 Q20.75,94.31 21.75,97.25 L23.9,97.25 Q24.1,93.97 23.9,90.74 Z" fill="url(#keyArc)"/>
+<path d="M21.95,90.79 Q20.75,94.31 21.75,97.2" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="18.77" y="90.69" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="18.87" y="95.04" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">D</text>
+<text x="18.92" y="92.84" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">5</text>
+<text x="21.37" y="94.54" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">โ</text>
+<text x="21.92" y="96.64" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">เ</text>
+</g>
+<g class="key" data-key="f">
+<rect x="24.43" y="90.54" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="24.55" y="90.59" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M28.13,90.74 Q26.93,94.31 27.93,97.25 L30.08,97.25 Q30.28,93.97 30.08,90.74 Z" fill="url(#keyArc)"/>
+<path d="M28.13,90.79 Q26.93,94.31 27.93,97.2" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="24.95" y="90.69" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="25.05" y="95.04" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">F</text>
+<text x="25.1" y="92.84" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">6</text>
+<text x="27.55" y="94.54" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ฌ</text>
+</g>
+<g class="key" data-key="g">
+<rect x="30.61" y="90.54" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="30.73" y="90.59" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M34.31,90.74 Q33.11,94.31 34.11,97.25 L36.26,97.25 Q36.46,93.97 36.26,90.74 Z" fill="url(#keyArc)"/>
+<path d="M34.31,90.79 Q33.11,94.31 34.11,97.2" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="31.13" y="90.69" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="31.23" y="95.04" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">G</text>
+<text x="31.28" y="92.84" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">/</text>
+<text x="33.73" y="94.54" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">+</text>
+</g>
+<g class="key" data-key="h">
+<rect x="36.79" y="90.54" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="36.91" y="90.59" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M40.49,90.74 Q39.29,94.31 40.29,97.25 L42.44,97.25 Q42.64,93.97 42.44,90.74 Z" fill="url(#keyArc)"/>
+<path d="M40.49,90.79 Q39.29,94.31 40.29,97.2" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="37.31" y="90.69" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="37.41" y="95.04" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">H</text>
+<text x="37.46" y="92.84" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">:</text>
+<text x="39.91" y="94.54" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">~</text>
+<text x="40.46" y="96.64" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">า</text>
+</g>
+<g class="key" data-key="j">
+<rect x="42.97" y="90.54" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="43.09" y="90.59" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M46.67,90.74 Q45.47,94.31 46.47,97.25 L48.62,97.25 Q48.82,93.97 48.62,90.74 Z" fill="url(#keyArc)"/>
+<path d="M46.67,90.79 Q45.47,94.31 46.47,97.2" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="43.49" y="90.69" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="43.59" y="95.04" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">J</text>
+<text x="43.64" y="92.84" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">;</text>
+<text x="46.09" y="94.54" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ษ</text>
+<text x="46.64" y="96.64" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">ส</text>
+</g>
+<g class="key" data-key="k">
+<rect x="49.15" y="90.54" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="49.27" y="90.59" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M52.85,90.74 Q51.65,94.31 52.65,97.25 L54.8,97.25 Q55,93.97 54.8,90.74 Z" fill="url(#keyArc)"/>
+<path d="M52.85,90.79 Q51.65,94.31 52.65,97.2" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="49.67" y="90.69" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="49.77" y="95.04" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">K</text>
+<text x="49.82" y="92.84" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">'</text>
+<text x="52.27" y="94.54" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ศ</text>
+<text x="52.82" y="96.64" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">ว</text>
+</g>
+<g class="key" data-key="l">
+<rect x="55.33" y="90.54" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="55.45" y="90.59" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M59.03,90.74 Q57.83,94.31 58.83,97.25 L60.98,97.25 Q61.18,93.97 60.98,90.74 Z" fill="url(#keyArc)"/>
+<path d="M59.03,90.79 Q57.83,94.31 58.83,97.2" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="55.85" y="90.69" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="55.95" y="95.04" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">L</text>
+<text x="56" y="92.84" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">&quot;</text>
+<text x="58.45" y="94.54" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ซ</text>
+<text x="59" y="96.64" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">ง</text>
+</g>
+<g class="key" data-key="backspace">
+<rect x="61.51" y="90.54" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="61.63" y="90.59" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M65.21,90.74 Q64.01,94.31 65.01,97.25 L67.16,97.25 Q67.36,93.97 67.16,90.74 Z" fill="url(#keyArc)"/>
+<path d="M65.21,90.79 Q64.01,94.31 65.01,97.2" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="62.03" y="90.69" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<path d="M62.77,93.97 L63.67,92.97 L66.12,92.97 L66.12,94.97 L63.67,94.97 Z" fill="none" stroke="#f2f2f2" stroke-width=".32" stroke-linejoin="round"/>
+<path d="M64.32,93.47 l1.0,1.0 M65.32,93.47 l-1.0,1.0" stroke="#f2f2f2" stroke-width=".3" stroke-linecap="round"/>
+</g>
+<g class="key" data-key="alt">
+<rect x="5.89" y="98.31" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="6.01" y="98.36" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M9.59,98.51 Q8.39,102.08 9.39,105.02 L11.54,105.02 Q11.74,101.74 11.54,98.51 Z" fill="url(#keyArc)"/>
+<path d="M9.59,98.56 Q8.39,102.08 9.39,104.97" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="6.41" y="98.46" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="6.76" y="102.66" font-family="Arial, Helvetica, sans-serif" font-size="2.05" font-weight="700" fill="#f4f4f4">alt</text>
+</g>
+<g class="key" data-key="z">
+<rect x="12.07" y="98.31" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="12.19" y="98.36" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M15.77,98.51 Q14.57,102.08 15.57,105.02 L17.72,105.02 Q17.92,101.74 17.72,98.51 Z" fill="url(#keyArc)"/>
+<path d="M15.77,98.56 Q14.57,102.08 15.57,104.97" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="12.59" y="98.46" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="12.69" y="102.81" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">Z</text>
+<text x="12.74" y="100.61" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">7</text>
+<text x="15.19" y="102.31" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ฒ</text>
+<text x="15.74" y="104.41" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">ผ</text>
+</g>
+<g class="key" data-key="x">
+<rect x="18.25" y="98.31" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="18.37" y="98.36" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M21.95,98.51 Q20.75,102.08 21.75,105.02 L23.9,105.02 Q24.1,101.74 23.9,98.51 Z" fill="url(#keyArc)"/>
+<path d="M21.95,98.56 Q20.75,102.08 21.75,104.97" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="18.77" y="98.46" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="18.87" y="102.81" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">X</text>
+<text x="18.92" y="100.61" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">8</text>
+<text x="21.37" y="102.31" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ฌ</text>
+<text x="21.92" y="104.41" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">แ</text>
+</g>
+<g class="key" data-key="c">
+<rect x="24.43" y="98.31" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="24.55" y="98.36" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M28.13,98.51 Q26.93,102.08 27.93,105.02 L30.08,105.02 Q30.28,101.74 30.08,98.51 Z" fill="url(#keyArc)"/>
+<path d="M28.13,98.56 Q26.93,102.08 27.93,104.97" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="24.95" y="98.46" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="25.05" y="102.81" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">C</text>
+<text x="25.1" y="100.61" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">9</text>
+<text x="27.55" y="102.31" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ฉ</text>
+<text x="28.1" y="104.41" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">อ</text>
+</g>
+<g class="key" data-key="v">
+<rect x="30.61" y="98.31" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="30.73" y="98.36" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M34.31,98.51 Q33.11,102.08 34.11,105.02 L36.26,105.02 Q36.46,101.74 36.26,98.51 Z" fill="url(#keyArc)"/>
+<path d="M34.31,98.56 Q33.11,102.08 34.11,104.97" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="31.13" y="98.46" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="31.23" y="102.81" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">V</text>
+<text x="31.28" y="100.61" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">?</text>
+<text x="33.73" y="102.31" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ซ</text>
+</g>
+<g class="key" data-key="b">
+<rect x="36.79" y="98.31" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="36.91" y="98.36" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M40.49,98.51 Q39.29,102.08 40.29,105.02 L42.44,105.02 Q42.64,101.74 42.44,98.51 Z" fill="url(#keyArc)"/>
+<path d="M40.49,98.56 Q39.29,102.08 40.29,104.97" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="37.31" y="98.46" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="37.41" y="102.81" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">B</text>
+<text x="37.46" y="100.61" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">!</text>
+</g>
+<g class="key" data-key="n">
+<rect x="42.97" y="98.31" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="43.09" y="98.36" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M46.67,98.51 Q45.47,102.08 46.47,105.02 L48.62,105.02 Q48.82,101.74 48.62,98.51 Z" fill="url(#keyArc)"/>
+<path d="M46.67,98.56 Q45.47,102.08 46.47,104.97" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="43.49" y="98.46" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="43.59" y="102.81" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">N</text>
+<text x="43.64" y="100.61" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">,</text>
+<text x="46.64" y="104.41" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">ทม</text>
+</g>
+<g class="key" data-key="m">
+<rect x="49.15" y="98.31" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="49.27" y="98.36" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M52.85,98.51 Q51.65,102.08 52.65,105.02 L54.8,105.02 Q55,101.74 54.8,98.51 Z" fill="url(#keyArc)"/>
+<path d="M52.85,98.56 Q51.65,102.08 52.65,104.97" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="49.67" y="98.46" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="49.77" y="102.81" font-family="Arial, Helvetica, sans-serif" font-size="2.15" font-weight="700" fill="#f6f6f6">M</text>
+<text x="49.82" y="100.61" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">.</text>
+<text x="52.27" y="102.31" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ฒ</text>
+<text x="52.82" y="104.41" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a" text-anchor="middle">ใฝ</text>
+</g>
+<g class="key" data-key="$">
+<rect x="55.33" y="98.31" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="55.45" y="98.36" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M59.03,98.51 Q57.83,102.08 58.83,105.02 L60.98,105.02 Q61.18,101.74 60.98,98.51 Z" fill="url(#keyArc)"/>
+<path d="M59.03,98.56 Q57.83,102.08 58.83,104.97" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="55.85" y="98.46" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<path d="M58.35,99.66 h.55 l.85,-.7 v2.3 l-.85,-.7 h-.55 z" fill="none" stroke="#f2f2f2" stroke-width=".16" stroke-linejoin="round"/>
+<path d="M60.1,99.41 a.9,.9 0 0 1 0,1.3 M60.5,99.06 a1.4,1.4 0 0 1 0,2.0" fill="none" stroke="#f2f2f2" stroke-width=".14"/>
+<text x="56.05" y="102.66" font-family="Arial, Helvetica, sans-serif" font-size="2.0" font-weight="700" fill="#f0962a">$</text>
+<text x="56.35" y="104.56" font-family="Arial, Helvetica, sans-serif" font-size="1.45" fill="#f0962a">ลฟ</text>
+</g>
+<g class="key" data-key="enter">
+<rect x="61.51" y="98.31" width="6.02" height="6.91" rx="0.65" fill="#0a0a0b"/>
+<rect x="61.63" y="98.36" width="5.78" height="6.76" rx="0.55" fill="url(#keyG)"/>
+<path d="M65.21,98.51 Q64.01,102.08 65.01,105.02 L67.16,105.02 Q67.36,101.74 67.16,98.51 Z" fill="url(#keyArc)"/>
+<path d="M65.21,98.56 Q64.01,102.08 65.01,104.97" fill="none" stroke="#6b6d71" stroke-width=".09" opacity=".75"/>
+<rect x="62.03" y="98.46" width="4.98" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<path d="M65.82,100.54 L65.82,102.34 L63.12,102.34" fill="none" stroke="#f2f2f2" stroke-width=".38" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M62.77,102.34 l.9,-.75 v1.5 z" fill="#f2f2f2"/>
+</g>
+<g class="key" data-key="shift">
+<path d="M19.3,106.5 L19.3,111.3 L15.4,111.15 Q13,109.7 12.4,108.1 C12.4,107 12.9,106.5 14,106.5 Z" fill="#0a0a0b" transform="translate(0 .12)"/>
+<path d="M19.3,106.5 L19.3,111.3 L15.4,111.15 Q13,109.7 12.4,108.1 C12.4,107 12.9,106.5 14,106.5 Z" fill="url(#keyG)"/>
+<rect x="12.9" y="106.6" width="5.9" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<path d="M16.2,107.75 L17.45,109 L16.75,109 L16.75,110.2 L15.65,110.2 L15.65,109 L14.95,109 Z" fill="none" stroke="#f4f4f4" stroke-width=".26" stroke-linejoin="round"/>
+</g>
+<g class="key" data-key="0">
+<path d="M19.96,106.5 L26,106.5 L26.3,111.8 Q22.98,112.1 19.66,111.8 Z" fill="#0a0a0b" transform="translate(0 .12)"/>
+<path d="M19.96,106.5 L26,106.5 L26.3,111.8 Q22.98,112.1 19.66,111.8 Z" fill="url(#keyG)"/>
+<rect x="20.16" y="106.6" width="5.64" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="20.35" y="108.55" font-family="Arial, Helvetica, sans-serif" font-size="1.75" font-weight="700" fill="#f6f6f6">0</text>
+<text x="20.35" y="111.0" font-family="Arial, Helvetica, sans-serif" font-size="1.5" fill="#f0962a">ป</text>
+<rect x="22.85" y="108.75" width=".95" height="1.55" rx=".47" fill="#f2f2f2"/>
+<path d="M22.45,109.75 a.88,.88 0 0 0 1.76,0 M23.33,110.65 v.45 M22.75,111.12 h1.16" fill="none" stroke="#f2f2f2" stroke-width=".17" stroke-linecap="round"/>
+</g>
+<g class="key" data-key=" ">
+<path d="M27.1,106.5 L46.85,106.5 L47.15,112 Q36.98,112.3 26.8,112 Z" fill="#0a0a0b" transform="translate(0 .12)"/>
+<path d="M27.1,106.5 L46.85,106.5 L47.15,112 Q36.98,112.3 26.8,112 Z" fill="url(#keyG)"/>
+<rect x="27.3" y="106.6" width="19.35" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<path d="M33.6,108.9 V110.0 H40.4 V108.9" fill="none" stroke="#f4f4f4" stroke-width=".32"/>
+</g>
+<g class="key" data-key="sym">
+<path d="M47.76,106.5 L53.86,106.5 L54.16,111.8 Q50.81,112.1 47.46,111.8 Z" fill="#0a0a0b" transform="translate(0 .12)"/>
+<path d="M47.76,106.5 L53.86,106.5 L54.16,111.8 Q50.81,112.1 47.46,111.8 Z" fill="url(#keyG)"/>
+<rect x="47.96" y="106.6" width="5.7" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<text x="50.8" y="109.75" font-family="Arial, Helvetica, sans-serif" font-size="1.95" font-weight="700" fill="#f6f6f6" text-anchor="middle">sym</text>
+</g>
+<g class="key" data-key="shift">
+<path d="M54.48,106.5 L54.48,111.3 L58.55,111.15 Q60.95,109.7 61.55,108.1 C61.55,107 61.05,106.5 59.95,106.5 Z" fill="#0a0a0b" transform="translate(0 .12)"/>
+<path d="M54.48,106.5 L54.48,111.3 L58.55,111.15 Q60.95,109.7 61.55,108.1 C61.55,107 61.05,106.5 59.95,106.5 Z" fill="url(#keyG)"/>
+<rect x="54.98" y="106.6" width="6.07" height=".14" rx=".07" fill="#fff" opacity=".12"/>
+<path d="M58,107.75 L59.25,109 L58.55,109 L58.55,110.2 L57.45,110.2 L57.45,109 L56.75,109 Z" fill="none" stroke="#f4f4f4" stroke-width=".26" stroke-linejoin="round"/>
+</g>
+<rect id="usb" data-dir="down" x="31.53" y="120.05" width="8.94" height=".65" rx=".3" fill="#0d0e10" stroke="#8d9196" stroke-width=".1"/>
+</svg>
