@@ -32,6 +32,18 @@ CYAN  = (0, 214, 214)
 # ---- the clips ----
 
 CLIPS = {
+    # v1.41.0 "Return to Sender", at the T-Deck Plus's 320x240: the LORA page
+    # on its DMs tab (--tab 2), the chats' DMs list, a private line typed to
+    # YETI on Meshtastic (SQUACHSIM_DMPEER; dots, then its tick), the MeshCore
+    # one with JERSEY DVL (SQUACHSIM_DMNET), then the CYD's main screen for
+    # the new Waveshare C5 board.
+    "return-to-sender": [
+        ("lora", 40, 40, ["--tab", "2"], {"SQUACHSIM_LORATX": "1"}, 1500, "THE T-DECK LEARNED TO WHISPER."),
+        ("lorachat", 20, 40, ["--tab", "2"], {"SQUACHSIM_LORATX": "1"}, 1500, "DMS: MESHTASTIC AND MESHCORE, ONE LIST."),
+        ("lorachat", 20, 80, ["--tab", "2"], {"SQUACHSIM_LORATX": "1", "SQUACHSIM_DMPEER": "3b1c9a00", "SQUACHSIM_LORATYPE": "SAVE ME SOME JERKY|"}, 1700, "TYPE IT. ONLY YETI HEARS IT."),
+        ("lorachat", 20, 40, ["--tab", "2"], {"SQUACHSIM_LORATX": "1", "SQUACHSIM_DMPEER": "4e0a7f12", "SQUACHSIM_DMNET": "1"}, 1600, "THE TICK MEANS IT GOT THERE."),
+        ("clear", 60, 40, ["--bg", "5"], {"SQUACHSIM_BATT": "80"}, 1400, "NEW BOARD: WAVESHARE C5 2.8 (BETA)"),
+    ],
     # v1.40.0 "Wake Me Up Before You Go-Go", 320x240: SNOOZE mid-pick on the
     # alert card (SQUACHSIM_SNOOZE is the step it shows, its bar running out
     # over the capture), the SNOOZED toast it leaves on CLEAR
