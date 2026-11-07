@@ -646,13 +646,18 @@ private:
     // detection instead of one per type.
     uint32_t    _lifetimeByType[(uint8_t)DetectionType::COUNT] = {0};
     bool        _lifetimeDirty   = false;   // counted since the last write
-    // Detections waiting for their SD line. pushLog runs on the Bluetooth
-    // host task, and an SD append (open, write, close) does not belong
-    // there any more than the flash writes did; loop() writes them, one a
-    // frame. A burst past eight loses log lines, never detections.
-    static const uint8_t SD_Q_CAP = 8;
+    // Detections waiting for their SD line: first sights and returns (see
+    // queueSd). They are queued on the Bluetooth host task as well as in
+    // loop(), and an SD append (open, write, close) does not belong on the
+    // host task any more than the flash writes did; loop() writes them, all
+    // that are waiting each pass, through one open of the file. One a pass
+    // with room for eight could not keep up with a burst on the 3.5", whose
+    // loop runs nine to fourteen times a second. A burst past the queue
+    // still loses log lines, never detections, and _sdDropped counts them.
+    static const uint8_t SD_Q_CAP = 24;
     Detection        _sdQ[SD_Q_CAP];
     volatile uint8_t _sdQHead = 0, _sdQTail = 0;
+    volatile uint16_t _sdDropped = 0;
 
     // Sightings owed to the black box. Not the Detection itself: the entry
     // is read back from the log when it is written, a second and a half
@@ -663,6 +668,7 @@ private:
     BlackBoxQ _bbQ[BB_Q_CAP];
     uint8_t   _bbQHead = 0, _bbQTail = 0;
     void queueBlackBox(const Detection& d, bool again);
+    void queueSd(const Detection& d);
     void drainBlackBox(uint32_t now);
     uint32_t    _lifetimeSavedMs = 0;
     void        saveLifetime(uint32_t now); // from loop()

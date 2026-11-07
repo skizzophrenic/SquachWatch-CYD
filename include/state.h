@@ -195,7 +195,8 @@ enum class AppState : uint8_t {
     DEX              = 37, // the SQUACHY-DEX, from Settings' row. See ui_dex.h.
     LORA_CHAT        = 38, // LORA CHATS, from WATCH SETTINGS (SQUACH_LORA builds). See ui_lorachat.h.
     LORA_HOME        = 39, // LORA, the T-Deck's radio landing page. See ui_lorahome.h.
-    LORA_SETTINGS    = 40  // LORA SETTINGS, only from the LORA page. See ui_lorasettings.h.
+    LORA_SETTINGS    = 40, // LORA SETTINGS, only from the LORA page. See ui_lorasettings.h.
+    LOG_SHARE        = 41  // SHARE LOGS, from the SYSTEM page (-DSQW_LOG_SHARE=1). See ui_logshare.h.
 };
 
 enum class ButtonId : uint8_t {

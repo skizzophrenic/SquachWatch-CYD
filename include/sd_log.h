@@ -1,5 +1,6 @@
 // SquachWatch-CYD — optional SD card event log
-// If the SD card is mounted at boot, each Detection is appended to
+// If the SD card is mounted at boot, each Detection -- its first sight, and
+// every return after it went quiet -- is appended to
 // /squachwatch-YYYYMMDD.log as one CSV line, one file per local day. Until the
 // clock is trusted the rows go to /squachwatch-nodate.log, because a guessed
 // date can be days behind.
@@ -16,6 +17,8 @@ public:
     bool begin();              // returns true if card mounted
     bool ready() const { return _ready; }
     void logEvent(const Detection& d);
+    // n rows from a ring of cap, starting at from, through one open of the file.
+    void logEvents(const Detection* ring, uint8_t cap, uint8_t from, uint8_t n);
     void tick();               // flush / housekeeping (called from loop)
     // Deletes every squachwatch log file on the card. For the security wipe --
     // the phrase and the ignore list live in NVS, but the detection history a

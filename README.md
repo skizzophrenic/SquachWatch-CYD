@@ -215,6 +215,10 @@ none of the saved networks is in range. REMOVE takes one off the list.
 If a microSD card is present, every detection is also appended to
 `squachwatch-<day>.log` (CSV: `ts,type,rssi,mac,channel,vendor,ssid`).
 
+On the 2.8" CYD, Freenove 3.2" and 3.5" resistive builds, **Settings → SYSTEM → SHARE LOGS** serves those
+files and the black box to a browser on your WiFi network; see
+[docs/LOG-SHARE.md](docs/LOG-SHARE.md).
+
 ### The clock
 
 There is no GPS (except on the T-Watch S3 Plus, which sets its clock from

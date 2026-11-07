@@ -164,6 +164,9 @@ void wipe();
 
 // BLACKBOX on the console: both rings, as text.
 void dump();
+// The same text, a line at a time (each with its '\n'), to anywhere: the
+// WiFi log share (log_share.cpp) sends it to a browser as blackbox.csv.
+void dumpTo(void (*line)(const char* s, void* ctx), void* ctx);
 
 #ifdef BLACKBOX_TEST
 // test/blackbox_test.cpp only: forget what is in RAM and scan again, as a
