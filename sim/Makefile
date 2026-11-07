@@ -260,6 +260,65 @@ all: $(BIN) $(LIVE_BIN)
 live: $(LIVE_BIN)
 wasm: $(WASM_OUT)
 
+# The T-Deck Plus, for the web page's T-Deck: the same firmware built as the
+# board is (-DTDECK_PLUS, -DSQUACH_LORA), so its LORA page, chats, DMs and
+# keyboard are the real ones. sim/lora_sim.cpp is the radio (a made-up band
+# around Bluff Creek) and sim/gt911_sim.cpp the touch chip. SQUACHSIM leaves
+# out what a browser cannot do: the speaker and POWER OFF (include/sound.h).
+# No BOOT button: the T-Deck's POCKET MODE is not wired on the board either.
+WASM_TDECK_OUT  := $(WASM_DIR)/squachsim-tdeck.js
+WASM_TDECK_SRCS := $(UI_SRCS) $(SRC)/main.cpp $(SRC)/cap_touch.cpp $(SRC)/touch_cal.cpp \
+             $(SRC)/ui_lorahome.cpp $(SRC)/ui_lorasettings.cpp $(SRC)/ui_lorachat.cpp \
+             $(SRC)/lora_profiles.cpp $(SRC)/lora_crypto.cpp $(SRC)/lora_meshtastic.cpp \
+             $(SRC)/lora_meshcore.cpp $(SRC)/lora_channels.cpp \
+             $(SIM_DIR)/lora_sim.cpp $(SIM_DIR)/gt911_sim.cpp $(SIM_DIR)/main_wasm.cpp $(SIM_DIR)/detection_sim.cpp
+WASM_TDECK_FLAGS := $(filter-out -DSQUACHSIM_BOOT=1,$(WASM_FLAGS)) \
+             -DTDECK_PLUS=1 -DSQUACH_LORA=1 -DCYD_GPS=1 -DSQUACHSIM=1
+
+wasm-tdeck: $(WASM_TDECK_OUT)
+
+$(WASM_TDECK_OUT): $(WASM_TDECK_SRCS) $(wildcard $(SIM_DIR)/*.h) $(wildcard $(INC)/*.h)
+	@command -v em++ >/dev/null || { echo "em++ not found -- run: source ~/emsdk/emsdk_env.sh"; exit 1; }
+	@mkdir -p $(WASM_DIR)
+	em++ $(WASM_TDECK_FLAGS) -sEXPORT_NAME=SquachSimTDeck -o $@ $(WASM_TDECK_SRCS)
+
+# The T-Watch S3 and the Cardputer ADV, built as the boards are, for the
+# page's watch and Cardputer. The watch has its own screens, the crown
+# (sim/XPowersLib.h stands in for its power chip, which reads it) and LoRa
+# listening on the same made-up band as the T-Deck; its touch falls back to
+# the CYD's path here, as its FT6336 does not answer. The Cardputer has no
+# touch at all: its keyboard drives a cursor (sw_cardkey).
+WASM_TWATCH_OUT  := $(WASM_DIR)/squachsim-twatch.js
+WASM_TWATCH_SRCS := $(UI_SRCS) $(SRC)/main.cpp $(SRC)/cap_touch.cpp $(SRC)/touch_cal.cpp \
+             $(SRC)/ui_lorahome.cpp $(SRC)/ui_lorasettings.cpp $(SRC)/ui_lorachat.cpp \
+             $(SRC)/lora_profiles.cpp $(SRC)/lora_crypto.cpp $(SRC)/lora_meshtastic.cpp \
+             $(SRC)/lora_meshcore.cpp $(SRC)/lora_channels.cpp \
+             $(SRC)/wardrive.cpp $(SIM_DIR)/lora_sim.cpp $(SIM_DIR)/main_wasm.cpp $(SIM_DIR)/detection_sim.cpp
+WASM_TWATCH_FLAGS := $(filter-out -DSQUACHSIM_BOOT=1,$(WASM_FLAGS)) \
+             -DTWATCH_S3=1 -DSQUACH_LORA=1 -DSQUACHSIM=1
+
+wasm-twatch: $(WASM_TWATCH_OUT)
+
+$(WASM_TWATCH_OUT): $(WASM_TWATCH_SRCS) $(wildcard $(SIM_DIR)/*.h) $(wildcard $(INC)/*.h)
+	@command -v em++ >/dev/null || { echo "em++ not found -- run: source ~/emsdk/emsdk_env.sh"; exit 1; }
+	@mkdir -p $(WASM_DIR)
+	em++ $(WASM_TWATCH_FLAGS) -sEXPORT_NAME=SquachSimTWatch -o $@ $(WASM_TWATCH_SRCS)
+
+WASM_CARD_OUT  := $(WASM_DIR)/squachsim-cardputer.js
+WASM_CARD_SRCS := $(WASM_SRCS)
+WASM_CARD_FLAGS := $(filter-out -DSQUACHSIM_BOOT=1,$(WASM_FLAGS)) \
+             -DCARDPUTER_ADV=1 -DSQW_SMALL=1 -DSQUACHSIM=1
+
+wasm-cardputer: $(WASM_CARD_OUT)
+
+$(WASM_CARD_OUT): $(WASM_CARD_SRCS) $(wildcard $(SIM_DIR)/*.h) $(wildcard $(INC)/*.h)
+	@command -v em++ >/dev/null || { echo "em++ not found -- run: source ~/emsdk/emsdk_env.sh"; exit 1; }
+	@mkdir -p $(WASM_DIR)
+	em++ $(WASM_CARD_FLAGS) -sEXPORT_NAME=SquachSimCardputer -o $@ $(WASM_CARD_SRCS)
+
+# Every browser build the web page loads.
+wasm-all: wasm wasm-tdeck wasm-twatch wasm-cardputer
+
 $(WASM_OUT): $(WASM_SRCS) $(wildcard $(SIM_DIR)/*.h) $(wildcard $(INC)/*.h)
 	@command -v em++ >/dev/null || { echo "em++ not found -- run: source ~/emsdk/emsdk_env.sh"; exit 1; }
 	@mkdir -p $(WASM_DIR)
@@ -298,6 +357,6 @@ clean:
 	# Leftovers from the old single-shot build, which Apple clang gave
 	# debug bundles; the object build never makes them.
 	rm -rf $(BIN).dSYM $(LIVE_BIN).dSYM
-	rm -rf out .nvs $(WASM_DIR)/squachsim.js $(WASM_DIR)/squachsim.wasm
+	rm -rf out .nvs $(WASM_DIR)/squachsim.js $(WASM_DIR)/squachsim.wasm $(WASM_DIR)/squachsim-*.js $(WASM_DIR)/squachsim-*.wasm
 
 .PHONY: all live wasm shots clean

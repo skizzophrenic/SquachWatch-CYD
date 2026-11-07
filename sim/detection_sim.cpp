@@ -238,3 +238,15 @@ void DetectionEngine::processDeauthQ() {}
 void DetectionEngine::expireStale() {}
 void DetectionEngine::hopChannel() {}
 void DetectionEngine::decayChannelActivity() {}
+
+// The radios' rest, which the T-Deck build's LoRa duty cycle asks for (and
+// the watch's). Nothing here to rest: they report awake.
+bool DetectionEngine::restRadios(bool) { return false; }
+void DetectionEngine::wakeRadios() {}
+bool DetectionEngine::radiosResting() { return false; }
+
+// The watch build's boot report and its count of new Bluetooth arrivals
+// (detection.cpp has the real ones; no radios here, so none arrive).
+char g_bootRadioLine[192] = "";
+uint32_t bleArrivals() { return 0; }
+void bleArrivalsRoll(uint32_t) {}

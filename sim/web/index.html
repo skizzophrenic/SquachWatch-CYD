@@ -309,7 +309,9 @@
       <li>The gear in the top-left opens Settings; the icon top-right rotates the screen, and the board turns with it.</li>
       <li>Tap Squachy to pet him. Hold <kbd>CLR</kbd> for four seconds to unlock every outfit.</li>
       <li>On a CYD, <kbd>BOOT ↑</kbd> under the board is its BOOT button (it is on the back): POCKET MODE, screen off and on. On the watch, the crown does it.</li>
-      <li><kbd>1</kbd>–<kbd>5</kbd> switch boards.</li>
+      <li>The Cardputer has no touch screen: the arrow keys or <kbd>Tab</kbd> move its cursor, <kbd>Enter</kbd> or <kbd>Space</kbd> presses, <kbd>Esc</kbd> goes home.</li>
+      <li>On the T-Deck, type on your keyboard (or click its keys): <kbd>Enter</kbd> on the home screen opens the LORA page, and the chats and DMs take what you type.</li>
+      <li><kbd>1</kbd>–<kbd>5</kbd> switch boards (on the T-Deck they type instead: click the shelf).</li>
     </ul>
   </div>
 
@@ -326,9 +328,13 @@
       shape layer isn't pixel-exact against the display library.
     </p>
     <p>
-      Not yet: every board here runs the CYD firmware at its own screen size. The T-Deck's
-      keyboard, LORA page and DMs, and the watch's and Cardputer's own layouts, need their own
-      builds; until then their keys move but don't type.
+      Every board runs its own firmware build. On the T-Deck the keyboard, LORA page, chats
+      and DMs are the real ones. Its air is made up &mdash; a handful of cryptids around Bluff Creek on
+      Meshtastic and MeshCore &mdash; and what you send goes nowhere.
+    </p>
+    <p>
+      The 2.8" and the 3.5" share the CYD build, each at its own screen size, as the boards
+      do; the watch and the Cardputer run theirs.
     </p>
     <p>
       The frame rate is capped to 33fps to match what the hardware actually manages once
@@ -1944,9 +1950,12 @@
      goes back to being an import -- the two have to agree. -->
 <script src="./squachsim.js"></script>
 <script type="module">
-
 const STATES = ['BOOT','CLEAR','ALERT','LOG','SETTINGS','DIARY','OUTFIT','RAWSCAN',
-                'WATCH ALERT','DIAGNOSTICS','HUNT','COLOUR CHECK','TYPE FILTER'];
+                'WATCH ALERT','DIAGNOSTICS','HUNT','COLOUR CHECK','TYPE FILTER','OUTFIT UNLOCK',
+                'IGNORE LIST','POWER SAVER','PHONE','MESH MENU','MESH WARN','MESH PHRASE',
+                'MESH COMPOSE','BEACON WARN','SECURITY','LOCKED','PIN ENTRY','SQUAD','UPDATE',
+                'WIFI PASS','STATUS LIGHT','NUDGE','SQUAD UPDATE','INVITE','DESK','WIFI NETS',
+                'WIFI ADD','SYS PROPS','BINGO','DEX','LORA CHATS','LORA','LORA SETTINGS'];
 
 const $ = id => document.getElementById(id);
 const cv = $('screen'), ctx = cv.getContext('2d', { alpha:false });
@@ -1955,7 +1964,11 @@ const cv = $('screen'), ctx = cv.getContext('2d', { alpha:false });
 // panel: the screen the firmware draws on, landscape, in pixels. The drawing
 // (a <template> above, from sim/web/boards/) is in millimetres, and its
 // #screen rect is the panel's active area, so pixels and millimetres meet
-// there. pocket: which of the board's controls is the BOOT button.
+// there. pocket: which of the board's controls is the BOOT button. build:
+// which firmware runs in it -- each board's own where it has one (the
+// T-Deck's keyboard, LORA page, chats and DMs; the watch's screens and crown;
+// the Cardputer's keyboard cursor), the CYD build at the board's size where it
+// does not.
 const BOARDS = [
   {id:'cyd28', name:'2.8" CYD', full:'2.8 inch CYD (ESP32-2432S028)', panel:[320,240], pocket:'boot',
    spec:'2.8 in · 320×240 · touch',
@@ -1963,21 +1976,20 @@ const BOARDS = [
   {id:'cyd35', name:'3.5"', full:'3.5 inch CYD / Freenove 3.5', panel:[480,320], pocket:'boot',
    spec:'3.5 in · 480×320 · touch',
    adds:'The same detector with big text, and room for Squachy and his pets to spread out.'},
-  {id:'tdeck', name:'T-Deck', full:'LilyGo T-Deck Plus', panel:[320,240],
+  {id:'tdeck', name:'T-Deck', full:'LilyGo T-Deck Plus', panel:[320,240], build:'tdeck',
    spec:'2.8 in · 320×240 · keyboard · LoRa',
    adds:'A real keyboard, the LoRa radar, Meshtastic and MeshCore chats, private DMs, GPS and a speaker.',
-   later:'Here it runs the CYD screens at its size. Its keyboard, LORA page and DMs come with its own emulator build.'},
-  {id:'watch', name:'T-Watch', full:'LilyGo T-Watch S3', panel:[240,240], pocket:'crown',
+   later:'This is the T-Deck\'s own firmware. Type on your keyboard; Enter on the home screen opens the LORA page. The air is made up: a few cryptids chatting on Meshtastic and MeshCore.'},
+  {id:'watch', name:'T-Watch', full:'LilyGo T-Watch S3', panel:[240,240], pocket:'crown', build:'twatch',
    spec:'1.54 in · 240×240 · on your wrist',
    adds:'The detector on your wrist: buzz alerts, the crown for POCKET MODE, and LoRa listening on the S3 Plus.',
-   later:'Here it runs the CYD screens at its size; the watch\'s own layout comes with its own emulator build.'},
-  {id:'cardputer', name:'Cardputer', full:'M5Stack Cardputer ADV', panel:[240,135],
+   later:'This is the watch\'s own firmware: tap the screen, press the crown. It listens to the same made-up LoRa air as the T-Deck.'},
+  {id:'cardputer', name:'Cardputer', full:'M5Stack Cardputer ADV', panel:[240,135], build:'cardputer',
    spec:'1.14 in · 240×135 · keyboard',
    adds:'A pocket keyboard computer with a tiny sideways screen.',
-   later:'Here it runs the CYD screens at its size; its keyboard and layout come with its own emulator build.'},
+   later:'This is the Cardputer\'s own firmware. No touch screen: the arrow keys (or Tab) move the cursor, Enter or Space presses, Esc goes home.'},
 ];
 const byId = id => BOARDS.find(b => b.id === id);
-const SVG_NS = 'http://www.w3.org/2000/svg';
 
 // The drawing's size in mm, from its viewBox.
 function dims(id) {
@@ -2005,64 +2017,133 @@ let size = pref('size', 'fit');
 if (!/^(fit|same|actual)$/.test(size)) size = 'fit';
 
 // ---- the firmware ------------------------------------------------------------
-const M = await SquachSim();
-const setup  = () => M.ccall('sw_setup', null, [], []);
-const step   = M.cwrap('sw_step','null',['number']);
-const frame  = M.cwrap('sw_frame','number',[]);
-const touch  = M.cwrap('sw_touch','null',['number','number','number']);
-const detect = M.cwrap('sw_detect','number',['number','number']);
-// Older builds have no resize (every board then shows the CYD's 320x240), no
-// BOOT button and no backlight; the page still runs.
-const resize = M._sw_resize ? M.cwrap('sw_resize','null',['number','number']) : () => {};
-const bootPress = M._sw_boot ? M.cwrap('sw_boot','null',[]) : null;
-const backlight = M._sw_backlight ? M.cwrap('sw_backlight','number',[]) : () => -1;
-// One entry per device the firmware can name, straight from its own table
-// (sim/sim_detections.h), grouped by detection type. A list kept by hand here
-// went stale and hid the Flipper Zero and iBeacons.
-{
-  const groups = {};
-  for (const [i, type, label] of JSON.parse(M.ccall('sw_det_catalog', 'string', [], []))) {
-    if (!groups[type]) {
-      groups[type] = document.createElement('optgroup');
-      groups[type].label = type;
-      $('type').add(groups[type]);
-    }
-    groups[type].appendChild(new Option(label, i));
-    if (label === 'Apple AirTag') $('type').value = i;   // the one people recognise
-  }
+// The CYD's build (squachsim.js, loaded by the page) and each board's own
+// (squachsim-tdeck.js and so on), fetched the first time that board is picked.
+// Each keeps its state once started, with its own settings (localStorage
+// squachsim.nvs.*, squachsim.tdeck.nvs.*, ...), so switching back finds it
+// where it was. A site without a board's file (an older release) runs the CYD
+// build at that board's size instead.
+const BUILDS = {
+  tdeck:     ['./squachsim-tdeck.js',     'SquachSimTDeck'],
+  twatch:    ['./squachsim-twatch.js',    'SquachSimTWatch'],
+  cardputer: ['./squachsim-cardputer.js', 'SquachSimCardputer'],
+};
+const engines = {};
+function loadScript(src) {
+  return new Promise((ok, no) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = ok; s.onerror = no;
+    document.head.appendChild(s);
+  });
 }
-const stateOf= M.cwrap('sw_state','number',[]);
-const rotOf  = M.cwrap('sw_rotation','number',[]);
-const wOf    = M.cwrap('sw_width','number',[]);
-const hOf    = M.cwrap('sw_height','number',[]);
+async function engine(kind) {
+  if (engines[kind]) return engines[kind];
+  let M;
+  if (BUILDS[kind]) {
+    const [src, global] = BUILDS[kind];
+    try {
+      if (!window[global]) await loadScript(src);
+      M = await window[global]();
+    } catch (e) {
+      return engine('cyd');
+    }
+  } else {
+    M = await SquachSim();
+  }
+  const E = {
+    kind, M,
+    nvs:    BUILDS[kind] ? `squachsim.${kind}.nvs.` : 'squachsim.nvs.',
+    setup:  () => M.ccall('sw_setup', null, [], []),
+    step:   M.cwrap('sw_step','null',['number']),
+    frame:  M.cwrap('sw_frame','number',[]),
+    touch:  M.cwrap('sw_touch','null',['number','number','number']),
+    detect: M.cwrap('sw_detect','number',['number','number']),
+    state:  M.cwrap('sw_state','number',[]),
+    rot:    M.cwrap('sw_rotation','number',[]),
+    w:      M.cwrap('sw_width','number',[]),
+    h:      M.cwrap('sw_height','number',[]),
+    // Older builds have no resize (every board then shows the CYD's 320x240),
+    // no BOOT button, no backlight and no keyboard; the page still runs.
+    resize: M._sw_resize ? M.cwrap('sw_resize','null',['number','number']) : () => {},
+    boot:   M._sw_boot ? M.cwrap('sw_boot','null',[]) : null,
+    bl:     M._sw_backlight ? M.cwrap('sw_backlight','number',[]) : () => -1,
+    key:    M._sw_key ? M.cwrap('sw_key','null',['number']) : null,
+    cardKey: M._sw_cardkey ? M.cwrap('sw_cardkey','null',['number','number']) : null,
+    meshCmd:     M.cwrap('sw_mesh','number',['string']),
+    meshStatus:  M.cwrap('sw_mesh_status','string',[]),
+    meshCatalog: M.cwrap('sw_mesh_catalog','string',[]),
+    panel: null,
+  };
+  E.setup();
+  engines[E.kind] = E;
+  return E;
+}
+let E = null;
 
-// The board's own panel, after a boot: setup() keeps whatever panel it is
-// handed, and sw_resize puts it at the board's landscape.
-function boot() { setup(); resize(board.panel[0], board.panel[1]); lastW = 0; }
+// Put the running build on this board's panel, after a boot or a switch:
+// setup() keeps whatever panel it is handed, and sw_resize puts it at the
+// board's landscape. Only on a change, so coming back to a board does not
+// undo a rotation made there.
+function fit(force) {
+  const key = board.panel.join('x');
+  if (force || E.panel !== key) { E.resize(board.panel[0], board.panel[1]); E.panel = key; }
+  lastW = 0;
+}
+function boot() { E.setup(); fit(true); }
+
 let img = null, lastW = 0, lastH = 0, lastRot = -1;
-boot();
-$('boot').textContent = '';
-
 function blit() {
-  const w = wOf(), h = hOf(), r = rotOf();
+  const w = E.w(), h = E.h(), r = E.rot();
   if (w !== lastW || h !== lastH || r !== lastRot) {   // a rotation or a new board
     cv.width = w; cv.height = h;
     img = ctx.createImageData(w, h);
     lastW = w; lastH = h; lastRot = r;
     place();
   }
-  const p = frame();
-  img.data.set(M.HEAPU8.subarray(p, p + w * h * 4));
+  const p = E.frame();
+  img.data.set(E.M.HEAPU8.subarray(p, p + w * h * 4));
   ctx.putImageData(img, 0, 0);
+}
+
+// The detection picker, from the firmware's own table (sim/sim_detections.h),
+// grouped by detection type. A list kept by hand here went stale and hid the
+// Flipper Zero and iBeacons. Both builds share the table.
+function fillCatalog() {
+  const sel = $('type'), was = sel.value; sel.innerHTML = '';
+  const groups = {};
+  for (const [i, type, label] of JSON.parse(E.M.ccall('sw_det_catalog', 'string', [], []))) {
+    if (!groups[type]) {
+      groups[type] = document.createElement('optgroup');
+      groups[type].label = type;
+      sel.add(groups[type]);
+    }
+    groups[type].appendChild(new Option(label, i));
+    if (label === 'Apple AirTag' && !was) sel.value = i;   // the one people recognise
+  }
+  if (was) sel.value = was;
+}
+function fillMeshCatalog() {
+  const cat = JSON.parse(E.meshCatalog());
+  for (const [id, list] of [['meshOutfit', cat.outfits], ['meshShade', cat.shades],
+                            ['meshNick', cat.nicks], ['meshLine', cat.lines]]) {
+    $(id).innerHTML = '';
+    list.forEach((n, i) => $(id).add(new Option(n, i)));
+  }
 }
 
 // ---- the bench -----------------------------------------------------------------
 const stage = $('stage'), scene = $('scene'), wrap = $('screenWrap');
 let rotor = null, part = null;
+// Whether the board's own build is the one running (not the CYD stand-in).
+const own = () => !!(E && board.build && E.kind === board.build);
+const typing = () => own() && !!E.key;        // the T-Deck: characters
+const cursor = () => own() && !!E.cardKey;    // the Cardputer: a cursor
 
 function hint() {
   if (board.pocket === 'boot') return 'Tap the screen to touch it · BOOT ↑ is the button on the back: POCKET MODE';
   if (board.pocket === 'crown') return 'Tap the screen to touch it · press the crown for POCKET MODE';
+  if (typing()) return 'Tap the screen, or type on your keyboard (or its keys) · Enter on the home screen opens LORA';
+  if (cursor()) return 'No touch screen: arrows or Tab move the cursor, Enter or Space presses, Esc goes home';
   return 'Tap the screen to touch it · the keys move as you type, but don\'t type yet';
 }
 
@@ -2073,7 +2154,8 @@ function drawInfo() {
   add('h2', null, b.full);
   add('span', 'spec', b.spec);
   add('p', null, b.adds);
-  if (b.later) add('p', 'later', b.later);
+  if (b.later && (!b.build || own())) add('p', 'later', b.later);
+  if (b.build && !own()) add('p', 'later', 'Here it runs the CYD screens at its size; its own build is not on this site yet.');
   const a = add('a', 'flash', 'Flash this board →'); a.href = '../';
   $('hint').textContent = hint();
   $('footSize').textContent = `${b.panel[0]}×${b.panel[1]} · 8bpp RGB332`;
@@ -2106,12 +2188,22 @@ function drawShelf() {
   document.querySelectorAll('#sizes button').forEach(x => x.setAttribute('aria-pressed', x.dataset.size === size));
 }
 
-function choose(b) {
+let switching = 0;
+async function choose(b) {
   if (b === board) return;
   board = b; keep('board', b.id);
   history.replaceState(null, '', '#' + b.id);
   queue.length = 0; held = false;
-  resize(b.panel[0], b.panel[1]);
+  const ticket = ++switching;
+  const want = b.build || 'cyd';
+  if (!E || E.kind !== want) {
+    if (want === 'tdeck' && !engines.tdeck) $('boot').textContent = 'loading the T-Deck firmware…';
+    const next = await engine(want);
+    if (ticket !== switching) return;          // picked another board meanwhile
+    $('boot').textContent = '';
+    if (next !== E) { E = next; fillCatalog(); fillMeshCatalog(); lastBl = null; }
+  }
+  fit(false);
   build(true);
 }
 
@@ -2124,7 +2216,7 @@ function build(animate) {
   rotor.appendChild(c.svg);
   scene.insertBefore(rotor, wrap);
   // BOOT, or the crown: the real POCKET MODE (sw_boot).
-  const press = () => { if (bootPress) bootPress(); };
+  const press = () => { if (E.boot) E.boot(); };
   if (board.pocket === 'crown') {
     const cr = part('crown');
     if (cr) { cr.style.cursor = 'pointer'; cr.addEventListener('click', press); }
@@ -2151,7 +2243,7 @@ function place() {
   if (!rotor) return;
   const D = dims(board.id), scr = part('screen');
   const sx = num(scr, 'x'), sy = num(scr, 'y'), sw = num(scr, 'width'), sh = num(scr, 'height');
-  const turn = ({0: 90, 2: 270, 3: 180})[rotOf()] || 0;
+  const turn = ({0: 90, 2: 270, 3: 180})[E.rot()] || 0;
   const side = turn % 180 !== 0;
   const bw = side ? D.h : D.w, bh = side ? D.w : D.h;   // the turned board, mm
 
@@ -2252,24 +2344,55 @@ let rt;
 new ResizeObserver(() => { clearTimeout(rt); rt = setTimeout(place, 60); }).observe(stage);
 addEventListener('hashchange', () => { const b = byId(location.hash.slice(1)); if (b) choose(b); });
 
-// Keys press when you type. The firmware does not hear them yet (that is the
-// T-Deck and Cardputer builds' job), so nothing is sent. 1-5 switch boards,
-// unless this board has a key for it.
+// ---- keys ---------------------------------------------------------------------
+// On the T-Deck, typed keys go to the firmware as its keyboard's helper chip
+// would hand them over (sw_key): the character, a newline for Enter, a
+// backspace for Backspace. The drawn key moves either way. On a board that
+// takes no typing, 1-5 switch boards.
+const KEYCODE = { enter: 10, backspace: 8, ' ': 32 };
+// The Cardputer's cursor keys, as its firmware reads the keyboard: ENTER and
+// the space bar press, the arrow keys (; , . / on the Cardputer) and TAB step,
+// ESC (`) and DEL go home.
+const CARD = { enter: 0, ' ': 0, arrowdown: 1, arrowright: 1, tab: 1, '.': 1, '/': 1,
+               arrowup: 2, arrowleft: 2, ';': 2, ',': 2, escape: 3, '`': 3, backspace: 3 };
+function press(el) { el.classList.add('down'); setTimeout(() => el.classList.remove('down'), 120); }
+function send(k) {
+  if (cursor()) {
+    const w = CARD[k.toLowerCase()];
+    if (w === undefined) return false;
+    queue.push({ card: w, down: 1 });
+    return true;
+  }
+  if (!typing()) return false;
+  const code = KEYCODE[k] ?? (k.length === 1 ? k.charCodeAt(0) : 0);
+  if (!code || code > 126) return false;
+  queue.push({ key: code });
+  return true;
+}
 document.addEventListener('keydown', e => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if (e.target.closest && e.target.closest('input,select,textarea,[contenteditable]')) return;
-  const k = e.key.toLowerCase();
-  const key = rotor && [...rotor.querySelectorAll('.key')].find(x => String(x.dataset.key).toLowerCase() === k);
-  if (key) {
-    key.classList.add('down'); setTimeout(() => key.classList.remove('down'), 120);
-    if (e.key === ' ' || e.key === 'Backspace') e.preventDefault();
-    return;
-  }
+  const k = e.key.length === 1 ? e.key : e.key.toLowerCase();
+  const key = rotor && [...rotor.querySelectorAll('.key')].find(x => String(x.dataset.key).toLowerCase() === k.toLowerCase());
+  if (key) press(key);
+  if (send(k)) { e.preventDefault(); return; }
+  if (key) { if (e.key === ' ' || e.key === 'Backspace') e.preventDefault(); return; }
   if (/^[1-5]$/.test(e.key)) choose(BOARDS[+e.key - 1]);
+});
+// ENTER on the Cardputer is held for as long as the key is: a long press is
+// still a long press.
+document.addEventListener('keyup', e => {
+  if (!cursor() || CARD[(e.key.length === 1 ? e.key : e.key.toLowerCase())] !== 0) return;
+  queue.push({ card: 0, down: 0 });
 });
 scene.addEventListener('pointerdown', e => {
   const k = e.target.closest && e.target.closest('.key.hit'); if (!k) return;
-  k.classList.add('down'); setTimeout(() => k.classList.remove('down'), 120);
+  press(k);
+  const name = String(k.dataset.key);
+  if (send(name) && cursor() && CARD[name] === 0) {
+    const up = () => { queue.push({ card: 0, down: 0 }); removeEventListener('pointerup', up); };
+    addEventListener('pointerup', up);
+  }
 });
 
 // ---- touch ------------------------------------------------------------------
@@ -2305,14 +2428,14 @@ $('trigger').onclick = () => queue.push({det:+$('type').value});
 $('reboot').onclick  = () => { queue.length = 0; held = false; boot(); };
 
 // Settings live in localStorage under one key per NVS namespace (see
-// Preferences.h in the emulator repo). Clearing them and re-running
-// setup() puts the device back to first boot -- the equivalent of
-// deleting the .nvs directory the native emulator uses. Done from JS
-// rather than a new wasm export so it stays a page concern.
+// Preferences.h). Clearing the running build's and re-running setup() puts it
+// back to first boot -- the equivalent of deleting the .nvs directory the
+// native emulator uses. Done from JS rather than a new wasm export so it stays
+// a page concern.
 $('wipe').onclick = () => {
   try {
     Object.keys(localStorage)
-      .filter(k => k.startsWith('squachsim.nvs.'))
+      .filter(k => k.startsWith(E.nvs))
       .forEach(k => localStorage.removeItem(k));
   } catch (e) { /* private mode: nothing was persisted to begin with */ }
   queue.length = 0; held = false; boot();
@@ -2344,20 +2467,12 @@ function meshLines(el, lines) {
 }
 
 // ---- SquachMesh: a second SquachWatch that lives in this page ------------------
-// sim/meshsim.cpp. Commands go straight in between frames -- one thread, so
-// nothing lands halfway through a loop().
-const meshCmd     = M.cwrap('sw_mesh','number',['string']);
-const meshStatus  = M.cwrap('sw_mesh_status','string',[]);
-const meshCatalog = M.cwrap('sw_mesh_catalog','string',[]);
-{
-  const cat = JSON.parse(meshCatalog());
-  for (const [id, list] of [['meshOutfit', cat.outfits], ['meshShade', cat.shades],
-                            ['meshNick', cat.nicks], ['meshLine', cat.lines]])
-    list.forEach((n, i) => $(id).add(new Option(n, i)));
-}
+// sim/meshsim.cpp, in whichever build is running. Commands go straight in
+// between frames -- one thread, so nothing lands halfway through a loop().
 let mesh = {};
 function meshShow() {
-  try { mesh = JSON.parse(meshStatus()); } catch (e) { return; }
+  if (!E) return;
+  try { mesh = JSON.parse(E.meshStatus()); } catch (e) { return; }
   $('meshHere').textContent = mesh.present ? 'Send it away' : 'Bring it nearby';
   $('meshSay').disabled = !mesh.present;
   $('meshType').disabled = !mesh.present;
@@ -2368,7 +2483,7 @@ function meshShow() {
   $('meshReply').checked = !!mesh.reply;
   meshLines($('meshStatus'), meshHint(mesh));
 }
-const meshDo = c => { meshCmd(c); meshShow(); };
+const meshDo = c => { E.meshCmd(c); meshShow(); };
 $('meshSetup').onclick = () => meshDo('setup');
 $('meshHere').onclick  = () => meshDo(mesh.present ? 'off' : 'on');
 $('meshSay').onclick   = () => meshDo('say ' + $('meshLine').value);
@@ -2380,7 +2495,6 @@ $('meshName').onchange   = e => meshDo('name ' + e.target.value);
 $('meshShares').onchange = e => meshDo('phrase ' + (e.target.checked ? 'same' : 'other'));
 $('meshReply').onchange  = e => meshDo('reply ' + (e.target.checked ? 'on' : 'off'));
 setInterval(meshShow, 400);
-meshShow();
 
 // The device is the reference, not the host. On the CYD the whole
 // loop -- render plus the SPI push to the panel -- lands at ~33fps, so
@@ -2408,17 +2522,19 @@ function tick(now) {
 
   const ev = queue.shift();
   if (ev) {
-    if (ev.det !== undefined) detect(ev.det, 0);
-    else { touch(ev.d ? 1 : 0, ev.x, ev.y); step(1); }
+    if (ev.det !== undefined) E.detect(ev.det, 0);
+    else if (ev.key !== undefined) { if (E.key) E.key(ev.key); }
+    else if (ev.card !== undefined) { if (E.cardKey) E.cardKey(ev.card, ev.down); }
+    else { E.touch(ev.d ? 1 : 0, ev.x, ev.y); E.step(1); }
   }
-  step(1);
+  E.step(1);
   blit();
 
   // The backlight: POCKET MODE's dark, the power saver's dim, BRIGHT.
-  const bl = backlight();
+  const bl = E.bl();
   if (bl !== lastBl) { lastBl = bl; wrap.style.setProperty('--bl', bl < 0 ? 1 : (bl / 255).toFixed(3)); }
 
-  const s = stateOf();
+  const s = E.state();
   $('state').textContent = STATES[s] || '?';
   if (++frames >= 30) {
     const t = performance.now();
@@ -2426,6 +2542,11 @@ function tick(now) {
     frames = 0; mark = t;
   }
 }
+
+E = await engine(board.build || 'cyd');
+fit(true);
+fillCatalog(); fillMeshCatalog(); meshShow();
+$('boot').textContent = '';
 build(false);
 requestAnimationFrame(tick);
 </script>

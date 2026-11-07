@@ -873,7 +873,11 @@ static TouchFit::Fit s_touchFit = TouchFit::fromRanges(RAW_X_MIN, RAW_X_MAX, RAW
 void simResizeFrame(int w, int h) {
     if (frame.created()) frame.resizeInPlace((int16_t)w, (int16_t)h);
     const int n0 = w < h ? w : h, n1 = w < h ? h : w;      // the panel's own upright frame
-    s_touchFit = TouchFit::fromRanges(RAW_X_MIN, RAW_X_MAX, RAW_Y_MIN, RAW_Y_MAX, n0, n1);
+    // With the ranges of whichever digitiser this build reads: the browser's
+    // T-Deck build answers in the capacitive chip's numbers (sim/gt911_sim.cpp).
+    s_touchFit = usingCapTouch
+        ? TouchFit::fromRanges(CAP_NX_MIN, CAP_NX_MAX, CAP_NY_MIN, CAP_NY_MAX, n0, n1)
+        : TouchFit::fromRanges(RAW_X_MIN, RAW_X_MAX, RAW_Y_MIN, RAW_Y_MAX, n0, n1);
 }
 
 // Where s_touchFit came from, for the diagnostics screen and for deciding
@@ -1117,8 +1121,25 @@ static bool cardKeysBegin() {
     s_cardKeysOk = ok;
     return ok;
 }
+#if defined(SQUACHSIM)
+// The browser emulator's Cardputer keyboard (sw_cardkey in sim/main_wasm.cpp):
+// the four things smallKeysRead() makes of the real one's events. ENTER is a
+// level, as the real key's is; the others happen once.
+static SmallKeys s_simKeys = { false, false, false, false };
+void simCardKey(int what, bool down) {
+    if (what == 0) s_simKeys.press = down;
+    else if (down && what == 1) s_simKeys.next = true;
+    else if (down && what == 2) s_simKeys.prev = true;
+    else if (down && what == 3) s_simKeys.home = true;
+}
+#endif
 static SmallKeys smallKeysRead() {
     SmallKeys k = { false, false, false, false };
+#if defined(SQUACHSIM)
+    k = s_simKeys;
+    s_simKeys.next = s_simKeys.prev = s_simKeys.home = false;
+    return k;
+#endif
     if (!s_cardKeysOk) return k;
     for (int i = 0; i < 10; i++) {
         const int cnt = cardRead(0x03);
@@ -1617,6 +1638,9 @@ static void tdeckPowerUp() {
 // (2026-10-12). The flash of full brightness before the steps is too short
 // to see.
 static void tdeckBacklight(uint8_t duty) {
+#if defined(SQUACHSIM)
+    ledcWrite(0, duty);   // the emulator's backlight readout (sw_backlight)
+#endif
     static int level = -1;               // what was last asked for; -1 = never
     const int want = duty == 0 ? 0 : 1 + (int)(((uint32_t)duty * 15 + 127) / 255);
     if (want == level) return;
@@ -1647,6 +1671,7 @@ static const uint8_t TDECK_KBD = 0x55;
 static void enterLoraChat();
 static void enterLoraHome();
 #endif
+static void tdeckKey(char c, uint32_t now);
 static void tdeckKeysTick(uint32_t now) {
     static uint32_t at = 0;
     if (now - at < 25) return;
@@ -1656,7 +1681,15 @@ static void tdeckKeysTick(uint32_t now) {
     if (Wire.requestFrom((int)TDECK_KBD, 1) != 1) return;
     const uint8_t k = (uint8_t)Wire.read();
     if (k == 0 || k == 0x0C) return;             // nothing, or alt+C (its own)
-    const char c = k == 0x0D ? '\n' : k == 0x08 ? '\b' : (char)k;
+    tdeckKey(k == 0x0D ? '\n' : k == 0x08 ? '\b' : (char)k, now);
+}
+#if defined(SQUACHSIM)
+// The browser emulator's keyboard (sw_key in sim/main_wasm.cpp): the byte the
+// helper chip would have answered, already turned into a character.
+void simKeyPress(char c) { tdeckKey(c, millis()); }
+#endif
+// One key from the keyboard, to whichever text screen is up.
+static void tdeckKey(char c, uint32_t now) {
     if (state == AppState::WIFI_PASS) uiWifiPassKey(c, now);
 #if SQUACH_MESH
     else if (state == AppState::PHONE) uiPhoneKey(c);

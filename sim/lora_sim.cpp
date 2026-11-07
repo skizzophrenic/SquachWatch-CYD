@@ -372,8 +372,11 @@ void    nodeName(Proto p, uint32_t num, char* out, size_t cap) {
 
 }  // namespace Lora
 
-// LORA CHATS is not in the emulator; the page only asks it for the badge.
+// The one-shot renderer has no LORA CHATS screen; the page only asks it for
+// the badge. The browser's T-Deck build (-DSQUACH_LORA) has the real one.
+#if !SQUACH_LORA
 uint16_t uiLoraChatUnread() { return s_cfg.unread; }
+#endif
 
 // ---- what LORA SETTINGS calls ---------------------------------------------------------
 // The settings themselves are the real src/settings.cpp over the NVS shim;
@@ -456,3 +459,13 @@ void channelKeyPreview(uint8_t row, char* out, size_t cap) {
 }
 
 }  // namespace Lora
+
+#if SQUACH_LORA
+// The browser's T-Deck build calls the sniffer's start and per-loop tick, as
+// the board does. The band needs neither: it is a function of the clock, and
+// sim/main_wasm.cpp steps it every frame (SimLora::step).
+namespace Lora {
+bool begin() { return true; }
+void tick(uint32_t) {}
+}
+#endif

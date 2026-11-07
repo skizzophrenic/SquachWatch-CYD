@@ -18,7 +18,8 @@
 #pragma once
 #include <stdint.h>
 
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)
+// SQUACHSIM: the browser emulator's T-Deck build has no speaker to drive.
+#if (defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)) && !defined(SQUACHSIM)
 #define SQW_SPEAKER 1
 #else
 #define SQW_SPEAKER 0
@@ -31,7 +32,8 @@
 // speaker and no BOOT button to hold (the Core2), or a BOOT pin that is
 // something else (the Waveshare C5s). Add a board here only once POWER OFF
 // and its wake have been proven on it.
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)
+// Not in the emulator (SQUACHSIM): a browser tab has no power to switch off.
+#if (defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)) && !defined(SQUACHSIM)
 #define SQW_BOOT_POWEROFF 1
 #else
 #define SQW_BOOT_POWEROFF 0
