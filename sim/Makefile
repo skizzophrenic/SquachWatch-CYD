@@ -86,6 +86,7 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/signatures.cpp \
             $(SRC)/remote_id.cpp \
             $(SRC)/clock.cpp \
+            $(SRC)/home_sync.cpp \
             $(SRC)/blackbox.cpp \
             $(SRC)/log_index.cpp \
             $(SRC)/bingo.cpp \

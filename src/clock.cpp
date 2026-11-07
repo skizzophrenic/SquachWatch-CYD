@@ -1,4 +1,5 @@
 // SquachWatch-CYD — wall-clock time. See clock.h.
+#include "home_sync.h"
 #include "clock.h"
 #include "serial_flush.h"
 #include "security.h"   // a locked device takes no console commands
@@ -822,6 +823,14 @@ void pollSerial() {
                 Serial.printf("[push] %s. PUSH ON / PUSH OFF to change it\n",
                               FramePush::enabled() ? "on" : "off");
             }
+        } else if (strncasecmp(line, "SYNC", 4) == 0) {
+            // SYNC: home sync's state; SYNC NOW / ON / OFF.
+            const char* a = line + 4;
+            while (*a == ' ') a++;
+            if (!strncasecmp(a, "NOW", 3))      { HomeSync::syncSoon(); Serial.println("[sync] at the next idle moment"); }
+            else if (!strncasecmp(a, "ON", 2))  HomeSync::setEnabled(true);
+            else if (!strncasecmp(a, "OFF", 3)) HomeSync::setEnabled(false);
+            HomeSync::printStatus();
         } else if (strncasecmp(line, "BLACKBOX", 8) == 0) {
             BlackBox::dump();
         } else if (strncasecmp(line, "LOG", 3) == 0) {

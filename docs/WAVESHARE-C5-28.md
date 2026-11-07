@@ -14,6 +14,7 @@ for what differs.
 | Panel reset | board reset | **none**: the CH32V003 helper's EXIO1 |
 | SD card | CS 10, on the display's SPI | **CS 23**, on the display's SPI |
 | Status light | WS2812 on GPIO27 | **none** |
+| Speaker | none | **ES8311 + NS4150B**, I2S BCK 24 / WS 25 / DOUT 26 |
 | BOOT button | — | GPIO28 |
 | USB | CH340 + native | **native only** (USB Serial/JTAG) |
 | Extras | — | QMI8658 IMU, PCF85063 RTC, SHTC3, ES8311 codec + speaker, LiPo charger |
@@ -71,6 +72,67 @@ runs on first boot like every other capacitive board.
 is not "no touch": the board is always treated as capacitive, and every poll
 asks the chip again.
 
+## Speaker
+
+The ES8311 codec (I2C 0x18) and NS4150B amplifier drive the speaker plug
+(Waveshare ship a speaker/microphone combo for it). Same sounds and SOUND /
+VOLUME rows as the Freenove S3 boards (`src/sound.cpp`), with differences:
+
+- **Data out is GPIO26, not 27.** Waveshare's BSP routes `.dout` to GPIO27
+  (`BSP_I2S_DSIN`), and with that the board is silent; on GPIO26 it plays.
+  Found by ear on the board. BCK 24, WS 25.
+- **No MCLK line.** The codec takes its clock from BCK (reg 01 = 0xBF): 16-bit
+  slots, BCK = 32 fs, multiplied x8 in the codec (reg 02 = 0x18) to 256 fs.
+  The codec is set up with esp_codec_dev's own es8311 sequence, as the BSP
+  does, and the I2S clocks never stop between sounds (with BCK as its clock
+  the codec does not survive losing it).
+- **IDF 5's I2S driver** (`i2s_std`), not the legacy one.
+- **Amp enable is the helper's EXIO3**, sent again at the start of every
+  sound and never turned off. Set once at boot (as the BSP does), it went off
+  once the battery gauge began reading the same helper, and alerts went
+  quiet while the console's test sounds still played.
+- The sound task is not pinned to core 1: the C5 has one core.
+
+**EXIO6 is not a spare pin**: driven high, it reset the board.
+
+## GPS (`waveshare-c5-28-gps`)
+
+```bash
+pio run -e waveshare-c5-28-gps -t upload
+```
+
+The CYD GPS builds' features on this board: a fresh fix puts a position on
+each SD row and alert card, sets the clock, and drives **WARDRIVE**, a WiGLE
+file (`/wigle-YYYYMMDD-HHMM.csv`) on the SD card to upload to wigle.net as it
+is. Tested with an M5Stack Unit GPS v1.1 (AT6668), powered from **3V3** (the
+12-pin's 5V is the USB's and is dead on battery), its RX left unwired. Either
+port works -- the firmware searches both, at 115200, 9600 and 38400 baud,
+until a sentence parses:
+
+| Port | GPS TX to | Power |
+|------|-----------|-------|
+| UART header beside the USB-C (GND 3V3 TXD RXD) | **RXD** (GPIO12) | 3V3 |
+| 12-pin expansion cable | **IO3** | 3V3 |
+
+Not the header's **TXD** (GPIO11): that is UART0's TX, the chip's own log.
+
+The **GPS** label in the top bar shows only while there is a fix, in red.
+Set **TIME ZONE** (or `ZONE US PACIFIC` on the console): the GPS sets the
+clock in UTC, and without a zone the quiet hours (11 pm to 5 am) land on the
+wrong part of the day.
+
+First fix on IO3, 2026-10-16: 176 s from a cold start indoors, 9 satellites;
+7 s from a warm start.
+
+## Battery
+
+The battery gauge (the lava lamp, BATT on the console, the cable sounds and
+LOW BATTERY) reads the helper chip's ADC: register 0x06, two bytes low first,
+10 bits against its 3.3 V supply, on BAT_ADC -- which the schematic's R7 200K /
+R10 100K divider puts at a third of the cell's voltage. A full cell reads
+about 4.2 V. Like the Freenove, the charger's only status is its LED, so
+"charging" is a guess from the voltage rising.
+
 ## Status
 
 **Tested on hardware 2026-10-13** (one board, USB-powered):
@@ -85,6 +147,11 @@ asks the chip again.
 A poor USB cable browned the board out mid-boot once (screen dark, board gone
 from USB); a good cable fixed it.
 
+- [x] Speaker: every sound, the SOUND and VOLUME rows, alerts from real detections
+
+- [x] GPS on both ports, WARDRIVE writing its WiGLE file (2026-10-18)
+- [x] Battery gauge: 4.2 V on a full cell
+
 Not done here: the BOOT button (GPIO28; the firmware's button code assumes
-GPIO0, which is SDA on this board, so it is switched off), the battery level
-(the helper's ADC), the speaker, IMU and RTC.
+GPIO0, which is SDA on this board, so it is switched off), the microphone,
+IMU and RTC.
