@@ -111,7 +111,7 @@ def patch_tft_espi_for_c5(env):
         print("TFT_eSPI: added ESP32-C5 branch to %s" % fname)
 
 
-if env["PIOENV"] in ("nm-cyd-c5", "marauder-v8", "waveshare-c5-28"):
+if env["PIOENV"] in ("nm-cyd-c5", "marauder-v8", "waveshare-c5-28", "waveshare-c5-28-gps"):
     patch_tft_espi_for_c5(env)
 
 
