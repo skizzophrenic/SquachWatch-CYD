@@ -29,7 +29,7 @@ Nothing on the detector boards changes.
   you (hacking tools, skimmers, deauth floods, evil twins), orange for
   surveillance (Flock, ALPR, Raven, Axon), and a colour of its own for each
   tracker and camera. Drag to pan (a quick flick throws it further); + and -
-  to zoom, from zoom 12 down to 18, the last two enlarging the zoom-16 tiles.
+  to zoom, from zoom 12 down to 20, the last four enlarging the zoom-16 tiles.
   Tiles are kept decoded in memory and the ring just off the screen is loaded
   ahead, so panning only waits on the card for new ground.
 - **One capture per device.** A device seen again at the same place is not a
@@ -45,7 +45,7 @@ Nothing on the detector boards changes.
   and they go on the map straight away. The board's side is a separate pull
   request.
 - **Settings.** Brightness, sound (on, quiet at night, off), volume, the
-  basement light, the season, 12 or 24 hours, SET HOME HERE from a GPS fix,
+  basement light, the season, 12 or 24 hours, the time zone, SET HOME HERE from a GPS fix,
   WiFi, touch calibration, the last sync, and the version with the time a
   frame takes. The Tab5's battery sits by the SETTINGS button.
 - **WiFi from the screen.** Settings > WIFI lists the 2.4 GHz networks the
@@ -97,7 +97,7 @@ Everything lives in `/squachwatch-base/`:
 | `scene/` | The basement, light on and off. Copy from `tab5_card/`. |
 | `wifi.txt` | For home sync and the weather. Settings > WIFI writes it for you; or by hand, a network name on one line and its password on the next, up to four pairs (home first, then a phone's hotspot), tried in turn. Stays on the card. |
 | `season.txt` | Optional: `halloween`, `christmas` or `none` to override the calendar (Settings does the same). |
-| `home.txt` | Where the Tab5 lives, so it needs no GPS at home: `lat,lon` on the first line, your time zone as a POSIX TZ rule on the second (for example `PST8PDT,M3.2.0,M11.1.0` for North America's Pacific). See `tab5_card/squachwatch-base/home.txt.example`. Without it, live catches have no position unless the GPS has a fix, and the clock shows UTC. |
+| `home.txt` | Where the Tab5 lives, so it needs no GPS at home: `lat,lon` on the first line, your time zone as a POSIX TZ rule on the second (for example `PST8PDT,M3.2.0,M11.1.0` for the US Pacific, `<-07>7` for British Columbia). Settings > TIME ZONE overrides it. See `tab5_card/squachwatch-base/home.txt.example`. Without it, live catches have no position unless the GPS has a fix, and the clock shows UTC. |
 | `tiles/z/x/y.png` | Map tiles, zoom 12–16. Make them for your area (below). |
 | `catches.csv` | Written by the Tab5: every catch it hears. |
 | `import/*.csv`, or any other `*.csv` beside `catches.csv` | Imports, read at every start. |
@@ -143,7 +143,7 @@ the PC has, and skips tiles with nothing on them.
 `/squachwatch-base/` on the Tab5's SD card, so you have
 `/squachwatch-base/tiles/12/...` through `/16/...`. Restart the Tab5.
 
-The two closest zooms (17 and 18) need no tiles of their own: the Tab5
+The four closest zooms (17 to 20) need no tiles of their own: the Tab5
 enlarges zoom 16.
 
 | Area | Tiles, zoom 12–16 | On the card |

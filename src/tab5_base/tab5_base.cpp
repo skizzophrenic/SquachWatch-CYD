@@ -39,7 +39,7 @@
 #include <esp_system.h>
 // Shown on screen and in the file name, so an install can be told apart in
 // Launcher (which shows a file's first five letters).
-#define TAB5_VERSION "v32"
+#define TAB5_VERSION "v33"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
@@ -701,6 +701,24 @@ const char*    VOL_NAMES[]     = { "LOW", "MEDIUM", "HIGH" };
 const char*    SOUND_NAMES[]   = { "ON", "QUIET AT NIGHT (11 PM - 7 AM)", "OFF" };
 uint8_t s_bright = 2, s_vol = 1, s_sound = 0;
 bool    s_clock24 = false;                 // the Nixie clock: 24-hour, or 12
+// The time zone from Settings, which beats home.txt's. -1: home.txt's (or UTC).
+// British Columbia keeps UTC-7 all year since 2026, which no stock rule has.
+struct TzChoice { const char* name; const char* rule; };
+const TzChoice TZ_CHOICES[] = {
+    { "PACIFIC, BC (UTC-7 all year)",         "<-07>7" },
+    { "PACIFIC, US (daylight saving)",        "PST8PDT,M3.2.0,M11.1.0" },
+    { "MOUNTAIN (daylight saving)",           "MST7MDT,M3.2.0,M11.1.0" },
+    { "CENTRAL (daylight saving)",            "CST6CDT,M3.2.0,M11.1.0" },
+    { "EASTERN (daylight saving)",            "EST5EDT,M3.2.0,M11.1.0" },
+    { "UTC",                                  "UTC0" },
+};
+constexpr int8_t TZ_N = sizeof TZ_CHOICES / sizeof TZ_CHOICES[0];
+int8_t  s_tzPref = -1;
+void applyTzPref() {
+    if (s_tzPref < 0 || s_tzPref >= TZ_N) return;
+    setenv("TZ", TZ_CHOICES[s_tzPref].rule, 1);
+    tzset();
+}
 bool    s_clockSet = false;                // the system clock holds real time (s_timeOk, later)
 
 // Night by the local clock, once it is set.
@@ -1465,9 +1483,9 @@ char s_tallyType[TALLY_N][12];             // the CAPTURED rows on screen, for t
 // Pre-rendered 256 px tiles on the card, /squachwatch-base/tiles/z/x/y.png --
 // OpenStreetMap data drawn on a PC (tools/render_tiles.py) for the area the
 // squad covers. Positions are Web Mercator "world pixels" at the map's zoom.
-// Tiles go to zoom 16 (about 2 km across the screen); 17 and 18 (1 km, 500 m)
-// enlarge the zoom-16 tiles, so street level costs nothing on the card.
-constexpr int MAP_ZMIN = 12, MAP_ZMAX = 18, TILE_ZMAX = 16, TILE = 256;
+// Tiles go to zoom 16 (about 2 km across the screen); 17 to 20 (1 km down to
+// 125 m) enlarge the zoom-16 tiles, so street level costs nothing on the card.
+constexpr int MAP_ZMIN = 12, MAP_ZMAX = 20, TILE_ZMAX = 16, TILE = 256;
 int     s_mapZ = 14;
 double  s_mapLat = 0, s_mapLon = 0;              // until there is a fix, a home or a pin
 bool    s_mapCentred = false;
@@ -1575,7 +1593,7 @@ bool drawTile(M5Canvas& dst, int z, int x, int y, int dx, int dy) {
         return t->have;
     }
     // Closer than the card goes: the part of the zoom-16 tile under this one,
-    // enlarged 2x or 4x.
+    // enlarged 2x to 16x.
     const int dz = z - TILE_ZMAX, k = 1 << dz, sub = TILE >> dz;
     CachedTile* t = cachedTile(TILE_ZMAX, x >> dz, y >> dz);
     if (!t->have) { dst.fillRect(dx, dy, TILE, TILE, 0x18E4); return false; }
@@ -3539,6 +3557,7 @@ void drawSettings(uint32_t now) {
         { "BASEMENT LIGHT", s_lightOn ? "ON" : "OFF" },
         { "SEASON",         seasonName },
         { "CLOCK",          s_clock24 ? "24-HOUR" : "12-HOUR" },
+        { "TIME ZONE",      s_tzPref < 0 ? "from home.txt  (tap to choose)" : TZ_CHOICES[s_tzPref].name },
         { "HOME",           home },
         { "WIFI",           wifi },
         { "TOUCH",          s_prefs.isKey("tcal") ? "calibrated  (tap to calibrate again)" : "as it came  (tap to calibrate)" },
@@ -3547,16 +3566,16 @@ void drawSettings(uint32_t now) {
     };
     int y = 92;
     for (uint8_t i = 0; i < sizeof rows / sizeof rows[0]; i++) {
-        s_canvas.fillRoundRect(20, y, W - 40, 50, 10, PANEL);
+        s_canvas.fillRoundRect(20, y, W - 40, 48, 10, PANEL);
         s_canvas.setFont(&fonts::FreeSansBold12pt7b);
         s_canvas.setTextColor(INK, PANEL);
-        s_canvas.drawString(rows[i].label, 40, y + 14);
+        s_canvas.drawString(rows[i].label, 40, y + 13);
         s_canvas.setFont(&fonts::FreeSans12pt7b);
-        s_canvas.setTextColor(i >= 9 ? DIM : ACCENT, PANEL);
+        s_canvas.setTextColor(i >= 10 ? DIM : ACCENT, PANEL);
         snprintf(v, sizeof v, "%s", rows[i].value);
-        s_canvas.drawString(v, 330, y + 14);
-        if (i < 9) addButton(20, y, W - 40, 50, BTN_SET_ROW + i);
-        y += 56;
+        s_canvas.drawString(v, 330, y + 13);
+        if (i < 10) addButton(20, y, W - 40, 48, BTN_SET_ROW + i);
+        y += 52;
     }
     pushCanvas();
 }
@@ -3696,7 +3715,7 @@ void touchTestTick() {
 
 void onSettingsTap(int id, uint32_t now) {
     if (id == BTN_SET_BACK) { s_screen = Screen::MAIN; s_dirty = true; return; }
-    if (id < BTN_SET_ROW || id >= BTN_SET_ROW + 9) return;
+    if (id < BTN_SET_ROW || id >= BTN_SET_ROW + 10) return;
     switch (id - BTN_SET_ROW) {
         case 0: s_bright = (s_bright + 1) % 4; s_prefs.putUChar("bright", s_bright);
                 M5.Display.setBrightness(BRIGHT_LEVELS[s_bright]); break;
@@ -3710,10 +3729,12 @@ void onSettingsTap(int id, uint32_t now) {
                 s_prefs.putChar("season", s_seasonPref);
                 s_seasonForce = s_seasonPref; break;
         case 5: s_clock24 = !s_clock24; s_prefs.putBool("clock24", s_clock24); break;
-        case 6: if (setHomeHere(now)) feedAdd(FeedKind::NOTE, INFO, "HOME SET", "Home is where the GPS says the Tab5 is", now);
+        case 6: s_tzPref = s_tzPref + 1 >= TZ_N ? 0 : s_tzPref + 1;
+                s_prefs.putChar("tz", s_tzPref); applyTzPref(); break;
+        case 7: if (setHomeHere(now)) feedAdd(FeedKind::NOTE, INFO, "HOME SET", "Home is where the GPS says the Tab5 is", now);
                 break;
-        case 8: calStart(); return;
-        case 7: s_screen = Screen::WIFILIST; s_joinState = 0; scanStart(); s_dirty = true; return;
+        case 9: calStart(); return;
+        case 8: s_screen = Screen::WIFILIST; s_joinState = 0; scanStart(); s_dirty = true; return;
     }
     s_dirty = true;
 }
@@ -3756,6 +3777,7 @@ void setup() {
     s_sound   = s_prefs.getUChar("sound", 0) % 3;
     s_clock24 = s_prefs.getBool("clock24", false);
     s_seasonPref = s_prefs.getChar("season", -1);
+    s_tzPref  = s_prefs.getChar("tz", -1);
     M5.Display.setBrightness(BRIGHT_LEVELS[s_bright]);
     M5.Speaker.setVolume(VOL_LEVELS[s_vol]);
     clockStart();
@@ -3786,6 +3808,7 @@ void setup() {
     sdStart();
     sdLoadDevices();
     loadHome();
+    applyTzPref();                        // the Settings choice beats home.txt's
     loadSeason();
     if (s_seasonPref >= 0) s_seasonForce = s_seasonPref;   // the screen's choice beats season.txt
     wifiEvents();
