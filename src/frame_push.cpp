@@ -548,7 +548,17 @@ static bool pushNow(TFT_eSPI& tft, const uint8_t* src, int32_t w, int32_t h, int
 
     // A frame is every band of it, so the periodic full refresh counts pushes
     // rather than frames: 64 pushes is 64 frames on one band and 32 on two.
+#if defined(JC3248W535)
+    // The AXS15231B on this board ignores the 0x2A/0x2B column-/row-address
+    // commands: the write window is stuck at (0,0)-(319,479) regardless of
+    // setWindow(). Partial spans would place their pixels at the wrong panel
+    // position, producing horizontal coloured stripes. Force every frame to
+    // be a full push. The hashing still runs (it keeps s_rowHash[] current
+    // for the periodic-refresh counter), but all rows are always sent.
+    const bool full = true;
+#else
     const bool full = !s_valid || s_validW != w || s_validH != h || (s_frameNo % 64) == 0;
+#endif
     s_frameNo++;
 
     // Hash every row, and mark the ones to send. Full: all of them.
