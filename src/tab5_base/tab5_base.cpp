@@ -39,7 +39,7 @@
 #include <esp_system.h>
 // Shown on screen and in the file name, so an install can be told apart in
 // Launcher (which shows a file's first five letters).
-#define TAB5_VERSION "v33"
+#define TAB5_VERSION "v33b"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
@@ -1586,22 +1586,22 @@ void prefetchTick() {
 bool drawTile(M5Canvas& dst, int z, int x, int y, int dx, int dy) {
     // A tile the card does not have is empty sea or land: the tiles' own
     // background colour, (24, 28, 36), so it matches its neighbours.
-    if (z <= TILE_ZMAX) {
-        CachedTile* t = cachedTile(z, x, y);
-        if (t->have) t->spr->pushSprite(&dst, dx, dy);
-        else         dst.fillRect(dx, dy, TILE, TILE, 0x18E4);
-        return t->have;
+    // Closer than the card goes -- past zoom 16, or past the deepest zoom the
+    // card has here (2026-11-08: a card drawn to 15 went black at 16) -- the
+    // part of the nearest tile above it is enlarged, up to 32x.
+    for (int zs = z < TILE_ZMAX ? z : TILE_ZMAX; zs >= MAP_ZMIN && z - zs <= 5; zs--) {
+        const int dz = z - zs, k = 1 << dz, sub = TILE >> dz;
+        CachedTile* t = cachedTile(zs, x >> dz, y >> dz);
+        if (!t->have) continue;
+        if (!dz) { t->spr->pushSprite(&dst, dx, dy); return true; }
+        const int sx = (x & (k - 1)) * sub, sy = (y & (k - 1)) * sub;
+        dst.setClipRect(dx, dy, TILE, TILE);
+        t->spr->pushRotateZoom(&dst, dx - sx * k + TILE * k / 2.0f, dy - sy * k + TILE * k / 2.0f, 0, (float)k, (float)k);
+        dst.clearClipRect();
+        return true;
     }
-    // Closer than the card goes: the part of the zoom-16 tile under this one,
-    // enlarged 2x to 16x.
-    const int dz = z - TILE_ZMAX, k = 1 << dz, sub = TILE >> dz;
-    CachedTile* t = cachedTile(TILE_ZMAX, x >> dz, y >> dz);
-    if (!t->have) { dst.fillRect(dx, dy, TILE, TILE, 0x18E4); return false; }
-    const int sx = (x & (k - 1)) * sub, sy = (y & (k - 1)) * sub;
-    dst.setClipRect(dx, dy, TILE, TILE);
-    t->spr->pushRotateZoom(&dst, dx - sx * k + TILE * k / 2.0f, dy - sy * k + TILE * k / 2.0f, 0, (float)k, (float)k);
-    dst.clearClipRect();
-    return true;
+    dst.fillRect(dx, dy, TILE, TILE, 0x18E4);
+    return false;
 }
 
 // The map is drawn a tile bigger than the screen on every side, so a finger
