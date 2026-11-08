@@ -20,8 +20,9 @@ static bool ftRead(uint8_t reg, uint8_t* buf, uint8_t len) {
     Wire.beginTransmission(ADDR);
     Wire.write(reg);
     if (Wire.endTransmission(false) != 0) return false;
-    Wire.requestFrom((int)ADDR, (int)len);
-    for (uint8_t i = 0; i < len; i++) buf[i] = Wire.available() ? Wire.read() : 0;
+    // A truncated packet must not turn missing coordinate bytes into zeroes.
+    if (Wire.requestFrom((int)ADDR, (int)len) != len) return false;
+    for (uint8_t i = 0; i < len; i++) buf[i] = Wire.read();
     return true;
 }
 

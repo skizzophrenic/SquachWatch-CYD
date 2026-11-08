@@ -1791,6 +1791,13 @@ static bool s_screenDimmed = false;
 #else
 #define SQW_BOOT_BTN 0
 #endif
+#if SQW_BOOT_BTN
+#if defined(WS_C5_35)
+static constexpr uint8_t BOOT_BUTTON_PIN = 28;
+#else
+static constexpr uint8_t BOOT_BUTTON_PIN = 0;
+#endif
+#endif
 #if defined(TWATCH_S3)
 // A watch goes dark, not dim. When the screen timeout lands, the backlight
 // goes off and the ST7789 is put to sleep (DISPOFF, SLPIN: about a milliamp
@@ -1891,6 +1898,7 @@ static void applyBrightness() {
 #elif defined(WS_C5_35)
     // The backlight is the 0x24 I/O expander's PWM register (EXIO5, reg 0x05),
     // 0..255 with 255 brightest -- same convention as the slider. No GPIO LEDC.
+    if (s_crownDark && s_screenDimmed) duty = 0;
     WsExio::backlight(duty);
 #elif defined(NM_CYD_C5)
     // One backlight, and a pin-based call. Arduino core 3 dropped the LEDC
@@ -4368,7 +4376,7 @@ void setup() {
     rtc_gpio_deinit(GPIO_NUM_0);
 #endif
 #if SQW_BOOT_BTN
-    pinMode(0, INPUT_PULLUP);   // BOOT: see bootButtonTick()
+    pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);   // BOOT: see bootButtonTick()
 #endif
 #if SQW_BOOT_POWEROFF
     powerDiaryBoot();
@@ -6185,7 +6193,7 @@ static void cbdPowerOff() {
 static void bootButtonTick(uint32_t now) {
     static bool was = false, longDone = false, armed = false;
     static uint32_t downAt = 0;
-    const bool down = digitalRead(0) == LOW;
+    const bool down = digitalRead(BOOT_BUTTON_PIN) == LOW;
     // A press that was already down when the firmware started -- the one
     // that woke the board from POWER OFF, still held through the boot -- is
     // not a press. Counted, it was a short press that put the screen into
@@ -6237,8 +6245,6 @@ void loop() {
     if (g_consoleCharge) { g_consoleCharge = false; if (s_chargeMode) exitChargeMode(); else s_chargeWanted = true; }
 #if SQW_BOOT_POWEROFF
     if (g_consolePowerOff) { cbdPowerOff(); }
-#endif
-#if SQW_BOOT_POWEROFF
     powerDiaryTick(millis());
     if (g_consolePowerLog) { g_consolePowerLog = false; powerDiaryPrint(); }
 #endif
