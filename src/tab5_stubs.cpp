@@ -21,6 +21,7 @@
 // ---- SdLog: no card driven on this board yet ------------------------------
 bool SdLog::begin() { _ready = false; return false; }
 void SdLog::logEvent(const Detection&) {}
+void SdLog::logEvents(const Detection*, uint8_t, uint8_t, uint8_t) {}
 void SdLog::tick() {}
 void SdLog::wipe() {}
 void SdLog::openDaily() {}

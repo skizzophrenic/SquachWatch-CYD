@@ -1625,9 +1625,22 @@ void DetectionEngine::loop() {
     decayChannelActivity();
     saveLifetime(millis());
     drainBlackBox(millis());
-    if (_sdQTail != _sdQHead) {
-        _sd.logEvent(_sdQ[_sdQTail]);
-        _sdQTail = (uint8_t)((_sdQTail + 1) % SD_Q_CAP);
+    {
+        const uint8_t head = _sdQHead;
+        const uint8_t n = (uint8_t)((head + SD_Q_CAP - _sdQTail) % SD_Q_CAP);
+        if (n) {
+            _sd.logEvents(_sdQ, SD_Q_CAP, _sdQTail, n);
+            _sdQTail = head;
+        }
+        // Said, not silent: a lost line looks just like a device never seen.
+        static uint16_t toldDropped = 0;
+        static uint32_t toldAt = 0;
+        const uint16_t dropped = _sdDropped;
+        if (dropped != toldDropped && millis() - toldAt > 10000) {
+            Serial.printf("[sd] %u log line(s) lost to a full queue since boot\n", (unsigned)dropped);
+            toldDropped = dropped;
+            toldAt = millis();
+        }
     }
     _sd.tick();
 }
@@ -1901,6 +1914,7 @@ void DetectionEngine::processDeauthQ() {
                 _latest = &row;
                 _latestNew = false;      // the row the first flood made
                 _latestChangeMs = now;
+                queueSd(row);
                 queueBlackBox(row, true);
                 return;
             }
@@ -1985,6 +1999,7 @@ void DetectionEngine::postBle(Detection d) {
                 _latest = &_log[slot];
                 _latestNew = false;                // ...but a device we had already
                 _latestChangeMs = millis();
+                queueSd(_log[slot]);
                 queueBlackBox(_log[slot], true);
             }
             return;
@@ -2550,7 +2565,8 @@ void DetectionEngine::processWiFiQ() {
                     _latest = &_log[slot];
                     _latestNew = false;            // came back; not new to the log
                     _latestChangeMs = millis();
-                    queueBlackBox(_log[slot], true);
+                    queueSd(_log[slot]);
+                queueBlackBox(_log[slot], true);
                 }
                 merged = true;
                 break;
@@ -2634,12 +2650,25 @@ void DetectionEngine::pushLog(const Detection& d) {
     _lifetimeDirty = true;
     Bingo::note(d.type);
     Dex::note(d.type, d.rssi);
-    const uint8_t next = (uint8_t)((_sdQHead + 1) % SD_Q_CAP);
-    if (next != _sdQTail) { _sdQ[_sdQHead] = d; _sdQHead = next; }
+    queueSd(d);
     queueBlackBox(d, false);
 }
 
 static portMUX_TYPE s_bbMux = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE s_sdMux = portMUX_INITIALIZER_UNLOCKED;
+
+// A row for the SD log: every first sight, and every return of a device the
+// log already held (the black box's "again"), so a day's file has everything
+// the screen showed that day, not only what was new to the board. Filled from
+// the host task and loop() both, so under a lock; drained by loop().
+void DetectionEngine::queueSd(const Detection& d) {
+    if (!_sd.ready()) return;
+    portENTER_CRITICAL(&s_sdMux);
+    const uint8_t next = (uint8_t)((_sdQHead + 1) % SD_Q_CAP);
+    if (next != _sdQTail) { _sdQ[_sdQHead] = d; _sdQHead = next; }
+    else _sdDropped++;
+    portEXIT_CRITICAL(&s_sdMux);
+}
 
 
 void DetectionEngine::queueBlackBox(const Detection& d, bool again) {

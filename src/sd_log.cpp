@@ -32,9 +32,9 @@ extern TFT_eSPI tft;
 // CYD SD card CS — see docs/PINOUT.md. AWOK: CS=14 on the on-board
 // slot, sharing the DISPLAY'S VSPI bus (18/23/19). GPIO5 on this board
 // is TFT_RST — reusing the CYD's CS=5 would fight the display. cyd35
-// shares its display's VSPI bus too (14/13/12, not 18/19/23) but its
-// real SD-slot CS is unconfirmed -- 5 is a placeholder guess (SD has
-// failed to mount on every real unit tested so far regardless).
+// does NOT share its display's bus: the slot is wired to 18/19/23 with CS 5,
+// like the original CYD's (Sunton's schematic, and LCDwiki's E32R35T table).
+// See the CYD35 branch in begin().
 //
 // NM-CYD-C5: CS=10, on the DISPLAY's bus (SCK 6, MISO 2, MOSI 7), from
 // RockBase's connections.md. Not 5 -- GPIO5 on this board is the GPS header's
@@ -136,7 +136,18 @@ bool SdLog::begin() {
     // no-op, and AWOK's touch chip is apparently more sensitive to
     // that than cyd35's) -- so it keeps the plain no-args SD.begin()
     // below, same as before this fix existed.
-    if (!SD.begin(SD_CS_PIN, tft.getSPIinstance(), 4000000, "/sd", SD_MAX_FILES)) {
+    //
+    // ...and on the 3.5" that was the bug, the same one the RL Phantom had:
+    // the slot is not on the display's pins at all. It is wired to 18/19/23
+    // with CS 5, and the display's SPI engine (VSPI, routed to 14/13/12)
+    // never clocked those, so the card never answered ("Select Failed").
+    // So the card gets the other engine, HSPI, routed to its own pins. Nothing
+    // is added to VSPI, so the display and the touch on it are untouched.
+    // Its own instance, never the global `SPI`: that one is VSPI too.
+    // CYD35C lands here too: the same board with I2C touch, the same slot.
+    static SPIClass sdSpi(HSPI);
+    sdSpi.begin(18, 19, 23, SD_CS_PIN);  // SCK, MISO, MOSI, CS
+    if (!SD.begin(SD_CS_PIN, sdSpi, 4000000, "/sd", SD_MAX_FILES)) {
 #elif defined(NM_CYD_C5)
     // Same shape as cyd35 above, and for the same reason: the card is on the
     // DISPLAY's SPI bus here (SCK 6, MISO 2, MOSI 7), so it gets TFT_eSPI's
@@ -200,7 +211,11 @@ void SdLog::openDaily() {
 }
 
 void SdLog::logEvent(const Detection& d) {
-    if (!_ready) return;
+    logEvents(&d, 1, 0, 1);
+}
+
+void SdLog::logEvents(const Detection* ring, uint8_t cap, uint8_t from, uint8_t n) {
+    if (!_ready || !n) return;
     // The card shares the panel's SPI bus on the boards that have it there;
     // on the C5 the push runs in a task, so the write waits for a frame in
     // flight (a no-op everywhere else).
@@ -229,18 +244,21 @@ void SdLog::logEvent(const Detection& d) {
         return;
     }
     char line[SdRow::ROW_MAX];
+    for (uint8_t i = 0; i < n; i++) {
+        const Detection& d = ring[(from + i) % cap];
 #if defined(CYD_GPS)
-    // Where the board is now. The queue drains on the loop task within a
-    // frame or two of the detection, so this is where it was seen.
-    SdRow::line(line, sizeof(line), d,
-                Clock::trusted() ? Clock::nowEpoch() : 0, millis(),
-                &Gnss::fix(), Gnss::faked(), millis());
+        // Where the board is now. The queue drains on the loop task within a
+        // frame or two of the detection, so this is where it was seen.
+        SdRow::line(line, sizeof(line), d,
+                    Clock::trusted() ? Clock::nowEpoch() : 0, millis(),
+                    &Gnss::fix(), Gnss::faked(), millis());
 #else
-    SdRow::line(line, sizeof(line), d,
-                Clock::trusted() ? Clock::nowEpoch() : 0, millis(),
-                nullptr, false, 0);
+        SdRow::line(line, sizeof(line), d,
+                    Clock::trusted() ? Clock::nowEpoch() : 0, millis(),
+                    nullptr, false, 0);
 #endif
-    f.print(line);
+        f.print(line);
+    }
     f.close();
     FramePush::busUnlock();
 }

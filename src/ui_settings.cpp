@@ -201,6 +201,9 @@ static const SettingsRow SYSTEM_ROWS[] = {
 #endif
     SettingsRow::CALIBRATE, SettingsRow::CHECK_COLORS,
     SettingsRow::DIAGNOSTICS, SettingsRow::UPDATE_FIRMWARE, SettingsRow::UPDATE_CHECK, SettingsRow::WIFI_NETWORKS,
+#if SQW_LOG_SHARE
+    SettingsRow::SHARE_LOGS,
+#endif
     SettingsRow::RESET_STATS,
 };
 static const uint8_t SYSTEM_ROWS_N = sizeof(SYSTEM_ROWS) / sizeof(SYSTEM_ROWS[0]);
@@ -1385,6 +1388,11 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             label = "WIFI NETWORKS";
             if (OtaWifi::savedCount()) { snprintf(valBuf, valBufN, "%u SAVED >", (unsigned)OtaWifi::savedCount()); value = valBuf; }
             else value = "NONE >";
+            break;
+        case SettingsRow::SHARE_LOGS:
+            // Over the saved network, so it needs one.
+            label = "SHARE LOGS";
+            value = OtaWifi::savedCount() ? "WIFI >" : "NO WIFI >";
             break;
         case SettingsRow::TIME_ZONE:
             // Two arrows like BRIGHT's minus and plus: the left half of the
