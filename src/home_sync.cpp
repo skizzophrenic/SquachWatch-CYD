@@ -286,12 +286,12 @@ void tick(uint32_t now, bool idle, DetectionEngine& engine) {
         engine.startUpdateRadio();
         WiFi.mode(WIFI_STA);
         s_net = -1;
-        // The same scan the update screen makes, every channel at the
-        // driver's own pace: the first try, a quick look by name at 120 ms a
-        // channel and six seconds at most, missed a network on the same desk
-        // (2026-10-19) -- the C5 has the 5 GHz channels to visit too.
+        // The same scan the update screen makes (ota_wifi.cpp): async, every
+        // channel at 150 ms, and PASSIVE -- it listens for beacons rather than
+        // probing, so the detector stays quiet on the air until it actually
+        // associates to the base. The C5 has the 5 GHz channels to visit too.
         WiFi.scanDelete();
-        const int r = WiFi.scanNetworks(true, false);
+        const int r = WiFi.scanNetworks(true /* async */, false /* no hidden */, true /* passive */, 150);
         if (r == WIFI_SCAN_FAILED) { snprintf(s_last, sizeof s_last, "scan would not start"); finish(now); return; }
         s_phase = Phase::SCANNING;
         s_phaseAt = now;
