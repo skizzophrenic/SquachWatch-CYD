@@ -141,8 +141,17 @@ Word stateWord(uint32_t now) {
     else if (s.mode != SENSE_MODE_STA) {
         r.w = "JOINING"; r.c = Theme::AMBER;
         const char* shown = Settings::privacyMode() ? "a saved network" : net;   // Privacy Mode: no name
-        const uint16_t why = senseCydReason();
-        if (why) snprintf(r.sub, sizeof r.sub, "%.24s (code %u)", shown, (unsigned)why);
+        // The driver's reason in words. A refused board waits, longer each
+        // time, so the screen says so instead of looking stuck.
+        const uint16_t why = senseCydReason(), wait = senseCydRetryIn();
+        const char* said = why == 201 ? "network not found"
+                         : (why == 2 || why == 15 || why == 202 || why == 204) ? "router said no"
+                         : why == 203 ? "router busy"
+                         : (why == 8 || why == 200) ? "signal lost" : nullptr;
+        if (wait && said) snprintf(r.sub, sizeof r.sub, "%s, again in %u s", said, (unsigned)wait);
+        else if (wait) snprintf(r.sub, sizeof r.sub, "no answer, again in %u s", (unsigned)wait);
+        else if (why && said) snprintf(r.sub, sizeof r.sub, "%s, trying again", said);
+        else if (why) snprintf(r.sub, sizeof r.sub, "%.24s (code %u)", shown, (unsigned)why);
         else snprintf(r.sub, sizeof r.sub, "%.32s", shown);
     }
     else if (s.state == SENSE_STATE_CAL) { r.w = "PLEASE STAND BY"; r.c = Theme::AMBER; snprintf(r.sub, sizeof r.sub, "calibrating %u%%", (unsigned)s.cal); }

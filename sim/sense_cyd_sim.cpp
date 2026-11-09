@@ -92,7 +92,8 @@ void simSenseStep(uint32_t now) {
 
 // What the screen asks the engine.
 const char* senseCydNetwork() { return s_room == R_NOWIFI ? "" : "SquachNet"; }
-uint16_t    senseCydReason()  { return 0; }
+uint16_t    senseCydReason()  { return s_room == R_JOIN ? 202 : 0; }
+uint16_t    senseCydRetryIn() { return s_room == R_JOIN ? 40 : 0; }
 uint8_t     senseCydMode()    { return s_room == R_JOIN || s_room == R_NOWIFI ? SENSE_MODE_JOINING : SENSE_MODE_STA; }
 void        senseCydCommand(const char*) {}
 int            senseCydSpecRows() { return s_count; }

@@ -53,7 +53,8 @@ void        senseCydTick();                 // every loop pass; nothing when sto
 bool        senseCydRunning();
 void        senseCydCommand(const char* cmd);   // "cal", "rates", ... (the console's SENSE <cmd>)
 const char* senseCydNetwork();              // the network it was given, "" for none
-uint16_t    senseCydReason();               // the driver's last disconnect reason
+uint16_t    senseCydReason();
+uint16_t    senseCydRetryIn();              // seconds until the next join try after a refusal; 0 = trying now               // the driver's last disconnect reason
 uint8_t     senseCydMode();                 // SENSE_MODE_*
 
 // SENSE OPEN / SENSE CLOSE / SENSE OPEN NOWIFI on the console (bench): 1 open the

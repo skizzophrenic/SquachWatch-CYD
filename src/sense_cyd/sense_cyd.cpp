@@ -51,6 +51,19 @@ static bool     s_presence = false;
 static esp_ping_handle_t s_ping = nullptr;
 static volatile uint32_t s_pingOk = 0, s_pingTimeout = 0;
 static volatile uint16_t s_discReason = 0;
+// Sign-in attempts, for the bench (SENSE joins): ours (startJoin) and every
+// disconnect the WiFi driver reports, which is one per failed attempt, the
+// library's own instant retries included.
+static uint32_t s_tryCount = 0;
+static volatile uint32_t s_discCount = 0;
+// Refused, the board waits before it knocks again, longer each time: 20 s,
+// 40, 80, 160, then every 5 minutes. Knocking straight away (the WiFi
+// library's own auto-reconnect, 19 attempts a minute on the bench with a
+// wrong password) gets a board blocked by many routers for a few minutes,
+// which a tester saw as code 2 then 202 until the board sat unplugged.
+static uint8_t  s_failStreak = 0;
+static uint32_t s_retryAt = 0;
+static bool     s_waiting = false;
 
 static CsiMotionModel s_model;
 static uint32_t s_modelAccepted = 0;
@@ -308,15 +321,31 @@ static void startJoin() {
   // ESP-IDF aborts in pm_set_sleep_type ("should enable WiFi modem sleep when
   // both WiFi and Bluetooth are enabled"). The default modem sleep stays.
   s_discReason = 0;
+  s_tryCount++;
+  s_waiting = false;
+  // One attempt per startJoin: the library's instant retries are what get a
+  // board blocked. (It still retries once on a first connect, by itself.)
+  WiFi.setAutoReconnect(false);
   WiFi.begin(s_ssid, s_pass);
   s_mode = SENSE_MODE_JOINING; s_joinStartedMs = millis();
   if (priv()) note("joining a saved network...");
   else note("joining \"%s\"...", s_ssid);
 }
 
+// Refused or timed out: stop, and come back after the next wait.
+static void joinFailed(uint32_t now, const char* why) {
+  const uint32_t wait = s_failStreak >= 4 ? 300000UL : 20000UL << s_failStreak;
+  if (s_failStreak < 255) s_failStreak++;
+  WiFi.disconnect(false, false);
+  s_waiting = true; s_retryAt = now + wait;
+  note("join %s (status %d, reason %u, try %u); next try in %lu s", why, (int)WiFi.status(),
+       (unsigned)s_discReason, (unsigned)s_failStreak, (unsigned long)(wait / 1000));
+}
+
 static void onJoined() {
   const uint8_t* b = WiFi.BSSID();
   if (!b) return;
+  s_failStreak = 0; s_waiting = false;
   s_staSince = s_lastReadingAt = millis();
   memcpy(s_apMac, b, 6);
   s_chan = (uint16_t)WiFi.channel();
@@ -385,7 +414,7 @@ static void sendStat(uint32_t now) {
 }
 
 static void help() {
-  note("SENSE <cmd>: cal | win <ms> | caltime <ms> | hold <ms> | pingms <ms> | rates | stat | help");
+  note("SENSE <cmd>: cal | win <ms> | caltime <ms> | hold <ms> | pingms <ms> | rates | stat | joins | wrongpass | help");
 }
 
 static void command(char* line) {
@@ -420,6 +449,15 @@ static void command(char* line) {
     sendStat(millis());
   } else if (!strcasecmp(line, "stat")) {
     sendStat(millis());
+  } else if (!strcasecmp(line, "joins")) {
+    note("joins %lu  radio drops %lu  last reason %u", (unsigned long)s_tryCount, (unsigned long)s_discCount, (unsigned)s_discReason);
+  } else if (!strcasecmp(line, "wrongpass")) {
+    // Bench only: join with a password that cannot be right, to watch how
+    // often a refused board knocks. The real one is forgotten until the
+    // screen is opened again.
+    strncpy(s_pass, "squachwatch-wrong-password", sizeof s_pass - 1);
+    note("bench: joining with a wrong password");
+    startJoin();
   } else if (!strcasecmp(line, "help") || !strcmp(line, "?")) {
     help();
   } else {
@@ -431,8 +469,14 @@ static void command(char* line) {
 static void tickBody(uint32_t now) {
   if (s_mode == SENSE_MODE_JOINING) {
     const uint32_t jt = millis() - s_joinStartedMs;
-    if (WiFi.status() == WL_CONNECTED) onJoined();
-    else if (jt > 20000) { note("join failed (status %d, reason %u); retrying", (int)WiFi.status(), (unsigned)s_discReason); startJoin(); }
+    const wl_status_t st = WiFi.status();
+    if (s_waiting) { if ((int32_t)(now - s_retryAt) >= 0) startJoin(); }
+    else if (st == WL_CONNECTED) onJoined();
+    // The router said no, or the network is not there: done after the
+    // library's one retry has had its few seconds.
+    else if (s_discReason && jt > 12000 && (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL || st == WL_DISCONNECTED || st == WL_IDLE_STATUS))
+      joinFailed(now, "refused");
+    else if (jt > 20000) joinFailed(now, "timed out");
   } else if (s_mode == SENSE_MODE_STA && WiFi.status() != WL_CONNECTED) {
     note("link lost (reason %u), rejoining", (unsigned)s_discReason); startJoin();
   } else if (s_mode == SENSE_MODE_STA && s_csiOn && (int32_t)(now - s_lastReadingAt) > 8000) {
@@ -468,7 +512,7 @@ static void tickBody(uint32_t now) {
 }
 
 static void onWifiEvent(WiFiEvent_t e, WiFiEventInfo_t info) {
-  if (e == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) s_discReason = info.wifi_sta_disconnected.reason;
+  if (e == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) { s_discReason = info.wifi_sta_disconnected.reason; s_discCount++; }
 }
 
 // ---- The app's side (include/sense_cyd.h) -----------------------------------
@@ -504,6 +548,8 @@ void senseCydStop() {
   if (!s_running) return;
   stopPing(); csiStop(); s_haveAp = false;
   WiFi.disconnect(false, false);
+  WiFi.setAutoReconnect(true);   // the library's default, for whatever uses WiFi next
+  s_failStreak = 0; s_waiting = false;
   memset(s_pass, 0, sizeof s_pass);
   s_mode = SENSE_MODE_OFF; s_running = false;
   specEnd();
@@ -515,5 +561,10 @@ void senseCydTick() { if (s_running) tickBody(millis()); }
 bool senseCydRunning() { return s_running; }
 const char* senseCydNetwork() { return s_ssid; }
 uint16_t senseCydReason() { return s_discReason; }
+uint16_t senseCydRetryIn() {
+  if (!s_running || s_mode != SENSE_MODE_JOINING || !s_waiting) return 0;
+  const int32_t left = (int32_t)(s_retryAt - millis());
+  return left > 0 ? (uint16_t)((left + 999) / 1000) : 0;
+}
 uint8_t senseCydMode() { return s_mode; }
 #endif  // SENSE_CYD_APP
