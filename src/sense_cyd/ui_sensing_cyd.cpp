@@ -4,7 +4,7 @@
 //
 //   title bar     the gear (back to Settings), LIVE, channel and readings a second
 //   SPECTRUM.EXE  how fast the channel's shape changes, 0-2.5 Hz across: the
-//                 newest spectrum on top and the last ~18 s falling below it
+//                 newest spectrum on top and the last ~11 s sliding down below it
 //   tiles         NOW / FLOOR / PEAK / MARGIN over the last 80 s
 //   MOTION.EXE    the last 30 s: glyph rain from the traffic, the score fill and
 //                 trace, the marching MOTION line, peaks, the value now
@@ -205,7 +205,7 @@ void spectrum(TFT_eSPI& t) {
     osWindow(t, SP_X, SP_Y, SP_W, SP_H, "SPECTRUM.EXE", Theme::BG);
     const int x0 = SP_X + 1, gw = 96, bins = 32, bw = gw / bins;          // 3 px a bin
     const int cy0 = SP_Y + 11, ch = 22;                                    // the newest spectrum
-    const int wy0 = cy0 + ch + 3, rowH = 2, rows = 54;                     // the waterfall, ~18 s
+    const int wy0 = cy0 + ch + 3, rowH = 1, rows = 108;                    // the waterfall, ~11 s
     const int ay = wy0 + rows * rowH + 2;                                  // the Hz axis
     const float binHz = senseCydSpecBinHz();
     const uint8_t* top = senseCydSpecRow(0);

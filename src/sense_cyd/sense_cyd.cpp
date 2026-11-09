@@ -76,9 +76,11 @@ static bool priv() { return Settings::privacyMode(); }
 //   per CSI sample: the 50 data tones' amplitudes, normalised by their total
 //   every 100 ms:   the frame's mean, minus a ~5 s baseline -> d; c = d . v,
 //                   v += eta * c * (d - c * v), then v renormalised; c goes in a ring
-//   every 300 ms:   a 128-point FFT of the last 12.8 s (Hann, mean removed),
+//   every 100 ms:   a 128-point FFT of the last 12.8 s (Hann, mean removed),
 //                   bins 0-31 = 0-2.42 Hz, in dB over the room's recent level -> one row
-static const int kSpTones = 50, kSpN = 128, kSpBins = 32, kSpRows = 54;
+// A row every frame (100 ms), drawn 1 px tall: the waterfall slides a pixel
+// at a time instead of jumping two every 300 ms. 108 rows fill the same 108 px.
+static const int kSpTones = 50, kSpN = 128, kSpBins = 32, kSpRows = 108;
 struct SpecState {
   float acc[kSpTones]; int accN;
   float last[kSpTones]; bool haveLast;
@@ -165,7 +167,7 @@ static void specTick(uint32_t now) {
   nrm = sqrtf(nrm);
   if (nrm > 1e-6f) for (int i = 0; i < kSpTones; i++) p.v[i] /= nrm;
   p.ring[p.ringTotal % kSpN] = c; p.ringTotal++;
-  if (++p.sinceRow < 3 || p.ringTotal < (uint32_t)kSpN) return;
+  if (++p.sinceRow < 1 || p.ringTotal < (uint32_t)kSpN) return;
   p.sinceRow = 0;
   float mean = 0;
   for (int i = 0; i < kSpN; i++) mean += p.ring[(p.ringTotal + i) % kSpN];
@@ -191,7 +193,7 @@ static void specTick(uint32_t now) {
     srt[j] = v;
   }
   const float med = srt[ns / 2];
-  p.ref = p.refN ? p.ref + (med - p.ref) * (p.refN < 30 ? 1.0f / (p.refN + 1) : 0.01f) : med;
+  p.ref = p.refN ? p.ref + (med - p.ref) * (p.refN < 90 ? 1.0f / (p.refN + 1) : 0.0033f) : med;
   p.refN++;
   int best = -1; float bestOver = 8.0f;   // a peak must stand 8 dB over the room's median
   for (int b = 0; b < kSpBins; b++) {
