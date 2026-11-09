@@ -667,7 +667,9 @@ SquachWatch-CYD/
 - GPS and wardriving to the SD card on the CYD, and the SD log's dates
   (PR #46): **jotra7**. The Marauder V8 wardrives with it.
 - The Marauder V8 itself, and the Marauder project it comes from:
-  **justcallmekoko**.
+  **justcallmekoko**. HUMAN SENSING's motion model is ported from
+  [ESP32Marauder](https://github.com/justcallmekoko/ESP32Marauder)'s
+  CsiMotionModel (MIT).
 - Freenove ESP32-S3 Display 2.8" port: **greasy-electronics**.
 - Freenove 3.2" pin work: **DevOpsDAdams**.
 - 3.5" capacitive (ESP32-3248S035C) build: **VV-B0Y**.
