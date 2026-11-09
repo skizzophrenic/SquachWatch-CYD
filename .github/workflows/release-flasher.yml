@@ -44,6 +44,10 @@ on:
         description: "Lab build name, e.g. Anubis: what the flasher's ?lab=1 picker calls it (blank: the commit)"
         type: string
         default: ""
+      sense:
+        description: "Lab build only: HUMAN SENSING on, in the 320x240 ESP32 boards' lab builds"
+        type: boolean
+        default: false
 
 permissions:
   contents: write   # create the GitHub Release
@@ -241,7 +245,18 @@ jobs:
           # resistive's pins with an ST7789, confirmed on a real board.
           # cyd32c is the Sunton ESP32-2432S032C: the Freenove 3.2"'s screen with
           # a GT911 capacitive panel, confirmed on a real board (issue #6).
-          pio run -e cyd -e cyd-ili9341 -e awok -e rlphantom-r -e freenove32 -e cyd32c -e cyd-fast -e cyd-ili9341-fast -e cyd35-fast -e cyd35c-fast
+          if [ "${{ inputs.lab }}" = "true" ] && [ "${{ inputs.sense }}" = "true" ]; then
+            # HUMAN SENSING for testers (SETTINGS > HUMAN SENSING): a lab run
+            # with the sense box ticked builds the 320x240 ESP32 boards in the
+            # lab list with SENSE_CYD_APP, as their -sense envs are. A lab run
+            # never touches the public page's firmware, which keeps the
+            # release's. AWOK is not in the lab list; the 3.5" boards and the
+            # S3s are not proven for sensing yet, so they build as usual.
+            PLATFORMIO_BUILD_FLAGS="-DSENSE_CYD_APP=1" pio run -e cyd -e cyd-ili9341 -e rlphantom-r -e freenove32 -e cyd32c -e cyd-fast -e cyd-ili9341-fast
+            pio run -e awok -e cyd35-fast -e cyd35c-fast
+          else
+            pio run -e cyd -e cyd-ili9341 -e awok -e rlphantom-r -e freenove32 -e cyd32c -e cyd-fast -e cyd-ili9341-fast -e cyd35-fast -e cyd35c-fast
+          fi
           # twatch-s3 is the LilyGo T-Watch S3: an ESP32-S3, so its own
           # bootloader (at 0x0, not 0x1000) and its own 16 MB partition
           # table. A lab board until the watch work settles; see ?lab=1.
