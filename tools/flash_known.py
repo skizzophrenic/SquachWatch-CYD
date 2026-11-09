@@ -59,6 +59,7 @@ BOARDS = {
     # line): ST77922 over QSPI, touch in the panel chip. Bring-up began
     # 2026-10-09.
     "b8:1f:3f:c3:fd:58": ("freenove-s3-35", "Freenove ESP32-S3 Display 3.5in (FNK0104N), native USB"),
+    "28:84:85:85:12:0c": ("freenove-s3-35", "Freenove ESP32-S3 Display 3.5in, the second one (identified 2026-11-09: running SquachWatch, 480x320, 8 MB PSRAM)"),
     # Marauder V8 (justcallmekoko): ESP32-C5, 8 MB flash, ILI9341 + resistive
     # touch, GPS, MAX17048 gauge, behind a CP210x. Its Marauder v1.12.1 image
     # was read off first (sim/out/marauder_v8/marauder_v8_factory.bin).
