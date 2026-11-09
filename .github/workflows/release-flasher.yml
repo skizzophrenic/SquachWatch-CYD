@@ -245,17 +245,19 @@ jobs:
           # resistive's pins with an ST7789, confirmed on a real board.
           # cyd32c is the Sunton ESP32-2432S032C: the Freenove 3.2"'s screen with
           # a GT911 capacitive panel, confirmed on a real board (issue #6).
+          pio run -e cyd -e cyd-ili9341 -e awok -e rlphantom-r -e freenove32 -e cyd32c -e cyd-fast -e cyd-ili9341-fast -e cyd35-fast -e cyd35c-fast
           if [ "${{ inputs.lab }}" = "true" ] && [ "${{ inputs.sense }}" = "true" ]; then
             # HUMAN SENSING for testers (SETTINGS > HUMAN SENSING): a lab run
-            # with the sense box ticked builds the 320x240 ESP32 boards in the
-            # lab list with SENSE_CYD_APP, as their -sense envs are. A lab run
-            # never touches the public page's firmware, which keeps the
-            # release's. AWOK is not in the lab list; the 3.5" boards and the
-            # S3s are not proven for sensing yet, so they build as usual.
-            PLATFORMIO_BUILD_FLAGS="-DSENSE_CYD_APP=1" pio run -e cyd -e cyd-ili9341 -e rlphantom-r -e freenove32 -e cyd32c -e cyd-fast -e cyd-ili9341-fast
-            pio run -e awok -e cyd35-fast -e cyd35c-fast
-          else
-            pio run -e cyd -e cyd-ili9341 -e awok -e rlphantom-r -e freenove32 -e cyd32c -e cyd-fast -e cyd-ili9341-fast -e cyd35-fast -e cyd35c-fast
+            # with the sense box ticked builds the 320x240 ESP32 boards' -sense
+            # envs and puts each one's app where the plain env's was, so the
+            # lab list below serves it. Not PLATFORMIO_BUILD_FLAGS: a change to
+            # it makes the next pio run clean every env's build folder, and
+            # the plain envs' bootloaders went with it (2026-11-09). A lab run
+            # never touches the public page's firmware. AWOK is not in the lab
+            # list; the 3.5" boards and the S3s are not proven for sensing yet.
+            SENSE="cyd cyd-ili9341 rlphantom-r freenove32 cyd32c cyd-fast cyd-ili9341-fast"
+            pio run $(for e in $SENSE; do printf -- "-e %s-sense " "$e"; done)
+            for e in $SENSE; do cp ".pio/build/$e-sense/firmware.bin" ".pio/build/$e/firmware.bin"; done
           fi
           # twatch-s3 is the LilyGo T-Watch S3: an ESP32-S3, so its own
           # bootloader (at 0x0, not 0x1000) and its own 16 MB partition
