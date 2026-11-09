@@ -25,8 +25,11 @@
 #include "sense_store.h"
 #include "settings.h"
 #include "csi_motion_model.h"
-#include "ping/ping_sock.h"
 #include "lwip/ip_addr.h"
+#include "lwip/sockets.h"
+#include "lwip/inet_chksum.h"
+#include "lwip/prot/icmp.h"
+#include "lwip/prot/ip4.h"
 
 static const uint8_t  kQueueSize   = 32;
 static const uint16_t kMaxCsiBytes = 128;   // L-LTF only: 64 tones x int8 imag, real
@@ -48,7 +51,6 @@ static bool     s_csiOn = false, s_running = false;
 static uint32_t s_joinStartedMs = 0, s_lastLineMs = 0, s_lastFusionMs = 0, s_lastMotionMs = 0;
 static uint32_t s_staSince = 0, s_lastReadingAt = 0;
 static bool     s_presence = false;
-static esp_ping_handle_t s_ping = nullptr;
 static volatile uint32_t s_pingOk = 0, s_pingTimeout = 0;
 static volatile uint16_t s_discReason = 0;
 // Sign-in attempts, for the bench (SENSE joins): ours (startJoin) and every
@@ -271,48 +273,67 @@ static void csiStop() {
   s_csiOn = false;
 }
 
-static void pingOk(esp_ping_handle_t, void*) { s_pingOk++; }
-static void pingTimeout(esp_ping_handle_t, void*) { s_pingTimeout++; }
+// ---- The pings: the router's answers are what the radio measures ------------
+// Sent from the loop on a raw socket, one every s_pingMs, the replies drained
+// as they come. No task: esp_ping ran one, whose 3 KB stack had to come out of
+// the heap in one piece. Made again on every join it broke the heap up until
+// it could not start (the soak board, 27 rejoins); kept for the visit at 2 KB
+// it overflowed after 29 minutes (a PANIC with the heap checker in "ping"; it
+// peaks just over 2 KB when the link has trouble); kept at 3 KB the heap was
+// broken up by the WiFi reconnects instead, and it still could not start
+// (2026-11-09). A socket costs a few hundred bytes and needs no big block.
+static int      s_icmp = -1;
+static uint32_t s_pingGw = 0, s_pingAt = 0, s_pingSent = 0;
+static uint16_t s_pingSeq = 0;
+static const uint16_t PING_ID = 0x5351;   // "SQ"
 
 static void stopPing() {
-  if (!s_ping) return;
-  esp_ping_stop(s_ping);
-  esp_ping_delete_session(s_ping);
-  s_ping = nullptr;
+  if (s_icmp >= 0) { lwip_close(s_icmp); s_icmp = -1; }
 }
 
-// One ping session for the whole time HUMAN SENSING is up, kept across
-// rejoins: it was made again on every join, and each one's task (a 3 KB stack
-// in one piece) left the heap more broken up, until on the soak board the
-// largest block was 2.4 KB, the ping could not start, the board heard
-// nothing, rejoined, and round it went 27 times (2026-11-09). While the link
-// is down it just times out. A new one only for a different router address.
-static uint32_t s_pingGw = 0;
 static void startPing() {
   const IPAddress gw = WiFi.gatewayIP();
-  if (s_ping && s_pingGw == (uint32_t)gw) return;
-  stopPing();
-  esp_ping_config_t cfg = ESP_PING_DEFAULT_CONFIG();
-  cfg.count = ESP_PING_COUNT_INFINITE;
-  cfg.interval_ms = s_pingMs;
-  cfg.timeout_ms = 1000;
-  cfg.data_size = 1;
-  cfg.task_stack_size = 2048;   // the IDF's default: the callbacks only count
-  IP_ADDR4(&cfg.target_addr, gw[0], gw[1], gw[2], gw[3]);
-  esp_ping_callbacks_t cbs = {};
-  cbs.on_ping_success = pingOk;
-  cbs.on_ping_timeout = pingTimeout;
-  esp_ping_handle_t h = nullptr;
-  if (esp_ping_new_session(&cfg, &cbs, &h) == ESP_OK && esp_ping_start(h) == ESP_OK) {
-    s_ping = h; s_pingGw = (uint32_t)gw;
-    if (priv()) note("pinging the router every %lu ms", (unsigned long)s_pingMs);
-    else note("pinging the router %s every %lu ms", gw.toString().c_str(), (unsigned long)s_pingMs);
-  } else {
-    // A session that was made but would not start is deleted, not leaked.
-    if (h) esp_ping_delete_session(h);
-    s_ping = nullptr;
-    note("ping failed to start (largest block %lu)", (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  s_pingGw = (uint32_t)gw;
+  if (s_icmp < 0) {
+    s_icmp = lwip_socket(AF_INET, SOCK_RAW, IPPROTO_ICMP);
+    if (s_icmp < 0) { note("ping socket failed (heap %lu)", (unsigned long)ESP.getFreeHeap()); return; }
+    const int nb = 1;
+    lwip_ioctl(s_icmp, FIONBIO, (void*)&nb);
   }
+  s_pingAt = millis();
+  if (priv()) note("pinging the router every %lu ms", (unsigned long)s_pingMs);
+  else note("pinging the router %s every %lu ms", gw.toString().c_str(), (unsigned long)s_pingMs);
+}
+
+// Every loop pass while joined: at most one echo out, and the answers in.
+static void pingTick(uint32_t now) {
+  if (s_icmp < 0 || !s_pingGw) return;
+  // On the 20 ms beat: up to two a pass when a frame ran long (a pass is often
+  // over 20 ms, and one a pass held the readings near 35 a second), but never
+  // a burst to make up for a stall: more than 100 ms behind starts afresh.
+  if ((int32_t)(now - s_pingAt) > 100) s_pingAt = now;
+  for (int k = 0; k < 2 && (int32_t)(now - s_pingAt) >= 0; k++) {
+    s_pingAt += s_pingMs;
+    struct __attribute__((packed)) { icmp_echo_hdr h; uint8_t data; } pkt = {};
+    pkt.h.type = ICMP_ECHO; pkt.h.code = 0;
+    pkt.h.id = lwip_htons(PING_ID); pkt.h.seqno = lwip_htons(++s_pingSeq);
+    pkt.data = 0x51;
+    pkt.h.chksum = inet_chksum(&pkt, sizeof pkt);
+    sockaddr_in to = {};
+    to.sin_family = AF_INET; to.sin_addr.s_addr = s_pingGw;
+    if (lwip_sendto(s_icmp, &pkt, sizeof pkt, 0, (sockaddr*)&to, sizeof to) > 0) s_pingSent++;
+  }
+  uint8_t buf[64];
+  for (int i = 0; i < 8; i++) {   // the replies, a few a pass, so their buffers come straight back
+    const int n = lwip_recvfrom(s_icmp, buf, sizeof buf, 0, nullptr, nullptr);
+    if (n <= 0) break;
+    const int ihl = (buf[0] & 0x0f) * 4;
+    if (n < ihl + (int)sizeof(icmp_echo_hdr)) continue;
+    const icmp_echo_hdr* h = (const icmp_echo_hdr*)(buf + ihl);
+    if (h->type == ICMP_ER && h->id == lwip_htons(PING_ID)) s_pingOk++;
+  }
+  // Lost ones, for the console: everything sent more than one answer behind.
+  s_pingTimeout = s_pingSent > s_pingOk + 50 ? s_pingSent - s_pingOk - 50 : 0;
 }
 
 static void resetModels() {
@@ -327,7 +348,7 @@ static void resetModels() {
 
 static void startJoin() {
   if (!s_ssid[0]) return;
-  csiStop(); s_haveAp = false;   // the ping stays: see startPing
+  csiStop(); s_haveAp = false;   // the ping socket stays: see startPing
   esp_wifi_set_promiscuous(false);
   WiFi.disconnect(false, false);   // as the WiFi update does: the radio stays up for the detector
   WiFi.persistent(false);
@@ -338,6 +359,15 @@ static void startJoin() {
   s_discReason = 0;
   s_tryCount++;
   s_waiting = false;
+  // Third try in a row: the radio itself restarted first. On the soak board a
+  // join that kept answering "network not found" for minutes joined in a
+  // second once the radio was started afresh (2026-11-09).
+  if (s_failStreak >= 2) {
+    note("restarting the radio before this try");
+    esp_wifi_stop();
+    delay(30);
+    esp_wifi_start();
+  }
   // One attempt per startJoin: the library's instant retries are what get a
   // board blocked. (It still retries once on a first connect, by itself.)
   WiFi.setAutoReconnect(false);
@@ -510,6 +540,7 @@ static void tickBody(uint32_t now) {
   } else if (s_mode == SENSE_MODE_STA && s_failStreak && now - s_staSince > 30000 && (int32_t)(now - s_lastReadingAt) < 2000) {
     s_failStreak = 0;   // 30 s of readings: the next trouble starts the waits afresh
   }
+  if (s_mode == SENSE_MODE_STA) pingTick(now);
 
   while (s_rd != s_wr) {
     Sample& s = s_queue[s_rd];

@@ -854,7 +854,7 @@ void pollSerial() {
             // a stack size somebody picked, which is the question here.
             static const char* TASKS[] = { "loopTask", "nimble_host", "btController",
                                            "wifi", "tiT", "esp_timer", "arduino_events",
-                                           "sys_evt", "otawifi", "IDLE" };
+                                           "sys_evt", "otawifi", "ping", "IDLE" };
             for (uint8_t i = 0; i < sizeof TASKS / sizeof TASKS[0]; i++) {
                 TaskHandle_t th = xTaskGetHandle(TASKS[i]);
                 if (!th) continue;
