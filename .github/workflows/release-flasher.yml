@@ -246,19 +246,6 @@ jobs:
           # cyd32c is the Sunton ESP32-2432S032C: the Freenove 3.2"'s screen with
           # a GT911 capacitive panel, confirmed on a real board (issue #6).
           pio run -e cyd -e cyd-ili9341 -e awok -e rlphantom-r -e freenove32 -e cyd32c -e cyd-fast -e cyd-ili9341-fast -e cyd35-fast -e cyd35c-fast
-          if [ "${{ inputs.lab }}" = "true" ] && [ "${{ inputs.sense }}" = "true" ]; then
-            # HUMAN SENSING for testers (SETTINGS > HUMAN SENSING): a lab run
-            # with the sense box ticked builds the 320x240 ESP32 boards' -sense
-            # envs and puts each one's app where the plain env's was, so the
-            # lab list below serves it. Not PLATFORMIO_BUILD_FLAGS: a change to
-            # it makes the next pio run clean every env's build folder, and
-            # the plain envs' bootloaders went with it (2026-11-09). A lab run
-            # never touches the public page's firmware. AWOK is not in the lab
-            # list; the 3.5" boards and the S3s are not proven for sensing yet.
-            SENSE="cyd cyd-ili9341 rlphantom-r freenove32 cyd32c cyd-fast cyd-ili9341-fast"
-            pio run $(for e in $SENSE; do printf -- "-e %s-sense " "$e"; done)
-            for e in $SENSE; do cp ".pio/build/$e-sense/firmware.bin" ".pio/build/$e/firmware.bin"; done
-          fi
           # twatch-s3 is the LilyGo T-Watch S3: an ESP32-S3, so its own
           # bootloader (at 0x0, not 0x1000) and its own 16 MB partition
           # table. A lab board until the watch work settles; see ?lab=1.
@@ -285,6 +272,21 @@ jobs:
           # The Phantom's capacitive version has never run on a real board, so
           # it is compiled to keep its code honest but NOT published anywhere.
           pio run -e rlphantom
+          if [ "${{ inputs.lab }}" = "true" ] && [ "${{ inputs.sense }}" = "true" ]; then
+            # HUMAN SENSING for testers (SETTINGS > HUMAN SENSING): a lab run
+            # with the sense box ticked builds the boards' -sense envs and puts
+            # each one's app where the plain env's was, so the lab list below
+            # serves it. Last in this step, after every plain build: a later
+            # pio run of the plain env would put its own app back. Not
+            # PLATFORMIO_BUILD_FLAGS: a change to it makes the next pio run
+            # clean every env's build folder (2026-11-09). A lab run never
+            # touches the public page's firmware. The 320x240 ESP32 boards and
+            # the T-Deck Plus are proven on a bench; AWOK is not in the lab
+            # list; the 3.5" boards and the other S3s are not proven yet.
+            SENSE="cyd cyd-ili9341 rlphantom-r freenove32 cyd32c cyd-fast cyd-ili9341-fast tdeck-plus"
+            pio run $(for e in $SENSE; do printf -- "-e %s-sense " "$e"; done)
+            for e in $SENSE; do cp ".pio/build/$e-sense/firmware.bin" ".pio/build/$e/firmware.bin"; done
+          fi
 
       - name: Fetch the NM-CYD-C5 build
         # Only if its runner managed one (see build-c5). The C5 shares no

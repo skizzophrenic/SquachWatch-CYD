@@ -1677,6 +1677,8 @@ static const uint8_t TDECK_KBD = 0x55;
 static void enterLoraChat();
 static void enterLoraHome();
 #endif
+static void enterClear();
+static void enterSettings();
 static void tdeckKey(char c, uint32_t now);
 static void tdeckKeysTick(uint32_t now) {
     static uint32_t at = 0;
@@ -1707,6 +1709,21 @@ static void tdeckKey(char c, uint32_t now) {
     // Enter on the home screen opens the LORA page, when the radio is on: the
     // keyboard is the reason to own a T-Deck (asked for 2026-10-15).
     else if (state == AppState::CLEAR && c == '\n' && Settings::loraListen() != 0) enterLoraHome();
+#endif
+#if defined(SENSE_CYD_APP)
+    // HUMAN SENSING's three buttons from the keyboard: Backspace is BACK, R
+    // re-calibrates, O is OFF (back to the detector). The screen's own
+    // buttons still work by touch.
+    else if (state == AppState::SENSING) {
+        if (c == '\b') enterSettings();
+        else if (c == 'r' || c == 'R') {
+            senseCydCommand("cal");
+            Theme::showToast("RECALIBRATING", "Keep the room still for 15 s", Theme::AMBER);
+        } else if (c == 'o' || c == 'O') {
+            Theme::showToast("SENSING OFF", "Detector back on", Theme::CYAN);
+            enterClear();
+        }
+    }
 #endif
 }
 #endif
