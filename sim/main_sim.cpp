@@ -78,6 +78,13 @@
 #include "png_writer.h"
 #include "touch_cal.h"
 #include "ui_lorahome.h"
+// HUMAN SENSING's screen, built with SENSE_CYD_APP on its own objects (see the
+// Makefile); its header is read with the flag so the calls are declared.
+#define SENSE_CYD_APP 1
+#include "ui_sensing_cyd.h"
+#undef SENSE_CYD_APP
+void simSenseBegin(uint32_t now);   // sim/sense_cyd_sim.cpp
+void simSenseStep(uint32_t now);
 #include "ui_lorasettings.h"
 #include "ui_lorachat.h"
 #include "lora_channels.h"
@@ -908,6 +915,11 @@ int main(int argc, char** argv) {
             }
             uiLoraChatTick(frame, t);
         }
+        else if (screen == "sensing") {
+            // HUMAN SENSING at this panel's size; SQUACHSIM_SENSE picks the room.
+            simSenseStep(t);
+            uiSensingTick(frame, t);
+        }
         else if (screen == "lorasettings") {
             SimLora::step(t);
             // Typed into whatever edit line a --tap opened, from the capture
@@ -1105,6 +1117,10 @@ int main(int argc, char** argv) {
         if (const char* dp = getenv("SQUACHSIM_DMPEER"))
             uiLoraChatOpenDm((uint32_t)strtoul(dp, nullptr, 16), getenv("SQUACHSIM_DMNET") ? Lora::Proto::MESHCORE : Lora::Proto::MESHTASTIC);
         uiLoraChatInit(frame);
+    }
+    else if (screen == "sensing") {
+        simSenseBegin(now);
+        uiSensingInit(frame);
     }
     else if (screen == "lorasettings") {
         SimLora::Config lc;

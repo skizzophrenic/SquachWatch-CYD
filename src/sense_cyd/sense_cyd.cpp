@@ -208,6 +208,7 @@ static void specTick(uint32_t now) {
 }
 
 int senseCydSpecRows() { return s_sp ? s_sp->rowCount : 0; }
+int senseCydSpecRowsMax() { return kSpRows; }
 const uint8_t* senseCydSpecRow(int r) {
   if (!s_sp || r < 0 || r >= s_sp->rowCount) return nullptr;
   return s_sp->rows[(s_sp->rowHead - 1 - r + kSpRows * 2) % kSpRows];

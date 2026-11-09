@@ -64,6 +64,7 @@ extern volatile uint8_t g_senseConsole;
 // SPECTRUM.EXE: rows of 32 bins (0-2.42 Hz), 0-255 over the room's recent level,
 // row 0 the newest, three a second; the peak bin standing 8 dB clear, or -1.
 int            senseCydSpecRows();
+int            senseCydSpecRowsMax();   // the most rows it keeps (108, ~11 s)
 const uint8_t* senseCydSpecRow(int r);
 int            senseCydSpecPeak();
 float          senseCydSpecBinHz();
