@@ -281,23 +281,38 @@ static void stopPing() {
   s_ping = nullptr;
 }
 
+// One ping session for the whole time HUMAN SENSING is up, kept across
+// rejoins: it was made again on every join, and each one's task (a 3 KB stack
+// in one piece) left the heap more broken up, until on the soak board the
+// largest block was 2.4 KB, the ping could not start, the board heard
+// nothing, rejoined, and round it went 27 times (2026-11-09). While the link
+// is down it just times out. A new one only for a different router address.
+static uint32_t s_pingGw = 0;
 static void startPing() {
-  stopPing();
   const IPAddress gw = WiFi.gatewayIP();
+  if (s_ping && s_pingGw == (uint32_t)gw) return;
+  stopPing();
   esp_ping_config_t cfg = ESP_PING_DEFAULT_CONFIG();
   cfg.count = ESP_PING_COUNT_INFINITE;
   cfg.interval_ms = s_pingMs;
   cfg.timeout_ms = 1000;
   cfg.data_size = 1;
-  cfg.task_stack_size = 3072;
+  cfg.task_stack_size = 2048;   // the IDF's default: the callbacks only count
   IP_ADDR4(&cfg.target_addr, gw[0], gw[1], gw[2], gw[3]);
   esp_ping_callbacks_t cbs = {};
   cbs.on_ping_success = pingOk;
   cbs.on_ping_timeout = pingTimeout;
-  if (esp_ping_new_session(&cfg, &cbs, &s_ping) == ESP_OK && esp_ping_start(s_ping) == ESP_OK) {
+  esp_ping_handle_t h = nullptr;
+  if (esp_ping_new_session(&cfg, &cbs, &h) == ESP_OK && esp_ping_start(h) == ESP_OK) {
+    s_ping = h; s_pingGw = (uint32_t)gw;
     if (priv()) note("pinging the router every %lu ms", (unsigned long)s_pingMs);
     else note("pinging the router %s every %lu ms", gw.toString().c_str(), (unsigned long)s_pingMs);
-  } else { note("ping failed to start"); s_ping = nullptr; }
+  } else {
+    // A session that was made but would not start is deleted, not leaked.
+    if (h) esp_ping_delete_session(h);
+    s_ping = nullptr;
+    note("ping failed to start (largest block %lu)", (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+  }
 }
 
 static void resetModels() {
@@ -312,7 +327,7 @@ static void resetModels() {
 
 static void startJoin() {
   if (!s_ssid[0]) return;
-  stopPing(); csiStop(); s_haveAp = false;
+  csiStop(); s_haveAp = false;   // the ping stays: see startPing
   esp_wifi_set_promiscuous(false);
   WiFi.disconnect(false, false);   // as the WiFi update does: the radio stays up for the detector
   WiFi.persistent(false);
@@ -345,7 +360,7 @@ static void joinFailed(uint32_t now, const char* why) {
 static void onJoined() {
   const uint8_t* b = WiFi.BSSID();
   if (!b) return;
-  s_failStreak = 0; s_waiting = false;
+  s_waiting = false;   // the streak goes back to 0 only once readings flow (tickBody)
   s_staSince = s_lastReadingAt = millis();
   memcpy(s_apMac, b, 6);
   s_chan = (uint16_t)WiFi.channel();
@@ -357,7 +372,8 @@ static void onJoined() {
   // failed esp_wifi_set_csi held the loop up for seconds).
   s_mode = SENSE_MODE_STA;
   startPing();
-  if (priv()) note("joined: channel %u rssi %d csi %s heap %lu", s_chan, WiFi.RSSI(), csi ? "on" : "FAILED", (unsigned long)ESP.getFreeHeap());
+  if (priv()) note("joined: channel %u rssi %d csi %s heap %lu largest %lu", s_chan, WiFi.RSSI(), csi ? "on" : "FAILED",
+                   (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   else note("joined: BSSID %02X:%02X:%02X:%02X:%02X:%02X channel %u rssi %d csi %s heap %lu",
             b[0], b[1], b[2], b[3], b[4], b[5], s_chan, WiFi.RSSI(), csi ? "on" : "FAILED", (unsigned long)ESP.getFreeHeap());
 }
@@ -404,6 +420,9 @@ static void sendStat(uint32_t now) {
   static uint32_t lastSeen = 0, lastAcc = 0, lastOk = 0, lastAt = 0;
   const uint32_t dt = now - lastAt ? now - lastAt : 1;
   const uint32_t seen = s_seen, acc = s_accepted, ok = s_pingOk;
+  if (seen < lastSeen) lastSeen = 0;   // the counts start again when the models reset
+  if (acc < lastAcc) lastAcc = 0;
+  if (ok < lastOk) lastOk = 0;
   note("stat up %lu  csi_all %lu/s  csi_router %lu/s  ping_ok %lu/s  timeouts %lu  drop %lu  heap %lu min %lu big %lu",
        (unsigned long)(now / 1000),
        (unsigned long)((seen - lastSeen) * 1000UL / dt), (unsigned long)((acc - lastAcc) * 1000UL / dt),
@@ -474,16 +493,22 @@ static void tickBody(uint32_t now) {
     else if (st == WL_CONNECTED) onJoined();
     // The router said no, or the network is not there: done after the
     // library's one retry has had its few seconds.
-    else if (s_discReason && jt > 12000 && (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL || st == WL_DISCONNECTED || st == WL_IDLE_STATUS))
+    // (Reason 8 is our own WiFi.disconnect() in startJoin, arriving late: not a refusal.)
+    else if (s_discReason && s_discReason != 8 && jt > 12000 && (st == WL_CONNECT_FAILED || st == WL_NO_SSID_AVAIL || st == WL_DISCONNECTED || st == WL_IDLE_STATUS))
       joinFailed(now, "refused");
     else if (jt > 20000) joinFailed(now, "timed out");
   } else if (s_mode == SENSE_MODE_STA && WiFi.status() != WL_CONNECTED) {
-    note("link lost (reason %u), rejoining", (unsigned)s_discReason); startJoin();
+    // The first loss rejoins at once; a board that keeps losing it backs off.
+    if (!s_failStreak) { note("link lost (reason %u), rejoining", (unsigned)s_discReason); startJoin(); }
+    else { s_mode = SENSE_MODE_JOINING; joinFailed(now, "lost"); }
   } else if (s_mode == SENSE_MODE_STA && s_csiOn && (int32_t)(now - s_lastReadingAt) > 8000) {
     // Joined but deaf: no reading from the router for 8 s (a router that
-    // restarted looks the same). Join again.
-    note("joined but no readings for 8 s (%lu ping timeouts), rejoining", (unsigned long)s_pingTimeout);
-    startJoin();
+    // restarted looks the same). Join again, after the back-off's wait.
+    note("joined but no readings for 8 s (%lu ping timeouts)", (unsigned long)s_pingTimeout);
+    s_mode = SENSE_MODE_JOINING;
+    joinFailed(now, "deaf");
+  } else if (s_mode == SENSE_MODE_STA && s_failStreak && now - s_staSince > 30000 && (int32_t)(now - s_lastReadingAt) < 2000) {
+    s_failStreak = 0;   // 30 s of readings: the next trouble starts the waits afresh
   }
 
   while (s_rd != s_wr) {
@@ -549,6 +574,7 @@ void senseCydStop() {
   stopPing(); csiStop(); s_haveAp = false;
   WiFi.disconnect(false, false);
   WiFi.setAutoReconnect(true);   // the library's default, for whatever uses WiFi next
+  stopPing(); s_pingGw = 0;
   s_failStreak = 0; s_waiting = false;
   memset(s_pass, 0, sizeof s_pass);
   s_mode = SENSE_MODE_OFF; s_running = false;
