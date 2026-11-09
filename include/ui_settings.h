@@ -100,6 +100,9 @@ enum class SettingsRow : uint8_t {
     FONT_XP,         // on the FONTS page: the XP counter tiles, 1x or 2x
     FONT_PETS,       // on the FONTS page: the pets' balloons
     FONT_PREVIEW,    // on the FONTS page: a sample of the last kind moved, at its size
+#if defined(SENSE_CYD_APP)
+    SENSING,         // HUMAN SENSING: WiFi motion sensing on the CYD's own radio (opens the screen)
+#endif
     BACK,
     COUNT,
     NONE = 255

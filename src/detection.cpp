@@ -955,7 +955,14 @@ bool DetectionEngine::init() {
         cfg.ampdu_rx_enable    = 0;
         cfg.ampdu_tx_enable    = 0;
         cfg.amsdu_tx_enable    = 0;
+#if defined(SENSE_CYD_APP)
+        // HUMAN SENSING reads channel state from this same driver: with
+        // csi_enable 0, esp_wifi_set_csi(true) fails (ESP_FAIL) on every try,
+        // and each try held the loop up for seconds (bench, 2026-11-08).
+        cfg.csi_enable         = 1;
+#else
         cfg.csi_enable         = 0;
+#endif
         cfg.mgmt_sbuf_num      = 6;    // the floor
         cfg.nvs_enable         = 0;
         const esp_err_t rc = esp_wifi_init(&cfg);

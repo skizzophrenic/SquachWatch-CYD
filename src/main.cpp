@@ -28,6 +28,12 @@
 #else
 #define SQW_PUSH_ROWS() FramePush::lastRows()
 #endif
+#if defined(SENSE_CYD_APP)
+// HUMAN SENSING: WiFi motion sensing on the CYD's own radio (include/sense_cyd.h).
+#include "sense_store.h"
+#include "ui_sensing_cyd.h"
+#include "sense_cyd.h"
+#endif
 // The frame buffer forced into INTERNAL RAM on the boards whose blit reads it
 // scattered (the CrowPanel's twitch, the Tab5's column-wise walk): plain
 // calloc() of anything over CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL is served
@@ -2450,6 +2456,16 @@ static void enterDesk() {
     transitionStart = millis();
     uiDeskInit(*canvas);
 }
+
+#if defined(SENSE_CYD_APP)
+// HUMAN SENSING: the CYD's own radio, borrowed from the detector while this
+// screen is up (the sensing tick in loop(), include/sense_cyd.h).
+static void enterSensing() {
+    state = AppState::SENSING;
+    transitionStart = millis();
+    uiSensingInit(*canvas);
+}
+#endif
 
 static void enterDiagnostics() {
     state = AppState::DIAGNOSTICS;
@@ -5229,6 +5245,28 @@ static inline void drawTwoBand(F&& draw) {
     draw(*canvas, true);
 }
 
+#if defined(SENSE_CYD_APP)
+// SENSE SHOT on the console: the last frame as it sits in the 8-bit sprite
+// (RGB332), one "#R<row>:" line of hex per row, so a bench script can turn
+// it into a PNG and the screen can be checked without a camera.
+void consoleFrameShot() {
+    if (!frameBufferOk || frame.getColorDepth() != 8 || !frame.getPointer()) { Serial.println("[sense] shot: no 8-bit frame"); return; }
+    const uint8_t* px = (const uint8_t*)frame.getPointer();
+    const int w = frame.width(), h = frame.height();
+    Serial.printf("#SHOT %d %d rgb332\n", w, h);
+    static const char HX[] = "0123456789abcdef";
+    static char line[8 + 2 * 480 + 2];
+    for (int y = 0; y < h; y++) {
+        int n = snprintf(line, sizeof line, "#R%03d:", y);
+        for (int x = 0; x < w && n < (int)sizeof line - 3; x++) { const uint8_t v = px[y * w + x]; line[n++] = HX[v >> 4]; line[n++] = HX[v & 15]; }
+        line[n] = 0;
+        Serial.println(line);
+        Serial.flush();   // a row at a time: at 2 Mbaud whole rows went missing on the PC
+    }
+    Serial.println("#SHOT END");
+}
+#endif
+
 static inline uint32_t emaUpdate(uint32_t avg, uint32_t sample) {
     return avg ? avg + ((int32_t)sample - (int32_t)avg) / 8 : sample;
 }
@@ -5247,6 +5285,7 @@ static const char* timedScreenName(AppState s) {
         case AppState::HUNT:        return "HUNT";
         case AppState::ALERT:       return "ALERT";
         case AppState::WATCH_ALERT: return "WATCH";
+        case AppState::SENSING:     return "SENSING";
         default:                    return nullptr;
     }
 }
@@ -6211,6 +6250,58 @@ void loop() {
         touchJustUp = false;
     }
     engine.loop();
+#if defined(SENSE_CYD_APP)
+    // SENSING on the CYD's own radio, and only while its screen is up: one
+    // radio, so the detector lets go of it the way it does for a WiFi update
+    // and gets it back the moment the screen goes (BACK, OFF, the gear).
+    // The network is the saved one the updates use (SETTINGS > WIFI).
+    {
+        static bool s_senseNoWifi = false;   // SENSE OPEN NOWIFI: this session only
+        if (g_senseConsole && !Security::locked()) {   // SENSE OPEN / CLOSE / OPEN NOWIFI (bench)
+            const uint8_t c = g_senseConsole; g_senseConsole = 0;
+            if ((c == 1 || c == 3) && state != AppState::SENSING) { s_senseNoWifi = c == 3; enterSensing(); }
+            else if (c == 2 && state == AppState::SENSING) enterClear();
+        }
+        // Booted straight into SENSING: give the detector's radio 8 s to settle
+        // first. Started at once, the first join came up deaf (no CSI, every
+        // ping lost) on the bench, 2026-11-09; opened later it never did.
+        const bool want = state == AppState::SENSING && millis() > 8000;
+        if (want && !senseCydRunning()) {
+            // Remembered (NVS), so a board switched off in SENSING boots back
+            // into it (the boot screen's exit). Cleared below
+            // when the screen is left any way but a power cut.
+            if (!Settings::sensing()) Settings::setSensing(true);
+            engine.startUpdateRadio();
+            SenseStore::begin();
+            char ssid[33] = "", pass[65] = "";
+            // Which saved network: there is no scan here (the screen should
+            // come up at once), so the one marked USE if it has joined before,
+            // else the first that has, else USE. A board carried between two
+            // places has both saved, and USE may be the one that is not here.
+            const uint8_t nSaved = s_senseNoWifi ? 0 : OtaWifi::savedCount();
+            s_senseNoWifi = false;
+            if (nSaved) {
+                const uint8_t use = OtaWifi::savedUse() < nSaved ? OtaWifi::savedUse() : 0;
+                int k = OtaWifi::savedResult(use) == OtaWifi::SavedResult::JOINED ? use : -1;
+                for (uint8_t i = 0; i < nSaved && k < 0; i++)
+                    if (OtaWifi::savedResult(i) == OtaWifi::SavedResult::JOINED) k = i;
+                if (k < 0) k = use;
+                strncpy(ssid, OtaWifi::savedSsidAt((uint8_t)k), sizeof ssid - 1);
+                OtaWifi::savedPassAt((uint8_t)k, pass, sizeof pass);
+            }
+            senseCydStart(ssid, pass);
+            memset(pass, 0, sizeof pass);
+        } else if (!want && senseCydRunning()) {
+            if (Settings::sensing()) Settings::setSensing(false);
+            senseCydStop();
+            SenseStore::end();
+            engine.stopUpdateRadio();
+            Serial.println("[sense] detector back on");
+        }
+        senseCydTick();
+        SenseStore::tick(now);
+    }
+#endif
 #if defined(CYD_GPS)
     cydGpsTick(millis());
 #endif
@@ -6641,7 +6732,7 @@ void loop() {
                       state == AppState::RAWSCAN || state == AppState::DETECTION_FILTER ||
                       state == AppState::IGNORE_LIST || state == AppState::POWER_SAVER ||
                       state == AppState::SECURITY || state == AppState::STATUS_LIGHT ||
-                      state == AppState::DESK) &&
+                      state == AppState::DESK || state == AppState::SENSING) &&
         Theme::settingsButtonHit(tp.x, tp.y) &&
         // ...but not where the watch/hunt pill is sitting. The gear's tap box
         // is 55x50, much larger than its 28px glyph, so it reaches into the
@@ -6657,7 +6748,7 @@ void loop() {
         }
         else if (state == AppState::OUTFIT || state == AppState::DETECTION_FILTER ||
             state == AppState::IGNORE_LIST || state == AppState::POWER_SAVER ||
-            state == AppState::SECURITY) enterSettings();
+            state == AppState::SECURITY || state == AppState::SENSING) enterSettings();
         else if (state == AppState::SETTINGS) {
             // The gear on a sub-page goes back up a level, the way it does
             // from every other screen Settings opens.
@@ -6789,6 +6880,10 @@ void loop() {
                 // board gets on with its day. Not over the first-boot
                 // walkthrough, which has a screen of its own to finish.
                 else if (OtaCore::availableVersion()[0] && !Security::locked()) enterSysProps();
+#if defined(SENSE_CYD_APP)
+                // Switched off with HUMAN SENSING up: straight back to it.
+                else if (Settings::sensing() && !Security::locked()) enterSensing();
+#endif
                 else if (Settings::deskWanted())  enterDesk();   // switched off on the desk: back to it
                 else                              enterClear();
             }
@@ -8176,6 +8271,13 @@ void loop() {
 #endif
                         case SettingsRow::DETECTION_FILTER: enterDetFilter(); break;
                         case SettingsRow::POWER_SAVER: enterPower(); break;
+#if defined(SENSE_CYD_APP)
+                        case SettingsRow::SENSING:
+                            // Opens HUMAN SENSING; the detector pauses while it is up.
+                            Theme::showToast("HUMAN SENSING", "Detector paused while this is open", Theme::CYAN);
+                            enterSensing();
+                            break;
+#endif
                         case SettingsRow::EXT_SCREEN:
                             Settings::toggleExtScreen();
                             Theme::showToast(Settings::extScreen() ? "EXT SCREEN ON" : "EXT SCREEN OFF",
@@ -9512,6 +9614,35 @@ void loop() {
             }
             break;
         }
+#if defined(SENSE_CYD_APP)
+        case AppState::SENSING: {
+            drawTwoBand([&](TFT_eSPI& t, bool advance) { uiSensingTick(t, now, advance); });
+            // A tap acts on release, where the finger went down.
+            static bool sGesture = false;
+            static int  sDownX = 0, sDownY = 0;
+            if (touchJustDown) { sGesture = true; sDownX = tp.x; sDownY = tp.y; }
+            if (touchJustUp && sGesture && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                sGesture = false;
+                const SensingTap tap = uiSensingTap(sDownX, sDownY, tft.width(), tft.height(), now);
+                if (tap != SensingTap::NONE) lastTouch = now;
+                if (tap == SensingTap::BACK) {
+                    enterSettings();
+                } else if (tap == SensingTap::RECAL) {
+                    senseCydCommand("cal");
+                    Theme::showToast("RECALIBRATING", "Keep the room still for 15 s", Theme::AMBER);
+                } else if (tap == SensingTap::ADD_WIFI) {
+                    // No saved network: straight to the list to add one. Leaving
+                    // SENSING hands the radio back, which the add screen's scan needs.
+                    enterWifiNets();
+                } else if (tap == SensingTap::OFF) {
+                    // Straight back to the detector (the loop gives it the radio back).
+                    Theme::showToast("SENSING OFF", "Detector back on", Theme::CYAN);
+                    enterClear();
+                }
+            }
+            break;
+        }
+#endif
         case AppState::COLOR_CHECK: {
             drawTwoBand([&](TFT_eSPI& t, bool) { uiColorCheckTick(t, now); });
             if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {

@@ -91,6 +91,11 @@ static const SettingsRow ALL_ROWS[] = {
 #endif
     SettingsRow::DETECTION_FILTER,
     SettingsRow::IGNORED_DEVICES,
+#if defined(SENSE_CYD_APP)
+    // Beside what the detector listens for: what the board's radio senses
+    // (the detector paused while HUMAN SENSING is up).
+    SettingsRow::SENSING,
+#endif
 #if defined(CARDPUTER_ADV)
     SettingsRow::EXT_SCREEN,
 #endif
@@ -338,6 +343,9 @@ static RowGroupId groupFor(SettingsRow r) {
 #endif
         case SettingsRow::DETECTION_FILTER:
         case SettingsRow::IGNORED_DEVICES:
+#if defined(SENSE_CYD_APP)
+        case SettingsRow::SENSING:
+#endif
             return RowGroupId::BEHAVIOR;
         case SettingsRow::SQUACHY_NAME:
         case SettingsRow::APPEARANCE:
@@ -1341,6 +1349,11 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
         case SettingsRow::PRIVACY:
             label = "PRIVACY MODE"; value = Settings::privacyMode() ? "ON" : "OFF";
             break;
+#if defined(SENSE_CYD_APP)
+        case SettingsRow::SENSING:
+            label = "HUMAN SENSING"; value = ">";   // opens the screen
+            break;
+#endif
         case SettingsRow::CHARGE_MODE:
             label = "CHARGE MODE"; value = "START";
             break;

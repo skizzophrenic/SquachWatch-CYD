@@ -195,7 +195,9 @@ enum class AppState : uint8_t {
     DEX              = 37, // the SQUACHY-DEX, from Settings' row. See ui_dex.h.
     LORA_CHAT        = 38, // LORA CHATS, from WATCH SETTINGS (SQUACH_LORA builds). See ui_lorachat.h.
     LORA_HOME        = 39, // LORA, the T-Deck's radio landing page. See ui_lorahome.h.
-    LORA_SETTINGS    = 40  // LORA SETTINGS, only from the LORA page. See ui_lorasettings.h.
+    LORA_SETTINGS    = 40, // LORA SETTINGS, only from the LORA page. See ui_lorasettings.h.
+    SENSING          = 41  // HUMAN SENSING (SENSE_CYD_APP builds): WiFi motion sensing on the CYD's own
+                           // radio, from Settings > HUMAN SENSING. See ui_sensing_cyd.h and sense_cyd.h.
 };
 
 enum class ButtonId : uint8_t {

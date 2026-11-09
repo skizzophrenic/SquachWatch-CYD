@@ -165,6 +165,7 @@ static uint8_t  s_idleCpuIx    = IDLE_CPU_DEFAULT;
 static bool     s_wakeOnAlert  = true;
 static bool     s_quietTrack   = true;
 static bool     s_privacy      = false;
+static bool     s_sensing      = false;
 static bool     s_extScreen    = false;
 struct __attribute__((packed)) RunEntry { uint16_t boot, minutes; };
 static const uint8_t RUNS_N = 8;
@@ -281,6 +282,7 @@ uint16_t cpuMhz()           { return s_powerSaver ? CPU_MHZ[s_cpuIx] : 240; }
 bool     wakeOnAlert()      { return s_wakeOnAlert; }
 bool     quietTrackers()    { return s_quietTrack; }
 bool     privacyMode()      { return s_privacy; }
+bool     sensing()          { return s_sensing; }
 bool     extScreen()        { return s_extScreen; }
 bool     watchPlus()        { return s_watchPlus; }
 bool     buzz()             { return s_buzzMode != 0; }
@@ -376,6 +378,10 @@ void toggleExtScreen() {
 void togglePrivacyMode() {
     s_privacy = !s_privacy;
     s_prefs.putBool("privacy", s_privacy);
+}
+void setSensing(bool on) {
+    s_sensing = on;
+    s_prefs.putBool("sensing", s_sensing);
 }
 void toggleQuietTrackers() {
     s_quietTrack = !s_quietTrack;
@@ -652,6 +658,7 @@ void load() {
     s_wakeOnAlert  = s_prefs.getBool("pwrWake", true);
     s_quietTrack   = s_prefs.getBool("qTrack", true);
     s_privacy      = s_prefs.getBool("privacy", false);
+    s_sensing      = s_prefs.getBool("sensing", false);
     s_extScreen    = s_prefs.getBool("extscr", false);
     if (s_prefs.getBytesLength("runs") == sizeof s_runs) s_prefs.getBytes("runs", s_runs, sizeof s_runs);
     s_watchPlus    = s_prefs.getBool("wPlus", false);

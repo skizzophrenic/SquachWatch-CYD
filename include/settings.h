@@ -262,6 +262,10 @@ namespace Settings {
     // address and all but three characters of every device and network
     // name. See include/privacy.h. Off by default.
     bool       privacyMode();
+    // HUMAN SENSING (SENSE_CYD_APP builds): set while its screen is up, so a board
+    // switched off there boots back into it.
+    bool       sensing();
+    void       setSensing(bool on);
     // EXT SCREEN (the Cardputer ADV): a second panel on the EXT header shows
     // the main scene, and the built-in screen is left for the menus.
     bool       extScreen();

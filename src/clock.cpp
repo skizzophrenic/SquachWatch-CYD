@@ -3,6 +3,10 @@
 #include "serial_flush.h"
 #include "security.h"   // a locked device takes no console commands
 #include "ota_wifi.h"    // the WIFI command lists the saved networks
+#if defined(SENSE_CYD_APP)
+#include "sense_cyd.h"      // SENSE <cmd>
+void consoleFrameShot();     // main.cpp: SENSE SHOT
+#endif
 #include "detection.h"   // WINDOW N, for the bench; RADIO
 #if defined(ARDUINO_ARCH_ESP32) && !defined(SQW_NO_RADIO)
 #include <esp_phy_init.h> // RADIO FULLCAL (not on the Tab5: the P4 has no radio of its own)
@@ -595,6 +599,16 @@ void pollSerial() {
             OtaWifi::printSaved();
             continue;
         }
+#if defined(SENSE_CYD_APP)
+        // SENSE SHOT: the frame on the console as hex rows (a PNG on the PC).
+        // SENSE OPEN / SENSE CLOSE / SENSE OPEN NOWIFI: open or leave HUMAN SENSING (bench).
+        // SENSE <cmd>: a command to the sensing engine (cal, rates, ...).
+        if (strcasecmp(line, "SENSE SHOT") == 0) { ::consoleFrameShot(); continue; }
+        if (strcasecmp(line, "SENSE OPEN") == 0) { g_senseConsole = 1; continue; }
+        if (strcasecmp(line, "SENSE OPEN NOWIFI") == 0) { g_senseConsole = 3; continue; }   // as if none were saved
+        if (strcasecmp(line, "SENSE CLOSE") == 0) { g_senseConsole = 2; continue; }
+        if (strncasecmp(line, "SENSE ", 6) == 0) { ::senseCydCommand(line + 6); continue; }
+#endif
         if (strcasecmp(line, "INVERT") == 0) { g_consoleInvert = true; continue; }
         if (strcasecmp(line, "ADC") == 0)    { g_consoleAdc = true; continue; }
         if (strcasecmp(line, "XYZZY") == 0)  { g_consoleXyzzy = true; continue; }
