@@ -10,8 +10,9 @@
 
 namespace WsExio {
     // Opens the shared I2C bus (SDA 27 / SCL 26), powers the panel rail, then
-    // pulses the LCD (EXIO1) and touch (EXIO0) resets, and sets the backlight
-    // to full. Call ONCE, BEFORE tft.init(): it pulses the ST7796 reset, so a
+    // pulses the LCD (EXIO1) and touch (EXIO0) resets. The backlight is left
+    // OFF: light it with backlight() only after the first frame has been drawn
+    // and has settled. Call ONCE, BEFORE tft.init(): it pulses the ST7796 reset, so a
     // second call after the panel is up would blank it — hence the internal
     // idempotency guard (the touch driver's begin() also calls this, safely).
     // Returns true if 0x24 answered.

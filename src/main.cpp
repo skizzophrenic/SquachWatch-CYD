@@ -4609,6 +4609,11 @@ void setup() {
 #elif defined(WS_C5_35)
     // No LEDC: the backlight is the 0x24 expander's PWM register, set by
     // WsExio::backlight() from applyBrightness(). Same shape as CrowPanel 7.
+    // The expander left it off, and the panel memory now holds the first
+    // fill, but the glass lags behind it by about 0.1 s (seen on 240 fps
+    // video on this board). Wait that out so applyBrightness() below lights a
+    // settled screen, not the tail of the old contents.
+    delay(150);
 #else
 #if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(CYD32C) && !defined(CYD35C)
     ledcSetup(BL_CH_ORIG, 5000, 8);

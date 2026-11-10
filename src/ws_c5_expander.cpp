@@ -65,7 +65,11 @@ bool begin() {
     ok = ok && exioSet(LCD_RST, true);  delay(120);
     ok = ok && exioSet(TP_RST, false);  delay(20);
     ok = ok && exioSet(TP_RST, true);   delay(300);   // FT6336 boot
-    ok = ok && exioWrite(PWM_REG, 0xFF);              // backlight full
+    // The backlight stays OFF here. The panel keeps its own memory (random
+    // data after power-on, the previous picture after a reset); lighting it
+    // before the first frame is written shows that memory as static or a
+    // ghost. setup() lights it through applyBrightness() once the first fill
+    // has settled. Characterised in the ESP32-C5-BSP project ("Clean startup").
 
     s_ready = ok;
     Serial.printf("[WS-C5] I/O expander 0x24 %s\n", ok ? "ready" : "NOT FOUND");
