@@ -51,7 +51,10 @@
 
 namespace StatusLight {
 
-#if defined(FREENOVE32)
+#if defined(E32R28T_AUDIO)
+// E32R28T schematic: GPIO4 shuts down the amplifier.
+static const int     PIN_R = 22, PIN_G = 16, PIN_B = 17;
+#elif defined(FREENOVE32)
 // The Freenove 3.2": its schematic puts the RGB LED on 22, 16 and 17 (common
 // anode, lit low, like the Sunton's) and GPIO4 on the audio amplifier's
 // enable. Red on 4 would have switched the amp with every breath of the light.

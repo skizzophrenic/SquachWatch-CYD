@@ -4264,6 +4264,9 @@ void setup() {
     // while it is still the previous life's, not this one's.
     crashReportInit();
     Serial.begin(SERIAL_BAUD);
+#if defined(E32R28T_AUDIO)
+    Sound::begin();
+#endif
 #if SQW_BOOT_POWEROFF
     // POWER OFF left BOOT's pad on the RTC side for its wake, and a pad on
     // the RTC side reads nothing on the ordinary GPIO path. Hand it back
@@ -6160,6 +6163,8 @@ void loop() {
 #endif
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
     if (g_consoleBatt) { g_consoleBatt = false; boardBatteryPrintLog(); }
+#endif
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(E32R28T_AUDIO)
     // The speaker's housekeeping: hushed while the saver has the screen
     // dimmed; a chime for a squad message that just landed (once per
     // message, by its arrival time); and the console's SOUND commands.
@@ -6615,8 +6620,10 @@ void loop() {
     // so it gets a pull-up here; the rest are read as they stand.
     if (g_consolePins) {
         g_consolePins = false;
+#if !defined(E32R28T_AUDIO)
         static bool once = false;
         if (!once) { once = true; pinMode(22, INPUT_PULLUP); }
+#endif
         const uint8_t pins[] = { 0, 22, 5, 18, 19, 23, 26, 35, 36, 39 };
         char line[120]; int n = snprintf(line, sizeof line, "[pins]");
         for (uint8_t p : pins) n += snprintf(line + n, sizeof line - n, " %u=%d", p, digitalRead(p));
