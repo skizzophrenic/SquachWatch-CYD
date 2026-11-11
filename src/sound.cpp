@@ -23,7 +23,7 @@
 // drawing side never puts a gap in a sound. Four 256-frame buffers is 64 ms
 // of DMA, 4 KB of internal RAM.
 #include "sound.h"
-#if SQW_SPEAKER
+#if SQW_SPEAKER && !defined(E32R28T_AUDIO)
 #include <Arduino.h>
 #include <Wire.h>
 #include <math.h>
