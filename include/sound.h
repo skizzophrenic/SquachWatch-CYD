@@ -19,7 +19,7 @@
 #include <stdint.h>
 
 // SQUACHSIM: the browser emulator's T-Deck build has no speaker to drive.
-#if (defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)) && !defined(SQUACHSIM)
+#if (defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(E32R28T_AUDIO)) && !defined(SQUACHSIM)
 #define SQW_SPEAKER 1
 #else
 #define SQW_SPEAKER 0
@@ -55,6 +55,11 @@ namespace Sound {
         LAND_TOASTER,     // ALL: T0@$TY's landing, a tin clank and a rattle
         LAND_YETI,        // ALL: the yeti's landing, a grumpy "OOF"
         HEADS_UP,         // ALERTS: one Bigfoot whoop, a squadmate's serious catch
+#if defined(E32R28T_AUDIO)
+        MELODY,           // Serial playback test, SOUND 14
+        DAC_TEST,         // Direct DAC oscillator test, SOUND 15
+#endif
+        MOTHMAN_CHIRP,    // ALL: two notes from the Fireflies treeline
         COUNT
     };
 

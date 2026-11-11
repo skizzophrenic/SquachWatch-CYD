@@ -626,6 +626,7 @@ namespace Theme {
     // True once, after three knocks on the igloo that goes by in the SNOWFALL
     // snow. Same contract; main.cpp turns it into Squachy::unlockMeaty().
     bool consumeIglooKnock();
+    bool mothmanEyesTap(int x, int y, uint32_t now);
     // True once, after the owl on the FIRE background was tapped while asking
     // WHAT REEKS?! (every third time he speaks). main.cpp turns it into
     // Squachy::unlockShambler().

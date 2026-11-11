@@ -111,6 +111,7 @@ static void cydGpsTick(uint32_t now);
 #include "bingo.h"
 #include "dex.h"
 #include "ui_dex.h"
+#include "ui_cryptid_guide.h"
 #include "regulars.h"
 #include "notices.h"
 #include "theme.h"            // the crash card on the splash
@@ -1322,6 +1323,13 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         const uint8_t k = state == AppState::DESK ? uiDeskStops(w, h, millis(), xs, ys, 20)
                                                   : uiDexStops(w, h, xs, ys, 20);
         for (uint8_t i = 0; i < k; i++) add(xs[i], ys[i]);
+        return n;
+    }
+    if (state == AppState::CRYPTID_GUIDE) {
+        const auto bar = Theme::computeButtonBar(w, h);
+        add(bar.x[0] + bar.w[0] / 2, bar.y + bar.h / 2);
+        if (Squachy::mothmanUnlocked() && !Squachy::jailed())
+            add(bar.x[2] + bar.w[2] / 2, bar.y + bar.h / 2);
         return n;
     }
     if (state == AppState::DIARY) {
@@ -4264,6 +4272,9 @@ void setup() {
     // while it is still the previous life's, not this one's.
     crashReportInit();
     Serial.begin(SERIAL_BAUD);
+#if defined(E32R28T_AUDIO)
+    Sound::begin();
+#endif
 #if SQW_BOOT_POWEROFF
     // POWER OFF left BOOT's pad on the RTC side for its wake, and a pad on
     // the RTC side reads nothing on the ordinary GPIO path. Hand it back
@@ -6160,6 +6171,8 @@ void loop() {
 #endif
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
     if (g_consoleBatt) { g_consoleBatt = false; boardBatteryPrintLog(); }
+#endif
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(E32R28T_AUDIO)
     // The speaker's housekeeping: hushed while the saver has the screen
     // dimmed; a chime for a squad message that just landed (once per
     // message, by its arrival time); and the console's SOUND commands.
@@ -6443,6 +6456,7 @@ void loop() {
          state == AppState::IGNORE_LIST || state == AppState::POWER_SAVER || state == AppState::SECURITY ||
          state == AppState::STATUS_LIGHT ||
          state == AppState::DIARY || state == AppState::HUNT || state == AppState::DIAGNOSTICS ||
+         state == AppState::CRYPTID_GUIDE ||
          state == AppState::DESK) &&
         Theme::lockButtonHit(tp.x, tp.y, tft.width())) {
         lastTouch = now;
@@ -6615,8 +6629,10 @@ void loop() {
     // so it gets a pull-up here; the rest are read as they stand.
     if (g_consolePins) {
         g_consolePins = false;
+#if !defined(E32R28T_AUDIO)
         static bool once = false;
         if (!once) { once = true; pinMode(22, INPUT_PULLUP); }
+#endif
         const uint8_t pins[] = { 0, 22, 5, 18, 19, 23, 26, 35, 36, 39 };
         char line[120]; int n = snprintf(line, sizeof line, "[pins]");
         for (uint8_t p : pins) n += snprintf(line + n, sizeof line - n, " %u=%d", p, digitalRead(p));
@@ -6678,7 +6694,8 @@ void loop() {
         (state == AppState::CLEAR || state == AppState::LOG ||
                       state == AppState::SETTINGS || state == AppState::OUTFIT ||
                       state == AppState::RAWSCAN || state == AppState::DETECTION_FILTER ||
-                      state == AppState::IGNORE_LIST || state == AppState::DESK) &&
+                      state == AppState::IGNORE_LIST || state == AppState::DESK ||
+                      state == AppState::CRYPTID_GUIDE) &&
         Theme::rotateButtonHit(tp.x, tp.y, tft.width()) &&
         (now - lastTouch) > TOUCH_DEBOUNCE_MS)) {
         if (g_consoleRotate) { g_consoleRotate = false; Serial.printf("[console] rotation -> %u\n", (unsigned)((screenRotation + 1) % 4)); }
@@ -6749,7 +6766,8 @@ void loop() {
                       state == AppState::RAWSCAN || state == AppState::DETECTION_FILTER ||
                       state == AppState::IGNORE_LIST || state == AppState::POWER_SAVER ||
                       state == AppState::SECURITY || state == AppState::STATUS_LIGHT ||
-                      state == AppState::DESK || state == AppState::SENSING) &&
+                      state == AppState::DESK || state == AppState::SENSING ||
+                      state == AppState::CRYPTID_GUIDE) &&
         Theme::settingsButtonHit(tp.x, tp.y) &&
         // ...but not where the watch/hunt pill is sitting. The gear's tap box
         // is 55x50, much larger than its 28px glyph, so it reaches into the
@@ -6765,7 +6783,8 @@ void loop() {
         }
         else if (state == AppState::OUTFIT || state == AppState::DETECTION_FILTER ||
             state == AppState::IGNORE_LIST || state == AppState::POWER_SAVER ||
-            state == AppState::SECURITY || state == AppState::SENSING) enterSettings();
+            state == AppState::SECURITY || state == AppState::SENSING ||
+            state == AppState::CRYPTID_GUIDE) enterSettings();
         else if (state == AppState::SETTINGS) {
             // The gear on a sub-page goes back up a level, the way it does
             // from every other screen Settings opens.
@@ -6915,6 +6934,25 @@ void loop() {
                 // it wants the board back, not another list.
                 if (uiBingoHitTest(*canvas, tp.x, tp.y, tft.width(), tft.height()) == BingoTap::BACK)
                     goHome();
+            }
+            break;
+        }
+        case AppState::CRYPTID_GUIDE: {
+            drawTwoBand([&](TFT_eSPI& t, bool) { uiCryptidGuideDraw(t, now); });
+            if (touchJustDown && now - lastTouch > TOUCH_DEBOUNCE_MS) {
+                lastTouch = now;
+                switch (Theme::hitTestButtonBar(tp.x, tp.y, tft.width(), tft.height())) {
+                    case ButtonId::SCAN:
+                        enterSettings();
+                        break;
+                    case ButtonId::CLR:
+                        if (Squachy::mothmanUnlocked() && !Squachy::jailed()) {
+                            Squachy::equipMothman();
+                            goHome();
+                        }
+                        break;
+                    default: break;
+                }
             }
             break;
         }
@@ -7210,6 +7248,19 @@ void loop() {
             // A touch on C1iPPY is his, not Squachy's or the background's:
             // the whole gesture, from the press to the let-go, which is a
             // poke, a drop or a throw depending on what the finger did.
+            if (state == AppState::CLEAR && touchJustDown && !boring && !s_scanPickerOpen &&
+                now - lastTouch > TOUCH_DEBOUNCE_MS) {
+                if (Theme::mothmanEyesTap(tp.x, tp.y, now)) {
+                    Squachy::unlockMothman();
+                    Sound::play(Sound::Id::MOTHMAN_CHIRP);
+                    lastTouch = now;
+                    break;
+                }
+                if (Pet::mothmanTap(tp.x, tp.y, now)) {
+                    lastTouch = now;
+                    break;
+                }
+            }
             static bool clipActive = false;
             if (touchJustDown && !boring && Pet::clippyHit(tp.x, tp.y)) {
                 clipActive = true;
@@ -8456,6 +8507,11 @@ void loop() {
                         case SettingsRow::VIEW_DIARY:   enterDiary(); break;
                         case SettingsRow::BINGO:        enterBingo(); break;
                         case SettingsRow::DEX:          enterDex(); break;
+                        case SettingsRow::CRYPTID_GUIDE:
+                            state = AppState::CRYPTID_GUIDE;
+                            transitionStart = now;
+                            lastTouch = now;
+                            break;
                         case SettingsRow::APPEARANCE:  uiSettingsOpenAppearance(true); break;
                         case SettingsRow::AURA:        Settings::toggleAura(); break;
                         case SettingsRow::DET_STYLE:   Settings::toggleDetXp(); break;

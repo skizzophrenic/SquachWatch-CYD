@@ -4342,7 +4342,8 @@ static uint32_t s_ffWaveAt = 0,  s_ffWaveStart = 0;   // the sync ripple
 static uint32_t s_ffGustAt = 0,  s_ffGustStart = 0;   // wind through the grass
 static uint32_t s_ffEyesAt = 0,  s_ffEyesStart = 0;   // something in the treeline
 static uint32_t s_ffLantAt = 0,  s_ffLantStart = 0;   // one passes close to the lens
-static int      s_ffEyesX = 0;
+static int      s_ffEyesX = 0, s_ffEyesY = 0;
+static uint32_t s_ffEyesDrawnAt = 0;
 static float    s_ffLantY = 0.0f;
 
 static void ffSpawn(Fly& f, int w, int y0, int y1, float spd) {
@@ -4470,7 +4471,7 @@ void drawFireflies(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         s_ffLastMs = now;
         s_ffWaveAt = now + (uint32_t)random(9000, 16000);
         s_ffGustAt = now + (uint32_t)random(18000, 30000);
-        s_ffEyesAt = now + (uint32_t)random(14000, 26000);
+        s_ffEyesAt = now + (uint32_t)random(6500, 11000);
         s_ffLantAt = now + (uint32_t)random(20000, 34000);
         s_ffInit = true;
     }
@@ -4583,15 +4584,23 @@ void drawFireflies(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         }
     }
 
-    // Something in the trees. Two green eyes, for three seconds, with
-    // one blink. Nothing else about it is ever shown.
+    // Two synchronized red eyes in the treeline. Only the visible pair
+    // can be tapped, including when the screen is drawn in two bands.
+    s_ffEyesDrawnAt = 0;
     if (s_ffEyesStart) {
-        const uint32_t ea = now - s_ffEyesStart;
-        if (ea > 3200u) { s_ffEyesStart = 0; s_ffEyesAt = now + (uint32_t)random(16000, 30000); }
-        else if (!(ea > 1700u && ea < 1850u)) {
-            const uint16_t eye = (uint16_t)0x97ED;
-            t.fillRect(s_ffEyesX - 4, horizon - 9, 2, 2, eye);
-            t.fillRect(s_ffEyesX + 2, horizon - 9, 2, 2, eye);
+        const uint32_t age = now - s_ffEyesStart;
+        if (age > 5000u) {
+            s_ffEyesStart = 0;
+            s_ffEyesAt = now + (uint32_t)random(9000, 16000);
+        } else if (age < 2350u || age >= 2500u) {
+            const bool found = Squachy::mothmanUnlocked();
+            s_ffEyesY = horizon - 9;
+            for (int side : {-1, 1}) {
+                const int x = s_ffEyesX + 5 * side;
+                t.fillCircle(x, s_ffEyesY, 3, found ? 0x3243 : 0x5800);
+                t.fillCircle(x, s_ffEyesY, 2, found ? 0x97ED : 0xFA08);
+            }
+            if (!found) s_ffEyesDrawnAt = now;
         }
     }
 
@@ -5178,6 +5187,16 @@ bool consumeIglooKnock() {
 bool consumeEyeCatch() {
     if (!s_eyePairPending) return false;
     s_eyePairPending = false;
+    return true;
+}
+
+bool mothmanEyesTap(int x, int y, uint32_t now) {
+    if (Settings::background() != Settings::Background::FIREFLIES ||
+        !s_ffEyesDrawnAt || now - s_ffEyesDrawnAt > 250 ||
+        abs(x - s_ffEyesX) > 17 || abs(y - s_ffEyesY) > 13) return false;
+    s_ffEyesDrawnAt = 0;
+    s_ffEyesStart = 0;
+    s_ffEyesAt = now + 12000u;
     return true;
 }
 

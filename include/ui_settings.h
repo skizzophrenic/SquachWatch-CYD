@@ -7,7 +7,7 @@
 // The speaker's two rows: on the boards with one, and in the emulator, where
 // they are listed only with SQUACHSIM_SPEAKER set (for the release clip) so
 // the web emulator never offers a sound it cannot make.
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || !defined(ESP32)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(E32R28T_AUDIO) || !defined(ESP32)
 #define SQW_SOUND_ROWS 1
 #else
 #define SQW_SOUND_ROWS 0
@@ -103,6 +103,7 @@ enum class SettingsRow : uint8_t {
 #if defined(SENSE_CYD_APP)
     SENSING,         // HUMAN SENSING: WiFi motion sensing on the CYD's own radio (opens the screen)
 #endif
+    CRYPTID_GUIDE,
     BACK,
     COUNT,
     NONE = 255

@@ -41,6 +41,9 @@ namespace Pet {
     // screen changes underneath him, so he does not reappear mid-jump on a
     // screen that has been away for a minute.
     void reset();
+    bool mothmanTap(int x, int y, uint32_t now);
+    void drawMothman(TFT_eSPI& t, int x, int y, int scale, uint32_t now, bool powered = false);
+    void drawMothmanPerch(TFT_eSPI& t, int x, int y, uint32_t now);
 
     // C1iPPY. A catch he should have an opinion about (a DetectionType);
     // whether a tap landed on him; a poke; and where he is, for the cursor on

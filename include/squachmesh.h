@@ -93,7 +93,7 @@ void phoneMac(const uint8_t id[PHONE_ID_LEN], uint8_t out[6]);
 // 14 when the shark suit made it 15, and every visiting shark was folded
 // back to index 0 -- NONE -- on arrival.
 static const uint8_t  NICK_N   = 10;
-static const uint8_t  OUTFIT_N = 20;
+static const uint8_t  OUTFIT_N = 22;
 static const uint8_t  SHADE_N  = 4;
 
 static const uint8_t  NICK_SHIFT   = 12, NICK_BITS   = 4;

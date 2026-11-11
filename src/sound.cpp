@@ -23,7 +23,7 @@
 // drawing side never puts a gap in a sound. Four 256-frame buffers is 64 ms
 // of DMA, 4 KB of internal RAM.
 #include "sound.h"
-#if SQW_SPEAKER
+#if SQW_SPEAKER && !defined(E32R28T_AUDIO)
 #include <Arduino.h>
 #include <Wire.h>
 #include <math.h>
@@ -104,6 +104,7 @@ static const Part NEW_DEVICE[] = { BEEP(660, 0, 45, TRI, 25), BEEP(880, 0, 45, T
 static const Part THROW[]      = { BEEP(300, 1500, 260, SIN, 0) };
 static const Part LAND[]       = { { NOISE, 0, 0, 0, 30, 0, 4, 60, 100 }, BEEP(180, 70, 60, SQ, 0) };
 static const Part TOAST_POP[]  = { BEEP(200, 1800, 80, SQ, 0) };
+static const Part MOTHMAN_CHIRP[] = { BEEP(880, 1140, 85, SIN, 40), BEEP(1320, 1010, 130, SIN, 0) };
 #undef BEEP
 // The Bigfoot whoop, twice, echoing through the trees.
 static const Part WATCH_HIT[]  = {
@@ -144,6 +145,7 @@ static const Sound SOUNDS[(int)Id::COUNT] = {
     { SND(VISITOR), 70, 0.2f, 0.25f }, { SND(THROW) }, { SND(LAND) }, { SND(CLIPPY) }, { SND(TOAST_POP) },
     { SND(PLUG_IN), 90, 0.3f, 0.35f }, { SND(UNPLUG), 90, 0.3f, 0.35f },
     { SND(LAND_TOASTER) }, { SND(LAND_YETI) }, { SND(HEADS_UP), 190, 0.38f, 0.45f, 0.75f },
+    { SND(MOTHMAN_CHIRP) },
 };
 #undef SND
 
