@@ -1061,7 +1061,57 @@ bool drawnAt(int& x, int& y) {
     return false;
 }
 
+static int s_mothX = 0, s_mothY = 0;
+static uint32_t s_mothDrawnAt = 0, s_mothPowerAt = 0;
+static constexpr uint32_t MOTH_POWER_MS = 3500;
+
+static bool mothmanOut() {
+    return Squachy::petChoice() == Squachy::PetId::MOTHMAN &&
+           Squachy::mothmanUnlocked() && !Squachy::jailed();
+}
+
+void drawMothman(TFT_eSPI& t, int x, int y, int scale, uint32_t now, bool powered) {
+    const uint16_t wing = powered ? 0xA165 : 0x51ED;
+    const uint16_t shade = powered ? 0x5825 : 0x2947;
+    const int flap = (int)(3.0f * sinf(now / (powered ? 40.0f : 95.0f)));
+    for (int side : {-1, 1}) {
+        const int tip = x + side * 15 * scale;
+        const int high = y - (7 + flap) * scale;
+        t.fillTriangle(x, y, tip, high, x + side * 11 * scale, y + 7 * scale, wing);
+        t.fillTriangle(x, y + 2 * scale, tip, high, x + side * 8 * scale, y + 4 * scale, shade);
+        t.drawLine(x, y, tip, high, wing);
+        t.drawLine(x + side * 2 * scale, y - 3 * scale,
+                   x + side * 5 * scale, y - 8 * scale, wing);
+    }
+    t.fillCircle(x, y + 2 * scale, 5 * scale, 0x39CA);
+    t.fillCircle(x, y - 3 * scale, 5 * scale, 0x39CA);
+    t.fillCircle(x - 2 * scale, y - 3 * scale, scale, 0xFA08);
+    t.fillCircle(x + 2 * scale, y - 3 * scale, scale, 0xFA08);
+    if (powered) t.drawCircle(x, y, (16 + (now / 90) % 4) * scale, 0xF986);
+}
+
+void drawMothmanPerch(TFT_eSPI& t, int x, int y, uint32_t now) {
+    if (!mothmanOut()) return;
+    const int k = 1;
+    t.drawLine(x - 3, y, x - 3, y + 7, 0x51ED);
+    t.drawLine(x + 3, y, x + 3, y + 7, 0x51ED);
+    drawMothman(t, x, y + 11, k, now);
+}
+
+bool mothmanTap(int x, int y, uint32_t now) {
+    if (!mothmanOut() || !s_mothDrawnAt || now - s_mothDrawnAt > 250 ||
+        abs(x - s_mothX) > 18 * s_k || abs(y - s_mothY) > 12 * s_k) return false;
+    if (!s_mothPowerAt || now - s_mothPowerAt >= MOTH_POWER_MS) {
+        s_mothPowerAt = now;
+        Squachy::unlockMothmanPowerOutfit();
+        Sound::play(Sound::Id::MOTHMAN_CHIRP);
+    }
+    return true;
+}
+
 void reset() {
+    s_mothDrawnAt = 0;
+    s_mothPowerAt = 0;
     toasterReset();
     meatyReset();
     jailReset();
@@ -1272,6 +1322,21 @@ void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom) {
         return;
     }
     s_mX = -100;
+    if (which == Squachy::PetId::MOTHMAN) {
+        s_phase = Phase::AWAY;
+        s_yPhase = YPhase::AWAY;
+        if (mothmanOut() && screenW >= 40 && bandBottom - bandTop >= 26) {
+            const bool powered = s_mothPowerAt && now - s_mothPowerAt < MOTH_POWER_MS;
+            const int x = screenW * 3 / 4 + (int)((powered ? screenW / 6 : 6) * sinf(now / 230.0f));
+            const int y = bandTop + 14 + (bandBottom - bandTop - 26) / 3
+                          + (int)(5.0f * sinf(now / 180.0f));
+            s_mothX = x * s_k;
+            s_mothY = y * s_k;
+            s_mothDrawnAt = now;
+            drawMothman(t, x, y, 1, now, powered);
+        }
+        return;
+    }
     if (!Squachy::petUnlocked() || which == Squachy::PetId::OFF) {
         s_phase  = Phase::AWAY;
         s_yPhase = YPhase::AWAY;
@@ -1521,6 +1586,7 @@ bool anyOut(uint32_t now) {
     if (which == Squachy::PetId::CLIPPY)  return Squachy::clippyUnlocked();
     if (which == Squachy::PetId::TOASTER) return Squachy::toasterUnlocked();
     if (which == Squachy::PetId::MEATY) return Squachy::meatyUnlocked();
+    if (which == Squachy::PetId::MOTHMAN) return mothmanOut();
     return Squachy::petUnlocked() && which != Squachy::PetId::OFF;
 }
 

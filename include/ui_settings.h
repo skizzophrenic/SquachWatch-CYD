@@ -103,6 +103,7 @@ enum class SettingsRow : uint8_t {
 #if defined(SENSE_CYD_APP)
     SENSING,         // HUMAN SENSING: WiFi motion sensing on the CYD's own radio (opens the screen)
 #endif
+    CRYPTID_GUIDE,
     BACK,
     COUNT,
     NONE = 255

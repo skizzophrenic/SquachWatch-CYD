@@ -114,7 +114,7 @@ static const SettingsRow ALL_ROWS[] = {
     // -- see APPEARANCE_ROWS. Everything about how he LOOKS is on one page;
     // what stays here is what he DOES.
     SettingsRow::REPLAY_INTRO, SettingsRow::SHOW_OFF, SettingsRow::VIEW_DIARY,
-    SettingsRow::BINGO, SettingsRow::DEX, SettingsRow::DESK_MODE,
+    SettingsRow::BINGO, SettingsRow::DEX, SettingsRow::CRYPTID_GUIDE, SettingsRow::DESK_MODE,
     SettingsRow::POWER_SAVER,
 #if defined(CYD_GPS)
     SettingsRow::WATCH_WARDRIVE,   // the watch's row and setting, on the CYD GPS builds
@@ -354,6 +354,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::VIEW_DIARY:
         case SettingsRow::BINGO:
         case SettingsRow::DEX:
+        case SettingsRow::CRYPTID_GUIDE:
         case SettingsRow::DESK_MODE:
         case SettingsRow::SHOW_OFF:
             return RowGroupId::SQUACHY;
@@ -1470,6 +1471,10 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             value = bingoVal;
             break;
         }
+        case SettingsRow::CRYPTID_GUIDE:
+            label = "CRYPTID FIELD GUIDE";
+            value = Squachy::mothmanUnlocked() ? "1/1 >" : "0/1 >";
+            break;
         case SettingsRow::DEX: {
             label = "SQUACHY-DEX";
             static char dexVal[12];

@@ -45,12 +45,13 @@ static const Note kMelody[] = {
 
 struct Sequence { const Note* notes; uint8_t size; };
 #define SEQ(s) {s, (uint8_t)(sizeof(s) / sizeof((s)[0]))}
+static const Note kMothmanChirp[] = {{880, 1140, 85, 40}, {1320, 1010, 130, 0}};
 static const Note kDacTest[] = {{800, 800, 1500, 0}};
 static const Sequence kEvents[] = {
     SEQ(kNew), SEQ(kWatch), SEQ(kLow), SEQ(kMessage), SEQ(kVisitor),
     SEQ(kThrow), SEQ(kLand), SEQ(kClippy), SEQ(kToast), SEQ(kPlugIn),
     SEQ(kUnplug), SEQ(kLandToaster), SEQ(kLandYeti), SEQ(kHeadsUp),
-    SEQ(kMelody), SEQ(kDacTest)
+    SEQ(kMelody), SEQ(kDacTest), SEQ(kMothmanChirp)
 };
 #undef SEQ
 static_assert(sizeof(kEvents)/sizeof(kEvents[0]) == (int)Id::COUNT,

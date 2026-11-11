@@ -59,6 +59,7 @@ namespace Sound {
         MELODY,           // Serial playback test, SOUND 14
         DAC_TEST,         // Direct DAC oscillator test, SOUND 15
 #endif
+        MOTHMAN_CHIRP,    // ALL: two notes from the Fireflies treeline
         COUNT
     };
 
