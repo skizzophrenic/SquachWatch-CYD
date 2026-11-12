@@ -3265,6 +3265,8 @@ bool uiMascotStep(uint32_t now, bool advance) {
     return true;
 }
 
+#include "ui_terminal.inc"
+
 void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance, bool scanMenu) {
     int w = t.width();
     int h = t.height();
@@ -3440,7 +3442,11 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // from the space he is given, so telling him about these rows would make
     // him a tenth bigger and move everything hanging off him.
     FrameProf::lap(FrameProf::CHROME);   // the counting and geometry above
-    Theme::drawActiveBackground(t, now, 0, h, eng, advance);
+    // TERMINAL MODE: the desktop of windows instead of the scene. Everything
+    // that would have stood in the scene -- Squachy, the pets, the tiles,
+    // the headline -- already stays out in this mode (see below).
+    if (Settings::boringMode()) uiTerminalDraw(t, now, eng, titleBottom + 2, bar.y - 2);
+    else                        Theme::drawActiveBackground(t, now, 0, h, eng, advance);
     Theme::clearBackgroundFloor();
     FrameProf::lap(FrameProf::BG);
     // The battery lamp, under everything that moves for the same reason as
@@ -3693,7 +3699,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     static const int HEADLINE_H   = 33;
     static const int HEADLINE_PAD = 5;
     const int headlineTop = counterTextTop - HEADLINE_PAD - HEADLINE_H;
-    if (!xp)
+    if (!xp && !Settings::boringMode())
     if (anyActive && t.height() >= 200) {
         // The rainbow ALL CLEAR used to own. It was the good part and it was
         // wasted on the state you see least; now it runs on the state that
@@ -3807,7 +3813,11 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // per-orientation cap on any row.
     DetectionType counterTypes[MAX_COUNTER_TYPES];
     uint8_t counterN = activeCounterTypes(counterTypes);
-    if (!xp) {
+    // TERMINAL MODE: COUNTS says this, in its own window.
+    if (Settings::boringMode()) {
+        s_tileN = 0;
+        s_tileRowsLast = 0;
+    } else if (!xp) {
         // CLASSIC: every type, zeroes and all, in balanced rows -- except on
         // a screen as small as the StickS3's, where there is no room for a
         // row of zeroes and only the types in range are shown.

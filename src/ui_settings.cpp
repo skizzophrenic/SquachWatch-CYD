@@ -794,9 +794,9 @@ static const ConfirmText CONFIRMS[] = {
     // The second line is the whole reason this row has a panel: boring mode
     // hides every Squachy row, so the first thing it does is take away the
     // OUTFIT row, and the way back is not obvious once it has.
-    { SettingsRow::BORING_MODE, "BORING MODE?",
-      "Hides Squachy and his rows,",
-      "OUTFIT included. Same row undoes.", "TURN ON" },
+    { SettingsRow::BORING_MODE, "TERMINAL MODE?",
+      "Swaps Squachy for the dashboard;",
+      "his rows hide. Same row undoes.", "TURN ON" },
     { SettingsRow::REPLAY_INTRO, "REPLAY INTRO?",
       "Runs the first-boot walkthrough",
       "again, from the top.", "REPLAY" },
@@ -1214,7 +1214,7 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             label = "ROTATION LOCK"; value = Settings::rotationLocked() ? "ON" : "OFF";
             break;
         case SettingsRow::BORING_MODE:
-            label = "BORING MODE"; value = Settings::boringMode() ? "ON" : "OFF";
+            label = "TERMINAL MODE"; value = Settings::boringMode() ? "ON" : "OFF";
             break;
         case SettingsRow::CONFIDENCE:
             label = "ALERT FILTER"; value = Settings::minConfidenceLabel();

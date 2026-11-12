@@ -7221,6 +7221,14 @@ void loop() {
             // A touch on C1iPPY is his, not Squachy's or the background's:
             // the whole gesture, from the press to the let-go, which is a
             // poke, a drop or a throw depending on what the finger did.
+            // TERMINAL MODE: a touch that starts on one of its windows is
+            // theirs, from the press to the let-go -- a drag scrolls the log,
+            // a tap picks a row. The title bar and the buttons are outside
+            // every window, so they work as they always have.
+            if (boring && !s_scanPickerOpen && uiTerminalTouch(tp.x, tp.y, tp.valid, touchJustDown, now)) {
+                lastTouch = now;
+                break;
+            }
             static bool clipActive = false;
             if (touchJustDown && !boring && Pet::clippyHit(tp.x, tp.y)) {
                 clipActive = true;
@@ -8216,7 +8224,7 @@ void loop() {
                     // Switched off by a mode: say so, rather than doing nothing
                     // and reading as a broken row.
                     if (uiSettingsRowIsOff(row)) {
-                        Theme::showToast("BORING MODE IS ON", nullptr, Theme::CYAN);
+                        Theme::showToast("TERMINAL MODE IS ON", nullptr, Theme::CYAN);
                         gestureActive = false;
                         break;
                     }

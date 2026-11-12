@@ -41,6 +41,10 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
 typedef bool (*BatterySource)(uint8_t& pct, bool& charging);
 void uiClearSetBatterySource(BatterySource fn);
 
+// TERMINAL MODE (Settings::boringMode()): the windows on the home screen.
+// True while a gesture that started on a window is theirs.
+bool uiTerminalTouch(int x, int y, bool valid, bool justDown, uint32_t now);
+
 #if SQUACH_MESH
 // SPIKE: the peer currently visiting, or nullptr. Owned by whatever discovers
 // peers -- for now that is only the emulator's --peer flag, so the CLEAR screen
