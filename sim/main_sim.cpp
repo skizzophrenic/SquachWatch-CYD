@@ -631,6 +631,11 @@ int main(int argc, char** argv) {
     });
     // SQUACHSIM_PRIVACY=1: PRIVACY MODE on, for shots of the masked screens.
     if (getenv("SQUACHSIM_PRIVACY") && !Settings::privacyMode()) Settings::togglePrivacyMode();
+    // SQUACHSIM_TERMINAL=1: TERMINAL MODE on (the dashboard in Squachy's place).
+    // Set either way, since the NVS shim may remember a previous run.
+    if ((getenv("SQUACHSIM_TERMINAL") != nullptr) != Settings::boringMode()) Settings::toggleBoringMode();
+    // SQUACHSIM_TMSORT=3 (or 3-): the terminal LOG sorted by that heading, 0 TIME .. 3 dBm; '-' flips it.
+    if (const char* ts = getenv("SQUACHSIM_TMSORT")) uiTerminalSetSort((uint8_t)atoi(ts), strchr(ts, '-') ? -1 : 1);
     // SQUACHSIM_CLASSIC=1: DETECTIONS set to CLASSIC (NEARBY and the full counter rows).
     if (getenv("SQUACHSIM_CLASSIC") && Settings::detXp()) Settings::toggleDetXp();
     // SQUACHSIM_FONTS=mtbs: the FONTS page's four sliders, one digit each for

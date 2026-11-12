@@ -46,6 +46,9 @@ void uiClearSetBatterySource(BatterySource fn);
 bool uiTerminalTouch(int x, int y, bool valid, bool justDown, uint32_t now);
 // The device the terminal asked to open (its WATCH/HUNT/INFO/IGNORE menu), once.
 bool uiTerminalTakeOpen(uint8_t mac[6]);
+// The LOG's order without a tap (emulator shots): 0 TIME, 1 KIND, 2 DEVICE, 3 dBm;
+// dir 1 is the first tap's order, -1 the flipped one.
+void uiTerminalSetSort(uint8_t col, int8_t dir);
 
 #if SQUACH_MESH
 // SPIKE: the peer currently visiting, or nullptr. Owned by whatever discovers
