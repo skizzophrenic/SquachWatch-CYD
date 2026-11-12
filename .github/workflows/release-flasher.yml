@@ -44,10 +44,6 @@ on:
         description: "Lab build name, e.g. Anubis: what the flasher's ?lab=1 picker calls it (blank: the commit)"
         type: string
         default: ""
-      sense:
-        description: "Lab build only: HUMAN SENSING on, in the 320x240 ESP32 boards' lab builds"
-        type: boolean
-        default: false
 
 permissions:
   contents: write   # create the GitHub Release
@@ -272,21 +268,6 @@ jobs:
           # The Phantom's capacitive version has never run on a real board, so
           # it is compiled to keep its code honest but NOT published anywhere.
           pio run -e rlphantom
-          if [ "${{ inputs.lab }}" = "true" ] && [ "${{ inputs.sense }}" = "true" ]; then
-            # HUMAN SENSING for testers (SETTINGS > HUMAN SENSING): a lab run
-            # with the sense box ticked builds the boards' -sense envs and puts
-            # each one's app where the plain env's was, so the lab list below
-            # serves it. Last in this step, after every plain build: a later
-            # pio run of the plain env would put its own app back. Not
-            # PLATFORMIO_BUILD_FLAGS: a change to it makes the next pio run
-            # clean every env's build folder (2026-11-09). A lab run never
-            # touches the public page's firmware. The 320x240 ESP32 boards and
-            # the T-Deck Plus are proven on a bench; AWOK is not in the lab
-            # list; the 3.5" boards and the other S3s are not proven yet.
-            SENSE="cyd cyd-ili9341 rlphantom-r freenove32 cyd32c cyd-fast cyd-ili9341-fast tdeck-plus"
-            pio run $(for e in $SENSE; do printf -- "-e %s-sense " "$e"; done)
-            for e in $SENSE; do cp ".pio/build/$e-sense/firmware.bin" ".pio/build/$e/firmware.bin"; done
-          fi
 
       - name: Fetch the NM-CYD-C5 build
         # Only if its runner managed one (see build-c5). The C5 shares no

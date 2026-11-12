@@ -273,6 +273,38 @@ stands, as a polaroid of the sender's Squachy with his name in the margin,
 the message on a note beside it and the time it came, until you tap it.
 The power saver never dims this screen.
 
+### Human sensing
+
+<p align="center">
+  <img src="docs/breathe-the-pressure.gif" width="640"
+       alt="HUMAN SENSING: the SPECTRUM waterfall, the NOW, FLOOR, PEAK and MARGIN tiles and the MOTION graph on a still room, then someone walking through, then someone sitting still; the same screen on the watch and the Cardputer; and a router turning the board away, with the board waiting before it tries again.">
+</p>
+
+**SETTINGS > HUMAN SENSING** turns the board's WiFi radio into a motion
+sensor. It joins your saved network (add one in **SETTINGS > WIFI
+NETWORKS** first), pings the router fifty times a second, and watches how
+the radio signal between them changes. A person moving through that path
+changes it a lot; an empty room barely at all. It takes about 15 seconds
+to learn the empty room, so keep still while it says PLEASE STAND BY.
+
+The screen shows **SPECTRUM** (how fast the signal is changing, the newest
+on top and the last 11 seconds sliding down), the **NOW / FLOOR / PEAK /
+MARGIN** tiles, **MOTION** (the last 30 seconds against the line that
+counts as movement) and a banner: CLEAR, PRESENCE (someone moved in the
+last 15 seconds), or what the radio is doing. **RECAL** re-learns the empty
+room, **OFF** hands the radio back to the detector, and **BACK** goes to
+Settings. Detection pauses while this screen is up: there is one radio.
+On the T-Deck, Backspace, R and O do the same; on the StickS3 and the
+Cardputer, the cursor's press re-calibrates and HOME leaves.
+
+It works best with you somewhere between the board and the router. If the
+router refuses the board, it waits longer each time before trying again
+(20 seconds, then 40, up to 5 minutes) instead of getting itself blocked.
+A board switched off on this screen comes back to it. Privacy Mode keeps
+the network's name and address off the screen and the console. Every
+ESP32 and ESP32-S3 board has it; the ESP32-C5 boards and the Tab5 do not
+yet.
+
 ## Alert controls
 
 A detector that cries wolf gets switched off, so there are a few ways to

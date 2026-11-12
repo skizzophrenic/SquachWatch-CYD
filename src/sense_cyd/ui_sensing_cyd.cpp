@@ -508,7 +508,7 @@ void buttons(TFT_eSPI& t) {
     static const char* const LB[3] = { "[ BACK ]", "[ RECAL ]", "[ OFF ]" };
     if (!s_L->btOn) {   // no touch screen: what the keys do, under the banner
         const int y = s_L->bnY + s_L->bnH + 1;
-        if (y + 8 <= t.height()) textT(t, t.width() / 2, y, "ARROWS SCROLL  ENTER RECAL  ESC BACK", mixc(Theme::BG, Theme::WHITE, 120), 1, 1);
+        if (y + 8 <= t.height()) textT(t, t.width() / 2, y, "PRESS: RECAL   HOME: LEAVE", mixc(Theme::BG, Theme::WHITE, 120), 1, 1);
         return;
     }
     const Bar g = barGeom(t.width(), t.height());
@@ -559,8 +559,17 @@ SensingTap uiSensingTap(int x, int y, int screenW, int screenH, uint32_t now) {
         }
         return SensingTap::NONE;
     }
-    // No saved network: the banner is the way to add one.
-    if (!senseCydNetwork()[0] && y >= s_L->bnY && y < s_L->bnY + s_L->bnH) return SensingTap::ADD_WIFI;
+    // No saved network: the banner is the way to add one. With no button bar
+    // (the boards with no touch screen), a press on the banner is RECAL.
+    if (y >= s_L->bnY && y < s_L->bnY + s_L->bnH) {
+        if (!senseCydNetwork()[0]) return SensingTap::ADD_WIFI;
+        if (!s_L->btOn) return SensingTap::RECAL;
+    }
     return SensingTap::NONE;
+}
+void uiSensingBannerStop(int screenW, int screenH, int16_t& x, int16_t& y) {
+    s_L = &layFor(screenW, screenH);
+    x = (int16_t)(s_L->bnX + s_L->bnW / 2);
+    y = (int16_t)(s_L->bnY + s_L->bnH / 2);
 }
 #endif  // SENSE_CYD_APP

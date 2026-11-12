@@ -15,4 +15,7 @@ void uiSensingTick(TFT_eSPI& t, uint32_t now, bool advance = true);
 // ADD_WIFI: no saved network, the banner tapped (to WIFI NETWORKS).
 enum class SensingTap : uint8_t { NONE, BACK, RECAL, OFF, ADD_WIFI };
 SensingTap uiSensingTap(int x, int y, int screenW, int screenH, uint32_t now);
+// The middle of the banner, where the boards with no touch screen (StickS3,
+// Cardputer) put their one cursor stop: pressed, it re-calibrates.
+void uiSensingBannerStop(int screenW, int screenH, int16_t& x, int16_t& y);
 #endif

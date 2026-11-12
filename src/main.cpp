@@ -1351,6 +1351,17 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         add(w / 2, h - 14);             // REMOVE FROM WATCH LIST
         return n;
     }
+#if defined(SENSE_CYD_APP)
+    if (state == AppState::SENSING) {
+        // One stop, the banner: a press there re-calibrates (or, with no
+        // network saved, opens WIFI NETWORKS). HOME leaves, as from anywhere,
+        // and hands the radio back to the detector.
+        int16_t bx, by;
+        uiSensingBannerStop(w, h, bx, by);
+        add(bx, by);
+        return n;
+    }
+#endif
     add(w / 2, h - 12);                 // BACK, pinned to the bottom edge
     for (int r = 0; r < 3; r++)
         for (int c = 0; c < 4; c++) add(w * (2 * c + 1) / 8, h * (2 * r + 1) / 6);
