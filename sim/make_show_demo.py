@@ -32,6 +32,18 @@ CYAN  = (0, 214, 214)
 # ---- the clips ----
 
 CLIPS = {
+    # v1.42.0, HUMAN SENSING at the 2.8in's 320x240 (the emulator's pretend
+    # radio, sim/sense_cyd_sim.cpp; SQUACHSIM_SENSE picks the room): a still
+    # room, someone walking through, someone sitting still, the watch's and
+    # the Cardputer's layouts (_SIZE), and a router saying no.
+    "breathe-the-pressure": [
+        ("sensing", 30, 40, [], {"SQUACHSIM_SENSE": "clear"}, 1400, "NEW: HUMAN SENSING. YOUR WIFI, WATCHING THE ROOM."),
+        ("sensing", 30, 50, [], {"SQUACHSIM_SENSE": "motion"}, 1500, "WALK IN. THE ROOM NOTICES."),
+        ("sensing", 30, 40, [], {"SQUACHSIM_SENSE": "presence"}, 1500, "SIT STILL. IT STILL KNOWS YOU'RE THERE."),
+        ("sensing", 30, 40, [], {"SQUACHSIM_SENSE": "motion", "_SIZE": "240x240"}, 1300, "ON THE WATCH TOO."),
+        ("sensing", 30, 40, [], {"SQUACHSIM_SENSE": "presence", "_SIZE": "240x135"}, 1300, "AND THE CARDPUTER. AND THE T-DECK. AND..."),
+        ("sensing", 30, 30, [], {"SQUACHSIM_SENSE": "join"}, 1500, "ROUTER SAYS NO? IT WAITS. POLITELY."),
+    ],
     # v1.41.0 "Return to Sender", at the T-Deck Plus's 320x240: the LORA page
     # on its DMs tab (--tab 2), the chats' DMs list, a private line typed to
     # YETI on Meshtastic (SQUACHSIM_DMPEER; dots, then its tick), the MeshCore

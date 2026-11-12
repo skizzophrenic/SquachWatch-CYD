@@ -43,6 +43,17 @@ env.Append(BUILD_FLAGS=['-DSQW_ENV=\\"%s\\"' % env["PIOENV"]])
 # a pre: script land before the framework's and lose). C accepts it too.
 env.Append(BUILD_FLAGS=["-fno-exceptions"])
 
+# HUMAN SENSING (SETTINGS > HUMAN SENSING, src/sense_cyd/) in every build for
+# an ESP32 or an ESP32-S3: the shipping boards, their variants and the bench
+# builds that run the app. Not the ESP32-C5 boards (their radio's channel-state
+# calls differ: a port of its own) and not the Tab5 (no radio of its own), nor
+# the CrowPanel and Tab5 bench builds that have no app. It costs ~33 KB of
+# flash and nothing while the screen is closed.
+_SENSE_SKIP = ("crowpanel7-paneltest", "crowpanel7-probe", "crowpanel7-touchtrace", "crowpanel7-native")
+if env.BoardConfig().get("build.mcu", "") in ("esp32", "esp32s3") and env["PIOENV"] not in _SENSE_SKIP \
+        and not env["PIOENV"].startswith("tab5"):
+    env.Append(BUILD_FLAGS=["-DSENSE_CYD_APP=1"])
+
 
 # ---------------------------------------------------------------------------
 # TFT_eSPI, ESP32-C5. Only for the nm-cyd-c5 environment.
