@@ -72,6 +72,12 @@ uint32_t s_tmLastTotal = 0;
 bool     s_tmSelOn = false;
 uint8_t  s_tmSel[6];
 uint8_t  s_tmFocus = 0;         // which window's title is lit: 0 LOG
+// The device DETAILS / LATEST is showing, and a request (a tap on that window,
+// or on the picked row again) for its menu, which main.cpp takes.
+bool     s_tmDetOn = false;
+uint8_t  s_tmDetMac[6];
+bool     s_tmOpenReq = false;
+uint8_t  s_tmOpenMac[6];
 
 // AIR: the busiest second of each of the last sixty minutes.
 uint8_t  s_tmAir[60];
@@ -320,7 +326,9 @@ const Detection* tmPicked(const DetectionEngine& eng) {
 }
 
 void tmDetails(TFT_eSPI& t, uint32_t now, const Detection* d, TmRect r, const TmTheme& T) {
+    s_tmDetOn = d != nullptr;
     if (!d) { tmText(t, "NOTHING YET", r.x + 1, r.y + 1, T.FGD); return; }
+    memcpy(s_tmDetMac, d->mac, 6);
     char b[24];
     tmName(*d, b, sizeof b);
     const int nmax = r.w / 6;
@@ -413,7 +421,10 @@ void uiTerminalDraw(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int t
         tmCounts(t, eng, c, T);
         const int dy = cy + cntH + 4;
         const Detection* d = tmPicked(eng);
-        TmRect dr = tmWindow(t, sx, dy, sideW, detH, s_tmSelOn ? "DETAILS" : "LATEST", s_tmFocus == 3, true, nullptr, 0, T);
+        // OPEN in its title bar: a tap anywhere on this window brings up the
+        // device's menu (WATCH / HUNT / INFO / IGNORE).
+        TmRect dr = tmWindow(t, sx, dy, sideW, detH, s_tmSelOn ? "DETAILS" : "LATEST", s_tmFocus == 3, !d,
+                             d ? "OPEN" : nullptr, T.FG, T);
         s_tmWin[3] = { (int16_t)sx, (int16_t)dy, (int16_t)sideW, (int16_t)detH };
         tmDetails(t, now, d, dr, T);
     }
@@ -426,7 +437,7 @@ void uiTerminalDraw(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int t
 // the arrows / track / NOW pill, tap any window to bring its title up.
 bool uiTerminalTouch(int x, int y, bool valid, bool justDown, uint32_t now) {
     (void)now;
-    static bool own = false, dragged = false, done = false, inBody = false;
+    static bool own = false, dragged = false, done = false, inBody = false, onDet = false;
     static int  startY = 0, lastX = 0, lastY = 0;
     static int  startScroll = 0;
     auto setScroll = [](int v) {
@@ -445,6 +456,7 @@ bool uiTerminalTouch(int x, int y, bool valid, bool justDown, uint32_t now) {
         startY = lastY = y; lastX = x; startScroll = s_tmScroll;
         s_tmFocus = (uint8_t)which;
         inBody = which == 0 && s_tmBody.in(x, y);
+        onDet  = which == 3 && s_tmDetOn;
         if (which == 0) {
             const int page = s_tmVis > 1 ? s_tmVis - 1 : 1;
             if (s_tmPill.in(x, y))       { setScroll(0); done = true; inBody = false; }
@@ -466,15 +478,33 @@ bool uiTerminalTouch(int x, int y, bool valid, bool justDown, uint32_t now) {
         }
         return true;
     }
-    // Let go: a tap that did not drag picks the row under it.
+    // Let go: a tap that did not drag picks the row under it; the picked
+    // row tapped again, or the DETAILS window, asks for the device's menu;
+    // the empty space under the rows lets the pick go.
     own = false;
-    if (!dragged && !done && inBody) {
+    if (!dragged && !done && onDet && s_tmWin[3].in(lastX, lastY)) {
+        memcpy(s_tmOpenMac, s_tmDetMac, 6);
+        s_tmOpenReq = true;
+    } else if (!dragged && !done && inBody) {
         const int j = (lastY - s_tmRowY0 + 1) / TM_ROW_H;
         if (lastY >= s_tmRowY0 - 1 && j >= 0 && j < s_tmRowN) {
-            if (s_tmSelOn && !memcmp(s_tmSel, s_tmRowMac[j], 6)) s_tmSelOn = false;
-            else { memcpy(s_tmSel, s_tmRowMac[j], 6); s_tmSelOn = true; }
+            if (s_tmSelOn && !memcmp(s_tmSel, s_tmRowMac[j], 6)) {
+                memcpy(s_tmOpenMac, s_tmSel, 6);
+                s_tmOpenReq = true;
+            } else {
+                memcpy(s_tmSel, s_tmRowMac[j], 6);
+                s_tmSelOn = true;
+            }
+        } else if (j >= s_tmRowN) {
+            s_tmSelOn = false;
         }
     }
-    (void)lastX;
+    return true;
+}
+
+bool uiTerminalTakeOpen(uint8_t mac[6]) {
+    if (!s_tmOpenReq) return false;
+    s_tmOpenReq = false;
+    memcpy(mac, s_tmOpenMac, 6);
     return true;
 }

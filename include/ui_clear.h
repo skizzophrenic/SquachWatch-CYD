@@ -44,6 +44,8 @@ void uiClearSetBatterySource(BatterySource fn);
 // TERMINAL MODE (Settings::boringMode()): the windows on the home screen.
 // True while a gesture that started on a window is theirs.
 bool uiTerminalTouch(int x, int y, bool valid, bool justDown, uint32_t now);
+// The device the terminal asked to open (its WATCH/HUNT/INFO/IGNORE menu), once.
+bool uiTerminalTakeOpen(uint8_t mac[6]);
 
 #if SQUACH_MESH
 // SPIKE: the peer currently visiting, or nullptr. Owned by whatever discovers

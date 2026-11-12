@@ -2446,12 +2446,40 @@ static void enterWatchAlert() {
 #endif
 }
 
+// Set when TERMINAL MODE opened the panel below for one of its rows: once
+// the panel (or INFO after it) is closed, back to the terminal rather than
+// the LOG screen it was drawn over. enterLog() clears it.
+static bool s_logFromTerminal = false;
+
 static void enterLog() {
     state = AppState::LOG;
     transitionStart = millis();
     s_confirmPending = false;
     s_infoPending    = false;
+    s_logFromTerminal = false;
     uiLogInit(*canvas);
+}
+
+// The LOG screen's WATCH / HUNT / INFO / IGNORE / CANCEL panel, for one
+// device: what a long press on a LOG row opens, and what TERMINAL MODE opens
+// for the row it has picked.
+static void armLogConfirm(const Detection& d) {
+    memcpy(s_confirmMac, d.mac, 6);
+    s_confirmIsBle = (d.channel == 0);
+    s_confirmType  = d.type;
+    snprintf(s_confirmVendor, sizeof s_confirmVendor, "%s", vendorText(d));
+    memcpy(s_confirmName, d.name, sizeof s_confirmName);
+    s_confirmLabelIsName = d.name[0] != 0;
+    const char* lbl = s_confirmLabelIsName ? d.name : vendorText(d);
+    strncpy(s_confirmLabel, lbl, sizeof(s_confirmLabel) - 1);
+    s_confirmLabel[sizeof(s_confirmLabel) - 1] = 0;
+    {
+        int32_t la = 0, lo = 0;
+        const bool has = BlackBox::lastPosition(d.mac, (uint8_t)d.type, la, lo);
+        uiLogSetConfirmWhere(has, la, lo);
+    }
+    s_confirmPending = true;
+    s_confirmArmed   = false;
 }
 
 static bool    s_rawScanIsBle = true;
@@ -7227,6 +7255,19 @@ void loop() {
             // every window, so they work as they always have.
             if (boring && !s_scanPickerOpen && uiTerminalTouch(tp.x, tp.y, tp.valid, touchJustDown, now)) {
                 lastTouch = now;
+                // Its picked row asked for the device's menu: the LOG
+                // screen's panel, and back here when it closes.
+                uint8_t want[6];
+                if (uiTerminalTakeOpen(want)) {
+                    for (uint8_t i = 0; i < engine.logCount(); i++) {
+                        const Detection* d = engine.logAt(i);
+                        if (!d || memcmp(d->mac, want, 6)) continue;
+                        enterLog();
+                        armLogConfirm(*d);
+                        s_logFromTerminal = true;
+                        break;
+                    }
+                }
                 break;
             }
             static bool clipActive = false;
@@ -7760,6 +7801,14 @@ void loop() {
                 Theme::drawToast(t, now);
             });
 
+            // Opened from TERMINAL MODE: once its panel (and INFO, if that
+            // came next) is closed, straight back to the terminal.
+            if (s_logFromTerminal && !s_confirmPending && !s_infoPending) {
+                s_logFromTerminal = false;
+                enterClear();
+                break;
+            }
+
             // Same "ignore the touch that opened this until it releases"
             // gate s_confirmArmed uses on the confirm panel, applied to
             // the info panel's own GOT IT button -- it appears mid-hold
@@ -7926,22 +7975,7 @@ void loop() {
                     const Detection* d = (row >= 0) ? uiLogRow(engine, row) : nullptr;
                     if (d) {
                         rowHoldFired = true;
-                        memcpy(s_confirmMac, d->mac, 6);
-                        s_confirmIsBle = (d->channel == 0);
-                        s_confirmType  = d->type;
-                        snprintf(s_confirmVendor, sizeof s_confirmVendor, "%s", vendorText(*d));
-                        memcpy(s_confirmName,   d->name,   sizeof s_confirmName);
-                        s_confirmLabelIsName = d->name[0] != 0;
-                        const char* lbl = s_confirmLabelIsName ? d->name : vendorText(*d);
-                        strncpy(s_confirmLabel, lbl, sizeof(s_confirmLabel) - 1);
-                        s_confirmLabel[sizeof(s_confirmLabel) - 1] = 0;
-                        {
-                            int32_t la = 0, lo = 0;
-                            const bool has = BlackBox::lastPosition(d->mac, (uint8_t)d->type, la, lo);
-                            uiLogSetConfirmWhere(has, la, lo);
-                        }
-                        s_confirmPending = true;
-                        s_confirmArmed   = false;
+                        armLogConfirm(*d);
                     }
                 }
             }
