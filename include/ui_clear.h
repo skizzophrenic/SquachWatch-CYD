@@ -49,6 +49,8 @@ bool uiTerminalTakeOpen(uint8_t mac[6]);
 // The LOG's order without a tap (emulator shots): 0 TIME, 1 KIND, 2 DEVICE, 3 dBm;
 // dir 1 is the first tap's order, -1 the flipped one.
 void uiTerminalSetSort(uint8_t col, int8_t dir);
+// The terminal's cursor stops for the boards without touch (StickS3, Cardputer).
+uint8_t uiTerminalStops(int16_t* xs, int16_t* ys, uint8_t cap);
 
 #if SQUACH_MESH
 // SPIKE: the peer currently visiting, or nullptr. Owned by whatever discovers

@@ -663,6 +663,22 @@ bool uiTerminalTouch(int x, int y, bool valid, bool justDown, uint32_t now) {
     return true;
 }
 
+// Where the StickS3 / Cardputer cursor stops on the terminal (they have no
+// touch panel): the four headings, each row on screen, the scroll arrows,
+// and LATEST when it has a device to open. Empty when the terminal is not up.
+uint8_t uiTerminalStops(int16_t* xs, int16_t* ys, uint8_t cap) {
+    uint8_t n = 0;
+    if (!s_tmDrawn || !Settings::boringMode()) return 0;
+    auto add = [&](int x, int y) { if (n < cap) { xs[n] = (int16_t)x; ys[n] = (int16_t)y; n++; } };
+    const int hy = s_tmBody.y - 4 - s_tmM.bh / 2;
+    for (int k = 0; k < 4; k++) add((s_tmColX[k] + s_tmColX[k + 1]) / 2, hy);
+    for (int j = 0; j < s_tmRowN; j++) add(s_tmBody.x + s_tmBody.w / 2, s_tmRowY0 + j * s_tmRowH + s_tmRowH / 2 - 1);
+    if (s_tmUp.w) add(s_tmUp.x + s_tmUp.w / 2, s_tmUp.y + s_tmUp.h / 2);
+    if (s_tmDn.w) add(s_tmDn.x + s_tmDn.w / 2, s_tmDn.y + s_tmDn.h / 2);
+    if (s_tmWin[3].w && s_tmDetOn) add(s_tmWin[3].x + s_tmWin[3].w / 2, s_tmWin[3].y + s_tmWin[3].h / 2);
+    return n;
+}
+
 void uiTerminalSetSort(uint8_t col, int8_t dir) {
     s_tmSort = col > TM_S_RSSI ? TM_S_TIME : col;
     s_tmDir = dir < 0 ? -1 : 1;

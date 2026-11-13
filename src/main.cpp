@@ -1256,6 +1256,17 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         add(w / 2, h - 17);             // MORE / GOT IT
         return n;
     }
+    if (state == AppState::CLEAR && Settings::boringMode()) {
+        // TERMINAL MODE: its headings, rows and windows, then the buttons.
+        int16_t xs[24], ys[24];
+        const uint8_t k = uiTerminalStops(xs, ys, 24);
+        for (uint8_t i = 0; i < k; i++) add(xs[i], ys[i]);
+        add(w / 2, h - 16);             // LOG
+        add(w * 5 / 6 - 4, h - 16);     // DESK
+        add(w / 6 + 2, h - 16);         // SCAN
+        add(13, 11);                    // the menu
+        return n;
+    }
     if (state == AppState::CLEAR) {
         add(w / 2, h * 2 / 5);          // Squachy, and whatever card is over him
         add(w / 2, h * 13 / 20);        // a card's own button
