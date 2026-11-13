@@ -10,6 +10,11 @@
 //
 // SQUACHSIM_SENSE picks the room: clear (default), presence, motion, cal,
 // low, join, nowifi.
+//
+// The web emulator runs the firmware's real main.cpp, which starts and stops
+// the engine itself (senseCydStart/Stop/Tick below). There it plays DEMO: a
+// loop of a still room, somebody walking through, then somebody sitting
+// still, and the network reads "DEMO" so nobody takes it for their own room.
 #include <Arduino.h>
 #include <math.h>
 #include <stdlib.h>
@@ -20,16 +25,27 @@
 volatile uint8_t g_senseConsole = 0;
 
 namespace {
-enum Room { R_CLEAR, R_PRESENCE, R_MOTION, R_CAL, R_LOW, R_JOIN, R_NOWIFI };
+enum Room { R_CLEAR, R_PRESENCE, R_MOTION, R_CAL, R_LOW, R_JOIN, R_NOWIFI, R_DEMO };
 Room s_room = R_CLEAR;
 uint32_t s_next = 0, s_seed = 12345, s_lastMotion = 0;
 const int ROWS = 108, BINS = 32;
 uint8_t s_rows[ROWS][BINS];
 int s_head = 0, s_count = 0, s_peak = -1;
 
+bool s_running = false;
+
+// DEMO's loop, 36 s: 12 s of an empty room, 8 s of somebody walking through,
+// 16 s of them sitting still.
+Room demoRoom(uint32_t at) {
+    const uint32_t s = (at / 1000) % 36;
+    return s < 12 ? R_CLEAR : s < 20 ? R_MOTION : R_PRESENCE;
+}
+
 float rnd() { s_seed = s_seed * 1664525u + 1013904223u; return (s_seed >> 8) / 16777216.0f; }
 
 void step(uint32_t at) {
+    const Room keepRoom = s_room;
+    if (s_room == R_DEMO) s_room = demoRoom(at);
     SenseReport r = {};
     r.upMs = at; r.chan = 6; r.rssi = -52; r.rate = 46; r.rel = 90; r.cal = 100;
     r.mode = (s_room == R_JOIN || s_room == R_NOWIFI) ? SENSE_MODE_JOINING : SENSE_MODE_STA;
@@ -62,6 +78,7 @@ void step(uint32_t at) {
     s_peak = best;
     s_head = (s_head + 1) % ROWS;
     if (s_count < ROWS) s_count++;
+    s_room = keepRoom;
 }
 }  // namespace
 
@@ -91,7 +108,7 @@ void simSenseStep(uint32_t now) {
 }
 
 // What the screen asks the engine.
-const char* senseCydNetwork() { return s_room == R_NOWIFI ? "" : "SquachNet"; }
+const char* senseCydNetwork() { return s_room == R_NOWIFI ? "" : s_room == R_DEMO ? "DEMO" : "SquachNet"; }
 uint16_t    senseCydReason()  { return s_room == R_JOIN ? 202 : 0; }
 uint16_t    senseCydRetryIn() { return s_room == R_JOIN ? 40 : 0; }
 uint8_t     senseCydMode()    { return s_room == R_JOIN || s_room == R_NOWIFI ? SENSE_MODE_JOINING : SENSE_MODE_STA; }
@@ -101,3 +118,17 @@ int            senseCydSpecRowsMax() { return ROWS; }
 const uint8_t* senseCydSpecRow(int r) { return (r < 0 || r >= s_count) ? nullptr : s_rows[(s_head - 1 - r + ROWS * 2) % ROWS]; }
 int            senseCydSpecPeak() { return s_peak; }
 float          senseCydSpecBinHz() { return 10.0f / 128; }
+
+// The engine's switch, as the firmware's loop() drives it (the web emulator).
+void senseCydStart(const char*, const char*) {
+    s_room = R_DEMO;
+    s_head = s_count = 0;
+    s_lastMotion = 0;
+    const uint32_t now = millis();
+    for (int32_t ago = 30000; ago > 0; ago -= 100) step(now - (uint32_t)ago);
+    s_next = now;
+    s_running = true;
+}
+void senseCydStop()    { s_running = false; }
+bool senseCydRunning() { return s_running; }
+void senseCydTick()    { if (s_running) simSenseStep(millis()); }
