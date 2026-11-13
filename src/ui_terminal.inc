@@ -62,6 +62,12 @@ struct TmRect { int16_t x, y, w, h; bool in(int px, int py) const { return w > 0
 constexpr uint16_t TM_AMBER = 0xFD20;
 constexpr uint8_t  TM_ROWS_MAX = 24;
 constexpr uint8_t  TM_ROW_H = 10;
+// The LOG's type and spacing. Font 1 in 10 px rows on the small panels; on a
+// big one (the 3.5in, the Tab5 -- 480 px or more on its long side) font 2 in
+// 18 px rows, with taller heading buttons and a wider scrollbar to match.
+struct TmM { uint8_t f, rh, bh, sb; };
+TmM      s_tmM = { 1, 10, 13, 14 };
+uint8_t  s_tmRowH = 10;         // what the touch handler steps by
 
 // What the last frame drew, for the touch handler.
 bool     s_tmDrawn = false;
@@ -104,8 +110,8 @@ uint8_t  s_tmAir[60];
 uint8_t  s_tmAirHead = 0;
 uint32_t s_tmAirMinute = 0xFFFFFFFF;
 
-void tmText(TFT_eSPI& t, const char* s, int x, int y, uint16_t c, bool right = false) {
-    t.setTextFont(1);
+void tmText(TFT_eSPI& t, const char* s, int x, int y, uint16_t c, bool right = false, uint8_t font = 1) {
+    t.setTextFont(font);
     t.setTextSize(1);
     t.setTextColor(c);
     if (right) x -= t.textWidth(s);
@@ -172,9 +178,10 @@ void tmName(const Detection& d, char* out, size_t n) {
     for (char* p = out; *p; p++) if (*p >= 'a' && *p <= 'z') *p -= 32;
 }
 
-void tmBars(TFT_eSPI& t, int x, int y, int8_t rssi, uint16_t on, uint16_t off) {
-    const int lv = rssi > -62 ? 3 : rssi > -74 ? 2 : 1;
-    for (int k = 0; k < 3; k++) t.fillRect(x + k * 3, y + 5 - k * 2, 2, 2 + k * 2, k < lv ? on : off);
+// Three bars standing on y + 7 (font 1) or y + 14 (font 2), twice the size on the big panels.
+void tmBars(TFT_eSPI& t, int x, int y, int8_t rssi, uint16_t on, uint16_t off, int s = 1) {
+    const int lv = rssi > -62 ? 3 : rssi > -74 ? 2 : 1, bw = s == 1 ? 2 : 3, base = y + 7 * s;
+    for (int k = 0; k < 3; k++) { const int hh = (2 + k * 2) * s; t.fillRect(x + k * (bw + 1), base - hh, bw, hh, k < lv ? on : off); }
 }
 
 // The log in display order, top to bottom, as logAt() indices (0 = newest).
@@ -207,22 +214,37 @@ void tmOrder(const DetectionEngine& eng, int n, uint8_t* ord) {
 }
 
 void tmLog(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, TmRect r, const TmTheme& T) {
-    const int SB = 14, foot = 11, usable = r.w - SB - 1, right = r.x + usable - 2, top = 18;
+    const TmM M = s_tmM;
+    const int f = M.f, RH = M.rh, SB = M.sb, foot = RH + 1, k2 = f == 1 ? 1 : 2;
+    const int usable = r.w - SB - 1, right = r.x + usable - 2, top = M.bh + 5;
     const bool live = tmLive();
 
-    // The headings: four buttons in a sunken strip, a 2 px gap between them.
-    const int ex[5] = { r.x, r.x + 35, r.x + 85, right - 30, r.x + usable };
+    // The columns, measured in the font they are drawn in. On font 1 these come
+    // out at the 2.8in's 33 / 38 / 85 / right - 30.
+    t.setTextFont(f);
+    t.setTextSize(1);
+    int timeW = t.textWidth("00:00");
+    if (f != 1 && t.textWidth("TIME") + 9 > timeW) timeW = t.textWidth("TIME") + 9;
+    timeW += 3;
+    const int badgeX = r.x + timeW, kindX = badgeX + 5;
+    const int nameX = kindX + t.textWidth("TRACKER") + 5;
+    const int barsW = 3 * ((k2 == 1 ? 2 : 3) + 1) - 1, rssiR = right - barsW - 3;
+    int colR = rssiR - t.textWidth("-99") - 1;
+    if (f != 1 && r.x + usable - (t.textWidth("dBm") + 14) < colR) colR = r.x + usable - (t.textWidth("dBm") + 14);
+    const int ex[5] = { r.x, r.x + timeW + 2, nameX, colR, r.x + usable };
     for (int i = 0; i < 5; i++) s_tmColX[i] = (int16_t)ex[i];
-    t.fillRect(r.x, r.y - 1, usable, 18, Theme::BLACK);
-    tmBevel(t, r.x, r.y - 1, usable, 17, false, T);
+
+    // The headings: four buttons in a sunken strip, a 2 px gap between them.
+    t.fillRect(r.x, r.y - 1, usable, M.bh + 5, Theme::BLACK);
+    tmBevel(t, r.x, r.y - 1, usable, M.bh + 4, false, T);
     static const char* const LBL[4] = { "TIME", "KIND", "DEVICE", "dBm" };
     for (int k = 0; k < 4; k++) {
         const bool on  = s_tmSort == k;
         const bool pr  = s_tmPressCol == k && (s_tmPressHeld || (int32_t)(s_tmPressUntil - now) > 0);
         const bool tab = on && !pr;                     // lit, and joined to its column
-        const int bx = ex[k] + 1, bw = ex[k + 1] - ex[k] - 2, by = r.y + 1, bh = tab ? 17 : 13, p = pr ? 1 : 0;
+        const int bx = ex[k] + 1, bw = ex[k + 1] - ex[k] - 2, by = r.y + 1, bh = tab ? M.bh + 4 : M.bh, p = pr ? 1 : 0;
         t.fillRect(bx, by, bw, bh, on ? T.HI : T.ZEB);
-        if (!on) t.fillRect(bx + 1, by + 1, bw - 2, 5, T.DOT);           // two-tone, like the title bars
+        if (!on) t.fillRect(bx + 1, by + 1, bw - 2, M.bh / 2 - 1, T.DOT);   // two-tone, like the title bars
         if (tab) {
             t.drawFastHLine(bx, by, bw, (uint16_t)0xFFFF);
             t.drawFastVLine(bx, by, bh, (uint16_t)0xFFFF);
@@ -234,9 +256,9 @@ void tmLog(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, TmRect r, cons
         t.drawPixel(bx + bw - 1, by, Theme::BLACK);
         if (!tab) { t.drawPixel(bx, by + bh - 1, Theme::BLACK); t.drawPixel(bx + bw - 1, by + bh - 1, Theme::BLACK); }
         const bool rs = k == TM_S_RSSI;
-        tmText(t, LBL[k], (rs ? bx + bw - 3 : bx + 3) + p, by + 3 + p, on ? Theme::BLACK : T.FG, rs);
+        tmText(t, LBL[k], (rs ? bx + bw - 3 : bx + 3) + p, by + 3 + p, on ? Theme::BLACK : T.FG, rs, f);
         // The sort mark: up-and-down on the idle ones, one solid arrow on the lit one.
-        const int cx = (rs ? bx + 5 : bx + bw - 5) + p, cy = by + 3 + p;
+        const int cx = (rs ? bx + 5 : bx + bw - 5) + p, cy = by + (M.bh - 7) / 2 + p;
         if (on) {
             for (int i = 0; i < 3; i++) t.drawFastHLine(cx - i, s_tmDir < 0 ? cy + 1 + i : cy + 3 - i, 2 * i + 1, Theme::BLACK);
         } else {
@@ -250,7 +272,7 @@ void tmLog(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, TmRect r, cons
     const int n = eng.logCount() > TM_LOG_MAX ? TM_LOG_MAX : eng.logCount();
     uint8_t ord[TM_LOG_MAX];
     tmOrder(eng, n, ord);
-    int vis = (r.h - top + 1 - foot) / TM_ROW_H;
+    int vis = (r.h - top + 1 - foot) / RH;
     if (vis > TM_ROWS_MAX) vis = TM_ROWS_MAX;
     if (vis < 1) vis = 1;
     const int max = n > vis ? n - vis : 0;
@@ -263,22 +285,21 @@ void tmLog(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, TmRect r, cons
     s_tmVis = (uint8_t)vis; s_tmMax = (uint8_t)(max > 255 ? 255 : max);
     s_tmBody = { r.x, (int16_t)(r.y + top - 1), (int16_t)usable, (int16_t)(r.h - top + 1 - foot) };
     s_tmRowY0 = (int16_t)(r.y + top);
+    s_tmRowH = (uint8_t)RH;
     s_tmRowN = 0;
 
-    const int nameX = r.x + 85, rssiR = right - 11;
-    const int nameMax = (rssiR - 22 - nameX) / 6;
     const int b0 = ex[s_tmSort], b1 = ex[s_tmSort + 1];
     for (int j = 0; j < shown; j++) {
-        const int y = r.y + top + j * TM_ROW_H;
+        const int y = r.y + top + j * RH;
         const Detection* d = eng.logAt(ord[start + j]);
         if (!d) continue;
-        if (j & 1) t.fillRect(r.x, y - 1, usable, TM_ROW_H, T.ZEB);
-        t.fillRect(b0, y - 1, b1 - b0, TM_ROW_H, (j & 1) ? T.DOT : T.ZEB);   // the sorted column's band
+        if (j & 1) t.fillRect(r.x, y - 1, usable, RH, T.ZEB);
+        t.fillRect(b0, y - 1, b1 - b0, RH, (j & 1) ? T.DOT : T.ZEB);   // the sorted column's band
         if (s_tmRowN < TM_ROWS_MAX) memcpy(s_tmRowMac[s_tmRowN++], d->mac, 6);
         // Just re-sorted: the rows come back in from the top, 28 ms apart.
         if (s_tmSortAt && now - s_tmSortAt < (uint32_t)j * 28) continue;
         const bool sel = s_tmSelOn && !memcmp(d->mac, s_tmSel, 6);
-        if (sel) t.fillRect(r.x, y - 1, usable, TM_ROW_H, T.HI);
+        if (sel) t.fillRect(r.x, y - 1, usable, RH, T.HI);
         uint16_t fg = d->active ? T.FG : T.FGM, fm = T.FGM;
         if (IgnoreList::silenced(d->mac)) fg = T.FGD;
         if (!d->restored && now - d->firstSeen < 2000) { fg = now - d->firstSeen < 1000 ? T.FGD : T.FGM; fm = T.FGD; }
@@ -286,50 +307,51 @@ void tmLog(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, TmRect r, cons
         if (sel) { fg = Theme::BLACK; fm = Theme::BLACK; }
         char buf[24];
         tmStamp(*d, buf, sizeof buf);
-        tmText(t, buf, r.x + 1, y, fm);
-        t.fillRect(r.x + 33, y, 3, 7, kc);
-        tmText(t, Dex::shortName(d->type), r.x + 38, y, kc);
+        tmText(t, buf, r.x + 1, y, fm, false, f);
+        t.fillRect(badgeX, y + (k2 - 1) * 2, 3, 7 * k2 - (k2 - 1) * 2, kc);
+        tmText(t, Dex::shortName(d->type), kindX, y, kc, false, f);
+        // The name, cut to fit, and how many times it came back.
         tmName(*d, buf, sizeof buf);
         char cnt[6] = "";
         if (d->hits > 1) snprintf(cnt, sizeof cnt, "x%u", (unsigned)(d->hits > 999 ? 999 : d->hits));
-        int nm = nameMax - (cnt[0] ? (int)strlen(cnt) + 1 : 0);
-        if (nm < 1) nm = 1;
-        if (nm < (int)sizeof buf) buf[nm] = 0;
-        tmText(t, buf, nameX, y, fg);
-        if (cnt[0]) tmText(t, cnt, nameX + (int)strlen(buf) * 6 + 6, y, sel ? Theme::BLACK : T.FGD);
-        tmBars(t, right - 8, y, d->rssi, sel ? Theme::BLACK : fm, sel ? T.MID : T.LO);
+        t.setTextFont(f);
+        int room = colR - 4 - nameX - (cnt[0] ? t.textWidth(cnt) + 6 : 0);
+        for (int L = (int)strlen(buf); L > 1 && t.textWidth(buf) > room; ) buf[--L] = 0;
+        tmText(t, buf, nameX, y, fg, false, f);
+        if (cnt[0]) { t.setTextFont(f); tmText(t, cnt, nameX + t.textWidth(buf) + 6, y, sel ? Theme::BLACK : T.FGD, false, f); }
+        tmBars(t, right - barsW, y, d->rssi, sel ? Theme::BLACK : fm, sel ? T.MID : T.LO, k2);
         snprintf(buf, sizeof buf, "%d", (int)d->rssi);
-        tmText(t, buf, rssiR, y, fg, true);
+        tmText(t, buf, rssiR, y, fg, true, f);
     }
     if (live && !off) {
-        const int cy = r.y + top + shown * TM_ROW_H;
-        if (cy + 8 <= r.y + r.h - foot) {
-            if ((now / 500) & 1) t.fillRect(r.x + 1, cy, 6, 8, T.FG);
-            if (!n) tmText(t, "all quiet, still listening", r.x + 12, cy, T.FGD);
+        const int cy = r.y + top + shown * RH;
+        if (cy + RH - 2 <= r.y + r.h - foot) {
+            if ((now / 500) & 1) t.fillRect(r.x + 1, cy, 6 * k2 - (k2 - 1) * 4, RH - 2, T.FG);
+            if (!n) tmText(t, "all quiet, still listening", r.x + 6 * k2 + 6, cy, T.FGD, false, f);
         }
     }
 
     // The scrollbar: arrows, a dotted track, a bevelled thumb with grip lines.
-    const int sx = r.x + r.w - SB, sy = r.y, sh = r.h - foot;
+    const int sx = r.x + r.w - SB, sy = r.y, sh = r.h - foot, ah = SB + 1;
     t.drawFastVLine(sx - 1, sy, sh, T.LO);
     t.fillRect(sx, sy, SB, sh, Theme::BLACK);
-    for (int yy = sy + 16; yy < sy + sh - 16; yy += 2)
+    for (int yy = sy + ah + 1; yy < sy + sh - ah - 1; yy += 2)
         for (int xx = sx + (((yy >> 1) & 1) ? 1 : 3); xx < sx + SB; xx += 4) t.drawPixel(xx, yy, T.ZEB);
     for (int a = 0; a < 2; a++) {
-        const int y0 = a ? sy + sh - 15 : sy;
-        tmBevel(t, sx, y0, SB, 15, true, T);
-        const int cx = sx + 7, cy = y0 + 7;
-        for (int k = 0; k < 4; k++) t.drawFastHLine(cx - k, a ? cy + 2 - k : cy - 2 + k, 2 * k + 1, T.FG);
+        const int y0 = a ? sy + sh - ah : sy;
+        tmBevel(t, sx, y0, SB, ah, true, T);
+        const int cx = sx + SB / 2, cy = y0 + ah / 2, A = SB / 4 + 1;
+        for (int k = 0; k < A; k++) t.drawFastHLine(cx - k, a ? cy + A / 2 - k : cy - A / 2 + k, 2 * k + 1, T.FG);
     }
-    const int track = sh - 32;
+    const int track = sh - 2 * ah - 2;
     const int th = max ? (track * vis / n > 10 ? track * vis / n : 10) : track;
-    const int tyy = sy + 16 + (max ? (track - th) * (live ? max - off : off) / max : 0);
+    const int tyy = sy + ah + 1 + (max ? (track - th) * (live ? max - off : off) / max : 0);
     t.fillRect(sx + 1, tyy, SB - 2, th, T.ZEB);
     tmBevel(t, sx + 1, tyy, SB - 2, th, true, T);
     for (int k = -1; k <= 1; k++) t.drawFastHLine(sx + 4, tyy + th / 2 + k * 2, SB - 8, T.MID);
-    s_tmUp    = { (int16_t)sx, (int16_t)sy, (int16_t)SB, 15 };
-    s_tmDn    = { (int16_t)sx, (int16_t)(sy + sh - 15), (int16_t)SB, 15 };
-    s_tmTrack = { (int16_t)sx, (int16_t)(sy + 15), (int16_t)SB, (int16_t)(sh - 30) };
+    s_tmUp    = { (int16_t)sx, (int16_t)sy, (int16_t)SB, (int16_t)ah };
+    s_tmDn    = { (int16_t)sx, (int16_t)(sy + sh - ah), (int16_t)SB, (int16_t)ah };
+    s_tmTrack = { (int16_t)sx, (int16_t)(sy + ah), (int16_t)SB, (int16_t)(sh - 2 * ah) };
     s_tmThumb = { (int16_t)sx, (int16_t)tyy, (int16_t)SB, (int16_t)th };
 
     // Scrolled up in the live log: a pill back to the newest, counting what arrived below.
@@ -348,20 +370,21 @@ void tmLog(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, TmRect r, cons
     }
 
     // Which lines these are; live or paused, or what the order means in words.
-    const int fy = r.y + r.h - 10;
+    const int fy = r.y + r.h - foot + 1;
     t.drawFastHLine(r.x, fy - 1, r.w, T.LO);
     char st[24];
     snprintf(st, sizeof st, "%d-%d OF %d", n ? start + 1 : 0, start + shown, n);
-    tmText(t, st, r.x + 1, fy + 1, T.FGM);
+    tmText(t, st, r.x + 1, fy + 1, T.FGM, false, f);
     if (!live) {
         static const char* const W[4][2] = { { "BY TIME", "NEWEST UP" }, { "BY KIND", "BY KIND" },
                                              { "A-Z", "Z-A" }, { "CLOSEST UP", "FARTHEST UP" } };
-        tmText(t, W[s_tmSort][s_tmDir > 0 ? 0 : 1], r.x + r.w - 1, fy + 1, T.FG, true);
+        tmText(t, W[s_tmSort][s_tmDir > 0 ? 0 : 1], r.x + r.w - 1, fy + 1, T.FG, true, f);
     } else if (off > 0) {
-        tmText(t, "PAUSED", r.x + r.w - 1, fy + 1, TM_AMBER, true);
+        tmText(t, "PAUSED", r.x + r.w - 1, fy + 1, TM_AMBER, true, f);
     } else {
-        t.fillCircle(r.x + r.w - 30, fy + 4, 2, T.FG);
-        tmText(t, "LIVE", r.x + r.w - 1, fy + 1, T.FGM, true);
+        t.setTextFont(f);
+        t.fillCircle(r.x + r.w - t.textWidth("LIVE") - 6, fy + RH / 2 - 1, 2, T.FG);
+        tmText(t, "LIVE", r.x + r.w - 1, fy + 1, T.FGM, true, f);
     }
 }
 
@@ -500,36 +523,54 @@ void uiTerminalDraw(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int t
 
     for (auto& r : s_tmWin) r = { 0, 0, 0, 0 };
     const int H = bottom - top;
-    const bool side = w >= 300 && w > h && H >= 150;
+    const bool side  = w >= 300 && w > h && H >= 150;
+    const bool below = !side && h > w && H >= 220;     // upright: the same windows, under the LOG
+    const bool big   = (w > h ? w : h) >= 480;
+    s_tmM = big ? TmM{ 2, 18, 21, 20 } : TmM{ 1, 10, 13, 14 };
     const int sideW = side ? (w >= 400 ? 120 : 90) : 0;
     const int logW  = side ? w - sideW - 8 : w - 4;
+    const int botH  = below ? (H * 34 / 100 < 96 ? 96 : H * 34 / 100) : 0;
+    const int logH  = below ? H - botH - 4 : H;
 
     char chip[8];
     snprintf(chip, sizeof chip, "%s", !tmLive() ? "SORTED" : s_tmScroll ? "PAUSED" : "LIVE");
-    TmRect lr = tmWindow(t, 2, top, logW, H, "LOG", s_tmFocus == 0, false, chip,
+    TmRect lr = tmWindow(t, 2, top, logW, logH, "LOG", s_tmFocus == 0, false, chip,
                          tmLive() && s_tmScroll ? TM_AMBER : T.FG, T);
-    s_tmWin[0] = { 2, (int16_t)top, (int16_t)logW, (int16_t)H };
+    s_tmWin[0] = { 2, (int16_t)top, (int16_t)logW, (int16_t)logH };
     tmLog(t, now, eng, lr, T);
 
+    // AIR, COUNTS and LATEST: down the right side, or in a row along the bottom.
+    TmRect wa{}, wc{}, wd{};
     if (side) {
         const int sx = w - sideW - 4;
         const int airH = H * 24 / 100, cntH = H * 42 / 100, detH = H - airH - cntH - 8;
+        wa = { (int16_t)sx, (int16_t)top, (int16_t)sideW, (int16_t)airH };
+        wc = { (int16_t)sx, (int16_t)(top + airH + 4), (int16_t)sideW, (int16_t)cntH };
+        wd = { (int16_t)sx, (int16_t)(top + airH + cntH + 8), (int16_t)sideW, (int16_t)detH };
+    } else if (below) {
+        // LATEST gets the most room: its name and its OPEN tag share a title bar.
+        const int by = top + logH + 4, avail = w - 4 - 8, aw = avail * 30 / 100, cw = aw, dw = avail - aw - cw;
+        wa = { 2, (int16_t)by, (int16_t)aw, (int16_t)botH };
+        wc = { (int16_t)(2 + aw + 4), (int16_t)by, (int16_t)cw, (int16_t)botH };
+        wd = { (int16_t)(2 + aw + cw + 8), (int16_t)by, (int16_t)dw, (int16_t)botH };
+    }
+    if (wa.w) {
         char title[16];
         snprintf(title, sizeof title, "AIR %lu/S", (unsigned long)rate);
-        TmRect a = tmWindow(t, sx, top, sideW, airH, title, s_tmFocus == 1, true, nullptr, 0, T);
-        s_tmWin[1] = { (int16_t)sx, (int16_t)top, (int16_t)sideW, (int16_t)airH };
+        const bool close = wa.w >= 90;
+        if ((int)strlen(title) * 6 + 8 > wa.w - (close ? 14 : 4)) snprintf(title, sizeof title, "AIR");
+        TmRect a = tmWindow(t, wa.x, wa.y, wa.w, wa.h, title, s_tmFocus == 1, close, nullptr, 0, T);
+        s_tmWin[1] = wa;
         tmAir(t, a, T);
-        const int cy = top + airH + 4;
-        TmRect c = tmWindow(t, sx, cy, sideW, cntH, "COUNTS", s_tmFocus == 2, true, nullptr, 0, T);
-        s_tmWin[2] = { (int16_t)sx, (int16_t)cy, (int16_t)sideW, (int16_t)cntH };
+        TmRect c = tmWindow(t, wc.x, wc.y, wc.w, wc.h, "COUNTS", s_tmFocus == 2, wc.w >= 90, nullptr, 0, T);
+        s_tmWin[2] = wc;
         tmCounts(t, eng, c, T);
-        const int dy = cy + cntH + 4;
         const Detection* d = tmPicked(eng);
         // OPEN in its title bar: a tap anywhere on this window brings up the
         // device's menu (WATCH / HUNT / INFO / IGNORE).
-        TmRect dr = tmWindow(t, sx, dy, sideW, detH, s_tmSelOn ? "DETAILS" : "LATEST", s_tmFocus == 3, !d,
+        TmRect dr = tmWindow(t, wd.x, wd.y, wd.w, wd.h, s_tmSelOn ? "DETAILS" : "LATEST", s_tmFocus == 3, !d,
                              d ? "OPEN" : nullptr, T.FG, T);
-        s_tmWin[3] = { (int16_t)sx, (int16_t)dy, (int16_t)sideW, (int16_t)detH };
+        s_tmWin[3] = wd;
         tmDetails(t, now, d, dr, T);
     }
     s_tmDrawn = true;
@@ -583,7 +624,7 @@ bool uiTerminalTouch(int x, int y, bool valid, bool justDown, uint32_t now) {
         if (inBody) {
             const int dy = y - startY;
             if (!dragged && (dy > 8 || dy < -8)) dragged = true;
-            if (dragged) setScroll(startScroll + (tmLive() ? dy : -dy) / TM_ROW_H);
+            if (dragged) setScroll(startScroll + (tmLive() ? dy : -dy) / s_tmRowH);
         }
         return true;
     }
@@ -606,7 +647,7 @@ bool uiTerminalTouch(int x, int y, bool valid, bool justDown, uint32_t now) {
         memcpy(s_tmOpenMac, s_tmDetMac, 6);
         s_tmOpenReq = true;
     } else if (!dragged && !done && inBody) {
-        const int j = (lastY - s_tmRowY0 + 1) / TM_ROW_H;
+        const int j = (lastY - s_tmRowY0 + 1) / s_tmRowH;
         if (lastY >= s_tmRowY0 - 1 && j >= 0 && j < s_tmRowN) {
             if (s_tmSelOn && !memcmp(s_tmSel, s_tmRowMac[j], 6)) {
                 memcpy(s_tmOpenMac, s_tmSel, 6);
