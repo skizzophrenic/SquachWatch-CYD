@@ -15,3 +15,7 @@ void uiZoneCardDraw(TFT_eSPI& t, uint32_t now);
 
 enum class ZoneHit : uint8_t { NONE, CARD, PREV, NEXT, OK };   // CARD: on it, not on a button
 ZoneHit uiZoneCardHit(int x, int y, int screenW, int screenH);
+
+// The three buttons' centres, left to right (<, THIS IS RIGHT, >), for the
+// keyboard and button boards' cursor.
+void uiZoneCardStops(int screenW, int screenH, int16_t xs[3], int16_t ys[3]);

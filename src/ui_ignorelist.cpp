@@ -90,7 +90,11 @@ void uiIgnoreListTick(TFT_eSPI& t, uint32_t now) {
         t.print(m1);
         Theme::bodyFontOn(t);
         t.setTextColor(Theme::CYAN, Theme::BG);
+#if defined(SQW_SMALL)
+        const char* m2 = "Pick IGNORE on an alert to mute";
+#else
         const char* m2 = "Tap IGNORE on an alert to mute";
+#endif
         const char* m3 = "a device you own.";
         t.setCursor((w - t.textWidth(m2)) / 2, h / 2 + 2);
         t.print(m2);

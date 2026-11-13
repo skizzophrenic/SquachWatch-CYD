@@ -1,5 +1,6 @@
 // SquachWatch-CYD — settings screen implementation
 #include "ui_settings.h"
+#include "gnss.h"
 #if !defined(ESP32)
 #include <stdlib.h>     // getenv: the emulator's SQUACHSIM_SPEAKER
 #endif
@@ -103,6 +104,11 @@ static const SettingsRow ALL_ROWS[] = {
     // very top of this list, which put it under the first thumb that opened
     // the screen and got pressed by accident. Down here with SQUACHMESH it is
     // beside the other row that opens a page rather than changing a value.
+#if defined(SQW_SMALL)
+    // The small boards keep PET out here, not a page down: it is the one
+    // switch for the companion, which is OFF until someone picks one.
+    SettingsRow::PET,
+#endif
     SettingsRow::APPEARANCE,
 #if SQUACH_MESH
     // One row, not two: NAME moved inside the SquachMesh menu, which is a
@@ -114,15 +120,23 @@ static const SettingsRow ALL_ROWS[] = {
     // -- see APPEARANCE_ROWS. Everything about how he LOOKS is on one page;
     // what stays here is what he DOES.
     SettingsRow::REPLAY_INTRO, SettingsRow::SHOW_OFF, SettingsRow::VIEW_DIARY,
-    SettingsRow::BINGO, SettingsRow::DEX, SettingsRow::DESK_MODE,
+    SettingsRow::BINGO, SettingsRow::DEX,
+#if !defined(STICKS3)   // the StickS3 has FOB MODE on the main screen in its place
+    SettingsRow::DESK_MODE,
+#endif
     SettingsRow::POWER_SAVER,
 #if defined(CYD_GPS)
     SettingsRow::WATCH_WARDRIVE,   // the watch's row and setting, on the CYD GPS builds
+#if defined(CARDPUTER_ADV)
+    SettingsRow::WARDRIVE_SOUND,
+#endif
 #endif
 #if defined(ESP32) && !defined(TWATCH_S3)
     SettingsRow::CHARGE_MODE,
 #endif
+#if !defined(STICKS3)   // a fob that keeps no log has nothing to lock, and a PIN on two buttons is misery
     SettingsRow::SECURITY,
+#endif
     // CALIBRATE, CHECK COLORS, DIAGNOSTICS and RESET STATS moved behind the
     // SYSTEM row -- see SYSTEM_ROWS. They are the four you touch once a year,
     // and they were sitting below everything you actually adjust.
@@ -139,7 +153,10 @@ static const SettingsRow APPEARANCE_ROWS[] = {
     // How HE looks comes first -- these are the rows people open this page to
     // change, and they were a scroll away on the main list. AURA only
     // appears once it has been earned; see buildDisplayList().
-    SettingsRow::SQUACHY_SIZE, SettingsRow::OUTFIT, SettingsRow::PET,
+    SettingsRow::SQUACHY_SIZE, SettingsRow::OUTFIT,
+#if !defined(SQW_SMALL)   // on the main list there, where it can be found
+    SettingsRow::PET,
+#endif
     SettingsRow::SHADES_COLOR, SettingsRow::BANTER, SettingsRow::AURA,
     // Then how the SCREEN looks.
     SettingsRow::THEME, SettingsRow::BACKGROUND, SettingsRow::BACKGROUND_LOCK, SettingsRow::DET_STYLE,
@@ -204,8 +221,14 @@ static const SettingsRow SYSTEM_ROWS[] = {
 #if defined(ESP32) && !defined(TWATCH_S3)
     SettingsRow::LAST_RUN,
 #endif
-    SettingsRow::CALIBRATE, SettingsRow::CHECK_COLORS,
-    SettingsRow::DIAGNOSTICS, SettingsRow::UPDATE_FIRMWARE, SettingsRow::UPDATE_CHECK, SettingsRow::WIFI_NETWORKS,
+#if !defined(SQW_SMALL)   // no touch panel to calibrate on the StickS3 or the Cardputer
+    SettingsRow::CALIBRATE,
+#endif
+    SettingsRow::CHECK_COLORS,
+    SettingsRow::DIAGNOSTICS, SettingsRow::UPDATE_FIRMWARE, SettingsRow::UPDATE_CHECK,
+#if !defined(STICKS3)   // no WiFi password on two buttons: the StickS3 updates over Bluetooth
+    SettingsRow::WIFI_NETWORKS,
+#endif
     SettingsRow::RESET_STATS,
 };
 static const uint8_t SYSTEM_ROWS_N = sizeof(SYSTEM_ROWS) / sizeof(SYSTEM_ROWS[0]);
@@ -271,6 +294,9 @@ static RowGroupId groupFor(SettingsRow r) {
 #if defined(CYD_GPS)
     // Under its neighbor's heading: a CYD has no WATCH heading.
     if (r == SettingsRow::WATCH_WARDRIVE) return groupFor(SettingsRow::POWER_SAVER);
+#if defined(CARDPUTER_ADV)
+    if (r == SettingsRow::WARDRIVE_SOUND) return groupFor(SettingsRow::POWER_SAVER);
+#endif
 #endif
     switch (r) {
         case SettingsRow::WATCH_BATTERY:
@@ -545,7 +571,11 @@ static int maxScroll(const DisplayItem* items, uint8_t n,
 static void rowPanel(TFT_eSPI& t, int w, int y, int hgt);   // below, with the other rows
 // The preview: a box with a sample of the kind moved last, drawn by the same
 // code that draws the real thing, so what it shows is what the screens get.
+#if defined(SQW_SMALL)
+static const char* const PREVIEW_TEXT = "Squachy spotted a tracker tagging along. Pick a row to see where it went.";
+#else
 static const char* const PREVIEW_TEXT = "Squachy spotted a tracker tagging along. Tap a row to see where it went.";
+#endif
 static const char* const PREVIEW_SAY  = "Like this?";
 static const char* const PREVIEW_PET  = "Me next!";
 static const int PREVIEW_CAP = 12;    // the "PREVIEW" caption's rows
@@ -853,6 +883,17 @@ SettingsConfirmTap uiSettingsHitConfirm(int x, int y, int screenW, int screenH) 
     // trying to think about.
     if (x >= px && x <= px + pw && y >= py && y <= py + ph) return SettingsConfirmTap::NONE;
     return SettingsConfirmTap::CANCEL;
+}
+
+// The two drawn buttons only, nothing around them: for the boards that aim a
+// cursor, where "outside the panel cancels" is a tap target nobody can see.
+SettingsConfirmTap uiSettingsConfirmButtonAt(int x, int y, int screenW, int screenH) {
+    if (s_confirmRow == SettingsRow::NONE) return SettingsConfirmTap::NONE;
+    int px, py, pw, ph, okX, okY, okW, okH, cnX, cnY, cnW, cnH;
+    settingsConfirmRects(screenW, screenH, px, py, pw, ph, okX, okY, okW, okH, cnX, cnY, cnW, cnH);
+    if (x >= okX && x <= okX + okW && y >= okY && y <= okY + okH) return SettingsConfirmTap::CONFIRM;
+    if (x >= cnX && x <= cnX + cnW && y >= cnY && y <= cnY + cnH) return SettingsConfirmTap::CANCEL;
+    return SettingsConfirmTap::NONE;
 }
 
 static void drawSettingsConfirm(TFT_eSPI& t, int w, int h) {
@@ -1335,12 +1376,22 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
                 case Wardrive::SdState::OFF:             value = "OFF"; break;
                 case Wardrive::SdState::NO_CARD:         value = "NO CARD"; break;
                 case Wardrive::SdState::LOW_MEMORY:      value = "LOW MEMORY"; break;
+#if defined(CARDPUTER_ADV)
+                // Why it is waiting: NO GPS, FINDING 3 SATS.
+                case Wardrive::SdState::WAITING_FOR_FIX: value = Gnss::status(millis(), valBuf, valBufN); break;
+#else
                 case Wardrive::SdState::WAITING_FOR_FIX: value = "WAITING FOR FIX"; break;
+#endif
                 case Wardrive::SdState::LOGGING:
                     snprintf(valBuf, valBufN, "ON  %lu", (unsigned long)Wardrive::written());
                     value = valBuf;
                     break;
             }
+            break;
+#endif
+#if defined(CARDPUTER_ADV) && defined(CYD_GPS)
+        case SettingsRow::WARDRIVE_SOUND:
+            label = "WARDRIVE SOUND"; value = Wardrive::soundOn() ? "ON" : "OFF";
             break;
 #endif
         case SettingsRow::EXT_SCREEN:

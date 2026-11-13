@@ -33,6 +33,11 @@ uint32_t uiMascotStepMs();
 
 void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
                   bool advance = true, bool scanMenu = false);
+// FOB MODE (StickS3): the main screen with no title bar and no buttons, the
+// room they took given to Squachy. Everything else on it carries on as usual.
+void uiClearSetFob(bool on);
+// Cardputer ADV, EXT screen on: no scene, the counts and hotkeys instead.
+void uiClearInfoOnly(bool on);
 
 // The battery gauge: a lava lamp under the menu icon, filled to the charge.
 // A board with a battery hands over a function that fills in the percent and
@@ -50,7 +55,8 @@ bool uiTerminalTakeOpen(uint8_t mac[6]);
 // dir 1 is the first tap's order, -1 the flipped one.
 void uiTerminalSetSort(uint8_t col, int8_t dir);
 // The terminal's cursor stops for the boards without touch (StickS3, Cardputer).
-uint8_t uiTerminalStops(int16_t* xs, int16_t* ys, uint8_t cap);
+// Boxes, so the cursor can light each one whole.
+uint8_t uiTerminalStops(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint8_t cap);
 
 #if SQUACH_MESH
 // SPIKE: the peer currently visiting, or nullptr. Owned by whatever discovers

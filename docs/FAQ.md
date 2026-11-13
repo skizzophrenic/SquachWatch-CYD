@@ -51,8 +51,8 @@ Everything on the [web flasher](https://squachwatch.com/), with the names it use
 | Freenove ESP32-S3 2.8" (FNK0104) | Capacitive | BETA | The release notes name the FNK0104B, the touch version. |
 | Elecrow CrowPanel Advance 7.0 | Capacitive | BETA | Draws the small-screen layout doubled. Has a buzzer. Notes in [CROWPANEL7.md](CROWPANEL7.md). |
 | RockBase NM-CYD-C5 2.8" (ESP32-C5) | Resistive | BETA | The only board that scans 5 GHz WiFi too. Contributed by quietradio. Notes in [NM-CYD-C5.md](NM-CYD-C5.md). |
-| M5Stack StickS3 | None, two buttons | BETA | Tiny 1.14" screen, landscape only. One button moves a cursor, the other presses. |
-| M5Stack Cardputer ADV | None, keyboard | BETA | Not the original Cardputer. Arrows and TAB move, ENTER presses, ESC goes home. |
+| M5Stack StickS3 | None, two buttons | BETA | Tiny 1.14" screen, landscape only. Front click next, front hold select, side click back, side hold home. Shake and knock poke Squachy. Controls in [SMALL-BOARDS.md](SMALL-BOARDS.md). |
+| M5Stack Cardputer ADV | None, keyboard | BETA | Not the original Cardputer. Arrows move, ENTER presses, ESC goes back, hold ESC for home, letters are hotkeys. Optional EXT screen and Grove GPS for wardriving. Controls in [SMALL-BOARDS.md](SMALL-BOARDS.md). |
 | LilyGo T-Watch S3 / S3 Plus | Capacitive | BETA | On your wrist. Battery, buzz, LoRa listening; the S3 Plus adds GPS. |
 | M5Stack Tab5 | Capacitive | Test builds only (`?lab=1`) | Experimental. A 5" tablet whose radio is a separate chip that needs our firmware first. Notes in [TAB5.md](TAB5.md). |
 
@@ -237,7 +237,7 @@ A squad gets you:
 
 ## GPS and LoRa (watches only)
 
-**GPS** is on the **T-Watch S3 Plus** only. **WARDRIVE** in WATCH SETTINGS turns the GPS and the log on together: every WiFi network and Bluetooth device it hears, with position, logged only while it has a fresh fix. It holds up to 125,000 sightings across restarts. **DOWNLOAD WIGLE FILE** on the web flasher (desktop Chrome or Edge) saves it as a file you can upload to [wigle.net](https://wigle.net/uploads). The log stays on the watch until you clear it, and a duress wipe takes it with everything else. The watch also sets its clock from GPS. Wardriving was marked not road-tested when it shipped in v1.25.0, so treat it as new.
+**GPS** is on the **T-Watch S3 Plus**, and on the **Cardputer ADV** with a Grove GPS (see [SMALL-BOARDS.md](SMALL-BOARDS.md)). **WARDRIVE** in WATCH SETTINGS turns the GPS and the log on together: every WiFi network and Bluetooth device it hears, with position, logged only while it has a fresh fix. It holds up to 125,000 sightings across restarts. **DOWNLOAD WIGLE FILE** on the web flasher (desktop Chrome or Edge) saves it as a file you can upload to [wigle.net](https://wigle.net/uploads). The log stays on the watch until you clear it, and a duress wipe takes it with everything else. The watch also sets its clock from GPS. Wardriving was marked not road-tested when it shipped in v1.25.0, so treat it as new.
 
 **SEEN AT.** Anything the LOG kept with a GPS position shows it: long-press the device in the LOG and it says SEEN AT and where.
 

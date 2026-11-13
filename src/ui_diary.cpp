@@ -109,7 +109,11 @@ void uiDiaryTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     uint16_t col = Theme::blend(Theme::BG, Theme::CYAN, (uint16_t)(pulse * 255.0f));
     Theme::bodyFontOn(t);
     t.setTextColor(col, Theme::BG);
+#if defined(SQW_SMALL)
+    const char* hint = "press any button to go back";
+#else
     const char* hint = "tap anywhere to go back";
+#endif
     int hw = t.textWidth(hint);
     t.setCursor((w - hw) / 2, top + 9 * rowH + (Theme::large() ? 4 : 8));
     t.print(hint);

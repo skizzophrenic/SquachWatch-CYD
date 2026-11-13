@@ -48,6 +48,9 @@ extern TFT_eSPI tft;
     #define SD_CS_PIN 23
 #elif defined(NM_CYD_C5)
     #define SD_CS_PIN 10
+#elif defined(CARDPUTER_ADV)
+    #define SD_CS_PIN 12   // SCK 40, MISO 39, MOSI 14: the EXT screen's bus
+    extern SPIClass g_cardSpi;   // main.cpp, the EXT screen's
 #elif defined(TDECK_PLUS)
     #define SD_CS_PIN 39   // on the display's bus (40/38/41), per LilyGo's utilities.h
 #else
@@ -63,7 +66,7 @@ static const uint8_t SD_MAX_FILES = 2;
 
 bool SdLog::begin() {
     if (_ready) return true;
-#if defined(TWATCH_S3) || defined(SQW_SMALL)   // the Cardputer has a slot, on pins of its own: not brought up yet
+#if defined(TWATCH_S3) || (defined(SQW_SMALL) && !defined(CARDPUTER_ADV))   // the Cardputer's slot: see below
     return false;   // no card slot; GPIO19/20 are the S3's USB pins
 #endif
 #if defined(CROWPANEL7)
@@ -157,6 +160,14 @@ bool SdLog::begin() {
     // CS 39), with the SX1262 beside it on CS 9: the same shared-bus treatment
     // as the C5 above, TFT_eSPI's own instance and nothing extra attached.
     if (!SD.begin(SD_CS_PIN, tft.getSPIinstance(), 4000000, "/sd", SD_MAX_FILES)) {
+#elif defined(CARDPUTER_ADV)
+    // The slot shares SCK 40 and MOSI 14 with the EXT screen (main.cpp), so
+    // both use one SPIClass on one host: two hosts on the same pins fight in
+    // the GPIO matrix. The EXT panel's CS is parked high first, so a panel
+    // that was never switched on does not listen in.
+    pinMode(5, OUTPUT); digitalWrite(5, HIGH);
+    g_cardSpi.begin(40, 39, 14, -1);
+    if (!SD.begin(SD_CS_PIN, g_cardSpi, 4000000, "/sd", SD_MAX_FILES)) {
 #elif defined(AWOK)
     if (!SD.begin(SD_CS_PIN, SPI, 4000000, "/sd", SD_MAX_FILES)) {
 #else

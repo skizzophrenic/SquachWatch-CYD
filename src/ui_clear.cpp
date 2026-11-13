@@ -25,6 +25,9 @@
 #include "crowd_bench.h"
 #if defined(CYD_GPS)
 #include "gnss.h"       // the GPS label in the top bar
+#if defined(CYD_GPS)
+#include "wardrive.h"   // the Cardputer's wardrive tag in the same spot
+#endif
 #endif
 
 // A peer supplied from outside -- the emulator's --peer flag today, the radio
@@ -1945,18 +1948,48 @@ static int16_t drawCornerClock(TFT_eSPI& t, int w) {
 // always red, whatever the theme or the rain colour (2026-10-18). Drawn
 // straight after the background like the watch's corner clock. Returns where
 // the WATCH pill's free span must end, or -1.
-static const int GPS_LABEL_W = 22;
+static const int GPS_LABEL_W_PLAIN = 22;
+#if defined(CARDPUTER_ADV)
+// With wardrive on, the label is a wardrive tag: green rows written, amber
+// satellites heard while it waits, red when there is no GPS or no card.
+// With it off, the label is the one every GPS board has.
+static const int GPS_LABEL_W_WD = 52;
+static int gpsLabelW() { return Wardrive::enabled() ? GPS_LABEL_W_WD : GPS_LABEL_W_PLAIN; }
+static bool gpsLabelShown() { return Wardrive::enabled() || Gnss::fresh(millis()) || Gnss::faked(); }
+static void wardriveTag(char* buf, size_t n, uint16_t& col) {
+    const uint32_t now = millis();
+    const bool talking = Gnss::lastGoodMs() && now - Gnss::lastGoodMs() < 5000;
+    const Wardrive::SdState st = Wardrive::sdState(now);
+    const uint32_t r = Wardrive::written();
+    if (st == Wardrive::SdState::NO_CARD)         { snprintf(buf, n, "NO CARD"); col = Theme::RED; }
+    else if (st == Wardrive::SdState::LOW_MEMORY) { snprintf(buf, n, "WD MEM"); col = Theme::RED; }
+    else if (!talking)                            { snprintf(buf, n, "NO GPS"); col = Theme::RED; }
+    else if (st == Wardrive::SdState::LOGGING) {
+        if (r < 10000) snprintf(buf, n, "WD %lu", (unsigned long)r);
+        else           snprintf(buf, n, "WD %lu.%luK", (unsigned long)(r / 1000), (unsigned long)(r / 100 % 10));
+        col = Theme::GREEN;
+    }
+    else { snprintf(buf, n, "WD %u SAT", Gnss::sky().heard); col = Theme::AMBER; }
+}
+#else
+static int gpsLabelW() { return GPS_LABEL_W_PLAIN; }
 static bool gpsLabelShown() { return Gnss::fresh(millis()) || Gnss::faked(); }
+#endif
 static int16_t drawGpsLabel(TFT_eSPI& t, int w) {
     if (!gpsLabelShown()) return -1;
-    const uint16_t col = 0xF800;          // TFT_RED, not a theme colour
+    uint16_t col = 0xF800;          // TFT_RED, not a theme colour
+    char txt[12] = "GPS";
+#if defined(CARDPUTER_ADV)
+    if (Wardrive::enabled()) wardriveTag(txt, sizeof txt, col);
+#endif
+    const int lw = gpsLabelW();
     const int right = Theme::titleBarRightIconsX(w) - 2;
-    const int x = right - GPS_LABEL_W;
+    const int x = right - lw;
     t.setTextSize(1);
-    t.fillRect(x, 0, GPS_LABEL_W, 20, TFT_BLACK);
+    t.fillRect(x, 0, lw, 20, TFT_BLACK);
     t.setTextColor(col, TFT_BLACK);
-    t.setCursor(x + (GPS_LABEL_W - (t.textWidth("GPS") - 1)) / 2, 6);
-    t.print("GPS");
+    t.setCursor(x + (lw - (t.textWidth(txt) - 1)) / 2, 6);
+    t.print(txt);
     return (int16_t)(x - 4);
 }
 #endif
@@ -3267,6 +3300,14 @@ bool uiMascotStep(uint32_t now, bool advance) {
 
 #include "ui_terminal.inc"
 
+static bool s_fob = false;
+void uiClearSetFob(bool on) { s_fob = on; }
+// The Cardputer ADV with the EXT screen on: the built-in screen is the main
+// screen's buttons, tiles and menu with no scene, and in the middle the
+// counts and the hotkeys (Squachy is on the big one).
+static bool s_infoOnly = false;
+void uiClearInfoOnly(bool on) { s_infoOnly = on; }
+
 void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance, bool scanMenu) {
     int w = t.width();
     int h = t.height();
@@ -3292,6 +3333,9 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     const uint8_t counterRows = landscape ? COUNTER_ROWS_LANDSCAPE : COUNTER_ROWS_PORTRAIT;
 
     Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
+    // FOB MODE: no buttons, so the bar's rows belong to the scene. Pushing it
+    // off the bottom moves everything that stands on it down to the floor.
+    if (s_fob) bar.y = h + 2;
     const int lineH          = 14;
     const int countersTop    = bar.y - counterRows * lineH - 6;
     // The counter rows alone sit 9px lower than countersTop, and nothing
@@ -3445,8 +3489,10 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // TERMINAL MODE: the desktop of windows instead of the scene. Everything
     // that would have stood in the scene -- Squachy, the pets, the tiles,
     // the headline -- already stays out in this mode (see below).
-    if (Settings::boringMode()) uiTerminalDraw(t, now, eng, titleBottom + 2, bar.y - 2);
-    else                        Theme::drawActiveBackground(t, now, 0, h, eng, advance);
+    // The Cardputer's built-in screen with the EXT screen on shows neither.
+    if (s_infoOnly)                   t.fillRect(0, 0, w, h, Theme::BG);
+    else if (Settings::boringMode())  uiTerminalDraw(t, now, eng, titleBottom + 2, bar.y - 2);
+    else                              Theme::drawActiveBackground(t, now, 0, h, eng, advance);
     Theme::clearBackgroundFloor();
     FrameProf::lap(FrameProf::BG);
     // The battery lamp, under everything that moves for the same reason as
@@ -3501,11 +3547,11 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
 #if CROWD_BENCH
     // A test build: the crowd benchmark stands in for the Squachys while it
     // runs, and the visit machine sits it out.
-    if (CrowdBench::active() && !Settings::boringMode())
+    if (CrowdBench::active() && !Settings::boringMode() && !s_infoOnly)
         CrowdBench::draw(t, now, sqTop, squachyBottom);
     else
 #endif
-    if (!Settings::boringMode()) {
+    if (!Settings::boringMode() && !s_infoOnly) {
         // The last argument is the SIZE row in Settings. CLEAR is the only
         // screen that passes it: everywhere else he is a cameo in a box
         // somebody sized deliberately, and shrinking him there would just
@@ -3566,8 +3612,14 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         // so his soles, not his shadow, land on the bar's top line.
         {
             Squachy::setSizeBoost(soloBoost(t, Settings::squachySizePct()));
+#if defined(SQW_SMALL)
+            // At 135 rows he fills his band: a bubble at its top sat on his
+            // face. It hangs from his feet instead.
+            Squachy::setBubbleSinkTo(sqFeet);
+#endif
             Squachy::tick(t, w / 2, sqTop, sqFeet + SQ_FOOT_SINK - sqTop, now, step,
                           1.0f, false, -1, Settings::squachySizePct());
+            Squachy::setBubbleSinkTo(-1);
             Squachy::setSizeBoost(1.0f);
         }
         Squachy::setBubbleRiseTo(-1);
@@ -3589,7 +3641,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // mid-lesson would be more distraction than delight.
     FrameProf::lap(FrameProf::SQUACHY);
     Squachy::setBubbleRiseTo(-1);   // boring mode skips the one above
-    if (!Settings::boringMode() && !Squachy::onboardingActive()) {
+    if (!Settings::boringMode() && !s_infoOnly && !Squachy::onboardingActive()) {
         IdleEvents::tick(t, now, 0, bandTop, w, squachyBottom, step);
     }
     FrameProf::lap(FrameProf::IDLE);
@@ -3603,7 +3655,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     Theme::drawBackgroundOverlay(t, now);
 
     // Title bar at the top
-    if (DrawBand::has(0, titleBottom)) Theme::drawTitleBar(t, ">> SQUACHWATCH <<  SCANNING");
+    if (DrawBand::has(0, titleBottom) && !s_fob) Theme::drawTitleBar(t, ">> SQUACHWATCH <<  SCANNING");
 
     // The watch/hunt indicator, in the title bar's empty middle. AFTER the bar
     // itself, which repaints that whole band -- see drawWatchPill()'s comment
@@ -3871,7 +3923,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
                                     ? Theme::TITLE_ICON_W + (Security::enabled() ? 26 : 0)
                                     : Theme::TITLE_ICON_W) + 3
 #if defined(CYD_GPS)
-                               + (gpsLabelShown() ? GPS_LABEL_W + 2 : 0)   // the GPS label, left of the icons
+                               + (gpsLabelShown() ? gpsLabelW() + 2 : 0)   // the GPS label, left of the icons
 #endif
                                ;
         auto rowRoom = [&](uint8_t row) {
@@ -3938,7 +3990,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         }
         s_tileN = 0;
         int bX = 0, bY = 0, bW = 0, bH = 0;
-        const bool bub = !Settings::boringMode() && Squachy::ownBubble(bX, bY, bW, bH);
+        const bool bub = !Settings::boringMode() && !s_infoOnly && Squachy::ownBubble(bX, bY, bW, bH);
         if (counterN) {
             const uint8_t bse = counterN / rowsUsed, rem = counterN % rowsUsed;
             uint8_t st = 0;
@@ -3979,12 +4031,46 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
 
     // The pet, last of the scene: over the counters, under the buttons.
     Pet::setGround(sqFeet);
-    if (!Settings::boringMode()) drawPets(t, now, w, h, bandTop, petFloor);
+    if (!Settings::boringMode() && !s_infoOnly) drawPets(t, now, w, h, bandTop, petFloor);
+    if (s_infoOnly) {
+        const int top = (s_tileRowsLast ? tilesTop + s_tileRowsLast * tileLineH : 18) + 6;
+        int y = top;
+        t.setTextFont(1); t.setTextSize(1); t.setTextWrap(false);
+        t.setTextColor(Theme::AMBER, Theme::BG);
+        t.setCursor(6, y); t.print("SQUACHY IS ON THE BIG SCREEN"); y += 13;
+        char line[48];
+        snprintf(line, sizeof line, "Seen this boot: %u   In the log: %u",
+                 (unsigned)s_hitsThisBoot, (unsigned)eng.logCount());
+        t.setTextColor(Theme::WHITE, Theme::BG);
+        t.setCursor(6, y); t.print(line); y += 13;
+#if defined(CARDPUTER_ADV) && defined(CYD_GPS)
+        if (Wardrive::enabled()) {
+            char st[24];
+            Gnss::status(now, st, sizeof st);
+            const bool logging = Wardrive::sdState(now) == Wardrive::SdState::LOGGING;
+            if (Wardrive::sdState(now) == Wardrive::SdState::NO_CARD) snprintf(st, sizeof st, "NO CARD");
+            snprintf(line, sizeof line, "WARDRIVE %s  rows %lu", st, (unsigned long)Wardrive::written());
+            t.setTextColor(logging ? Theme::GREEN : Theme::AMBER, Theme::BG);
+            t.setCursor(6, y); t.print(line); y += 13;
+        }
+#endif
+        y += 3;
+        static const char* const KEYS[] = {
+            "S scan   L log   D desk   B background",
+            "E turns the EXT screen off",
+            "ESC back   arrows move   ENTER press",
+        };
+        t.setTextColor(Theme::CYAN, Theme::BG);
+        for (const char* k : KEYS) {
+            if (y + 8 > bar.y - 3) break;
+            t.setCursor(6, y); t.print(k); y += 11;
+        }
+    }
 
     // Soft buttons, straight over the background: it repaints the whole
     // strip under them every frame, margins and gaps included. Each
     // button fills its own box, so the labels stay on a dark ground.
-    if (DrawBand::has(bar.y, bar.y + bar.h))
+    if (DrawBand::has(bar.y, bar.y + bar.h) && !s_fob)
         Theme::drawButtonBar(t, ButtonId::NONE,
                              scanMenu ? Theme::ButtonBarMode::SCAN_PICKER : Theme::ButtonBarMode::MAIN);
 #if SQUACH_MESH

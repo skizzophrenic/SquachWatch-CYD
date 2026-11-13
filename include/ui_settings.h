@@ -7,7 +7,7 @@
 // The speaker's two rows: on the boards with one, and in the emulator, where
 // they are listed only with SQUACHSIM_SPEAKER set (for the release clip) so
 // the web emulator never offers a sound it cannot make.
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || !defined(ESP32)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(STICKS3) || defined(CARDPUTER_ADV) || !defined(ESP32)
 #define SQW_SOUND_ROWS 1
 #else
 #define SQW_SOUND_ROWS 0
@@ -71,6 +71,9 @@ enum class SettingsRow : uint8_t {
     WATCH_SETTINGS,  // the T-Watch only: the row on the main list that opens the WATCH SETTINGS page
     WATCH_TEMP,      // the T-Watch only: the chip's temperature, a reading, under WATCH
     WATCH_WARDRIVE,  // the T-Watch only: WARDRIVE, every network and device with where, for WiGLE
+#if defined(CARDPUTER_ADV)
+    WARDRIVE_SOUND,  // the Cardputer: beeps for the fix and a tick for new rows
+#endif
     WATCH_QUIET_TAGS, // the T-Watch only: TAGS + RINGS, logged without waking the watch
     WATCH_LORA,      // the T-Watch only: LORA, which networks the LoRa radio listens to
     WATCH_LORA_CHATS, // the T-Watch only: LORA CHATS, what it decoded, one chat per network
@@ -176,3 +179,5 @@ enum class SettingsConfirmTap { NONE, CONFIRM, CANCEL };
 void               uiSettingsSetConfirm(SettingsRow r);
 SettingsRow        uiSettingsConfirmRow();
 SettingsConfirmTap uiSettingsHitConfirm(int x, int y, int screenW, int screenH);
+// The same, but only on the two drawn buttons (NONE everywhere else).
+SettingsConfirmTap uiSettingsConfirmButtonAt(int x, int y, int screenW, int screenH);

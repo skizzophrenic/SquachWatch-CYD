@@ -664,18 +664,21 @@ bool uiTerminalTouch(int x, int y, bool valid, bool justDown, uint32_t now) {
 }
 
 // Where the StickS3 / Cardputer cursor stops on the terminal (they have no
-// touch panel): the four headings, each row on screen, the scroll arrows,
-// and LATEST when it has a device to open. Empty when the terminal is not up.
-uint8_t uiTerminalStops(int16_t* xs, int16_t* ys, uint8_t cap) {
+// touch panel), as boxes for the cursor to light whole: the four headings,
+// each row on screen, the scroll arrows, and LATEST when it has a device to
+// open. Empty when the terminal is not up.
+uint8_t uiTerminalStops(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint8_t cap) {
     uint8_t n = 0;
     if (!s_tmDrawn || !Settings::boringMode()) return 0;
-    auto add = [&](int x, int y) { if (n < cap) { xs[n] = (int16_t)x; ys[n] = (int16_t)y; n++; } };
-    const int hy = s_tmBody.y - 4 - s_tmM.bh / 2;
-    for (int k = 0; k < 4; k++) add((s_tmColX[k] + s_tmColX[k + 1]) / 2, hy);
-    for (int j = 0; j < s_tmRowN; j++) add(s_tmBody.x + s_tmBody.w / 2, s_tmRowY0 + j * s_tmRowH + s_tmRowH / 2 - 1);
-    if (s_tmUp.w) add(s_tmUp.x + s_tmUp.w / 2, s_tmUp.y + s_tmUp.h / 2);
-    if (s_tmDn.w) add(s_tmDn.x + s_tmDn.w / 2, s_tmDn.y + s_tmDn.h / 2);
-    if (s_tmWin[3].w && s_tmDetOn) add(s_tmWin[3].x + s_tmWin[3].w / 2, s_tmWin[3].y + s_tmWin[3].h / 2);
+    auto add = [&](int x, int y, int w, int h) {
+        if (n < cap && w > 0 && h > 0) { rx[n] = (int16_t)x; ry[n] = (int16_t)y; rw[n] = (int16_t)w; rh[n] = (int16_t)h; n++; }
+    };
+    const int hy = s_tmBody.y - s_tmM.bh - 3;
+    for (int k = 0; k < 4; k++) add(s_tmColX[k] + 1, hy, s_tmColX[k + 1] - s_tmColX[k] - 2, s_tmM.bh);
+    for (int j = 0; j < s_tmRowN; j++) add(s_tmBody.x, s_tmRowY0 + j * s_tmRowH - 1, s_tmBody.w, s_tmRowH);
+    add(s_tmUp.x, s_tmUp.y, s_tmUp.w, s_tmUp.h);
+    add(s_tmDn.x, s_tmDn.y, s_tmDn.w, s_tmDn.h);
+    if (s_tmDetOn) add(s_tmWin[3].x, s_tmWin[3].y, s_tmWin[3].w, s_tmWin[3].h);
     return n;
 }
 
