@@ -13,6 +13,7 @@
 #define EXIO_REG_MODE  0x02   // one bit per EXIO, 1 = output
 #define EXIO_REG_OUT   0x03   // one bit per EXIO, the levels
 #define EXIO_REG_PWM   0x05   // the backlight, 0..255
+#define EXIO_REG_ADC   0x06   // BAT_ADC, two bytes, low first
 #define EXIO_TP_RST    0      // touch reset, active low
 #define EXIO_LCD_RST   1      // panel reset, active low
 #define EXIO_PA_CTRL   3      // speaker amplifier enable, high = on
@@ -34,12 +35,23 @@ static bool writeReg(uint8_t reg, uint8_t value) {
     return Wire.endTransmission() == 0;
 }
 
+// The sound task flips the amp while the loop may be resetting the touch
+// chip: the read-modify-write of the cached byte is the part Wire's own lock
+// does not cover.
+static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
+
 static bool setPin(uint8_t pin, bool high) {
+    portENTER_CRITICAL(&s_mux);
     if (high) s_out |= (uint8_t)(1u << pin);
     else      s_out &= (uint8_t)~(1u << pin);
-    return writeReg(EXIO_REG_OUT, s_out);
+    const uint8_t v = s_out;
+    portEXIT_CRITICAL(&s_mux);
+    return writeReg(EXIO_REG_OUT, v);
 }
 
+void setAmp(bool on) {
+    if (s_ok) setPin(EXIO_PA_CTRL, on);
+}
 bool begin() {
     Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL, I2C_HZ);
     delay(10);
@@ -66,6 +78,22 @@ void setBacklight(uint8_t duty) {
     if (!s_ok) return;
     // Waveshare's own driver clamps at 97%; 255 here is that, not more.
     writeReg(EXIO_REG_PWM, (uint8_t)(((uint16_t)duty * 247u + 127u) / 255u));
+}
+
+uint16_t batteryRaw() {
+    if (!s_ok) return 0;
+    Wire.beginTransmission(EXIO_ADDR);
+    Wire.write(EXIO_REG_ADC);
+    if (Wire.endTransmission(false) != 0) return 0;
+    if (Wire.requestFrom((int)EXIO_ADDR, 2) != 2) return 0;
+    const uint8_t lo = (uint8_t)Wire.read();
+    const uint8_t hi = (uint8_t)Wire.read();
+    return (uint16_t)(lo | (hi << 8));
+}
+
+uint16_t batteryMv() {
+    // 3300 mV full scale over 1023 steps, times three for the divider.
+    return (uint16_t)((uint32_t)batteryRaw() * 3300u * 3u / 1023u);
 }
 
 bool resetTouch() {
