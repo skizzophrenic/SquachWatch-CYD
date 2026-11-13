@@ -4,6 +4,7 @@
 #include <stdlib.h>     // getenv: the emulator's SQUACHSIM_SPEAKER
 #endif
 #include "wardrive.h"
+#include "home_sync.h"
 #if SQUACH_LORA
 #include "ui_lorachat.h"
 #endif
@@ -58,8 +59,8 @@ static uint8_t s_dexCaught = 0;
 // has turned off) are filtered out by visibleRows() below rather than
 // removed here, so their SettingsRow values stay stable regardless of
 // which mode is active.
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(MARAUDER_V8) || defined(TDECK_PLUS)
-void boardBatteryLine(char* out, size_t n);    // main.cpp: the divider on GPIO9
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(MARAUDER_V8) || defined(TDECK_PLUS) || defined(WAVESHARE_C5)
+void boardBatteryLine(char* out, size_t n);    // main.cpp: the cell, however the board reads it
 #endif
 #if defined(TWATCH_S3)
 void twatchBatteryLine(char* out, size_t n);   // main.cpp, where the power chip lives
@@ -118,6 +119,9 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::POWER_SAVER,
 #if defined(CYD_GPS)
     SettingsRow::WATCH_WARDRIVE,   // the watch's row and setting, on the CYD GPS builds
+#if SQW_HOME_SYNC
+    SettingsRow::HOME_SYNC,        // directly under WARDRIVE: hands the logs to the Tab5 base
+#endif
 #endif
 #if defined(ESP32) && !defined(TWATCH_S3)
     SettingsRow::CHARGE_MODE,
@@ -193,7 +197,7 @@ static const uint8_t WATCH_ROWS_N = sizeof(WATCH_ROWS) / sizeof(WATCH_ROWS[0]);
 // The SYSTEM page: the rarely-needed machinery, off the main list.
 static const SettingsRow SYSTEM_ROWS[] = {
     SettingsRow::PRIVACY,
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(MARAUDER_V8) || defined(TDECK_PLUS)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(MARAUDER_V8) || defined(TDECK_PLUS) || defined(WAVESHARE_C5)
     SettingsRow::BOARD_BATTERY,
 #endif
 #if SQUACH_LORA && defined(TDECK_PLUS)
@@ -271,6 +275,9 @@ static RowGroupId groupFor(SettingsRow r) {
 #if defined(CYD_GPS)
     // Under its neighbor's heading: a CYD has no WATCH heading.
     if (r == SettingsRow::WATCH_WARDRIVE) return groupFor(SettingsRow::POWER_SAVER);
+#if SQW_HOME_SYNC
+    if (r == SettingsRow::HOME_SYNC)      return groupFor(SettingsRow::POWER_SAVER);
+#endif
 #endif
     switch (r) {
         case SettingsRow::WATCH_BATTERY:
@@ -1266,7 +1273,7 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             snprintf(valBuf, valBufN, "%u", (unsigned)IgnoreList::count());
             value = valBuf;
             break;
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(MARAUDER_V8) || defined(TDECK_PLUS)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(MARAUDER_V8) || defined(TDECK_PLUS) || defined(WAVESHARE_C5)
         case SettingsRow::BOARD_BATTERY:
             label = "BATTERY"; boardBatteryLine(valBuf, valBufN); value = valBuf;
             break;
@@ -1341,6 +1348,11 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
                     value = valBuf;
                     break;
             }
+            break;
+#endif
+#if SQW_HOME_SYNC
+        case SettingsRow::HOME_SYNC:
+            label = "HOME SYNC"; value = HomeSync::enabled() ? "ON" : "OFF";
             break;
 #endif
         case SettingsRow::EXT_SCREEN:
