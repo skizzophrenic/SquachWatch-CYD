@@ -22,19 +22,39 @@
 // driver's DMA buffers and blocks on the write, so a slow frame on the
 // drawing side never puts a gap in a sound. Four 256-frame buffers is 64 ms
 // of DMA, 4 KB of internal RAM.
+//
+// The Waveshare ESP32-C5-Touch-LCD-2.8 has the same ES8311 at 0x18, on the
+// same bus as its touch chip, with BCK 24, WS 25, DOUT 26 (not the BSP's 27;
+// see PIN_DOUT) and NO master clock
+// line (Waveshare's BSP: BSP_I2S_MCLK is NC), so the codec takes its clock
+// from BCK: 16-bit slots make that 32 x 16 kHz = 512 kHz, multiplied x8 in
+// the codec to the 4.096 MHz (256 fs) the rest of the setup assumes. The NS4150B's enable is the CH32 helper's
+// EXIO3, high = on. It uses IDF 5's I2S driver (i2s_std), not the legacy
+// one: on the C5's core the two cannot be linked together.
 #include "sound.h"
-#if SQW_SPEAKER
+#if SQW_SOUND
 #include <Arduino.h>
 #include <Wire.h>
 #include <math.h>
+#if defined(WAVESHARE_C5)
+#include <driver/i2s_std.h>
+#include "waveshare_c5_board.h"
+#else
 #include <driver/i2s.h>
+#endif
 #include <esp_heap_caps.h>
 #include "settings.h"
 #include "clock.h"
 
 namespace Sound {
 
-#if defined(FREENOVE_S3_35)
+#if defined(WAVESHARE_C5)
+// The MCU's data out is GPIO26 -- CONFIRMED by ear on the board 2026-10-13.
+// Waveshare's BSP says the opposite (`.dout = BSP_I2S_DSIN`, GPIO27, "MCU TX
+// -> codec DSDIN"), and with that this board is silent.
+static const int PIN_MCK = -1, PIN_BCK = 24, PIN_WS = 25, PIN_DOUT = 26;
+static const int PIN_AMP = -1;   // the CH32's EXIO3: see amp()
+#elif defined(FREENOVE_S3_35)
 static const int PIN_MCK = 17, PIN_BCK = 18, PIN_WS = 21, PIN_DOUT = 15;
 static const int PIN_AMP = 1;
 #elif defined(TDECK_PLUS)
@@ -53,8 +73,77 @@ static const int PIN_AMP = 1;
 #endif
 static const uint8_t    CODEC   = 0x18;
 static const uint32_t   RATE    = 16000;      // plenty for tones under 4 kHz
-static const i2s_port_t PORT    = I2S_NUM_0;
 static const int        CHUNK   = 256;        // frames per write, 16 ms
+
+// ---- the I2S port: the legacy driver, or IDF 5's on the Waveshare ----------
+#if defined(WAVESHARE_C5)
+static i2s_chan_handle_t s_tx = nullptr;
+static bool i2sInstall() {
+    i2s_chan_config_t cc = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
+    cc.dma_desc_num  = 4;
+    cc.dma_frame_num = CHUNK;
+    cc.auto_clear    = true;
+    if (i2s_new_channel(&cc, &s_tx, nullptr) != ESP_OK) return false;
+    i2s_std_config_t sc = {};
+    sc.clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(RATE);
+    sc.slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_STEREO);
+    // 16-bit slots: BCK = 32 fs, which the codec multiplies x8 to 256 fs --
+    // the layout esp_codec_dev runs on this board (16-bit stereo, use_mclk
+    // false, pre_multi forced to x8).
+    sc.gpio_cfg.mclk = I2S_GPIO_UNUSED;
+    sc.gpio_cfg.bclk = (gpio_num_t)PIN_BCK;
+    sc.gpio_cfg.ws   = (gpio_num_t)PIN_WS;
+    sc.gpio_cfg.dout = (gpio_num_t)PIN_DOUT;
+    sc.gpio_cfg.din  = I2S_GPIO_UNUSED;
+    if (i2s_channel_init_std_mode(s_tx, &sc) != ESP_OK) return false;
+    return i2s_channel_enable(s_tx) == ESP_OK;   // clocks on for the codec's power-up
+}
+// The clocks never stop here: with no MCLK line the codec's own clock IS the
+// bit clock, and the codec does not come back from losing it mid-session.
+// auto_clear keeps the line at zero between sounds.
+static void i2sStart() {}
+static void i2sStop()  {}
+static void i2sZero()  {}   // auto_clear sends zeros once the data runs out
+static void i2sWrite(const void* buf, size_t bytes) {
+    size_t done = 0;
+    i2s_channel_write(s_tx, buf, bytes, &done, portMAX_DELAY);
+}
+#else
+static const i2s_port_t PORT    = I2S_NUM_0;
+static bool i2sInstall() {
+    i2s_config_t cfg = {};
+    cfg.mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
+    cfg.sample_rate          = RATE;
+    cfg.bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT;
+    cfg.channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT;
+    cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
+    cfg.intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1;
+    cfg.dma_buf_count        = 4;
+    cfg.dma_buf_len          = CHUNK;
+    cfg.use_apll             = false;
+    cfg.tx_desc_auto_clear   = true;
+    cfg.fixed_mclk           = 0;
+    cfg.mclk_multiple        = I2S_MCLK_MULTIPLE_256;
+    cfg.bits_per_chan        = I2S_BITS_PER_CHAN_16BIT;
+    if (i2s_driver_install(PORT, &cfg, 0, nullptr) != ESP_OK) return false;
+    i2s_pin_config_t pins = {};
+    pins.mck_io_num   = PIN_MCK >= 0 ? PIN_MCK : I2S_PIN_NO_CHANGE;
+    pins.bck_io_num   = PIN_BCK;
+    pins.ws_io_num    = PIN_WS;
+    pins.data_out_num = PIN_DOUT;
+    pins.data_in_num  = I2S_PIN_NO_CHANGE;
+    i2s_set_pin(PORT, &pins);
+    i2s_zero_dma_buffer(PORT);
+    return true;
+}
+static void i2sStart() { i2s_start(PORT); }
+static void i2sStop()  { i2s_stop(PORT); }
+static void i2sZero()  { i2s_zero_dma_buffer(PORT); }
+static void i2sWrite(const void* buf, size_t bytes) {
+    size_t done = 0;
+    i2s_write(PORT, buf, bytes, &done, portMAX_DELAY);
+}
+#endif
 
 static bool          s_ok      = false;
 static bool          s_ampLow  = true;        // the amp plays with the pin LOW
@@ -71,7 +160,10 @@ static TaskHandle_t  s_task    = nullptr;
 // rounded fade instead of a straight one. The kinds:
 //
 //   TONE   a wave gliding through the pitches p[] (Hz, 0 = unused), with an
-//          optional wobble: k0 depth, k1 rate (Hz), k2 the ms it fades over
+//          optional wobble: k0 depth, k1 rate (Hz), k2 the ms it fades over.
+//          Two of its waves are not pitches: SWOOSH is noise through a
+//          low-pass whose cutoff follows the glide, heard as air rushing past;
+//          GRUNT is a saw roughened with noise, a nasal, raspy buzz
 //   NOISE  the first Sound Lab's low-passed noise burst
 //   VOICE  a throat buzzing through the pitches p[], shaped by the mouth
 //          vowels v[]: k0 mouth size (under 1 = a bigger creature, 0 = 1),
@@ -85,7 +177,7 @@ static TaskHandle_t  s_task    = nullptr;
 // for sample, and the picks below are the owner's. The ones kept from the
 // first Sound Lab (2026-10-11) are written with BEEP and sound as before.
 enum : uint8_t { TONE = 0, NOISE, VOICE, BELL, AIR };
-enum : uint8_t { SQ = 0, TRI, SIN, SAW };
+enum : uint8_t { SQ = 0, TRI, SIN, SAW, SWOOSH, GRUNT };
 enum : uint8_t { WITH = 1, COS = 2 };
 enum : uint8_t { V_END = 0, OO, OH, AH, UH, EH, EE, IH, MM };
 struct Part {
@@ -104,6 +196,10 @@ static const Part NEW_DEVICE[] = { BEEP(660, 0, 45, TRI, 25), BEEP(880, 0, 45, T
 static const Part THROW[]      = { BEEP(300, 1500, 260, SIN, 0) };
 static const Part LAND[]       = { { NOISE, 0, 0, 0, 30, 0, 4, 60, 100 }, BEEP(180, 70, 60, SQ, 0) };
 static const Part TOAST_POP[]  = { BEEP(200, 1800, 80, SQ, 0) };
+// A drone going overhead: the rush builds as it comes in, and falls away.
+static const Part DRONE[]      = { BEEP(300, 2800, 220, SWOOSH, 0), BEEP(2800, 250, 320, SWOOSH, 0) };
+// Oink oink: two short grunts, each sliding down, the second a touch higher.
+static const Part OINK[]       = { BEEP(330, 190, 130, GRUNT, 45), BEEP(380, 210, 170, GRUNT, 0) };
 #undef BEEP
 // The Bigfoot whoop, twice, echoing through the trees.
 static const Part WATCH_HIT[]  = {
@@ -144,6 +240,7 @@ static const Sound SOUNDS[(int)Id::COUNT] = {
     { SND(VISITOR), 70, 0.2f, 0.25f }, { SND(THROW) }, { SND(LAND) }, { SND(CLIPPY) }, { SND(TOAST_POP) },
     { SND(PLUG_IN), 90, 0.3f, 0.35f }, { SND(UNPLUG), 90, 0.3f, 0.35f },
     { SND(LAND_TOASTER) }, { SND(LAND_YETI) }, { SND(HEADS_UP), 190, 0.38f, 0.45f, 0.75f },
+    { SND(DRONE) }, { SND(OINK) },
 };
 #undef SND
 
@@ -163,7 +260,61 @@ static uint8_t rd(uint8_t r) {
 // asleep. The divider registers (02-08) only matter to the codec as a bus
 // master, but they are set to the table's 4.096 MHz / 16 kHz row anyway, as
 // the driver does. Volume register 32 sits at the driver's 85%.
+#if defined(WAVESHARE_C5)
+// The Waveshare board gets esp_codec_dev's own es8311 sequence, verbatim and
+// in its order -- open(), set_fs() for 16 kHz 16-bit with use_mclk false,
+// start() in DAC mode, unmute -- the sequence Waveshare's BSP runs.
+static bool codecInitWs() {
+    if (!wr(0x44, 0x08)) return false;      // open()
+    wr(0x01, 0x30);
+    wr(0x02, 0x00);
+    wr(0x03, 0x10);
+    wr(0x16, 0x24);
+    wr(0x04, 0x10);
+    wr(0x05, 0x00);
+    wr(0x0B, 0x00);
+    wr(0x0C, 0x00);
+    wr(0x10, 0x1F);
+    wr(0x11, 0x7F);
+    wr(0x00, 0x80);                         // slave
+    wr(0x01, 0xBF);                         // clocks on, MCLK from SCLK (no MCLK line)
+    wr(0x13, 0x10);
+    wr(0x1B, 0x0A);
+    wr(0x1C, 0x6A);
+    wr(0x44, 0x58);
+    // set_fs(): the 4.096 MHz / 16 kHz row, pre_multi forced to x8 for SCLK.
+    wr(0x02, (uint8_t)((rd(0x02) & 0x07) | 0x18));
+    wr(0x05, 0x00);
+    wr(0x03, 0x10);
+    wr(0x04, 0x20);
+    wr(0x07, (uint8_t)(rd(0x07) & 0xC0));
+    wr(0x08, 0xFF);
+    wr(0x06, (uint8_t)((rd(0x06) & 0xE0) | 0x03));
+    wr(0x09, (uint8_t)(((rd(0x09) & ~0x1C) | 0x0C) & 0xFC));   // 16-bit, I2S
+    wr(0x0A, (uint8_t)(((rd(0x0A) & ~0x1C) | 0x0C) & 0xFC));
+    // start(), DAC mode.
+    wr(0x00, 0x80);
+    wr(0x01, 0xBF);
+    wr(0x09, (uint8_t)(rd(0x09) & ~0x40));  // SDP in un-muted
+    wr(0x0A, (uint8_t)(rd(0x0A) | 0x40));   // SDP out muted: no ADC here
+    wr(0x17, 0xBF);
+    wr(0x0E, 0x02);
+    wr(0x12, 0x00);
+    wr(0x14, 0x1A);
+    wr(0x0D, 0x01);
+    wr(0x15, 0x40);
+    wr(0x37, 0x08);
+    wr(0x45, 0x00);
+    wr(0x31, (uint8_t)(rd(0x31) & 0x9F));   // unmute
+    wr(0x32, 0xD8);                         // volume: loudness is in the samples
+    return true;
+}
+#endif
+
 static bool codecInit() {
+#if defined(WAVESHARE_C5)
+    return codecInitWs();
+#else
     if (!wr(0x00, 0x1F)) return false;      // reset everything
     delay(20);
     wr(0x00, 0x00);
@@ -187,10 +338,18 @@ static bool codecInit() {
     wr(0x37, 0x08);                         // DAC equalizer bypass
     wr(0x32, 0xD8);                         // DAC volume, 85%
     return true;
+#endif
 }
 
 // ---- the amplifier ---------------------------------------------------------
+#if defined(WAVESHARE_C5)
+// The enable is the helper chip's EXIO3, high = on. Waveshare's BSP turns it
+// on once and leaves it; so does this (begin() below), and the player never
+// touches I2C. Silence between sounds is the clocks' zeros.
+static void amp(bool) {}
+#else
 static void amp(bool on) { if (PIN_AMP >= 0) digitalWrite(PIN_AMP, (on == s_ampLow) ? LOW : HIGH); }
+#endif
 
 // ---- rendering -------------------------------------------------------------
 // The whole sound is rendered into a float buffer in PSRAM first (every board
@@ -269,6 +428,21 @@ static void renderTone(const Part& st, float* out, int N, uint32_t& lcg, float& 
             case SQ:  v = ph < 0.5f ? 0.35f : -0.35f; break;
             case TRI: v = (ph < 0.5f ? (ph * 4.0f - 1.0f) : (3.0f - ph * 4.0f)) * 0.7f; break;
             case SIN: v = sinf(ph * TAU_F) * 0.7f; break;
+            case SWOOSH: {
+                lcg = lcg * 1664525u + 1013904223u;
+                const float r = ((int32_t)(lcg >> 8) / 8388608.0f) - 1.0f;
+                float a = f / 4000.0f;                                   // the cutoff rides the glide
+                if (a < 0.03f) a = 0.03f; else if (a > 0.9f) a = 0.9f;
+                lp += a * (r - lp);
+                v = lp * 1.1f;
+                break;
+            }
+            case GRUNT: {
+                lcg = lcg * 1664525u + 1013904223u;
+                const float r = ((int32_t)(lcg >> 8) / 8388608.0f) - 1.0f;
+                v = (ph * 2.0f - 1.0f) * 0.45f + r * 0.12f;
+                break;
+            }
             default:  v = (ph * 2.0f - 1.0f) * 0.4f; break;
         }
         out[n] += v * envLin(st, n, N) * lv;
@@ -332,8 +506,7 @@ static void renderAir(const Part& st, float* out, int N) {
 }
 
 static void writeFrames(int16_t* buf, int frames) {
-    size_t done = 0;
-    i2s_write(PORT, buf, (size_t)frames * 4, &done, portMAX_DELAY);
+    i2sWrite(buf, (size_t)frames * 4);
 }
 
 static void silence(int16_t* buf, int ms) {
@@ -397,7 +570,7 @@ static void playNow(Id id) {
     const float vol = pct * pct * 32000.0f, g = snd.gain > 0 ? snd.gain : 1.0f;
     int16_t buf[CHUNK * 2];
 
-    i2s_start(PORT);
+    i2sStart();
     silence(buf, 24);         // clocks and zeros before the amp wakes: no pop
     amp(true);
     silence(buf, 16);
@@ -417,8 +590,16 @@ static void playNow(Id id) {
     silence(buf, 16);
     amp(false);
     silence(buf, 24);         // let the DMA drain before the clocks stop
-    i2s_zero_dma_buffer(PORT);
-    i2s_stop(PORT);
+    i2sZero();
+    i2sStop();
+}
+
+// Core 1 where there is one; the C5 has a single core.
+static void soundTask(void*);
+static void startTask() {
+    s_q = xQueueCreate(4, sizeof(uint8_t));
+    xTaskCreatePinnedToCore(soundTask, "sound", 4096, nullptr, 2, &s_task, portNUM_PROCESSORS > 1 ? 1 : 0);
+    s_ok = s_q && s_task;
 }
 
 static void soundTask(void*) {
@@ -438,45 +619,22 @@ void begin() {
     if (Wire.endTransmission() != 0) { Serial.println("[sound] ES8311 did not answer; no speaker"); return; }
 #endif
 
-    i2s_config_t cfg = {};
-    cfg.mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
-    cfg.sample_rate          = RATE;
-    cfg.bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT;
-    cfg.channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT;
-    cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
-    cfg.intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1;
-    cfg.dma_buf_count        = 4;
-    cfg.dma_buf_len          = CHUNK;
-    cfg.use_apll             = false;
-    cfg.tx_desc_auto_clear   = true;
-    cfg.fixed_mclk           = 0;
-    cfg.mclk_multiple        = I2S_MCLK_MULTIPLE_256;
-    cfg.bits_per_chan        = I2S_BITS_PER_CHAN_16BIT;
-    if (i2s_driver_install(PORT, &cfg, 0, nullptr) != ESP_OK) { Serial.println("[sound] I2S driver refused"); return; }
-    i2s_pin_config_t pins = {};
-    pins.mck_io_num   = PIN_MCK >= 0 ? PIN_MCK : I2S_PIN_NO_CHANGE;
-    pins.bck_io_num   = PIN_BCK;
-    pins.ws_io_num    = PIN_WS;
-    pins.data_out_num = PIN_DOUT;
-    pins.data_in_num  = I2S_PIN_NO_CHANGE;
-    i2s_set_pin(PORT, &pins);
-    i2s_zero_dma_buffer(PORT);
+    if (!i2sInstall()) { Serial.println("[sound] I2S driver refused"); return; }
     // The codec's power-up wants its clocks running; the driver starts them
     // on install. Set the codec up, then park the clocks until a sound.
 #if SOUND_NO_CODEC
-    i2s_stop(PORT);
-    s_q = xQueueCreate(4, sizeof(uint8_t));
-    xTaskCreatePinnedToCore(soundTask, "sound", 4096, nullptr, 2, &s_task, 1);
-    s_ok = s_q && s_task;
+    i2sStop();
+    startTask();
     Serial.printf("[sound] I2S amp ready: BCK %d WS %d DOUT %d%s\n", PIN_BCK, PIN_WS, PIN_DOUT, s_ok ? "" : " -- task failed");
 #else
     const bool ok = codecInit();
     const uint8_t id1 = rd(0xFD), id2 = rd(0xFE);
-    i2s_stop(PORT);
+    i2sStop();
     if (!ok) { Serial.println("[sound] ES8311 setup failed"); return; }
-    s_q = xQueueCreate(4, sizeof(uint8_t));
-    xTaskCreatePinnedToCore(soundTask, "sound", 4096, nullptr, 2, &s_task, 1);
-    s_ok = s_q && s_task;
+#if defined(WAVESHARE_C5)
+    WsC5::setAmp(true);
+#endif
+    startTask();
     Serial.printf("[sound] ES8311 id %02X%02X ready: MCK %d BCK %d WS %d DOUT %d, amp on GPIO%d%s\n",
                   id1, id2, PIN_MCK, PIN_BCK, PIN_WS, PIN_DOUT, PIN_AMP, s_ok ? "" : " -- task failed");
 #endif
@@ -487,7 +645,7 @@ void play(Id id, bool sample) {
     if (!sample) {
         const uint8_t mode = Settings::soundMode();          // 0 OFF, 1 ALERTS, 2 ALL
         const bool alert = id == Id::NEW_DEVICE || id == Id::WATCH_HIT || id == Id::LOW_BATTERY
-                        || id == Id::HEADS_UP;
+                        || id == Id::HEADS_UP || id == Id::DRONE || id == Id::OINK;
         if (mode == 0 || (!alert && mode < 2)) return;
         if (s_hush) return;
         if (Clock::night() && id != Id::WATCH_HIT) return;
@@ -506,7 +664,12 @@ void quiet() {
 
 bool present() { return s_ok; }
 
+#if defined(WAVESHARE_C5)
+// The bench here: SOUND AMP HIGH turns the amplifier on, SOUND AMP LOW off.
+void ampLow(bool activeLow) { WsC5::setAmp(!activeLow); }
+#else
 void ampLow(bool activeLow) { s_ampLow = activeLow; amp(false); }
+#endif
 
 }  // namespace Sound
-#endif  // SQW_SPEAKER
+#endif  // SQW_SOUND

@@ -30,6 +30,9 @@ namespace WsC5 {
     void setBacklight(uint8_t duty);
     // Pulses the touch chip's reset (EXIO0) with Waveshare's timings.
     bool resetTouch();
+    // The speaker amplifier's enable (EXIO3). Safe from the sound task.
+    // (EXIO6 is NOT spare: driven high, it reset the board. Leave it alone.)
+    void setAmp(bool on);
 }
 
 namespace Cst3530 {
