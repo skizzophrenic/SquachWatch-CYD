@@ -82,6 +82,59 @@ uint32_t       channelLastMs(uint8_t i);    // millis() of the last one; 0 = nev
 // check, as it is in the firmware.
 void decrypt(const Header& h, const Channel& c, uint8_t* payload, uint8_t len);
 
+// ---- sending ------------------------------------------------------------------
+// Whether a frame can be built for this channel: switched on, and a key this
+// file can seal with -- 16 bytes, or none at all (ham mode, in the clear). A
+// 32-byte key is refused here for the reason decrypt() cannot open one: there
+// is no AES-256 in lora_crypto, and a frame sealed wrong is worse than none.
+bool canSend(const Channel& c);
+// One broadcast frame from `from`, the way a stock node builds it: the 16-byte
+// header in the clear (to all, from, id, hop limit = hop start = `hops`, the
+// channel's hash, next hop 0, relay = our last byte), then Data{portnum,
+// payload} under the channel's key with the same nonce decrypt() uses -- CTR,
+// so sealing is that same operation. `f` needs room for 16 + 4 + 200 bytes;
+// the payload is cut at 200. Returns the length, 0 when !canSend(c).
+// Pure, so test/lora_meshtastic_test.cpp builds one and opens it with decode().
+uint16_t buildFrame(const Channel& c, uint32_t from, uint32_t id, uint8_t hops, uint8_t port,
+                    const uint8_t* payload, size_t plen, uint8_t* f);
+// The pieces buildFrame is made of, for frames that are not a plain
+// broadcast. encodeData: Data{portnum, payload (cut at 200), want_response
+// when asked, request_id when non-zero} into `out` (room for 212); returns
+// its length. buildChannelFrame: that Data under the channel's key, to `to`,
+// want_ack as asked -- an ACK, or a NodeInfo sent to one node.
+size_t   encodeData(uint8_t port, const uint8_t* payload, size_t plen, bool wantResponse, uint32_t requestId,
+                    uint8_t* out);
+uint16_t buildChannelFrame(const Channel& c, uint32_t from, uint32_t to, uint32_t id, uint8_t hops, bool wantAck,
+                           const uint8_t* data, size_t dlen, uint8_t* f);
+
+// ---- direct messages (PKI, firmware 2.5 and later) ------------------------------
+// A direct message is sealed to the two nodes' X25519 keys: the AES-256 key
+// is SHA-256 of the shared secret, the cipher AES-CCM with an 8-byte tag and
+// a 13-byte nonce of the packet id, a random "extra nonce" and the sender.
+// On the air: header (channel byte 0), ciphertext, tag, extra nonce. Since
+// 2.5 the firmware refuses a text DM sealed under a channel key ("Rejecting
+// legacy DM", Router.cpp), so this is the only kind that arrives.
+// CryptoEngine::encryptCurve25519 / decryptCurve25519 are the reference.
+static const uint8_t PKI_OVERHEAD = 12;     // tag 8 + extra nonce 4
+static const uint8_t PKI_CHANNEL  = 0xFF;   // Decoded::channelIdx of an opened direct message
+// False when their key is a bad point (the shared secret came out zero).
+bool     pkiKey(const uint8_t myPriv[32], const uint8_t theirPub[32], uint8_t key[32]);
+// out gets ciphertext | tag | extra nonce; returns len + 12 (0 for nothing to seal).
+size_t   pkiSeal(const uint8_t key[32], uint32_t from, uint32_t id, uint32_t extraNonce,
+                 const uint8_t* plain, size_t len, uint8_t* out);
+// The plaintext's length, or -1 when the tag does not hold (wrong key, or tampered).
+int      pkiOpen(const uint8_t key[32], uint32_t from, uint32_t id, const uint8_t* in, size_t len, uint8_t* out);
+// Header to `to` on channel 0, then pkiSeal of the encoded Data. 0 when it
+// would not fit in 255 bytes, or `to` is everyone (a DM is to one node).
+uint16_t buildPkiFrame(const uint8_t key[32], uint32_t from, uint32_t to, uint32_t id, uint8_t hops, bool wantAck,
+                       uint32_t extraNonce, const uint8_t* data, size_t dlen, uint8_t* f);
+// decode() hands a channel-0 frame to this when one is set: true and the
+// plaintext in `out` (room for 240) only when the frame is to this board and
+// the sender's key is known (Lora::Dm holds both). Without one, a DM stays
+// shut -- every board but the T-Deck, and the host tests that do not set one.
+typedef bool (*PkiOpener)(const Header& h, const uint8_t* in, uint8_t len, uint8_t* out, uint8_t& outLen);
+void     setPkiOpener(PkiOpener fn);
+
 struct Data {
     uint32_t       portnum;
     const uint8_t* payload;
@@ -171,8 +224,9 @@ bool parseNeighborInfo(const uint8_t* p, uint8_t len, NeighborInfo& out);
 // area, kept in the struct so the payload pointers stay valid.
 struct Decoded {
     Header   hdr;
-    bool     haveData;      // a channel key opened it
-    uint8_t  channelIdx;    // which Channel did
+    bool     haveData;      // a channel key opened it -- or, with pki, our own key pair
+    uint8_t  channelIdx;    // which Channel did; PKI_CHANNEL for a direct message
+    bool     pki;           // a direct message to this board, opened by the PkiOpener
     Data     data;
     uint8_t  plain[240];
     // The payload, by port; only the one matching data.portnum is filled.

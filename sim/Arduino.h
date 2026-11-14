@@ -44,6 +44,10 @@ inline uint32_t millis() {
     return (uint32_t)duration_cast<milliseconds>(steady_clock::now() - t0).count();
 }
 inline uint32_t micros() { return millis() * 1000; }
+inline void delayMicroseconds(uint32_t) {}
+// The T-Deck backlight's pulse train runs with interrupts off; nothing to stop here.
+#define portDISABLE_INTERRUPTS() do {} while (0)
+#define portENABLE_INTERRUPTS()  do {} while (0)
 
 // delay() advances virtual time rather than sleeping. That matters more
 // than it looks: the firmware has real-time busy-waits that would spin
@@ -96,9 +100,24 @@ inline void pinMode(uint8_t, uint8_t) {}
 inline void digitalWrite(uint8_t, uint8_t) {}
 inline int  digitalRead(uint8_t) { return 0; }
 inline int  analogRead(uint8_t) { return 0; }
+// A battery divider's pin reads half a cell on the charger (4.2 V): the
+// emulator is always on the cable, which is the honest reading.
+inline uint32_t analogReadMilliVolts(uint8_t) { return 2100; }
+// The watch build's boot report and its self-heal: a chip at room warmth, an
+// NVS with room, and a deep sleep that never comes (the heal only fires when
+// Bluetooth goes deaf, which a browser cannot).
+inline float temperatureRead() { return 35.0f; }
+struct nvs_stats_t { size_t used_entries, free_entries, total_entries, namespace_count; };
+inline int nvs_get_stats(const char*, nvs_stats_t* s) { if (s) { s->used_entries = 40; s->free_entries = 590; s->total_entries = 630; s->namespace_count = 8; } return 0; }
+inline int esp_sleep_enable_timer_wakeup(uint64_t) { return 0; }
+inline void esp_deep_sleep_start() {}
 inline void ledcSetup(uint8_t, double, uint8_t) {}
 inline void ledcAttachPin(uint8_t, uint8_t) {}
-inline void ledcWrite(uint8_t, uint32_t) {}
+// The backlight's channel (BL_CH_ORIG, 0 on the CYDs) is remembered, so the
+// browser emulator can show the screen going dark (sw_backlight). -1 until
+// the firmware first sets it.
+inline int g_simBacklight = -1;
+inline void ledcWrite(uint8_t ch, uint32_t duty) { if (ch == 0) g_simBacklight = (int)duty; }
 
 // Interrupt masking around the firmware's IRAM queues -- single-
 // threaded here, so there's nothing to mask.
@@ -206,6 +225,8 @@ struct HardwareSerial {
     size_t   pos = 0;
     uint32_t t0 = 0;
     bool     loaded = false;
+    // The baud is a fiction here: the NMEA file plays at its own pace.
+    void updateBaudRate(unsigned long) {}
     void begin(unsigned long baud, uint32_t config = 0, int8_t rx = -1, int8_t tx = -1) {
         t0 = millis();
         pos = 0;

@@ -8,7 +8,7 @@
 #pragma once
 #include <Arduino.h>
 static inline void serialFlush() {
-#if defined(SQW_S3)
+#if defined(SQW_S3) || defined(TAB5)   // the Tab5's console is the P4's own USB too
     if (Serial) Serial.flush();
 #else
     Serial.flush();

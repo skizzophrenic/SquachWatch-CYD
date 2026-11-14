@@ -3,7 +3,9 @@
 #include "lora_channels.h"
 #include "lora_meshcore.h"
 #include "lora_meshtastic.h"
+#include "lora_profiles.h"
 #include "settings.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>   // strcasecmp: a group named at a console
@@ -159,7 +161,83 @@ bool save() {
     // nothing over it. See Settings::setLoraChannels.
     const bool ok = Settings::setLoraChannels(buf, n > 1 ? n : 0);
     free(buf);
+    // Every change to the list comes through here, so this is where a pick
+    // whose channel just went is let go of.
+    txPrune();
     return ok;
+}
+
+// ---- the channel a text goes out on ----------------------------------------
+static bool isMc(Proto p) { return p == Proto::MESHCORE; }
+
+uint8_t txDefault(Proto p, const char* mtPrimary) {
+    if (isMc(p)) return 0;
+    const int i = Meshtastic::findChannel(mtPrimary && *mtPrimary ? mtPrimary : "LongFast");
+    // findChannel answers with the first row of that name, and the keyed
+    // presets come before the ham-mode ones: this is the default-key row.
+    return i >= 0 ? (uint8_t)i : 0;
+}
+
+bool txSendable(Proto p, uint8_t idx, const char* mtPrimary) {
+    if (isMc(p)) {
+        if (idx >= MeshCore::channelCount()) return false;
+        return MeshCore::channel(idx).enabled;
+    }
+    if (idx >= Meshtastic::channelCount()) return false;
+    if (idx == txDefault(p, mtPrimary)) return true;
+    const uint8_t firstUser = (uint8_t)(Meshtastic::channelCount() - Meshtastic::userChannelCount());
+    return idx >= firstUser && Meshtastic::canSend(Meshtastic::channel(idx));
+}
+
+uint8_t txPick(Proto p, const char* mtPrimary) {
+    const uint8_t def = txDefault(p, mtPrimary);
+    const char* name = Settings::loraTxChan(isMc(p));
+    if (!name || !*name) return def;
+    const int i = isMc(p) ? MeshCore::findChannel(name) : Meshtastic::findChannel(name);
+    if (i < 0 || !txSendable(p, (uint8_t)i, mtPrimary)) return def;
+    return (uint8_t)i;
+}
+
+uint8_t txStep(Proto p, const char* mtPrimary) {
+    const uint8_t n = isMc(p) ? MeshCore::channelCount() : Meshtastic::channelCount();
+    const uint8_t cur = txPick(p, mtPrimary), def = txDefault(p, mtPrimary);
+    for (uint8_t k = 1; k <= n; k++) {
+        const uint8_t j = (uint8_t)((cur + k) % n);
+        if (!txSendable(p, j, mtPrimary)) continue;
+        if (j == def) Settings::setLoraTxChan(isMc(p), "");
+        else {
+            char name[24];
+            txName(p, j, name, sizeof name);
+            Settings::setLoraTxChan(isMc(p), name);
+        }
+        return j;
+    }
+    return cur;
+}
+
+void txPrune() {
+    for (int k = 0; k < 2; k++) {
+        const bool mc = k == 1;
+        const char* name = Settings::loraTxChan(mc);
+        if (!name || !*name) continue;
+        const int i = mc ? MeshCore::findChannel(name) : Meshtastic::findChannel(name);
+        if (i < 0) Settings::setLoraTxChan(mc, "");
+    }
+}
+
+const char* mtPrimary() {
+    const int16_t i = meshPresetFind(Proto::MESHTASTIC, Settings::loraMtPreset());
+    if (i < 0) return "LongFast";
+    const char* n = profile((uint8_t)i).name;
+    return strncmp(n, "MT ", 3) == 0 ? n + 3 : "LongFast";
+}
+uint8_t txPick(Proto p) { return txPick(p, mtPrimary()); }
+uint8_t txStep(Proto p) { return txStep(p, mtPrimary()); }
+bool    txIsDefault(Proto p) { const char* m = mtPrimary(); return txPick(p, m) == txDefault(p, m); }
+void txName(Proto p, uint8_t idx, char* out, size_t cap) {
+    if (!out || !cap) return;
+    if (isMc(p)) { const MeshCore::Channel c = MeshCore::channel(idx);   snprintf(out, cap, "%s", c.name[0] ? c.name : "?"); }
+    else         { const Meshtastic::Channel c = Meshtastic::channel(idx); snprintf(out, cap, "%s", c.name[0] ? c.name : "?"); }
 }
 
 // ---- named groups ----------------------------------------------------------

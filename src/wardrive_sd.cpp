@@ -21,7 +21,15 @@
 #include <string.h>
 #include <time.h>
 #if defined(ESP32)
+// The card is SD_MMC on the Freenove S3 boards (sd_log.cpp mounts it there)
+// and SPI SD everywhere else.
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
+#include <SD_MMC.h>
+#define WD_CARD SD_MMC
+#else
 #include <SD.h>
+#define WD_CARD SD
+#endif
 #include "frame_push.h"
 #endif
 
@@ -60,6 +68,7 @@ uint32_t   s_rowSince = 0;          // millis() of the oldest unflushed row
 // the pushes in flight.
 volatile bool s_live = false;
 volatile bool s_paused = false;
+volatile bool s_fixNow = false;     // a real fix on the last tick: nothing is queued without one
 int           s_users = 0;
 
 bool     s_card = false;            // the last sdTick saw a card
@@ -82,8 +91,8 @@ bool writeOut(const char* path, const char* buf, size_t len) {
     // Asked before the open: on core 2.0.14 a file that FILE_APPEND creates
     // reports a size() left over from the failed stat(), so the first file on
     // the user's board went out with no header and WiGLE would refuse it.
-    const bool fresh = !SD.exists(path);
-    File f = SD.open(path, FILE_APPEND);
+    const bool fresh = !WD_CARD.exists(path);
+    File f = WD_CARD.open(path, FILE_APPEND);
     if (!f) { FramePush::busUnlock(); return false; }
     bool ok = true;
     if (fresh) {
@@ -186,6 +195,10 @@ void enqueue(bool wifi, const Pending& p) {
 // paused only a count.
 bool taking() {
     if (!__atomic_load_n(&s_live, __ATOMIC_SEQ_CST)) return false;
+#if defined(CARDPUTER_ADV)
+    // Without a fix nothing could be written: not queued, and not a loss.
+    if (!s_fixNow) return false;
+#endif
     if (s_paused) { addDropped(1); return false; }
     return true;
 }
@@ -250,6 +263,21 @@ void setEnabled(bool on) {
 }
 bool enabled() { return s_on; }
 
+static int8_t s_sound = -1;   // -1 not read yet
+bool soundOn() {
+    if (s_sound < 0) {
+        Preferences prefs;
+        s_sound = 1;
+        if (prefs.begin("wardrive", true)) { s_sound = prefs.getBool("snd", true) ? 1 : 0; prefs.end(); }
+    }
+    return s_sound == 1;
+}
+void toggleSound() {
+    s_sound = soundOn() ? 0 : 1;
+    Preferences prefs;
+    if (prefs.begin("wardrive", false)) { prefs.putBool("snd", s_sound == 1); prefs.end(); }
+}
+
 void noteWifi(const uint8_t* bssid, const char* ssid, uint16_t auth, uint8_t channel, int8_t rssi) {
     if (!bssid || !taking()) return;
     Pending p;
@@ -298,6 +326,7 @@ void sdTick(uint32_t nowMs, bool cardMounted) {
         s_heapAt = nowMs ? nowMs : 1;
         s_paused = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < PAUSE_BLOCK_B;
     }
+    s_fixNow = realFix(nowMs);
     drain(nowMs);
     if (s_rowCount && nowMs - s_rowSince >= FLUSH_MS) flush();
 }
@@ -327,7 +356,7 @@ void sdWipe() {
     // and passes until one comes back short: a card driven with for months
     // holds more than sixteen.
     for (int pass = 0; pass < 64; pass++) {
-        File dir = SD.open("/");
+        File dir = WD_CARD.open("/");
         if (!dir) break;
         char victims[16][32];
         int  n = 0;
@@ -343,7 +372,7 @@ void sdWipe() {
             f.close();
         }
         dir.close();
-        for (int i = 0; i < n; i++) SD.remove(victims[i]);
+        for (int i = 0; i < n; i++) WD_CARD.remove(victims[i]);
         if (n < 16) break;
     }
     FramePush::busUnlock();

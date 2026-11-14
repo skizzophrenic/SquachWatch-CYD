@@ -100,7 +100,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.13"   # pioarduino refuses newer (3.15 broke the C5 runner, 2026-10-20)
       - name: Install PlatformIO
         run: pip install --upgrade platformio
       - name: Build RockBase NM-CYD-C5 (ESP32-C5)
@@ -110,6 +110,14 @@ jobs:
       - name: Build Marauder V8 (ESP32-C5)
         continue-on-error: true
         run: pio run -e marauder-v8
+      # The M5Stack Tab5 (ESP32-P4) on the same platform. LAB ONLY: offered
+      # under ?lab=1, never on the public page or attached to a release. Its
+      # radio is an ESP32-C6 that needs our own firmware written to it first
+      # (docs/TAB5.md); a stock Tab5 runs this build with WiFi and Bluetooth
+      # off. Its own step, so a failure here never costs the C5 boards.
+      - name: Build M5Stack Tab5 (ESP32-P4)
+        continue-on-error: true
+        run: pio run -e tab5
       - name: Collect
         run: |
           mkdir -p c5
@@ -122,6 +130,13 @@ jobs:
           # boot_app0 lives in the framework the C5 was built with, not the
           # Xtensa boards' one.
           cp "$(find ~/.platformio/packages -path '*framework-arduinoespressif32*/tools/partitions/boot_app0.bin' | head -1)" c5/boot_app0.bin
+          # The Tab5: bootloader at 0x2000 like the C5, the 16 MB table, and
+          # the same framework's boot_app0 under its own name, so its lab
+          # manifest never depends on a C5 build having come through.
+          if [ -f .pio/build/tab5/firmware.bin ]; then
+            for f in bootloader partitions firmware; do cp ".pio/build/tab5/$f.bin" "c5/tab5-$f.bin"; done
+            cp c5/boot_app0.bin c5/tab5-boot_app0.bin
+          fi
           ls -l c5
       - uses: actions/upload-artifact@v4
         with:
@@ -208,7 +223,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.13"   # pioarduino refuses newer (3.15 broke the C5 runner, 2026-10-20)
 
       - name: Install PlatformIO
         run: pip install --upgrade platformio
@@ -233,11 +248,14 @@ jobs:
           # freenove-s3 (Freenove ESP32-S3 2.8", FNK0104B) and crowpanel7
           # (Elecrow CrowPanel Advance 7.0) are S3s too, public BETAs from
           # v1.24.0, contributed and tested on their authors' boards (#16, #11).
+          # freenove-s3-40mhz is the same 2.8" at a 40 MHz screen wire, for the
+          # panels that tear at 80 (#65, #14); the flasher offers it by unticking
+          # 80 MHz under Advanced on the 2.8"'s row. A public BETA from v1.40.0.
           # freenove-s3-35 is the black Freenove ESP32-S3 3.5" (FNK0104N), a
           # public BETA from v1.34.0: the 2.8"'s flash layout, its own QSPI panel.
           # tdeck-plus is the LilyGo T-Deck Plus: the same S3, flash layout and
           # bootloader as the watch, a public BETA from v1.36.0.
-          pio run -e twatch-s3 -e freenove-s3 -e freenove-s3-35 -e crowpanel7 -e tdeck-plus
+          pio run -e twatch-s3 -e freenove-s3 -e freenove-s3-40mhz -e freenove-s3-35 -e crowpanel7 -e tdeck-plus
           # sticks3 is the M5Stack StickS3: an S3 with 8 MB of flash, so the
           # CYDs' partition table behind an S3 bootloader of its own. LAB ONLY:
           # built and signed every run, offered under ?lab=1, never attached
@@ -286,6 +304,12 @@ jobs:
             cp c5/boot_app0.bin esp32c5-boot_app0.bin
           else
             echo "::warning::No Marauder V8 build this run; the release goes out without it."
+          fi
+          # The Tab5, lab only: its four files, for the lab list below.
+          if [ -f c5/tab5-firmware.bin ]; then
+            cp c5/tab5-firmware.bin c5/tab5-bootloader.bin c5/tab5-partitions.bin c5/tab5-boot_app0.bin .
+          else
+            echo "::warning::No Tab5 build this run; it is not in the lab list."
           fi
           python -m esptool --chip esp32 merge_bin \
             -o firmware-cyd-merged.bin \
@@ -336,7 +360,7 @@ jobs:
             0x8000  .pio/build/twatch-s3/partitions.bin \
             0xe000  "$HOME/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin" \
             0x10000 .pio/build/twatch-s3/firmware.bin
-          for v in freenove-s3 freenove-s3-35 crowpanel7 tdeck-plus; do
+          for v in freenove-s3 freenove-s3-40mhz freenove-s3-35 crowpanel7 tdeck-plus; do
             python -m esptool --chip esp32s3 merge_bin \
               -o "firmware-$v-merged.bin" \
               --flash_mode dio --flash_freq 80m --flash_size 16MB \
@@ -415,7 +439,7 @@ jobs:
           # assumed, for the same reason as the ESP32 pair above.
           for f in bootloader partitions; do
             ref="$(sha256sum ".pio/build/twatch-s3/$f.bin" | cut -d' ' -f1)"
-            for v in freenove-s3 freenove-s3-35 crowpanel7 tdeck-plus; do
+            for v in freenove-s3 freenove-s3-40mhz freenove-s3-35 crowpanel7 tdeck-plus; do
               got="$(sha256sum ".pio/build/$v/$f.bin" | cut -d' ' -f1)"
               if [ "$got" != "$ref" ]; then
                 echo "::error::$v/$f.bin differs from twatch-s3/$f.bin, which the S3 manifests share."
@@ -430,7 +454,7 @@ jobs:
           # merged image for those on purpose: the merged blob is a
           # manual-recovery artifact, and recovery should land you on the
           # spec-compliant build rather than the overclocked one.
-          for v in cyd cyd-ili9341 awok rlphantom-r cyd24-st7789 freenove32 cyd32c cyd-fast cyd-ili9341-fast cyd35-fast cyd35c-fast twatch-s3 freenove-s3 freenove-s3-35 crowpanel7 tdeck-plus sticks3 cardputer-adv; do
+          for v in cyd cyd-ili9341 awok rlphantom-r cyd24-st7789 freenove32 cyd32c cyd-fast cyd-ili9341-fast cyd35-fast cyd35c-fast twatch-s3 freenove-s3 freenove-s3-40mhz freenove-s3-35 crowpanel7 tdeck-plus sticks3 cardputer-adv; do
             cp ".pio/build/$v/firmware.bin" "$v-firmware.bin"
           done
 
@@ -448,7 +472,7 @@ jobs:
           fi
           umask 077
           printf '%s\n' "$OTA_SIGNING_KEY" > "$RUNNER_TEMP/ota_key.pem"
-          for v in cyd cyd-ili9341 awok rlphantom-r cyd24-st7789 freenove32 cyd32c cyd-fast cyd-ili9341-fast cyd35-fast cyd35c-fast twatch-s3 freenove-s3 freenove-s3-35 crowpanel7 tdeck-plus sticks3 cardputer-adv; do
+          for v in cyd cyd-ili9341 awok rlphantom-r cyd24-st7789 freenove32 cyd32c cyd-fast cyd-ili9341-fast cyd35-fast cyd35c-fast twatch-s3 freenove-s3 freenove-s3-40mhz freenove-s3-35 crowpanel7 tdeck-plus sticks3 cardputer-adv; do
             python tools/sign_firmware.py --key "$RUNNER_TEMP/ota_key.pem" \
               --env "$v" --bin "$v-firmware.bin" --out "$v-firmware.sig"
           done
@@ -486,6 +510,7 @@ jobs:
                     "web-flasher/manifest-cyd35c-fast.json",
                     "web-flasher/manifest-twatch-s3.json",
                     "web-flasher/manifest-freenove-s3.json",
+                    "web-flasher/manifest-freenove-s3-40mhz.json",
                     "web-flasher/manifest-freenove-s3-35.json",
                     "web-flasher/manifest-crowpanel7.json",
                     "web-flasher/manifest-sticks3.json",
@@ -522,6 +547,7 @@ jobs:
           cp web-flasher/manifest-cyd35c-fast.json manifest-cyd35c-fast.json
           cp web-flasher/manifest-twatch-s3.json manifest-twatch-s3.json
           cp web-flasher/manifest-freenove-s3.json manifest-freenove-s3.json
+          cp web-flasher/manifest-freenove-s3-40mhz.json manifest-freenove-s3-40mhz.json
           cp web-flasher/manifest-freenove-s3-35.json manifest-freenove-s3-35.json
           cp web-flasher/manifest-crowpanel7.json manifest-crowpanel7.json
           cp web-flasher/manifest-tdeck-plus.json manifest-tdeck-plus.json
@@ -569,6 +595,9 @@ jobs:
             freenove-s3-firmware.bin \
             firmware-freenove-s3-merged.bin \
             manifest-freenove-s3.json \
+            freenove-s3-40mhz-firmware.bin \
+            firmware-freenove-s3-40mhz-merged.bin \
+            manifest-freenove-s3-40mhz.json \
             freenove-s3-35-firmware.bin \
             firmware-freenove-s3-35-merged.bin \
             manifest-freenove-s3-35.json \
@@ -611,9 +640,9 @@ jobs:
             $(ls *-firmware.sig 2>/dev/null)
 
       - name: Build the browser emulator
-        # Skipped on a lab run, which serves the released emulator instead --
-        # see the Pages step for why. Only a tag needs a fresh one.
-        if: steps.ver.outputs.is_lab != 'true'
+        # On a lab run too: a lab run serves the RELEASED emulator, and the
+        # only honest way to have one is to build it from the release tag's
+        # sources (next step). See the Pages step for why.
         uses: mymindstorm/setup-emsdk@v14
         with:
           # Matched to the toolchain the working emulator was built with
@@ -624,16 +653,48 @@ jobs:
           actions-cache-folder: emsdk-cache
 
       - name: Compile the emulator to WebAssembly
-        if: steps.ver.outputs.is_lab != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           em++ --version | head -1
-          make -C sim wasm WASM_VERSION="v${{ steps.ver.outputs.version }}"
-          ls -l sim/web/squachsim.js sim/web/squachsim.wasm
+          if [ "${{ steps.ver.outputs.is_lab }}" = "true" ]; then
+            # A lab run builds the LATEST RELEASE's emulator, from that tag's
+            # own tree, into released-emulator/ for the Pages step. It used
+            # to copy the files committed in web-flasher/emulator/ instead,
+            # and nobody refreshed those after v1.12.0: every lab run after a
+            # release put an emulator built from v1.7-era sources back on the
+            # public page, over the release's fresh one (seen 2026-11-07, with
+            # v1.40.0 out and the site's emulator still v1.7).
+            LATEST="$(gh release list --limit 1 --json tagName -q '.[0].tagName')"
+            git fetch --depth=1 origin "refs/tags/$LATEST:refs/tags/$LATEST"
+            git worktree add --detach /tmp/released "$LATEST"
+            make -C /tmp/released/sim wasm WASM_VERSION="$LATEST"
+            mkdir -p released-emulator
+            cp /tmp/released/web-flasher/emulator/index.html released-emulator/index.html
+            cp /tmp/released/sim/web/squachsim.js /tmp/released/sim/web/squachsim.wasm released-emulator/
+            # The boards' own builds (T-Deck, watch, Cardputer), from the
+            # release that first has each. Without one, the page runs the CYD
+            # build at that board's size.
+            for b in tdeck twatch cardputer; do
+              if grep -q "^wasm-$b:" /tmp/released/sim/Makefile; then
+                make -C /tmp/released/sim "wasm-$b" WASM_VERSION="$LATEST"
+                cp "/tmp/released/sim/web/squachsim-$b.js" "/tmp/released/sim/web/squachsim-$b.wasm" released-emulator/
+              fi
+            done
+            OUT=released-emulator
+          else
+            make -C sim wasm-all WASM_VERSION="v${{ steps.ver.outputs.version }}"
+            for b in tdeck twatch cardputer; do
+              test "$(stat -c%s "sim/web/squachsim-$b.wasm")" -gt 200000
+            done
+            OUT=sim/web
+          fi
+          ls -l "$OUT/squachsim.js" "$OUT/squachsim.wasm"
           # An empty or tiny output means the link quietly failed; the site
           # would then serve a page that loads nothing and sits there blank.
-          test -s sim/web/squachsim.wasm
-          test "$(stat -c%s sim/web/squachsim.wasm)" -gt 200000
+          test -s "$OUT/squachsim.wasm"
+          test "$(stat -c%s "$OUT/squachsim.wasm")" -gt 200000
 
       - name: Assemble Pages site
         env:
@@ -675,6 +736,7 @@ jobs:
           cp web-flasher/manifest-cyd35c-fast.json _site/manifest-cyd35c-fast.json
           cp web-flasher/manifest-twatch-s3.json _site/manifest-twatch-s3.json
           cp web-flasher/manifest-freenove-s3.json _site/manifest-freenove-s3.json
+          cp web-flasher/manifest-freenove-s3-40mhz.json _site/manifest-freenove-s3-40mhz.json
           cp web-flasher/manifest-freenove-s3-35.json _site/manifest-freenove-s3-35.json
           cp web-flasher/manifest-crowpanel7.json _site/manifest-crowpanel7.json
           cp web-flasher/manifest-sticks3.json _site/manifest-sticks3.json
@@ -758,8 +820,8 @@ jobs:
           import json, shutil, os
           label = "${{ steps.ver.outputs.label }}"
           ver   = "${{ steps.ver.outputs.version }}"
-          for board in ("cyd", "cyd-ili9341", "cyd-fast", "cyd-ili9341-fast", "cyd35-fast", "cyd35c-fast", "rlphantom-r", "cyd24-st7789", "freenove32", "cyd32c", "twatch-s3", "freenove-s3", "freenove-s3-35", "crowpanel7", "nm-cyd-c5", "marauder-v8", "tdeck-plus", "sticks3", "cardputer-adv"):
-              # The C5 comes from its own runner and may not have come at all.
+          for board in ("cyd", "cyd-ili9341", "cyd-fast", "cyd-ili9341-fast", "cyd35-fast", "cyd35c-fast", "rlphantom-r", "cyd24-st7789", "freenove32", "cyd32c", "twatch-s3", "freenove-s3", "freenove-s3-40mhz", "freenove-s3-35", "crowpanel7", "nm-cyd-c5", "marauder-v8", "tdeck-plus", "sticks3", "cardputer-adv", "tab5"):
+          # The C5s and the Tab5 come from their own runner and may not have come at all.
               if not os.path.exists(board + "-firmware.bin"):
                   print("::warning::no %s build this run; not in the lab list" % board)
                   continue
@@ -803,7 +865,7 @@ jobs:
             # firmware here: v1.16.0 shipped cyd35-fast to the release and into
             # index.html's <option> list but neither into _site, so the 3.5"
             # appeared in the picker and 404'd when chosen.
-            for board in cyd cyd-ili9341 awok rlphantom-r cyd24-st7789 freenove32 cyd32c cyd-fast cyd-ili9341-fast cyd35-fast cyd35c-fast twatch-s3 freenove-s3 freenove-s3-35 crowpanel7 tdeck-plus sticks3 cardputer-adv; do
+            for board in cyd cyd-ili9341 awok rlphantom-r cyd24-st7789 freenove32 cyd32c cyd-fast cyd-ili9341-fast cyd35-fast cyd35c-fast twatch-s3 freenove-s3 freenove-s3-40mhz freenove-s3-35 crowpanel7 tdeck-plus sticks3 cardputer-adv; do
               cp "$board-firmware.bin" "_site/$board-firmware.bin"
               # The Bluetooth update page fetches the image and its signature
               # side by side from the site root.
@@ -864,15 +926,15 @@ jobs:
           mkdir -p _site/emulator
           # A lab run serves the RELEASED emulator, for the same reason it
           # serves the released firmware: master's is built from unreleased
-          # features, and the emulator is the public page's "try it". The
-          # files are committed rather than release assets, so they come out
-          # of the release tag's tree.
+          # features, and the emulator is the public page's "try it". So it
+          # is the release tag's page and a build of the tag's own sources.
           if [ "${{ steps.ver.outputs.is_lab }}" = "true" ]; then
-            git fetch --depth=1 origin "refs/tags/$LATEST:refs/tags/$LATEST"
-            for f in index.html squachsim.js squachsim.wasm; do
-              git show "$LATEST:web-flasher/emulator/$f" > "_site/emulator/$f"
-            done
-            echo "emulator restored from $LATEST"
+            # Built from the release tag's sources by the compile step above.
+            # Not the tag's committed web-flasher/emulator/ files: those went
+            # stale at v1.12.0 and served a v1.7 emulator for weeks.
+            cp released-emulator/index.html released-emulator/squachsim.js released-emulator/squachsim.wasm _site/emulator/
+            cp released-emulator/squachsim-*.* _site/emulator/ 2>/dev/null || true
+            echo "emulator rebuilt from $LATEST's sources"
           else
             # index.html is hand-written and not a build product, so it always
             # comes from the tree. The two build products come from the build
@@ -880,6 +942,12 @@ jobs:
             cp web-flasher/emulator/index.html _site/emulator/index.html
             cp sim/web/squachsim.js            _site/emulator/squachsim.js
             cp sim/web/squachsim.wasm          _site/emulator/squachsim.wasm
+            # The boards' own builds (the T-Deck's keyboard and LORA page, the
+            # watch's screens, the Cardputer's cursor), each loaded by the page
+            # the first time somebody picks that board.
+            for b in tdeck twatch cardputer; do
+              cp "sim/web/squachsim-$b.js" "sim/web/squachsim-$b.wasm" _site/emulator/
+            done
             # Loud, because a silent mismatch here is the whole bug this step
             # exists to stop.
             if ! cmp -s sim/web/squachsim.wasm web-flasher/emulator/squachsim.wasm; then

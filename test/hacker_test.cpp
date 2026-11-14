@@ -10,9 +10,10 @@
 //     appears anywhere in the IEEE registry. Only 0C:FA:22 is registered
 //     to Flipper Devices Inc.
 //
-// Both are the same failure the Sonos entry was: a plausible constant
-// copied between detectors until it looks like a fact. Pinned here so a
-// future "fix" that imports them from another project turns this red.
+// And Flipper's real ones are not a Flipper Zero either (2026-10-14): a
+// Zero never sends 0x0E29 and has no WiFi to be seen by 0C:FA:22, while the
+// BUSY Bar, Flipper's desk sign, sends both. Only the Zero's own service
+// UUIDs and its name mark a Zero. Pinned here so neither drifts back.
 #include "signatures.h"
 #include "test_util.h"
 #include <cstring>
@@ -27,15 +28,15 @@ int main() {
 
     suite("Flipper Zero");
 
-    ck("its own IEEE block is HACKER", oui(0x0C, 0xFA, 0x22, &conf) == DetectionType::HACKER);
-    ck("...and graded HIGH", conf == Confidence::HIGH_CONF);
+    ck("Flipper's IEEE block is not HACKER (the BUSY Bar's WiFi)", oui(0x0C, 0xFA, 0x22, &conf) == DetectionType::UNKNOWN);
 
     // Not merely absent: these must never be added, because they are not
     // Flipper's and nothing in the registry says they are anybody's.
     ck("80:E1:26 matches nothing", oui(0x80, 0xE1, 0x26, &conf) == DetectionType::UNKNOWN);
     ck("80:E1:27 matches nothing", oui(0x80, 0xE1, 0x27, &conf) == DetectionType::UNKNOWN);
 
-    ck("SIG company ID 0x0E29 is HACKER", lookupMfgId(0x0E29) == DetectionType::HACKER);
+    ck("SIG company ID 0x0E29 is not HACKER (the BUSY Bar sends it)", lookupMfgId(0x0E29) == DetectionType::UNKNOWN);
+    ck("the BUSY Bar's own UUID 0x308A is not HACKER", lookupUuid(0x308A) == DetectionType::UNKNOWN);
     ck("0x0FBA (Cosonic) is not", lookupMfgId(0x0FBA) == DetectionType::UNKNOWN);
 
     // Three UUIDs, one per case colour. All three have to be present: ship

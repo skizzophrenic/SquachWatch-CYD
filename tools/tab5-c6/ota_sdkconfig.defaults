@@ -1,0 +1,34 @@
+# M5Stack Tab5 (ESP32-P4, 16 MB flash). Run `idf.py set-target esp32p4` first.
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
+
+# The Tab5 has a P4 older than revision v3 (the two sets of revisions are mutually exclusive in esp-idf 6.x, a
+# bootloader built for one refuses to boot on the other). Change these two lines for v3 silicon.
+CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
+CONFIG_ESP32P4_REV_MIN_1=y
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_360=y
+
+# ESP-Hosted over SDIO to the ESP32-C6. The board preset has the pins of the Tab5 (SDMMC slot 1, CLK 12, CMD 13,
+# D0-D3 11-8, reset on GPIO15). It is started by main.c after the C6 has been powered, not before app_main.
+CONFIG_ESP32P4_TAB5_C6_BOARD=y
+# CONFIG_ESP_HOSTED_AUTO_CALL_INIT_BEFORE_APP_MAIN is not set
+CONFIG_WIFI_RMT_NVS_ENABLED=n
+
+# A lower SDIO clock than the 40 MHz of normal operation, for a reliable transfer. Try 10000 if it fails.
+CONFIG_ESP_HOSTED_SDIO_CLOCK_FREQ_KHZ=20000
+
+# The transfer runs in the main task
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+CONFIG_FREERTOS_HZ=1000
+
+CONFIG_ESP_HOSTED_ENABLED=y
+
+CONFIG_ESP_HOSTED_CP_TARGET_ESP32C6=y
+CONFIG_ESP_HOSTED_SDIO_HOST_INTERFACE=y
+CONFIG_ESP_WIFI_REMOTE_LIBRARY_HOSTED=y
+CONFIG_ESP_HOSTED_SDIO_RESET_ACTIVE_HIGH=y
+CONFIG_ESP_HOSTED_ENABLE_PEER_DATA_TRANSFER=y
+CONFIG_ESP_HOSTED_MAX_CUSTOM_MSG_HANDLERS=8

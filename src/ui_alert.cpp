@@ -151,6 +151,12 @@ void uiAlertSetNight(bool night) { s_night = night; }
 void uiAlertSetLastFree(bool lastFree) { s_lastFree = lastFree; }
 static bool     s_spam      = false;
 static uint16_t s_spamFakes = 0;
+static const char* s_snzLabel = nullptr;
+static uint16_t    s_snzLeft  = 0;
+void uiAlertSetSnoozePick(const char* label, uint16_t left) {
+    s_snzLabel = label;
+    s_snzLeft  = left > 1000 ? 1000 : left;
+}
 void uiAlertSetSpam(bool spam, uint16_t fakes) { s_spam = spam; s_spamFakes = fakes; }
 #if defined(CYD_GPS)
 static bool    s_place = false, s_placeFake = false;
@@ -166,6 +172,7 @@ void uiAlertInit(TFT_eSPI& t, const Detection& d) {
     s_night = false;
     s_lastFree = false;
     s_spam     = false;
+    s_snzLabel = nullptr;
 #if defined(CYD_GPS)
     s_place    = false;   // a card never shows an earlier alert's place
 #endif
@@ -681,6 +688,7 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
     {
         int bx, by, bw, bh;
         moreInfoBtnRect(w, h, bx, by, bw, bh);
+        Theme::hotButton(bx, by, bw, bh, tinyAlert(h) ? "INFO" : "MORE INFO");
         t.fillRect(bx, by, bw, bh, Theme::BG);
         t.drawRect(bx, by, bw, bh, Theme::PURPLE);
         t.setTextSize(2);
@@ -713,6 +721,7 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
     {
         int bx, by, bw, bh;
         huntBtnRect(w, h, bx, by, bw, bh);
+        Theme::hotButton(bx, by, bw, bh, "HUNT");
         t.fillRect(bx, by, bw, bh, Theme::BG);
         t.drawRect(bx, by, bw, bh, Theme::PURPLE);
         t.setTextSize(2);
@@ -722,11 +731,43 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
         t.setCursor(bx + (bw - hw) / 2, by + (bh - t.fontHeight()) / 2);
         t.print("HUNT");
     }
-    // SNOOZE between the two: this device, quiet until the board restarts.
+    // SNOOZE between the two: this device, quiet for a while. Each tap
+    // steps the time up (main.cpp owns the steps); while one is being
+    // picked the button stays pushed in and wears it, and a line along its
+    // foot runs out as the pick locks in.
     {
         int bx, by, bw, bh;
         snoozeBtnRect(w, h, bx, by, bw, bh);
-        Theme::drawButton(t, bx, by, bw, bh, "SNOOZE", false);
+        Theme::drawButton(t, bx, by, bw, bh, s_snzLabel ? s_snzLabel : "SNOOZE",
+                          s_snzLabel != nullptr);
+        Theme::hotButton(bx, by, bw, bh, "SNOOZE");   // its name, whatever it says
+        if (s_snzLabel) {
+            const int barW = (int)((int32_t)(bw - 6) * s_snzLeft / 1000);
+            t.fillRect(bx + 3, by + bh - 4, bw - 6, 2, Theme::BG);
+            if (barW > 0) t.fillRect(bx + 3, by + bh - 4, barW, 2, Theme::AMBER);
+            // Nothing else on the card says the button counts taps, so once
+            // the first one has landed it says so itself, just above.
+            // Asked for 2026-10-22: "no way to realize you have to multi tap".
+#if defined(SQW_SMALL)
+            static const char* HINT = "PRESS AGAIN: LONGER";
+#else
+            static const char* HINT = "TAP AGAIN: LONGER";
+#endif
+            t.setTextFont(wideAlert(w) ? 2 : 1);
+            t.setTextSize(1);
+            t.setTextWrap(false);
+            const int hw = t.textWidth(HINT);
+            const int fh = t.fontHeight();
+            const int hx = (w - hw) / 2;
+            // The large panel has 18 rows between the radar's frame and the
+            // button for a 16-row font, so it sits tight against the button.
+            const int hy = by - fh - (wideAlert(w) ? 1 : 5);
+            t.fillRect(hx - 3, hy - 1, hw + 6, fh + 1, Theme::BG);
+            t.setTextColor(Theme::AMBER, Theme::BG);
+            t.setCursor(hx, hy);
+            t.print(HINT);
+            t.setTextFont(1);
+        }
     }
 
     // TV-static snow over the whole screen during the same random burst

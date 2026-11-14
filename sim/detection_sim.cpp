@@ -129,7 +129,7 @@ void DetectionEngine::pushLog(const Detection& d) {
 
 // Radio-fed entry points: inert here, nothing calls them in the sim.
 void DetectionEngine::postWiFi(const uint8_t*, int8_t, uint8_t, const char*, bool, bool, bool) {}
-void DetectionEngine::postDeauth(const uint8_t*, int8_t, uint8_t) {}
+void DetectionEngine::postDeauth(const uint8_t*, int8_t, uint8_t, bool) {}
 void DetectionEngine::postBle(Detection d) { pushLog(d); }
 
 // Not a stub. Everything else in this file is inert because it would need
@@ -238,3 +238,15 @@ void DetectionEngine::processDeauthQ() {}
 void DetectionEngine::expireStale() {}
 void DetectionEngine::hopChannel() {}
 void DetectionEngine::decayChannelActivity() {}
+
+// The radios' rest, which the T-Deck build's LoRa duty cycle asks for (and
+// the watch's). Nothing here to rest: they report awake.
+bool DetectionEngine::restRadios(bool) { return false; }
+void DetectionEngine::wakeRadios() {}
+bool DetectionEngine::radiosResting() { return false; }
+
+// The watch build's boot report and its count of new Bluetooth arrivals
+// (detection.cpp has the real ones; no radios here, so none arrive).
+char g_bootRadioLine[192] = "";
+uint32_t bleArrivals() { return 0; }
+void bleArrivalsRoll(uint32_t) {}

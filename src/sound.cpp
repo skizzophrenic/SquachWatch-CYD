@@ -17,16 +17,18 @@
 // which also means an idle board spends nothing on sound: the amp is in
 // shutdown (under a microamp) and the I2S clocks are stopped.
 //
-// Playback is a small FreeRTOS task fed by a queue. It renders one 256-frame
-// chunk at a time straight into the I2S driver's DMA buffers and blocks on
-// the write, so a slow frame on the drawing side never puts a gap in a
-// sound. Four 256-frame buffers is 64 ms of DMA, 4 KB of internal RAM.
+// Playback is a small FreeRTOS task fed by a queue. It renders the whole
+// sound into PSRAM, then streams it 256 frames at a time into the I2S
+// driver's DMA buffers and blocks on the write, so a slow frame on the
+// drawing side never puts a gap in a sound. Four 256-frame buffers is 64 ms
+// of DMA, 4 KB of internal RAM.
 #include "sound.h"
 #if SQW_SPEAKER
 #include <Arduino.h>
 #include <Wire.h>
 #include <math.h>
 #include <driver/i2s.h>
+#include <esp_heap_caps.h>
 #include "settings.h"
 #include "clock.h"
 
@@ -35,6 +37,21 @@ namespace Sound {
 #if defined(FREENOVE_S3_35)
 static const int PIN_MCK = 17, PIN_BCK = 18, PIN_WS = 21, PIN_DOUT = 15;
 static const int PIN_AMP = 1;
+#elif defined(STICKS3)
+// The StickS3: an ES8311 on the shared I2C bus (SDA 47 / SCL 48, 0x18) and an
+// AW8737 amp whose enable is the M5PM1's GPIO3, not an ESP32 pin (see amp()).
+// Pins from M5Stack's StickS3 page.
+static const int PIN_MCK = 18, PIN_BCK = 17, PIN_WS = 15, PIN_DOUT = 14;
+static const int PIN_AMP = -1;
+#elif defined(CARDPUTER_ADV)
+// The Cardputer ADV: an ES8311 on the keyboard's bus (SDA 8 / SCL 9, 0x18)
+// with no master clock pin (it makes one from BCLK), and an NS4150B amp with
+// no enable of its own (a headphone plug turns it off). Pins and the clock
+// registers from M5Unified's Cardputer ADV setup. No PSRAM here, so the
+// sounds are tones made on the fly (see playNow).
+static const int PIN_MCK = -1, PIN_BCK = 41, PIN_WS = 43, PIN_DOUT = 42;
+static const int PIN_AMP = -1;
+#pragma GCC diagnostic ignored "-Wunused-function"
 #elif defined(TDECK_PLUS)
 // The T-Deck Plus: a MAX98357A class-D amp straight on I2S (LilyGo's
 // BOARD_I2S_BCK 7 / WS 5 / DOUT 6). No codec to set up, no master clock, and
@@ -61,32 +78,93 @@ static QueueHandle_t s_q       = nullptr;
 static TaskHandle_t  s_task    = nullptr;
 
 // ---- the sounds ------------------------------------------------------------
-// One step: a tone from f to `to` (0 = steady) for ms, then a gap. Wave 0 is
-// square, 1 triangle, 2 sine, 3 sawtooth, 4 a low-passed noise burst. The
-// numbers are the Sound Lab's, where the browser played the same recipe.
-enum : uint8_t { SQ = 0, TRI, SIN, SAW, NOISE };
-struct Step { uint16_t f, to, ms; uint8_t wave, gap; };
-
-static const Step NEW_DEVICE[] = { {660, 0, 45, TRI, 25}, {880, 0, 45, TRI, 25}, {1100, 0, 60, TRI, 0} };
-static const Step WATCH_HIT[]  = { {620, 0, 90, SQ, 0}, {930, 0, 90, SQ, 0}, {620, 0, 90, SQ, 0},
-                                   {930, 0, 90, SQ, 0}, {620, 0, 90, SQ, 0}, {930, 0, 120, SQ, 0} };
-static const Step LOW_BATT[]   = { {440, 0, 160, TRI, 40}, {330, 0, 260, TRI, 0} };
-static const Step MESSAGE[]    = { {1046, 0, 120, TRI, 20}, {1568, 0, 200, TRI, 0} };
-static const Step VISITOR[]    = { {784, 0, 140, SIN, 20}, {659, 0, 200, SIN, 0} };
-static const Step THROW[]      = { {300, 1500, 260, SIN, 0} };
-static const Step LAND[]       = { {0, 0, 30, NOISE, 0}, {180, 70, 60, SQ, 0} };
-static const Step CLIPPY[]     = { {300, 900, 40, SIN, 0}, {900, 400, 60, SIN, 0}, {400, 700, 60, SIN, 0} };
-static const Step TOAST_POP[]  = { {200, 1800, 80, SQ, 0} };
-static const Step PLUG_IN[]    = { {523, 0, 60, SQ, 10}, {659, 0, 60, SQ, 10}, {784, 0, 120, SQ, 0} };
-static const Step UNPLUG[]     = { {1000, 200, 160, SQ, 0} };
-
-struct Seq { const Step* s; uint8_t n; };
-#define SEQ(a) { a, (uint8_t)(sizeof(a) / sizeof(a[0])) }
-static const Seq SEQS[(int)Id::COUNT] = {
-    SEQ(NEW_DEVICE), SEQ(WATCH_HIT), SEQ(LOW_BATT), SEQ(MESSAGE), SEQ(VISITOR), SEQ(THROW),
-    SEQ(LAND), SEQ(CLIPPY), SEQ(TOAST_POP), SEQ(PLUG_IN), SEQ(UNPLUG),
+// A sound is a short list of parts, played one after another unless a part is
+// marked WITH, which starts it together with the part before (a clank under a
+// spring); `off` nudges a part's start by that many ms, `gap` is silence after
+// it. Every part has an attack (a, ms), a level held until h percent of the
+// way (or a ringing fade, for a bell), a level lv in percent, and COS for a
+// rounded fade instead of a straight one. The kinds:
+//
+//   TONE   a wave gliding through the pitches p[] (Hz, 0 = unused), with an
+//          optional wobble: k0 depth, k1 rate (Hz), k2 the ms it fades over
+//   NOISE  the first Sound Lab's low-passed noise burst
+//   VOICE  a throat buzzing through the pitches p[], shaped by the mouth
+//          vowels v[]: k0 mouth size (under 1 = a bigger creature, 0 = 1),
+//          k1 breath, k2 an "h" at the start (ms), k3 vibrato depth
+//   BELL   two-operator FM, carrier p[0]: k0 the modulator's ratio, k1 its
+//          brightness, k2 the ring (ms), k3 how fast the brightness goes, as a
+//          share of the ring (0 = half)
+//   AIR    noise through a band-pass gliding through the centres p[], k0 = Q
+//
+// Sound Lab 2 (2026-10-14) rendered these same recipes in the browser, sample
+// for sample, and the picks below are the owner's. The ones kept from the
+// first Sound Lab (2026-10-11) are written with BEEP and sound as before.
+enum : uint8_t { TONE = 0, NOISE, VOICE, BELL, AIR };
+enum : uint8_t { SQ = 0, TRI, SIN, SAW };
+enum : uint8_t { WITH = 1, COS = 2 };
+enum : uint8_t { V_END = 0, OO, OH, AH, UH, EH, EE, IH, MM };
+struct Part {
+    uint8_t  kind, wave, flags;
+    int16_t  off;
+    uint16_t ms, gap;
+    uint8_t  a, h, lv;
+    uint16_t p[4];
+    uint8_t  v[4];
+    float    k[4];
 };
-#undef SEQ
+struct Sound { const Part* p; uint8_t n; uint16_t echoMs; float fb, mix, gain; };
+
+#define BEEP(f, to, ms, w, gap) { TONE, w, 0, 0, ms, gap, 4, 60, 100, { f, to } }
+static const Part NEW_DEVICE[] = { BEEP(660, 0, 45, TRI, 25), BEEP(880, 0, 45, TRI, 25), BEEP(1100, 0, 60, TRI, 0) };
+static const Part THROW[]      = { BEEP(300, 1500, 260, SIN, 0) };
+static const Part LAND[]       = { { NOISE, 0, 0, 0, 30, 0, 4, 60, 100 }, BEEP(180, 70, 60, SQ, 0) };
+static const Part TOAST_POP[]  = { BEEP(200, 1800, 80, SQ, 0) };
+static const Part WD_FIX[]     = { BEEP(880, 0, 70, TRI, 30), BEEP(1320, 0, 110, TRI, 0) };
+static const Part WD_LOST[]    = { BEEP(660, 220, 320, TRI, 0) };
+static const Part WD_TICK[]    = { BEEP(1800, 0, 14, SIN, 0) };
+#undef BEEP
+// The Bigfoot whoop, twice, echoing through the trees.
+static const Part WATCH_HIT[]  = {
+    { VOICE, 0, COS, 0, 520, 120, 25, 70, 100, { 240, 300, 500 }, { OO, OO, OO, OH }, { 0, 0.12f } },
+    { VOICE, 0, COS, 0, 560, 0,   25, 70, 100, { 240, 300, 520 }, { OO, OO, OO, OH }, { 0, 0.12f } } };
+static const Part HEADS_UP[]   = {
+    { VOICE, 0, COS, 0, 560, 0,   25, 70, 100, { 240, 300, 500 }, { OO, OO, OO, OH }, { 0, 0.12f } } };
+// A toy winding down: a wobble that slows and sags.
+static const Part LOW_BATT[]   = { { TONE, TRI, COS, 0, 650, 0, 5, 60, 100, { 520, 110 }, {}, { 0.12f, 9, 500 } } };
+// Two glass chimes, overlapping.
+static const Part MESSAGE[]    = {
+    { BELL, 0, 0,    0,   450, 0, 2, 0, 100, { 1568 }, {}, { 3.5f, 1, 260 } },
+    { BELL, 0, WITH, 110, 520, 0, 2, 0, 100, { 2093 }, {}, { 3.5f, 1, 320 } } };
+// Two wooden knocks on the cave door.
+static const Part VISITOR[]    = {
+    { AIR,  0,   0,    0, 35, 0,   1, 10, 120, { 950 }, {}, { 2.5f } },
+    { TONE, SIN, WITH, 0, 50, 110, 1, 10, 70,  { 230, 150 } },
+    { AIR,  0,   0,    0, 35, 0,   1, 10, 120, { 900 }, {}, { 2.5f } },
+    { TONE, SIN, 0,    0, 55, 0,   1, 10, 70,  { 220, 140 } } };
+// A doorstop spring: one flick, and it wobbles down.
+static const Part CLIPPY[]     = { { TONE, SIN, 0, 0, 380, 0, 2, 15, 100, { 420 }, {}, { 0.35f, 17, 150 } } };
+// A round slide with a short echo, up for the cable and down without it.
+static const Part PLUG_IN[]    = { { TONE, TRI, COS, 0, 260, 0, 10, 50, 100, { 220, 880 } } };
+static const Part UNPLUG[]     = { { TONE, TRI, COS, 0, 300, 0, 10, 50, 100, { 880, 220 } } };
+// T0@$TY lands: a tin box on the counter, and the lever rattles.
+static const Part LAND_TOASTER[] = {
+    { AIR,  0,   0,    0,  25,  0, 1, 10, 80,  { 2400 }, {}, { 3 } },
+    { BELL, 0,   WITH, 0,  360, 0, 2, 0,  100, { 620 },  {}, { 2.76f, 2.5f, 180 } },
+    { TONE, SIN, 0,    40, 220, 0, 2, 20, 35,  { 300 },  {}, { 0.25f, 22, 120 } } };
+// The yeti lands: big and grumpy, "OOF." out loud.
+static const Part LAND_YETI[]  = {
+    { TONE,  SIN, 0,          0, 100, 0, 1, 15, 90,  { 100, 36 } },
+    { VOICE, 0,   WITH | COS, 0, 300, 0, 8, 50, 100, { 110, 98, 80 }, { OH, OO }, { 0.85f, 0.25f } } };
+
+#define SND(a) a, (uint8_t)(sizeof(a) / sizeof(a[0]))
+static const Sound SOUNDS[(int)Id::COUNT] = {
+    { SND(NEW_DEVICE) }, { SND(WATCH_HIT), 190, 0.38f, 0.45f, 0.75f }, { SND(LOW_BATT) }, { SND(MESSAGE) },
+    { SND(VISITOR), 70, 0.2f, 0.25f }, { SND(THROW) }, { SND(LAND) }, { SND(CLIPPY) }, { SND(TOAST_POP) },
+    { SND(PLUG_IN), 90, 0.3f, 0.35f }, { SND(UNPLUG), 90, 0.3f, 0.35f },
+    { SND(LAND_TOASTER) }, { SND(LAND_YETI) }, { SND(HEADS_UP), 190, 0.38f, 0.45f, 0.75f },
+    { SND(WD_FIX) }, { SND(WD_LOST) }, { SND(WD_TICK), 0, 0, 0, 0.35f },
+};
+#undef SND
 
 // ---- the codec -------------------------------------------------------------
 static bool wr(uint8_t r, uint8_t v) {
@@ -111,6 +189,10 @@ static bool codecInit() {
     wr(0x00, 0x80);                         // power on
     wr(0x01, 0x3F);                         // MCLK from the MCLK pin, every clock on
     wr(0x02, (uint8_t)(rd(0x02) & 0x07));   // pre-divider 1, multiplier 1x
+#if defined(CARDPUTER_ADV)
+    wr(0x01, 0xBF);                         // MCLK made from BCLK, every clock on
+    wr(0x02, 0x18);                         // BCLK x8 = 256 x 16 kHz
+#endif
     wr(0x03, 0x10);                         // single speed, ADC OSR
     wr(0x04, 0x10);                         // DAC OSR
     wr(0x05, 0x00);                         // ADC and DAC dividers 1
@@ -131,25 +213,159 @@ static bool codecInit() {
 }
 
 // ---- the amplifier ---------------------------------------------------------
+#if defined(STICKS3)
+// The amp's enable is the M5PM1's GPIO3 (output level, register 0x11), high
+// to play. sticksPowerUp() made it a push-pull output and left it low.
+static void amp(bool on) {
+    Wire.beginTransmission(0x6E);
+    Wire.write(0x11);
+    if (Wire.endTransmission(false) != 0 || Wire.requestFrom((uint8_t)0x6E, (uint8_t)1) != 1) return;
+    uint8_t v = Wire.read();
+    v = on ? (uint8_t)(v | (1 << 3)) : (uint8_t)(v & ~(1 << 3));
+    Wire.beginTransmission(0x6E);
+    Wire.write(0x11); Wire.write(v);
+    Wire.endTransmission();
+}
+#else
 static void amp(bool on) { if (PIN_AMP >= 0) digitalWrite(PIN_AMP, (on == s_ampLow) ? LOW : HIGH); }
+#endif
 
 // ---- rendering -------------------------------------------------------------
-// Per-chunk synthesis into a stereo 16-bit buffer, the same sample in both
-// slots (the codec takes the left). The envelope is the Lab's: a 4 ms attack,
-// level until 60% of the step, then down to nothing at the end. Square and
-// saw are quieter than the round waves: on a thumbnail speaker they bite.
-static float waveSample(uint8_t w, float ph, uint32_t& lcg, float& lp) {
-    switch (w) {
-        case SQ:  return ph < 0.5f ? 0.35f : -0.35f;
-        case TRI: return (ph < 0.5f ? (ph * 4.0f - 1.0f) : (3.0f - ph * 4.0f)) * 0.7f;
-        case SIN: return sinf(ph * 6.2831853f) * 0.7f;
-        case SAW: return (ph * 2.0f - 1.0f) * 0.4f;
-        default: {
+// The whole sound is rendered into a float buffer in PSRAM first (every board
+// with a speaker has it; the longest sound, the whoop with its echo, is about
+// 150 KB), parts added on top of each other, then the echo and a soft limiter,
+// then it streams out 256 frames at a time, the same sample in both slots
+// (the codec takes the left). Rendering the longest one takes a few ms.
+static const float TAU_F = 6.2831853f;
+
+// Mouth shapes: the three loudest resonances of a throat, in Hz, and their widths.
+static const uint16_t VOWEL[][3] = {
+    { 0, 0, 0 }, { 300, 870, 2240 }, { 570, 840, 2410 }, { 730, 1090, 2440 }, { 640, 1190, 2390 },
+    { 530, 1840, 2480 }, { 270, 2290, 3010 }, { 390, 1990, 2550 }, { 260, 1050, 2200 } };
+static const float BANDW[3] = { 80, 110, 160 };
+static const float FORM[3]  = { 1.0f, 0.55f, 0.28f };
+
+// A seeded noise source, so a sound comes out the same every time: -1..1.
+struct Rng { uint32_t s; float next() { s = s * 1664525u + 1013904223u; return (float)(s >> 8) / 8388608.0f - 1.0f; } };
+
+// A band-pass with a peak of exactly 1 (the Audio EQ Cookbook's), for the
+// mouth and for filtered air. c = b0, b2, a1, a2; z = x1, x2, y1, y2.
+static void bpSet(float* c, float f, float bw) {
+    if (f > RATE * 0.45f) f = RATE * 0.45f;
+    const float w = TAU_F * f / (float)RATE, q = fmaxf(0.5f, f / bw), al = sinf(w) / (2 * q), a0 = 1 + al;
+    c[0] = al / a0; c[1] = -al / a0; c[2] = -2 * cosf(w) / a0; c[3] = (1 - al) / a0;
+}
+static float bpRun(const float* c, float* z, float x) {
+    const float y = c[0] * x + c[1] * z[1] - c[2] * z[2] - c[3] * z[3];
+    z[1] = z[0]; z[0] = x; z[3] = z[2]; z[2] = y;
+    return y;
+}
+
+// How many points a list holds: pitches end at the first 0, vowels at V_END.
+static int pts(const uint16_t* p) { int n = 0; while (n < 4 && p[n]) n++; return n ? n : 1; }
+static int pts(const uint8_t* v)  { int n = 0; while (n < 4 && v[n]) n++; return n ? n : 1; }
+// Glide along the points, u = 0..1 through the part, in equal musical steps.
+static float along(const uint16_t* p, float u) {
+    const int n = pts(p);
+    if (n == 1) return (float)p[0];
+    const float x = u * (n - 1);
+    const int i = x >= n - 1 ? n - 2 : (int)x;
+    return (float)p[i] * powf((float)p[i + 1] / (float)p[i], x - i);
+}
+
+static int attackFrames(const Part& st) { const int a = st.a * (int)RATE / 1000; return a > 0 ? a : 1; }
+// Attack, then level until h percent of the way, then down to nothing.
+static float envLin(const Part& st, int n, int N) {
+    const int a = attackFrames(st), h = N * st.h / 100;
+    if (n < a) return (float)n / a;
+    if (n < h) return 1.0f;
+    const float r = (float)(N - n) / (float)(N - h);
+    return (st.flags & COS) ? 0.5f - 0.5f * cosf(3.1415927f * r) : r;
+}
+// Attack, then a ring that dies away, with a short fade at the very end.
+static float envRing(const Part& st, int n, int N, float ringS) {
+    const int a = attackFrames(st), tail = RATE * 12 / 1000;
+    if (n < a) return (float)n / a;
+    float e = expf(-(float)(n - a) / (float)RATE / ringS);
+    if (n > N - tail) e *= (float)(N - n) / tail;
+    return e;
+}
+
+static void renderTone(const Part& st, float* out, int N, uint32_t& lcg, float& lp) {
+    const float lv = st.lv / 100.0f;
+    float ph = 0;
+    for (int n = 0; n < N; n++) {
+        const float t = (float)n / RATE;
+        float f = along(st.p, (float)n / N);
+        if (st.k[0] > 0) f *= 1 + st.k[0] * sinf(TAU_F * st.k[1] * t) * (st.k[2] > 0 ? expf(-t * 1000 / st.k[2]) : 1);
+        float v;
+        if (st.kind == NOISE) {
             lcg = lcg * 1664525u + 1013904223u;
-            const float n = ((int32_t)(lcg >> 8) / 8388608.0f) - 1.0f;   // -1..1
-            lp += 0.25f * (n - lp);                                      // one-pole low-pass
-            return lp * 0.9f;
+            lp += 0.25f * (((int32_t)(lcg >> 8) / 8388608.0f) - 1.0f - lp);   // one-pole low-pass
+            v = lp * 0.9f;
+        } else switch (st.wave) {
+            case SQ:  v = ph < 0.5f ? 0.35f : -0.35f; break;
+            case TRI: v = (ph < 0.5f ? (ph * 4.0f - 1.0f) : (3.0f - ph * 4.0f)) * 0.7f; break;
+            case SIN: v = sinf(ph * TAU_F) * 0.7f; break;
+            default:  v = (ph * 2.0f - 1.0f) * 0.4f; break;
         }
+        out[n] += v * envLin(st, n, N) * lv;
+        ph += f / RATE;
+        if (ph >= 1.0f) ph -= 1.0f;
+    }
+}
+
+// A throat: a Rosenberg glottal pulse at the pitch, its slope (what the mouth
+// hears) through three resonances that glide between the vowels, plus breath.
+static void renderVoice(const Part& st, float* out, int N) {
+    Rng r = { 777 };
+    const float sz = st.k[0] > 0 ? st.k[0] : 1.0f, br = st.k[1], vd = st.k[3], lv = st.lv / 100.0f;
+    const int h0 = (int)(st.k[2] * RATE / 1000);
+    const int nv = pts(st.v);
+    float ph = 0, prev = 0, jit = 0, c[3][4] = {}, z[3][4] = {};
+    for (int n = 0; n < N; n++) {
+        const float u = (float)n / N, t = (float)n / RATE;
+        jit += (r.next() * 0.5f - jit) * 0.02f;
+        const float f0 = along(st.p, u) * (1 + 0.012f * sinf(TAU_F * 5.2f * t) + 0.01f * jit + vd * sinf(TAU_F * 6 * t));
+        ph += f0 / RATE;
+        if (ph >= 1.0f) ph -= 1.0f;
+        const float pu = ph < 0.4f ? 0.5f - 0.5f * cosf(3.1415927f * ph / 0.4f)
+                       : ph < 0.56f ? cosf(1.5707963f * (ph - 0.4f) / 0.16f) : 0.0f;
+        float e = (pu - prev) * RATE / (f0 * 7.85f);
+        prev = pu;
+        const float hs = n < h0 ? 1.0f - (float)n / h0 : 0.0f;    // the h of "hey"
+        e = e * (1 - hs * 0.85f) + r.next() * (br * 0.35f + hs * 0.9f);
+        if ((n & 15) == 0) {
+            const float x = u * (nv - 1);
+            const int i = nv < 2 ? 0 : (x >= nv - 1 ? nv - 2 : (int)x);
+            const float fr = x - i;
+            const uint16_t* A = VOWEL[st.v[i]];
+            const uint16_t* B = VOWEL[st.v[nv < 2 ? i : i + 1]];
+            for (int k = 0; k < 3; k++) bpSet(c[k], (A[k] + (B[k] - A[k]) * fr) * sz, BANDW[k]);
+        }
+        float y = 0;
+        for (int k = 0; k < 3; k++) y += bpRun(c[k], z[k], e) * FORM[k];
+        out[n] += y * 1.7f * envLin(st, n, N) * lv;
+    }
+}
+
+static void renderBell(const Part& st, float* out, int N) {
+    const float fc = st.p[0], fm = fc * st.k[0], I = st.k[1], ring = st.k[2] / 1000.0f;
+    const float ie = ring * (st.k[3] > 0 ? st.k[3] : 0.5f), lv = st.lv / 100.0f;
+    for (int n = 0; n < N; n++) {
+        const float t = (float)n / RATE;
+        const float v = sinf(TAU_F * fc * t + I * expf(-t / ie) * sinf(TAU_F * fm * t));
+        out[n] += v * 0.55f * envRing(st, n, N, ring) * lv;
+    }
+}
+
+static void renderAir(const Part& st, float* out, int N) {
+    Rng r = { 4242 };
+    const float q = st.k[0] > 0 ? st.k[0] : 1.0f, lv = st.lv / 100.0f;
+    float c[4] = {}, z[4] = {};
+    for (int n = 0; n < N; n++) {
+        if ((n & 15) == 0) { const float fc = along(st.p, (float)n / N); bpSet(c, fc, fc / q); }
+        out[n] += bpRun(c, z, r.next()) * 1.4f * envLin(st, n, N) * lv;
     }
 }
 
@@ -164,47 +380,153 @@ static void silence(int16_t* buf, int ms) {
         writeFrames(buf, left < CHUNK ? left : CHUNK);
 }
 
+static void* bigAlloc(size_t bytes) {
+    void* p = heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    return p ? p : malloc(bytes);
+}
+
+#if defined(CARDPUTER_ADV)
+// Tones only, made as they play: no whole-sound buffer (no PSRAM here). Each
+// part is a pitch glide on its own: a TONE as written, a VOICE as a triangle
+// through the same pitches, a BELL as a ringing sine at its pitch. Noise and
+// air are left out, and so is the echo. Parts that overlap are added.
 static void playNow(Id id) {
-    const Seq& q = SEQS[(int)id];
+    const Sound& snd = SOUNDS[(int)id];
+    const uint8_t parts = snd.n < 8 ? snd.n : 8;
+    int at[8], len[8], t = 0, last = 0;
+    float ph[8] = {};
+    for (uint8_t i = 0; i < parts; i++) {
+        const Part& st = snd.p[i];
+        const int ms = ((st.flags & WITH) ? last : t) + st.off;
+        last = ms;
+        if (ms + st.ms + st.gap > t) t = ms + st.ms + st.gap;
+        at[i] = ms * (int)RATE / 1000;
+        len[i] = (st.kind == NOISE || st.kind == AIR) ? 0 : st.ms * (int)RATE / 1000;
+    }
+    const int total = (t + 30) * (int)RATE / 1000;
+    const float pct = (float)Settings::soundVolume() / 100.0f;
+    const float vol = pct * pct * 32000.0f, g = snd.gain > 0 ? snd.gain : 1.0f;
+    int16_t buf[CHUNK * 2];
+
+    i2s_start(PORT);
+    silence(buf, 24);
+    amp(true);
+    silence(buf, 16);
+    for (int s = 0; s < total; ) {
+        const int n = (total - s) < CHUNK ? (total - s) : CHUNK;
+        for (int k = 0; k < n; k++, s++) {
+            float v = 0;
+            for (uint8_t i = 0; i < parts; i++) {
+                const int j = s - at[i], N = len[i];
+                if (j < 0 || j >= N) continue;
+                const Part& st = snd.p[i];
+                const float tt = (float)j / RATE, lv = st.lv / 100.0f;
+                float f, e, x;
+                if (st.kind == BELL) {
+                    f = st.p[0];
+                    e = envRing(st, j, N, st.k[2] / 1000.0f);
+                    x = sinf(ph[i] * TAU_F) * 0.55f;
+                } else {
+                    f = along(st.p, (float)j / N);
+                    if (st.kind == VOICE) {
+                        if (st.k[3] > 0) f *= 1 + st.k[3] * sinf(TAU_F * 6 * tt);
+                        x = (ph[i] < 0.5f ? (ph[i] * 4.0f - 1.0f) : (3.0f - ph[i] * 4.0f)) * 0.8f;
+                    } else {
+                        if (st.k[0] > 0) f *= 1 + st.k[0] * sinf(TAU_F * st.k[1] * tt) * (st.k[2] > 0 ? expf(-tt * 1000 / st.k[2]) : 1);
+                        switch (st.wave) {
+                            case SQ:  x = ph[i] < 0.5f ? 0.35f : -0.35f; break;
+                            case TRI: x = (ph[i] < 0.5f ? (ph[i] * 4.0f - 1.0f) : (3.0f - ph[i] * 4.0f)) * 0.7f; break;
+                            case SIN: x = sinf(ph[i] * TAU_F) * 0.7f; break;
+                            default:  x = (ph[i] * 2.0f - 1.0f) * 0.4f; break;
+                        }
+                    }
+                    e = envLin(st, j, N);
+                }
+                v += x * e * lv;
+                ph[i] += f / RATE;
+                if (ph[i] >= 1.0f) ph[i] -= 1.0f;
+            }
+            v *= g;
+            const float a = fabsf(v);
+            const float o = a < 0.7f ? v : copysignf(0.7f + 0.3f * tanhf((a - 0.7f) / 0.3f), v);
+            const int16_t q = (int16_t)(o * vol);
+            buf[k * 2] = q; buf[k * 2 + 1] = q;
+        }
+        writeFrames(buf, n);
+    }
+    silence(buf, 16);
+    amp(false);
+    silence(buf, 24);
+    i2s_zero_dma_buffer(PORT);
+    i2s_stop(PORT);
+}
+#else
+static void playNow(Id id) {
+    const Sound& snd = SOUNDS[(int)id];
+    // Lay the parts out in time, the way the Lab did.
+    const uint8_t parts = snd.n < 8 ? snd.n : 8;
+    int start[8], t = 0, last = 0;
+    for (uint8_t i = 0; i < parts; i++) {
+        const Part& st = snd.p[i];
+        start[i] = ((st.flags & WITH) ? last : t) + st.off;
+        last = start[i];
+        if (start[i] + st.ms + st.gap > t) t = start[i] + st.ms + st.gap;
+    }
+    const int total = (t + snd.echoMs * 6 + 30) * (int)RATE / 1000;
+    float* mix = (float*)bigAlloc((size_t)total * sizeof(float));
+    if (!mix) { Serial.println("[sound] no memory for the sound"); return; }
+    memset(mix, 0, (size_t)total * sizeof(float));
+
+    uint32_t lcg = 0x5EED1234u;
+    float lp = 0;
+    for (uint8_t i = 0; i < parts; i++) {
+        const Part& st = snd.p[i];
+        const int at = start[i] * (int)RATE / 1000, N = st.ms * (int)RATE / 1000;
+        if (at < 0 || at + N > total) continue;
+        switch (st.kind) {
+            case VOICE: renderVoice(st, mix + at, N); break;
+            case BELL:  renderBell(st, mix + at, N);  break;
+            case AIR:   renderAir(st, mix + at, N);   break;
+            default:    renderTone(st, mix + at, N, lcg, lp); break;
+        }
+    }
+    if (snd.echoMs) {
+        const int D = snd.echoMs * (int)RATE / 1000;
+        float* line = (float*)bigAlloc((size_t)D * sizeof(float));
+        if (line) {
+            memset(line, 0, (size_t)D * sizeof(float));
+            for (int n = 0, i = 0; n < total; n++) {
+                const float z = line[i];
+                line[i] = mix[n] + z * snd.fb;
+                mix[n] += z * snd.mix;
+                if (++i == D) i = 0;
+            }
+            free(line);
+        }
+    }
+
     // The percent squared: the ear hears loudness on a curve, and squaring
     // the slider gives the bottom half of it real steps instead of a jump.
     const float pct = (float)Settings::soundVolume() / 100.0f;
-    const float vol = pct * pct;
+    const float vol = pct * pct * 32000.0f, g = snd.gain > 0 ? snd.gain : 1.0f;
     int16_t buf[CHUNK * 2];
 
     i2s_start(PORT);
     silence(buf, 24);         // clocks and zeros before the amp wakes: no pop
     amp(true);
     silence(buf, 16);
-
-    uint32_t lcg = 0x5EED1234u;
-    float lp = 0;
-    for (uint8_t si = 0; si < q.n; si++) {
-        const Step& st = q.s[si];
-        const int total = (int)(st.ms * RATE / 1000);
-        const int atk   = (int)(RATE * 4 / 1000);
-        const int hold  = total * 6 / 10;
-        float f = (float)st.f;
-        const float ratio = (st.to && st.f) ? powf((float)st.to / (float)st.f, 1.0f / (float)total) : 1.0f;
-        float ph = 0;
-        for (int at = 0; at < total; ) {
-            const int n = (total - at) < CHUNK ? (total - at) : CHUNK;
-            for (int i = 0; i < n; i++, at++) {
-                float env;
-                if (at < atk)        env = (float)at / (float)atk;
-                else if (at < hold)  env = 1.0f;
-                else                 env = (float)(total - at) / (float)(total - hold);
-                const float v = waveSample(st.wave, ph, lcg, lp) * env * vol;
-                const int16_t s = (int16_t)(v * 32000.0f);
-                buf[i * 2] = s; buf[i * 2 + 1] = s;
-                ph += f / (float)RATE;
-                if (ph >= 1.0f) ph -= 1.0f;
-                f *= ratio;
-            }
-            writeFrames(buf, n);
+    for (int at = 0; at < total; ) {
+        const int n = (total - at) < CHUNK ? (total - at) : CHUNK;
+        for (int i = 0; i < n; i++, at++) {
+            // A soft limiter: untouched under 0.7, then rounding off toward 1.
+            const float v = mix[at] * g, a = fabsf(v);
+            const float o = a < 0.7f ? v : copysignf(0.7f + 0.3f * tanhf((a - 0.7f) / 0.3f), v);
+            const int16_t s = (int16_t)(o * vol);
+            buf[i * 2] = s; buf[i * 2 + 1] = s;
         }
-        if (st.gap) silence(buf, st.gap);
+        writeFrames(buf, n);
     }
+    free(mix);
 
     silence(buf, 16);
     amp(false);
@@ -212,6 +534,8 @@ static void playNow(Id id) {
     i2s_zero_dma_buffer(PORT);
     i2s_stop(PORT);
 }
+
+#endif
 
 static void soundTask(void*) {
     uint8_t id;
@@ -258,7 +582,7 @@ void begin() {
 #if SOUND_NO_CODEC
     i2s_stop(PORT);
     s_q = xQueueCreate(4, sizeof(uint8_t));
-    xTaskCreatePinnedToCore(soundTask, "sound", 3072, nullptr, 2, &s_task, 1);
+    xTaskCreatePinnedToCore(soundTask, "sound", 4096, nullptr, 2, &s_task, 1);
     s_ok = s_q && s_task;
     Serial.printf("[sound] I2S amp ready: BCK %d WS %d DOUT %d%s\n", PIN_BCK, PIN_WS, PIN_DOUT, s_ok ? "" : " -- task failed");
 #else
@@ -267,7 +591,7 @@ void begin() {
     i2s_stop(PORT);
     if (!ok) { Serial.println("[sound] ES8311 setup failed"); return; }
     s_q = xQueueCreate(4, sizeof(uint8_t));
-    xTaskCreatePinnedToCore(soundTask, "sound", 3072, nullptr, 2, &s_task, 1);
+    xTaskCreatePinnedToCore(soundTask, "sound", 4096, nullptr, 2, &s_task, 1);
     s_ok = s_q && s_task;
     Serial.printf("[sound] ES8311 id %02X%02X ready: MCK %d BCK %d WS %d DOUT %d, amp on GPIO%d%s\n",
                   id1, id2, PIN_MCK, PIN_BCK, PIN_WS, PIN_DOUT, PIN_AMP, s_ok ? "" : " -- task failed");
@@ -278,7 +602,8 @@ void play(Id id, bool sample) {
     if (!s_ok || id >= Id::COUNT) return;
     if (!sample) {
         const uint8_t mode = Settings::soundMode();          // 0 OFF, 1 ALERTS, 2 ALL
-        const bool alert = id == Id::NEW_DEVICE || id == Id::WATCH_HIT || id == Id::LOW_BATTERY;
+        const bool alert = id == Id::NEW_DEVICE || id == Id::WATCH_HIT || id == Id::LOW_BATTERY
+                        || id == Id::HEADS_UP;
         if (mode == 0 || (!alert && mode < 2)) return;
         if (s_hush) return;
         if (Clock::night() && id != Id::WATCH_HIT) return;

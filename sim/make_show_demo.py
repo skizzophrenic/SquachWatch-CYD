@@ -32,6 +32,71 @@ CYAN  = (0, 214, 214)
 # ---- the clips ----
 
 CLIPS = {
+    # v1.43.0 "When You're Bored Then You're Boring", 320x240: TERMINAL MODE
+    # (SQUACHSIM_TERMINAL) on the live log, then sorted by KIND, dBm and
+    # DEVICE (SQUACHSIM_TMSORT), then the StickS3 / Cardputer panel.
+    # SQUACHSIM_T0 pins the first frame's time so the AIR graph is the same
+    # on every render.
+    "bored-then-boring": [
+        ("clear", 60, 40, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000"}, 1500, "NEW: TERMINAL MODE. SQUACHY CLOCKS OUT."),
+        ("clear", 60, 30, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_TMSORT": "1"}, 1400, "TAP A HEADING TO SORT. BY KIND..."),
+        ("clear", 60, 30, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_TMSORT": "3"}, 1400, "...BY SIGNAL, CLOSEST ON TOP..."),
+        ("clear", 60, 30, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_TMSORT": "2"}, 1400, "...OR A TO Z. TAP AGAIN TO FLIP IT."),
+        ("clear", 60, 30, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "_SIZE": "240x135"}, 1600, "ON THE STICKS3 AND CARDPUTER TOO."),
+    ],
+    # v1.42.0, HUMAN SENSING at the 2.8in's 320x240 (the emulator's pretend
+    # radio, sim/sense_cyd_sim.cpp; SQUACHSIM_SENSE picks the room): a still
+    # room, someone walking through, someone sitting still, the watch's and
+    # the Cardputer's layouts (_SIZE), and a router saying no.
+    "breathe-the-pressure": [
+        ("sensing", 30, 40, [], {"SQUACHSIM_SENSE": "clear"}, 1400, "NEW: HUMAN SENSING. YOUR WIFI, WATCHING THE ROOM."),
+        ("sensing", 30, 50, [], {"SQUACHSIM_SENSE": "motion"}, 1500, "WALK IN. THE ROOM NOTICES."),
+        ("sensing", 30, 40, [], {"SQUACHSIM_SENSE": "presence"}, 1500, "SIT STILL. IT STILL KNOWS YOU'RE THERE."),
+        ("sensing", 30, 40, [], {"SQUACHSIM_SENSE": "motion", "_SIZE": "240x240"}, 1300, "ON THE WATCH TOO."),
+        ("sensing", 30, 40, [], {"SQUACHSIM_SENSE": "presence", "_SIZE": "240x135"}, 1300, "AND THE CARDPUTER. AND THE T-DECK. AND..."),
+        ("sensing", 30, 30, [], {"SQUACHSIM_SENSE": "join"}, 1500, "ROUTER SAYS NO? IT WAITS. POLITELY."),
+    ],
+    # v1.41.0 "Return to Sender", at the T-Deck Plus's 320x240: the LORA page
+    # on its DMs tab (--tab 2), the chats' DMs list, a private line typed to
+    # YETI on Meshtastic (SQUACHSIM_DMPEER; dots, then its tick), the MeshCore
+    # one with JERSEY DVL (SQUACHSIM_DMNET), then the CYD's main screen for
+    # the new Waveshare C5 board.
+    "return-to-sender": [
+        ("lora", 40, 40, ["--tab", "2"], {"SQUACHSIM_LORATX": "1"}, 1500, "THE T-DECK LEARNED TO WHISPER."),
+        ("lorachat", 20, 40, ["--tab", "2"], {"SQUACHSIM_LORATX": "1"}, 1500, "DMS: MESHTASTIC AND MESHCORE, ONE LIST."),
+        ("lorachat", 20, 80, ["--tab", "2"], {"SQUACHSIM_LORATX": "1", "SQUACHSIM_DMPEER": "3b1c9a00", "SQUACHSIM_LORATYPE": "SAVE ME SOME JERKY|"}, 1700, "TYPE IT. ONLY YETI HEARS IT."),
+        ("lorachat", 20, 40, ["--tab", "2"], {"SQUACHSIM_LORATX": "1", "SQUACHSIM_DMPEER": "4e0a7f12", "SQUACHSIM_DMNET": "1"}, 1600, "THE TICK MEANS IT GOT THERE."),
+        ("clear", 60, 40, ["--bg", "5"], {"SQUACHSIM_BATT": "80"}, 1400, "NEW BOARD: WAVESHARE C5 2.8 (BETA)"),
+    ],
+    # v1.40.0 "Wake Me Up Before You Go-Go", 320x240: SNOOZE mid-pick on the
+    # alert card (SQUACHSIM_SNOOZE is the step it shows, its bar running out
+    # over the capture), the SNOOZED toast it leaves on CLEAR
+    # (SQUACHSIM_TOAST), then the T-Deck: Meshtastic names on the LORA page,
+    # the chats with a channel picked (SQUACHSIM_LORACH), and LORA SETTINGS.
+    "wake-me-up": [
+        ("alert", 40, 30, [], {"SQUACHSIM_SNOOZE": "10 MIN"}, 1300, "SNOOZE COUNTS TAPS NOW. ONE TAP: 10 MIN."),
+        ("alert", 40, 46, [], {"SQUACHSIM_SNOOZE": "4 HOURS"}, 1300, "FOUR TAPS: FOUR HOURS OF PEACE."),
+        ("clear", 40, 40, ["--bg", "5"], {"SQUACHSIM_TOAST": "SNOOZED|This one, for 4 hours", "SQUACHSIM_BATT": "80"}, 1600, "SQUACHY WILL WAKE YOU. LATER."),
+        ("lora", 40, 40, [], {"SQUACHSIM_LORATX": "1"}, 1500, "MESHTASTIC FOLKS HAVE NAMES NOW, NOT NUMBERS."),
+        ("lorachat", 20, 60, [], {"SQUACHSIM_LORATX": "1", "SQUACHSIM_LORACH": "Yowie", "SQUACHSIM_LORATYPE": "ANYONE SEEN MY LEFT BOOT?"}, 1700, "PICK A CHANNEL. YELL INTO IT."),
+        ("lorasettings", 20, 30, [], {}, 1700, "THE T-DECK GOT ITS OWN LORA SETTINGS."),
+    ],
+    # v1.39.0 "Radar Love", at the T-Deck Plus's 320x240: the LORA page on the
+    # emulator's made-up band (sim/lora_sim.cpp: Bluff Creek, cryptids only).
+    # A packet lands 0.7 s into every capture, on the open tab's network, so
+    # each scene opens with a loud ping on the radar and a new chat line. The
+    # Meshtastic tab, the radar, a quiet band (SQUACHSIM_LORAQUIET: nothing
+    # for 30 s, so the SPECTRUM twinkles and the meteor has the strip to
+    # itself), the MeshCore tab (--tab 1), and a line typed and sent
+    # (SQUACHSIM_LORATYPE). SQUACHSIM_LORATX turns LORA TX on, so the compose
+    # line reads as it does on a board that can send.
+    "radar-love": [
+        ("lora", 30, 40, [], {"SQUACHSIM_LORATX": "1"}, 1500, "THE T-DECK GOT A RADIO PAGE. PRESS ENTER."),
+        ("lora", 75, 40, [], {"SQUACHSIM_LORATX": "1"}, 1600, "A RADAR THAT ONLY TELLS THE TRUTH"),
+        ("lora", 120, 50, [], {"SQUACHSIM_LORAQUIET": "30", "SQUACHSIM_LORATX": "1"}, 1500, "QUIET AIR? IT STILL PUTS ON A SHOW."),
+        ("lora", 40, 40, ["--tab", "1"], {"SQUACHSIM_LORATX": "1"}, 1500, "TAP A TAB: MESHTASTIC OR MESHCORE"),
+        ("lora", 20, 60, ["--tab", "1"], {"SQUACHSIM_LORATYPE": "WHO TOOK MY TRAIL MIX?"}, 1800, "TYPE. ENTER. THE WHOLE FOREST KNOWS."),
+    ],
     # v1.38.0 "Snoop Onto Them", 320x240: an Axon body-cam alert and a gunshot
     # sensor's (--alert picks the kind), M3@ty's bad dance (SQUACHSIM_MEATY=4)
     # and a wave while he talks (=5), the FONTS page with BUBBLES slid to

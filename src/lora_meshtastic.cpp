@@ -186,6 +186,114 @@ void decrypt(const Header& h, const Channel& c, uint8_t* payload, uint8_t len) {
     ctr(k, nonce, payload, len);
 }
 
+bool canSend(const Channel& c) {
+    return c.enabled && c.name[0] && (c.keyLen == 16 || c.keyLen == 0);
+}
+
+size_t encodeData(uint8_t port, const uint8_t* payload, size_t plen, bool wantResponse, uint32_t requestId,
+                  uint8_t* out) {
+    if (!out) return 0;
+    if (!payload) plen = 0;
+    if (plen > 200) plen = 200;
+    uint8_t* q = out;
+    // portnum: every port this file sends is under 128, so one byte. (A
+    // port past 127 would need a varint; none is ever built here.)
+    *q++ = 0x08; *q++ = (uint8_t)(port & 0x7F);
+    *q++ = 0x12;
+    if (plen < 128) *q++ = (uint8_t)plen;
+    else { *q++ = (uint8_t)((plen & 0x7F) | 0x80); *q++ = (uint8_t)(plen >> 7); }
+    if (plen) memcpy(q, payload, plen);
+    q += plen;
+    if (wantResponse) { *q++ = 0x18; *q++ = 0x01; }          // want_response = true
+    if (requestId)    { *q++ = 0x35; wr32le(q, requestId); q += 4; }   // request_id, fixed32
+    return (size_t)(q - out);
+}
+
+// The 16 bytes every frame opens with. hop_limit in bits 0-2, want_ack bit
+// 3, hop_start bits 5-7 (both the same: we are where it starts), next hop 0
+// (flood), relay = our own last byte.
+static void writeHeader(uint8_t* f, uint32_t to, uint32_t from, uint32_t id, uint8_t hops, bool wantAck,
+                        uint8_t chanHash) {
+    if (hops < 1 || hops > 7) hops = 3;
+    wr32le(f, to);
+    wr32le(f + 4, from);
+    wr32le(f + 8, id);
+    f[12] = (uint8_t)(hops | (hops << 5) | (wantAck ? 0x08 : 0));
+    f[13] = chanHash;
+    f[14] = 0; f[15] = (uint8_t)from;
+}
+
+uint16_t buildChannelFrame(const Channel& c, uint32_t from, uint32_t to, uint32_t id, uint8_t hops, bool wantAck,
+                           const uint8_t* data, size_t dlen, uint8_t* f) {
+    if (!f || !data || !canSend(c) || dlen > 239) return 0;
+    writeHeader(f, to, from, id, hops, wantAck, c.hash);
+    memcpy(f + 16, data, dlen);
+    Header h;
+    parseHeader(f, (uint8_t)(16 + dlen), h);
+    decrypt(h, c, f + 16, (uint8_t)dlen);   // CTR: sealing is the same operation; no key = in the clear
+    return (uint16_t)(16 + dlen);
+}
+
+uint16_t buildFrame(const Channel& c, uint32_t from, uint32_t id, uint8_t hops, uint8_t port,
+                    const uint8_t* payload, size_t plen, uint8_t* f) {
+    uint8_t data[220];
+    const size_t dlen = encodeData(port, payload, plen, false, 0, data);
+    return buildChannelFrame(c, from, BROADCAST, id, hops, false, data, dlen, f);
+}
+
+// ---- direct messages ----------------------------------------------------------
+// CryptoEngine::initNonce with an extra nonce: the packet id as a 64-bit
+// little-endian number, whose top half the extra nonce then overwrites, the
+// sender, and CCM takes the first 13 bytes.
+static void pkiNonce(uint32_t from, uint32_t id, uint32_t extraNonce, uint8_t nonce[13]) {
+    memset(nonce, 0, 13);
+    wr32le(nonce, id);
+    wr32le(nonce + 4, extraNonce);
+    wr32le(nonce + 8, from);
+}
+
+bool pkiKey(const uint8_t myPriv[32], const uint8_t theirPub[32], uint8_t key[32]) {
+    uint8_t shared[32];
+    if (!x25519(shared, myPriv, theirPub)) return false;
+    sha256(shared, 32, key);
+    memset(shared, 0, sizeof shared);
+    return true;
+}
+
+size_t pkiSeal(const uint8_t key[32], uint32_t from, uint32_t id, uint32_t extraNonce,
+               const uint8_t* plain, size_t len, uint8_t* out) {
+    if (!key || !plain || !out || !len) return 0;
+    uint8_t nonce[13];
+    pkiNonce(from, id, extraNonce, nonce);
+    Aes256 k; k.setKey(key);
+    ccmSeal(k, nonce, plain, len, out, out + len);
+    wr32le(out + len + 8, extraNonce);
+    memset(&k, 0, sizeof k);
+    return len + PKI_OVERHEAD;
+}
+
+int pkiOpen(const uint8_t key[32], uint32_t from, uint32_t id, const uint8_t* in, size_t len, uint8_t* out) {
+    if (!key || !in || !out || len <= PKI_OVERHEAD) return -1;
+    const size_t n = len - PKI_OVERHEAD;
+    const uint32_t extraNonce = rd32le(in + n + 8);
+    uint8_t nonce[13];
+    pkiNonce(from, id, extraNonce, nonce);
+    Aes256 k; k.setKey(key);
+    const bool ok = ccmOpen(k, nonce, in, n, in + n, out);
+    memset(&k, 0, sizeof k);
+    return ok ? (int)n : -1;
+}
+
+uint16_t buildPkiFrame(const uint8_t key[32], uint32_t from, uint32_t to, uint32_t id, uint8_t hops, bool wantAck,
+                       uint32_t extraNonce, const uint8_t* data, size_t dlen, uint8_t* f) {
+    if (!f || !data || !dlen || to == BROADCAST || 16 + dlen + PKI_OVERHEAD > 255) return 0;
+    writeHeader(f, to, from, id, hops, wantAck, 0x00);     // channel 0: a PKI frame
+    return (uint16_t)(16 + pkiSeal(key, from, id, extraNonce, data, dlen, f + 16));
+}
+
+static PkiOpener s_pkiOpener = nullptr;
+void setPkiOpener(PkiOpener fn) { s_pkiOpener = fn; }
+
 bool parseData(const uint8_t* p, uint8_t len, Data& out) {
     memset(&out, 0, sizeof out);
     Pb::Reader r(p, len);
@@ -478,21 +586,32 @@ bool decode(const Lora::Packet& pk, Decoded& out) {
     const uint8_t plen = (uint8_t)(pk.len - 16);
     if (!plen) return true;
     if (plen > sizeof out.plain) return true;
-    if (out.hdr.channelHash == 0 && out.hdr.to != BROADCAST) return true;   // PKI: nobody's business
-
-    // Every channel whose hash matches gets a try; the first whose Data
-    // parses wins. Ham-mode channels are plaintext, so "decrypt" is a copy.
-    for (uint8_t i = 0; i < channelCount(); i++) {
-        const Channel c = channel(i);
-        if (!c.enabled || c.hash != out.hdr.channelHash) continue;
-        memcpy(out.plain, pk.data + 16, plen);
-        decrypt(out.hdr, c, out.plain, plen);
-        if (!parseData(out.plain, plen, out.data)) continue;
+    if (out.hdr.channelHash == 0 && out.hdr.to != BROADCAST) {
+        // PKI: sealed to one node's key pair. Opened only when that node is
+        // this board and the sender's key is known -- the opener says, and
+        // without one (every board but the T-Deck, and every host test that
+        // does not set one) it stays nobody's business.
+        uint8_t dl = 0;
+        if (!s_pkiOpener || plen <= PKI_OVERHEAD || !s_pkiOpener(out.hdr, pk.data + 16, plen, out.plain, dl)) return true;
+        if (!parseData(out.plain, dl, out.data)) return true;
         out.haveData = true;
-        out.channelIdx = i;
-        break;
+        out.pki = true;
+        out.channelIdx = PKI_CHANNEL;
+    } else {
+        // Every channel whose hash matches gets a try; the first whose Data
+        // parses wins. Ham-mode channels are plaintext, so "decrypt" is a copy.
+        for (uint8_t i = 0; i < channelCount(); i++) {
+            const Channel c = channel(i);
+            if (!c.enabled || c.hash != out.hdr.channelHash) continue;
+            memcpy(out.plain, pk.data + 16, plen);
+            decrypt(out.hdr, c, out.plain, plen);
+            if (!parseData(out.plain, plen, out.data)) continue;
+            out.haveData = true;
+            out.channelIdx = i;
+            break;
+        }
+        if (!out.haveData) return true;
     }
-    if (!out.haveData) return true;
 
     const uint8_t* p = out.data.payload;
     const uint8_t  n = out.data.payloadLen;

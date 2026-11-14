@@ -59,6 +59,21 @@ a keyboard, it can also **send**.
 - **Listening:** the same networks, presets, band choice, pill and **LORA
   CHATS** as the watches. Settings > SYSTEM > **LORA** cycles BOTH,
   MESHTASTIC, MESHCORE and OFF.
+- **The LORA page** (since v1.39.0): press **Enter** on the main screen, or
+  tap the LORA pill, which stays up whenever the radio is on. A radar of the
+  nodes heard: one that has sent its position sits at its real bearing and
+  distance once the T-Deck has a GPS fix, the rest wait on the dotted rim,
+  because one antenna cannot tell direction. A filled dot was heard directly,
+  a hollow one only through relays, and signal strength is never drawn as
+  distance. Beside it, NOW, FLOOR, PEAK and MARGIN, and a strip of the last
+  80 seconds: the noise as a line, each packet as a spike in its network's
+  colour. Under the radar, the GPS (FIX *n* SATS, SEARCHING or NOT HEARD) and
+  the nearest node. Below, one chat window with a MESHTASTIC tab and a
+  MESHCORE tab, and a compose line that sends to the open tab (LORA TX
+  permitting). BACK is in the top-right corner.
+- **One row per message.** A message relayed by three nodes used to show up
+  three times, and your own send could come back as a second row. Since
+  v1.39.0 a repeat of the same message within ten minutes is dropped.
 - **BOTH works on both.** The T-Deck stays tuned to MeshCore, whose
   messages announce themselves for only 65 ms, and glances at Meshtastic
   every 33 ms or so; a glance takes about 32 ms, well inside Meshtastic's

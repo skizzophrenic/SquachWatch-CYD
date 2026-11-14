@@ -3,9 +3,13 @@
 #include "serial_flush.h"
 #include "security.h"   // a locked device takes no console commands
 #include "ota_wifi.h"    // the WIFI command lists the saved networks
+#if defined(SENSE_CYD_APP)
+#include "sense_cyd.h"      // SENSE <cmd>
+void consoleFrameShot();     // main.cpp: SENSE SHOT
+#endif
 #include "detection.h"   // WINDOW N, for the bench; RADIO
-#if defined(ARDUINO_ARCH_ESP32)
-#include <esp_phy_init.h> // RADIO FULLCAL
+#if defined(ARDUINO_ARCH_ESP32) && !defined(SQW_NO_RADIO)
+#include <esp_phy_init.h> // RADIO FULLCAL (not on the Tab5: the P4 has no radio of its own)
 #endif
 #include "flood_bench.h" // FLOOD N, for the bench (a no-op outside FLOOD_BENCH builds)
 #include "settings.h"
@@ -71,6 +75,19 @@ extern volatile bool g_consoleMeaty;
 extern volatile bool g_consolePet;
 extern volatile bool g_consoleJail;
 extern volatile bool g_consoleFree;
+#if SQW_DEVTOOLS
+#include "shake.h"
+extern volatile uint8_t  g_devKey;
+extern volatile uint16_t g_devKeyMs;
+extern char g_devSdPath[48];
+extern volatile bool g_devGpsLogRearm;
+extern volatile bool     g_devShot;
+extern volatile bool g_devShotExt;
+extern volatile bool     g_devQuiet;
+extern volatile uint8_t  g_devImu;
+extern char              g_devType[48];
+extern volatile uint8_t  g_devTypeAt, g_devTypeN;
+#endif
 #if defined(CARDPUTER_ADV)
 extern volatile int8_t g_consoleExt;
 #endif
@@ -85,6 +102,7 @@ extern volatile bool g_consoleBatt;
 extern volatile bool g_consoleBattLog;
 extern volatile int8_t g_consoleSound;
 extern volatile bool g_consoleScreen;
+extern volatile int8_t g_consoleLoraSet;   // main.cpp: LORASET, the T-Deck's LORA SETTINGS from the bench
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
 extern volatile bool g_consolePowerOff;   // main.cpp: POWER OFF, the Freenove boards' deep sleep
 extern volatile bool g_consoleNapTest;       // main.cpp: NAPTEST, POWER OFF that wakes itself 3 s later
@@ -594,9 +612,55 @@ void pollSerial() {
             OtaWifi::printSaved();
             continue;
         }
+#if defined(SENSE_CYD_APP)
+        // SENSE SHOT: the frame on the console as hex rows (a PNG on the PC).
+        // SENSE OPEN / SENSE CLOSE / SENSE OPEN NOWIFI: open or leave HUMAN SENSING (bench).
+        // SENSE <cmd>: a command to the sensing engine (cal, rates, ...).
+        if (strcasecmp(line, "SENSE SHOT") == 0) { ::consoleFrameShot(); continue; }
+        if (strcasecmp(line, "SENSE OPEN") == 0) { g_senseConsole = 1; continue; }
+        if (strcasecmp(line, "SENSE OPEN NOWIFI") == 0) { g_senseConsole = 3; continue; }   // as if none were saved
+        if (strcasecmp(line, "SENSE CLOSE") == 0) { g_senseConsole = 2; continue; }
+        if (strncasecmp(line, "SENSE ", 6) == 0) { ::senseCydCommand(line + 6); continue; }
+#endif
         if (strcasecmp(line, "INVERT") == 0) { g_consoleInvert = true; continue; }
         if (strcasecmp(line, "ADC") == 0)    { g_consoleAdc = true; continue; }
         if (strcasecmp(line, "XYZZY") == 0)  { g_consoleXyzzy = true; continue; }
+#if SQW_DEVTOOLS
+        if (strcasecmp(line, "SHOT") == 0)      { g_devShot = true; continue; }
+        if (strcasecmp(line, "SHOT EXT") == 0)  { g_devShotExt = true; continue; }
+        if (strcasecmp(line, "POKE") == 0)      { g_devImu = 1; continue; }
+        if (strncasecmp(line, "TYPE ", 5) == 0) {
+            g_devTypeN = 0;
+            strncpy(g_devType, line + 5, sizeof g_devType - 1);
+            g_devType[sizeof g_devType - 1] = 0;
+            g_devTypeAt = 0; g_devTypeN = (uint8_t)strlen(g_devType);
+            continue;
+        }
+        if (strcasecmp(line, "TOSS") == 0)      { g_devImu = 2; continue; }
+        if (strcasecmp(line, "QUIET") == 0)     { g_devQuiet = !g_devQuiet;
+                                                  Serial.printf("[dev] alerts %s\n", g_devQuiet ? "QUIET" : "on"); continue; }
+        if (strcasecmp(line, "IMU") == 0)       { static bool on = false; on = !on; Shake::setTrace(on);
+                                                  Serial.printf("[imu] trace %s\n", on ? "on" : "off"); continue; }
+        if (strcasecmp(line, "KEY NEXT") == 0)  { g_devKey = 1; continue; }
+        if (strcasecmp(line, "KEY PREV") == 0)  { g_devKey = 2; continue; }
+        if (strcasecmp(line, "KEY HOME") == 0)  { g_devKey = 3; continue; }
+        if (strcasecmp(line, "KEY BACK") == 0)  { g_devKey = 5; continue; }
+        if (strcasecmp(line, "KEY SELECT") == 0) { g_devKey = 6; continue; }
+        if (strcasecmp(line, "HOTS") == 0)      { g_devKey = 7; continue; }
+        if (strcasecmp(line, "GPSPROBE") == 0)  { g_devKey = 8; continue; }
+        if (strcasecmp(line, "EXTID") == 0)     { g_devKey = 9; continue; }
+        if (strcasecmp(line, "SDTRY") == 0)     { g_devKey = 10; continue; }
+        if (strcasecmp(line, "SD LS") == 0)     { g_devKey = 11; continue; }
+        if (strncasecmp(line, "SD CAT ", 7) == 0) {
+            snprintf(g_devSdPath, sizeof g_devSdPath, "%s%s", line[7] == '/' ? "" : "/", line + 7);
+            g_devKey = 12; continue;
+        }
+        if (strncasecmp(line, "KEY PRESS", 9) == 0) {
+            g_devKeyMs = (uint16_t)atoi(line + 9);
+            g_devKey = 4;
+            continue;
+        }
+#endif
         if (strcasecmp(line, "LEGEND") == 0) { g_consoleLegend = true; continue; }
 #if defined(CARDPUTER_ADV)
         if (strcasecmp(line, "EXT ON") == 0)  { g_consoleExt = 1; continue; }
@@ -643,6 +707,15 @@ void pollSerial() {
         if (strcasecmp(line, "SOUND AMP LOW") == 0)  { g_consoleSound = 21; continue; }
         if (strncasecmp(line, "SOUND ", 6) == 0) { g_consoleSound = (int8_t)atoi(line + 6); continue; }
         if (strcasecmp(line, "SCREEN") == 0) { g_consoleScreen = true; continue; }
+        // LORASET: open LORA SETTINGS (over the LORA page); LORASET DET: step
+        // SQUACHWATCH DETECTIONS; LORASET PRESET: the next Meshtastic preset;
+        // LORASET HOME: back to the main screen. The
+        // T-Deck's bench, where a finger is not always to hand. Before LORA's
+        // own commands below, which take every line that starts LORA.
+        if (strcasecmp(line, "LORASET") == 0)      { g_consoleLoraSet = 0; continue; }
+        if (strcasecmp(line, "LORASET DET") == 0)  { g_consoleLoraSet = 1; continue; }
+        if (strcasecmp(line, "LORASET HOME") == 0) { g_consoleLoraSet = 2; continue; }
+        if (strcasecmp(line, "LORASET PRESET") == 0) { g_consoleLoraSet = 3; continue; }   // the next Meshtastic preset
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
         if (strcasecmp(line, "POWER OFF") == 0) { g_consolePowerOff = true; continue; }
         if (strcasecmp(line, "NAPTEST") == 0)   { g_consoleNapTest = true; g_consolePowerOff = true; continue; }
@@ -653,6 +726,7 @@ void pollSerial() {
         if (strcasecmp(line, "GPS") == 0)    { g_consoleGps = 1; continue; }
         if (strcasecmp(line, "GPS OFF") == 0) { g_consoleGps = 2; continue; }
         if (strcasecmp(line, "GPS STATUS") == 0) { g_consoleGps = 3; continue; }
+        if (strcasecmp(line, "GPS RAW") == 0)    { g_consoleGps = 10; continue; }
         if (strncasecmp(line, "GPS FAKE ", 9) == 0) {
             // Decimal degrees, e.g. GPS FAKE 40.7128 -74.0060.
             const double la = atof(line + 9);
@@ -684,6 +758,7 @@ void pollSerial() {
 #endif
 #if defined(ARDUINO_ARCH_ESP32)   // the radios themselves: nothing to ask in the emulator
         if (strcasecmp(line, "RADIO HEAL") == 0) { g_consoleHeal = true; continue; }
+#if !defined(SQW_NO_RADIO)
         if (strcasecmp(line, "RADIO FULLCAL") == 0) {
             // Throw away the radio's saved tuning and restart: the next boot
             // has nothing to load, so it calibrates from scratch.
@@ -691,6 +766,7 @@ void pollSerial() {
             delay(300);
             ESP.restart();
         }
+#endif
         if (strncasecmp(line, "RADIO", 5) == 0) { radioReport(strcasestr(line, "SCAN") != nullptr); continue; }
 #if SQW_WIFI_5G
         // BAND: which WiFi bands the sniffer sweeps. BAND 2 is 2.4 GHz only,
@@ -729,6 +805,17 @@ void pollSerial() {
                 for (uint8_t i = 0; i < zoneCount(); i++) Serial.printf(" %s,", zoneName(i));
                 Serial.println();
             }
+#if defined(SQW_DEVTOOLS)
+        } else if (strcasecmp(line, "UNCHOOSE ZONE") == 0) {
+            Settings::unmarkTimeZoneChosen();
+            Serial.println("[zone] not chosen: the card will ask again");
+        } else if (strcasecmp(line, "FORGET CLOCK") == 0) {
+            // As after a power-off: the time stays, marked a guess, until a
+            // real source sets it again.
+            setGuess(true);
+            g_devGpsLogRearm = true;
+            Serial.println("[clock] marked a guess until a real source sets it");
+#endif
         } else if (strncasecmp(line, "TIME ", 5) == 0) {
             const uint32_t e = (uint32_t)strtoul(line + 5, nullptr, 10);
             if (setEpoch(e)) {
@@ -828,7 +915,7 @@ void pollSerial() {
             // a stack size somebody picked, which is the question here.
             static const char* TASKS[] = { "loopTask", "nimble_host", "btController",
                                            "wifi", "tiT", "esp_timer", "arduino_events",
-                                           "sys_evt", "otawifi", "IDLE" };
+                                           "sys_evt", "otawifi", "ping", "IDLE" };
             for (uint8_t i = 0; i < sizeof TASKS / sizeof TASKS[0]; i++) {
                 TaskHandle_t th = xTaskGetHandle(TASKS[i]);
                 if (!th) continue;

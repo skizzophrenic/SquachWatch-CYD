@@ -6,8 +6,9 @@
 // no-ops everywhere else, so the pets and the mascot can ask for a sound
 // without knowing whether anything is listening.
 //
-// Every sound is a short run of 8-bit style tones, picked from the Sound Lab
-// artifact on 2026-10-11, and rendered on the fly: no samples in flash. The
+// Every sound is made on the fly from a short recipe (tones, a little voice,
+// FM bells, filtered air, an echo), picked in the two Sound Labs of
+// 2026-10-11 and 2026-10-14: no recordings in flash. The
 // SOUND row in Settings is OFF (the default), ALERTS or ALL; VOLUME is LOW,
 // MED or HIGH. The rules for when a sound may play are the CrowPanel
 // buzzer's, applied to all of them: never with the screen dimmed, never at
@@ -17,25 +18,46 @@
 #pragma once
 #include <stdint.h>
 
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)
+// SQUACHSIM: the browser emulator's builds have no speaker to drive.
+#if (defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(STICKS3) || defined(CARDPUTER_ADV)) && !defined(SQUACHSIM)
 #define SQW_SPEAKER 1
 #else
 #define SQW_SPEAKER 0
 #endif
 
+// The Freenove boards' power switch, which grew up around their speaker:
+// BOOT held three seconds is POWER OFF (deep sleep, BOOT wakes it), the one
+// restart its wake needs, and the power diary (POWERLOG) that follows a board
+// through it. A separate list from the speaker's, because a board can have a
+// speaker and no BOOT button to hold (the Core2), or a BOOT pin that is
+// something else (the Waveshare C5s). Add a board here only once POWER OFF
+// and its wake have been proven on it.
+// Not in the emulator (SQUACHSIM): a browser tab has no power to switch off.
+#if (defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)) && !defined(SQUACHSIM)
+#define SQW_BOOT_POWEROFF 1
+#else
+#define SQW_BOOT_POWEROFF 0
+#endif
+
 namespace Sound {
     enum class Id : uint8_t {
         NEW_DEVICE = 0,   // ALERTS: three climbing blips
-        WATCH_HIT,        // ALERTS: the two-tone siren, three times
-        LOW_BATTERY,      // ALERTS: two tired notes, once per dip under 10%
-        MESSAGE,          // ALL: ding dong, a squad message
-        VISITOR,          // ALL: yoo-hoo, a visitor walks in
+        WATCH_HIT,        // ALERTS: the Bigfoot whoop, twice, with an echo
+        LOW_BATTERY,      // ALERTS: a toy winding down, once per dip under 10%
+        MESSAGE,          // ALL: two glass chimes, a squad message
+        VISITOR,          // ALL: knock knock, a visitor walks in
         THROW,            // ALL: wheee, Squachy or a pet in the air
         LAND,             // ALL: splat, the first bounce off the floor
-        CLIPPY,           // ALL: the paperclip boing, when C1iPPY speaks
+        CLIPPY,           // ALL: a doorstop spring, when C1iPPY speaks
         TOAST_POP,        // ALL: ptoing, a slice pops
-        PLUG_IN,          // ALL: power up, the lamp sees the cable
-        UNPLUG,           // ALL: the drain slide, the cable comes out
+        PLUG_IN,          // ALL: a warm swoop up, the lamp sees the cable
+        UNPLUG,           // ALL: a warm fall, the cable comes out
+        LAND_TOASTER,     // ALL: T0@$TY's landing, a tin clank and a rattle
+        LAND_YETI,        // ALL: the yeti's landing, a grumpy "OOF"
+        HEADS_UP,         // ALERTS: one Bigfoot whoop, a squadmate's serious catch
+        WD_FIX,           // WARDRIVE SOUND: two rising beeps, the GPS has a fix
+        WD_LOST,          // WARDRIVE SOUND: a falling slide, the fix is gone
+        WD_TICK,          // WARDRIVE SOUND: a soft tick, new rows written
         COUNT
     };
 

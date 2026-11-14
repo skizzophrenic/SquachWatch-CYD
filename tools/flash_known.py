@@ -59,6 +59,7 @@ BOARDS = {
     # line): ST77922 over QSPI, touch in the panel chip. Bring-up began
     # 2026-10-09.
     "b8:1f:3f:c3:fd:58": ("freenove-s3-35", "Freenove ESP32-S3 Display 3.5in (FNK0104N), native USB"),
+    "28:84:85:85:12:0c": ("freenove-s3-35", "Freenove ESP32-S3 Display 3.5in, the second one (identified 2026-11-09: running SquachWatch, 480x320, 8 MB PSRAM)"),
     # Marauder V8 (justcallmekoko): ESP32-C5, 8 MB flash, ILI9341 + resistive
     # touch, GPS, MAX17048 gauge, behind a CP210x. Its Marauder v1.12.1 image
     # was read off first (sim/out/marauder_v8/marauder_v8_factory.bin).
@@ -69,6 +70,12 @@ BOARDS = {
     # the serial number. Its factory image was read off first
     # (sim/out/tdeck_plus/tdeck_plus_factory.bin). Bring-up began 2026-10-12.
     "30:ed:a0:a5:c3:f8": ("tdeck-plus",  "LilyGo T-Deck Plus, ESP32-S3, native USB"),
+    # M5Stack Tab5: ESP32-P4 with an ESP32-C6 radio over SDIO (esp-hosted),
+    # 1280x720 MIPI-DSI, ST7123 panel+touch on this unit. Native USB with its
+    # MAC as the serial number. Refused here on purpose from 2026-09-29 until
+    # 2026-10-19, when the owner said to build it: its MonsterC5 app is backed
+    # up whole in sim/out/tab5/. Builds from ~/.pioarduino like the C5s.
+    "30:ed:a0:e3:24:83": ("tab5",        "M5Stack Tab5, ESP32-P4 + C6, native USB"),
     # 88:57:21:2e:e6:e0 runs SquachEmit, not this firmware. It is the only
     # CAPACITIVE 2.8in; to test capacitive touch, list it here as cyd-fast
     # for the test and comment it out again after (done 2026-09-21).
@@ -144,7 +151,7 @@ def main():
                             "0x8000", os.path.join(build, "partitions.bin"),
                             "0xe000", boot_app0,
                             "0x10000", os.path.join(build, "firmware.bin")], cwd=ROOT)
-    elif env in ("nm-cyd-c5", "marauder-v8"):
+    elif env in ("nm-cyd-c5", "marauder-v8", "tab5"):
         # The C5's toolchain (pioarduino) installs its own core into whatever
         # penv runs it, and run from the shared one it broke `pio` for every
         # board (2026-10-02). It lives in a core dir of its own, and its

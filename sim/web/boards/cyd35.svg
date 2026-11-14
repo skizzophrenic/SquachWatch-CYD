@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 102.3 54.9" data-w-mm="102.3" data-h-mm="54.9">
+<title>3.5 inch ESP32 touch display board, front</title>
+<defs>
+<linearGradient id="pcb" x1="0" y1="0" x2="0.35" y2="1"><stop offset="0" stop-color="#f8e530"/><stop offset="0.45" stop-color="#f0d915"/><stop offset="1" stop-color="#e2c40c"/></linearGradient>
+<radialGradient id="pcbSheen" cx="0.3" cy="0.15" r="0.9"><stop offset="0" stop-color="#fff" stop-opacity="0.35"/><stop offset="0.5" stop-color="#fff" stop-opacity="0.06"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+<radialGradient id="ring" cx="0.4" cy="0.35" r="0.7"><stop offset="0" stop-color="#f2dc78"/><stop offset="0.6" stop-color="#d8b443"/><stop offset="1" stop-color="#b8922c"/></radialGradient>
+<linearGradient id="barrel" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6b5420"/><stop offset="1" stop-color="#c9a24a"/></linearGradient>
+<linearGradient id="frame" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f1efe6"/><stop offset="0.5" stop-color="#e3e0d2"/><stop offset="1" stop-color="#d6d2c2"/></linearGradient>
+<linearGradient id="ledge" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8a8b92"/><stop offset="0.5" stop-color="#7c7d85"/><stop offset="1" stop-color="#6d6e75"/></linearGradient>
+<linearGradient id="metal" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#3a3c40"/><stop offset="0.5" stop-color="#5a5d62"/><stop offset="1" stop-color="#43464b"/></linearGradient>
+<linearGradient id="fpc" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#8a5414"/><stop offset="0.5" stop-color="#d0902e"/><stop offset="1" stop-color="#9c6418"/></linearGradient>
+<linearGradient id="glare" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.13"/><stop offset="0.35" stop-color="#fff" stop-opacity="0.025"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<linearGradient id="usbShell" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e9ecef"/><stop offset="0.5" stop-color="#b9bec4"/><stop offset="1" stop-color="#8d939a"/></linearGradient>
+<linearGradient id="ant" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#0b0d0c"/><stop offset="1" stop-color="#1c201e"/></linearGradient>
+<radialGradient id="lens" cx="0.45" cy="0.4" r="0.6"><stop offset="0" stop-color="#fbfbf8"/><stop offset="0.7" stop-color="#d9dbd6"/><stop offset="1" stop-color="#b3b6b2"/></radialGradient>
+<linearGradient id="pad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f3dd8a"/><stop offset="1" stop-color="#c9a040"/></linearGradient>
+<linearGradient id="solder" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f4f4f2"/><stop offset="1" stop-color="#a9adb0"/></linearGradient>
+</defs>
+<rect x="0" y="12.65" width="1.4" height="7.5" rx="0.25" fill="url(#usbShell)" stroke="#6f757b" stroke-width="0.08"/>
+<rect x="0.12" y="13.55" width="0.3" height="5.7" fill="#7d838a" opacity="0.6"/>
+<rect x="95.9" y="18.85" width="6.25" height="17.3" rx="0.3" fill="url(#ant)"/>
+<polyline points="97.1,20.3 100.3,20.3 100.3,22.5 97.1,22.5 97.1,24.7 100.3,24.7 100.3,26.9 97.1,26.9 97.1,29.1 100.3,29.1 100.3,31.3 97.1,31.3 97.1,33.5 100.3,33.5" fill="none" stroke="#2a302d" stroke-width="0.45" stroke-linejoin="round" opacity="0.15"/>
+<path d="M3.4,0 H99.7 A2.6,2.6 0 0 1 102.3,2.6 V18.7 H96.2 A0.5,0.5 0 0 0 95.7,19.2 V35.8 A0.5,0.5 0 0 0 96.2,36.3 H102.3 V52.3 A2.6,2.6 0 0 1 99.7,54.9 H3.4 A2.6,2.6 0 0 1 0.8,52.3 V2.6 A2.6,2.6 0 0 1 3.4,0 Z M2.8,3.5 A1.5,1.5 0 1 0 5.8,3.5 A1.5,1.5 0 1 0 2.8,3.5 Z M97.3,3.5 A1.5,1.5 0 1 0 100.3,3.5 A1.5,1.5 0 1 0 97.3,3.5 Z M2.8,51.4 A1.5,1.5 0 1 0 5.8,51.4 A1.5,1.5 0 1 0 2.8,51.4 Z M97.3,51.4 A1.5,1.5 0 1 0 100.3,51.4 A1.5,1.5 0 1 0 97.3,51.4 Z" fill="url(#pcb)" fill-rule="evenodd" stroke="#b99a07" stroke-width="0.12"/>
+<path d="M3.4,0 H99.7 A2.6,2.6 0 0 1 102.3,2.6 V18.7 H96.2 A0.5,0.5 0 0 0 95.7,19.2 V35.8 A0.5,0.5 0 0 0 96.2,36.3 H102.3 V52.3 A2.6,2.6 0 0 1 99.7,54.9 H3.4 A2.6,2.6 0 0 1 0.8,52.3 V2.6 A2.6,2.6 0 0 1 3.4,0 Z M2.8,3.5 A1.5,1.5 0 1 0 5.8,3.5 A1.5,1.5 0 1 0 2.8,3.5 Z M97.3,3.5 A1.5,1.5 0 1 0 100.3,3.5 A1.5,1.5 0 1 0 97.3,3.5 Z M2.8,51.4 A1.5,1.5 0 1 0 5.8,51.4 A1.5,1.5 0 1 0 2.8,51.4 Z M97.3,51.4 A1.5,1.5 0 1 0 100.3,51.4 A1.5,1.5 0 1 0 97.3,51.4 Z" fill="url(#pcbSheen)" fill-rule="evenodd"/>
+<path d="M3.4,0 H99.7 A2.6,2.6 0 0 1 102.3,2.6 V18.7 H96.2 A0.5,0.5 0 0 0 95.7,19.2 V35.8 A0.5,0.5 0 0 0 96.2,36.3 H102.3 V52.3 A2.6,2.6 0 0 1 99.7,54.9 H3.4 A2.6,2.6 0 0 1 0.8,52.3 V2.6 A2.6,2.6 0 0 1 3.4,0 Z" fill="none" stroke="#fff6b0" stroke-width="0.25" opacity="0.55" transform="translate(0.12 0.12)" clip-path="none"/>
+<path d="M1.9,3.5 A2.4,2.4 0 1 0 6.7,3.5 A2.4,2.4 0 1 0 1.9,3.5 Z M2.8,3.5 A1.5,1.5 0 1 0 5.8,3.5 A1.5,1.5 0 1 0 2.8,3.5 Z" fill="url(#ring)" fill-rule="evenodd" stroke="#b08a20" stroke-width="0.06"/>
+<circle cx="4.3" cy="3.5" r="1.62" fill="none" stroke="url(#barrel)" stroke-width="0.18"/>
+<path d="M96.4,3.5 A2.4,2.4 0 1 0 101.2,3.5 A2.4,2.4 0 1 0 96.4,3.5 Z M97.3,3.5 A1.5,1.5 0 1 0 100.3,3.5 A1.5,1.5 0 1 0 97.3,3.5 Z" fill="url(#ring)" fill-rule="evenodd" stroke="#b08a20" stroke-width="0.06"/>
+<circle cx="98.8" cy="3.5" r="1.62" fill="none" stroke="url(#barrel)" stroke-width="0.18"/>
+<path d="M1.9,51.4 A2.4,2.4 0 1 0 6.7,51.4 A2.4,2.4 0 1 0 1.9,51.4 Z M2.8,51.4 A1.5,1.5 0 1 0 5.8,51.4 A1.5,1.5 0 1 0 2.8,51.4 Z" fill="url(#ring)" fill-rule="evenodd" stroke="#b08a20" stroke-width="0.06"/>
+<circle cx="4.3" cy="51.4" r="1.62" fill="none" stroke="url(#barrel)" stroke-width="0.18"/>
+<path d="M96.4,51.4 A2.4,2.4 0 1 0 101.2,51.4 A2.4,2.4 0 1 0 96.4,51.4 Z M97.3,51.4 A1.5,1.5 0 1 0 100.3,51.4 A1.5,1.5 0 1 0 97.3,51.4 Z" fill="url(#ring)" fill-rule="evenodd" stroke="#b08a20" stroke-width="0.06"/>
+<circle cx="98.8" cy="51.4" r="1.62" fill="none" stroke="url(#barrel)" stroke-width="0.18"/>
+<rect x="1.9" y="12.2" width="2.2" height="1.4" rx="0.7" fill="url(#pad)"/>
+<rect x="2.25" y="12.58" width="1.5" height="0.64" rx="0.32" fill="url(#solder)"/>
+<rect x="1.9" y="19.2" width="2.2" height="1.4" rx="0.7" fill="url(#pad)"/>
+<rect x="2.25" y="19.58" width="1.5" height="0.64" rx="0.32" fill="url(#solder)"/>
+<circle cx="5.5" cy="14" r="0.42" fill="#e5c84a" stroke="#c7a520" stroke-width="0.1"/>
+<circle cx="5.5" cy="14" r="0.17" fill="#6b5a1a"/>
+<circle cx="5.5" cy="18.7" r="0.42" fill="#e5c84a" stroke="#c7a520" stroke-width="0.1"/>
+<circle cx="5.5" cy="18.7" r="0.17" fill="#6b5a1a"/>
+<path d="M5.5,14 L7,12.5" stroke="#e8cd18" stroke-width="0.3" opacity="0.7"/>
+<path d="M5.5,18.7 L7,20.2" stroke="#e8cd18" stroke-width="0.3" opacity="0.7"/>
+<rect x="96.7" y="8.55" width="0.85" height="1.0" rx="0.1" fill="url(#pad)"/>
+<rect x="96.7" y="14.05" width="0.85" height="1.0" rx="0.1" fill="url(#pad)"/>
+<rect x="98.3" y="8.55" width="0.85" height="1.0" rx="0.1" fill="url(#pad)"/>
+<rect x="98.3" y="14.05" width="0.85" height="1.0" rx="0.1" fill="url(#pad)"/>
+<rect x="99.9" y="8.55" width="0.85" height="1.0" rx="0.1" fill="url(#pad)"/>
+<rect x="99.9" y="14.05" width="0.85" height="1.0" rx="0.1" fill="url(#pad)"/>
+<rect id="led" x="96.15" y="9.3" width="5" height="5" rx="0.25" fill="#f4f3ee" stroke="#c9c8c0" stroke-width="0.08"/>
+<path d="M100.25,9.3 L101.15,10.2 V9.3 Z" fill="#d6d4cc"/>
+<circle cx="98.65" cy="11.8" r="1.85" fill="url(#lens)" stroke="#a9aca7" stroke-width="0.1" opacity="0.92"/>
+<rect x="97.85" y="11.2" width="0.5" height="0.5" fill="#c96a5a" opacity="0.75"/>
+<rect x="98.95" y="11.2" width="0.5" height="0.5" fill="#6a9a6a" opacity="0.75"/>
+<rect x="98.4" y="12.1" width="0.5" height="0.5" fill="#6a7fb0" opacity="0.75"/>
+<circle cx="98.65" cy="11.8" r="0.18" fill="#e8c86a"/>
+<path d="M97.45,10.6 A1.7,1.7 0 0 1 99.25,10.2" fill="none" stroke="#fff" stroke-width="0.25" opacity="0.8"/>
+<circle cx="97.05" cy="15.8" r="0.22" fill="#4d4a3c"/>
+<circle cx="98.25" cy="15.8" r="0.22" fill="#4d4a3c"/>
+<rect x="97.05" y="39.35" width="4.1" height="5" fill="none" stroke="#fdfbe8" stroke-width="0.15" opacity="0.8"/>
+<rect x="97.4" y="39.7" width="3.4" height="1.15" fill="url(#pad)"/>
+<rect x="97.4" y="42.85" width="3.4" height="1.15" fill="url(#pad)"/>
+<rect x="97.95" y="40.4" width="2.3" height="2.9" rx="0.15" fill="#f2f1ec" stroke="#bdbbb3" stroke-width="0.06"/>
+<rect x="98.15" y="40.85" width="1.9" height="2" rx="0.1" fill="#1b1b1d"/>
+<rect x="98.25" y="40.95" width="0.5" height="1.8" fill="#fff" opacity="0.15"/>
+<rect x="7.4" y="0" width="87.65" height="54.9" fill="#000" opacity="0.18"/>
+<rect x="7.43" y="0" width="87.47" height="54.9" fill="#000" opacity="0.15"/>
+<rect x="7.45" y="0.05" width="87.3" height="54.8" rx="0.35" fill="url(#frame)" stroke="#a9a596" stroke-width="0.08"/>
+<rect x="7.45" y="0.6" width="0.8" height="53.7" rx="0.2" fill="url(#fpc)"/>
+<rect x="7.7" y="6.5" width="0.3" height="3.6" fill="#e9b45a" opacity="0.55"/>
+<rect x="7.7" y="11.7" width="0.3" height="3.6" fill="#e9b45a" opacity="0.55"/>
+<rect x="7.7" y="16.9" width="0.3" height="3.6" fill="#e9b45a" opacity="0.55"/>
+<rect x="7.7" y="22.1" width="0.3" height="3.6" fill="#e9b45a" opacity="0.55"/>
+<rect x="7.7" y="27.3" width="0.3" height="3.6" fill="#e9b45a" opacity="0.55"/>
+<rect x="7.7" y="32.5" width="0.3" height="3.6" fill="#e9b45a" opacity="0.55"/>
+<rect x="7.7" y="37.7" width="0.3" height="3.6" fill="#e9b45a" opacity="0.55"/>
+<rect x="7.7" y="42.9" width="0.3" height="3.6" fill="#e9b45a" opacity="0.55"/>
+<rect x="7.7" y="48.1" width="0.3" height="3.6" fill="#e9b45a" opacity="0.55"/>
+<rect x="8.25" y="20.8" width="1.65" height="33.4" fill="url(#metal)"/>
+<rect x="8.25" y="20.8" width="1.65" height="0.25" fill="#c7c9cc" opacity="0.6"/>
+<rect x="9" y="0.9" width="0.8" height="12.7" rx="0.1" fill="#4b4d52"/>
+<rect x="9.1" y="1.1" width="0.25" height="12.2" fill="#9a9ca0" opacity="0.6"/>
+<rect x="8.95" y="15.3" width="0.9" height="1.0" fill="#3b3c40"/>
+<rect x="8.95" y="18" width="0.9" height="1.0" fill="#3b3c40"/>
+<path d="M7.8,9.5 L8.8,14.6 L8.8,20.5" fill="none" stroke="#c98a2c" stroke-width="0.12" opacity="0.8"/>
+<path d="M7.9,10 L8.8,15.1 L8.8,20.5" fill="none" stroke="#c98a2c" stroke-width="0.12" opacity="0.8"/>
+<path d="M8,10.5 L8.8,15.6 L8.8,20.5" fill="none" stroke="#c98a2c" stroke-width="0.12" opacity="0.8"/>
+<path d="M8.1,11 L8.8,16.1 L8.8,20.5" fill="none" stroke="#c98a2c" stroke-width="0.12" opacity="0.8"/>
+<rect x="11.1" y="1.59" width="4.17" height="50.94" fill="url(#ledge)"/>
+<rect x="11.1" y="1.59" width="0.18" height="50.94" fill="#55565c"/>
+<rect x="15.27" y="1.59" width="77.83" height="50.94" fill="#07080b"/>
+<rect x="11.1" y="52.53" width="82" height="0.65" fill="#8e8c90"/>
+<rect x="11.1" y="1.59" width="82" height="51.59" fill="none" stroke="#b3afa2" stroke-width="0.15"/>
+<rect id="screen" x="17.45" y="2.6" width="73.44" height="48.96" fill="#000"/>
+<path d="M7.45,0.05 H94.75 V54.85 H7.45 Z M17.45,2.6 V51.56 H90.89 V2.6 Z" fill="url(#glare)" fill-rule="evenodd"/>
+<rect x="7.75" y="0.12" width="86.7" height="0.15" fill="#fff" opacity="0.7"/>
+<rect id="btn-boot" data-side="back" x="78.8" y="48.1" width="3.4" height="4.8" fill="#000" fill-opacity="0"/>
+<rect id="btn-rst" data-side="back" x="82.95" y="48.1" width="3.4" height="4.8" fill="#000" fill-opacity="0"/>
+<rect id="usb" data-dir="left" x="0" y="12.65" width="1.4" height="7.5" fill="#000" fill-opacity="0"/>
+</svg>

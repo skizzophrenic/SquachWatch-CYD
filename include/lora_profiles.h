@@ -26,6 +26,15 @@ const Profile& profile(uint8_t i);   // clamped
 // German Meshtastic default.
 uint8_t defaultProfile();
 
+// A network's mesh preset by name in this band plan: the row "MT <preset>"
+// for Meshtastic (case aside), or the network's first mesh row -- LongFast,
+// MeshCore's regional preset -- when `preset` is empty or this plan has no
+// such row. -1 when the plan has no mesh row for the network at all.
+int16_t meshPresetFind(Proto p, const char* preset);
+// Every mesh row a network has in this band plan, table order (the first is
+// the default). Returns how many went into out.
+uint8_t meshPresetRows(Proto p, uint8_t* out, uint8_t cap);
+
 // Meshtastic's frequency-slot rule (RadioInterface.cpp), for a channel with a
 // name that is not a preset's: the slot is a djb2 hash of the name. Region
 // edges in Hz, bandwidth in units of 100 Hz. Returns the centre frequency.

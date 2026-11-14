@@ -77,6 +77,13 @@ namespace Squachy {
     // band under the counter tiles and sends the bubble back up to row 1,
     // above them, where it always sat.
     void setBubbleRiseTo(int y);
+    // The other way: a row his bubble's BOTTOM sits on, or -1 for off. The
+    // small boards' main screen puts it at his feet: at 135 rows he fills
+    // his band, and a bubble at its top sat on his face. Beats the rise.
+    void setBubbleSinkTo(int y);
+    // Anything going on with him that someone else should not talk over:
+    // his bubble, a pet or held reaction still playing, in the air.
+    bool reacting();
     // His own bubble as drawn last frame, if he had one up.
     bool ownBubble(int& x, int& y, int& w, int& h);
 

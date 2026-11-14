@@ -7,6 +7,7 @@
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
+#include <stdio.h>
 #include "lora_pkt.h"
 #include "lora_nodes.h"
 #include "lora_survey.h"
@@ -40,6 +41,13 @@ struct Stats {
 // second macro rather than -DSQUACH_LORA in sim/Makefile because SQUACH_LORA
 // also switches on the network halves of lora_feed.cpp and lora_enrich.cpp,
 // which want WiFi.h and HTTPClient.h, and sim/ has no WiFi shim.
+// The last 80 seconds, for the LORA page's strip and waterfall: the noise
+// floor sampled once a second (newest last), and every packet's loudness,
+// when it landed and whose it was. Both are rings the radio task writes.
+static const uint16_t TRAIL_CAP = 80;
+static const uint8_t  HIT_CAP   = 24;
+struct Hit { uint32_t ms; int16_t rssi; Proto proto; };
+
 #if SQUACH_LORA || SQUACH_LORA_FAKE
 // After the WiFi and Bluetooth radios are up. True when a module answered.
 bool begin();
@@ -63,7 +71,48 @@ void applyListen(uint8_t listen);
 // for the time on air (half a second on LongFast) with the sniffer parked.
 // False when the radio is absent, the preset is not in this band plan, the
 // text is empty, or the send failed.
-bool sendText(Proto p, const char* name, const char* text, int8_t dbm);
+//
+// `chan` is the decoder's own channel index to send on (MeshCore::channel(),
+// Meshtastic::channel()), sealed with THAT channel's key and carrying ITS hash;
+// our copy files under it in the ring. -1, the default, is the network's
+// default channel -- Meshtastic's preset channel, MeshCore's Public -- which is
+// what every send was before the channel chip, and what the console's bench
+// sends still use. A channel that cannot be sent on (Lora::Chan::txSendable:
+// muted, gone, a 32-byte key, a preset that is not ours) is refused, never
+// swapped for another: a private line must not leave on the public channel.
+// The Meshtastic NodeInfo before a text always goes on the preset channel --
+// a name is announced publicly, not inside somebody's private channel.
+bool sendText(Proto p, const char* name, const char* text, int8_t dbm, int16_t chan = -1);
+// The LORA SETTINGS page's (the T-Deck). A name changed: the next Meshtastic
+// text sends the NodeInfo first again. CLEAR CHATS empties the message ring;
+// FORGET NAMES empties the remembered Meshtastic names and their stored copy
+// (the 'loranames' NVS namespace).
+void identityChanged();
+void clearChats();
+void forgetNames();
+// A Meshtastic direct message to node `to` (include/lora_dm.h): queued, its
+// row in the chat at once, sealed and sent from tick(), ACKed or retried
+// there. Returns its packet id, 0 when refused (no radio, LORA TX off, empty
+// text, outbox full). dmState is a Lora::Dm::State; dmHasKey whether we hold
+// that node's key (without it the DM waits while we ask for one).
+// MeshCore too (include/lora_mcdm.h): `to` is the first four bytes of the
+// contact's key, and "has a key" means "is a contact" -- a node we have
+// heard advertise. Without that a MeshCore DM is refused, since nothing
+// would open it.
+uint32_t sendDm(Proto p, uint32_t to, const char* text);
+uint8_t  dmState(uint32_t id);
+bool     dmHasKey(Proto p, uint32_t num);
+// A Meshtastic node's short name as its NodeInfo gave it (Lora::Names), else
+// its number, "!27cc63cc"; a MeshCore contact's advertised name, else the
+// first bytes of its key.
+void     nodeName(Proto p, uint32_t num, char* out, size_t cap);
+// CHANNELS on the same page: add one through the console's own path (LORA
+// CHAN: checked, added, stored), drop a user's row by its channelRow number
+// (a built-in refuses), and a saved key as its first and last four characters
+// only. `msg` gets a short line for the screen.
+bool channelAdd(Proto p, const char* name, const char* key, char* msg, size_t cap);
+bool channelDropRow(uint8_t row);
+void channelKeyPreview(uint8_t row, char* out, size_t cap);
 void setFocus(uint8_t profileIdx);
 uint8_t focus();
 // Which profiles the survey rotates through, as a bitmask over the table
@@ -96,6 +145,8 @@ bool     packetAt(uint16_t idxFromNewest, Packet& out);
 // that left the bytes behind would send the caller back for them one at a time.
 uint16_t packetSnapshot(Packet* out, uint16_t cap, uint16_t from = 0);
 const Stats& stats();
+uint16_t rssiTrail(int8_t* out, uint16_t cap);   // oldest first, newest last
+uint8_t  hitTrail(Hit* out, uint8_t cap);
 
 // The node table, copied out under the sniffer's lock: how many, the order
 // newest first, and one row.
@@ -219,7 +270,17 @@ inline void statusLine(char* out, size_t cap) { if (cap) out[0] = '\0'; }
 inline void tick(uint32_t) {}
 inline void setMode(Mode) {}
 inline void applyListen(uint8_t) {}
-inline bool sendText(Proto, const char*, const char*, int8_t) { return false; }
+inline bool sendText(Proto, const char*, const char*, int8_t, int16_t = -1) { return false; }
+inline void identityChanged() {}
+inline void clearChats() {}
+inline void forgetNames() {}
+inline uint32_t sendDm(Proto, uint32_t, const char*) { return 0; }
+inline uint8_t  dmState(uint32_t) { return 0; }
+inline bool     dmHasKey(Proto, uint32_t) { return false; }
+inline void     nodeName(Proto, uint32_t num, char* out, size_t cap) { if (cap) snprintf(out, cap, "!%08lx", (unsigned long)num); }
+inline bool channelAdd(Proto, const char*, const char*, char* msg, size_t cap) { if (msg && cap) msg[0] = '\0'; return false; }
+inline bool channelDropRow(uint8_t) { return false; }
+inline void channelKeyPreview(uint8_t, char* out, size_t cap) { if (cap) out[0] = '\0'; }
 inline Mode mode() { return Mode::OFF; }
 inline void setFocus(uint8_t) {}
 inline uint8_t focus() { return 0; }
@@ -251,6 +312,8 @@ inline uint8_t channelsQuietBuiltIn() { return 0; }
 inline void channelCapacity(uint8_t& a, uint8_t& b, uint8_t& c, uint8_t& d) { a = b = c = d = 0; }
 static const uint8_t SPECTRUM_BINS = 141;
 inline uint8_t spectrum(uint8_t*, uint8_t*, uint8_t) { return 0; }
+inline uint16_t rssiTrail(int8_t*, uint16_t) { return 0; }
+inline uint8_t  hitTrail(Hit*, uint8_t) { return 0; }
 inline uint32_t spectrumSweeps() { return 0; }
 inline int8_t surveyStart(const char*) { return -1; }
 inline bool surveyStop() { return false; }

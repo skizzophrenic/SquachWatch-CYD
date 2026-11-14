@@ -6,6 +6,8 @@
 #include "lora_meshcore.h"
 #include "lora_classify.h"
 #include "lora_crypto.h"
+#include "lora_msgs.h"
+#include "lora_names.h"
 #include "test_util.h"
 #include <cstring>
 #include <cstdio>
@@ -269,6 +271,45 @@ int main() {
         ck("at 5 minutes it becomes one", Nodes::dutyKnown(*n, 301001));
         ck("and 0.7 s of 300 s is 2 per-mille", Nodes::dutyPermille(*n, 301000) == 2);
         ck("so nothing is flagged", !(n->flags & Nodes::NF_DUTY));
+    }
+
+    suite("A name learned later reaches the chat rows that came first");
+    {
+        Nodes::clear(); Names::clear();
+        static uint8_t ring[200000];
+        ck("message ring up", Msgs::bytesNeeded() <= sizeof ring && Msgs::begin(ring, sizeof ring));
+        const uint8_t text[] = { 0x08, 0x01, 0x12, 0x05, 'h', 'o', 'w', 'l', '!' };
+        mtFrame(0x3b1c9a2e, 0x63, text, sizeof text, 10);
+        Nodes::note(pk, 1000, 0);
+        Msgs::Msg m;
+        ck("the text is held under the node number", Msgs::at(0, m) && strcmp(m.sender, "!3b1c9a2e") == 0 && strcmp(m.text, "howl!") == 0);
+        const uint8_t user[] = { 0x0A, 9, '!', '3','b','1','c','9','a','2','e', 0x12, 4, 'Y','e','t','i', 0x1A, 2, 'Y','T' };
+        uint8_t data[40] = { 0x08, 0x04, 0x12, (uint8_t)sizeof user };
+        memcpy(data + 4, user, sizeof user);
+        mtFrame(0x3b1c9a2e, 0x63, data, (uint8_t)(4 + sizeof user), 11);
+        Nodes::note(pk, 2000, 0);
+        ck("the NodeInfo renames the earlier row", Msgs::at(0, m) && strcmp(m.sender, "YT") == 0);
+        ck("and the name is remembered", Names::count() == 1 && Names::dirty());
+
+        // A restart: the node table and the chat ring are empty, and only
+        // what Names saved comes back.
+        uint8_t img[4000];
+        const size_t len = Names::save(img, sizeof img);
+        ck("the store saves", len > 3);
+        Nodes::clear(); Msgs::clear(); Names::clear();
+        ck("and loads", Names::load(img, len) && Names::count() == 1 && !Names::dirty());
+        mtFrame(0x3b1c9a2e, 0x63, text, sizeof text, 12);
+        Nodes::note(pk, 3000, 0);
+        const Nodes::Node* n = Nodes::at(0);
+        ck("after a restart the first text is already named", Msgs::at(0, m) && strcmp(m.sender, "YT") == 0);
+        ck("and so is the row", n && strcmp(n->tag, "YT") == 0 && strcmp(n->name, "Yeti") == 0);
+
+        // A stranger stays a number until it announces itself.
+        mtFrame(0x0badf00d, 0x63, text, sizeof text, 13);
+        Nodes::note(pk, 4000, 0);
+        ck("an unknown node is its number", Msgs::at(0, m) && strcmp(m.sender, "!0badf00d") == 0);
+        ck("and the other sender's rows are untouched", Msgs::at(1, m) && strcmp(m.sender, "YT") == 0);
+        Msgs::clear();
     }
 
     return report();

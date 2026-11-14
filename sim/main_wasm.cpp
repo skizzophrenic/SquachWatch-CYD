@@ -57,6 +57,9 @@ EM_JS(void, squachsim_nvs_write, (const char* key, const char* val), {
 #include "blackbox.h"
 #include "clock.h"
 #include "settings.h"
+#if defined(TDECK_PLUS)
+#include "lora_sim.h"
+#endif
 
 // Defined by the firmware's main.cpp, which this target compiles. Declared
 // here, outside the extern "C" block below, so they link as the C++ symbols
@@ -69,12 +72,31 @@ extern AppState state;
 extern uint8_t  screenRotation;
 extern DetectionEngine engine;
 extern volatile bool g_consoleRotate;
+#if SQUACHSIM_BOOT
+void simBootPress();
+#endif
+#if defined(TDECK_PLUS)
+void simKeyPress(char c);
+#endif
+#if defined(TWATCH_S3)
+#include "XPowersLib.h"
+#endif
+#if defined(CARDPUTER_ADV)
+void simCardKey(int what, bool down);
+#endif
 
 // pollTouch()'s XPT2046 defaults. Static inside main.cpp, but the
 // Preferences shim starts empty in the browser so loadOrDefaultCal()
 // never finds a stored calibration and these are exactly what it uses.
+#if defined(TDECK_PLUS)
+// The T-Deck build reads a capacitive chip (sim/gt911_sim.cpp), so the fit is
+// built from main.cpp's CAP_N* defaults instead; same mapping, other numbers.
+static const long RAW_X_MIN = 32, RAW_X_MAX = 166;
+static const long RAW_Y_MIN = 10, RAW_Y_MAX = 308;
+#else
 static const long RAW_X_MIN = 200, RAW_X_MAX = 3800;
 static const long RAW_Y_MIN = 200, RAW_Y_MAX = 3800;
+#endif
 
 static long imap(long x, long a, long b, long c, long d) {
     return (x - a) * (d - c) / (b - a) + c;
@@ -115,6 +137,11 @@ extern "C" {
 
 EMSCRIPTEN_KEEPALIVE void sw_setup() {
     SimClock::virtualTime = true;
+#if defined(TDECK_PLUS)
+    // The made-up LoRa band (sim/lora_sim.cpp), laid out from the boot on:
+    // a packet every five or six seconds, Meshtastic and MeshCore in turn.
+    SimLora::begin(SimLora::Config());
+#endif
     setup();
     g_rgba.assign((size_t)tft.width() * tft.height() * 4, 0);
 }
@@ -128,6 +155,9 @@ EMSCRIPTEN_KEEPALIVE void sw_step(int n) {
     if (n < 1) n = 1;
     for (int i = 0; i < n; i++) {
         SimClock::nowMs += STEP_MS;
+#if defined(TDECK_PLUS)
+        SimLora::step(millis());
+#endif
         loop();
     }
 }
@@ -237,6 +267,36 @@ EMSCRIPTEN_KEEPALIVE void sw_panel(int w, int h) {
 // frame buffer, the saved rotation and Squachy's reaction all happen as
 // they do for a tap on the icon.
 EMSCRIPTEN_KEEPALIVE void sw_rotate() { g_consoleRotate = true; }
+
+// The BOOT button: one short press, as a board's bootButtonTick() reports it
+// -- POCKET MODE on, or off. The page draws the board's button and calls this.
+#if SQUACHSIM_BOOT
+EMSCRIPTEN_KEEPALIVE void sw_boot() { simBootPress(); }
+#elif defined(TWATCH_S3)
+// The watch's crown: a short press, raised as the AXP2101's interrupt
+// (sim/XPowersLib.h), which the firmware's own crown poll picks up.
+EMSCRIPTEN_KEEPALIVE void sw_boot() { SimPmu::crown = true; }
+#endif
+
+#if defined(CARDPUTER_ADV)
+// The Cardputer's keyboard, as the firmware reads it (smallKeysRead): 0 ENTER
+// (down and up: it presses where the cursor is, for as long as it is held),
+// 1 next stop (down, right, TAB), 2 previous (up, left), 3 home (ESC, DEL).
+EMSCRIPTEN_KEEPALIVE void sw_cardkey(int what, int down) { simCardKey(what, down != 0); }
+#endif
+
+#if defined(TDECK_PLUS)
+// The T-Deck's keyboard: one key, as its helper chip hands it over -- a
+// character, a newline for enter, a backspace for backspace. Goes to whichever text
+// screen is up (the LORA page, the chats, the WiFi password), the way the
+// board's own keyboard does; elsewhere it is dropped, and enter on the home
+// screen opens the LORA page.
+EMSCRIPTEN_KEEPALIVE void sw_key(int c) { if (c > 0 && c < 256) simKeyPress((char)c); }
+#endif
+
+// The backlight's last duty, 0-255 (-1: not set yet), so the page can show
+// POCKET MODE, the power saver's dim and the BRIGHT setting on the canvas.
+EMSCRIPTEN_KEEPALIVE int sw_backlight() { return g_simBacklight; }
 
 // A new panel while running, `w` x `h` AS SHOWN: the phone app's band is the
 // board's own screen upright (240x320), its SQUACHY tab is phone-shaped. A

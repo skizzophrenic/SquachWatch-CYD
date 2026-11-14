@@ -124,6 +124,38 @@ uint8_t        profileCount() { return s_n; }
 const Profile& profile(uint8_t i) { return s_tab[i < s_n ? i : 0]; }
 uint8_t        defaultProfile() { return 0; }
 
+int16_t meshPresetFind(Proto p, const char* preset) {
+    int16_t first = -1;
+    for (uint8_t i = 0; i < s_n; i++) {
+        const Profile& r = s_tab[i];
+        if (r.hint != p || (r.group != PG_MESH_EU && r.group != PG_MESH_US)) continue;
+        if (first < 0) first = i;
+        if (!preset || !*preset) return first;
+        // "MT LongFast" answers to "LongFast"; the prefix is the table's.
+        const char* n = r.name;
+        if (n[0] && n[1] && n[2] == ' ') n += 3;
+        bool same = true;
+        for (size_t k = 0; ; k++) {
+            char a = n[k], b = preset[k];
+            if (a >= 'a' && a <= 'z') a = (char)(a - 32);
+            if (b >= 'a' && b <= 'z') b = (char)(b - 32);
+            if (a != b) { same = false; break; }
+            if (!a) break;
+        }
+        if (same) return i;
+    }
+    return first;
+}
+
+uint8_t meshPresetRows(Proto p, uint8_t* out, uint8_t cap) {
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < s_n && n < cap; i++) {
+        const Profile& r = s_tab[i];
+        if (r.hint == p && (r.group == PG_MESH_EU || r.group == PG_MESH_US)) out[n++] = i;
+    }
+    return n;
+}
+
 uint32_t meshtasticSlotHz(uint32_t startHz, uint32_t endHz, uint16_t bwKhz10,
                           uint32_t spacingHz, uint32_t paddingHz, const char* name) {
     const uint32_t bwHz = (uint32_t)bwKhz10 * 100u;

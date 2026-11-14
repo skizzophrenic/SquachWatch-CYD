@@ -487,5 +487,79 @@ int main() {
         ck("and the live list is left alone", indexOfName("#live") > 0);
     }
 
+    // ---- the channel chip ---------------------------------------------------
+    suite("The send pick: defaults, stepping, muting, and remembering by name");
+    {
+        using Lora::Proto;
+        namespace C = Lora::Chan;
+        powerCycle();
+        Settings::setLoraTxChan(false, "");
+        Settings::setLoraTxChan(true, "");
+        ck("Meshtastic defaults to the preset's own channel", C::txPick(Proto::MESHTASTIC, "LongFast") == 0);
+        const int mf = Meshtastic::findChannel("MediumFast");
+        ck("on MediumFast, MediumFast's keyed row", mf > 0 && C::txPick(Proto::MESHTASTIC, "MediumFast") == (uint8_t)mf);
+        ck("MeshCore defaults to Public", C::txPick(Proto::MESHCORE, "LongFast") == 0);
+        ck("another preset's row is not pickable", !C::txSendable(Proto::MESHTASTIC, (uint8_t)mf, "LongFast"));
+        const uint8_t ham = (uint8_t)(Meshtastic::channelCount() - Meshtastic::userChannelCount() - 1);
+        ck("a built-in ham-mode row is not pickable", Meshtastic::channel(ham).keyLen == 0 && !C::txSendable(Proto::MESHTASTIC, ham, "LongFast"));
+        ck("alone, a step stays on the default", C::txStep(Proto::MESHTASTIC, "LongFast") == 0 && !Settings::loraTxChan(false)[0]);
+
+        // Two of the user's Meshtastic channels (one with a key that cannot be
+        // sealed) and three MeshCore ones.
+        Meshtastic::addChannel("Yowie", "ah3yOYBexxSbQugNc68msQ==");
+        Meshtastic::addChannel("Big", MT_KEY);           // 32 bytes: skipped
+        Meshtastic::addChannel("OpenCamp", "0");          // no key: pickable
+        MeshCore::addChannel("#hiking", nullptr);
+        MeshCore::addChannel("Priv", PRIVATE_HEX);
+        MeshCore::addChannel("#ping", nullptr);
+        C::save();
+        const uint8_t yi = (uint8_t)Meshtastic::findChannel("Yowie"), oi = (uint8_t)Meshtastic::findChannel("OpenCamp");
+        ck("step: Yowie", C::txStep(Proto::MESHTASTIC, "LongFast") == yi && !strcmp(Settings::loraTxChan(false), "Yowie"));
+        ck("step: past the 32-byte key to OpenCamp", C::txStep(Proto::MESHTASTIC, "LongFast") == oi);
+        ck("step: round to LongFast, stored as the default", C::txStep(Proto::MESHTASTIC, "LongFast") == 0 && !Settings::loraTxChan(false)[0]);
+        ck("step: Yowie again", C::txStep(Proto::MESHTASTIC, "LongFast") == yi);
+
+        const uint8_t hk = (uint8_t)MeshCore::findChannel("#hiking"), pv = (uint8_t)MeshCore::findChannel("Priv");
+        ck("MeshCore step: #hiking", C::txStep(Proto::MESHCORE, "LongFast") == hk && !strcmp(Settings::loraTxChan(true), "#hiking"));
+        MeshCore::setChannelEnabled(pv, false);
+        ck("MeshCore step: past the muted Priv to #ping", C::txStep(Proto::MESHCORE, "LongFast") == (uint8_t)MeshCore::findChannel("#ping"));
+        ck("MeshCore step: round to Public", C::txStep(Proto::MESHCORE, "LongFast") == 0);
+        MeshCore::setChannelEnabled(pv, true);
+        C::txStep(Proto::MESHCORE, "LongFast"); C::txStep(Proto::MESHCORE, "LongFast");
+        ck("MeshCore pick: Priv", C::txPick(Proto::MESHCORE, "LongFast") == pv);
+        MeshCore::setChannelEnabled(pv, false);
+        ck("muted: sends fall back to Public", C::txPick(Proto::MESHCORE, "LongFast") == 0);
+        ck("but the pick is kept", !strcmp(Settings::loraTxChan(true), "Priv"));
+        MeshCore::setChannelEnabled(pv, true);
+        ck("unmuted: Priv again", C::txPick(Proto::MESHCORE, "LongFast") == pv);
+        C::save();
+
+        // By name, not index: drop the channel ABOVE the pick.
+        MeshCore::removeChannel(hk);
+        C::save();
+        ck("a channel above it removed: still Priv, at its new index", C::txPick(Proto::MESHCORE, "LongFast") == (uint8_t)MeshCore::findChannel("Priv") &&
+           MeshCore::findChannel("Priv") == (int)pv - 1);
+
+        // Across a reboot.
+        powerCycle();
+        C::restore();
+        ck("after a power cycle: Yowie and Priv", C::txPick(Proto::MESHTASTIC, "LongFast") == (uint8_t)Meshtastic::findChannel("Yowie") &&
+           C::txPick(Proto::MESHCORE, "LongFast") == (uint8_t)MeshCore::findChannel("Priv"));
+
+        // Removing the pick itself: back to the default, and forgotten.
+        MeshCore::removeChannel((uint8_t)MeshCore::findChannel("Priv"));
+        C::save();
+        ck("the picked channel removed: Public", C::txPick(Proto::MESHCORE, "LongFast") == 0 && !Settings::loraTxChan(true)[0]);
+        MeshCore::addChannel("Priv", PRIVATE_HEX);
+        C::save();
+        ck("re-adding the name does not bring the pick back", C::txPick(Proto::MESHCORE, "LongFast") == 0);
+        Meshtastic::clearUserChannels();
+        C::save();
+        ck("CLEAR: Meshtastic back to its default", C::txPick(Proto::MESHTASTIC, "LongFast") == 0 && !Settings::loraTxChan(false)[0]);
+        ck("names: what the chip shows", [] { char b[24]; C::txName(Proto::MESHTASTIC, 0, b, sizeof b); return strcmp(b, "LongFast") == 0; }());
+        MeshCore::clearUserChannels();
+        C::save();
+    }
+
     return report();
 }

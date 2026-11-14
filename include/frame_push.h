@@ -56,7 +56,7 @@ class TFT_eSPI;
   #define SQW_FRAME_PUSH    1
   #define SQW_PUSH_DMA_ONLY 1
   #define SQW_PUSH_QSPI     0
-#elif defined(ARDUINO_ARCH_ESP32) && !defined(SQW_S3) && !defined(CROWPANEL7)
+#elif defined(ARDUINO_ARCH_ESP32) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(TAB5)
   #define SQW_FRAME_PUSH    1
   #define SQW_PUSH_DMA_ONLY 0
   #define SQW_PUSH_QSPI     0

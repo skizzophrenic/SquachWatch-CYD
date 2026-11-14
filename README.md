@@ -45,10 +45,10 @@ the glitchy SquachWatch wordmark.
 | `GOOGLE_TAG` | Google Find My Device trackers (Chipolo, Pebblebee, Moto Tag) | BLE service UUID `0xFEAA` |
 | `TILE` | Tile BLE trackers | BLE service UUID `0xFEED` / `0xFEEC` |
 | `RING` | Ring doorbells / cameras | 15 WiFi OUI (Ring LLC's registered block + Amazon's) |
-| `DEAUTH` | WiFi deauthentication floods | Rate-detected burst, not a signature |
+| `DEAUTH` | WiFi deauthentication floods | Rate-detected burst, not a signature: 12 deauth or disassociation frames in 3 s from one transmitter, or 6 of them to the broadcast address |
 | `EVILTWIN` | Rogue / spoofed access points | One SSID beaconing from two BSSIDs that disagree about encryption |
 | `IBEACON` | Retail proximity beacons | Exact Apple header `4C 00 02 15` — **off by default**, see below |
-| `HACKER` | Flipper Zero, Pwnagotchi, WiFi Pineapple, ESP deauthers | Flipper's service UUIDs `0x3081`–`0x3083`, company ID `0x0E29` and OUI `0C:FA:22`; the Pwnagotchi's own beacon payload; `Pineapple_` and `pwned` SSIDs |
+| `HACKER` | Flipper Zero, Pwnagotchi, WiFi Pineapple, ESP deauthers | Flipper Zero's service UUIDs `0x3081`–`0x3083` and its name (not Flipper's company ID or OUI, which the BUSY Bar desk sign uses); the Pwnagotchi's own beacon payload; `Pineapple_` and `pwned` SSIDs |
 
 ### Confidence is per signature, not per type
 
@@ -84,25 +84,30 @@ whole firmware but has had fewer hours on it. The longer answer is in
 | Board | Flasher | Worth knowing |
 |---|---|---|
 | 2.8" CYD — ESP32-2432S028R | Yes | Ships with an ST7789 or an ILI9341 screen depending on the batch, and the flasher has both. A solid white screen means try the other one |
+| DIYmalls 2.8" — JC2432W328C (capacitive) | Yes | Uses the shared ST7789 `cyd` / `cyd-fast` firmware with runtime touchscreen detection. [Hardware guide](docs/DIYMALLS-28.md) |
 | 3.2" capacitive — ESP32-2432S032C | Yes | IPS screen, capacitive touch |
 | 3.2" resistive — Freenove FNK0103 | Yes | IPS screen |
 | RL Phantom 2.4" — ESP32-2432S024R | Yes | Status light on the front |
 | AWOK 2.4" — ESP32 Marauder v6.1 | Yes | |
 | 3.5" resistive / capacitive — ESP32-3248S035R / C | BETA | |
 | ESP32-32E 2.8" / 3.5" — E32R28T / E32R35T | Via another build | Takes the 2.8" CYD ILI9341 build and the 3.5" resistive one; type the code into the flasher's board finder |
-| Freenove ESP32-S3 2.8" — FNK0104B | BETA | Capacitive touch, SDMMC card slot, WS2812 light, battery connector. Pins in [docs/PINOUT.md](docs/PINOUT.md) |
+| Freenove ESP32-S3 2.8" — FNK0104B | BETA | Capacitive touch, SDMMC card slot, WS2812 light, battery connector. Torn screen? On the flasher, untick 80 MHz under Advanced for the 40 MHz build. Pins in [docs/PINOUT.md](docs/PINOUT.md) |
 | Freenove ESP32-S3 4.0" — FNK0104S | BETA (build it yourself) | The 2.8"'s board with a 320×480 ST7796: `pio run -e freenove-s3-40 -t upload`. Not on the flasher yet |
 | Freenove ESP32-S3 3.5" — FNK0104N | BETA | The black 3.5": a 320×480 panel on its own QSPI driver, capacitive touch, SDMMC card slot, WS2812 light, battery connector. Big text, and pets at double size |
 | Elecrow CrowPanel Advance 7.0 | BETA | 800×480, drawn at 400×240 doubled on purpose. Has a buzzer, silent unless you switch it on. [docs/CROWPANEL7.md](docs/CROWPANEL7.md) |
 | RockBase NM-CYD-C5 | BETA | The 2.8" CYD's glass on an ESP32-C5, the first RISC-V chip here. Scans **5 GHz** too (WIFI BANDS in Settings). [docs/NM-CYD-C5.md](docs/NM-CYD-C5.md) |
 | Marauder V8 (justcallmekoko) | BETA | The ESP32-C5 Marauder: 2.8" screen, GPS for **wardriving** to the SD card (a WiGLE file), and a battery gauge. Scans 5 GHz too |
+| Waveshare ESP32-C5-Touch-LCD-2.8 | BETA | An ESP32-C5 with a 2.8" capacitive touchscreen and 32 MB flash. Scans 5 GHz too. Not yet on the flasher: `pio run -e waveshare-c5-28 -t upload`. [docs/WAVESHARE-C5-28.md](docs/WAVESHARE-C5-28.md) |
 | LilyGo T-Deck Plus | BETA | ESP32-S3 handheld: 2.8" screen, capacitive touch, a real keyboard that types into the message and password screens, speaker, GPS for **wardriving**, SD card, 2000 mAh battery, and **LoRa**: it listens to Meshtastic and MeshCore at once like the T-Watch, and can **send** to their public channels from the keyboard (off until you turn on LORA TX). The trackball is not used yet. Pins in [docs/PINOUT.md](docs/PINOUT.md) |
-| M5Stack StickS3 | BETA | 1.14" screen, landscape, two buttons |
-| M5Stack Cardputer ADV | BETA | Driven from its keyboard. Not the original Cardputer |
+| M5Stack StickS3 | BETA | 1.14" screen, landscape, two buttons. A keychain: shake and knock poke Squachy, FOB MODE. [docs/SMALL-BOARDS.md](docs/SMALL-BOARDS.md) |
+| M5Stack Cardputer ADV | BETA | Driven from its keyboard, with hotkeys. Not the original Cardputer. SD card, the XL mod EXT screen, and a Grove GPS for **wardriving**. [docs/SMALL-BOARDS.md](docs/SMALL-BOARDS.md) |
 | LilyGo T-Watch S3 / S3 Plus | BETA | On your wrist, with a battery and a buzz. Listens to **LoRa**; the S3 Plus adds **GPS**. See [On the watch](#on-the-watch) |
+| M5Stack Tab5 | Test builds only (`?lab=1`) | 5" 1280×720 tablet on an ESP32-P4, whose radio is a separate ESP32-C6. WiFi and Bluetooth detection both work, but the C6 needs our firmware written first. No SD, sound or battery yet. [docs/TAB5.md](docs/TAB5.md) |
 
-Each board has its own build in `platformio.ini`, one `[env:...]` each, with
-what is and is not confirmed on it.
+Board builds and their confirmed hardware support are listed in
+`platformio.ini`. Compatible variants can share an environment when runtime
+detection handles their hardware differences, as with the original CYD and
+the DIYmalls JC2432W328C.
 
 ## Web Flash
 
@@ -268,6 +273,38 @@ stands, as a polaroid of the sender's Squachy with his name in the margin,
 the message on a note beside it and the time it came, until you tap it.
 The power saver never dims this screen.
 
+### Human sensing
+
+<p align="center">
+  <img src="docs/breathe-the-pressure.gif" width="640"
+       alt="HUMAN SENSING: the SPECTRUM waterfall, the NOW, FLOOR, PEAK and MARGIN tiles and the MOTION graph on a still room, then someone walking through, then someone sitting still; the same screen on the watch and the Cardputer; and a router turning the board away, with the board waiting before it tries again.">
+</p>
+
+**SETTINGS > HUMAN SENSING** turns the board's WiFi radio into a motion
+sensor. It joins your saved network (add one in **SETTINGS > WIFI
+NETWORKS** first), pings the router fifty times a second, and watches how
+the radio signal between them changes. A person moving through that path
+changes it a lot; an empty room barely at all. It takes about 15 seconds
+to learn the empty room, so keep still while it says PLEASE STAND BY.
+
+The screen shows **SPECTRUM** (how fast the signal is changing, the newest
+on top and the last 11 seconds sliding down), the **NOW / FLOOR / PEAK /
+MARGIN** tiles, **MOTION** (the last 30 seconds against the line that
+counts as movement) and a banner: CLEAR, PRESENCE (someone moved in the
+last 15 seconds), or what the radio is doing. **RECAL** re-learns the empty
+room, **OFF** hands the radio back to the detector, and **BACK** goes to
+Settings. Detection pauses while this screen is up: there is one radio.
+On the T-Deck, Backspace, R and O do the same; on the StickS3 and the
+Cardputer, the cursor's press re-calibrates and HOME leaves.
+
+It works best with you somewhere between the board and the router. If the
+router refuses the board, it waits longer each time before trying again
+(20 seconds, then 40, up to 5 minutes) instead of getting itself blocked.
+A board switched off on this screen comes back to it. Privacy Mode keeps
+the network's name and address off the screen and the console. Every
+ESP32 and ESP32-S3 board has it; the ESP32-C5 boards and the Tab5 do not
+yet.
+
 ## Alert controls
 
 A detector that cries wolf gets switched off, so there are a few ways to
@@ -278,7 +315,7 @@ the screen.
 | Control | Where | What it does |
 |---|---|---|
 | **IGNORE** | The alert card, or a LOG row | That one device never raises an alert again, and its LOG row wears an IGNORED tag. UN-IGNORE undoes it; Settings → IGNORED lists them all |
-| **SNOOZE** | The alert card | The same, until the board restarts |
+| **SNOOZE** | The alert card | The same, for a while: each tap steps it up (10 min, 30 min, 1 hour, 4 hours), and it locks in three seconds after the last tap |
 | **AUTO SNOOZE** | Settings: OFF, AFTER 5, AFTER 10 | After that many alerts a device has to come 7 dB closer than it ever has before it may interrupt again. Its allowance comes back after half an hour |
 | **ALERT FILTER** | Settings: ALL, MED+, HIGH ONLY | The lowest confidence allowed to take over the screen |
 | **TYPE FILTER** | Settings | Whole detection types on or off. An off type is dropped, not logged |
@@ -324,7 +361,7 @@ to three characters. It changes the screen only; nothing stored changes.
 - **POWER OFF** on the Freenove ESP32-S3 2.8" and 3.5": hold **BOOT** for
   three seconds; press it to turn the board back on. (CHARGE MODE is on
   the Settings list there.)
-- **The speaker** on the same two boards: SOUND in Settings is OFF,
+- **The speaker** on the same two boards and the T-Deck Plus: SOUND in Settings is OFF,
   ALERTS or ALL, with VOLUME on - and + buttons. Quiet at night and while
   the screen is dimmed, except for a watch-list hit.
 - **LAST RUN** (Settings → SYSTEM): how long the previous power-up lasted.
@@ -548,7 +585,7 @@ None of this finds anything. All of it is why you leave him on.
 | **SQUACHY'S DIARY** | Settings | Lifetime catches, most caught, first ever catch, best streaks, times petted |
 | **SHOW OFF** | Settings | Every pose he knows, back to back, each one named |
 | **Regulars** | Automatic | A device seen on three different days gets a name, on its LOG row and when he greets it |
-| **BORING MODE** | Settings | Takes Squachy, the pet and the flourishes away, and offers a plain BLACK background, for when you just want a detector |
+| **TERMINAL MODE** | Settings | Swaps Squachy and the pets for a desktop of windows: a LOG you can sort by time, kind, device or signal (tap a heading, tap again to flip), the AIR graph, COUNTS by kind and the LATEST catch. Tap a picked line again, or LATEST, for WATCH / HUNT / INFO / IGNORE. For when you just want a detector (it used to be BORING MODE) |
 | **DESK MODE** | Settings, or DESK on the main screen | The clock, [above](#desk-mode) |
 
 And he can be thrown: press and hold him until he notices, drag, and let go
@@ -588,6 +625,8 @@ SquachWatch-CYD/
 │   ├── DETECTIONS.md             (per-signature provenance)
 │   ├── CROWPANEL7.md             (the 7" CrowPanel: setup and testing)
 │   ├── NM-CYD-C5.md              (the ESP32-C5 board: esptool route, every pin)
+│   ├── TAB5.md                   (the M5Stack Tab5: P4 + C6, the radio link, status)
+│   ├── WAVESHARE-C5-28.md        (the Waveshare C5 2.8": helper chip, touch, pins)
 │   ├── LORA.md                   (LoRa research and the decoders behind it)
 │   ├── IDEAS.md                  (things worth building, with their cost)
 │   └── SQUACHWARE-AESTHETIC.md   (CSS → RGB565 mapping)
@@ -660,10 +699,13 @@ SquachWatch-CYD/
 - GPS and wardriving to the SD card on the CYD, and the SD log's dates
   (PR #46): **jotra7**. The Marauder V8 wardrives with it.
 - The Marauder V8 itself, and the Marauder project it comes from:
-  **justcallmekoko**.
+  **justcallmekoko**. HUMAN SENSING's motion model is ported from
+  [ESP32Marauder](https://github.com/justcallmekoko/ESP32Marauder)'s
+  CsiMotionModel (MIT).
 - Freenove ESP32-S3 Display 2.8" port: **greasy-electronics**.
 - Freenove 3.2" pin work: **DevOpsDAdams**.
 - 3.5" capacitive (ESP32-3248S035C) build: **VV-B0Y**.
+- Waveshare ESP32-C5-Touch-LCD-2.8 port: **bobsdinner-cell**.
 - The emulator building on macOS, and its incremental build: **aroth**.
 - Testing every single build, boot loops and green skies included: **Houdini**.
 - Bug reports that found real bugs: **rrahmani** (Remote ID never caught a

@@ -504,7 +504,7 @@ static void toasterTick(TFT_eSPI& t, uint32_t now, int screenW, int floorY) {
                     s_tSqK = s_tF.vy > 0.9f ? 1.0f : s_tF.vy / 0.9f;
                     if (s_tBounces == 0) {
                         toastCrumbs((int)s_tF.x + TOAST_W / 2, (int)s_tF.y + TOAST_H, now);
-                        if (s_tFlung) { zLandedAt((int)s_tF.x + TOAST_W / 2); Sound::play(Sound::Id::LAND); }
+                        if (s_tFlung) { zLandedAt((int)s_tF.x + TOAST_W / 2); Sound::play(Sound::Id::LAND_TOASTER); }
                         if (s_tFlung) {
                             s_tlLive = true; s_tlBorn = now;
                             s_tlX = s_tF.x + 8; s_tlY = s_tF.y; s_tlVX = -0.03f; s_tlVY = -0.4f;

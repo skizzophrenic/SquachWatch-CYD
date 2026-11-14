@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 86.8 50" data-w-mm="86.8" data-h-mm="50">
+  <!-- 2.8in yellow ESP32 display board (ILI9341 320x240, resistive touch), front side, landscape.
+       Units are millimetres. Board 86 x 50 starting at x=0.8; the micro-USB mouth pokes out 0.8 mm on the left.
+       Panel module 69.2 x 50 centred on the board; active area 57.6 x 43.2 sits 3.05 mm from the
+       panel end away from the USB side, centred vertically (panel datasheet). -->
+  <defs>
+    <linearGradient id="pcb" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0" stop-color="#fbc210"/>
+      <stop offset="0.55" stop-color="#f6b800"/>
+      <stop offset="1" stop-color="#eba900"/>
+    </linearGradient>
+    <radialGradient id="pcbSheen" cx="0.22" cy="0.08" r="0.95">
+      <stop offset="0" stop-color="#fff7cf" stop-opacity="0.38"/>
+      <stop offset="0.45" stop-color="#fff7cf" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#fff7cf" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="frame" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fbfaf1"/>
+      <stop offset="0.5" stop-color="#e2dcc8"/>
+      <stop offset="1" stop-color="#cbc3a8"/>
+    </linearGradient>
+    <linearGradient id="frameV" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f3efe0"/>
+      <stop offset="0.6" stop-color="#d3cbb1"/>
+      <stop offset="1" stop-color="#b7af94"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1d1e19"/>
+      <stop offset="0.45" stop-color="#0d0e0b"/>
+      <stop offset="1" stop-color="#060606"/>
+    </linearGradient>
+    <linearGradient id="glassSheen" x1="0" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.13"/>
+      <stop offset="0.3" stop-color="#ffffff" stop-opacity="0.03"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="ring" cx="0.4" cy="0.35" r="0.7">
+      <stop offset="0" stop-color="#f6f0d8"/>
+      <stop offset="0.6" stop-color="#ddd2aa"/>
+      <stop offset="1" stop-color="#b8a774"/>
+    </radialGradient>
+    <linearGradient id="flap" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#0c0d0a"/>
+      <stop offset="0.5" stop-color="#1d1e18"/>
+      <stop offset="1" stop-color="#101109"/>
+    </linearGradient>
+    <linearGradient id="usb" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f2f2f0"/>
+      <stop offset="0.5" stop-color="#bdbdba"/>
+      <stop offset="1" stop-color="#8b8b88"/>
+    </linearGradient>
+    <linearGradient id="tail" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#c9b78c"/>
+      <stop offset="0.5" stop-color="#f2e9d1"/>
+      <stop offset="1" stop-color="#d6c59c"/>
+    </linearGradient>
+    <linearGradient id="ldr" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#e7dfc0"/>
+      <stop offset="0.5" stop-color="#fbf8ea"/>
+      <stop offset="1" stop-color="#e0d6b4"/>
+    </linearGradient>
+  </defs>
+  <!-- micro-USB shell, mostly under the board -->
+  <rect x="0" y="11.6" width="3" height="7.6" rx="0.45" fill="url(#usb)" stroke="#6e6e6c" stroke-width="0.12"/>
+  <rect x="0.05" y="12.35" width="0.3" height="6.1" rx="0.1" fill="#3a3a38"/>
+  <path d="M0.12 11.82H0.9" stroke="#ffffff" stroke-opacity="0.75" stroke-width="0.12"/>
+  <!-- PCB: olive mask rim, yellow field, mounting holes cut through -->
+  <path fill="#b4aa06" fill-rule="evenodd" d="M3.4 0H84.2A2.6 2.6 0 0 1 86.8 2.6V47.4A2.6 2.6 0 0 1 84.2 50H3.4A2.6 2.6 0 0 1 0.8 47.4V2.6A2.6 2.6 0 0 1 3.4 0Z M4.8 2.4a1.6 1.6 0 1 0 0.001 0Z M82.8 2.4a1.6 1.6 0 1 0 0.001 0Z M4.8 44.4a1.6 1.6 0 1 0 0.001 0Z M82.8 44.4a1.6 1.6 0 1 0 0.001 0Z"/>
+  <path fill="url(#pcb)" fill-rule="evenodd" d="M3.4 0.42H84.2A2.18 2.18 0 0 1 86.38 2.6V47.4A2.18 2.18 0 0 1 84.2 49.58H3.4A2.18 2.18 0 0 1 1.22 47.4V2.6A2.18 2.18 0 0 1 3.4 0.42Z M4.8 1.2a2.8 2.8 0 1 0 0.001 0Z M82.8 1.2a2.8 2.8 0 1 0 0.001 0Z M4.8 43.2a2.8 2.8 0 1 0 0.001 0Z M82.8 43.2a2.8 2.8 0 1 0 0.001 0Z"/>
+  <path fill="url(#pcbSheen)" fill-rule="evenodd" d="M3.4 0.42H84.2A2.18 2.18 0 0 1 86.38 2.6V47.4A2.18 2.18 0 0 1 84.2 49.58H3.4A2.18 2.18 0 0 1 1.22 47.4V2.6A2.18 2.18 0 0 1 3.4 0.42Z M4.8 1.2a2.8 2.8 0 1 0 0.001 0Z M82.8 1.2a2.8 2.8 0 1 0 0.001 0Z M4.8 43.2a2.8 2.8 0 1 0 0.001 0Z M82.8 43.2a2.8 2.8 0 1 0 0.001 0Z"/>
+  <path d="M1.48 46.5V2.7A1.95 1.95 0 0 1 3.43 0.68H84.2" fill="none" stroke="#fff3b0" stroke-opacity="0.5" stroke-width="0.18"/>
+  <path d="M86.12 3V47.3A1.95 1.95 0 0 1 84.17 49.32H3.8" fill="none" stroke="#7a6400" stroke-opacity="0.35" stroke-width="0.18"/>
+  <g fill="none" stroke="#ffd24a" stroke-opacity="0.5" stroke-width="0.22" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M81.55 9.3H80.4V15.2"/>
+    <path d="M81.55 12.5H80.9L79.9 13.5V44.4L80.9 45.4"/>
+    <path d="M85.7 10.4V14.4"/>
+    <path d="M85.4 35.2V41.1L84.6 41.9"/>
+    <path d="M5.8 12.5V9.4L7 8.2"/>
+    <path d="M5.8 17.5V21.3L7.2 22.7V35.8"/>
+    <path d="M3.8 24V39.8"/>
+  </g>
+  <g fill="none" stroke="#b98c00" stroke-opacity="0.3" stroke-width="0.2" stroke-linecap="round" stroke-linejoin="round" transform="translate(0.14 0.14)">
+    <path d="M81.55 9.3H80.4V15.2"/>
+    <path d="M81.55 12.5H80.9L79.9 13.5V44.4L80.9 45.4"/>
+    <path d="M5.8 17.5V21.3L7.2 22.7V35.8"/>
+  </g>
+  <!-- mounting holes: darker mask edge, tin ring, plated wall -->
+  <path fill="#cdbb14" fill-opacity="0.85" fill-rule="evenodd" d="M4.8 1.2a2.8 2.8 0 1 0 0.001 0Z M4.8 2.4a1.6 1.6 0 1 0 0.001 0Z M82.8 1.2a2.8 2.8 0 1 0 0.001 0Z M82.8 2.4a1.6 1.6 0 1 0 0.001 0Z M4.8 43.2a2.8 2.8 0 1 0 0.001 0Z M4.8 44.4a1.6 1.6 0 1 0 0.001 0Z M82.8 43.2a2.8 2.8 0 1 0 0.001 0Z M82.8 44.4a1.6 1.6 0 1 0 0.001 0Z"/>
+  <path fill="url(#ring)" fill-rule="evenodd" d="M4.8 1.58a2.42 2.42 0 1 0 0.001 0Z M4.8 2.4a1.6 1.6 0 1 0 0.001 0Z M82.8 1.58a2.42 2.42 0 1 0 0.001 0Z M82.8 2.4a1.6 1.6 0 1 0 0.001 0Z M4.8 43.58a2.42 2.42 0 1 0 0.001 0Z M4.8 44.4a1.6 1.6 0 1 0 0.001 0Z M82.8 43.58a2.42 2.42 0 1 0 0.001 0Z M82.8 44.4a1.6 1.6 0 1 0 0.001 0Z"/>
+  <circle cx="4.8" cy="4" r="1.66" fill="none" stroke="#7a6733" stroke-width="0.18"/>
+  <path d="M2.95 3.15A2.4 2.4 0 0 1 5.6 1.7" fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="0.12"/>
+  <path d="M6.65 4.85A2.4 2.4 0 0 1 4 6.3" fill="none" stroke="#5e5228" stroke-opacity="0.35" stroke-width="0.12"/>
+  <circle cx="82.8" cy="4" r="1.66" fill="none" stroke="#7a6733" stroke-width="0.18"/>
+  <path d="M80.95 3.15A2.4 2.4 0 0 1 83.6 1.7" fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="0.12"/>
+  <path d="M84.65 4.85A2.4 2.4 0 0 1 82 6.3" fill="none" stroke="#5e5228" stroke-opacity="0.35" stroke-width="0.12"/>
+  <circle cx="4.8" cy="46" r="1.66" fill="none" stroke="#7a6733" stroke-width="0.18"/>
+  <path d="M2.95 45.15A2.4 2.4 0 0 1 5.6 43.7" fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="0.12"/>
+  <path d="M6.65 46.85A2.4 2.4 0 0 1 4 48.3" fill="none" stroke="#5e5228" stroke-opacity="0.35" stroke-width="0.12"/>
+  <circle cx="82.8" cy="46" r="1.66" fill="none" stroke="#7a6733" stroke-width="0.18"/>
+  <path d="M80.95 45.15A2.4 2.4 0 0 1 83.6 43.7" fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="0.12"/>
+  <path d="M84.65 46.85A2.4 2.4 0 0 1 82 48.3" fill="none" stroke="#5e5228" stroke-opacity="0.35" stroke-width="0.12"/>
+  <!-- USB shell solder lugs and pins -->
+  <rect x="1.95" y="10.85" width="2.3" height="1.3" rx="0.65" fill="#b08a00" fill-opacity="0.8"/>
+  <rect x="2.1" y="11" width="2" height="1" rx="0.5" fill="url(#ring)"/>
+  <rect x="2.5" y="11.25" width="1.2" height="0.5" rx="0.25" fill="#4b4115"/>
+  <rect x="1.95" y="18.1" width="2.3" height="1.3" rx="0.65" fill="#b08a00" fill-opacity="0.8"/>
+  <rect x="2.1" y="18.25" width="2" height="1" rx="0.5" fill="url(#ring)"/>
+  <rect x="2.5" y="18.5" width="1.2" height="0.5" rx="0.25" fill="#4b4115"/>
+  <circle cx="5.8" cy="12.5" r="0.72" fill="#b08a00" fill-opacity="0.8"/>
+  <circle cx="5.8" cy="12.5" r="0.55" fill="url(#ring)"/>
+  <circle cx="5.8" cy="12.5" r="0.24" fill="#3b3312"/>
+  <circle cx="5.8" cy="17.5" r="0.72" fill="#b08a00" fill-opacity="0.8"/>
+  <circle cx="5.8" cy="17.5" r="0.55" fill="url(#ring)"/>
+  <circle cx="5.8" cy="17.5" r="0.24" fill="#3b3312"/>
+  <g fill="#dca400" stroke="#bd8c00" stroke-width="0.08">
+    <circle cx="7.9" cy="1.3" r="0.22"/><circle cx="7" cy="8.2" r="0.22"/><circle cx="7.2" cy="35.8" r="0.22"/><circle cx="3.8" cy="24" r="0.22"/><circle cx="3.8" cy="39.8" r="0.22"/><circle cx="80.4" cy="15.2" r="0.22"/><circle cx="85.7" cy="14.4" r="0.22"/><circle cx="84.6" cy="41.9" r="0.22"/><circle cx="80.9" cy="45.4" r="0.22"/>
+  </g>
+  <!-- light sensor (LDR) with its silkscreen box -->
+  <rect x="81.35" y="7.75" width="3.5" height="6.05" rx="0.15" fill="none" stroke="#fbf6e2" stroke-width="0.14" stroke-opacity="0.9"/>
+  <rect x="81.85" y="8.0" width="2.5" height="0.28" rx="0.1" fill="#c7bd96"/>
+  <rect x="81.75" y="8.25" width="2.7" height="1.65" rx="0.12" fill="#fffef6" stroke="#d6cea8" stroke-width="0.08"/>
+  <rect x="81.75" y="9.9" width="2.7" height="1.55" fill="url(#ldr)"/>
+  <path d="M82.05 10.1V11.25H82.4V10.1H82.75V11.25H83.1V10.1H83.45V11.25H83.8V10.1H84.15" fill="none" stroke="#b46c1c" stroke-width="0.2" stroke-linejoin="round"/>
+  <rect x="81.75" y="11.45" width="2.7" height="1.45" rx="0.12" fill="#fbfaf1" stroke="#d6cea8" stroke-width="0.08"/>
+  <rect x="81.85" y="12.9" width="2.5" height="0.45" rx="0.12" fill="#8c8257"/>
+  <!-- black flex flap at the right edge, generic handling symbols -->
+  <rect x="80.1" y="15.6" width="6" height="18.9" rx="0.3" fill="url(#flap)"/>
+  <path d="M80.25 15.75H85.95" stroke="#5c5d54" stroke-width="0.12" stroke-opacity="0.8"/>
+  <path d="M80.2 15.9V34.3" stroke="#3a3b33" stroke-width="0.1"/>
+  <path d="M80.7 24.2L81.95 21.9L83.2 24.2Z" fill="#efefe6"/>
+  <path d="M81.6 23.95C81.7 23.3 82 22.95 82.4 22.8" fill="none" stroke="#141510" stroke-width="0.2" stroke-linecap="round"/>
+  <g fill="none" stroke="#efefe6" stroke-width="0.16">
+    <circle cx="81.95" cy="27.2" r="1.15"/>
+    <path d="M81.15 28L82.75 26.4"/>
+  </g>
+  <!-- ===== display module (69.2 x 50 metal backlight frame) ===== -->
+  <rect x="9.2" y="0" width="69.2" height="50" fill="url(#frame)"/>
+  <rect x="9.4" y="0.75" width="1.6" height="48.5" fill="#22231d"/>
+  <rect x="11" y="0.75" width="0.9" height="48.5" fill="url(#frameV)"/>
+  <rect x="11.9" y="1.2" width="65.1" height="47.6" fill="#191a15"/>
+  <rect x="12.25" y="1.9" width="64.75" height="46.2" rx="0.12" fill="url(#glass)"/>
+  <rect x="16.1" y="2.6" width="60.9" height="44.8" fill="#0a0a08" stroke="#272821" stroke-width="0.1"/>
+  <rect x="12.25" y="1.9" width="64.75" height="46.2" rx="0.12" fill="url(#glassSheen)"/>
+  <rect x="12.25" y="1.9" width="64.75" height="46.2" rx="0.12" fill="none" stroke="#3b3c34" stroke-width="0.1"/>
+  <rect x="9.2" y="0" width="69.2" height="50" fill="none" stroke="#857e66" stroke-width="0.14"/>
+  <path d="M9.35 0.2H78.25" stroke="#ffffff" stroke-opacity="0.9" stroke-width="0.2"/>
+  <path d="M11.9 1.2H77 M11.9 48.8H77" stroke="#9a9378" stroke-width="0.1"/>
+  <path d="M9.35 49.8H78.25" stroke="#6d6752" stroke-opacity="0.6" stroke-width="0.14"/>
+  <path d="M9.3 0.3V49.7" stroke="#ffffff" stroke-opacity="0.6" stroke-width="0.12"/>
+  <rect x="9.75" y="0.5" width="68.1" height="49" fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="0.1"/>
+  <!-- active pixel area: the page lays the live screen on top of this -->
+  <rect id="screen" x="17.75" y="3.4" width="57.6" height="43.2" fill="#000"/>
+  <!-- resistive-touch tail folded round the left end of the panel -->
+  <rect x="8.65" y="5.4" width="1.1" height="7.4" fill="#5a4a2a" fill-opacity="0.45"/>
+  <rect x="8.5" y="4.4" width="3" height="2.45" rx="0.2" fill="url(#tail)"/>
+  <path d="M8.7 4.55H11.2" stroke="#ffffff" stroke-opacity="0.65" stroke-width="0.12"/>
+  <path d="M8.6 6.78H11.3" stroke="#7e6e48" stroke-opacity="0.7" stroke-width="0.12"/>
+  <rect x="8.25" y="7.15" width="3.25" height="2.45" rx="0.2" fill="url(#tail)"/>
+  <path d="M8.7 7.3H11.45" stroke="#ffffff" stroke-opacity="0.65" stroke-width="0.12"/>
+  <path d="M8.6 9.53H11.55" stroke="#7e6e48" stroke-opacity="0.7" stroke-width="0.12"/>
+  <rect x="8.5" y="9.9" width="3" height="2.45" rx="0.2" fill="url(#tail)"/>
+  <path d="M8.7 10.05H11.2" stroke="#ffffff" stroke-opacity="0.65" stroke-width="0.12"/>
+  <path d="M8.6 12.28H11.3" stroke="#7e6e48" stroke-opacity="0.7" stroke-width="0.12"/>
+  <rect x="11.25" y="4.6" width="0.45" height="9.9" fill="#ece3c8"/>
+  <!-- BOOT / RST buttons and the RGB LED are on the BACK; invisible hit areas at their real spots -->
+  <rect id="btn-boot" data-side="back" x="72.6" y="48.4" width="3.55" height="1.6" fill="#000" fill-opacity="0"/>
+  <rect id="btn-rst" data-side="back" x="76.8" y="48.4" width="3.6" height="1.6" fill="#000" fill-opacity="0"/>
+  <circle id="led" data-side="back" cx="56.2" cy="11.8" r="2.4" fill="#000" fill-opacity="0"/>
+  <rect id="usb" data-dir="left" x="0" y="11.6" width="0.8" height="7.6" fill="#000" fill-opacity="0"/>
+</svg>

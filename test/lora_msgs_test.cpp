@@ -178,5 +178,34 @@ int main() {
     }
 
     free(mem);
+    suite("A relay's copy is the same message, not a new one");
+    {
+        Msgs::begin(mem, Msgs::bytesNeeded());
+        memset(&pk, 0, sizeof pk);
+        const uint32_t k = Msgs::meshtasticKey(0x5A5A1234u, 0xDEADBEEFu);
+        Msgs::note(Proto::MESHTASTIC, 0, 1, "YOU", 0, "hi all", pk, 1000, true, 0, k);
+        Msgs::note(Proto::MESHTASTIC, 0, 1, "!5a5a1234", 0x5A5A1234u, "hi all", pk, 3000, false, 1, k);
+        Msgs::note(Proto::MESHTASTIC, 0, 1, "!5a5a1234", 0x5A5A1234u, "hi all", pk, 4000, false, 2, k);
+        ck("our send and two relays' echoes are one row", Msgs::count() == 1);
+        Msgs::Msg m; Msgs::at(0, m);
+        ck("...and it is the one we sent", strcmp(m.sender, "YOU") == 0);
+        Msgs::note(Proto::MESHTASTIC, 0, 1, "!0badf00d", 0x0BADF00Du, "hi all", pk, 5000, true, 0,
+                   Msgs::meshtasticKey(0x0BADF00Du, 0xDEADBEEFu));
+        ck("the same words from someone else are a new message", Msgs::count() == 2);
+        Msgs::note(Proto::MESHTASTIC, 0, 1, "YOU", 0, "hi all", pk, 6000, true, 0, Msgs::meshtasticKey(0x5A5A1234u, 1));
+        ck("the same words sent again (a new id) are a new message", Msgs::count() == 3);
+        Msgs::note(Proto::MESHTASTIC, 0, 1, "x", 0, "no id", pk, 7000, true, 0, 0);
+        Msgs::note(Proto::MESHTASTIC, 0, 1, "x", 0, "no id", pk, 7001, true, 0, 0);
+        ck("key 0 never merges", Msgs::count() == 5);
+        Msgs::note(Proto::MESHTASTIC, 0, 1, "late", 0x5A5A1234u, "hi all", pk, 1000 + Msgs::SEEN_MS + 1, false, 3, k);
+        ck("a copy after ten minutes counts again", Msgs::count() == 6);
+
+        const uint32_t a = Msgs::meshCoreKey("Bigfoot", "anyone out?", 1790000000u);
+        ck("MeshCore: same name, text and stamp, same key", a == Msgs::meshCoreKey("Bigfoot", "anyone out?", 1790000000u));
+        ck("MeshCore: another second is another message", a != Msgs::meshCoreKey("Bigfoot", "anyone out?", 1790000001u));
+        ck("MeshCore: the name and text do not run together",
+           Msgs::meshCoreKey("ab", "c", 1) != Msgs::meshCoreKey("a", "bc", 1));
+    }
+
     return report();
 }

@@ -262,6 +262,10 @@ namespace Settings {
     // address and all but three characters of every device and network
     // name. See include/privacy.h. Off by default.
     bool       privacyMode();
+    // HUMAN SENSING (SENSE_CYD_APP builds): set while its screen is up, so a board
+    // switched off there boots back into it.
+    bool       sensing();
+    void       setSensing(bool on);
     // EXT SCREEN (the Cardputer ADV): a second panel on the EXT header shows
     // the main scene, and the built-in screen is left for the menus.
     bool       extScreen();
@@ -367,6 +371,57 @@ namespace Settings {
     bool        loraLookupFeed();        // meshcore.df0x.de recent adverts, to name MeshCore rows
     void        toggleLoraLookupFeed();
 
+    // The LORA SETTINGS page's own (the T-Deck, from the LORA page's SET).
+    // The name both networks see, typed on the keyboard, and Meshtastic's
+    // four-character short name. "" for either means the default -- the squad
+    // nickname, and SQWT or its first four (include/lora_myname.h) -- and is
+    // what an untouched board has. Keys "loraName" and "loraShort".
+    const char* loraName();
+    void        setLoraName(const char* n);      // cleaned (lora_myname.h); "" or null clears
+    const char* loraShortName();
+    void        setLoraShortName(const char* n);
+    // ANNOUNCE NAME: the Meshtastic NodeInfo before a text. ON by default.
+    // Key "loraAnnc".
+    bool        loraAnnounce();
+    void        toggleLoraAnnounce();
+    // SQUACHWATCH DETECTIONS: 0 ON (the default), 1 OFF ON LORA PAGE (WiFi and
+    // Bluetooth rest while the LORA page, its settings or the chats are up),
+    // 2 OFF (rest everywhere, until switched back). main.cpp's
+    // loraRadioTick() does the resting. Key "loraDet".
+    uint8_t     loraDetect();
+    void        cycleLoraDetect();               // ON -> OFF ON LORA PAGE -> OFF -> ON
+    const char* loraDetectName();
+    // ON-SCREEN DETECTIONS: whether a catch may pop the ALERT card (and its
+    // sound) over the LORA page, its settings or the chats. ON by default;
+    // OFF still catches, logs and counts. Key "loraAlrt".
+    bool        loraAlerts();
+    void        toggleLoraAlerts();
+    // HOPS: the hop limit (and hop start) on every Meshtastic frame this board
+    // sends, texts and the NodeInfo. 1-7, 3 by default. Key "loraHops".
+    uint8_t     loraHops();
+    void        cycleLoraHops();                 // 3 -> 4 ... 7 -> 1 ... 3
+    // MESSAGE SOUND: the ding (T-Deck) or buzz (watch) for a new LoRa chat
+    // message. ON by default. Key "loraMsgSnd".
+    bool        loraMsgSound();
+    void        toggleLoraMsgSound();
+    // MESHTASTIC PRESET: the preset Meshtastic is listened to and sent on, by
+    // name ("MediumFast"), so it means the same in EU 868 and US 915. "" is
+    // the default, LongFast. Found in the band plan by Lora::meshPresetFind.
+    // Key "loraMtPre".
+    const char* loraMtPreset();
+    void        setLoraMtPreset(const char* name);
+    // The CHANNEL CHIP on the T-Deck's compose lines: which channel each
+    // network's texts go out on, by NAME ("#hiking", "RidgeCrew"), never by
+    // index -- an index shifts when a channel above it is removed on the
+    // CHANNELS page, and a send that slid onto the neighbouring channel is the
+    // one mistake a picker must not make. "" is the default (Meshtastic: the
+    // preset's own channel; MeshCore: Public) and is the absence of the key.
+    // Lora::Chan::txPick (include/lora_channels.h) turns it into a channel and
+    // falls back to the default when the name is gone. Keys "loraTxChMt" and
+    // "loraTxChMc".
+    const char* loraTxChan(bool meshcore);
+    void        setLoraTxChan(bool meshcore, const char* name);
+
     // The channel keys the two mesh decoders hold, as one opaque blob. The
     // record format is Lora::Chan's business (include/lora_channels.h); this
     // is only the NVS entry, so that the store stays the one place that talks
@@ -434,6 +489,9 @@ namespace Settings {
     void        stepTimeZone(int dir);      // the card's arrows: steps without choosing
     void        setTimeZone(uint8_t i);     // from the ZONE serial command
     void        markTimeZoneChosen();       // THIS IS RIGHT on the card
+#if defined(SQW_DEVTOOLS)
+    void        unmarkTimeZoneChosen();     // dev: the card asks again
+#endif
     bool        timeZoneChosen();
 
     // SHOW PHRASE: whether this board ever prints its five words. OFF makes

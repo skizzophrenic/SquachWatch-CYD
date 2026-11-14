@@ -6,8 +6,9 @@ a computer, you can flash this in about ten minutes.
 Just want it on a board? The web flasher at
 [squachwatch.com](https://squachwatch.com/) does it from a browser, no
 toolchain needed. This page is for building it yourself. It walks
-through the classic 2.8" CYD; every other board is the same steps with
-a different environment name (see [Which build?](#which-build)).
+through the classic 2.8" CYD; other board builds use the environment
+names in [Which build?](#which-build). The DIYmalls JC2432W328C shares
+the CYD environments.
 
 ## What you need
 
@@ -64,9 +65,9 @@ web flasher offers:
 
 | Environment | Board |
 |---|---|
-| `cyd-fast` | 2.8" CYD, ST7789 screen (ESP32-2432S028R, the usual one), display at 80 MHz. The flasher's default for this board since v1.32.0. |
-| `cyd` | The same board at the stock display clock. Use it if `cyd-fast` gives you speckles or a white screen. |
-| `cyd-ili9341` | 2.8" CYD with the older ILI9341 screen. Same board, different panel batch. (`cyd-ili9341-fast` exists, but this panel usually can't keep up at 80 MHz.) |
+| `cyd-fast` | Original 2.8" CYD, ST7789 screen (ESP32-2432S028R), or DIYmalls 2.8" JC2432W328C; display at 80 MHz. The flasher's default for these options. |
+| `cyd` | The same ST7789 boards at the stock display clock. Use it if `cyd-fast` gives you speckles or a white screen. Runtime touch detection selects capacitive touch on the JC2432W328C or resistive touch on the original CYD. |
+| `cyd-ili9341` | Original 2.8" CYD with the older ILI9341 screen. The JC2432W328C uses ST7789 and should use `cyd` or `cyd-fast`. (`cyd-ili9341-fast` exists, but this panel usually can't keep up at 80 MHz.) |
 | `freenove32` | 3.2" resistive, Freenove FNK0103 |
 | `cyd32c` | 3.2" capacitive, ESP32-2432S032C (already runs at 80 MHz) |
 | `cyd35-fast` | 3.5" resistive, ESP32-3248S035R (BETA) |
@@ -85,7 +86,15 @@ The rest are not on the flasher: `freenove-s3-40` is the Freenove
 ESP32-S3 4.0" (FNK0104S), run on one board so far; `*-crowd`, `*-flood`,
 `twatch-s3-loratx` and the `crowpanel7-*` extras are bench builds,
 `cyd35` is the frozen 3.5" build, and `rlphantom` (the Phantom's
-capacitive build) has never run on a real board.
+capacitive build) has never run on a real board. `tab5` is the M5Stack
+Tab5, experimental, and its C6 radio needs our firmware first; see
+[TAB5](TAB5.md). `tab5-paneltest` and `tab5-radiotest` are its bench
+builds.
+
+The DIYmalls JC2432W328C does not need its own environment: `cyd` and
+`cyd-fast` probe for its capacitive I²C touch controller at startup and fall
+back to the original CYD's resistive touch when that controller is absent.
+The named flasher option shares the existing ST7789 manifests.
 
 **Don't know which screen you have?** Nobody can tell from the outside.
 For a 2.8" CYD, start with `cyd-fast`; a solid white screen means try
@@ -218,6 +227,7 @@ with the crash on it. Those are the things to put in a bug report.
 - **The C5 has its own toolchain.** `nm-cyd-c5` uses a different
   platform (pioarduino, Arduino 3.3) whose installer can break `pio`
   for every other board. Build it with its own `PLATFORMIO_CORE_DIR`.
+  The same goes for `marauder-v8` and `tab5`.
 - **One `pio run` at a time.** Two builds running at once can wipe
   each other's `.pio/build` folders.
 

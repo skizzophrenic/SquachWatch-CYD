@@ -1,4 +1,5 @@
-# SquachWatch — two-slot partition table for the 16 MB NM-CYD-C5.
+# SquachWatch — two-slot partition table for the 16 MB boards (the NM-CYD-C5
+# first; the M5Stack Tab5 uses it too).
 #
 # Same shape and the same reasoning as partitions_ota.csv, which this does not
 # replace: that table is correct for the 4 MB classic CYD and every Xtensa board

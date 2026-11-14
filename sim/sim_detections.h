@@ -106,8 +106,8 @@ inline const SimDetectionProfile kSimProfiles[] = {
     { DetectionType::EVILTWIN,    {0x02, 0xE7, 0x11}, "EvilTwin",    "HomeNet-5G",     -52, true,  "Evil twin AP" },
     // Six hex of the proximity UUID, then major.minor -- as the detector does.
     { DetectionType::IBEACON,     {0x02, 0x00, 0x4C}, "iBeacon",     "B9407F 10.42",   -59, false, "iBeacon" },
-    // HACKER -- Flipper Devices' own block, and the name a Flipper advertises
-    { DetectionType::HACKER,      {0x0C, 0xFA, 0x22}, "Flipper",     "Flipper Ozzyx",  -49, false, "Flipper Zero" },
+    // HACKER -- the prefix real Zeros advertise from, and the name they use
+    { DetectionType::HACKER,      {0x80, 0xE1, 0x26}, "Flipper",     "Flipper Ozzyx",  -49, false, "Flipper Zero" },
     { DetectionType::HACKER,      {0x02, 0x50, 0x57}, "Pwnagotchi",  "rikki",          -62, true,  "Pwnagotchi" },
     { DetectionType::HACKER,      {0x06, 0x50, 0x49}, "Pineapple",   "",               -60, true,  "WiFi Pineapple" },
     { DetectionType::HACKER,      {0x06, 0xDE, 0xA7}, "Deauther",    "",               -57, true,  "ESP deauther" },

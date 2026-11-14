@@ -1,0 +1,42 @@
+# The registry half of the signature audit, on a schedule instead of on every
+# push -- which is the objection signatures_test.cpp raises and is right about:
+#
+#     This cannot re-check the registry (CI has no business fetching 40,000
+#     rows on every push), so it checks the properties that hold regardless
+#     of what the registry says, plus a few anchors from the audit.
+#
+# Once a week is not every push. What it buys: the table is a hand-maintained
+# list of other people's hardware addresses, and the failure mode is a row
+# that is confidently wrong -- "Vigilant" for a block belonging to Sonos, for
+# eleven releases, or "Arlo" for a block belonging to Espressif, which made
+# every ESP32 in range read as a covert camera. Nothing about that fails to
+# compile. A person found both, late, by reading. This finds the next one.
+#
+# It also runs on demand, and on changes to the table itself, because that is
+# when a new row arrives.
+name: OUI audit
+
+# The weekly schedule came off at merge (2026-11-04): a registry that blocks
+# or rate-limits the runner would mail a failure every Monday with nothing
+# wrong in the table. It runs when the table changes and on demand.
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - 'src/signatures.cpp'
+      - 'tools/check_ouis.py'
+
+jobs:
+  registry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      # Hard errors fail the job: a row matching this board's own chip, or a
+      # grade the registry contradicts. Everything else prints as a note for
+      # a human to rule on -- and the ruling is recorded in ALLOW, so the
+      # same row does not ask twice.
+      - name: Check the signature table against the IEEE registry
+        run: tools/check_ouis.py --fetch

@@ -1,5 +1,8 @@
 // SquachWatch-CYD — persisted user settings implementation
 #include "settings.h"
+#include "lora_myname.h"
+#include <stdio.h>
+#include <strings.h>
 #include <string.h>
 #include "clock.h"
 #include "theme.h"
@@ -34,7 +37,9 @@ static bool        s_pocketNoteShown = false;
 // MADCTL, so rotating it would be a per-pixel software transform of an
 // 800x480 buffer every frame -- and the panel is natively landscape anyway.
 // And on the T-Deck: a keyboard under the screen has exactly one way up.
-#if defined(TWATCH_S3) || defined(CROWPANEL7) || defined(TDECK_PLUS)
+// And on the Tab5 for now: the blit turns the frame landscape and has no
+// portrait mapping yet (tab5_board.h).
+#if defined(TWATCH_S3) || defined(CROWPANEL7) || defined(TDECK_PLUS) || defined(TAB5)
 static const bool DEFAULT_ROTATION_LOCK = true;
 #else
 static const bool DEFAULT_ROTATION_LOCK = false;
@@ -55,8 +60,8 @@ static bool        s_deskFullVisit = false;   // one visitor: the whole visit, n
 // one step round from that with its crown on the right (LilyGo's default).
 #if defined(TWATCH_S3)
 static const uint8_t DEFAULT_ROTATION = 2;
-#elif defined(CROWPANEL7)
-static const uint8_t DEFAULT_ROTATION = 0;   // the panel is landscape as wired
+#elif defined(CROWPANEL7) || defined(TAB5)
+static const uint8_t DEFAULT_ROTATION = 0;   // the panel is landscape as wired (the Tab5: as blitted)
 #else
 static const uint8_t DEFAULT_ROTATION = 1;
 #endif
@@ -74,7 +79,15 @@ static bool        s_clock24Hour   = false;
 // FONTS: per kind of text, 0..4 for -2..+2 around the built size (2 is as
 // built). Keys fntMenu, fntText, fntBtn, fntBub, fntXp, fntPet. And a face
 // per kind, 0 as built, 1 PIXEL, 2 SMOOTH: keys fcMenu .. fcPet.
-static uint8_t     s_fontStep[(int)FontKind::COUNT] = { 2, 2, 2, 2, 2, 2 };
+// What a board starts on before anyone touches FONTS. The Tab5's picks from
+// its size lab (2026-10-20): button labels a step bigger and the counter
+// tiles a step smaller on its 5" glass, everything else as built.
+#if defined(TAB5)
+static const uint8_t FONT_DEFAULT[(int)FontKind::COUNT] = { 2, 2, 3, 2, 1, 2 };
+#else
+static const uint8_t FONT_DEFAULT[(int)FontKind::COUNT] = { 2, 2, 2, 2, 2, 2 };
+#endif
+static uint8_t     s_fontStep[(int)FontKind::COUNT] = { FONT_DEFAULT[0], FONT_DEFAULT[1], FONT_DEFAULT[2], FONT_DEFAULT[3], FONT_DEFAULT[4], FONT_DEFAULT[5] };
 static uint8_t     s_fontFace[(int)FontKind::COUNT] = { 0, 0, 0, 0, 0, 0 };
 static const char* const FONT_KEYS[(int)FontKind::COUNT] = { "fntMenu", "fntText", "fntBtn", "fntBub", "fntXp", "fntPet" };
 static const char* const FACE_KEYS[(int)FontKind::COUNT] = { "fcMenu", "fcText", "fcBtn", "fcBub", "fcXp", "fcPet" };
@@ -126,15 +139,27 @@ static const uint8_t  CPU_MHZ_N         = sizeof(CPU_MHZ) / sizeof(CPU_MHZ[0]);
 // someone changes them.
 #if defined(TWATCH_S3)
 static const bool DEFAULT_POWER_SAVER = true;
+#elif defined(STICKS3)
+// The StickS3 is a keychain on a small cell: a screen and a scan left on
+// all day is not a fob. On by default, with a minute before the screen goes
+// dark, and a shake brings it back (see shake.cpp).
+static const bool DEFAULT_POWER_SAVER = true;
 #else
 static const bool DEFAULT_POWER_SAVER = false;
+#endif
+#if defined(STICKS3)
+static const uint8_t DEFAULT_SCR_TIMEOUT_IX = 3;   // 60 s
+static const uint8_t DEFAULT_DIM_LEVEL      = 0;   // dark: the backlight is the fob's biggest draw
+#else
+static const uint8_t DEFAULT_SCR_TIMEOUT_IX = 2;   // 30 s
+static const uint8_t DEFAULT_DIM_LEVEL      = 16;  // ~6%, dim but not off
 #endif
 static bool     s_powerSaver   = DEFAULT_POWER_SAVER;
 #if SQW_WIFI_5G
 static bool     s_wifi5        = true;
 #endif
-static uint8_t  s_scrTimeoutIx = 2;    // 30 s
-static uint8_t  s_dimLevel     = 16;   // ~6%, dim but not off
+static uint8_t  s_scrTimeoutIx = DEFAULT_SCR_TIMEOUT_IX;
+static uint8_t  s_dimLevel     = DEFAULT_DIM_LEVEL;
 static uint8_t  s_idleFpsIx    = 2;    // 12 fps
 static uint8_t  s_idleAfterIx  = 1;    // 10 s
 static uint8_t  s_cpuIx        = 0;    // 240 MHz, the stock clock
@@ -152,6 +177,7 @@ static uint8_t  s_idleCpuIx    = IDLE_CPU_DEFAULT;
 static bool     s_wakeOnAlert  = true;
 static bool     s_quietTrack   = true;
 static bool     s_privacy      = false;
+static bool     s_sensing      = false;
 static bool     s_extScreen    = false;
 struct __attribute__((packed)) RunEntry { uint16_t boot, minutes; };
 static const uint8_t RUNS_N = 8;
@@ -195,6 +221,17 @@ static bool     s_loraLookups  = false;
 static bool     s_loraLkCall   = false;
 static bool     s_loraLkOgn    = false;
 static bool     s_loraLkFeed   = false;
+// The LORA SETTINGS page's: the name on the air, the NodeInfo switch, and how
+// detection behaves around the LoRa pages. See settings.h.
+static char     s_loraName[Lora::MyName::NAME_LEN + 1]   = { 0 };
+static char     s_loraShort[Lora::MyName::SHORT_LEN + 1] = { 0 };
+static bool     s_loraAnnounce = true;
+static uint8_t  s_loraDetect   = 0;   // ON
+static bool     s_loraAlerts   = true;
+static uint8_t  s_loraHops     = 3;
+static bool     s_loraMsgSnd   = true;
+static char     s_loraMtPre[16] = { 0 };   // "" = LongFast
+static char     s_loraTxCh[2][24] = { { 0 }, { 0 } };   // [0] Meshtastic, [1] MeshCore; "" = default
 
 // ---- status light --------------------------------------------------------
 static bool    s_lightOn     = true;
@@ -257,6 +294,7 @@ uint16_t cpuMhz()           { return s_powerSaver ? CPU_MHZ[s_cpuIx] : 240; }
 bool     wakeOnAlert()      { return s_wakeOnAlert; }
 bool     quietTrackers()    { return s_quietTrack; }
 bool     privacyMode()      { return s_privacy; }
+bool     sensing()          { return s_sensing; }
 bool     extScreen()        { return s_extScreen; }
 bool     watchPlus()        { return s_watchPlus; }
 bool     buzz()             { return s_buzzMode != 0; }
@@ -353,6 +391,10 @@ void togglePrivacyMode() {
     s_privacy = !s_privacy;
     s_prefs.putBool("privacy", s_privacy);
 }
+void setSensing(bool on) {
+    s_sensing = on;
+    s_prefs.putBool("sensing", s_sensing);
+}
 void toggleQuietTrackers() {
     s_quietTrack = !s_quietTrack;
     s_prefs.putBool("qTrack", s_quietTrack);
@@ -418,6 +460,54 @@ bool loraLookupOgn()       { return s_loraLkOgn; }
 void toggleLoraLookupOgn() { s_loraLkOgn = !s_loraLkOgn; s_prefs.putBool("loraLkOgn", s_loraLkOgn); }
 bool loraLookupFeed()       { return s_loraLkFeed; }
 void toggleLoraLookupFeed() { s_loraLkFeed = !s_loraLkFeed; s_prefs.putBool("loraLkMcF", s_loraLkFeed); }
+
+// Keys 8, 9, 8, 7 and 8 characters; none begins "loraChans". An empty name
+// removes its key rather than storing "": the default is the absence.
+const char* loraName() { return s_loraName; }
+void setLoraName(const char* n) {
+    snprintf(s_loraName, sizeof s_loraName, "%s", n ? n : "");
+    Lora::MyName::clean(s_loraName, Lora::MyName::NAME_LEN);
+    if (s_loraName[0]) s_prefs.putString("loraName", s_loraName);
+    else               s_prefs.remove("loraName");
+}
+const char* loraShortName() { return s_loraShort; }
+void setLoraShortName(const char* n) {
+    snprintf(s_loraShort, sizeof s_loraShort, "%s", n ? n : "");
+    Lora::MyName::clean(s_loraShort, Lora::MyName::SHORT_LEN);
+    if (s_loraShort[0]) s_prefs.putString("loraShort", s_loraShort);
+    else                s_prefs.remove("loraShort");
+}
+bool loraAnnounce()       { return s_loraAnnounce; }
+void toggleLoraAnnounce() { s_loraAnnounce = !s_loraAnnounce; s_prefs.putBool("loraAnnc", s_loraAnnounce); }
+uint8_t loraDetect() { return s_loraDetect; }
+void cycleLoraDetect() { s_loraDetect = (uint8_t)((s_loraDetect + 1) % 3); s_prefs.putUChar("loraDet", s_loraDetect); }
+const char* loraDetectName() {
+    static const char* const N[3] = { "ON", "OFF ON LORA PAGE", "OFF" };
+    return N[s_loraDetect < 3 ? s_loraDetect : 0];
+}
+bool loraAlerts()       { return s_loraAlerts; }
+void toggleLoraAlerts() { s_loraAlerts = !s_loraAlerts; s_prefs.putBool("loraAlrt", s_loraAlerts); }
+uint8_t loraHops() { return s_loraHops; }
+void cycleLoraHops() { s_loraHops = (uint8_t)(s_loraHops >= 7 ? 1 : s_loraHops + 1); s_prefs.putUChar("loraHops", s_loraHops); }
+bool loraMsgSound()       { return s_loraMsgSnd; }
+void toggleLoraMsgSound() { s_loraMsgSnd = !s_loraMsgSnd; s_prefs.putBool("loraMsgSnd", s_loraMsgSnd); }
+const char* loraMtPreset() { return s_loraMtPre; }
+void setLoraMtPreset(const char* name) {
+    snprintf(s_loraMtPre, sizeof s_loraMtPre, "%s", name ? name : "");
+    // LongFast is the default, and the default is the absence of the key.
+    if (s_loraMtPre[0] && strcasecmp(s_loraMtPre, "LongFast") != 0) s_prefs.putString("loraMtPre", s_loraMtPre);
+    else { s_loraMtPre[0] = '\0'; s_prefs.remove("loraMtPre"); }
+}
+
+// Keys 10 characters each, and neither begins "loraChans".
+const char* loraTxChan(bool meshcore) { return s_loraTxCh[meshcore ? 1 : 0]; }
+void setLoraTxChan(bool meshcore, const char* name) {
+    char* s = s_loraTxCh[meshcore ? 1 : 0];
+    snprintf(s, sizeof s_loraTxCh[0], "%s", name ? name : "");
+    const char* key = meshcore ? "loraTxChMc" : "loraTxChMt";
+    if (s[0]) s_prefs.putString(key, s);
+    else      s_prefs.remove(key);
+}
 
 // The channel list. Bytes in, bytes out: the store does not know or care what
 // a MeshCore hashtag is, which is why this pair takes a blob and the record
@@ -523,8 +613,8 @@ void load() {
     s_clockFont     = s_prefs.getUChar("clkfont", 0);
     s_clockSize     = s_prefs.getUChar("clksize", 1);
     for (int i = 0; i < (int)FontKind::COUNT; i++) {
-        s_fontStep[i] = s_prefs.getUChar(FONT_KEYS[i], 2);
-        if (s_fontStep[i] > 4) s_fontStep[i] = 2;
+        s_fontStep[i] = s_prefs.getUChar(FONT_KEYS[i], FONT_DEFAULT[i]);
+        if (s_fontStep[i] > 4) s_fontStep[i] = FONT_DEFAULT[i];
         s_fontFace[i] = s_prefs.getUChar(FACE_KEYS[i], 0);
         if (s_fontFace[i] > 2) s_fontFace[i] = 0;
     }
@@ -568,8 +658,8 @@ void load() {
         s_prefs.putBool("pwrWatch1", true);
     }
 #endif
-    s_scrTimeoutIx = s_prefs.getUChar("pwrScrnT", 2);
-    s_dimLevel     = s_prefs.getUChar("pwrDim", 16);
+    s_scrTimeoutIx = s_prefs.getUChar("pwrScrnT", DEFAULT_SCR_TIMEOUT_IX);
+    s_dimLevel     = s_prefs.getUChar("pwrDim", DEFAULT_DIM_LEVEL);
     s_idleFpsIx    = s_prefs.getUChar("pwrFps", 2);
     s_idleAfterIx  = s_prefs.getUChar("pwrIdleT", 1);
     s_cpuIx        = s_prefs.getUChar("pwrCpu", 0);
@@ -580,6 +670,7 @@ void load() {
     s_wakeOnAlert  = s_prefs.getBool("pwrWake", true);
     s_quietTrack   = s_prefs.getBool("qTrack", true);
     s_privacy      = s_prefs.getBool("privacy", false);
+    s_sensing      = s_prefs.getBool("sensing", false);
     s_extScreen    = s_prefs.getBool("extscr", false);
     if (s_prefs.getBytesLength("runs") == sizeof s_runs) s_prefs.getBytes("runs", s_runs, sizeof s_runs);
     s_watchPlus    = s_prefs.getBool("wPlus", false);
@@ -609,6 +700,23 @@ void load() {
     s_loraLkCall   = s_prefs.getBool("loraLkCal", false);
     s_loraLkOgn    = s_prefs.getBool("loraLkOgn", false);
     s_loraLkFeed   = s_prefs.getBool("loraLkMcF", false);
+    s_loraName[0] = s_loraShort[0] = '\0';
+    if (s_prefs.isKey("loraName"))  s_prefs.getString("loraName", s_loraName, sizeof s_loraName);
+    if (s_prefs.isKey("loraShort")) s_prefs.getString("loraShort", s_loraShort, sizeof s_loraShort);
+    Lora::MyName::clean(s_loraName, Lora::MyName::NAME_LEN);
+    Lora::MyName::clean(s_loraShort, Lora::MyName::SHORT_LEN);
+    s_loraAnnounce = s_prefs.getBool("loraAnnc", true);
+    s_loraDetect   = s_prefs.getUChar("loraDet", 0);
+    if (s_loraDetect > 2) s_loraDetect = 0;
+    s_loraAlerts   = s_prefs.getBool("loraAlrt", true);
+    s_loraHops     = s_prefs.getUChar("loraHops", 3);
+    if (s_loraHops < 1 || s_loraHops > 7) s_loraHops = 3;
+    s_loraMsgSnd   = s_prefs.getBool("loraMsgSnd", true);
+    s_loraMtPre[0] = '\0';
+    if (s_prefs.isKey("loraMtPre")) s_prefs.getString("loraMtPre", s_loraMtPre, sizeof s_loraMtPre);
+    s_loraTxCh[0][0] = s_loraTxCh[1][0] = '\0';
+    if (s_prefs.isKey("loraTxChMt")) s_prefs.getString("loraTxChMt", s_loraTxCh[0], sizeof s_loraTxCh[0]);
+    if (s_prefs.isKey("loraTxChMc")) s_prefs.getString("loraTxChMc", s_loraTxCh[1], sizeof s_loraTxCh[1]);
     s_lightOn      = s_prefs.getBool("ltOn", true);
     s_lightAlerts  = s_prefs.getBool("ltAlert", true);
     s_lightMsgs    = s_prefs.getBool("ltMsg", true);
@@ -637,7 +745,7 @@ void load() {
     if (s_lightBright < 1 || s_lightBright > 7) s_lightBright = 4;
     // A saved index from a build with more steps than this one must not walk
     // off the end of the table.
-    if (s_scrTimeoutIx >= SCREEN_TIMEOUTS_N) s_scrTimeoutIx = 2;
+    if (s_scrTimeoutIx >= SCREEN_TIMEOUTS_N) s_scrTimeoutIx = DEFAULT_SCR_TIMEOUT_IX;
     if (s_idleFpsIx    >= IDLE_FPS_N)        s_idleFpsIx    = 2;
     if (s_idleAfterIx  >= IDLE_AFTER_N)      s_idleAfterIx  = 1;
     if (s_cpuIx        >= CPU_MHZ_N)         s_cpuIx        = 0;
@@ -894,6 +1002,9 @@ bool        timeZoneChosen(){ return s_tzChosen; }
 void markTimeZoneChosen() {
     if (!s_tzChosen) { s_tzChosen = true; s_prefs.putBool("tzSet", true); }
 }
+#if defined(SQW_DEVTOOLS)
+void unmarkTimeZoneChosen() { s_tzChosen = false; s_prefs.putBool("tzSet", false); }
+#endif
 void setTimeZone(uint8_t i) {
     if (i >= Clock::zoneCount()) return;
     s_timeZone = i;

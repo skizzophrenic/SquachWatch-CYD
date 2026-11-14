@@ -8,6 +8,7 @@
 #include "lora_profiles.h"
 #include "lora_survey.h"
 #include "lora_msgs.h"
+#include "lora_names.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -91,15 +92,22 @@ uint16_t dutyPermille(const Node& n, uint32_t now) {
 
 bool dutyKnown(const Node& n, uint32_t now) { return now - n.hourStartMs > DUTY_MIN_WINDOW_MS; }
 
+static MeshtasticHook s_mtHook = nullptr;
+void setMeshtasticHook(MeshtasticHook fn) { s_mtHook = fn; }
+
 static void noteMeshtastic(const Packet& pk, uint32_t now) {
     Meshtastic::Decoded d;
     if (!Meshtastic::decode(pk, d)) return;
+    if (s_mtHook) s_mtHook(d, now);
     // Which key opened it, counted here and nowhere else: note() runs once per
     // frame off the air, while decode() runs again for every row the LIST and
     // CHANNELS views redraw. A counter inside the decoder would measure the
     // screen's refresh rate.
-    if (d.haveData) Meshtastic::noteChannelHeard(d.channelIdx, now);
+    if (d.haveData && !d.pki) Meshtastic::noteChannelHeard(d.channelIdx, now);
     Node& n = *get(Proto::MESHTASTIC, d.hdr.from, now);
+    // A new row: the name learned before this boot, if any (Lora::Names),
+    // and the node number until a NodeInfo says otherwise.
+    if (!n.tag[0] && !Names::lookup(d.hdr.from, n.tag, sizeof n.tag, n.name, sizeof n.name)) n.tag[0] = '\0';
     if (!n.tag[0]) Meshtastic::nodeId(d.hdr.from, n.tag);
     // hopsAway is hop_start - hop_limit, and 0xFF when hop_start is 0 -- a
     // firmware before 2.3, which gives no way to tell a relayed copy from a
@@ -118,6 +126,10 @@ static void noteMeshtastic(const Packet& pk, uint32_t now) {
         case Meshtastic::PORT_NODEINFO:
             if (d.user.longName[0]) strncpy(n.name, d.user.longName, sizeof n.name - 1);
             if (d.user.shortName[0]) { snprintf(n.tag, sizeof n.tag, "%s", d.user.shortName); }
+            // Kept across restarts, and the chat rows that arrived as
+            // "!3b1c9a2e" before this NodeInfo take the name now.
+            Names::learn(d.hdr.from, d.user.shortName, n.name);
+            if (d.user.shortName[0]) Msgs::renameSender(Proto::MESHTASTIC, d.hdr.from, n.tag);
             n.role = d.user.role;
             if (d.user.role == 3 || d.user.role == 4) n.flags |= NF_DEPRECATED;
             break;
@@ -139,8 +151,15 @@ static void noteMeshtastic(const Packet& pk, uint32_t now) {
         // detection is a sensor trigger rather than a message.
         case Meshtastic::PORT_TEXT:
         case Meshtastic::PORT_ALERT:
+            // A direct message to us (Lora::Dm opened it): the conversation
+            // with its sender, not a channel's.
+            if (d.pki) {
+                Msgs::noteDm(d.hdr.from, false, d.hdr.id, 0, n.tag, d.text, pk, now, away == 0, away,
+                             Msgs::meshtasticKey(d.hdr.from, d.hdr.id));
+                break;
+            }
             Msgs::note(Proto::MESHTASTIC, d.channelIdx, (uint8_t)d.data.portnum, n.tag, d.hdr.from,
-                       d.text, pk, now, away == 0, away);
+                       d.text, pk, now, away == 0, away, Msgs::meshtasticKey(d.hdr.from, d.hdr.id));
             break;
         case Meshtastic::PORT_TELEMETRY:
             // The default is an hour; under thirty minutes is the floor the
@@ -152,9 +171,13 @@ static void noteMeshtastic(const Packet& pk, uint32_t now) {
     }
 }
 
+static MeshCoreHook s_mcHook = nullptr;
+void setMeshCoreHook(MeshCoreHook fn) { s_mcHook = fn; }
+
 static void noteMeshCore(const Packet& pk, uint32_t now, uint32_t epoch) {
     MeshCore::Decoded d;
     if (!MeshCore::decode(pk, d)) return;
+    if (s_mcHook) s_mcHook(d, now);
     if (d.haveChannel) MeshCore::noteChannelHeard(d.channelIdx, now);   // opened, not necessarily text; see noteMeshtastic
     const MeshCore::Frame& f = d.f;
     // On a flood the path is the hops already TAKEN, so hops == 0 means we
@@ -170,7 +193,8 @@ static void noteMeshCore(const Packet& pk, uint32_t now, uint32_t epoch) {
     // a string the sender typed -- the frame carries no signature over it.
     if (d.haveGroup)
         Msgs::note(Proto::MESHCORE, d.channelIdx, MeshCore::TYPE_GRP_TXT, d.grp.sender, 0,
-                   d.grp.text, pk, now, flood && f.hops == 0, f.hops);
+                   d.grp.text, pk, now, flood && f.hops == 0, f.hops,
+                   Msgs::meshCoreKey(d.grp.sender, d.grp.text, d.grp.timestamp));
     // Adverts name their sender in full. Everything else names only the
     // last relay (the path's newest hash) or a destination, which is not
     // the sender -- so those count against the relay's row, as relayed.

@@ -29,8 +29,8 @@ const uint32_t BASE    = 0x810000;   // the gap after app1; partitions_twatch.cs
 // had one (found drawing the partition tables, 2026-10-12).
 #elif defined(MARAUDER_V8)
 const uint32_t BASE    = 0x710000;   // the gap after app1; see partitions_ota_8mb.csv
-#elif defined(NM_CYD_C5)
-const uint32_t BASE    = 0xC20000;   // the free space after coredump; see partitions_ota_16mb.csv
+#elif defined(NM_CYD_C5) || defined(TAB5)
+const uint32_t BASE    = 0xC20000;   // the free space after coredump; see partitions_ota_16mb.csv (the Tab5 takes the same table)
 #else
 const uint32_t BASE    = 0x3D0000;   // the gap after app1; see partitions_ota.csv
 #endif

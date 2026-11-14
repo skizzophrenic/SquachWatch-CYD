@@ -13,6 +13,12 @@ struct Store {
     uint16_t held;
     uint32_t total;
     uint32_t dropped;
+    // The identities of the last few messages, for note()'s copy check. A
+    // flood's copies arrive within seconds of each other; 32 covers a busy
+    // channel's ten minutes many times over.
+    uint32_t seenKey[32];
+    uint32_t seenMs[32];
+    uint8_t  seenNext;
 };
 
 Store* s_st = nullptr;
@@ -54,12 +60,34 @@ void clear() {
     memset(s_st, 0, sizeof(Store));
 }
 
+uint32_t meshtasticKey(uint32_t from, uint32_t packetId) {
+    const uint32_t k = (from * 2654435761u) ^ packetId;
+    return k ? k : 1;
+}
+
+uint32_t meshCoreKey(const char* sender, const char* text, uint32_t timestamp) {
+    uint32_t h = 2166136261u;                                  // FNV-1a
+    auto mix = [&](const char* s) { for (; s && *s; s++) { h ^= (uint8_t)*s; h *= 16777619u; } h ^= 0xFF; h *= 16777619u; };
+    mix(sender);
+    mix(text);
+    for (int i = 0; i < 4; i++) { h ^= (uint8_t)(timestamp >> (8 * i)); h *= 16777619u; }
+    return h ? h : 1;
+}
+
 void note(Proto p, uint8_t chan, uint8_t port, const char* sender, uint64_t senderId, const char* text,
-          const Packet& pk, uint32_t now, bool direct, uint8_t hops) {
+          const Packet& pk, uint32_t now, bool direct, uint8_t hops, uint32_t key) {
     if (!s_st) return;
     // An empty line is a frame that opened and parsed into nothing worth
     // reading. It would fill the ring with blank rows and push out words.
     if (!text || !text[0]) return;
+    // A relay's copy of something already here, or our own send coming back.
+    if (key) {
+        for (uint8_t i = 0; i < 32; i++)
+            if (s_st->seenKey[i] == key && now - s_st->seenMs[i] < SEEN_MS) return;
+        s_st->seenKey[s_st->seenNext] = key;
+        s_st->seenMs[s_st->seenNext] = now;
+        s_st->seenNext = (uint8_t)((s_st->seenNext + 1) % 32);
+    }
     Msg& m = s_st->m[s_st->head];
     memset(&m, 0, sizeof m);
     m.proto = p;
@@ -78,6 +106,76 @@ void note(Proto p, uint8_t chan, uint8_t port, const char* sender, uint64_t send
     if (s_st->held < CAP) s_st->held++;
     else                  s_st->dropped++;
     s_st->total++;
+}
+
+void noteDm(uint32_t peer, bool mine, uint32_t pktId, uint8_t dmState, const char* sender, const char* text,
+            const Packet& pk, uint32_t now, bool direct, uint8_t hops, uint32_t key, Proto p) {
+    if (!s_st || !peer) return;
+    const uint32_t before = s_st->total;
+    // The network's own type: Meshtastic's TEXT port, MeshCore's TXT_MSG.
+    note(p, DM_CHAN, p == Proto::MESHCORE ? 2 : 1, sender, mine ? 0 : peer, text, pk, now, direct, hops, key);
+    if (s_st->total == before) return;      // a copy, dropped
+    Msg& m = s_st->m[(s_st->head + CAP - 1) % CAP];
+    m.peer = peer;
+    m.mine = mine;
+    m.pktId = pktId;
+    m.dmState = dmState;
+}
+
+bool setDmState(uint32_t pktId, uint8_t dmState) {
+    if (!s_st || !pktId) return false;
+    for (uint16_t i = 0; i < s_st->held; i++) {
+        Msg& m = s_st->m[newest(i)];
+        if (m.chan == DM_CHAN && m.mine && m.pktId == pktId) { m.dmState = dmState; return true; }
+    }
+    return false;
+}
+
+uint16_t countForPeer(uint32_t peer) {
+    if (!s_st || !peer) return 0;
+    uint16_t n = 0;
+    for (uint16_t i = 0; i < s_st->held; i++) {
+        const Msg& m = s_st->m[newest(i)];
+        if (m.chan == DM_CHAN && m.peer == peer) n++;
+    }
+    return n;
+}
+
+uint16_t pageForPeer(uint32_t peer, Msg* out, uint16_t cap, uint16_t from) {
+    if (!s_st || !out || !cap || !peer) return 0;
+    uint16_t seen = 0, w = 0;
+    for (uint16_t i = 0; i < s_st->held && w < cap; i++) {
+        const Msg& m = s_st->m[newest(i)];
+        if (m.chan != DM_CHAN || m.peer != peer) continue;
+        if (seen++ < from) continue;
+        out[w++] = m;
+    }
+    return w;
+}
+
+uint16_t dmPeers(uint32_t* out, uint16_t cap) {
+    if (!s_st || !out || !cap) return 0;
+    uint16_t w = 0;
+    for (uint16_t i = 0; i < s_st->held && w < cap; i++) {
+        const Msg& m = s_st->m[newest(i)];
+        if (m.chan != DM_CHAN || !m.peer) continue;
+        bool have = false;
+        for (uint16_t j = 0; j < w && !have; j++) have = out[j] == m.peer;
+        if (!have) out[w++] = m.peer;
+    }
+    return w;
+}
+
+uint16_t renameSender(Proto p, uint64_t senderId, const char* sender) {
+    if (!s_st || !sender || !sender[0]) return 0;
+    uint16_t n = 0;
+    for (uint16_t i = 0; i < s_st->held; i++) {
+        Msg& m = s_st->m[newest(i)];
+        if (m.proto != p || m.senderId != senderId || !strcmp(m.sender, sender)) continue;
+        put(m.sender, sizeof m.sender, sender);
+        n++;
+    }
+    return n;
 }
 
 uint16_t count()   { return s_st ? s_st->held : 0; }

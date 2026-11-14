@@ -21,8 +21,13 @@ void uiAlertSetLastFree(bool lastFree);
 // This alert is a spam flood's one announcement (see spam_watch.h): the card
 // says how many fakes so far, and that the rest of the flood stays quiet.
 void uiAlertSetSpam(bool spam, uint16_t fakes);
-// SNOOZE (this device, until restart), bottom centre between HUNT and MORE INFO.
+// SNOOZE (this device, for a while), bottom centre between HUNT and MORE INFO.
 bool uiAlertHitSnooze(int x, int y, int screenW, int screenH);
+// While SNOOZE is being tapped through its steps: the button shows the step
+// ("30 MIN"), held down, with a bar that runs out when the pick locks in.
+// left is that bar, 0..1000. nullptr puts the plain SNOOZE button back;
+// uiAlertInit does that too.
+void uiAlertSetSnoozePick(const char* label, uint16_t left);
 // While the device is locked with ALERTS WHEN LOCKED at TYPE ONLY: the type
 // and the signal still show, the device's name, label and address do not.
 void uiAlertSetRedacted(bool redacted);

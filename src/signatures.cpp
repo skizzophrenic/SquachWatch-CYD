@@ -132,7 +132,24 @@ const OuiEntry kOuiTable[] = {
     // detection stood up while the attribution did not.
     {{0x28, 0x57, 0xBE}, "Hikvision",    DetectionType::CAMERA,     Confidence::HIGH_CONF},
     {{0x00, 0xE0, 0x4C}, "Realtek",      DetectionType::CAMERA,     Confidence::LOW_CONF},
-    {{0xBC, 0xDD, 0xC2}, "Arlo",         DetectionType::CAMERA,     Confidence::LOW_CONF},
+    // Arlo's own MA-L blocks, all three registered to "Arlo Technology",
+    // so High by the rule the other vendor-registered camera rows use.
+    {{0xFC, 0x9C, 0x98}, "Arlo",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    {{0x48, 0x62, 0x64}, "Arlo",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    {{0xA4, 0x11, 0x62}, "Arlo",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    // BC:DD:C2 sat here as "Arlo" and is registered to ESPRESSIF. It was
+    // wrong in both directions: every ESP32 in that block read as a covert
+    // camera, and no real Arlo was ever matched, because none of the three
+    // blocks above were in the table. It also contradicted this project's
+    // own documented decision -- DETECTIONS.md, under the camera section,
+    // says a "flag any Espressif OUI as a possible camera" fallback "would
+    // need a real audit of Espressif's OUI ranges against known false
+    // positives before shipping -- it is NOT built". One was in the table
+    // anyway, mislabelled, so the audit graded it Low as "Arlo" instead of
+    // removing it as Espressif. Same hazard the FLOCK block was cleared of
+    // on 2026-10-14 ("so a SquachWatch is never somebody else's Flock
+    // camera"); a SquachWatch is an ESP32, and this is a SquachWatch
+    // reading another SquachWatch as surveillance.
     {{0x4C, 0x69, 0x05}, "Blink",        DetectionType::CAMERA,     Confidence::LOW_CONF},
     {{0xA4, 0xC1, 0x38}, "Tuya",         DetectionType::CAMERA,     Confidence::LOW_CONF},
     // Blink by Amazon's own blocks (IEEE MA-L, "Blink by Amazon").
@@ -210,17 +227,14 @@ const OuiEntry kOuiTable[] = {
     {{0x00, 0x26, 0x7E}, "Parrot",       DetectionType::DRONE,      Confidence::LOW_CONF},
 
     // ---- Pentest hardware ------------------------------------------
-    // Flipper Devices' own MA-L block, verified in the IEEE registry
-    // (FLIPPER DEVICES INC, Claymont DE). This is the only Flipper prefix
-    // that is actually registered to them.
-    //
-    // Two others circulate widely -- 80:E1:26 and 80:E1:27, copied from
-    // detector to detector -- and neither appears in the IEEE registry at
-    // all. That is how 00:0E:58 spent eleven releases here as "Vigilant"
-    // while belonging to Sonos, so they are left out rather than shipped
-    // at LOW. Flipper has three other signatures below; it does not need
-    // a prefix nobody can source.
-    {{0x0C,0xFA,0x22}, "Flipper",    DetectionType::HACKER, Confidence::HIGH_CONF},
+    // No Flipper prefix here. Flipper Devices' own IEEE block, 0C:FA:22,
+    // sat here as HACKER until 2026-10-14, and this table is only ever
+    // read for WiFi frames -- a radio a Flipper Zero does not have. What
+    // it caught was the BUSY Bar, Flipper's desk sign, whose WiFi uses
+    // that block (0c:fa:22:00:41:54 on the bench, beside three real
+    // Zeros). The Zeros themselves advertise from 80:E1:26, which is in
+    // nobody's IEEE registration, so it stays out as well; their three
+    // service UUIDs below catch every one of them.
 
     // Hak5's WiFi Pineapple. Hak5 hold NO IEEE registration -- the whole
     // 40,000-row registry has no entry for them -- because their gear is
@@ -357,14 +371,13 @@ const MfgIdEntry kMfgIdTable[] = {
     {0x08C3, "Chipolo",    DetectionType::GOOGLE_TAG},
 
     // ---- Pentest hardware -----------------------------------------------
-    // Flipper Devices Inc., from the Bluetooth SIG company identifier list.
-    //
-    // Worth stating because the wrong value is widespread: ESP32 Marauder
-    // comments its Flipper company ID as 0x0FBA, and every project that
-    // copied that constant inherited it. 0x0FBA is Cosonic Intelligent
-    // Technologies, who make headsets. Flipper is 0x0E29. Checked against
-    // the SIG registry, the same way the OUI rows are checked against IEEE.
-    {0x0E29, "Flipper",    DetectionType::HACKER},
+    // None. Flipper Devices' SIG company ID is 0x0E29 (not 0x0FBA, which
+    // ESP32 Marauder comments it as: that is Cosonic, who make headsets),
+    // and it sat here as HACKER until 2026-10-14. A Flipper Zero never sends
+    // it -- its firmware's serial profile advertises only a service UUID and
+    // a name, and three Zeros on the bench agreed -- while the BUSY Bar, a
+    // desk sign, puts it in every advert until it is paired (its firmware's
+    // ble_advertise.c). So the only thing the row ever caught was the sign.
 };
 const uint16_t kMfgIdCount = sizeof(kMfgIdTable) / sizeof(kMfgIdTable[0]);
 
@@ -650,8 +663,8 @@ Confidence confidenceFor(DetectionType t) {
         // The BASE grade only, and it is the one the weakest members of
         // this bucket deserve: an SSID beginning "pwned" or a BLE name
         // beginning "Flipper" is a string anybody can type. The exact
-        // signatures -- the three Flipper service UUIDs, Flipper's SIG
-        // company ID, a Pwnagotchi announcing its own handshake count --
+        // signatures -- the three Flipper Zero service UUIDs and a
+        // Pwnagotchi announcing its own handshake count --
         // set HIGH explicitly at their match sites, and the OUI rows carry
         // their own. This is the value a caller gets when nothing more
         // specific was established.

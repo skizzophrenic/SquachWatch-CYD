@@ -272,6 +272,164 @@ bool parseGroupText(const uint8_t* plain, uint8_t len, GroupText& g) {
     return true;
 }
 
+uint16_t sealGroupText(const Channel& c, uint32_t stamp, const char* name, const char* text, uint8_t* f,
+                       GroupText* echo) {
+    if (echo) memset(echo, 0, sizeof *echo);
+    if (!f || !c.enabled || !c.name[0] || !text) return 0;
+    uint8_t plain[192];
+    memset(plain, 0, sizeof plain);
+    wr32le(plain, stamp);
+    plain[4] = 0x00;
+    int tl = snprintf((char*)plain + 5, sizeof plain - 5, "%s: %s", name ? name : "", text);
+    if (tl < 0) return 0;
+    if (tl > (int)sizeof plain - 6) tl = (int)sizeof plain - 6;
+    const uint16_t plen = (uint16_t)(5 + tl);
+    const uint16_t clen = (uint16_t)((plen + 15) & ~15);
+    f[0] = 0x15;          // flood, GRP_TXT
+    f[1] = 0x00;          // no path yet
+    f[2] = c.hash;
+    Aes128 aes; aes.setKey(c.key);
+    for (uint16_t off = 0; off < clen; off = (uint16_t)(off + 16)) aes.encryptBlock(plain + off, f + 5 + off);
+    uint8_t secret[32] = {0}; memcpy(secret, c.key, 16);
+    uint8_t mac[32];
+    hmacSha256(secret, 32, f + 5, clen, mac);
+    f[3] = mac[0]; f[4] = mac[1];
+    if (echo) parseGroupText(plain, (uint8_t)plen, *echo);
+    return (uint16_t)(5 + clen);
+}
+
+// ---- direct messages ----------------------------------------------------------------
+uint16_t sealSecret(const uint8_t secret[32], const uint8_t* plain, uint16_t len, uint8_t* out) {
+    if (!secret || !plain || !out || !len || len > 176) return 0;
+    const uint16_t clen = (uint16_t)((len + 15) & ~15);
+    uint8_t block[16];
+    Aes128 aes; aes.setKey(secret);
+    for (uint16_t off = 0; off < clen; off = (uint16_t)(off + 16)) {
+        memset(block, 0, 16);
+        memcpy(block, plain + off, (size_t)(len - off < 16 ? len - off : 16));
+        aes.encryptBlock(block, out + 2 + off);
+    }
+    uint8_t mac[32];
+    hmacSha256(secret, 32, out + 2, clen, mac);
+    out[0] = mac[0]; out[1] = mac[1];
+    return (uint16_t)(2 + clen);
+}
+
+bool openSecret(const uint8_t secret[32], const uint8_t* in, uint8_t len, uint8_t* plain, uint8_t& plainLen) {
+    plainLen = 0;
+    if (!secret || !in || len < 2 + 16) return false;
+    const uint8_t clen = (uint8_t)(len - 2);
+    if (clen & 15) return false;
+    uint8_t mac[32];
+    hmacSha256(secret, 32, in + 2, clen, mac);
+    if (mac[0] != in[0] || mac[1] != in[1]) return false;
+    Aes128 aes; aes.setKey(secret);
+    for (uint8_t off = 0; off < clen; off = (uint8_t)(off + 16)) aes.decryptBlock(in + 2 + off, plain + off);
+    plainLen = clen;
+    return true;
+}
+
+void ackFor(const uint8_t* plain, size_t len, const uint8_t senderPub[32], uint8_t ack[4]) {
+    uint8_t h[32];
+    sha256Two(plain, len, senderPub, 32, h);
+    memcpy(ack, h, 4);
+}
+
+uint16_t buildDirectText(const uint8_t secret[32], const uint8_t destPub[32], const uint8_t ourPub[32],
+                         uint32_t stamp, uint8_t attempt, const char* text, uint8_t* f, uint8_t ack[4]) {
+    if (!f || !text || !text[0] || !destPub || !ourPub) return 0;
+    uint8_t plain[5 + 160];
+    size_t n = strlen(text); if (n > 160) n = 160;
+    wr32le(plain, stamp);
+    plain[4] = (uint8_t)(attempt & 3);          // TXT_TYPE_PLAIN << 2 | attempt
+    memcpy(plain + 5, text, n);
+    if (ack) ackFor(plain, 5 + n, ourPub, ack);
+    f[0] = (uint8_t)((TYPE_TXT_MSG << 2) | ROUTE_FLOOD);
+    f[1] = 0x00;                                 // no path yet
+    f[2] = destPub[0];
+    f[3] = ourPub[0];
+    const uint16_t s = sealSecret(secret, plain, (uint16_t)(5 + n), f + 4);
+    return s ? (uint16_t)(4 + s) : 0;
+}
+
+uint16_t buildPathReturn(const uint8_t secret[32], uint8_t destHash, uint8_t ourHash, uint8_t pathLenByte,
+                         const uint8_t* path, const uint8_t ack[6], uint8_t* f) {
+    if (!f || !ack) return 0;
+    const uint8_t hs = (uint8_t)((pathLenByte >> 6) + 1), hc = (uint8_t)(pathLenByte & 63);
+    const uint16_t pathBytes = (uint16_t)(hs * hc);
+    if (pathBytes + 1 + 1 + 6 > 160) return 0;
+    uint8_t plain[176];
+    uint16_t n = 0;
+    plain[n++] = pathLenByte;
+    if (pathBytes) { memcpy(plain + n, path, pathBytes); n = (uint16_t)(n + pathBytes); }
+    plain[n++] = TYPE_ACK;
+    memcpy(plain + n, ack, 6); n = (uint16_t)(n + 6);
+    f[0] = (uint8_t)((TYPE_PATH << 2) | ROUTE_FLOOD);
+    f[1] = 0x00;
+    f[2] = destHash;
+    f[3] = ourHash;
+    const uint16_t s = sealSecret(secret, plain, n, f + 4);
+    return s ? (uint16_t)(4 + s) : 0;
+}
+
+uint16_t buildAck(const uint8_t ack[6], uint8_t* f) {
+    if (!f || !ack) return 0;
+    f[0] = (uint8_t)((TYPE_ACK << 2) | ROUTE_FLOOD);
+    f[1] = 0x00;
+    memcpy(f + 2, ack, 6);
+    return 8;
+}
+
+uint16_t buildAdvert(const uint8_t pub[32], const uint8_t prv[64], uint32_t stamp, const char* name, uint8_t* f) {
+    if (!f || !pub || !prv) return 0;
+    size_t nl = name ? strlen(name) : 0;
+    if (nl > 31) nl = 31;
+    uint8_t* p = f + 2;
+    memcpy(p, pub, 32);
+    wr32le(p + 32, stamp);
+    uint8_t* sig = p + 36;
+    uint8_t* app = p + 36 + 64;
+    app[0] = (uint8_t)(0x80 | NODE_CHAT);        // ADV_NAME_MASK | ADV_TYPE_CHAT
+    memcpy(app + 1, name, nl);
+    const size_t appLen = 1 + nl;
+    // Signed over the key, the time and the app data, in that order (Mesh::createAdvert).
+    uint8_t msg[32 + 4 + 32];
+    memcpy(msg, pub, 32); wr32le(msg + 32, stamp); memcpy(msg + 36, app, appLen);
+    ed25519Sign(sig, msg, 36 + appLen, pub, prv);
+    f[0] = (uint8_t)((TYPE_ADVERT << 2) | ROUTE_FLOOD);
+    f[1] = 0x00;
+    return (uint16_t)(2 + 32 + 4 + 64 + appLen);
+}
+
+bool parseDirectText(const uint8_t* plain, uint8_t len, DirectText& t) {
+    memset(&t, 0, sizeof t);
+    if (!plain || len < 6) return false;
+    t.timestamp = rd32le(plain);
+    t.txtType = (uint8_t)(plain[4] >> 2);
+    t.attempt = (uint8_t)(plain[4] & 3);
+    uint8_t n = 0;
+    while (5 + n < len && plain[5 + n] && n < 160) { t.text[n] = (char)plain[5 + n]; n++; }
+    t.text[n] = '\0';
+    t.textLen = n;
+    return n > 0;
+}
+
+bool parsePathReturn(const uint8_t* plain, uint8_t len, PathReturn& p) {
+    memset(&p, 0, sizeof p);
+    if (!plain || len < 2) return false;
+    p.pathLenByte = plain[0];
+    p.hashSize = (uint8_t)((plain[0] >> 6) + 1);
+    p.hops = (uint8_t)(plain[0] & 63);
+    if (p.hashSize > 3) return false;
+    const uint16_t k = (uint16_t)(1 + p.hashSize * p.hops);
+    if (k + 1 > len) return false;
+    p.path = plain + 1;
+    p.extraType = (uint8_t)(plain[k] & 0x0F);
+    p.extra = plain + k + 1;
+    p.extraLen = (uint8_t)(len - k - 1);
+    return true;
+}
+
 bool parseTrace(const Frame& f, Trace& t) {
     memset(&t, 0, sizeof t);
     if (f.type != TYPE_TRACE || f.payloadLen < 9) return false;

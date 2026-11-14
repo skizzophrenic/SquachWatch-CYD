@@ -40,6 +40,7 @@ Everything on the [web flasher](https://squachwatch.com/), with the names it use
 | Board | Touch | On the flasher | Good to know |
 |---|---|---|---|
 | 2.8" CYD, ST7789 (ESP32-2432S028R) | Resistive | Yes | The usual screen. The 80 MHz box is ticked by default. |
+| DIYmalls 2.8" (JC2432W328C) | Capacitive | Yes | Named flasher option; shares the ST7789 `cyd` / `cyd-fast` firmware, which detects touch at startup. [Hardware and battery notes](DIYMALLS-28.md). |
 | 2.8" CYD, ILI9341 (ESP32-2432S028R) | Resistive | Yes | The older screen on the same board. Also the build for the ESP32-32E 2.8" (E32R28T). Leave 80 MHz unticked. |
 | 3.2" resistive (Freenove FNK0103) | Resistive | Yes | |
 | 3.2" capacitive (ESP32-2432S032C) | Capacitive | Yes (NEW) | Already runs at 80 MHz. |
@@ -50,11 +51,12 @@ Everything on the [web flasher](https://squachwatch.com/), with the names it use
 | Freenove ESP32-S3 2.8" (FNK0104) | Capacitive | BETA | The release notes name the FNK0104B, the touch version. |
 | Elecrow CrowPanel Advance 7.0 | Capacitive | BETA | Draws the small-screen layout doubled. Has a buzzer. Notes in [CROWPANEL7.md](CROWPANEL7.md). |
 | RockBase NM-CYD-C5 2.8" (ESP32-C5) | Resistive | BETA | The only board that scans 5 GHz WiFi too. Contributed by quietradio. Notes in [NM-CYD-C5.md](NM-CYD-C5.md). |
-| M5Stack StickS3 | None, two buttons | BETA | Tiny 1.14" screen, landscape only. One button moves a cursor, the other presses. |
-| M5Stack Cardputer ADV | None, keyboard | BETA | Not the original Cardputer. Arrows and TAB move, ENTER presses, ESC goes home. |
+| M5Stack StickS3 | None, two buttons | BETA | Tiny 1.14" screen, landscape only. Front click next, front hold select, side click back, side hold home. Shake and knock poke Squachy. Controls in [SMALL-BOARDS.md](SMALL-BOARDS.md). |
+| M5Stack Cardputer ADV | None, keyboard | BETA | Not the original Cardputer. Arrows move, ENTER presses, ESC goes back, hold ESC for home, letters are hotkeys. Optional EXT screen and Grove GPS for wardriving. Controls in [SMALL-BOARDS.md](SMALL-BOARDS.md). |
 | LilyGo T-Watch S3 / S3 Plus | Capacitive | BETA | On your wrist. Battery, buzz, LoRa listening; the S3 Plus adds GPS. |
+| M5Stack Tab5 | Capacitive | Test builds only (`?lab=1`) | Experimental. A 5" tablet whose radio is a separate chip that needs our firmware first. Notes in [TAB5.md](TAB5.md). |
 
-Not sure which one you've got? The code on the back (like ESP32-2432S028R) tells you. The last letter is the touch: R is resistive (press), C is capacitive (tap). Type it into the flasher's box and it picks the build for you.
+Not sure which one you've got? Type the code on the back into the flasher's box. `JC2432W328C` selects the named DIYmalls option; `ESP32-2432S028R` selects the original CYD entry. For that CYD family, the last letter is the touch: R is resistive (press), C is capacitive (tap).
 
 BETA means it runs the whole firmware but has had less time on real hardware than the 2.8". It works; it just hasn't earned the right to be boring yet.
 
@@ -107,7 +109,11 @@ Yes, a little, and I'd rather you hear it from me. Older versions of this FAQ sa
 | **A Bluetooth update server.** S3 boards only. | Only while the UPDATE OVER BLUETOOTH screen is open | Leave that screen. |
 | **SquachMesh adverts.** A Bluetooth advert every 1.5 seconds with a fixed address, your Squachy's name and outfit. Messages, heads-ups and squad updates ride on it. | Only with **TRANSMIT** on | It's **off by default**, behind a warning screen that literally says THIS MAKES YOU TRACKABLE. Settings > SQUACHMESH > TRANSMIT. |
 
-The WiFi detection itself just listens. LoRa on the watches only listens. Nothing else talks.
+The WiFi detection itself just listens, and so does the manual **WIFI SCAN**: both ask the radio for a *passive* sweep, which hears the beacons networks send out anyway without sending anything itself.
+
+That last part is new, and the old behaviour belongs in this table even though it is now gone. Until this release the manual WiFi sweep used Arduino's default scan, which is an **active** one: it sent a probe request on every channel, with this board's address in it, every time you opened that screen. It was never a deliberate choice -- the setting is the third argument of a function that was being called with one -- and this table, which promises you everything that goes out, never mentioned it. It is passive now, and `tools/check_emissions.sh` fails the build if any scan in the firmware goes back to active without a line saying why.
+
+LoRa on the watches only listens. Nothing else talks.
 
 **PRIVACY MODE** (Settings > SYSTEM) is not a radio switch. It's for filming: addresses show as AA:BB:CC:XX:XX:XX and device and network names are cut to three characters, on the screen only. The log keeps the real values.
 
@@ -144,6 +150,8 @@ Be honest with yourself about what the PIN does: it stops a snoop who picks the 
 
 **The battery lamp.** On the Freenove ESP32-S3 2.8" and 3.5" and the T-Watch, a little lava lamp under the menu button is the battery: the lava is the charge. On the cable, bubbles stream up and a rainbow runs through the cap and base; under 10% it flickers. The Freenove boards work out the cable from the battery voltage jumping when you plug in, so it can take a few seconds to notice. Boards with no battery don't show a lamp.
 
+The DIYmalls JC2432W328C has a physical BAT connector and battery switch, but the board's battery-sensing circuit and charger have not been verified. SquachWatch does not show a battery percentage for it, and USB power must not be taken as evidence that USB charging is supported. See the [JC2432W328C hardware guide](DIYMALLS-28.md) before connecting a battery.
+
 **On the T-Watch:**
 
 - POWER SAVER is on by default. On battery the screen times out whatever you set; on the charger it stays lit like a desk clock.
@@ -168,7 +176,7 @@ The buttons:
 
 - **MORE INFO**: what this thing is and why it matched.
 - **IGNORE**: never alert on this exact device again. It's still logged and counted, with an IGNORED tag on its LOG row. Tap it again (it reads MUTED) or use Settings > IGNORED to undo it.
-- **SNOOZE**: quiet about this device until the board restarts.
+- **SNOOZE**: quiet about this device for a while. Tap once for 10 minutes, twice for 30, three times for an hour, four times for 4 hours. The button shows the time, and it locks in three seconds after your last tap. After the first tap the card says TAP AGAIN: LONGER. For good, use IGNORE.
 - **HUNT**: a hot/cold fox hunt for that device, GETTING WARMER or GETTING COLDER as you move. STOP HUNT ends it.
 
 **Too many alerts?**
@@ -229,7 +237,7 @@ A squad gets you:
 
 ## GPS and LoRa (watches only)
 
-**GPS** is on the **T-Watch S3 Plus** only. **WARDRIVE** in WATCH SETTINGS turns the GPS and the log on together: every WiFi network and Bluetooth device it hears, with position, logged only while it has a fresh fix. It holds up to 125,000 sightings across restarts. **DOWNLOAD WIGLE FILE** on the web flasher (desktop Chrome or Edge) saves it as a file you can upload to [wigle.net](https://wigle.net/uploads). The log stays on the watch until you clear it, and a duress wipe takes it with everything else. The watch also sets its clock from GPS. Wardriving was marked not road-tested when it shipped in v1.25.0, so treat it as new.
+**GPS** is on the **T-Watch S3 Plus**, and on the **Cardputer ADV** with a Grove GPS (see [SMALL-BOARDS.md](SMALL-BOARDS.md)). **WARDRIVE** in WATCH SETTINGS turns the GPS and the log on together: every WiFi network and Bluetooth device it hears, with position, logged only while it has a fresh fix. It holds up to 125,000 sightings across restarts. **DOWNLOAD WIGLE FILE** on the web flasher (desktop Chrome or Edge) saves it as a file you can upload to [wigle.net](https://wigle.net/uploads). The log stays on the watch until you clear it, and a duress wipe takes it with everything else. The watch also sets its clock from GPS. Wardriving was marked not road-tested when it shipped in v1.25.0, so treat it as new.
 
 **SEEN AT.** Anything the LOG kept with a GPS position shows it: long-press the device in the LOG and it says SEEN AT and where.
 
@@ -243,7 +251,7 @@ That's Squachy. The detection is the *why*, Squachy is the *fun*. He reacts to w
 
 Other things hiding in Settings: the SQUACHY-DEX (a card per detection type with your record), BINGO, Squachy's diary, and DESK MODE, a clock for your desk.
 
-**Don't want him?** **Settings > BEHAVIOR > BORING MODE** turns him off. Detection is exactly the same; you just get a plain detector, and a plain BLACK background if you want it. His rows in Settings stay visible, greyed out, so you can find your way back.
+**Don't want him?** **Settings > BEHAVIOR > TERMINAL MODE** (it used to be called BORING MODE) swaps him for a plain dashboard: a sortable LOG, an AIR graph, COUNTS and the LATEST catch. Detection is exactly the same. The same row turns him back on.
 
 ## Is this legal?
 

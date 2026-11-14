@@ -293,11 +293,23 @@ positives before shipping — it is **not** built, and the UI does not
 show a Low-confidence camera reading in v1.0.
 
 **Since the OUI audit** the rows carry their own grades: the blocks
-registered to Wyze, Hikvision, Verkada, Avigilon and Axis are High;
-Amazon's two are Medium (Amazon makes far more than cameras); Realtek,
-Tuya, Arlo, Blink and Wyze's module block are Low. Two rows were
+registered to Wyze, Hikvision, Verkada, Avigilon, Axis and Arlo are
+High; Amazon's two are Medium (Amazon makes far more than cameras);
+Realtek, Tuya, Blink and Wyze's module block are Low. Two rows were
 relabelled by the audit: `F0:27:2D` was "Hikvision" and is Amazon's,
 and `28:57:BE` was "Reolink" and is Hikvision's.
+
+**And one the audit graded instead of checking.** `BC:DD:C2` was
+labelled "Arlo" and graded Low. It is registered to **Espressif**, so
+it matched ESP32s -- dev boards, ESPHome sensors, smart plugs, and
+SquachWatch itself -- as covert cameras, while no real Arlo was ever
+matched, because none of Arlo Technology's own three blocks
+(`FC:9C:98`, `48:62:64`, `A4:11:62`) were in the table at all. They are
+now, at High, and the Espressif row is gone. Note that this is the
+fallback the paragraph above says is *not* built: one Espressif OUI was
+flagging cameras regardless, because it did not look like Espressif.
+`tools/check_ouis.py` now reads this table against the IEEE registry so
+the next one is caught by a job rather than by a reader.
 
 ---
 
@@ -430,14 +442,22 @@ Everything else this device finds is equipment that *watches*. This is
 equipment that transmits at other radios, which is why it shares the red
 of `DEAUTH` and `EVILTWIN` rather than the cyan of the cameras.
 
-### Flipper Zero — four signatures, three of them exact
+### Flipper Zero — two signatures, one of them exact
 
 | Signature | Value | Grade |
 |---|---|---|
 | BLE service UUID | `0x3081` / `0x3082` / `0x3083` — one per case colour | **High** |
-| BLE company ID | `0x0E29`, Flipper Devices Inc. | **High** |
-| MAC OUI | `0C:FA:22`, FLIPPER DEVICES INC | **High** |
 | Advertised name | begins `Flipper ` | **Medium** — the owner can change it |
+
+**Flipper's own company ID and address block are not a Flipper Zero.**
+Both used to be on this list. A Zero never sends Flipper's Bluetooth
+company ID `0x0E29`, and it has no WiFi, so Flipper's IEEE block
+`0C:FA:22` (which only WiFi frames are checked against) can never be one.
+The thing both actually caught was the **BUSY Bar**, Flipper's desk sign:
+its WiFi uses `0C:FA:22`, and until it is paired its Bluetooth advert
+carries `0x0E29` beside its own UUID `0x308A`. Bench, 2026-10-14: a BUSY
+Bar flagged as a hacker tool, three real Zeros beside it advertising
+`0x3082`/`0x3083` from `80:E1:26` addresses and no company ID at all.
 
 **Two constants the ecosystem gets wrong, and we do not.**
 
@@ -448,7 +468,8 @@ project that copied that constant inherited the error.
 
 Wall-of-Flippers checks MAC prefixes `80:E1:26` and `80:E1:27`. Neither
 appears anywhere in the IEEE registry — not under Flipper, not under
-anybody. Only `0C:FA:22` is really theirs.
+anybody. Real Zeros do advertise from `80:E1:26`, but an unregistered
+prefix is anybody's to use, and the service UUIDs already catch every Zero.
 
 Both are the same failure as the `00:0E:58` entry that sat here for eleven
 releases labelled "Vigilant" while belonging to Sonos: a plausible constant

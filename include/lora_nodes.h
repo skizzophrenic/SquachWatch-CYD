@@ -10,6 +10,8 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "lora_pkt.h"
+#include "lora_meshtastic.h"
+#include "lora_meshcore.h"
 
 namespace Lora {
 namespace Nodes {
@@ -85,6 +87,14 @@ static const uint8_t CAP = 96;
 // Feed a classified packet in. `now` is millis(); `epoch` the wall clock
 // or 0. Decodes what it needs itself.
 void note(const Packet& pk, uint32_t now, uint32_t epoch);
+// Every Meshtastic frame note() decodes, handed on once: Lora::Dm's keys,
+// ACKs and owed answers (src/lora_sniffer.cpp sets it). Called inside the
+// same lock as note(). Unset: nothing, as in the host tests.
+typedef void (*MeshtasticHook)(const Meshtastic::Decoded& d, uint32_t now);
+void setMeshtasticHook(MeshtasticHook fn);
+// The same for MeshCore (Lora::McDm: adverts, DMs to us, their ACKs).
+typedef void (*MeshCoreHook)(const MeshCore::Decoded& d, uint32_t now);
+void setMeshCoreHook(MeshCoreHook fn);
 
 uint8_t     count();
 const Node* at(uint8_t i);

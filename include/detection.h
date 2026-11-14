@@ -227,7 +227,7 @@ public:
     // attack, which processDeauthQ() (run from loop()) is what
     // actually decides, via a rolling window + cooldown rather than
     // firing per frame.
-    void IRAM_ATTR postDeauth(const uint8_t* mac, int8_t rssi, uint8_t channel);
+    void IRAM_ATTR postDeauth(const uint8_t* mac, int8_t rssi, uint8_t channel, bool bcast = false);
 
     // Called from the BLE scan callback when a hit is found.
     void postBle(Detection d);
@@ -512,14 +512,33 @@ private:
     // postDeauth()/processDeauthQ(). Separate from _wifiQ above since
     // this feeds a rolling burst-window counter, not the OUI/SSID
     // signature matcher.
+    // The bar, per SENDER (2026-10-15). It used to be six frames in three
+    // seconds from anyone at all, and a house with a good router tripped it
+    // on its own: band steering deauths a phone to push it onto 5 GHz, and
+    // two or three access points doing that add up to six in no time. A
+    // tool does not look like that. aireplay sends 128 a burst, the ESP
+    // deauthers and Marauder hundreds a second, nearly all of them to the
+    // broadcast address, which a router almost never deauths. So: twelve
+    // frames in the window from ONE transmitter, or six of them to
+    // broadcast, and disassociation frames count alongside deauths since
+    // the same tools send both. The Pwnagotchi's few targeted frames stay
+    // under this on purpose; its own beacon is the better tell.
     static const uint8_t  DEAUTH_Q_CAP       = 8;
-    static const uint8_t  DEAUTH_THRESHOLD   = 6;      // frames within...
+    static const uint8_t  DEAUTH_THRESHOLD   = 12;     // frames from one sender within...
+    static const uint8_t  DEAUTH_BCAST       = 6;      // ...or this many of them to broadcast...
     static const uint32_t DEAUTH_WINDOW_MS   = 3000;   // ...this window...
     static const uint32_t DEAUTH_COOLDOWN_MS = 15000;  // ...then this long before re-firing.
+    static const uint8_t  DEAUTH_SENDERS     = 4;      // transmitters tracked at once
     struct DeauthQEntry {
         uint8_t mac[6];
         int8_t  rssi;
         uint8_t channel;
+        bool    bcast;      // addressed to ff:ff:ff:ff:ff:ff
+    };
+    struct DeauthSender {
+        uint8_t  mac[6];
+        uint32_t winStart;
+        uint8_t  count, bcastCount;
     };
     // ---- Evil-twin / rogue-AP tracking --------------------------
     // First BSSID seen beaconing each SSID, with the security posture it
@@ -562,8 +581,7 @@ private:
     volatile DeauthQEntry _deauthQ[DEAUTH_Q_CAP];
     volatile uint8_t      _deauthQHead = 0;
     volatile uint8_t      _deauthQTail = 0;
-    uint8_t  _deauthWinCount   = 0;
-    uint32_t _deauthWinStart   = 0;
+    DeauthSender _deauthSenders[DEAUTH_SENDERS] = {};
     uint32_t _deauthLastFireMs = 0;
 
     // Watched target -- see the public watchBle()/watchWifi() section

@@ -216,7 +216,7 @@ static void yetiFlightTick(TFT_eSPI& t, uint32_t now, int screenW, int floorY) {
                 if (s_yBounces == 0) {
                     s_yLandAt = now ? now : 1;
                     s_yDust = s_yFlung;
-                    if (s_yFlung) { zLandedAt((int)s_yF.x); Sound::play(Sound::Id::LAND); }
+                    if (s_yFlung) { zLandedAt((int)s_yF.x); Sound::play(Sound::Id::LAND_YETI); }
                 }
                 // Heavy: one small bounce at most, and he does not slide.
                 if (s_yF.vy > 0.35f && s_yBounces < 1) {

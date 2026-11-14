@@ -15,5 +15,13 @@ public:
     void end() {}
     void setFrequency(uint32_t) {}
     uint8_t transfer(uint8_t v) { return v; }
+    // The Cardputer's EXT SCREEN driver writes to a second panel; nothing here.
+    template <typename S> void beginTransaction(S) {}
+    void endTransaction() {}
+    void write(uint8_t) {}
+    void writeBytes(const uint8_t*, uint32_t) {}
 };
+#define MSBFIRST  1
+#define SPI_MODE0 0
+struct SPISettings { SPISettings(uint32_t = 0, uint8_t = 0, uint8_t = 0) {} };
 inline SPIClass SPI;

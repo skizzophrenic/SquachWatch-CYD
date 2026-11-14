@@ -41,6 +41,60 @@ selects between them via their respective `CS` lines. The SD card
 is optional — if no card is inserted at boot, the firmware just
 skips SD logging and everything else works.
 
+## DIYmalls 2.8" — JC2432W328C
+
+The JC2432W328C uses the shared `cyd` / `cyd-fast` firmware, but its
+touchscreen and backlight wiring differ from the original resistive CYD.
+The display pins are the ST7789 CYD pins above; the touchscreen and
+backlight below are the JC2432W328C assignments used by the firmware. See
+[the board guide](DIYMALLS-28.md) for support and battery limitations.
+
+### Capacitive touch — CST816/CST820 family, I²C
+
+| Signal | GPIO / value |
+|---|---:|
+| SDA | 33 |
+| SCL | 32 |
+| Reset | 25 |
+| I²C address | `0x15` |
+| Interrupt | Not used by firmware |
+
+At startup, `cyd` and `cyd-fast` probe this I²C address. An answering
+controller selects capacitive touch; otherwise the firmware initializes the
+original CYD's XPT2046 resistive touchscreen on its separate SPI bus.
+
+### Backlight
+
+| Signal | GPIO |
+|---|---:|
+| Backlight, active-high PWM | 27 |
+
+This replaces GPIO21 for the JC2432W328C only. The original CYD continues to
+use GPIO21.
+
+### microSD
+
+The shared CYD firmware configures its SD card on the classic CYD's separate
+SPI bus: SCK 18, MISO 19, MOSI 23, CS 5. The board has a microSD slot, but
+mounting/logging on all JC2432W328C revisions still needs physical
+verification.
+
+### Battery, USB and other connectors
+
+The board has a two-pin 1.25 mm BAT connector and a dedicated battery power
+switch. The connector polarity and any battery-sense connection have not
+been established from a JC2432W328C schematic or measurement. Do not copy the
+Freenove S3 battery divider on GPIO9: GPIO6–11 are reserved for flash on this
+classic ESP32. There is no JC2432W328C battery monitor in the current
+firmware, and USB charging is not verified. A protected 1S LiPo only adds
+cell protection; that is not evidence that the board provides compatible
+charge management. Details are in [DIYMALLS-28.md](DIYMALLS-28.md).
+
+The USB-C connector provides the board's USB/data connection and 5 V input.
+The board also has a two-pin speaker connector, but its mapping and electrical
+requirements have not been verified for this model; the shared CYD firmware
+does not drive it.
+
 ## Spare GPIOs
 
 The spare pins on the connectors are GPIO 22 and 35. GPIO 27 on CN1 is
@@ -161,6 +215,23 @@ high.
 
 Not usable on an S3: GPIO 26-32 (flash/PSRAM) and 33-37 (octal PSRAM).
 
+### GPS — `[env:freenove-s3-gps]`
+
+The CYD GPS builds' features: a position on each SD row and alert card, the
+clock set from GPS, and WARDRIVE's WiGLE file on the card. The module goes
+on the **UART** port (5V, GND, TXD, RXD, beside the card slot):
+
+| Module | Freenove UART port |
+|---|---|
+| TX  | RXD (GPIO44) |
+| VCC | 5V |
+| GND | GND |
+| RX  | not connected |
+
+The console is the USB, so UART0 is free. The firmware tries 115200, 9600 and
+38400 baud until a sentence parses. The **GPS** label in the top bar shows,
+in red, only while there is a fix.
+
 ## Marauder V8 (justcallmekoko) — `[env:marauder-v8]`
 
 An ESP32-C5 (8 MB flash, 4 MB PSRAM) behind a CP210x. Marauder's own V8
@@ -204,6 +275,21 @@ board 2026-10-12. The console is the native USB port.
 
 Not used: 43 (GPS RX), 46 (keyboard INT, polled instead), 48/21/47/14 (the
 ES7210 microphones), 19/20 (USB).
+
+## M5Stack Tab5 — `[env:tab5]`
+
+An ESP32-P4 (no radio of its own) with an ESP32-C6 for WiFi and Bluetooth on
+SDIO. Pins from M5GFX and M5Stack's reference board support; the board, the
+radio link and what is proven are in [TAB5.md](TAB5.md).
+
+| Part | Pins |
+|---|---|
+| MIPI-DSI panel, 720×1280 as wired | two DSI lanes, driven by M5GFX; backlight GPIO 22 |
+| Touch (inside the ST7123 panel chip) | I2C SDA 31, SCL 32, INT 23, address 0x55 |
+| I/O expander 0x43 | P4 panel reset, P5 touch reset, P1 speaker enable, P2 5 V out |
+| I/O expander 0x44 | P0 C6 power, P3 USB 5 V, P7 charge enable |
+| ESP32-C6 on SDIO | CLK 12, CMD 13, D0 11, D1 10, D2 9, D3 8 |
+| ESP32-C6 reset | GPIO 15, **active-high** on this unit |
 
 ## Sources
 
