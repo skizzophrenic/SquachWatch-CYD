@@ -32,6 +32,18 @@ CYAN  = (0, 214, 214)
 # ---- the clips ----
 
 CLIPS = {
+    # v1.43.0 "When You're Bored Then You're Boring", 320x240: TERMINAL MODE
+    # (SQUACHSIM_TERMINAL) on the live log, then sorted by KIND, dBm and
+    # DEVICE (SQUACHSIM_TMSORT), then the StickS3 / Cardputer panel.
+    # SQUACHSIM_T0 pins the first frame's time so the AIR graph is the same
+    # on every render.
+    "bored-then-boring": [
+        ("clear", 60, 40, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000"}, 1500, "NEW: TERMINAL MODE. SQUACHY CLOCKS OUT."),
+        ("clear", 60, 30, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_TMSORT": "1"}, 1400, "TAP A HEADING TO SORT. BY KIND..."),
+        ("clear", 60, 30, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_TMSORT": "3"}, 1400, "...BY SIGNAL, CLOSEST ON TOP..."),
+        ("clear", 60, 30, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_TMSORT": "2"}, 1400, "...OR A TO Z. TAP AGAIN TO FLIP IT."),
+        ("clear", 60, 30, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "_SIZE": "240x135"}, 1600, "ON THE STICKS3 AND CARDPUTER TOO."),
+    ],
     # v1.42.0, HUMAN SENSING at the 2.8in's 320x240 (the emulator's pretend
     # radio, sim/sense_cyd_sim.cpp; SQUACHSIM_SENSE picks the room): a still
     # room, someone walking through, someone sitting still, the watch's and

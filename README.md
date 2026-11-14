@@ -585,7 +585,7 @@ None of this finds anything. All of it is why you leave him on.
 | **SQUACHY'S DIARY** | Settings | Lifetime catches, most caught, first ever catch, best streaks, times petted |
 | **SHOW OFF** | Settings | Every pose he knows, back to back, each one named |
 | **Regulars** | Automatic | A device seen on three different days gets a name, on its LOG row and when he greets it |
-| **BORING MODE** | Settings | Takes Squachy, the pet and the flourishes away, and offers a plain BLACK background, for when you just want a detector |
+| **TERMINAL MODE** | Settings | Swaps Squachy and the pets for a desktop of windows: a LOG you can sort by time, kind, device or signal (tap a heading, tap again to flip), the AIR graph, COUNTS by kind and the LATEST catch. Tap a picked line again, or LATEST, for WATCH / HUNT / INFO / IGNORE. For when you just want a detector (it used to be BORING MODE) |
 | **DESK MODE** | Settings, or DESK on the main screen | The clock, [above](#desk-mode) |
 
 And he can be thrown: press and hold him until he notices, drag, and let go

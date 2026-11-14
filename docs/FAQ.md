@@ -251,7 +251,7 @@ That's Squachy. The detection is the *why*, Squachy is the *fun*. He reacts to w
 
 Other things hiding in Settings: the SQUACHY-DEX (a card per detection type with your record), BINGO, Squachy's diary, and DESK MODE, a clock for your desk.
 
-**Don't want him?** **Settings > BEHAVIOR > BORING MODE** turns him off. Detection is exactly the same; you just get a plain detector, and a plain BLACK background if you want it. His rows in Settings stay visible, greyed out, so you can find your way back.
+**Don't want him?** **Settings > BEHAVIOR > TERMINAL MODE** (it used to be called BORING MODE) swaps him for a plain dashboard: a sortable LOG, an AIR graph, COUNTS and the LATEST catch. Detection is exactly the same. The same row turns him back on.
 
 ## Is this legal?
 

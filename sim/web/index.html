@@ -325,7 +325,7 @@
       <li>The gear in the top-left opens Settings; the icon top-right rotates the screen, and the board turns with it.</li>
       <li>Tap Squachy to pet him. Hold <kbd>CLR</kbd> for four seconds to unlock every outfit.</li>
       <li>On a CYD, <kbd>BOOT ↑</kbd> under the board is its BOOT button (it is on the back): POCKET MODE, screen off and on. On the watch, the crown does it.</li>
-      <li>The Cardputer has no touch screen: the arrow keys or <kbd>Tab</kbd> move its cursor, <kbd>Enter</kbd> or <kbd>Space</kbd> presses, <kbd>Esc</kbd> goes home.</li>
+      <li>The Cardputer has no touch screen: the arrow keys or <kbd>Tab</kbd> move its cursor, <kbd>Enter</kbd> or <kbd>Space</kbd> presses, <kbd>Esc</kbd> goes back.</li>
       <li>On the T-Deck, type on your keyboard (or click its keys): <kbd>Enter</kbd> on the home screen opens the LORA page, and the chats and DMs take what you type.</li>
       <li><kbd>1</kbd>–<kbd>5</kbd> switch boards (on the T-Deck they type instead: click the shelf).</li>
     </ul>
@@ -2003,7 +2003,7 @@ const BOARDS = [
   {id:'cardputer', name:'Cardputer', full:'M5Stack Cardputer ADV', panel:[240,135], build:'cardputer',
    spec:'1.14 in · 240×135 · keyboard',
    adds:'A pocket keyboard computer with a tiny sideways screen.',
-   later:'This is the Cardputer\'s own firmware. No touch screen: the arrow keys (or Tab) move the cursor, Enter or Space presses, Esc goes home.'},
+   later:'This is the Cardputer\'s own firmware. No touch screen: the arrow keys (or Tab) move the cursor, Enter or Space presses, Esc goes back.'},
 ];
 const byId = id => BOARDS.find(b => b.id === id);
 
@@ -2159,7 +2159,7 @@ function hint() {
   if (board.pocket === 'boot') return 'Tap the screen to touch it · BOOT ↑ is the button on the back: POCKET MODE';
   if (board.pocket === 'crown') return 'Tap the screen to touch it · press the crown for POCKET MODE';
   if (typing()) return 'Tap the screen, or type on your keyboard (or its keys) · Enter on the home screen opens LORA';
-  if (cursor()) return 'No touch screen: arrows or Tab move the cursor, Enter or Space presses, Esc goes home';
+  if (cursor()) return 'No touch screen: arrows or Tab move the cursor, Enter or Space presses, Esc goes back';
   return 'Tap the screen to touch it · the keys move as you type, but don\'t type yet';
 }
 
