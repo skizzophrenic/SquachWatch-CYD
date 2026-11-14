@@ -320,7 +320,8 @@ the screen.
 | **ALERT FILTER** | Settings: ALL, MED+, HIGH ONLY | The lowest confidence allowed to take over the screen |
 | **TYPE FILTER** | Settings | Whole detection types on or off. An off type is dropped, not logged |
 | **Watch list** | Hold a LOG row, then WATCH | When that device turns up you get **LOCKED ON**: a radar scope with its signal and whether it is getting closer, which stays until you tap it. A watched device always gets through AUTO SNOOZE and spam floods |
-| **HUNT MODE** | HUNT on the alert card, or hold a LOG row | A signal gauge to walk the device down. While a hunt runs, the HUNTING pill on the main screen takes you back to it; STOP HUNT ends it |
+| **HUNT MODE** | HUNT on the alert card, or hold a LOG row or a SCAN result | A signal gauge to walk the device down. While a hunt runs, the HUNTING pill on the main screen takes you back to it; STOP HUNT ends it. A phone changes its Bluetooth address every 15 minutes or so: hunting one picked from SCAN, the board notices when it goes quiet and a new one of its kind turns up, and asks whether to follow it |
+| **Phone labels** | SCAN → BLE | Devices that give no name are labelled from their broadcast when it says what they are: (iPhone?), (Android?), (Samsung?), (AirPods?), (Apple). Best guesses, hence the question marks. iPhones never broadcast their own name over Bluetooth |
 | **Spam floods** | Automatic | A storm of fake tags (piles of addresses heard for a moment and never again) gets one alert with a SPAM: N FAKE TAGS banner, then quiet logging until it dies down |
 | **HEADS-UP** | Settings → SQUACHMESH | Serious catches from your squad's boards arrive as a banner; see [SquachMesh](#squachmesh) |
 
@@ -357,7 +358,8 @@ to three characters. It changes the screen only; nothing stored changes.
 - **The battery lamp** on the Freenove ESP32-S3 2.8" and 3.5" and the
   T-Watch: a lava lamp under the menu button, filled to the charge.
   Bubbles and a rainbow on the cable, a flicker under 10%. Boards with no
-  battery don't show one.
+  battery don't show one. **Settings → APPEARANCE → LAVA LAMP** turns it
+  off; TERMINAL MODE shows the battery in the LOG's title bar instead.
 - **POWER OFF** on the Freenove ESP32-S3 2.8" and 3.5": hold **BOOT** for
   three seconds; press it to turn the board back on. (CHARGE MODE is on
   the Settings list there.)
