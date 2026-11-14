@@ -259,7 +259,13 @@ void statusLine(TFT_eSPI& t, uint32_t now) {
     const bool fresh = SenseStore::fresh(now) && s.mode == SENSE_MODE_STA;
     char b[40];
     if (fresh && (now % 1000) < 600) t.fillCircle(36, 9, 3, Theme::GREEN);
+#if defined(__EMSCRIPTEN__)
+    // The web emulator plays a made-up room (sim/sense_cyd_sim.cpp): it says
+    // so where a board says LIVE, so nobody takes it for their own room.
+    textT(t, 42, 6, "DEMO", Theme::AMBER, 1);
+#else
     textT(t, 42, 6, fresh ? "LIVE" : (senseCydNetwork()[0] ? "WAIT" : "NO WIFI"), fresh ? Theme::GREEN : Theme::AMBER, 1);
+#endif
     if (SenseStore::heard() && s.chan) {
         const int W = t.width();
         snprintf(b, sizeof b, "2.4 GHz ch %u  %u/s", (unsigned)s.chan, (unsigned)s.rate);

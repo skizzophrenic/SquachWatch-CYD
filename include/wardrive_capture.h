@@ -22,7 +22,11 @@ struct Pending {
 };
 // Drained on every pass of loop(), about 38 a second, so a CYD with its
 // heap measured at 5.6 KB largest block keeps 8 of each; the watch keeps 32.
-#if defined(CYD_GPS)
+#if defined(CARDPUTER_ADV)
+// The Cardputer drains about 17 times a second, and a street's beacons
+// overflowed 8 within a frame: 24 costs about 2 KB more.
+const uint8_t QN = 24;
+#elif defined(CYD_GPS)
 const uint8_t QN = 8;
 #else
 const uint8_t QN = 32;

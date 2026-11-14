@@ -290,3 +290,38 @@ BingoTap uiBingoHitTest(TFT_eSPI& t, int x, int y, int screenW, int screenH) {
     }
     return BingoTap::NONE;
 }
+
+uint8_t uiBingoStopRects(TFT_eSPI& t, int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint8_t cap) {
+    uint8_t n = 0;
+    auto add = [&](int x, int y, int w, int h) { if (w > 0 && h > 0 && n < cap) { rx[n] = x; ry[n] = y; rw[n] = w; rh[n] = h; n++; } };
+    const int screenW = t.width(), screenH = t.height();
+    if (s_confirm) {
+        int px, py, pw, ph, yesX, yesY, yesW, yesH, noX, noY, noW, noH;
+        confirmRects(screenW, screenH, px, py, pw, ph, yesX, yesY, yesW, yesH, noX, noY, noW, noH);
+        add(noX, noY, noW, noH); add(yesX, yesY, yesW, yesH);   // KEEP first: the safe one
+        return n;
+    }
+    if (s_openCell >= 0) return 0;                               // a card: any press closes it
+    if (!s_stats) {
+        int gx, gy, cw, ch;
+        geom(t, screenW, screenH, gx, gy, cw, ch);
+        for (uint8_t i = 0; i < Bingo::CELLS; i++) add(gx + (i % 4) * (cw + 4), gy + (i / 4) * (ch + 4), cw, ch);
+    }
+    const Theme::ButtonBarGeom bar = Theme::computeButtonBar(screenW, screenH);
+    for (int b = 0; b < 3; b++) add(bar.x[b], bar.y, bar.w[b], bar.h);
+    return n;
+}
+
+// BACK's rectangle: the bar's third slot, or KEEP on the new-card question,
+// or the whole screen while a cell's card is open (any press closes it).
+bool uiBingoBackRect(TFT_eSPI& t, int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
+    const int screenW = t.width(), screenH = t.height();
+    if (s_confirm) {
+        int px, py, pw, ph, yesX, yesY, yesW, yesH, noX, noY, noW, noH;
+        confirmRects(screenW, screenH, px, py, pw, ph, yesX, yesY, yesW, yesH, noX, noY, noW, noH);
+        x = noX; y = noY; w = noW; h = noH; return true;
+    }
+    if (s_openCell >= 0) { x = 0; y = 0; w = screenW; h = screenH; return true; }
+    const Theme::ButtonBarGeom bar = Theme::computeButtonBar(screenW, screenH);
+    x = bar.x[2]; y = bar.y; w = bar.w[2]; h = bar.h; return true;
+}

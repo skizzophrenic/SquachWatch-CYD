@@ -164,11 +164,19 @@ void begin() {
     s_waitStart = 0;   // set on the next real millis() in lockoutRemainingMs()
 }
 
-bool    enabled()   { return s_enabled; }
 uint8_t pinLength() { return s_len; }
 PinLen  pinLen()    { return (PinLen)s_len; }
+#if defined(STICKS3)
+// The StickS3 cannot type a PIN, so it never locks. A PIN saved by an
+// older build stays stored, untouched: no padlock, never asked for.
+bool    enabled()   { return false; }
+bool    locked()    { return false; }
+void    lock()      {}
+#else
+bool    enabled()   { return s_enabled; }
 bool    locked()    { return s_enabled && s_locked; }
 void    lock()      { if (s_enabled) s_locked = true; }
+#endif
 
 void setPinLength(PinLen n) {
     if (s_enabled) return;                 // length is fixed once a PIN exists

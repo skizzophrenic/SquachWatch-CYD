@@ -337,13 +337,25 @@ static const char* const ONBOARD_LINES[] = {
     "SquachWatch listens for surveillance nearby -- cameras, plate readers, trackers like AirTags.",
     "No magic. Just WiFi and Bluetooth, matching known hardware as it passes by.",
     "All zeroes down there means nothing's around. It flips to a big flashing ALERT the second something matches.",
+#if defined(STICKS3)
+    "Down there: SCAN rescans, LOG shows history, FOB is keychain mode.",
+#else
     "Down there: SCAN rescans, LOG shows history, DESK is a big clock.",
-#if defined(AWOK)
+#endif
+#if defined(STICKS3)
+    "Front button steps, hold it to pick. Side button goes back, hold it to go home.",
+#elif defined(CARDPUTER_ADV)
+    "Arrows step, ENTER picks, ESC goes back. Hold ESC to go home from anywhere.",
+#elif defined(AWOK)
     "Up top left: Settings. The far left/right edges of the screen swap backgrounds, one swap per tap.",
 #else
     "Up top: left icon is Settings, right one rotates. Far left/right edges of the screen swap backgrounds.",
 #endif
+#if defined(SQW_SMALL)
+    "Knock on the case to pet me. Shake me and I go flying.",
+#else
     "Tap me for a pet, hold me for a beat longer, or stroke me. Hold then drag to carry me.",
+#endif
     "That's everything. Stay squachy.",
 };
 static const uint8_t  ONBOARD_N        = sizeof(ONBOARD_LINES) / sizeof(ONBOARD_LINES[0]);
@@ -1517,6 +1529,13 @@ static void ensurePrefsLoaded() {
     s_petUnlocked        = s_petPrefs.getBool("petUnlk", false);
     s_petAnnounced       = s_petPrefs.getBool("petSeen", false);
     s_clippyUnlocked     = s_petPrefs.getBool("clippy", false);
+#if defined(SQW_SMALL)
+    // No secret unlock on the small boards: opening Settings five times is
+    // ordinary use on two buttons, and he turned up uninvited. He is simply
+    // one of the choices on the PET row, which starts at OFF. Not saved, so
+    // nothing changes for this board under any other build.
+    s_clippyUnlocked     = true;
+#endif
     s_toasterUnlocked    = s_petPrefs.getBool("toaster", false);
     s_ballUnlocked       = s_petPrefs.getBool("ball", false);
     s_meatyUnlocked    = s_petPrefs.getBool("meaty", false);
@@ -1533,8 +1552,14 @@ static void ensurePrefsLoaded() {
     // see it, not to go and find a switch.
     // "petSel" is the one to read; a board from before there were two
     // companions has only the old on/off bool, which becomes SHAGGY or OFF.
+#if defined(SQW_SMALL)
+    // The small boards start with no pet: a second animal on a 240x135
+    // screen is clutter until somebody asks for it in Settings > PET.
+    s_petSel             = s_petPrefs.getUChar("petSel", 0u);
+#else
     s_petSel             = s_petPrefs.getUChar("petSel",
                                s_petPrefs.getBool("petOn", true) ? (uint8_t)PetId::SHAGGY : 0u);
+#endif
     if (s_petSel >= (uint8_t)PetId::COUNT) s_petSel = (uint8_t)PetId::SHAGGY;
     s_wolfPeltUnlocked   = s_petPrefs.getBool("wolfPelt", false);
     s_chromeWingUnlocked = s_petPrefs.getBool("chromeWing", false);
@@ -2060,6 +2085,11 @@ bool ownBubble(int& x, int& y, int& w, int& h) {
     return true;
 }
 
+bool reacting() {
+    return (s_ownBW > 0 && s_ownBH > 0) || thrown() || s_grabbed || s_dangle ||
+           (int32_t)(millis() - s_petFxUntil) < 0;
+}
+
 // Everyday speech bubble stays single-line and text-hugging (its
 // original compact look) whenever the line actually fits — most
 // idle/pet-reaction lines do. Only when a line is too wide for a
@@ -2148,8 +2178,14 @@ static const int CORNER_W    = 30;   // icon box plus a pixel of air
 static const int CORNER_H    = 20;   // ICON_BOX_H over in theme.cpp
 
 static int s_riseTo = -1;
+static int s_sinkTo = -1;
 void setBubbleRiseTo(int y) { s_riseTo = y; }
-static int risenBubbleTop(int topY, int bx, int bw, int screenW) {
+void setBubbleSinkTo(int y) { s_sinkTo = y; }
+static int risenBubbleTop(int topY, int bx, int bw, int screenW, int bh) {
+    if (s_sinkTo >= 0) {
+        const int y = s_sinkTo - bh;
+        return y < 1 ? 1 : y;
+    }
     // Clamped to row 1, not rejected below it. Every screen hands Squachy
     // topY = 16 and BUBBLE_RISE is 16, so ry is exactly 0 everywhere -- a
     // `< 1` test would fail on all of them and quietly switch the rise off
@@ -2274,7 +2310,7 @@ static void drawBubbleIn(TFT_eSPI& t, int cx, int topY, const char* text,
         int bx = cx - bw / 2;
         if (bx + bw > screenW - 2) bx = screenW - 2 - bw;
         if (bx < 2) bx = 2;
-        const int by = mayRise ? risenBubbleTop(topY, bx, bw, screenW) : topY;
+        const int by = mayRise ? risenBubbleTop(topY, bx, bw, screenW, bh) : topY;
         if (bubblePop(t, bx, by, bw, bh, now)) return;
         t.fillRoundRect(bx, by, bw, bh, 3, Theme::BG);
         t.drawRoundRect(bx, by, bw, bh, 3, Theme::VAPOR_PINK);
@@ -2314,7 +2350,7 @@ static void drawBubbleIn(TFT_eSPI& t, int cx, int topY, const char* text,
     // always too wide to clear the corners, so this always returns topY.
     // Written as the same call rather than a hardcoded topY so that if the
     // wrap width ever narrows, this starts rising on its own.
-    const int by = mayRise ? risenBubbleTop(topY, bx, bw, screenW) : topY;
+    const int by = mayRise ? risenBubbleTop(topY, bx, bw, screenW, bh) : topY;
     if (bubblePop(t, bx, by, bw, bh, now)) return;
     t.fillRoundRect(bx, by, bw, bh, 3, Theme::BG);
     t.drawRoundRect(bx, by, bw, bh, 3, Theme::VAPOR_PINK);
@@ -2742,6 +2778,14 @@ static bool petOutNow() {
     return false;
 }
 
+// The small boards never put a newly earned pet out by themselves: the
+// toast says where to find him, and Settings > PET puts him out.
+#if defined(SQW_SMALL)
+static constexpr bool kSmallBoard = true;
+#else
+static constexpr bool kSmallBoard = false;
+#endif
+
 void unlockClippy(const char* why) {
     ensurePrefsLoaded();
     if (s_clippyUnlocked) return;
@@ -2750,7 +2794,7 @@ void unlockClippy(const char* why) {
     // On at once when no pet is out: he is the kind of help that does not
     // wait to be asked. Somebody walking VAPOR SHAGGY or the yeti keeps
     // them, and is told where he is instead.
-    if (!petOutNow()) {
+    if (!petOutNow() && !kSmallBoard) {
         s_petSel = (uint8_t)PetId::CLIPPY;
         s_petPrefs.putUChar("petSel", s_petSel);
         s_clippyIntro = why;
@@ -2768,7 +2812,7 @@ void unlockToaster(const char* why) {
     s_petPrefs.putBool("toaster", true);
     // The same manners as C1iPPY: on at once when nobody else is out,
     // otherwise a toast saying where he went.
-    if (!petOutNow()) {
+    if (!petOutNow() && !kSmallBoard) {
         s_petSel = (uint8_t)PetId::TOASTER;
         s_petPrefs.putUChar("petSel", s_petSel);
         s_toasterIntro = why;
@@ -2785,7 +2829,7 @@ void unlockMeaty(const char* why) {
     s_meatyUnlocked = true;
     s_petPrefs.putBool("meaty", true);
     // The same manners as the other two: on at once when nobody else is out.
-    if (!petOutNow()) {
+    if (!petOutNow() && !kSmallBoard) {
         s_petSel = (uint8_t)PetId::MEATY;
         s_petPrefs.putUChar("petSel", s_petSel);
         s_meatyIntro = why;

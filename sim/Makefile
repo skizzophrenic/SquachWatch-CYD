@@ -200,7 +200,8 @@ WASM_SRCS := $(UI_SRCS) \
              $(SRC)/cap_touch.cpp \
              $(SRC)/touch_cal.cpp \
              $(SIM_DIR)/main_wasm.cpp \
-             $(SIM_DIR)/detection_sim.cpp
+             $(SIM_DIR)/detection_sim.cpp \
+             $(SENSE_SRCS)
 WASM_DIR  := web
 WASM_OUT  := $(WASM_DIR)/squachsim.js
 # -Os over -O2: this ships over the wire, and the emulator spends its
@@ -219,9 +220,13 @@ WASM_OUT  := $(WASM_DIR)/squachsim.js
 # that every shipping board has had since v1.5.23.
 # -DSQUACHSIM_BOOT=1 compiles POCKET MODE in and gives the page sw_boot, so
 # the BOOT button drawn on the board does what the real one does.
+# -DSENSE_CYD_APP=1: HUMAN SENSING, in every board's build since v1.42.0, so
+# here too, on the fake engine in sim/sense_cyd_sim.cpp (DEMO). It was left out
+# while sensing was lab-only and v1.42.0's emulator shipped without it: the
+# web build has to carry every feature the release does.
 # -Os keeps the website's download small; the phone app builds with -O3 for speed.
 WASM_OPT ?= -Os
-WASM_FLAGS := -std=c++17 $(WASM_OPT) -I$(SIM_DIR) -I$(INC) -DSQUACH_MESH=1 -DSQUACHSIM_BOOT=1 \
+WASM_FLAGS := -std=c++17 $(WASM_OPT) -I$(SIM_DIR) -I$(INC) -DSQUACH_MESH=1 -DSQUACHSIM_BOOT=1 -DSENSE_CYD_APP=1 \
               -Wno-unused-parameter \
               -include $(SIM_DIR)/Arduino.h \
               -include $(INC)/cyd_user_setup.h \
@@ -279,7 +284,8 @@ WASM_TDECK_SRCS := $(UI_SRCS) $(SRC)/main.cpp $(SRC)/cap_touch.cpp $(SRC)/touch_
              $(SRC)/ui_lorahome.cpp $(SRC)/ui_lorasettings.cpp $(SRC)/ui_lorachat.cpp \
              $(SRC)/lora_profiles.cpp $(SRC)/lora_crypto.cpp $(SRC)/lora_meshtastic.cpp \
              $(SRC)/lora_meshcore.cpp $(SRC)/lora_channels.cpp \
-             $(SIM_DIR)/lora_sim.cpp $(SIM_DIR)/gt911_sim.cpp $(SIM_DIR)/main_wasm.cpp $(SIM_DIR)/detection_sim.cpp
+             $(SIM_DIR)/lora_sim.cpp $(SIM_DIR)/gt911_sim.cpp $(SIM_DIR)/main_wasm.cpp $(SIM_DIR)/detection_sim.cpp \
+             $(SENSE_SRCS)
 WASM_TDECK_FLAGS := $(filter-out -DSQUACHSIM_BOOT=1,$(WASM_FLAGS)) \
              -DTDECK_PLUS=1 -DSQUACH_LORA=1 -DCYD_GPS=1 -DSQUACHSIM=1
 
@@ -301,7 +307,8 @@ WASM_TWATCH_SRCS := $(UI_SRCS) $(SRC)/main.cpp $(SRC)/cap_touch.cpp $(SRC)/touch
              $(SRC)/ui_lorahome.cpp $(SRC)/ui_lorasettings.cpp $(SRC)/ui_lorachat.cpp \
              $(SRC)/lora_profiles.cpp $(SRC)/lora_crypto.cpp $(SRC)/lora_meshtastic.cpp \
              $(SRC)/lora_meshcore.cpp $(SRC)/lora_channels.cpp \
-             $(SRC)/wardrive.cpp $(SIM_DIR)/lora_sim.cpp $(SIM_DIR)/main_wasm.cpp $(SIM_DIR)/detection_sim.cpp
+             $(SRC)/wardrive.cpp $(SIM_DIR)/lora_sim.cpp $(SIM_DIR)/main_wasm.cpp $(SIM_DIR)/detection_sim.cpp \
+             $(SENSE_SRCS)
 WASM_TWATCH_FLAGS := $(filter-out -DSQUACHSIM_BOOT=1,$(WASM_FLAGS)) \
              -DTWATCH_S3=1 -DSQUACH_LORA=1 -DSQUACHSIM=1
 

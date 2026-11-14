@@ -33,6 +33,11 @@ uint32_t uiMascotStepMs();
 
 void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
                   bool advance = true, bool scanMenu = false);
+// FOB MODE (StickS3): the main screen with no title bar and no buttons, the
+// room they took given to Squachy. Everything else on it carries on as usual.
+void uiClearSetFob(bool on);
+// Cardputer ADV, EXT screen on: no scene, the counts and hotkeys instead.
+void uiClearInfoOnly(bool on);
 
 // The battery gauge: a lava lamp under the menu icon, filled to the charge.
 // A board with a battery hands over a function that fills in the percent and
@@ -40,6 +45,18 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
 // Boards without a battery never set one, and their screen does not change.
 typedef bool (*BatterySource)(uint8_t& pct, bool& charging);
 void uiClearSetBatterySource(BatterySource fn);
+
+// TERMINAL MODE (Settings::boringMode()): the windows on the home screen.
+// True while a gesture that started on a window is theirs.
+bool uiTerminalTouch(int x, int y, bool valid, bool justDown, uint32_t now);
+// The device the terminal asked to open (its WATCH/HUNT/INFO/IGNORE menu), once.
+bool uiTerminalTakeOpen(uint8_t mac[6]);
+// The LOG's order without a tap (emulator shots): 0 TIME, 1 KIND, 2 DEVICE, 3 dBm;
+// dir 1 is the first tap's order, -1 the flipped one.
+void uiTerminalSetSort(uint8_t col, int8_t dir);
+// The terminal's cursor stops for the boards without touch (StickS3, Cardputer).
+// Boxes, so the cursor can light each one whole.
+uint8_t uiTerminalStops(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint8_t cap);
 
 #if SQUACH_MESH
 // SPIKE: the peer currently visiting, or nullptr. Owned by whatever discovers

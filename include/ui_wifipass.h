@@ -24,6 +24,7 @@ void           uiWifiPassRedrawAll();
 void           uiWifiPassTouch(int x, int y, uint32_t now, WifiPassTouch phase);
 // A character from a physical keyboard: '\b' deletes, '\n' is OK.
 void           uiWifiPassKey(char c, uint32_t now);
+bool           uiWifiPassBackRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h);
 WifiPassResult uiWifiPassResult();
 const char*    uiWifiPassText();
 const char*    uiWifiPassSsid();

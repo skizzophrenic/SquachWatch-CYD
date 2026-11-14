@@ -27,7 +27,17 @@
     font-family:var(--mono);font-size:14px;line-height:1.6;
     background-image:repeating-linear-gradient(180deg,rgba(255,255,255,.022) 0 1px,transparent 1px 3px);
   }
-  .wrap{max-width:1120px;margin:0 auto;padding:40px 16px 80px}
+  .wrap{max-width:1400px;margin:0 auto;padding:40px 16px 80px}
+  /* The board and its controls side by side once there is room for both:
+     the controls used to sit under the bench, out of sight while you
+     watched the screen. The stage refits itself to whatever width it gets. */
+  .workbench{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;margin-bottom:26px}
+  .workbench .bench{margin-bottom:0}
+  .controls{display:flex;flex-direction:column;gap:18px;min-width:0}
+  @media (min-width:1040px){
+    .workbench{grid-template-columns:minmax(0,1fr) minmax(300px,360px);align-items:start}
+    .controls{position:sticky;top:12px;max-height:calc(100vh - 24px);overflow-y:auto}
+  }
   @media (min-width:600px){.wrap{padding-left:22px;padding-right:22px}}
   header{border-bottom:1px solid var(--rule);padding-bottom:22px;margin-bottom:24px}
   .kicker{color:var(--cyan);letter-spacing:.22em;text-transform:uppercase;font-size:11px;margin:0 0 10px}
@@ -217,6 +227,7 @@
   </p>
 </header>
 
+<div class="workbench">
 <section class="bench" aria-label="The emulator">
   <div class="shelfbar">
     <div class="shelf" id="shelf" role="tablist" aria-label="Board"></div>
@@ -253,7 +264,9 @@
   <div class="info" id="info" aria-live="polite"></div>
 </section>
 
-<main class="cards">
+<!-- Beside the board on a wide screen, so what you do and what it does are
+     both in view; under it on a narrow one. -->
+<aside class="controls" aria-label="Controls">
   <div class="card">
     <h2>Simulate a detection</h2>
     <p>There are no radios in a browser, so nothing will ever be found on its own. Send it something:</p>
@@ -300,7 +313,10 @@
       send it away, let it leave, and bring it back.
     </p>
   </div>
+</aside>
+</div>
 
+<main class="cards">
   <div class="card">
     <h2>Getting around</h2>
     <ul>
@@ -309,7 +325,7 @@
       <li>The gear in the top-left opens Settings; the icon top-right rotates the screen, and the board turns with it.</li>
       <li>Tap Squachy to pet him. Hold <kbd>CLR</kbd> for four seconds to unlock every outfit.</li>
       <li>On a CYD, <kbd>BOOT ↑</kbd> under the board is its BOOT button (it is on the back): POCKET MODE, screen off and on. On the watch, the crown does it.</li>
-      <li>The Cardputer has no touch screen: the arrow keys or <kbd>Tab</kbd> move its cursor, <kbd>Enter</kbd> or <kbd>Space</kbd> presses, <kbd>Esc</kbd> goes home.</li>
+      <li>The Cardputer has no touch screen: the arrow keys or <kbd>Tab</kbd> move its cursor, <kbd>Enter</kbd> or <kbd>Space</kbd> presses, <kbd>Esc</kbd> goes back.</li>
       <li>On the T-Deck, type on your keyboard (or click its keys): <kbd>Enter</kbd> on the home screen opens the LORA page, and the chats and DMs take what you type.</li>
       <li><kbd>1</kbd>–<kbd>5</kbd> switch boards (on the T-Deck they type instead: click the shelf).</li>
     </ul>
@@ -1987,7 +2003,7 @@ const BOARDS = [
   {id:'cardputer', name:'Cardputer', full:'M5Stack Cardputer ADV', panel:[240,135], build:'cardputer',
    spec:'1.14 in · 240×135 · keyboard',
    adds:'A pocket keyboard computer with a tiny sideways screen.',
-   later:'This is the Cardputer\'s own firmware. No touch screen: the arrow keys (or Tab) move the cursor, Enter or Space presses, Esc goes home.'},
+   later:'This is the Cardputer\'s own firmware. No touch screen: the arrow keys (or Tab) move the cursor, Enter or Space presses, Esc goes back.'},
 ];
 const byId = id => BOARDS.find(b => b.id === id);
 
@@ -2143,7 +2159,7 @@ function hint() {
   if (board.pocket === 'boot') return 'Tap the screen to touch it · BOOT ↑ is the button on the back: POCKET MODE';
   if (board.pocket === 'crown') return 'Tap the screen to touch it · press the crown for POCKET MODE';
   if (typing()) return 'Tap the screen, or type on your keyboard (or its keys) · Enter on the home screen opens LORA';
-  if (cursor()) return 'No touch screen: arrows or Tab move the cursor, Enter or Space presses, Esc goes home';
+  if (cursor()) return 'No touch screen: arrows or Tab move the cursor, Enter or Space presses, Esc goes back';
   return 'Tap the screen to touch it · the keys move as you type, but don\'t type yet';
 }
 

@@ -28,6 +28,25 @@ static void computeGeom(int w, int h,
                          int& ordX, int& ordY, int& ordW, int& ordH,
                          int& doneX, int& doneY, int& doneW, int& doneH) {
     (void)h;
+#if defined(SQW_SMALL)
+    // 135 rows: the stacked layout below put BLUE and every button off the
+    // bottom. One caption line, the three words on one line, the buttons
+    // under them. No Squachy (squachyScale 0 tells the draw).
+    squachyScale = 0.0f;
+    squachyBaseY = 0;
+    captionTop  = 4;
+    captionMaxW = w - 8;
+    wordsTop    = 20;
+    wordRowH    = 0;
+    {
+        const int margin = 8, gap = 8, btnH = 26;
+        const int btnW = (w - 2 * margin - gap) / 2;
+        invX = margin;              invY = 50; invW = btnW; invH = btnH;
+        ordX = margin + btnW + gap; ordY = 50; ordW = btnW; ordH = btnH;
+        doneX = margin; doneY = 50 + btnH + 8; doneW = w - 2 * margin; doneH = btnH;
+    }
+    return;
+#endif
     // Everything a step up on the large panels: Squachy, the 16-row body
     // font for the caption, size-4 colour words and taller buttons.
     const bool big = Theme::large();
@@ -72,13 +91,17 @@ void uiColorCheckTick(TFT_eSPI& t, uint32_t now) {
     // left null) -- his normal speech bubble caps at 2 short lines,
     // too little room for this caption, so it's drawn as its own
     // wrapped block below him instead, with a real line budget.
-    Squachy::drawWaving(t, w / 2, squachyBaseY, now, squachyScale, nullptr);
+    if (squachyScale > 0.0f) Squachy::drawWaving(t, w / 2, squachyBaseY, now, squachyScale, nullptr);
 
     Theme::bodyFontOn(t);
     t.setTextWrap(false);
     t.setTextColor(Theme::WHITE, Theme::BG);
     char capLines[CAPTION_MAX_LINES][48];
+#if defined(SQW_SMALL)
+    uint8_t capN = Theme::wrapText(t, "Colors wrong? Press below to fix.", captionMaxW, capLines, 1);
+#else
     uint8_t capN = Theme::wrapText(t, CAPTION, captionMaxW, capLines, CAPTION_MAX_LINES);
+#endif
     int cy = captionTop;
     for (uint8_t i = 0; i < capN; i++) {
         int lw = t.textWidth(capLines[i]);
@@ -91,6 +114,21 @@ void uiColorCheckTick(TFT_eSPI& t, uint32_t now) {
     t.setTextSize(Theme::upSize(3));
     const char* words[3] = { "RED", "GREEN", "BLUE" };
     uint16_t cols[3] = { PURE_RED, PURE_GREEN, PURE_BLUE };
+#if defined(SQW_SMALL)
+    // All three on one line, centred as a group.
+    t.setTextSize(2);
+    {
+        const int sp = 12;
+        const int total = t.textWidth("RED") + t.textWidth("GREEN") + t.textWidth("BLUE") + 2 * sp;
+        int x = (w - total) / 2;
+        for (int i = 0; i < 3; i++) {
+            t.setTextColor(cols[i], Theme::BG);
+            t.setCursor(x, wordsTop);
+            t.print(words[i]);
+            x += t.textWidth(words[i]) + sp;
+        }
+    }
+#else
     int y = wordsTop;
     for (int i = 0; i < 3; i++) {
         t.setTextColor(cols[i], Theme::BG);
@@ -99,6 +137,7 @@ void uiColorCheckTick(TFT_eSPI& t, uint32_t now) {
         t.print(words[i]);
         y += wordRowH;
     }
+#endif
 
     char invLabel[16];
     snprintf(invLabel, sizeof(invLabel), "INVERT: %s", Settings::inverted() ? "ON" : "OFF");

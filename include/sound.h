@@ -18,8 +18,8 @@
 #pragma once
 #include <stdint.h>
 
-// The browser emulator has no hardware speaker to drive.
-#if (defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(WS_C5_35)) && !defined(SQUACHSIM)
+// SQUACHSIM: the browser emulator's builds have no speaker to drive.
+#if (defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(STICKS3) || defined(CARDPUTER_ADV) || defined(WS_C5_35)) && !defined(SQUACHSIM)
 #define SQW_SPEAKER 1
 #else
 #define SQW_SPEAKER 0
@@ -55,6 +55,9 @@ namespace Sound {
         LAND_TOASTER,     // ALL: T0@$TY's landing, a tin clank and a rattle
         LAND_YETI,        // ALL: the yeti's landing, a grumpy "OOF"
         HEADS_UP,         // ALERTS: one Bigfoot whoop, a squadmate's serious catch
+        WD_FIX,           // WARDRIVE SOUND: two rising beeps, the GPS has a fix
+        WD_LOST,          // WARDRIVE SOUND: a falling slide, the fix is gone
+        WD_TICK,          // WARDRIVE SOUND: a soft tick, new rows written
         COUNT
     };
 
