@@ -49,7 +49,7 @@ namespace Settings {
     void       cyclePalette();       // advances+wraps, persists, applies to Theme
 
     Background background();
-    void       cycleBackground();    // advances+wraps, persists
+    void       cycleBackground();    // advances+wraps, persists (saved by tick() once the taps stop)
     // For the bench: this session only, NOT saved, so the owner's own pick
     // is back at the next boot. Refuses a background the menu cannot reach.
     bool       previewBackground(Background b);
@@ -84,6 +84,7 @@ namespace Settings {
     bool        clock24Hour();
     void        toggleClock24Hour();
     void       cyclePrevBackground(); // same, but backward
+    void       tick(uint32_t now);    // from loop(): writes a background choice once the taps stop
 
     // Disables the two CLEAR-screen gestures that cycle background
     // (the left/right edge-zone tap, and boring mode's "tap anywhere"

@@ -1592,8 +1592,10 @@ void drawDigitalRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advan
                 // drawn either way, so it is tinted rather than left at BG.
                 bg = blend(BG, hue, (uint16_t)(a / (surge ? 3u : 4u)));
             } else {
-                const float f = 1.0f - (float)(j - hot) / (float)(len - hot);
-                uint32_t a = (uint32_t)((surge ? 245.0f : 225.0f) * f * f);
+                // (len - j) / (len - hot), squared, in integers: a float
+                // divide per glyph is ~1,300 a frame, and the C5s have no FPU.
+                const uint32_t fn = (uint32_t)(len - j), fd = (uint32_t)(len - hot);
+                uint32_t a = ((surge ? 245u : 225u) * fn * fn) / (fd * fd);
                 a = (a * deep) / 255u;
                 a = (a * edge) / 255u;
                 // Lightning lifts the trail toward white without touching
@@ -4961,6 +4963,8 @@ static void releaseFire() {
     if (s_fireHeat) { free(s_fireHeat); s_fireHeat = nullptr; s_fireInited = false; }
 }
 
+void releaseBackgroundBuffers() { releaseFire(); releaseRain(); releaseTerm(); }
+
 static bool s_stillBackdrop = false;
 void setStillBackdrop(bool on) { s_stillBackdrop = on; }
 // A sun going down behind a grid, in the theme's own colours, and nothing
@@ -5428,6 +5432,20 @@ bool backgroundTap(int x, int y, uint32_t now) {
     return true;
 }
 
+// The heat grid's dice: two or three a cell, about ten thousand a frame. The
+// core's random() goes to the hardware generator, which is made to wait
+// between reads; for flames a small xorshift is the same dice at a fraction
+// of the cost. random() still seeds it, and everything outside the per-cell
+// loop keeps random().
+static uint32_t s_fireRng = 0;
+static inline int fireRand(int lo, int hi) {   // [lo, hi), like random()
+    uint32_t x = s_fireRng;
+    if (!x) x = (uint32_t)random(1, 0x7FFFFFFF);
+    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+    s_fireRng = x;
+    return lo + (int)(((uint64_t)x * (uint32_t)(hi - lo)) >> 32);
+}
+
 void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     static const int CW = 4;
     // Grid is sized to the widest panel the build can actually run on.
@@ -5598,11 +5616,11 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         float bf = 48.0f * (v / 1.25f) * (1.0f + wolfSurge * 0.25f);
         if (bf > (float)HEAT_MAX) bf = (float)HEAT_MAX;
         uint8_t base = (uint8_t)bf;
-        heat[(fh - 1) * MAXFW + x] = (random(0, 6) == 0) ? 0 : base;
+        heat[(fh - 1) * MAXFW + x] = (fireRand(0, 6) == 0) ? 0 : base;
         // The bed above the seed row: glowing rather than blazing, and a
         // little uneven, so it reads as coals and not as a solid bar.
         for (int r = 1; r < bedRows; r++) {
-            const int coal = (int)base - random(4, 14);
+            const int coal = (int)base - fireRand(4, 14);
             heat[(fh - 1 - r) * MAXFW + x] = (uint8_t)(coal < 0 ? 0 : coal);
         }
         litSum += (float)base;
@@ -5636,8 +5654,8 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // leaves the flame body exactly as it was.
     for (int y = 0; y < fh - bedRows; y++) {
         for (int x = 0; x < fw; x++) {
-            int drift = random(-1, 2);
-            if (windChance > 0 && random(0, 100) < windChance) drift += windDir;
+            int drift = fireRand(-1, 2);
+            if (windChance > 0 && fireRand(0, 100) < windChance) drift += windDir;
             // Reflect at the edges rather than clamp. Clamping means a
             // cell at the downwind edge samples nx == itself every row,
             // so that column stops mixing sideways and becomes a solid
@@ -5651,7 +5669,7 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             if (nx < 0)   nx = 0;
             if (nx >= fw) nx = fw - 1;
             int src = heat[(y + 1) * MAXFW + nx];
-            int decay = (src < 10) ? random(0, 4) : random(0, 3);
+            int decay = (src < 10) ? fireRand(0, 4) : fireRand(0, 3);
             int val = src - decay;
             if (val < 0) val = 0;
             heat[y * MAXFW + x] = (uint8_t)val;
@@ -10355,6 +10373,13 @@ uint8_t wrapText(TFT_eSPI& t, const char* text, int maxW,
 // Info panel geometry -- see theme.h's comment on drawInfoPanel() for
 // what this is/who uses it.
 static const uint8_t INFO_MAX_LINES = 7;
+// The compact panels' rows and the large panels' rows. A board is one or the
+// other (or neither), never both, so they share one block: 2.5 KB, not 3.6.
+static const uint8_t INFO_COMPACT_MAX = 24, INFO_WIDE_MAX = 32;
+static union {
+    char compact[INFO_COMPACT_MAX][48];
+    char wide[INFO_WIDE_MAX][80];
+} s_infoRows;
 
 static void infoRects(int screenW, int screenH,
                        int& px, int& py, int& pw, int& ph,
@@ -10447,10 +10472,9 @@ void drawInfoPanel(TFT_eSPI& t, int w, int h, uint32_t now,
         }
         const int btnH = 18, btnY = py + ph - btnH - 4;
         const int per = (btnY - 3 - ly) / 10;
-        static const uint8_t MAXL = 24;
-        static char lines[MAXL][48];
+        char (*lines)[48] = s_infoRows.compact;
         t.setTextSize(1);
-        const uint8_t n = wrapText(t, text, pw - 10, lines, MAXL);
+        const uint8_t n = wrapText(t, text, pw - 10, lines, INFO_COMPACT_MAX);
         s_infoPages = (uint8_t)(per > 0 ? (n + per - 1) / per : 1);
         if (!s_infoPages) s_infoPages = 1;
         if (s_infoPage >= s_infoPages) s_infoPage = 0;
@@ -10492,12 +10516,11 @@ void drawInfoPanel(TFT_eSPI& t, int w, int h, uint32_t now,
     t.setTextWrap(false);
     t.setTextColor(WHITE, BG);
     const int step = s_large ? t.fontHeight() + 3 : 12;
-    static const uint8_t WIDE_MAX = 32;
-    static char wide[WIDE_MAX][80];
+    char (*wide)[80] = s_infoRows.wide;
     char narrow[INFO_MAX_LINES][48];
     int per = (btnY - 4 - textTop) / step;
     if (per < 1) per = 1;
-    const uint8_t n = s_large ? wrapText(t, text, textMaxW, wide, WIDE_MAX)
+    const uint8_t n = s_large ? wrapText(t, text, textMaxW, wide, INFO_WIDE_MAX)
                               : wrapText(t, text, textMaxW, narrow, INFO_MAX_LINES);
     int first = 0, last = n;
     if (s_large) {

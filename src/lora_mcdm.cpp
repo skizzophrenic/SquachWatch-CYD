@@ -260,6 +260,7 @@ void onFrame(const Decoded& d, uint32_t now) {
     if (d.haveAdvert) { learn(d.adv.pubkey, d.adv.hasName ? d.adv.name : nullptr); return; }
     if (f.type == TYPE_ACK && f.payloadLen >= 4) { settle(f.payload); return; }
     if ((f.type != TYPE_TXT_MSG && f.type != TYPE_PATH) || f.payloadLen < 2 + 2 + 16) return;
+    if (f.payloadLen - 2 - 2 > 192) return;               // would not fit plain[] below
     if (f.payload[0] != s_pub[0]) return;                  // not to us
     const uint8_t src = f.payload[1];
     // Every contact whose key starts with that byte gets a try, as

@@ -534,22 +534,34 @@ public:
     static const uint32_t HUNT_SWAP_OVERLAP_MS = 3000;   // the new address can start a moment before the old stops
     static const int      HUNT_SWAP_DB        = 15;
     static const uint8_t  HUNT_OTHERS_CAP     = 32;
+    static const uint32_t HUNT_OTHERS_BUSY_MS = 60000;   // evicting one heard this lately = the table is too small for the room
     void checkHuntSwap(const uint8_t* mac, int8_t rssi, const uint8_t* adv, size_t len, uint32_t now) {
         if (_huntKind != WatchKind::BLE || !_huntBleKind || _swapReady || !adv) return;
         if (memcmp(mac, _huntMac, 6) == 0) return;
         if (rawBleKindOf(adv, len) != _huntBleKind) return;
-        int idx = -1;
-        for (uint8_t i = 0; i < _huntOthersN; i++)
+        int idx = -1, stalest = 0;
+        for (uint8_t i = 0; i < _huntOthersN; i++) {
             if (memcmp(_huntOthers[i].mac, mac, 6) == 0) { idx = i; break; }
-        if (idx < 0) {   // a ring: in a crowd the oldest address goes first
-            idx = _huntOthersN < HUNT_OTHERS_CAP ? _huntOthersN++ : _huntOthersNext;
-            _huntOthersNext = (uint8_t)((idx + 1) % HUNT_OTHERS_CAP);
+            if ((int32_t)(_huntOthers[i].last - _huntOthers[stalest].last) < 0) stalest = i;
+        }
+        if (idx < 0) {
+            // Full: the address heard least lately goes, which is an ID a
+            // phone has already rotated away from. Phones still in the room
+            // keep their entries, so a bystander is never mistaken for new.
+            // If even the stalest was heard in the last minute, the room has
+            // more of this kind than the table holds and nobody can say who
+            // is new: the newcomer is marked unknown and never offered.
+            bool unknown = false;
+            if (_huntOthersN < HUNT_OTHERS_CAP) idx = _huntOthersN++;
+            else { idx = stalest; unknown = (uint32_t)(now - _huntOthers[idx].last) < HUNT_OTHERS_BUSY_MS; }
             memcpy(_huntOthers[idx].mac, mac, 6);
             _huntOthers[idx].first = now;
             _huntOthers[idx].declined = false;
+            _huntOthers[idx].unknown = unknown;
         }
+        _huntOthers[idx].last = now;
         const HuntOther& o = _huntOthers[idx];
-        if (o.declined || !_huntSeenMs) return;
+        if (o.declined || o.unknown || !_huntSeenMs) return;
         const uint32_t quiet = now - _huntSeenMs;
         if (quiet < HUNT_SWAP_QUIET_MS || quiet > HUNT_SWAP_MAX_MS) return;
         if ((int32_t)(o.first - (_huntSeenMs - HUNT_SWAP_OVERLAP_MS)) < 0) return;   // was already about
@@ -744,15 +756,15 @@ private:
     uint8_t   _huntBleKind = 0;
     volatile uint32_t _huntSeenMs = 0;
     int8_t    _huntSeenRssi = 0;
-    struct HuntOther { uint8_t mac[6]; bool declined; uint32_t first; };
+    struct HuntOther { uint8_t mac[6]; bool declined; bool unknown; uint32_t first; uint32_t last; };
     HuntOther _huntOthers[HUNT_OTHERS_CAP];
-    uint8_t   _huntOthersN = 0, _huntOthersNext = 0;
+    uint8_t   _huntOthersN = 0;
     uint8_t   _swapMac[6] = {0};
     int8_t    _swapRssi = 0;
     volatile bool _swapReady = false;
     void huntSwapReset(uint8_t kind) {
         _huntBleKind = kind; _huntSeenMs = 0; _huntSeenRssi = 0;
-        _huntOthersN = _huntOthersNext = 0; _swapReady = false;
+        _huntOthersN = 0; _swapReady = false;
     }
     void checkHuntWifi(const uint8_t* mac, int8_t rssi);
     void recordHuntRssi(int8_t rssi);
@@ -825,6 +837,7 @@ private:
     void processWiFiQ();
     void processDeauthQ();
     void expireStale();
+    void resumeAgeing();     // give active rows back the time the radios were away
     void hopChannel();
 #if SQW_WIFI_5G
     bool start5(uint32_t now);

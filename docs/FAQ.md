@@ -130,8 +130,8 @@ None of this leaves the board unless you plug it in and ask for it.
 
 **Who can read it:** anyone holding the board, unless you lock it. **Settings > SECURITY** has:
 
-- **PIN LOCK** with a 4, 6 or 8 digit PIN, **AUTO-LOCK** (on sleep, or after 1 to 30 idle minutes) and **LOCK AT BOOT**. Detection keeps running while locked; **ALERTS LOCKED** decides how much an alert shows to a stranger (FULL, TYPE ONLY or NONE).
-- **DURESS PIN.** A second PIN that looks like it unlocks the board, but first wipes it: the squad phrase and key, saved WiFi passwords, the ignore list, the black box log and crash history, the SD card's log files and the watch's wardrive log. Then it restarts quietly and comes up looking like an ordinary, empty SquachWatch. Your other settings survive the wipe.
+- **PIN LOCK** with a 4, 6 or 8 digit PIN, **AUTO-LOCK** (on sleep, or after 1 to 30 idle minutes) and **LOCK AT BOOT** (on by default once you set a PIN, so a reset does not unlock it). Detection keeps running while locked; **ALERTS LOCKED** decides how much an alert shows to a stranger (FULL, TYPE ONLY or NONE).
+- **DURESS PIN.** A second PIN that looks like it unlocks the board, but first wipes it: the squad phrase and key, saved WiFi passwords, the ignore list, the devices seen on several days, the LoRa DM keys and names, the black box log and crash history, the SD card's log files and the watch's wardrive log. Then it restarts quietly and comes up looking like an ordinary, empty SquachWatch. Your other settings survive the wipe.
 - **WIPE AFTER 10.** The same wipe after ten wrong guesses.
 
 Be honest with yourself about what the PIN does: it stops a snoop who picks the board up. It does not stop someone with a USB cable and some time, because the flash can be read directly. The board tells you this when you set the PIN, too.

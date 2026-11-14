@@ -297,8 +297,22 @@ void tmLog(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, TmRect r, cons
     }
 
     const int n = eng.logCount() > TM_LOG_MAX ? TM_LOG_MAX : eng.logCount();
-    uint8_t ord[TM_LOG_MAX];
-    tmOrder(eng, n, ord);
+    // A sorted view is worked out again when a row arrives, the sort or its
+    // direction changes, or a quarter second passes (a strength or a name
+    // moving): not every frame, where sorted by DEV it was 64 names and an
+    // insertion sort of string compares. Time order is free and never cached.
+    static uint8_t  s_ord[TM_LOG_MAX];
+    static int      s_ordN = -1;
+    static uint32_t s_ordTotal = 0, s_ordAt = 0;
+    static uint8_t  s_ordSort = 0;
+    static int8_t   s_ordDir = 0;
+    if (s_tmSort == TM_S_TIME || n != s_ordN || eng.lifetimeTotal() != s_ordTotal ||
+        s_tmSort != s_ordSort || s_tmDir != s_ordDir || now - s_ordAt >= 250) {
+        tmOrder(eng, n, s_ord);
+        s_ordN = n; s_ordTotal = eng.lifetimeTotal(); s_ordAt = now;
+        s_ordSort = s_tmSort; s_ordDir = s_tmDir;
+    }
+    const uint8_t* ord = s_ord;
     int vis = (r.h - top + 1 - foot) / RH;
     if (vis > TM_ROWS_MAX) vis = TM_ROWS_MAX;
     if (vis < 1) vis = 1;

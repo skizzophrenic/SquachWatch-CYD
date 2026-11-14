@@ -3410,6 +3410,7 @@ static void enterWatchAlert() {
 static bool s_logFromTerminal = false;
 
 static void enterLog() {
+    Theme::releaseBackgroundBuffers();
     state = AppState::LOG;
     transitionStart = millis();
     s_confirmPending = false;
@@ -3458,6 +3459,7 @@ static void enterSettings() {
     restoreFrameBuffer();   // lent to a download that did not end in a restart
     Settings::deskActive(false);
     Theme::releaseClockBackdrop();
+    Theme::releaseBackgroundBuffers();
     state = AppState::SETTINGS;
     transitionStart = millis();
     uiSettingsInit(*canvas);
@@ -3487,6 +3489,7 @@ static void enterDesk() {
 // HUMAN SENSING: the CYD's own radio, borrowed from the detector while this
 // screen is up (the sensing tick in loop(), include/sense_cyd.h).
 static void enterSensing() {
+    Theme::releaseBackgroundBuffers();   // sensing takes ~8.5 KB of its own
     state = AppState::SENSING;
     transitionStart = millis();
     uiSensingInit(*canvas);
@@ -3502,6 +3505,7 @@ static void enterDiagnostics() {
 
 static void enterUpdate() {
     Theme::releaseClockBackdrop();   // the download wants every byte
+    Theme::releaseBackgroundBuffers();
     state = AppState::UPDATE;
     transitionStart = millis();
     uiUpdateInit(*canvas);
@@ -3966,8 +3970,13 @@ static nvs_iterator_t sqwNvsEntryNext(nvs_iterator_t it) {
 #endif
 
 static bool secretNamespace(const char* ns) {
-    // "otawifi" is the saved WiFi password for firmware updates.
-    return !strcmp(ns, "meshtalk") || !strcmp(ns, "ignore") || !strcmp(ns, "otawifi");
+    // "otawifi" is the saved WiFi password for firmware updates. "loradm" is
+    // the LoRa DM private keys and the keys and names of the nodes talked
+    // to, "loranames" the names heard on LoRa, and "regulars" the addresses
+    // seen on several days: who this board has been near, which is what a
+    // duress wipe is for.
+    return !strcmp(ns, "meshtalk") || !strcmp(ns, "ignore") || !strcmp(ns, "otawifi") ||
+           !strcmp(ns, "loradm") || !strcmp(ns, "loranames") || !strcmp(ns, "regulars");
 }
 
 static void physicalNvsWipe() {
@@ -6326,14 +6335,19 @@ void consoleFrameShot() {
     const int w = frame.width(), h = frame.height();
     Serial.printf("#SHOT %d %d rgb332\n", w, h);
     static const char HX[] = "0123456789abcdef";
-    static char line[8 + 2 * 480 + 2];
+    // From the heap for the length of the shot: a bench command has no
+    // business holding a kilobyte of fixed RAM on every board for good.
+    const int cap = 8 + 2 * w + 2;
+    char* line = (char*)malloc(cap);
+    if (!line) { Serial.println("[sense] shot: no memory"); return; }
     for (int y = 0; y < h; y++) {
-        int n = snprintf(line, sizeof line, "#R%03d:", y);
-        for (int x = 0; x < w && n < (int)sizeof line - 3; x++) { const uint8_t v = px[y * w + x]; line[n++] = HX[v >> 4]; line[n++] = HX[v & 15]; }
+        int n = snprintf(line, cap, "#R%03d:", y);
+        for (int x = 0; x < w && n < cap - 3; x++) { const uint8_t v = px[y * w + x]; line[n++] = HX[v >> 4]; line[n++] = HX[v & 15]; }
         line[n] = 0;
         Serial.println(line);
         Serial.flush();   // a row at a time: at 2 Mbaud whole rows went missing on the PC
     }
+    free(line);
     Serial.println("#SHOT END");
 }
 #endif
@@ -7573,6 +7587,7 @@ void loop() {
         touchJustUp = false;
     }
     engine.loop();
+    Settings::tick(millis());
 #if defined(SENSE_CYD_APP)
     // SENSING on the CYD's own radio, and only while its screen is up: one
     // radio, so the detector lets go of it the way it does for a WiFi update
@@ -8955,7 +8970,7 @@ void loop() {
         }
         case AppState::ALERT: {
             const char* alertInfoText = s_infoShowingPrimer ? DetectionInfo::rssiConfidencePrimer()
-                                                              : DetectionInfo::explainFor(s_confirmType, s_confirmVendor, privName(s_confirmName), engine);
+                                                              : DetectionInfo::explainFor(s_confirmType, s_confirmVendor, privName(s_confirmName), engine, s_confirmMac);
             // No heading during the primer page -- it's about RSSI/
             // confidence in general, not any one detection type.
             const char* alertInfoTypeName = s_infoShowingPrimer ? nullptr
@@ -9206,7 +9221,7 @@ void loop() {
         case AppState::LOG: {
             const char* infoText = s_infoShowingPrimer
                                   ? DetectionInfo::rssiConfidencePrimer()
-                                  : DetectionInfo::explainFor(s_confirmType, s_confirmVendor, privName(s_confirmName), engine);
+                                  : DetectionInfo::explainFor(s_confirmType, s_confirmVendor, privName(s_confirmName), engine, s_confirmMac);
 
             // No heading during the primer page -- it's about RSSI/
             // confidence in general, not any one detection type.

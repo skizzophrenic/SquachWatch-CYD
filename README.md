@@ -330,13 +330,16 @@ the screen.
 **Settings → SECURITY** puts a PIN on the board: 4, 6 or 8 digits, with
 LOCK AT BOOT, AUTO-LOCK (when the screen sleeps, or after 1 to 30 idle
 minutes), ALERTS LOCKED (what an alert shows while locked: FULL, TYPE ONLY
-or NONE) and WIPE AFTER 10 wrong guesses. It says plainly what it is for:
-people at the table, not someone with a USB cable.
+or NONE) and WIPE AFTER 10 wrong guesses. LOCK AT BOOT starts on when you
+set your first PIN, so pressing reset or pulling the cable does not unlock
+the board. It says plainly what it is for: people at the table, not someone
+with a USB cable.
 
 A **DURESS PIN** is a second PIN of the same length. Typed at the lock
 screen, it erases the squad phrase and messages, the ignore list, the saved
-WiFi passwords and the log (in flash and on the SD card, and the watch's GPS
-log), then restarts quietly, with the status light dark and no splash, and
+WiFi passwords, the list of devices seen on several days, the LoRa DM keys
+and the names heard on LoRa, and the log (in flash and on the SD card, and
+the watch's GPS log), then restarts quietly, with the status light dark and no splash, and
 comes back unlocked on the main screen. To anyone watching, it was an
 unlock.
 

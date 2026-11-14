@@ -855,12 +855,18 @@ bool previewBackground(Background b) {
     return true;
 }
 
+// A tap on the screen edge steps the background, and a flash write in the
+// same frame stalls the very frame that should show the new one (and a
+// row of taps is a row of writes). The choice is saved once the taps stop.
+static const uint32_t BG_SAVE_AFTER_MS = 1500;
+static uint32_t s_bgDirtyAt = 0;   // 0 = saved
+
 void cycleBackground() {
     for (uint8_t i = 0; i < BACKGROUND_COUNT; i++) {
         s_background = (Background)(((uint8_t)s_background + 1) % BACKGROUND_COUNT);
         if (backgroundSelectable(s_background)) break;
     }
-    s_prefs.putUChar("bg", (uint8_t)s_background);
+    s_bgDirtyAt = millis() | 1u;
 }
 
 void cyclePrevBackground() {
@@ -868,7 +874,14 @@ void cyclePrevBackground() {
         s_background = (Background)(((uint8_t)s_background + BACKGROUND_COUNT - 1) % BACKGROUND_COUNT);
         if (backgroundSelectable(s_background)) break;
     }
-    s_prefs.putUChar("bg", (uint8_t)s_background);
+    s_bgDirtyAt = millis() | 1u;
+}
+
+void tick(uint32_t now) {
+    if (s_bgDirtyAt && now - s_bgDirtyAt >= BG_SAVE_AFTER_MS) {
+        s_bgDirtyAt = 0;
+        s_prefs.putUChar("bg", (uint8_t)s_background);
+    }
 }
 
 bool inverted() { return s_inverted; }

@@ -6,6 +6,7 @@
 #include "signatures.h"
 #include "settings.h"
 #include "blackbox.h"
+#include "ota_core.h"
 #include "bingo.h"
 #include "dex.h"
 #include "regulars.h"
@@ -73,6 +74,7 @@ void bootStage(uint8_t s);   // main.cpp: the power diary's steps through setup(
 // on one target and wrong on another is worse than no guard.
 #include <esp_heap_caps.h>
 #include <string.h>
+#include <atomic>
 #if !defined(TAB5)   // the Tab5's card is not driven yet; nothing here reads SD directly anyway
 #include <SD.h>
 #endif
@@ -1498,7 +1500,11 @@ static bool scanModeTick(uint32_t now, uint32_t largest) {
     s_advRate = (raw - lastRaw) * 1000UL / (now - lastAt);
     lastRaw = raw;
     lastAt  = now;
-    const bool pressedWindow = s_passiveUntil && (int32_t)(s_passiveUntil - now) > 0;
+    // An expired deadline is cleared, not left set: 2^31 ms later the signed
+    // difference turns positive again and would pin the scan passive for
+    // another 24.8 days.
+    if (s_passiveUntil && (int32_t)(s_passiveUntil - now) <= 0) s_passiveUntil = 0;
+    const bool pressedWindow = s_passiveUntil != 0;
     bool want = s_wantPassive;
     // Heap pressure first: the bench may pin the scan active to watch it
     // suffer, but a board that is out of room goes passive whatever the pin
@@ -1529,6 +1535,13 @@ static bool scanModeTick(uint32_t now, uint32_t largest) {
 uint32_t advertRate() { return s_advRate; }
 
 static void scanFlushTick() {
+    // The heap walk below takes the heap lock for a few hundred microseconds;
+    // ten times a second is plenty for a seatbelt the adverts outrun anyway
+    // only in bursts, and at 25-30 fps it was being done three times as often.
+    static uint32_t s_lastTickMs = 0;
+    const uint32_t tickNow = millis();
+    if (s_lastTickMs && tickNow - s_lastTickMs < 100) return;
+    s_lastTickMs = tickNow;
     if (!bleLive()) {
         s_heapLow = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < 1536;
         return;
@@ -1562,7 +1575,7 @@ static void scanFlushTick() {
         for (uint8_t i = 0; i < SCAN_PRESSED_LIMIT; i++)
             if (!s_pressedAt[i] || now - s_pressedAt[i] > 60000) allRecent = false;
         if (allRecent && !(s_passiveUntil && (int32_t)(s_passiveUntil - now) > 0)) {
-            s_passiveUntil = now + SCAN_PASSIVE_MS;
+            s_passiveUntil = (now + SCAN_PASSIVE_MS) | 1u;   // never 0, which means unset
             for (uint8_t i = 0; i < SCAN_PRESSED_LIMIT; i++) s_pressedAt[i] = 0;
             Serial.printf("[scan] passive for %lu s: too many devices for the heap here\n",
                           (unsigned long)(SCAN_PASSIVE_MS / 1000));
@@ -1593,6 +1606,29 @@ static void scanFlushTick() {
 }
 #endif  // SQW_BLE
 
+// When the radios stopped listening for the detection log (NEARBY, a WiFi
+// sweep, an update), so the rows can be given that time back on return.
+// Without it, everything still in the room went stale on the first pass
+// after a minute away and then "arrived" again: hits +1, a black-box row,
+// a fresh ALERT for a tag that never left. A rest (the watch's duty cycle)
+// is not counted here; that is how the rest is meant to behave.
+static uint32_t s_agePausedAt = 0;   // 0 = listening
+static void noteAgeingPaused() { if (!s_agePausedAt) s_agePausedAt = millis() | 1u; }
+
+void DetectionEngine::resumeAgeing() {
+    if (!s_agePausedAt) return;
+    const uint32_t now = millis();
+    const uint32_t gap = now - s_agePausedAt;
+    s_agePausedAt = 0;
+    for (uint8_t i = 0; i < _logCount; i++) {
+        Detection& d = _log[(_logHead + LOG_CAP - 1 - i) % LOG_CAP];
+        if (!d.active) continue;
+        uint32_t seen = d.lastSeen + gap;
+        if ((int32_t)(seen - now) > 0) seen = now;   // heard again since: never ahead of now
+        d.lastSeen = seen;
+    }
+}
+
 void DetectionEngine::loop() {
     // Resting radios still take the BLE side of the loop when BLE is up;
     // only the WiFi steps below are skipped, since WiFi is stopped.
@@ -1602,9 +1638,18 @@ void DetectionEngine::loop() {
         // sweep, and the WiFi promiscuous queue is empty anyway (it's
         // disabled for the duration of either raw mode, see
         // startRawBleScan/startRawWifiScan).
+        // The seatbelt still has to move: the host task keeps building
+        // strings for every advert during NEARBY, and a flag frozen at
+        // "fine" is the abort it exists to prevent (frozen at "low", every
+        // advert is dropped and NEARBY lists nothing).
+        s_heapLow = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < 1536;
+        noteAgeingPaused();
         _sd.tick();
         return;
     }
+    // Back from NEARBY, a WiFi sweep or an update: the room was not being
+    // listened to, so that time does not count against "last seen".
+    resumeAgeing();
     // After the raw-scan return above, so a raw scan that owns the radio is
     // never restarted out from under it.
     scanFlushTick();
@@ -2178,6 +2223,7 @@ void DetectionEngine::startUpdateRadio() {
     }
     if (g_rawMode == RawScanMode::WIFI) rawScanDelete();
     g_rawMode = RawScanMode::UPDATE;
+    noteAgeingPaused();
     sniffOff();
 #if SQUACH_MESH
     Mesh::stopAdvertisingForUpdate();
@@ -2245,6 +2291,7 @@ void DetectionEngine::startUpdateRadio() {
     if (g_rawMode == RawScanMode::REST) wakeRadios();
     if (g_rawMode == RawScanMode::WIFI) rawScanDelete();
     g_rawMode = RawScanMode::UPDATE;
+    noteAgeingPaused();
     sniffOff();
 }
 
@@ -2354,9 +2401,16 @@ int8_t DetectionEngine::watchRssiAt(uint8_t idx) const {
 }
 
 void DetectionEngine::huntBle(const uint8_t* mac, const char* name, uint8_t rawKind) {
+    // The scan callback reads these on the other core: the hunt is off while
+    // the new target is written, and on only once it is all there, so an
+    // advert from the old target cannot stamp the new hunt's last reading.
+    _huntKind = WatchKind::NONE;
+    std::atomic_signal_fence(std::memory_order_seq_cst);
     huntSwapReset(rawKind);
-    _huntKind = WatchKind::BLE;
     memcpy(_huntMac, mac, 6);
+    std::atomic_signal_fence(std::memory_order_seq_cst);
+    _swapReady = false;    // an offer about the old target, raised mid-switch
+    _huntKind = WatchKind::BLE;
     strncpy(_huntLabel, (name && name[0]) ? name : "Unnamed device", sizeof(_huntLabel) - 1);
     _huntLabel[sizeof(_huntLabel) - 1] = 0;
     _huntRssiHead = _huntRssiCount = 0;
@@ -2364,9 +2418,12 @@ void DetectionEngine::huntBle(const uint8_t* mac, const char* name, uint8_t rawK
 }
 
 void DetectionEngine::huntWifi(const uint8_t* bssid, const char* ssid) {
+    _huntKind = WatchKind::NONE;
+    std::atomic_signal_fence(std::memory_order_seq_cst);
     huntSwapReset(0);
-    _huntKind = WatchKind::WIFI;
     memcpy(_huntMac, bssid, 6);
+    std::atomic_signal_fence(std::memory_order_seq_cst);
+    _huntKind = WatchKind::WIFI;
     strncpy(_huntLabel, (ssid && ssid[0]) ? ssid : "(hidden)", sizeof(_huntLabel) - 1);
     _huntLabel[sizeof(_huntLabel) - 1] = 0;
     _huntRssiHead = _huntRssiCount = 0;
@@ -2743,21 +2800,20 @@ void logDump() {
 }
 
 
-// The lifetime tally, to flash: at most once every five seconds while it
-// has changed. Five seconds of counting is what a power cut can lose.
+// The lifetime tally, to flash: at most once a minute while it has changed,
+// and straight away when an update or a switch is about to restart the board.
+// A minute of counting is what a power cut can lose.
 void DetectionEngine::saveLifetime(uint32_t now) {
-#if defined(CROWPANEL7)
-    // Once a minute, not every five seconds. On the CrowPanel every flash
-    // write disables the cache the RGB panel's DMA reads its framebuffer
-    // through, and the picture steps sideways for it -- measured 2026-09-23:
-    // with this and the black-box drain below switched off the step went
-    // from "occasional" to "very rare". A crash costs under a minute of
-    // lifetime counts, which is what these are.
+    // Once a minute on every board, not every five seconds as it used to be
+    // everywhere but the CrowPanel. In a busy room the five-second save
+    // filled an NVS page every couple of minutes, and each page erase stalls
+    // both cores with the flash cache off. On the CrowPanel the same stall
+    // steps the picture sideways (the RGB panel's DMA reads its framebuffer
+    // through that cache; measured 2026-09-23), which is where the minute
+    // came from.
     static const uint32_t LIFETIME_EVERY_MS = 60000;
-#else
-    static const uint32_t LIFETIME_EVERY_MS = 5000;
-#endif
-    if (!_lifetimeDirty || now - _lifetimeSavedMs < LIFETIME_EVERY_MS) return;
+    if (!_lifetimeDirty) return;
+    if (now - _lifetimeSavedMs < LIFETIME_EVERY_MS && !OtaCore::restartPending()) return;
     _lifetimeDirty   = false;
     _lifetimeSavedMs = now;
     _prefs.putUInt("total", _lifetimeTotal);

@@ -623,6 +623,7 @@ static uint32_t s_legendaryUntil = 0;
 static Preferences s_petPrefs;
 static bool        s_petPrefsLoaded = false;
 static uint32_t    s_petCount       = 0;
+static uint32_t    s_petsDirtyAt    = 0;   // a pet not yet written to flash; 0 = saved
 static uint32_t    s_petFxStart     = 0;
 static uint32_t    s_petFxUntil     = 0;
 
@@ -1802,7 +1803,7 @@ void trigger(Event evt, DetectionType dt, uint32_t lifetimeTotal, uint32_t hitCo
             s_petFxUntil = now + 1900;
             ensurePrefsLoaded();
             s_petCount++;
-            s_petPrefs.putUInt("pets", s_petCount);
+            s_petsDirtyAt = now | 1u;   // saved by tick() once the petting stops
 
             uint32_t hit = 0;
             for (uint8_t i = 0; i < PET_MILESTONES_N; i++) {
@@ -7988,6 +7989,10 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
           bool advance, float minScale, bool scanningFx, int wanderRangePx,
           uint8_t sizePct) {
     s_topLimit = topY;
+    if (s_petsDirtyAt && now - s_petsDirtyAt >= 1500) {
+        s_petsDirtyAt = 0;
+        s_petPrefs.putUInt("pets", s_petCount);
+    }
     scouterTick(now);
     // A property of the caller's screen, not of his mood -- see the arm
     // chain in drawBody(). Assigned on every call, band calls included,

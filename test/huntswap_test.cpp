@@ -60,6 +60,47 @@ int main() {
     ck("not asked again after NO", !e.huntSwapOffered());
     ck("the hunt stays on the old address", e.isHunted(T, true));
 
+    suite("A long hunt with phones coming and going");
+    // Over an hour, IDs rotate away and new ones arrive: well over the 32 the
+    // table holds. The bystanders still in the room must keep their place.
+    e.huntBle(T, "(iPhone?)", RAW_KIND_IPHONE);
+    const uint8_t B[6] = { 0x60, 0, 0, 0, 0, 6 };                  // a bystander, there all hunt
+    uint32_t t = millis();
+    for (int i = 0; i < 40; i++) {                                 // 40 IDs, each heard once and gone
+        const uint8_t g[6] = { 0x70, 0, 0, 0, (uint8_t)(i >> 8), (uint8_t)i };
+        e.checkHuntSwap(g, -70, IPHONE, sizeof IPHONE, t);
+        e.checkHuntSwap(B, -60, IPHONE, sizeof IPHONE, t + 500);  // the bystander keeps talking
+        t += 90000;
+    }
+    SimClock::nowMs = t;
+    e.checkHuntBle(T, -61);
+    const uint32_t s5 = millis();
+    for (int i = 0; i < 30; i++) {                                 // then a busy minute: 30 more, far off
+        const uint8_t g[6] = { 0x71, 0, 0, 0, 0, (uint8_t)i };
+        e.checkHuntSwap(g, -95, IPHONE, sizeof IPHONE, s5 + 1000 + (uint32_t)i * 200);
+        if (i % 4 == 0) e.checkHuntSwap(B, -60, IPHONE, sizeof IPHONE, s5 + 1100 + (uint32_t)i * 200);
+    }
+    e.checkHuntSwap(B, -60, IPHONE, sizeof IPHONE, s5 + 12000);
+    ck("a bystander heard all along is not offered", !e.huntSwapOffered());
+    const uint8_t N5[6] = { 0x80, 0, 0, 0, 0, 8 };
+    e.checkHuntSwap(N5, -62, IPHONE, sizeof IPHONE, s5 + 12000);
+    ck("a genuinely new ID still is", e.huntSwapOffered());
+    e.huntSwapDecline();
+
+    suite("A room with more phones than the table");
+    e.huntBle(T, "(iPhone?)", RAW_KIND_IPHONE);
+    t = millis();
+    for (int i = 0; i < 32; i++) {                                 // 32 phones all talking at once
+        const uint8_t g[6] = { 0x90, 0, 0, 0, 0, (uint8_t)i };
+        e.checkHuntSwap(g, -60, IPHONE, sizeof IPHONE, t + (uint32_t)i);
+    }
+    SimClock::nowMs = t + 1000;
+    e.checkHuntBle(T, -60);
+    const uint32_t s6 = millis();
+    const uint8_t C[6] = { 0xA0, 0, 0, 0, 0, 10 };                 // a 33rd: new, or one of the crowd?
+    e.checkHuntSwap(C, -60, IPHONE, sizeof IPHONE, s6 + 12000);
+    ck("no guess when the room outgrows the table", !e.huntSwapOffered());
+
     suite("Only phones the scan labelled");
     e.huntBle(T, "AirTag");                                         // from the LOG: no kind
     e.checkHuntBle(T, -62);

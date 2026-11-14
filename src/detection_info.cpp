@@ -3,6 +3,7 @@
 #include "detection.h"
 #include "device_info.h"
 #include <stdio.h>
+#include <string.h>
 
 namespace DetectionInfo {
 
@@ -61,8 +62,9 @@ const char* explain(DetectionType t) {
     return EXPLAIN_TEXT[idx];
 }
 
-const char* explainLive(DetectionType t, const DetectionEngine& eng) {
+const char* explainLive(DetectionType t, const DetectionEngine& eng, const uint8_t* mac) {
     if (t != DetectionType::DRONE) return explain(t);
+    if (mac && memcmp(mac, eng.remoteIdMac(), 6) != 0) return explain(t);
 
     const RemoteId::Info& rid = eng.remoteId();
     if (!rid.haveBasic && !rid.haveLoc && !rid.haveOperator) return explain(t);
@@ -89,8 +91,8 @@ const char* explainLive(DetectionType t, const DetectionEngine& eng) {
 }
 
 const char* explainFor(DetectionType t, const char* vendor, const char* name,
-                       const DetectionEngine& eng) {
-    if (t == DetectionType::DRONE) return explainLive(t, eng);
+                       const DetectionEngine& eng, const uint8_t* mac) {
+    if (t == DetectionType::DRONE) return explainLive(t, eng, mac);
     const DeviceInfo::Device* d = DeviceInfo::find(t, vendor, name);
     return d ? d->text : explain(t);
 }
