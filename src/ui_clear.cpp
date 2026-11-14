@@ -1746,6 +1746,7 @@ static int16_t s_cornerClockPillR = -1;
 // goes on the screen as runs -- about 40 fillRects a frame, not 300.
 static BatterySource s_battSrc = nullptr;
 void uiClearSetBatterySource(BatterySource fn) { s_battSrc = fn; }
+bool uiClearHasBattery() { return s_battSrc != nullptr; }
 
 static float lampHash(uint32_t a, uint32_t b) {
     uint32_t h = (a * 374761393u + b * 668265263u) ^ 0x5bd1e995u;
@@ -1921,7 +1922,7 @@ static bool battRead(uint32_t now, uint8_t& pctOut, bool& chgOut) {
 static void drawBatteryGauge(TFT_eSPI& t, uint32_t now) {
     // TERMINAL MODE has its own battery, in the LOG's title bar: the lamp
     // stood on the LOG's title and its TIME heading.
-    if (Settings::boringMode()) return;
+    if (Settings::boringMode() || !Settings::lavaLamp()) return;   // LAVA LAMP OFF (#132)
     uint8_t pct; bool chg;
     if (!battRead(now, pct, chg)) return;
     int h2, ox, oy;

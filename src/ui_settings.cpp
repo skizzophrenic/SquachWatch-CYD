@@ -160,7 +160,7 @@ static const SettingsRow APPEARANCE_ROWS[] = {
     SettingsRow::SHADES_COLOR, SettingsRow::BANTER, SettingsRow::AURA,
     // Then how the SCREEN looks.
     SettingsRow::THEME, SettingsRow::BACKGROUND, SettingsRow::BACKGROUND_LOCK, SettingsRow::DET_STYLE,
-    SettingsRow::BRIGHTNESS,
+    SettingsRow::LAVA_LAMP, SettingsRow::BRIGHTNESS,
     SettingsRow::INVERT, SettingsRow::RGB_SWAP, SettingsRow::ROTATION_LOCK,
     // And the one light that is not on the screen at all.
     SettingsRow::STATUS_LIGHT,
@@ -344,6 +344,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::PET:
         case SettingsRow::BANTER:
         case SettingsRow::DET_STYLE:
+        case SettingsRow::LAVA_LAMP:
         case SettingsRow::FONTS:
             return RowGroupId::APPEARANCE;
         case SettingsRow::FONT_MENUS:
@@ -460,6 +461,8 @@ static uint8_t buildDisplayList(DisplayItem* out) {
         // does not have yet would be a switch that does nothing.
         if (r == SettingsRow::PET && !Squachy::anyPetUnlocked()) continue;
         if (r == SettingsRow::AURA && !Squachy::hasAura()) continue;
+        // No battery to show, no lamp to switch.
+        if (r == SettingsRow::LAVA_LAMP && !uiClearHasBattery()) continue;
         // Not a secret, just impossible: a board without a second app slot or
         // a Bluetooth server has nothing to update into.
         if ((r == SettingsRow::UPDATE_FIRMWARE || r == SettingsRow::UPDATE_CHECK) && !OtaCore::available()) continue;
@@ -1510,6 +1513,10 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
         case SettingsRow::DET_STYLE:
             label = "DETECTIONS";
             value = Settings::detXp() ? "XP" : "CLASSIC";
+            break;
+        case SettingsRow::LAVA_LAMP:
+            label = "LAVA LAMP";
+            value = Settings::lavaLamp() ? "ON" : "OFF";
             break;
         case SettingsRow::VIEW_DIARY:
             label = "SQUACHY'S DIARY";

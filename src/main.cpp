@@ -9945,6 +9945,7 @@ void loop() {
                         case SettingsRow::APPEARANCE:  uiSettingsOpenAppearance(true); break;
                         case SettingsRow::AURA:        Settings::toggleAura(); break;
                         case SettingsRow::DET_STYLE:   Settings::toggleDetXp(); break;
+                        case SettingsRow::LAVA_LAMP:   Settings::toggleLavaLamp(); break;
                         // FONTS: the page, then a slider per kind of text. The
                         // rows and the preview box redraw at the new size
                         // straight away.

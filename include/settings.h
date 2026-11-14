@@ -148,6 +148,10 @@ namespace Settings {
     // the full counter rows at the bottom, as before v1.31.0).
     bool       detXp();
     void       toggleDetXp();
+    // LAVA LAMP on the APPEARANCE page, on boards with a battery: the home
+    // screen's battery lamp, on (the default) or off (issue #132).
+    bool       lavaLamp();
+    void       toggleLavaLamp();
 
     // FONTS on the APPEARANCE page: a slider per kind of text, around the
     // size each board was built with. 0..4 for -2..+2; 2 is as built. Theme

@@ -47,6 +47,7 @@ static const bool DEFAULT_ROTATION_LOCK = false;
 static bool        s_rotationLocked = DEFAULT_ROTATION_LOCK;
 static bool        s_aura = true;
 static bool        s_detXp = true;
+static bool        s_lavaLamp = true;
 // Eight is the ceiling because the radio's own squad ring holds eight (see
 // SQUAD_N in mesh.cpp). A menu that offered thirty would be offering something
 // the hardware cannot hear: the ninth board in the room evicts the first, and
@@ -603,6 +604,7 @@ void load() {
     // anything about the aura, and should see it once before deciding.
     s_aura           = s_prefs.getBool("aura", true);
     s_detXp          = s_prefs.getBool("detxp", true);
+    s_lavaLamp       = s_prefs.getBool("lavalamp", true);
     s_rotation = s_prefs.getUChar("rot", DEFAULT_ROTATION);
     if (s_rotation > 3) s_rotation = DEFAULT_ROTATION;
 #if defined(TDECK_PLUS)
@@ -936,6 +938,12 @@ void setFontStep(FontKind k, uint8_t step) {
 void toggleDetXp() {
     s_detXp = !s_detXp;
     s_prefs.putBool("detxp", s_detXp);
+}
+
+bool lavaLamp() { return s_lavaLamp; }
+void toggleLavaLamp() {
+    s_lavaLamp = !s_lavaLamp;
+    s_prefs.putBool("lavalamp", s_lavaLamp);
 }
 
 void toggleAura() {
