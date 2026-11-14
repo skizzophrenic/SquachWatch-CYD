@@ -48,7 +48,9 @@ env.Append(BUILD_FLAGS=["-fno-exceptions"])
 # builds that run the app. Not the ESP32-C5 boards (their radio's channel-state
 # calls differ: a port of its own) and not the Tab5 (no radio of its own), nor
 # the CrowPanel and Tab5 bench builds that have no app. It costs ~33 KB of
-# flash and nothing while the screen is closed.
+# flash and ~0.3 KB of fixed RAM; its ~8.5 KB of buffers come from the heap
+# only while the screen is open (v1.42.0 had them fixed, and CYDs short of
+# heap went deaf).
 _SENSE_SKIP = ("crowpanel7-paneltest", "crowpanel7-probe", "crowpanel7-touchtrace", "crowpanel7-native")
 if env.BoardConfig().get("build.mcu", "") in ("esp32", "esp32s3") and env["PIOENV"] not in _SENSE_SKIP \
         and not env["PIOENV"].startswith("tab5"):

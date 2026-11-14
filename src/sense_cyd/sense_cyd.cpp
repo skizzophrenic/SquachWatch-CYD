@@ -21,6 +21,7 @@
 #include <esp_wifi.h>
 #include <esp_heap_caps.h>
 #include <string.h>
+#include <new>
 #include "sense_cyd.h"
 #include "sense_store.h"
 #include "settings.h"
@@ -35,7 +36,11 @@ static const uint8_t  kQueueSize   = 32;
 static const uint16_t kMaxCsiBytes = 128;   // L-LTF only: 64 tones x int8 imag, real
 
 struct Sample { uint16_t length; int8_t rssi; bool fwi; uint32_t at; int8_t iq[kMaxCsiBytes]; };
-static Sample            s_queue[kQueueSize];
+// The queue and the motion model (~6.6 KB) come from the heap while the
+// screen is up and go back when it closes (senseCydStart / senseCydStop).
+// As fixed RAM they cost every board that much heap all the time, sensing or
+// not, and from v1.42.0 on CYDs short of it heard nothing (2026-11-14).
+static Sample* volatile  s_queue = nullptr;
 static volatile uint8_t  s_wr = 0, s_rd = 0;
 static volatile uint32_t s_seen = 0, s_accepted = 0, s_dropped = 0;
 static uint8_t  s_apMac[6];
@@ -67,7 +72,7 @@ static uint8_t  s_failStreak = 0;
 static uint32_t s_retryAt = 0;
 static bool     s_waiting = false;
 
-static CsiMotionModel s_model;
+static CsiMotionModel* s_model = nullptr;
 static uint32_t s_modelAccepted = 0;
 static uint8_t  s_score = 0, s_rel = 0, s_state = SENSE_STATE_CAL;
 static uint16_t s_rate = 0, s_live = 0;
@@ -234,12 +239,13 @@ float senseCydSpecBinHz() { return 10.0f / kSpN; }
 // ---- CSI: only the router's frames are queued ------------------------------
 static void IRAM_ATTR csiCb(void* ctx, wifi_csi_info_t* info) {
   (void)ctx;
-  if (!info || !info->buf || info->len < 16) return;
+  Sample* const q = s_queue;
+  if (!q || !info || !info->buf || info->len < 16) return;
   s_seen++;
   if (!s_haveAp || memcmp(info->mac, s_apMac, 6) != 0) return;
   const uint8_t next = (uint8_t)((s_wr + 1) % kQueueSize);
   if (next == s_rd) { s_dropped++; return; }
-  Sample& s = s_queue[s_wr];
+  Sample& s = q[s_wr];
   s.length = info->len > kMaxCsiBytes ? kMaxCsiBytes : info->len;
   s.rssi = info->rx_ctrl.rssi;
   s.fwi = info->first_word_invalid;
@@ -338,7 +344,8 @@ static void pingTick(uint32_t now) {
 
 static void resetModels() {
   const uint32_t now = millis();
-  s_model.reset(now, s_calMs, s_windowMs);
+  if (!s_model) return;
+  s_model->reset(now, s_calMs, s_windowMs);
   s_modelAccepted = 0; s_wr = s_rd = 0; s_accepted = s_dropped = 0;
   s_score = s_rel = 0; s_rate = s_live = 0;
   s_motionVotes = s_stillVotes = 0; s_state = SENSE_STATE_CAL; s_presence = false;
@@ -410,7 +417,7 @@ static void onJoined() {
 
 // ---- One transmitter, the router: the motion model's score into a state ------
 static void fuse(uint32_t now) {
-  CsiMotionModel& m = s_model;
+  CsiMotionModel& m = *s_model;
   m.tick(now, s_modelAccepted, 0);
   s_rate = m.samplesPerSecond();
   s_rssi = m.rssi();
@@ -432,7 +439,7 @@ static void fuse(uint32_t now) {
 static void sendStatus(uint32_t now) {
   SenseReport r = {};
   r.upMs = now; r.score = s_score; r.state = s_state; r.rel = s_rel;
-  r.cal = s_mode == SENSE_MODE_STA ? s_model.calibrationPercent(now) : 0;
+  r.cal = s_mode == SENSE_MODE_STA ? s_model->calibrationPercent(now) : 0;
   r.mode = s_mode; r.rate = s_rate; r.chan = s_chan; r.live = s_live; r.rssi = s_rssi;
   r.drop = s_dropped; r.presence = s_presence;
   SenseStore::status(r, millis());
@@ -440,9 +447,9 @@ static void sendStatus(uint32_t now) {
 
 static void sendRouter(uint32_t now) {
   if (s_mode != SENSE_MODE_STA) return;
-  SenseStore::router((uint16_t)((s_apMac[4] << 8) | s_apMac[5]), s_model.rssi(), s_model.samplesPerSecond(),
-                     s_model.calibrated() ? s_model.motionScore() : 0, s_model.calibrationPercent(now),
-                     s_model.reliability(), millis());
+  SenseStore::router((uint16_t)((s_apMac[4] << 8) | s_apMac[5]), s_model->rssi(), s_model->samplesPerSecond(),
+                     s_model->calibrated() ? s_model->motionScore() : 0, s_model->calibrationPercent(now),
+                     s_model->reliability(), millis());
 }
 
 // Every 10 s on the console: the numbers a bench run needs, in one line.
@@ -491,10 +498,11 @@ static void command(char* line) {
     if (v < 5 || v > 1000) { note("pingms 5..1000 (now %lu)", (unsigned long)s_pingMs); return; }
     s_pingMs = (uint32_t)v; if (s_mode == SENSE_MODE_STA) startPing();
   } else if (!strcasecmp(line, "rates")) {
+    if (!s_model) { note("HUMAN SENSING is not open"); return; }
     note("router %u/s rssi %d tones %u cal %u%% rel %u score %u (a%u p%u c%u) live %.2f",
-         s_model.samplesPerSecond(), s_model.rssi(), (unsigned)s_model.carriers(), s_model.calibrationPercent(millis()),
-         s_model.reliability(), s_model.motionScore(), s_model.amplitudeScore(), s_model.phaseScore(), s_model.correlationScore(),
-         s_model.live());
+         s_model->samplesPerSecond(), s_model->rssi(), (unsigned)s_model->carriers(), s_model->calibrationPercent(millis()),
+         s_model->reliability(), s_model->motionScore(), s_model->amplitudeScore(), s_model->phaseScore(), s_model->correlationScore(),
+         s_model->live());
     sendStat(millis());
   } else if (!strcasecmp(line, "stat")) {
     sendStat(millis());
@@ -516,6 +524,7 @@ static void command(char* line) {
 
 // One pass of the engine: the join, the readings into the models, the screen's numbers.
 static void tickBody(uint32_t now) {
+  if (!s_model || !s_queue) return;   // no memory at the start: nothing to run
   if (s_mode == SENSE_MODE_JOINING) {
     const uint32_t jt = millis() - s_joinStartedMs;
     const wl_status_t st = WiFi.status();
@@ -544,7 +553,7 @@ static void tickBody(uint32_t now) {
 
   while (s_rd != s_wr) {
     Sample& s = s_queue[s_rd];
-    s_model.addSample(s.iq, s.length, s.rssi, s.at, s.fwi, CsiMotionModel::SampleEncoding::SIGNED_8_IMAG_REAL);
+    s_model->addSample(s.iq, s.length, s.rssi, s.at, s.fwi, CsiMotionModel::SampleEncoding::SIGNED_8_IMAG_REAL);
     specAdd(s.iq, s.length);
     s_modelAccepted++;
     s_lastReadingAt = now;
@@ -562,7 +571,7 @@ static void tickBody(uint32_t now) {
   }
   if (now - s_lastLineMs >= 1000 / SENSE_LINE_HZ) {
     s_lastLineMs = now;
-    if (s_model.calibrated()) { const float lv = s_model.live() * 100.0f; s_live = (uint16_t)(lv > 1000.0f ? 1000.0f : lv); }
+    if (s_model->calibrated()) { const float lv = s_model->live() * 100.0f; s_live = (uint16_t)(lv > 1000.0f ? 1000.0f : lv); }
     sendStatus(now);
   }
 }
@@ -588,6 +597,15 @@ void senseCydStart(const char* ssid, const char* pass) {
   strncpy(s_ssid, ssid ? ssid : "", sizeof s_ssid - 1); s_ssid[sizeof s_ssid - 1] = 0;
   strncpy(s_pass, pass ? pass : "", sizeof s_pass - 1); s_pass[sizeof s_pass - 1] = 0;
   s_running = true;
+  if (!s_queue) s_queue = (Sample*)malloc(sizeof(Sample) * kQueueSize);
+  if (!s_model) s_model = new (std::nothrow) CsiMotionModel();
+  if (!s_queue || !s_model) {
+    note("HUMAN SENSING: NO MEMORY (queue %s, model %s, largest block %lu)", s_queue ? "ok" : "no",
+         s_model ? "ok" : "no", (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    free(s_queue); s_queue = nullptr;
+    delete s_model; s_model = nullptr;
+    return;   // running, so the loop does not ask again; tickBody does nothing
+  }
   specBegin();
   s_lastLineMs = s_lastFusionMs = millis();
   s_mode = SENSE_MODE_OFF;
@@ -610,6 +628,9 @@ void senseCydStop() {
   memset(s_pass, 0, sizeof s_pass);
   s_mode = SENSE_MODE_OFF; s_running = false;
   specEnd();
+  // csiStop() took the callback away first, so nothing writes the queue now.
+  Sample* q = s_queue; s_queue = nullptr; free(q);
+  delete s_model; s_model = nullptr;
   note("HUMAN SENSING off: heap %lu, %lu readings dropped", (unsigned long)ESP.getFreeHeap(), (unsigned long)s_dropped);
 }
 
