@@ -227,19 +227,21 @@ void DetectionEngine::recordWatchRssi(int8_t rssi) {
     if (_watchRssiCount < WATCH_RSSI_CAP) _watchRssiCount++;
 }
 
-void DetectionEngine::huntBle(const uint8_t* mac, const char* name) {
+void DetectionEngine::huntBle(const uint8_t* mac, const char* name, uint8_t rawKind) {
+    huntSwapReset(rawKind);
     _huntKind = WatchKind::BLE;
     if (mac) memcpy(_huntMac, mac, 6);
     snprintf(_huntLabel, sizeof(_huntLabel), "%s", name ? name : "");
     _huntRssiCount = 0;
 }
 void DetectionEngine::huntWifi(const uint8_t* bssid, const char* ssid) {
+    huntSwapReset(0);
     _huntKind = WatchKind::WIFI;
     if (bssid) memcpy(_huntMac, bssid, 6);
     snprintf(_huntLabel, sizeof(_huntLabel), "%s", ssid ? ssid : "");
     _huntRssiCount = 0;
 }
-void DetectionEngine::clearHunt() { _huntKind = WatchKind::NONE; _huntLabel[0] = 0; _huntRssiCount = 0; }
+void DetectionEngine::clearHunt() { huntSwapReset(0); _huntKind = WatchKind::NONE; _huntLabel[0] = 0; _huntRssiCount = 0; }
 int8_t DetectionEngine::huntRssiAt(uint8_t idx) const {
     if (idx >= _huntRssiCount) return 0;
     uint8_t slot = (uint8_t)((_huntRssiHead + WATCH_RSSI_CAP - _huntRssiCount + idx) % WATCH_RSSI_CAP);
@@ -249,6 +251,7 @@ int8_t DetectionEngine::huntRssiAt(uint8_t idx) const {
 // hunt screen's CAUGHT state is checked that way (main_sim.cpp, "hunt" --pose 1).
 void DetectionEngine::checkHuntBle(const uint8_t* mac, int8_t rssi) {
     if (_huntKind != WatchKind::BLE || memcmp(mac, _huntMac, 6) != 0) return;
+    _huntSeenMs = millis(); _huntSeenRssi = rssi;
     recordHuntRssi(rssi);
 }
 void DetectionEngine::checkHuntWifi(const uint8_t*, int8_t) {}

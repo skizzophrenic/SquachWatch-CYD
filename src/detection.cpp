@@ -480,6 +480,10 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
         int8_t rssi = (int8_t)adv->getRSSI();
         g_engine->checkWatchBle(mac, rssi);
         g_engine->checkHuntBle(mac, rssi);
+        if (g_engine->huntBleKind()) {   // hunting a phone: is this its new ID?
+            const std::vector<uint8_t>& hp = adv->getPayload();
+            g_engine->checkHuntSwap(mac, rssi, hp.data(), hp.size(), millis());
+        }
         // The radio is dedicated to a WiFi sweep or a firmware update right now.
         if (g_rawMode == RawScanMode::WIFI || g_rawMode == RawScanMode::UPDATE) return;
         if (g_rawMode == RawScanMode::BLE) {
@@ -2349,7 +2353,8 @@ int8_t DetectionEngine::watchRssiAt(uint8_t idx) const {
     return _watchRssiHist[slot];
 }
 
-void DetectionEngine::huntBle(const uint8_t* mac, const char* name) {
+void DetectionEngine::huntBle(const uint8_t* mac, const char* name, uint8_t rawKind) {
+    huntSwapReset(rawKind);
     _huntKind = WatchKind::BLE;
     memcpy(_huntMac, mac, 6);
     strncpy(_huntLabel, (name && name[0]) ? name : "Unnamed device", sizeof(_huntLabel) - 1);
@@ -2359,6 +2364,7 @@ void DetectionEngine::huntBle(const uint8_t* mac, const char* name) {
 }
 
 void DetectionEngine::huntWifi(const uint8_t* bssid, const char* ssid) {
+    huntSwapReset(0);
     _huntKind = WatchKind::WIFI;
     memcpy(_huntMac, bssid, 6);
     strncpy(_huntLabel, (ssid && ssid[0]) ? ssid : "(hidden)", sizeof(_huntLabel) - 1);
@@ -2368,6 +2374,7 @@ void DetectionEngine::huntWifi(const uint8_t* bssid, const char* ssid) {
 }
 
 void DetectionEngine::clearHunt() {
+    huntSwapReset(0);
     _huntKind = WatchKind::NONE;
     _huntRssiHead = _huntRssiCount = 0;
 }
@@ -2375,6 +2382,7 @@ void DetectionEngine::clearHunt() {
 void DetectionEngine::checkHuntBle(const uint8_t* mac, int8_t rssi) {
     if (_huntKind != WatchKind::BLE) return;
     if (memcmp(mac, _huntMac, 6) != 0) return;
+    _huntSeenMs = millis(); _huntSeenRssi = rssi;   // every advert, for the ID-change watch
     recordHuntRssi(rssi);
 }
 

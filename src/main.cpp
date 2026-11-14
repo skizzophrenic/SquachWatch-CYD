@@ -9460,7 +9460,9 @@ void loop() {
                             engine.clearHunt();
                             Theme::showToast("HUNT STOPPED", nullptr, Theme::CYAN);
                         } else {
-                            if (s_rawScanIsBle) engine.huntBle(s_confirmMac, s_confirmLabel);
+                            // The scan's guess goes with it: a phone's kind turns on
+                            // the ID-change watch (DetectionEngine::checkHuntSwap).
+                            if (s_rawScanIsBle) engine.huntBle(s_confirmMac, s_confirmLabel, engine.rawBleKindFor(s_confirmMac));
                             else                engine.huntWifi(s_confirmMac, s_confirmLabel);
                             engine.stopRawScan();
                             enterHunt();
@@ -11102,7 +11104,18 @@ void loop() {
         }
         case AppState::HUNT: {
             drawTwoBand([&](TFT_eSPI& t, bool advance) { uiHuntTick(t, now, engine, advance); });
-            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+            if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS && engine.huntSwapOffered()) {
+                // "It changed its ID?": the bar's buttons are the answer while
+                // it asks. NO sits where BACK is, so BACK keys say no.
+                if (uiHuntHitStop(tp.x, tp.y, tft.width(), tft.height())) {
+                    lastTouch = now;
+                    engine.huntSwapAccept(now);
+                    Theme::showToast("FOLLOWING ITS NEW ID", nullptr, Theme::GREEN);
+                } else if (uiHuntHitBack(tp.x, tp.y, tft.width(), tft.height())) {
+                    lastTouch = now;
+                    engine.huntSwapDecline();
+                }
+            } else if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 if (uiHuntHitStop(tp.x, tp.y, tft.width(), tft.height())) {
                     lastTouch = now;
                     engine.clearHunt();

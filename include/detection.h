@@ -496,7 +496,9 @@ public:
     // at-a-time replacement rule, just its own mac/label/RSSI history.
     // No alert flag/cooldown of its own -- HUNT MODE is a screen you're
     // actively looking at already, so there's nothing to pop up over.
-    void huntBle(const uint8_t* mac, const char* name);
+    // rawKind (RawBleKind): what the raw scan took the device for. A phone's
+    // kind turns on the ID-change watch below; 0 for everything else.
+    void huntBle(const uint8_t* mac, const char* name, uint8_t rawKind = 0);
     void huntWifi(const uint8_t* bssid, const char* ssid);
     void clearHunt();
     // The hunt half of isWatched(), and for the same reason: HUNT was the
@@ -517,6 +519,68 @@ public:
     // member.
     void checkWatchBle(const uint8_t* mac, int8_t rssi);
     void checkHuntBle(const uint8_t* mac, int8_t rssi);
+
+    // ---- A hunted phone that changed its ID -----------------------------
+    // Phones take a new random Bluetooth address every ~15 minutes, and the
+    // hunt, which follows one address, goes quiet. Hunting something the raw
+    // scan labelled (iPhone?, Android?...), every advert of that same kind is
+    // noted with when its address was first heard; once the target has been
+    // quiet HUNT_SWAP_QUIET_MS, an address of its kind first heard no earlier
+    // than just before the target went quiet, within HUNT_SWAP_DB of its last
+    // reading, is offered: "it changed its ID?". A guess, so the HUNT screen
+    // asks. Called from the BLE scan callback with the advert's bytes.
+    static const uint32_t HUNT_SWAP_QUIET_MS  = 10000;   // ~30 adverts missed
+    static const uint32_t HUNT_SWAP_MAX_MS    = 600000;  // after 10 min quiet, stop guessing
+    static const uint32_t HUNT_SWAP_OVERLAP_MS = 3000;   // the new address can start a moment before the old stops
+    static const int      HUNT_SWAP_DB        = 15;
+    static const uint8_t  HUNT_OTHERS_CAP     = 32;
+    void checkHuntSwap(const uint8_t* mac, int8_t rssi, const uint8_t* adv, size_t len, uint32_t now) {
+        if (_huntKind != WatchKind::BLE || !_huntBleKind || _swapReady || !adv) return;
+        if (memcmp(mac, _huntMac, 6) == 0) return;
+        if (rawBleKindOf(adv, len) != _huntBleKind) return;
+        int idx = -1;
+        for (uint8_t i = 0; i < _huntOthersN; i++)
+            if (memcmp(_huntOthers[i].mac, mac, 6) == 0) { idx = i; break; }
+        if (idx < 0) {   // a ring: in a crowd the oldest address goes first
+            idx = _huntOthersN < HUNT_OTHERS_CAP ? _huntOthersN++ : _huntOthersNext;
+            _huntOthersNext = (uint8_t)((idx + 1) % HUNT_OTHERS_CAP);
+            memcpy(_huntOthers[idx].mac, mac, 6);
+            _huntOthers[idx].first = now;
+            _huntOthers[idx].declined = false;
+        }
+        const HuntOther& o = _huntOthers[idx];
+        if (o.declined || !_huntSeenMs) return;
+        const uint32_t quiet = now - _huntSeenMs;
+        if (quiet < HUNT_SWAP_QUIET_MS || quiet > HUNT_SWAP_MAX_MS) return;
+        if ((int32_t)(o.first - (_huntSeenMs - HUNT_SWAP_OVERLAP_MS)) < 0) return;   // was already about
+        const int d = (int)rssi - (int)_huntSeenRssi;
+        if (d > HUNT_SWAP_DB || d < -HUNT_SWAP_DB) return;
+        memcpy(_swapMac, mac, 6);
+        _swapRssi = rssi;
+        _swapReady = true;
+    }
+    bool    huntSwapOffered() const { return _swapReady; }
+    int8_t  huntSwapRssi() const { return _swapRssi; }
+    uint8_t huntBleKind() const { return _huntBleKind; }
+    // YES: the hunt follows the new address, keeping its readings.
+    void huntSwapAccept(uint32_t now) {
+        if (!_swapReady) return;
+        memcpy(_huntMac, _swapMac, 6);
+        _huntSeenMs = now; _huntSeenRssi = _swapRssi;
+        _swapReady = false;
+    }
+    // NO: that address is not asked about again this hunt.
+    void huntSwapDecline() {
+        for (uint8_t i = 0; i < _huntOthersN; i++)
+            if (memcmp(_huntOthers[i].mac, _swapMac, 6) == 0) _huntOthers[i].declined = true;
+        _swapReady = false;
+    }
+    // The raw scan's guess for a device in its list, 0 if it is not there.
+    uint8_t rawBleKindFor(const uint8_t* mac) const {
+        for (uint8_t i = 0; i < _rawBleCount; i++)
+            if (memcmp(_rawBle[i].mac, mac, 6) == 0) return _rawBle[i].kind;
+        return 0;
+    }
 
     // SD log helper accessor.
     SdLog& sd() { return _sd; }
@@ -675,6 +739,21 @@ private:
     uint8_t   _huntRssiHead  = 0;
     uint8_t   _huntRssiCount = 0;
     uint32_t  _huntRssiLastMs = 0;
+    // The ID-change watch (checkHuntSwap). _huntSeenMs/_huntSeenRssi are the
+    // target's last advert, every one, not the gauge's 2 s samples.
+    uint8_t   _huntBleKind = 0;
+    volatile uint32_t _huntSeenMs = 0;
+    int8_t    _huntSeenRssi = 0;
+    struct HuntOther { uint8_t mac[6]; bool declined; uint32_t first; };
+    HuntOther _huntOthers[HUNT_OTHERS_CAP];
+    uint8_t   _huntOthersN = 0, _huntOthersNext = 0;
+    uint8_t   _swapMac[6] = {0};
+    int8_t    _swapRssi = 0;
+    volatile bool _swapReady = false;
+    void huntSwapReset(uint8_t kind) {
+        _huntBleKind = kind; _huntSeenMs = 0; _huntSeenRssi = 0;
+        _huntOthersN = _huntOthersNext = 0; _swapReady = false;
+    }
     void checkHuntWifi(const uint8_t* mac, int8_t rssi);
     void recordHuntRssi(int8_t rssi);
 
