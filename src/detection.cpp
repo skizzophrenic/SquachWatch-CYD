@@ -1958,7 +1958,7 @@ void DetectionEngine::processDeauthQ() {
                 Regulars::note(e.mac, DetectionType::DEAUTH);
                 _latest = &row;
                 _latestNew = false;      // the row the first flood made
-                _latestChangeMs = now;
+                _latestSeq = _latestSeq + 1;
                 queueBlackBox(row, true);
                 return;
             }
@@ -2042,7 +2042,7 @@ void DetectionEngine::postBle(Detection d) {
                 _typeCounts[(uint8_t)d.type]++;
                 _latest = &_log[slot];
                 _latestNew = false;                // ...but a device we had already
-                _latestChangeMs = millis();
+                _latestSeq = _latestSeq + 1;
                 queueBlackBox(_log[slot], true);
             }
             return;
@@ -2624,7 +2624,7 @@ void DetectionEngine::processWiFiQ() {
                     _typeCounts[(uint8_t)t]++;
                     _latest = &_log[slot];
                     _latestNew = false;            // came back; not new to the log
-                    _latestChangeMs = millis();
+                    _latestSeq = _latestSeq + 1;
                     queueBlackBox(_log[slot], true);
                 }
                 merged = true;
@@ -2680,7 +2680,7 @@ void DetectionEngine::pushLog(const Detection& d) {
     if (_logCount < LOG_CAP) _logCount++;
     _latest = &_log[(_logHead + LOG_CAP - 1) % LOG_CAP];
     _latestNew = true;      // the one place a row the log never held is made
-    _latestChangeMs = millis();
+    _latestSeq = _latestSeq + 1;
     _typeCounts[(uint8_t)d.type]++;
     if (d.channel == 0 && (uint8_t)d.type < SpamWatch::TYPES) _newBle[(uint8_t)d.type]++;
 #if SQW_WIFI_5G

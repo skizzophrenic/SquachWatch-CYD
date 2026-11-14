@@ -743,9 +743,10 @@ namespace Theme {
 
     // FIRE's heat (6.4 KB on a 2.8"), DIGITAL's trails and TERMINAL's columns
     // are only let go when another background is picked, so a screen with no
-    // background (LOG, SETTINGS, UPDATE, HUMAN SENSING) would otherwise run
-    // with them pinned in the middle of the heap. Called on the way into
-    // those; the home screen takes them back on its first frame.
+    // background (UPDATE, HUMAN SENSING) would otherwise run with them pinned
+    // in the middle of the heap. Called on the way into those; the next
+    // screen that draws the background takes them back on its first frame.
+    // Not LOG or SETTINGS: those draw the background behind their lists.
     void releaseBackgroundBuffers();
 
     // True during the shared random glitch burst drawBangersText()

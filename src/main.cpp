@@ -2870,6 +2870,31 @@ static bool s_alertSpam     = false;   // this alert is a spam flood's one annou
 static const uint16_t BUZZ_CHIRP_MS = 80;
 #endif
 
+// The sighting a screen should announce now, or null: one the engine has
+// pointed latest() at since a screen last asked (latestSeq() moved), and only
+// while it is fresh. Asking consumes it, so each catch is announced once.
+//
+// This replaced "firstSeen within 200 ms of this pass", which dropped any
+// catch the loop did not look at quickly enough: at 5 fps (POWER SAVER) a pass
+// is 200 ms, and one slow pass (an SD append, a flash erase) was enough. The
+// catch stayed in the LOG and the counters, with no card, no sound and no
+// heads-up. A catch made while a screen that does not announce was up
+// (SETTINGS, LOG) is still let go: by the time the main screen is back it is
+// older than ALERT_FRESH_MS, as it was before.
+static const uint32_t ALERT_FRESH_MS = 2000;
+static uint32_t s_alertSeqSeen = 0;
+static const Detection* freshCatch(uint32_t now) {
+    const uint32_t seq = engine.latestSeq();
+    if (seq == s_alertSeqSeen) return nullptr;
+    const Detection* d = engine.latest();
+    if (!d) { s_alertSeqSeen = seq; return nullptr; }
+    // Stamped on a radio task a moment after `now` was read: the next pass.
+    const int32_t age = (int32_t)(now - d->firstSeen);
+    if (age < 0) return nullptr;
+    s_alertSeqSeen = seq;
+    return age <= (int32_t)ALERT_FRESH_MS ? d : nullptr;
+}
+
 // Whether a sighting may take the screen, and AUTO SNOOZE's bookkeeping
 // with it. Call it once for each alert about to be raised and obey the
 // answer -- it counts, so asking twice spends two of the device's allowance.
@@ -2932,7 +2957,7 @@ static bool alertMayInterrupt(const Detection& d) {
     // update window -- and none of the manual ones (NEARBY's hold, a tap on
     // the desk card), which open a card for something already on the glass.
     // Everything upstream of this line is the board's own idea of
-    // alert-worthy: within ALERT_GRACE_MS of firstSeen, past ALERT FILTER,
+    // alert-worthy: fresh (freshCatch()), past ALERT FILTER,
     // not ignored or snoozed, and now past AUTO SNOOZE. The buzzer adds four
     // of its own: it is switched on; the row is one the log never held (a
     // device coming back is news to the screen, not to the room); the saver
@@ -3410,7 +3435,6 @@ static void enterWatchAlert() {
 static bool s_logFromTerminal = false;
 
 static void enterLog() {
-    Theme::releaseBackgroundBuffers();
     state = AppState::LOG;
     transitionStart = millis();
     s_confirmPending = false;
@@ -3459,7 +3483,6 @@ static void enterSettings() {
     restoreFrameBuffer();   // lent to a download that did not end in a restart
     Settings::deskActive(false);
     Theme::releaseClockBackdrop();
-    Theme::releaseBackgroundBuffers();
     state = AppState::SETTINGS;
     transitionStart = millis();
     uiSettingsInit(*canvas);
@@ -4165,8 +4188,8 @@ static void loraRadioTick(uint32_t now) {
 static bool loraPageAlertTick(uint32_t now) {
     if (!Settings::loraAlerts() || uiLoraSettingsEditing()) return false;
     if (Squachy::onboardingActive()) return false;
-    const Detection* latest = engine.latest();
-    if (latest && (now - latest->firstSeen) < 200 &&
+    const Detection* latest = freshCatch(now);
+    if (latest &&
         latest->conf >= Settings::minConfidence() && !IgnoreList::silenced(latest->mac) &&
         alertMayInterrupt(*latest)) {
         uiAlertSetRedacted(false);
@@ -8395,8 +8418,8 @@ void loop() {
             // news -- and it has no timeout, so without this it held every
             // alert back until somebody happened to tap it.
             {
-                const Detection* latest = engine.latest();
-                if (latest && (now - latest->firstSeen) < 200 &&
+                const Detection* latest = freshCatch(now);
+                if (latest &&
                     latest->conf >= Settings::minConfidence() && !IgnoreList::silenced(latest->mac) &&
                     alertMayInterrupt(*latest)) {
                     uiAlertSetRedacted(false);
@@ -8547,6 +8570,10 @@ void loop() {
             // is deliberately NOT called in that branch since it's
             // consumed on read; leaving it untouched means it stays
             // pending and still fires for real once onboarding ends.
+            // Taken (and so consumed) before the chain: a catch that lands
+            // during the walkthrough, or alongside a watch hit, is not held
+            // back to pop up a moment later.
+            const Detection* latest = freshCatch(now);
             if (Squachy::onboardingActive()
 #if SQUACH_MESH
                 || MeshTutor::active()     // same courtesy for the messages tutorial
@@ -8556,8 +8583,7 @@ void loop() {
             } else if (engine.watchHitPending()) {
                 enterWatchAlert();
             } else {
-                const Detection* latest = engine.latest();
-                if (latest && (now - latest->firstSeen) < 200 &&
+                if (latest &&
                     // This sighting's grade, not the type's -- which is what
                     // finally makes ALERT FILTER mean something. Set it to
                     // High and an ESP32 probe request matching a
@@ -10673,8 +10699,8 @@ void loop() {
             // much of a new one reaches the glass. The same test CLEAR makes.
             {
                 const Security::LockAlerts la = Security::lockAlerts();
-                const Detection* latest = engine.latest();
-                if (la != Security::LockAlerts::NONE && latest && (now - latest->firstSeen) < 200 &&
+                const Detection* latest = freshCatch(now);
+                if (la != Security::LockAlerts::NONE && latest &&
                     latest->conf >= Settings::minConfidence() && !IgnoreList::silenced(latest->mac) &&
                     alertMayInterrupt(*latest)) {
                     uiAlertSetRedacted(la == Security::LockAlerts::TYPE_ONLY);
@@ -10965,8 +10991,8 @@ void loop() {
             // The same test CLEAR makes, but the answer is a small card
             // beside the clock, and Squachy's reaction, not a new screen.
             {
-                const Detection* latest = engine.latest();
-                if (latest && (now - latest->firstSeen) < 200 &&
+                const Detection* latest = freshCatch(now);
+                if (latest &&
                     latest->conf >= Settings::minConfidence() && !IgnoreList::silenced(latest->mac) &&
                     alertMayInterrupt(*latest)) {
                     uiDeskAlert(*latest, now);
