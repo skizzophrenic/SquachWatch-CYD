@@ -918,7 +918,10 @@ void connect(const char* ssid, const char* pass, bool save) {
     s_fail    = Fail::NONE;
     s_cancel  = s_install = s_downloadStarted = false;
     s_state   = State::CONNECTING;
-    if (xTaskCreatePinnedToCore(run, "otawifi", TASK_STACK, nullptr, 1, &s_task, 1) != pdPASS) {
+    // The second core where there is one. The ESP32-C5 has only core 0, and
+    // asking for core 1 there is an assert, not a failure: every WiFi update
+    // on the NM-CYD-C5 restarted the board (issue #121).
+    if (xTaskCreatePinnedToCore(run, "otawifi", TASK_STACK, nullptr, 1, &s_task, portNUM_PROCESSORS > 1 ? 1 : 0) != pdPASS) {
         s_task = nullptr;
         memset(s_pass, 0, sizeof s_pass);
         Serial.printf("[ota] no room for the update task: %u wanted, heap %lu largest %lu\n", (unsigned)TASK_STACK,
