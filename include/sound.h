@@ -19,7 +19,7 @@
 #include <stdint.h>
 
 // SQUACHSIM: the browser emulator's builds have no speaker to drive.
-#if (defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(STICKS3) || defined(CARDPUTER_ADV)) && !defined(SQUACHSIM)
+#if (defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(STICKS3) || defined(CARDPUTER_ADV) || defined(WS_C5_35)) && !defined(SQUACHSIM)
 #define SQW_SPEAKER 1
 #else
 #define SQW_SPEAKER 0

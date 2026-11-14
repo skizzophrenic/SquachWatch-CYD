@@ -82,6 +82,9 @@ jobs:
       # The Waveshare ESP32-C5-Touch-LCD-2.8: the same C5 platform again.
       - name: Build Waveshare ESP32-C5-Touch-LCD-2.8 (ESP32-C5)
         run: pio run -e waveshare-c5-28
+      # The Waveshare C5 3.5": the same C5 platform, so no new toolchain.
+      - name: Build Waveshare ESP32-C5-Touch-LCD-3.5
+        run: pio run -e ws-c5-35
 
       # The LilyGo T-Deck Plus: an S3 like the watch, on the ordinary platform.
       - name: Build LilyGo T-Deck Plus (ESP32-S3)
@@ -117,6 +120,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Run host tests
         run: make -C test
+
+      # The Waveshare C5 3.5" FT6336 read path: a short I2C packet must be
+      # rejected, not zero-filled into a fabricated on-panel coordinate. Its
+      # own runner (bespoke Wire/Arduino fakes) since it injects truncated
+      # transfers the sim shims do not model.
+      - name: FT6336 touch read regression (C5 3.5)
+        run: python3 test/ws_c5_touch_read_test.py
 
       # Costs a second and needs no toolchain. The failure it covers is a
       # scan quietly going back to active -- which compiles, runs, finds
