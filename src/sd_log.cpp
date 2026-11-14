@@ -75,7 +75,14 @@ bool SdLog::begin() {
     // sits on the amplifier. So no log and no wipe of it here.
     return false;
 #endif
-    Serial.printf("[sd] mounting: heap %lu, largest block %lu\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    // INTERNAL SRAM, not whatever pool happens to have the biggest block in
+    // it: what a failed mount runs out of is the driver's own buffers, and
+    // those are internal. MALLOC_CAP_8BIT alone also matches PSRAM on the
+    // boards that build with -DBOARD_HAS_PSRAM, so on those this line used to
+    // print a megabyte-scale number and say nothing at all about the pool the
+    // mount was actually short of. See the note at the top of detection.cpp.
+    Serial.printf("[sd] mounting: heap %lu, largest block %lu\n", (unsigned long)ESP.getFreeHeap(),
+                  (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
     // SDMMC on the S3's GPIO matrix. Pins from Freenove's own SDMMC sketch and
     // the schematic: CLK 38, CMD 40, D0 39, D1 41, D2 48, D3 47 on the 2.8",

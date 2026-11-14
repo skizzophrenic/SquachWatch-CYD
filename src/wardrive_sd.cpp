@@ -47,6 +47,15 @@ namespace {
 // The scanner's SCAN_FLUSH_BLOCK_B in detection.cpp: wardriving gives way at
 // the point where detection starts fighting for heap.
 const uint32_t PAUSE_BLOCK_B = 8192;
+// And out of the same pool it was measured in -- INTERNAL SRAM. Asking with
+// MALLOC_CAP_8BIT alone also matches PSRAM on every board that builds with
+// -DBOARD_HAS_PSRAM (sticks3, twatch-s3, tdeck-plus, crowpanel7, the Freenove
+// S3 envs), and the call hands back the larger of the two blocks, so there it
+// would answer with PSRAM's megabytes and the pause would never arm however
+// little internal SRAM was left. MALLOC_CAP_8BIT stays in the mask so a board
+// without PSRAM reads exactly what it read before; see the long note at the
+// top of src/detection.cpp for why not MALLOC_CAP_INTERNAL on its own.
+const uint32_t PAUSE_CAPS = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
 const uint16_t ROWS_B   = 512;      // the row buffer, about three rows
 const uint16_t ROW_MAX  = 320;      // one csvRow() always fits in this
 const uint32_t FLUSH_MS = 2000;     // the longest a row waits for the card
@@ -324,7 +333,7 @@ void sdTick(uint32_t nowMs, bool cardMounted) {
     }
     if (!s_heapAt || nowMs - s_heapAt >= HEAP_MS) {
         s_heapAt = nowMs ? nowMs : 1;
-        s_paused = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < PAUSE_BLOCK_B;
+        s_paused = heap_caps_get_largest_free_block(PAUSE_CAPS) < PAUSE_BLOCK_B;
     }
     s_fixNow = realFix(nowMs);
     drain(nowMs);
