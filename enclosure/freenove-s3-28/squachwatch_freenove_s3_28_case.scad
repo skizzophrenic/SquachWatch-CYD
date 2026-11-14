@@ -24,7 +24,7 @@ part = "print"; // [print, back, bezel, assembly]
 
 /* [Measure these on your board] */
 // Floor top -> PCB back. Speaker (10) + tallest part on the PCB back (4.7)
-back_clear = 15;
+back_clear = 15;    // + gps_depth (worked out) with the GPS bay
 // RESET/BOOT switch height off the PCB back, actuator included
 btn_h = 2.0;
 
@@ -32,7 +32,7 @@ btn_h = 2.0;
 fit = 0.3;          // side gap (the glass is as wide as the PCB)
 end_fit = 0.6;      // end gap (USB-C pokes out ~0.3)
 bezel_fit = 0.15;   // gap between lid skirt and tub step
-rib_interf = 0.2;   // crush-rib bite into the tub step (raise if loose)
+rib_interf = 0.35;  // crush-rib bite into the tub step (raise if loose; 0.2 was, 2026-10-25)
 pin_d = 3.0;        // locating pins into the 3.2 mm holes
 pin_h = 1.3;
 wall = 2.2;
@@ -50,6 +50,22 @@ sd_slot = true;
 sd_slot_w = 19;     // TF slot opening width (the card is 11)
 mic_hole = true;
 speaker = true;     // pocket + grille
+
+/* [GPS bay] */
+// An M5Stack Unit GPS v1.1 standing on its long edge across the right end
+// (opposite the USB-C), its face against the end wall. Standing, it is
+// taller than the plain case is deep, so the case is gps_depth deeper; it
+// adds only its thickness to the length; the unit and its plug fit across
+// inside. The cable goes from
+// the UART connector out through its opening and back in through a port just
+// below it, then along the wall to the plug. Measured 2026-10-25: about
+// 48 x 24 x 8.5, the plug 5 mm proud. The case is made just deep enough for
+// it standing, plus room.
+gps_bay = false;
+gps_l = 49;       // along the end wall (the unit's length, plus room)
+gps_h = 25;       // standing height (the unit's width)
+gps_t = 9.2;      // its thickness, plus room
+gps_room = 0.6;   // above its top edge, under the lid's bar
 
 /* [Lettering] */
 logo = "SQUACHWATCH";   // engraved on the back; "" for none
@@ -90,13 +106,17 @@ mic = [82, 10];
 
 // ---- derived ----
 cav_x0 = -end_fit;  cav_y0 = -fit;
-cav_l = pcb_l + 2 * end_fit;  cav_w = pcb_w + 2 * fit;
+gps_x0 = pcb_l + end_fit + 0.4;                    // the unit's board-side face
+cav_l = pcb_l + 2 * end_fit + (gps_bay ? gps_t + 0.4 : 0);
+cav_w = pcb_w + 2 * fit;
 cav_y1 = cav_y0 + cav_w;
 out_x0 = cav_x0 - wall;  out_y0 = cav_y0 - wall;
 out_l = cav_l + 2 * wall; out_w = cav_w + 2 * wall;
 out_y1 = out_y0 + out_w;
 
-z_pcb_bot = floor_t + back_clear;
+// standing, the unit needs gps_h + room between the floor and the lid
+gps_depth = gps_bay ? max(0, gps_h + gps_room - (back_clear + pcb_t + stack)) : 0;
+z_pcb_bot = floor_t + back_clear + gps_depth;
 z_pcb_top = z_pcb_bot + pcb_t;
 z_glass = z_pcb_top + stack;
 tub_h = z_glass;
@@ -104,7 +124,7 @@ step = skirt_t + bezel_fit;
 
 z_usb = z_pcb_bot - 1.6;
 z_io = z_pcb_bot - 1.6;
-z_sd = z_pcb_bot - 1.0;
+z_sd = z_pcb_bot - 0.5;    // 0.5 nearer the face than first drawn (a print, 2026-10-26)
 
 // paperclip guide: hole through the floor, tube up to just under the switch
 clip_d = 1.6;                         // a standard paperclip is ~1 mm
@@ -152,6 +172,7 @@ module back() {
             for (b = btns) translate([b[0], b[1], floor_t - eps])
                 cylinder(d = tube_d, h = tube_top - floor_t + eps);
             if (speaker) speaker_frame();
+            if (gps_bay) gps_holder();
         }
 
         for (b = btns) translate([b[0], b[1], 0]) {
@@ -173,6 +194,23 @@ module back() {
             port_y(uart_x, z_io, 8.0, 4.5, cav_y1 - 1, out_y1 + 1);
         }
 
+        if (gps_bay) {
+            // 2 mm more room across for the unit, its plug and wires: the side
+            // walls thinned 1 mm inside at the GPS end only, so the board's
+            // side ports stay against the wall (too tight, 2026-10-26)
+            translate([0, 0, floor_t]) linear_extrude(tub_h - skirt_h - 0.6 - floor_t)
+                intersection() {
+                    offset(delta = 1) cav2d();
+                    translate([gps_x0 - 0.2, cav_y0 - 2]) square([cav_x0 + cav_l - gps_x0 + 0.2, cav_w + 4]);
+                }
+            // a groove in the corner post by the SD side, facing the corner,
+            // for the GPS wires; its top stays whole under the board
+            translate([holes[3][0], holes[3][1], floor_t - eps]) rotate(45)
+                translate([1.9, -2, 0]) cube([4, 4, z_pcb_bot - floor_t - 2]);
+            // the cable's way back in, just below the UART opening
+            port_y(uart_x, z_io - 6.5, 8.0, 5.0, cav_y1 - 1, out_y1 + 1, 2);
+        }
+
         if (sd_slot) {
             // 19 mm, not 13: on the first print the card sat 2-3 mm off the
             // slot's centre (2026-10-17), and the drawing's position is a
@@ -192,6 +230,13 @@ module back() {
 
         if (speaker) grille();
     }
+}
+
+// A low wall on the board side of the unit and a stop at each end keep it
+// standing against the end wall; the lid's bar holds its top edge.
+module gps_holder() {
+    rail_h = 7;
+    translate([gps_x0 - 1.6, cav_y0 + 4, floor_t - eps]) cube([1.6, cav_w - 8, rail_h]);
 }
 
 module speaker_frame() {
@@ -227,6 +272,9 @@ module bezel() {
             for (h = holes) translate([h[0], h[1], z_pcb_top + 0.1])
                 cylinder(d = 5.6, h = z_glass - z_pcb_top);
             crush_ribs();
+            if (gps_bay)                     // holds the standing GPS down
+                translate([gps_x0 + 1, cav_y0 + 4, floor_t + gps_h + 0.3])
+                    cube([gps_t - 2, cav_w - 8, z_glass - (floor_t + gps_h + 0.3) + eps]);
         }
         // pry notch on the plain right end, for getting the lid off
         translate([out_x0 + out_l - skirt_t - 1, out_y0 + out_w / 2 - 5, z_glass - skirt_h - 1])
@@ -268,6 +316,8 @@ module board() {
     color("silver") port_x(usb_y, z_usb, 8.9, 3.2, -0.3, 7);
     if (speaker) color("#666") translate([spk_center[0] - spk_x / 2, spk_center[1] - spk_y / 2, floor_t])
         cube([spk_x, spk_y, spk_d]);
+    if (gps_bay) color("white") translate([gps_x0 + 0.3, cav_y0 + 0.5, floor_t])
+        cube([gps_t - 0.6, gps_l - 1, gps_h - 1]);
 }
 
 module bezel_print() translate([0, 0, z_glass + bezel_t]) rotate([180, 0, 0]) bezel();
