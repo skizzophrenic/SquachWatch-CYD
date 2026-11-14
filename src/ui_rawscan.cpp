@@ -382,12 +382,12 @@ if (!Theme::stillBackdrop(t)) switch (Settings::background()) {
                 const int rsw = t.textWidth(rs);
                 Theme::bodyFontOff(t);
                 t.setTextSize(2);
-                printName(t, r->name[0] ? Privacy::name(r->name, pv, sizeof pv) : "(unnamed)",
+                printName(t, r->name[0] ? Privacy::name(r->name, pv, sizeof pv) : rawBleKindLabel(r->kind),
                           4, y + topPad, w - rsw - 14 - 11 - 8);
             }
 #else
             t.setCursor(4, y + topPad);
-            t.print(r->name[0] ? Privacy::name(r->name, pv, sizeof pv) : "(unnamed)");
+            t.print(r->name[0] ? Privacy::name(r->name, pv, sizeof pv) : rawBleKindLabel(r->kind));
 #endif
 
             Theme::bodyFontOn(t);

@@ -1037,7 +1037,7 @@ int main(int argc, char** argv) {
         if (const char* ep = getenv("SQUACHSIM_EPOCH")) Clock::setEpoch((uint32_t)strtoul(ep, nullptr, 10));
         if (getenv("SQUACH_ALERT") && engine.logAt(0)) uiDeskAlert(*engine.logAt(0), now);
     }
-    else if (screen == "rawscan")    uiRawScanInit(frame, true);
+    else if (screen == "rawscan")    { engine.startRawBleScan(); uiRawScanInit(frame, true); }
     else if (screen == "watchalert") {
         // Watching the seeded AirTag, with a signal that has been climbing for
         // the last twenty seconds -- so the screen has a name, a type and a

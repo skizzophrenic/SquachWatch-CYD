@@ -9533,7 +9533,7 @@ void loop() {
                             if (r) {
                                 memcpy(s_confirmMac, r->mac, 6);
                                 s_confirmLabelIsName = true;  // name or placeholder; Privacy::name exempts the latter
-                                strncpy(s_confirmLabel, r->name[0] ? r->name : "Unnamed device",
+                                strncpy(s_confirmLabel, r->name[0] ? r->name : r->kind ? rawBleKindLabel(r->kind) : "Unnamed device",
                                         sizeof(s_confirmLabel) - 1);
                                 haveTarget = true;
                             }

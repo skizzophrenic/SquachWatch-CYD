@@ -150,9 +150,35 @@ void DetectionEngine::postRawBle(RawBleResult r) {
     if (_rawBleCount < RAW_BLE_CAP) _rawBle[_rawBleCount++] = r;
 }
 
-// Raw scanner: reports "done, nothing found" so the raw-scan screen
-// renders its empty-result state rather than spinning forever.
-void DetectionEngine::startRawBleScan() { _rawBleCount = 0; }
+// Raw scanner: "done" at once, with a room's worth of devices so the list
+// and its phone labels can be seen. Each is made from advert bytes of the
+// kind the real ones send, through the firmware's own rawBleKindOf().
+static RawBleResult simRaw(uint8_t tag, int8_t rssi, const char* name, const uint8_t* adv, size_t n) {
+    RawBleResult r;
+    memset(&r, 0, sizeof r);
+    const uint8_t mac[6] = { 0x5A, 0x11, 0x5C, 0x00, 0x00, tag };
+    memcpy(r.mac, mac, 6);
+    r.rssi = r.prev = rssi;
+    if (name) strncpy(r.name, name, sizeof r.name - 1);
+    r.kind = rawBleKindOf(adv, n);
+    return r;
+}
+void DetectionEngine::startRawBleScan() {
+    _rawBleCount = 0;
+    static const uint8_t IPHONE[]  = { 0x02, 0x01, 0x1A, 0x0A, 0xFF, 0x4C, 0x00, 0x10, 0x05, 0x03, 0x1C, 0x12, 0x34, 0x56 };
+    static const uint8_t AIRPODS[] = { 0x0B, 0xFF, 0x4C, 0x00, 0x07, 0x06, 0x01, 0x0E, 0x20, 0x55, 0xAA, 0x01 };
+    static const uint8_t ANDROID[] = { 0x02, 0x01, 0x06, 0x03, 0x03, 0xF3, 0xFE, 0x05, 0x16, 0xF3, 0xFE, 0x01, 0x02 };
+    static const uint8_t GALAXY[]  = { 0x02, 0x01, 0x06, 0x07, 0xFF, 0x75, 0x00, 0x42, 0x09, 0x01, 0x02 };
+    static const uint8_t FINDMY[]  = { 0x05, 0xFF, 0x4C, 0x00, 0x12, 0x00 };
+    static const uint8_t PLAIN[]   = { 0x02, 0x01, 0x06 };
+    postRawBle(simRaw(1, -54, nullptr, AIRPODS, sizeof AIRPODS));
+    postRawBle(simRaw(2, -61, nullptr, IPHONE, sizeof IPHONE));
+    postRawBle(simRaw(3, -66, "Flip 5", PLAIN, sizeof PLAIN));
+    postRawBle(simRaw(4, -72, nullptr, ANDROID, sizeof ANDROID));
+    postRawBle(simRaw(5, -77, nullptr, GALAXY, sizeof GALAXY));
+    postRawBle(simRaw(6, -81, nullptr, FINDMY, sizeof FINDMY));
+    postRawBle(simRaw(7, -88, nullptr, PLAIN, sizeof PLAIN));
+}
 bool DetectionEngine::rawBleScanDone() const { return true; }
 const RawBleResult* DetectionEngine::rawBleAt(uint8_t idx) const {
     return idx < _rawBleCount ? &_rawBle[idx] : nullptr;

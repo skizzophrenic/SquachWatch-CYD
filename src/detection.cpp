@@ -492,6 +492,8 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
             const std::string advName = adv->getName();
             const char* name = advName.c_str();
             if (name && name[0]) strncpy(r.name, name, sizeof(r.name) - 1);
+            const std::vector<uint8_t>& pl = adv->getPayload();
+            r.kind = rawBleKindOf(pl.data(), pl.size());
             g_engine->postRawBle(r);
             return;
         }
@@ -2016,6 +2018,7 @@ void DetectionEngine::postRawBle(RawBleResult r) {
             _rawBle[i].prev = _rawBle[i].rssi;   // for the NEARBY list's closer/further arrow
             _rawBle[i].rssi = r.rssi;
             if (r.name[0]) strncpy(_rawBle[i].name, r.name, sizeof(_rawBle[i].name) - 1);
+            if (r.kind > _rawBle[i].kind) _rawBle[i].kind = r.kind;   // the best guess yet
             return;
         }
     }
