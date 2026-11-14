@@ -16,6 +16,7 @@ struct Contact {
     char    name[32];
     uint8_t secret[32];
     bool    secretReady, bad;
+    bool    kept;         // came back from flash at boot: never evicted to make room
 };
 
 struct Pending {
@@ -128,8 +129,11 @@ bool learn(const uint8_t pub[32], const char* name) {
     if (i < 0) {
         for (int k = 0; k < CONTACTS; k++) if (isZero(s_c[k].pub, 32)) { i = k; break; }
         if (i < 0) {
-            // Full: a contact we never worked a secret out for goes first.
-            for (int k = 0; k < CONTACTS; k++) if (!s_c[k].secretReady) { i = k; break; }
+            // Full: a contact we never worked a secret out for goes first --
+            // never one saved from before this boot. secretReady is RAM only,
+            // so after a restart a flood of unsigned adverts could push every
+            // saved contact out.
+            for (int k = 0; k < CONTACTS; k++) if (!s_c[k].secretReady && !s_c[k].kept) { i = k; break; }
             if (i < 0) return false;
         }
         memset(&s_c[i], 0, sizeof s_c[i]);
@@ -173,6 +177,8 @@ bool loadContacts(const uint8_t* in, size_t len) {
     for (size_t o = 1; o + 64 <= len; o += 64) {
         char name[33]; memcpy(name, in + o + 32, 32); name[32] = '\0';
         learn(in + o, name);
+        const int k = findContactByKey(in + o);
+        if (k >= 0) s_c[k].kept = true;
     }
     s_dirty = false;
     return true;

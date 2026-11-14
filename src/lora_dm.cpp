@@ -17,6 +17,7 @@ struct Peer {
     uint8_t  pub[32];
     uint8_t  aes[32];      // SHA-256 of the shared secret, once worked out
     bool     aesReady;
+    bool     kept;         // came back from flash at boot: never evicted to make room
     bool     bad;          // their key is a point no secret comes out of
     uint32_t askedMs;      // our NodeInfo last went to them (asking or answering)
     bool     asked;
@@ -150,8 +151,12 @@ Learn learnKey(uint32_t num, const uint8_t pub[32]) {
     if (!p) {
         for (auto& q : s_peer) if (!q.num) { p = &q; break; }
         if (!p) {
-            // Full: the oldest-asked row that has never been used to seal goes.
-            for (auto& q : s_peer) if (!q.aesReady) { p = &q; break; }
+            // Full: the oldest-asked row that has never been used to seal goes
+            // -- but never a key that came back from flash. aesReady is RAM
+            // only, so after a restart every saved key used to be fair game:
+            // a burst of made-up NodeInfos could push a contact's key out and
+            // the next one claiming that node number became "them".
+            for (auto& q : s_peer) if (!q.aesReady && !q.kept) { p = &q; break; }
             if (!p) return L_FULL;
         }
         memset(p, 0, sizeof *p);
@@ -195,7 +200,11 @@ size_t saveKeys(uint8_t* out, size_t cap) {
 }
 bool loadKeys(const uint8_t* in, size_t len) {
     if (!in || len < 1 || in[0] != 1 || (len - 1) % 36) return false;
-    for (size_t o = 1; o + 36 <= len; o += 36) learnKey(LoraCrypto::rd32le(in + o), in + o + 4);
+    for (size_t o = 1; o + 36 <= len; o += 36) {
+        const uint32_t num = LoraCrypto::rd32le(in + o);
+        learnKey(num, in + o + 4);
+        if (Peer* p = findPeer(num)) p->kept = true;
+    }
     s_keysDirty = false;
     return true;
 }

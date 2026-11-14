@@ -75,6 +75,7 @@ void bootStage(uint8_t s);   // main.cpp: the power diary's steps through setup(
 #include <esp_heap_caps.h>
 #include <string.h>
 #include <atomic>
+#include "ad_fields.h"
 #if !defined(TAB5)   // the Tab5's card is not driven yet; nothing here reads SD directly anyway
 #include <SD.h>
 #endif
@@ -420,10 +421,14 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
         // what keeps them seeing a peer that is in the middle of a message.
         if (adv->haveManufacturerData()) {
             bool ours = false;
-            const uint8_t mdN = adv->getManufacturerDataCount();
+            // Read in place (include/ad_fields.h): a std::string per block
+            // was a malloc per advert on this task.
+            const std::vector<uint8_t>& mp = adv->getPayload();
+            const uint8_t mdN = AdFields::count(mp.data(), mp.size(), 0xFF);
             for (uint8_t i = 0; i < mdN; i++) {
-                const std::string md = adv->getManufacturerData(i);
-                if (Mesh::onManufacturerData((const uint8_t*)md.data(), md.size(), mac, millis())) ours = true;
+                const uint8_t* md;
+                const size_t mdLen = AdFields::find(mp.data(), mp.size(), 0xFF, i, &md);
+                if (Mesh::onManufacturerData(md, mdLen, mac, millis())) ours = true;
             }
             // A SquachWatch is not a detection, but it can be a hunt target:
             // the SQUAD screen's HUNT aims the gauge at one. Its advert feeds
@@ -493,12 +498,10 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
             memset(&r, 0, sizeof(r));
             memcpy(r.mac, mac, 6);
             r.rssi = adv->getRSSI();
-            // Held, not borrowed: getName() returns a temporary, and a pointer
-            // into it dangles by the next line (issue #22).
-            const std::string advName = adv->getName();
-            const char* name = advName.c_str();
-            if (name && name[0]) strncpy(r.name, name, sizeof(r.name) - 1);
+            // Copied out of the advert's own bytes, the way NimBLE's
+            // getName() finds it, without the std::string it would allocate.
             const std::vector<uint8_t>& pl = adv->getPayload();
+            AdFields::copyName(pl.data(), pl.size(), r.name, sizeof(r.name));
             r.kind = rawBleKindOf(pl.data(), pl.size());
             g_engine->postRawBle(r);
             return;
@@ -511,21 +514,20 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
         det.firstSeen = det.lastSeen = millis();
         det.hits   = 1;
         det.active = true;
-        // Held for the same reason as the raw scan's above. Borrowed, a
-        // nameless device read freed memory as its name -- and a garbage name
-        // that happened to be ten digits was logged as a Flock battery (#22).
-        const std::string advName = adv->getName();
-        const char* name = advName.c_str();
-        if (name && name[0]) {
-            strncpy(det.name, name, sizeof(det.name) - 1);
-        }
+        // Copied, never borrowed: a pointer into a temporary std::string
+        // once read freed memory as a nameless device's name -- and a garbage
+        // name that happened to be ten digits was logged as a Flock battery
+        // (#22). Read from the advert's bytes now, with no string at all.
+        const std::vector<uint8_t>& advPl = adv->getPayload();
+        AdFields::copyName(advPl.data(), advPl.size(), det.name, sizeof(det.name));
         // The matched row's own label, for the types that cover several
         // devices -- see where the vendor is written, below.
         const char* label = nullptr;
         // Manufacturer data
         if (adv->haveManufacturerData()) {
-            std::string mfg = adv->getManufacturerData();
-            if (mfg.size() >= 2) {
+            const uint8_t* mfg;
+            const size_t mfgLen = AdFields::find(advPl.data(), advPl.size(), 0xFF, 0, &mfg);
+            if (mfgLen >= 2) {
                 uint16_t mfgId = (uint8_t)mfg[0] | ((uint8_t)mfg[1] << 8);
                 det.type = lookupMfgId(mfgId);
                 label    = mfgIdName(mfgId);
@@ -543,8 +545,8 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
                         // AirTag, therefore nothing, therefore dropped. They
                         // are probably the most numerous tracking transmitter
                         // most people walk past in a day.
-                        const uint8_t* b = (const uint8_t*)mfg.data();
-                        if (isIBeacon(b, (uint8_t)mfg.size())) {
+                        const uint8_t* b = mfg;
+                        if (isIBeacon(b, (uint8_t)mfgLen)) {
                             det.type = DetectionType::IBEACON;
                             // Major and minor are BIG endian here, unlike the
                             // company ID two bytes earlier -- Apple's format
@@ -858,9 +860,25 @@ void DetectionEngine::resetLifetime() {
     saveLifetimeByType();
 }
 
+// The detection log is written from two tasks on two cores: the NimBLE host
+// task (postBle) and the loop (the WiFi and deauth queues, expireStale,
+// CLEAR LOG). Unlocked, two new rows in the same instant could take the same
+// slot -- one catch overwrote the other, a LOG row came out blank, latest()
+// pointed at the wrong row and a type counter drifted. Every writer takes
+// this; readers (the screens) do not, and a torn read there is one frame of
+// one row. Recursive, because the merges call pushLog() with it held.
+static SemaphoreHandle_t s_logMx = nullptr;
+namespace {
+struct LogLock {
+    LogLock()  { if (s_logMx) xSemaphoreTakeRecursive(s_logMx, portMAX_DELAY); }
+    ~LogLock() { if (s_logMx) xSemaphoreGiveRecursive(s_logMx); }
+};
+}
+
 bool DetectionEngine::init() {
     if (g_engine) return true;
     g_engine = this;
+    if (!s_logMx) s_logMx = xSemaphoreCreateRecursiveMutex();
 
     // The SD card is mounted LAST, after both radios -- see the end of this
     // function. It used to be first, and on a board with a card in the slot
@@ -1620,6 +1638,7 @@ void DetectionEngine::resumeAgeing() {
     const uint32_t now = millis();
     const uint32_t gap = now - s_agePausedAt;
     s_agePausedAt = 0;
+    LogLock lock;
     for (uint8_t i = 0; i < _logCount; i++) {
         Detection& d = _log[(_logHead + LOG_CAP - 1 - i) % LOG_CAP];
         if (!d.active) continue;
@@ -1820,6 +1839,7 @@ bool DetectionEngine::hop5(uint32_t now) {
 #endif
 
 void DetectionEngine::clearLog() {
+    LogLock lock;
     _logCount = 0;
     _logHead  = 0;
     _latest   = nullptr;
@@ -1879,6 +1899,7 @@ void IRAM_ATTR DetectionEngine::postDeauth(const uint8_t* mac, int8_t rssi, uint
 
 void DetectionEngine::processDeauthQ() {
     while (_deauthQTail != _deauthQHead) {
+        LogLock lock;
         DeauthQEntry e;
         {
             noInterrupts();
@@ -1888,35 +1909,49 @@ void DetectionEngine::processDeauthQ() {
         }
 
         uint32_t now = millis();
+        // Every broadcast frame, whoever sent it, in one shared window.
+        if (now - _deauthAllStart > DEAUTH_WINDOW_MS) { _deauthAllStart = now; _deauthAllBcast = 0; }
+        if (e.bcast && _deauthAllBcast < 255) _deauthAllBcast++;
+
         // This sender's rolling window: resets after a gap longer than the
         // window itself, so an isolated frame (normal traffic) never counts
         // toward a burst that happened long before or after it. A sender
-        // not seen before takes the slot whose window is oldest.
+        // not seen before takes a slot whose window has run out -- the
+        // oldest of those -- and never one still counting: pushing a live
+        // count out let a sender rotation keep every count under the bar.
         DeauthSender* s = nullptr;
         for (uint8_t i = 0; i < DEAUTH_SENDERS; i++)
             if (memcmp(_deauthSenders[i].mac, e.mac, 6) == 0) { s = &_deauthSenders[i]; break; }
         if (!s) {
-            s = &_deauthSenders[0];
-            for (uint8_t i = 1; i < DEAUTH_SENDERS; i++)
-                if (_deauthSenders[i].winStart < s->winStart) s = &_deauthSenders[i];
-            memcpy(s->mac, e.mac, 6);
-            s->winStart = now; s->count = 0; s->bcastCount = 0;
+            for (uint8_t i = 0; i < DEAUTH_SENDERS; i++) {
+                DeauthSender& c = _deauthSenders[i];
+                if (c.winStart && now - c.winStart <= DEAUTH_WINDOW_MS) continue;   // still counting
+                if (!s || (int32_t)(c.winStart - s->winStart) < 0) s = &c;
+            }
+            if (s) {
+                memcpy(s->mac, e.mac, 6);
+                s->winStart = now; s->count = 0; s->bcastCount = 0;
+            }
         }
-        if (now - s->winStart > DEAUTH_WINDOW_MS) {
+        if (s && now - s->winStart > DEAUTH_WINDOW_MS) {
             s->winStart = now;
             s->count = 0; s->bcastCount = 0;
         }
-        if (s->count < 255) s->count++;
-        if (e.bcast && s->bcastCount < 255) s->bcastCount++;
-        const uint8_t burst = s->count;
+        if (s && s->count < 255) s->count++;
+        if (s && e.bcast && s->bcastCount < 255) s->bcastCount++;
+        const bool oneSender = s && (s->count >= DEAUTH_THRESHOLD || s->bcastCount >= DEAUTH_BCAST);
+        const bool anySender = _deauthAllBcast >= DEAUTH_BCAST_ALL;
+        const uint8_t burst = oneSender ? s->count : _deauthAllBcast;
 
         // Window/cooldown bookkeeping above still runs even while
         // disabled, so re-enabling doesn't instantly fire off a stale
-        // accumulated count -- only the actual recording is gated.
-        if ((s->count >= DEAUTH_THRESHOLD || s->bcastCount >= DEAUTH_BCAST) &&
-            (now - _deauthLastFireMs) > DEAUTH_COOLDOWN_MS &&
+        // accumulated count -- only the actual recording is gated. The
+        // cooldown starts at the first alert, not at boot: "0 ms ago" kept
+        // the first fifteen seconds after a restart deaf.
+        if ((oneSender || anySender) &&
+            (!_deauthLastFireMs || now - _deauthLastFireMs > DEAUTH_COOLDOWN_MS) &&
             Settings::typeEnabled(DetectionType::DEAUTH)) {
-            _deauthLastFireMs = now;
+            _deauthLastFireMs = now | 1u;
             Detection d;
             memset(&d, 0, sizeof(d));
             memcpy(d.mac, e.mac, 6);
@@ -1990,6 +2025,7 @@ void DetectionEngine::postBle(Detection d) {
     // the normal expireStale() path like any other device that goes
     // out of range.
     if (!Settings::typeEnabled(d.type)) return;
+    LogLock lock;
     // Try to dedupe / merge with existing log entry by MAC
     for (uint8_t i = 0; i < _logCount; i++) {
         uint8_t slot = (_logHead + LOG_CAP - 1 - i) % LOG_CAP;
@@ -2032,7 +2068,6 @@ void DetectionEngine::postBle(Detection d) {
             _log[slot].lastSeen = millis();
             Bingo::note(d.type);
             Dex::note(d.type, d.rssi);
-    Regulars::note(d.mac, d.type);
             Regulars::note(d.mac, d.type);
             if (reactivating) {
                 _log[slot].hits++;
@@ -2517,6 +2552,7 @@ bool DetectionEngine::noteApBeacon(const uint8_t* bssid, const char* ssid, bool 
 
 void DetectionEngine::processWiFiQ() {
     while (_wifiQTail != _wifiQHead) {
+        LogLock lock;   // per frame, so the host task is never kept waiting long
         WiFiQEntry e;
         {
             // copy out under volatile guard
@@ -2673,6 +2709,7 @@ void DetectionEngine::processWiFiQ() {
 }
 
 void DetectionEngine::pushLog(const Detection& d) {
+    LogLock lock;
     _log[_logHead] = d;
     _log[_logHead].prevRssi = d.rssi;                 // no trend on a first sight
     _log[_logHead].prevAt   = (uint8_t)(millis() >> 11);
@@ -2823,6 +2860,7 @@ void DetectionEngine::saveLifetime(uint32_t now) {
 static_assert((uint8_t)DetectionType::COUNT <= SpamWatch::TYPES, "SpamWatch is sized for 32 types");
 
 void DetectionEngine::expireStale() {
+    LogLock lock;
     uint32_t now = millis();
     for (uint8_t i = 0; i < _logCount; i++) {
         uint8_t slot = (_logHead + LOG_CAP - 1 - i) % LOG_CAP;

@@ -475,9 +475,14 @@ Fail finish() {
         }
         Serial.printf("[ota] the image says it is %s\n", s_imgVer);
     } else {
-        // A release from before the marker existed. Its signature still has
-        // to check out; there is simply no version in it to compare.
-        Serial.println("[ota] the image carries no version marker");
+        // No marker that reads: a release from before the marker worked
+        // (v1.19.0 and older), so older than anything that runs this code.
+        // Taken as one, it was the gap in the rule above -- somebody on the
+        // network could answer with an old, genuinely signed release and it
+        // went in, since there was no version to compare.
+        Serial.printf("[ota] refused: the image carries no version marker, so it predates %s\n", runningVersion());
+        abort();
+        return Fail::TOO_OLD;
     }
 
     // esp_ota_end() checks the image itself: its segments and its own hash.

@@ -666,6 +666,13 @@ private:
     static const uint32_t DEAUTH_WINDOW_MS   = 3000;   // ...this window...
     static const uint32_t DEAUTH_COOLDOWN_MS = 15000;  // ...then this long before re-firing.
     static const uint8_t  DEAUTH_SENDERS     = 4;      // transmitters tracked at once
+    // A "deauth all" tool spoofs each target network as the sender, so with
+    // five or more networks on the channel no single slot fills, and slots
+    // kept pushing each other out. This many broadcast frames in the window
+    // from any mix of senders is a flood too. Routers almost never deauth
+    // broadcast, so it is a high bar the home router that tripped the old
+    // any-sender rule does not come near.
+    static const uint8_t  DEAUTH_BCAST_ALL   = 24;
     struct DeauthQEntry {
         uint8_t mac[6];
         int8_t  rssi;
@@ -719,7 +726,9 @@ private:
     volatile uint8_t      _deauthQHead = 0;
     volatile uint8_t      _deauthQTail = 0;
     DeauthSender _deauthSenders[DEAUTH_SENDERS] = {};
-    uint32_t _deauthLastFireMs = 0;
+    uint32_t _deauthLastFireMs = 0;     // 0 = never fired
+    uint32_t _deauthAllStart = 0;       // the any-sender broadcast window
+    uint8_t  _deauthAllBcast = 0;
 
     // Watched target -- see the public watchBle()/watchWifi() section
     // above.

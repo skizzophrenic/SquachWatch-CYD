@@ -968,6 +968,28 @@ static bool readTouchRaw(int16_t& a, int16_t& b);
 // So the sample is taken in pushFrame(), in the moment between one push
 // finishing and the next starting, when the bus is free, and this only
 // consumes it. Everywhere else it is the plain read.
+static bool sampleTouchRaw(int16_t& a, int16_t& b);
+
+// The power saver's pause between frames, in slices: a finger landing ends it
+// early. As one delay() it held a tap off for up to a whole idle frame (200
+// ms at IDLE FPS 5) -- and on the capacitive panels a quick tap that began
+// and ended inside it was never seen at all. The small boards' buttons keep
+// the plain delay (their poll reads button edges, not a level).
+static void idleWait(uint32_t ms) {
+#if defined(SQW_SMALL)
+    delay(ms);
+#else
+    const uint32_t until = millis() + ms;
+    for (;;) {
+        const int32_t left = (int32_t)(until - millis());
+        if (left <= 0) return;
+        delay(left > 10 ? 10 : (uint32_t)left);
+        int16_t a, b;
+        if (sampleTouchRaw(a, b)) return;
+    }
+#endif
+}
+
 static bool sampleTouchRaw(int16_t& a, int16_t& b) {
 #if defined(NM_CYD_C5)
     if (s_tsValid) { a = s_tsA; b = s_tsB; return s_tsDown; }
@@ -5769,7 +5791,10 @@ void setup() {
 #elif defined(TWATCH_S3)
     // The T-Watch's FT6336, on I2C SDA 39 / SCL 40 at 0x38. No reset line;
     // the AXP2101 powers it (ALDO3) in twatchPowerUp(), before this runs.
-    CapTouch::begin(39, 40, -1, 0x38);
+    // 400 kHz: the touch is alone on this bus (the PMU is on Wire1), and the
+    // FT6336 is a fast-mode part. At the 100 kHz default the read every frame
+    // cost ~0.8 ms; at 400 about a quarter of that.
+    CapTouch::begin(39, 40, -1, 0x38, 400000);
     usingCapTouch = CapTouch::probe();
     Serial.println(usingCapTouch ? "T-Watch S3 -- FT6336 capacitive touch answered."
                                  : "T-Watch S3 -- FT6336 did not answer; no touch.");
@@ -6211,6 +6236,21 @@ static inline void pushFrame(int x, int y) {
 #endif
 #if defined(TWATCH_S3)
     if (s_panelAsleep) return;   // nothing to show it to; see applyBrightness()
+#else
+    // A backlight at 0 (POCKET MODE on the BOOT-button boards, or DIM LEVEL
+    // 0 once the screen timeout lands) shows nothing: the 15-30 ms push of a
+    // frame nobody can see is battery and loop time the radios could have.
+    // The panel keeps the last frame it was sent, so the first push after
+    // the light comes back is a full one (the row record is stale by then).
+    {
+        static bool skipped = false;
+        bool dark = s_screenDimmed && Settings::dimLevel() == 0;
+#if SQW_BOOT_BTN
+        if (s_crownDark && s_screenDimmed) dark = true;
+#endif
+        if (dark) { skipped = true; return; }
+        if (skipped) { skipped = false; FramePush::invalidate(); }
+    }
 #endif
 #if defined(CARDPUTER_ADV)
     // With the EXT panel taking a push of its own, the built-in screen is
@@ -7611,6 +7651,7 @@ void loop() {
     }
     engine.loop();
     Settings::tick(millis());
+    if (state != AppState::LOG) uiLogLeave();
 #if defined(SENSE_CYD_APP)
     // SENSING on the CYD's own radio, and only while its screen is up: one
     // radio, so the detector lets go of it the way it does for a WiFi update
@@ -11402,14 +11443,14 @@ void loop() {
         // ten passes a second is plenty, and the rest of the time is idle.
         if (s_panelAsleep) {
             const uint32_t spentUs = micros() - frameStartUs;
-            if (spentUs < 100000UL) delay((100000UL - spentUs) / 1000UL);
+            if (spentUs < 100000UL) idleWait((100000UL - spentUs) / 1000UL);
         }
 #endif
         const uint8_t fps = Settings::idleFps();
         if (fps && idleMs > (uint32_t)Settings::idleAfterSec() * 1000UL) {
             const uint32_t budgetUs = 1000000UL / fps;
             const uint32_t spentUs  = micros() - frameStartUs;
-            if (spentUs < budgetUs) delay((budgetUs - spentUs) / 1000UL);
+            if (spentUs < budgetUs) idleWait((budgetUs - spentUs) / 1000UL);
         }
     }
 
