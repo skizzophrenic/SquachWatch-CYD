@@ -1903,8 +1903,9 @@ static void drawLavaLamp(TFT_eSPI& t, uint32_t now, uint8_t L, bool chg) {
 
 // Asks the board for its battery once a second, and draws the lamp when there
 // is a cell to show.
-static void drawBatteryGauge(TFT_eSPI& t, uint32_t now) {
-    if (!s_battSrc) return;
+// The battery as last read: once a second at most. False with no cell to show.
+static bool battRead(uint32_t now, uint8_t& pctOut, bool& chgOut) {
+    if (!s_battSrc) return false;
     static uint32_t at = 0;
     static bool     has = false, chg = false;
     static uint8_t  pct = 0;
@@ -1913,7 +1914,16 @@ static void drawBatteryGauge(TFT_eSPI& t, uint32_t now) {
         has = s_battSrc(pct, chg);
         if (pct > 100) pct = 100;
     }
-    if (!has) return;
+    pctOut = pct; chgOut = chg;
+    return has;
+}
+
+static void drawBatteryGauge(TFT_eSPI& t, uint32_t now) {
+    // TERMINAL MODE has its own battery, in the LOG's title bar: the lamp
+    // stood on the LOG's title and its TIME heading.
+    if (Settings::boringMode()) return;
+    uint8_t pct; bool chg;
+    if (!battRead(now, pct, chg)) return;
     int h2, ox, oy;
     lampPlace(t, h2, ox, oy);
     if (DrawBand::has(oy, oy + (21 * h2 >> 1))) drawLavaLamp(t, now, pct, chg);
