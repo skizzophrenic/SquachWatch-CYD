@@ -476,7 +476,7 @@ void task(void*) {
 // names come back from flash at boot; a changed set is written back at most
 // every five minutes, and not in the first minute after boot, so a node table
 // filling up after a restart costs one write, not one per NodeInfo. The PIN
-// lock's duress wipe erases the whole NVS partition, these with it.
+// lock's wipe erases these (secretNamespace() in main.cpp).
 static const char*    NAMES_NS = "loranames";
 static uint32_t       s_namesSavedAt = 0;
 
@@ -522,7 +522,7 @@ static void namesSave(uint32_t now) {
 // to every Meshtastic node that knew it (NodeDB keeps the first key it
 // heard), so it must survive a restart. The keys of the nodes we talk to are
 // kept beside it, written back like the names, at most once a minute. The
-// duress wipe erases the whole partition, these with it.
+// PIN lock's wipe erases these (secretNamespace() in main.cpp).
 static const char* DM_NS = "loradm";
 static void dmTick(uint32_t now);
 static void mcTick(uint32_t now);

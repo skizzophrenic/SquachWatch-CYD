@@ -17,7 +17,9 @@ namespace CapTouch {
     // reset line we drive); `addr` is the controller's I2C address, 0x15
     // for the CST816/CST820 and 0x38 for the FT6336, whose registers
     // 0x02..0x06 (finger count, X high/low, Y high/low) share a layout.
-    void begin(int sda, int scl, int rst, uint8_t addr = 0x15);
+    // hz: the bus clock. 100 kHz unless the board has checked its chip and
+    // everything else on that bus runs faster (the T-Watch: 400 kHz).
+    void begin(int sda, int scl, int rst, uint8_t addr = 0x15, uint32_t hz = 100000);
 
     // True if a CST816/CST820 answers at its known I2C address (0x15).
     // Call after begin(); if this returns false, call Wire.end() and

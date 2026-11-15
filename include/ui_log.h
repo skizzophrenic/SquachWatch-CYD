@@ -5,6 +5,7 @@
 #include "detection.h"
 
 void uiLogInit(TFT_eSPI& t);
+void uiLogLeave();                   // from loop() whenever the LOG is not up: lets its index go
 // confirmPending/confirmLabel: draws a modal "TRACK THIS TARGET?"
 // panel with WATCH/HUNT/MORE INFO/CANCEL over everything else instead
 // of the normal list -- see uiLogHitConfirm() below. confirmLabel is

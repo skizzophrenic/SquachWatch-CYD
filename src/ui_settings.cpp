@@ -160,7 +160,7 @@ static const SettingsRow APPEARANCE_ROWS[] = {
     SettingsRow::SHADES_COLOR, SettingsRow::BANTER, SettingsRow::AURA,
     // Then how the SCREEN looks.
     SettingsRow::THEME, SettingsRow::BACKGROUND, SettingsRow::BACKGROUND_LOCK, SettingsRow::DET_STYLE,
-    SettingsRow::BRIGHTNESS,
+    SettingsRow::LAVA_LAMP, SettingsRow::BRIGHTNESS,
     SettingsRow::INVERT, SettingsRow::RGB_SWAP, SettingsRow::ROTATION_LOCK,
     // And the one light that is not on the screen at all.
     SettingsRow::STATUS_LIGHT,
@@ -344,6 +344,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::PET:
         case SettingsRow::BANTER:
         case SettingsRow::DET_STYLE:
+        case SettingsRow::LAVA_LAMP:
         case SettingsRow::FONTS:
             return RowGroupId::APPEARANCE;
         case SettingsRow::FONT_MENUS:
@@ -460,6 +461,8 @@ static uint8_t buildDisplayList(DisplayItem* out) {
         // does not have yet would be a switch that does nothing.
         if (r == SettingsRow::PET && !Squachy::anyPetUnlocked()) continue;
         if (r == SettingsRow::AURA && !Squachy::hasAura()) continue;
+        // No battery to show, no lamp to switch.
+        if (r == SettingsRow::LAVA_LAMP && !uiClearHasBattery()) continue;
         // Not a secret, just impossible: a board without a second app slot or
         // a Bluetooth server has nothing to update into.
         if ((r == SettingsRow::UPDATE_FIRMWARE || r == SettingsRow::UPDATE_CHECK) && !OtaCore::available()) continue;
@@ -821,12 +824,6 @@ static const ConfirmText CONFIRMS[] = {
     { SettingsRow::RESET_STATS, "RESET STATS?",
       "Clears every detection total.",
       "Outfits earned by count re-lock.", "RESET" },
-    // The second line is the whole reason this row has a panel: boring mode
-    // hides every Squachy row, so the first thing it does is take away the
-    // OUTFIT row, and the way back is not obvious once it has.
-    { SettingsRow::BORING_MODE, "TERMINAL MODE?",
-      "Swaps Squachy for the dashboard;",
-      "his rows hide. Same row undoes.", "TURN ON" },
     { SettingsRow::REPLAY_INTRO, "REPLAY INTRO?",
       "Runs the first-boot walkthrough",
       "again, from the top.", "REPLAY" },
@@ -1511,6 +1508,10 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             label = "DETECTIONS";
             value = Settings::detXp() ? "XP" : "CLASSIC";
             break;
+        case SettingsRow::LAVA_LAMP:
+            label = "LAVA LAMP";
+            value = Settings::lavaLamp() ? "ON" : "OFF";
+            break;
         case SettingsRow::VIEW_DIARY:
             label = "SQUACHY'S DIARY";
             break;
@@ -1646,7 +1647,7 @@ if (!Theme::stillBackdrop(t)) switch (Settings::background()) {
             // value goes, rather than gone. See isSquachyOnlyRow().
             const bool off = Settings::boringMode() && isSquachyOnlyRow(items[idx].row);
             if (off) {
-                drawRow(t, w, y, itemH, label, "boring mode", false, Theme::W95_SHADOW, h > w);
+                drawRow(t, w, y, itemH, label, "terminal", false, Theme::W95_SHADOW, h > w);
             } else if (isTwoLineRow(items[idx].row)) {
                 drawTwoLineRow(t, w, y, itemH, label, value, groupColor(items[idx].group),
                                items[idx].row == SettingsRow::BACKGROUND ||

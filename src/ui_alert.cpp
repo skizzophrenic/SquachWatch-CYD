@@ -25,6 +25,7 @@ static const char* targetLabel(DetectionType t) {
         case DetectionType::GOOGLE_TAG:  return "GOOGLE TAG";
         case DetectionType::TILE:        return "TILE";
         case DetectionType::RING:        return "RING CAM";
+        case DetectionType::DEAUTH:      return "DEAUTH FLOOD";   // had no case: its banner read UNKNOWN
         case DetectionType::EVILTWIN:    return "EVIL TWIN AP";
         case DetectionType::IBEACON:     return "PROXIMITY BEACON";
         case DetectionType::HACKER:      return "HACKER HARDWARE";

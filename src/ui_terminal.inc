@@ -163,6 +163,33 @@ TmRect tmWindow(TFT_eSPI& t, int x, int y, int w, int h, const char* title, bool
     return { (int16_t)(x + 3), (int16_t)(y + 13), (int16_t)(w - 6), (int16_t)(h - 16) };
 }
 
+// The battery, in the LOG's title bar left of its chip: four segments and the
+// percentage, black behind it like the chip. Charging, the segments fill in
+// turn and it says CHG in green; under 20% it goes red. Nothing on a board
+// with no cell to read. Same box on every panel: the title bar is 10 px on
+// all of them.
+void tmBattery(TFT_eSPI& t, uint32_t now, int x, int y, int w, int chipLen, bool act, const TmTheme& T) {
+    uint8_t pct; bool chg;
+    if (!battRead(now, pct, chg)) return;
+    char txt[6];
+    if (chg) snprintf(txt, sizeof txt, "CHG");
+    else     snprintf(txt, sizeof txt, "%u%%", (unsigned)pct);
+    const uint16_t c = chg ? Theme::GREEN : pct < 20 ? Theme::RED : T.FG;
+    const int tw = (int)strlen(txt) * 6, bw = 3 + 20 + 3 + tw + 2;
+    const int chx = x + w - 7 - (chipLen * 6 + 6);       // where tmWindow put the chip
+    const int bx = chx - 3 - bw, ty = y + 2;
+    if (bx < x + 26) return;                               // no room past "LOG"
+    t.fillRect(bx, ty + 1, bw, 9, act ? Theme::BLACK : T.ZEB);
+    const int ix = bx + 3, iy = ty + 2;
+    t.drawRect(ix, iy, 19, 7, c);                          // the cell
+    t.fillRect(ix + 19, iy + 2, 1, 3, c);                  // its nub
+    int lit = (pct + 24) / 25;                              // 1..4 for anything above 0
+    if (chg) lit = (int)((now / 400) % 5);
+    for (int k = 0; k < 4; k++)
+        t.fillRect(ix + 2 + k * 4, iy + 2, 3, 3, k < lit ? c : (act ? T.LO : T.DOT));
+    tmText(t, txt, ix + 23, ty + 2, c);
+}
+
 void tmStamp(const Detection& d, char* out, size_t n) {
     if (d.restored) Clock::formatEpochStamp(d.firstSeen, out, n);
     else            Clock::formatStamp(d.firstSeen, out, n);
@@ -270,8 +297,22 @@ void tmLog(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, TmRect r, cons
     }
 
     const int n = eng.logCount() > TM_LOG_MAX ? TM_LOG_MAX : eng.logCount();
-    uint8_t ord[TM_LOG_MAX];
-    tmOrder(eng, n, ord);
+    // A sorted view is worked out again when a row arrives, the sort or its
+    // direction changes, or a quarter second passes (a strength or a name
+    // moving): not every frame, where sorted by DEV it was 64 names and an
+    // insertion sort of string compares. Time order is free and never cached.
+    static uint8_t  s_ord[TM_LOG_MAX];
+    static int      s_ordN = -1;
+    static uint32_t s_ordTotal = 0, s_ordAt = 0;
+    static uint8_t  s_ordSort = 0;
+    static int8_t   s_ordDir = 0;
+    if (s_tmSort == TM_S_TIME || n != s_ordN || eng.lifetimeTotal() != s_ordTotal ||
+        s_tmSort != s_ordSort || s_tmDir != s_ordDir || now - s_ordAt >= 250) {
+        tmOrder(eng, n, s_ord);
+        s_ordN = n; s_ordTotal = eng.lifetimeTotal(); s_ordAt = now;
+        s_ordSort = s_tmSort; s_ordDir = s_tmDir;
+    }
+    const uint8_t* ord = s_ord;
     int vis = (r.h - top + 1 - foot) / RH;
     if (vis > TM_ROWS_MAX) vis = TM_ROWS_MAX;
     if (vis < 1) vis = 1;
@@ -536,6 +577,7 @@ void uiTerminalDraw(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int t
     snprintf(chip, sizeof chip, "%s", !tmLive() ? "SORTED" : s_tmScroll ? "PAUSED" : "LIVE");
     TmRect lr = tmWindow(t, 2, top, logW, logH, "LOG", s_tmFocus == 0, false, chip,
                          tmLive() && s_tmScroll ? TM_AMBER : T.FG, T);
+    tmBattery(t, now, 2, top, logW, (int)strlen(chip), s_tmFocus == 0, T);
     s_tmWin[0] = { 2, (int16_t)top, (int16_t)logW, (int16_t)logH };
     tmLog(t, now, eng, lr, T);
 

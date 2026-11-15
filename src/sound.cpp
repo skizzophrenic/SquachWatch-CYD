@@ -626,9 +626,7 @@ void begin() {
 #if SOUND_NO_CODEC
     i2s_stop(PORT);
     s_q = xQueueCreate(4, sizeof(uint8_t));
-    // The C5 is single-core (core 0 only); pinning to core 1 asserts at boot.
-    const BaseType_t core = (portNUM_PROCESSORS > 1) ? 1 : 0;
-    xTaskCreatePinnedToCore(soundTask, "sound", 4096, nullptr, 2, &s_task, core);
+    xTaskCreatePinnedToCore(soundTask, "sound", 4096, nullptr, 2, &s_task, portNUM_PROCESSORS > 1 ? 1 : 0);   // one core on the C5 (#121)
     s_ok = s_q && s_task;
     Serial.printf("[sound] I2S amp ready: BCK %d WS %d DOUT %d%s\n", PIN_BCK, PIN_WS, PIN_DOUT, s_ok ? "" : " -- task failed");
 #else
@@ -637,9 +635,7 @@ void begin() {
     i2s_stop(PORT);
     if (!ok) { Serial.println("[sound] ES8311 setup failed"); return; }
     s_q = xQueueCreate(4, sizeof(uint8_t));
-    // The C5 is single-core (core 0 only); pinning to core 1 asserts at boot.
-    const BaseType_t core = (portNUM_PROCESSORS > 1) ? 1 : 0;
-    xTaskCreatePinnedToCore(soundTask, "sound", 4096, nullptr, 2, &s_task, core);
+    xTaskCreatePinnedToCore(soundTask, "sound", 4096, nullptr, 2, &s_task, portNUM_PROCESSORS > 1 ? 1 : 0);   // one core on the C5 (#121)
     s_ok = s_q && s_task;
     Serial.printf("[sound] ES8311 id %02X%02X ready: MCK %d BCK %d WS %d DOUT %d, amp on GPIO%d%s\n",
                   id1, id2, PIN_MCK, PIN_BCK, PIN_WS, PIN_DOUT, PIN_AMP, s_ok ? "" : " -- task failed");

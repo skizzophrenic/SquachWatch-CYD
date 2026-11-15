@@ -741,6 +741,14 @@ namespace Theme {
     void drawClockBackdrop(TFT_eSPI& t, uint32_t now, int x, int y, int w, int h, uint8_t kind);
     void releaseClockBackdrop();
 
+    // FIRE's heat (6.4 KB on a 2.8"), DIGITAL's trails and TERMINAL's columns
+    // are only let go when another background is picked, so a screen with no
+    // background (UPDATE, HUMAN SENSING) would otherwise run with them pinned
+    // in the middle of the heap. Called on the way into those; the next
+    // screen that draws the background takes them back on its first frame.
+    // Not LOG or SETTINGS: those draw the background behind their lists.
+    void releaseBackgroundBuffers();
+
     // True during the shared random glitch burst drawBangersText()
     // already rolls every ~5-10s (see its own comment) -- exposed so
     // other draw code can layer a coordinated effect onto the exact

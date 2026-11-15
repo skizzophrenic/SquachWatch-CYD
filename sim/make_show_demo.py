@@ -32,6 +32,30 @@ CYAN  = (0, 214, 214)
 # ---- the clips ----
 
 CLIPS = {
+    # v1.45.0 "Skate Better", 320x240: the main screen on FIREFLIES, a deauth
+    # flood's alert (--alert 14 DEAUTH) and an AirTag's (--alert 6), the
+    # AQUARIUM with the memory the release handed back, TERMINAL MODE (one tap
+    # now, no panel), and SYNTHWAVE for the self-review.
+    "skate-better": [
+        ("clear", 60, 40, ["--bg", "5"], {"SQUACHSIM_BATT": "80"}, 1500, "SKATE BETTER. SAME BOARD, FEWER FALLS."),
+        ("alert", 40, 40, ["--alert", "14"], {}, 1500, "DEAUTH FLOODS DON'T SNEAK PAST."),
+        ("alert", 40, 40, ["--alert", "6"], {}, 1400, "EVERY CATCH GETS ITS ALERT. EVERY ONE."),
+        ("clear", 60, 40, ["--bg", "3"], {"SQUACHSIM_BATT": "80"}, 1500, "9 KB LIGHTER. MORE ROOM FOR THE RADIOS."),
+        ("clear", 60, 40, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_BATT": "80"}, 1500, "TERMINAL MODE: ONE TAP. NO LECTURE."),
+        ("clear", 60, 40, ["--bg", "10"], {"SQUACHSIM_BATT": "80"}, 1600, "WE PENTESTED OURSELVES. IT FOUND THINGS."),
+    ],
+    # v1.44.0 "Unbreaking Bad", 320x240: the main screen hearing the room
+    # again, SCAN > BLE with its phone labels (the emulator's seeded room,
+    # sim/detection_sim.cpp), HUNT asking about a phone's new ID (--pose 2),
+    # TERMINAL MODE's battery in the LOG title bar, and Squachy back on the
+    # boot screen with TERMINAL MODE on.
+    "unbreaking-bad": [
+        ("clear", 60, 40, ["--bg", "5"], {"SQUACHSIM_BATT": "80"}, 1500, "SCANS HEAR THE ROOM AGAIN. MY BAD."),
+        ("rawscan", 30, 30, [], {}, 1600, "UNNAMED PHONES GET A BEST GUESS."),
+        ("hunt", 30, 30, ["--pose", "2"], {}, 1800, "PHONE CHANGED ITS ID? FOLLOW IT."),
+        ("clear", 60, 40, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_BATT": "80"}, 1500, "TERMINAL MODE GOT A BATTERY."),
+        ("boot", 60, 40, [], {"SQUACHSIM_TERMINAL": "1"}, 1400, "AND SQUACHY STILL WAVES AT BOOT."),
+    ],
     # v1.43.0 "When You're Bored Then You're Boring", 320x240: TERMINAL MODE
     # (SQUACHSIM_TERMINAL) on the live log, then sorted by KIND, dBm and
     # DEVICE (SQUACHSIM_TMSORT), then the StickS3 / Cardputer panel.

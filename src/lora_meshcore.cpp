@@ -457,6 +457,9 @@ bool decode(const Lora::Packet& pk, Decoded& out) {
             break;
         case TYPE_GRP_TXT: case TYPE_GRP_DATA: {
             if (f.payloadLen < 1 + 2 + 16) break;
+            // A sealed text longer than the plaintext buffer is not one
+            // MeshCore sends; opening it would write past out.plain.
+            if ((size_t)(f.payloadLen - 3) > sizeof out.plain) break;
             const uint8_t hash = f.payload[0];
             for (uint8_t i = 0; i < channelCount(); i++) {
                 const Channel c = channel(i);

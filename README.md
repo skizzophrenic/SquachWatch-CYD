@@ -45,7 +45,7 @@ the glitchy SquachWatch wordmark.
 | `GOOGLE_TAG` | Google Find My Device trackers (Chipolo, Pebblebee, Moto Tag) | BLE service UUID `0xFEAA` |
 | `TILE` | Tile BLE trackers | BLE service UUID `0xFEED` / `0xFEEC` |
 | `RING` | Ring doorbells / cameras | 15 WiFi OUI (Ring LLC's registered block + Amazon's) |
-| `DEAUTH` | WiFi deauthentication floods | Rate-detected burst, not a signature: 12 deauth or disassociation frames in 3 s from one transmitter, or 6 of them to the broadcast address |
+| `DEAUTH` | WiFi deauthentication floods | Rate-detected burst, not a signature: 12 deauth or disassociation frames in 3 s from one transmitter, or 6 of them to the broadcast address, or 24 broadcast ones from any mix of senders (a tool spoofing many networks at once) |
 | `EVILTWIN` | Rogue / spoofed access points | One SSID beaconing from two BSSIDs that disagree about encryption |
 | `IBEACON` | Retail proximity beacons | Exact Apple header `4C 00 02 15` — **off by default**, see below |
 | `HACKER` | Flipper Zero, Pwnagotchi, WiFi Pineapple, ESP deauthers | Flipper Zero's service UUIDs `0x3081`–`0x3083` and its name (not Flipper's company ID or OUI, which the BUSY Bar desk sign uses); the Pwnagotchi's own beacon payload; `Pineapple_` and `pwned` SSIDs |
@@ -320,7 +320,8 @@ the screen.
 | **ALERT FILTER** | Settings: ALL, MED+, HIGH ONLY | The lowest confidence allowed to take over the screen |
 | **TYPE FILTER** | Settings | Whole detection types on or off. An off type is dropped, not logged |
 | **Watch list** | Hold a LOG row, then WATCH | When that device turns up you get **LOCKED ON**: a radar scope with its signal and whether it is getting closer, which stays until you tap it. A watched device always gets through AUTO SNOOZE and spam floods |
-| **HUNT MODE** | HUNT on the alert card, or hold a LOG row | A signal gauge to walk the device down. While a hunt runs, the HUNTING pill on the main screen takes you back to it; STOP HUNT ends it |
+| **HUNT MODE** | HUNT on the alert card, or hold a LOG row or a SCAN result | A signal gauge to walk the device down. While a hunt runs, the HUNTING pill on the main screen takes you back to it; STOP HUNT ends it. A phone changes its Bluetooth address every 15 minutes or so: hunting one picked from SCAN, the board notices when it goes quiet and a new one of its kind turns up, and asks whether to follow it |
+| **Phone labels** | SCAN → BLE | Devices that give no name are labelled from their broadcast when it says what they are: (iPhone?), (Android?), (Samsung?), (AirPods?), (Apple). Best guesses, hence the question marks. iPhones never broadcast their own name over Bluetooth |
 | **Spam floods** | Automatic | A storm of fake tags (piles of addresses heard for a moment and never again) gets one alert with a SPAM: N FAKE TAGS banner, then quiet logging until it dies down |
 | **HEADS-UP** | Settings → SQUACHMESH | Serious catches from your squad's boards arrive as a banner; see [SquachMesh](#squachmesh) |
 
@@ -329,13 +330,16 @@ the screen.
 **Settings → SECURITY** puts a PIN on the board: 4, 6 or 8 digits, with
 LOCK AT BOOT, AUTO-LOCK (when the screen sleeps, or after 1 to 30 idle
 minutes), ALERTS LOCKED (what an alert shows while locked: FULL, TYPE ONLY
-or NONE) and WIPE AFTER 10 wrong guesses. It says plainly what it is for:
-people at the table, not someone with a USB cable.
+or NONE) and WIPE AFTER 10 wrong guesses. LOCK AT BOOT starts on when you
+set your first PIN, so pressing reset or pulling the cable does not unlock
+the board. It says plainly what it is for: people at the table, not someone
+with a USB cable.
 
 A **DURESS PIN** is a second PIN of the same length. Typed at the lock
 screen, it erases the squad phrase and messages, the ignore list, the saved
-WiFi passwords and the log (in flash and on the SD card, and the watch's GPS
-log), then restarts quietly, with the status light dark and no splash, and
+WiFi passwords, the list of devices seen on several days, the LoRa DM keys
+and the names heard on LoRa, and the log (in flash and on the SD card, and
+the watch's GPS log), then restarts quietly, with the status light dark and no splash, and
 comes back unlocked on the main screen. To anyone watching, it was an
 unlock.
 
@@ -357,7 +361,8 @@ to three characters. It changes the screen only; nothing stored changes.
 - **The battery lamp** on the Freenove ESP32-S3 2.8" and 3.5" and the
   T-Watch: a lava lamp under the menu button, filled to the charge.
   Bubbles and a rainbow on the cable, a flicker under 10%. Boards with no
-  battery don't show one.
+  battery don't show one. **Settings → APPEARANCE → LAVA LAMP** turns it
+  off; TERMINAL MODE shows the battery in the LOG's title bar instead.
 - **POWER OFF** on the Freenove ESP32-S3 2.8" and 3.5": hold **BOOT** for
   three seconds; press it to turn the board back on. (CHARGE MODE is on
   the Settings list there.)

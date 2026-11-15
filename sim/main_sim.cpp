@@ -1037,7 +1037,7 @@ int main(int argc, char** argv) {
         if (const char* ep = getenv("SQUACHSIM_EPOCH")) Clock::setEpoch((uint32_t)strtoul(ep, nullptr, 10));
         if (getenv("SQUACH_ALERT") && engine.logAt(0)) uiDeskAlert(*engine.logAt(0), now);
     }
-    else if (screen == "rawscan")    uiRawScanInit(frame, true);
+    else if (screen == "rawscan")    { engine.startRawBleScan(); uiRawScanInit(frame, true); }
     else if (screen == "watchalert") {
         // Watching the seeded AirTag, with a signal that has been climbing for
         // the last twenty seconds -- so the screen has a name, a type and a
@@ -1277,6 +1277,15 @@ int main(int argc, char** argv) {
     else if (screen == "hunt")       {
         // --pose 1: the target is in your hand, two strong samples in, CAUGHT!
         const uint8_t hm[6] = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66 };
+        if (poseIdx == 2) {
+            // --pose 2: a hunted iPhone took a new ID, and the screen asks.
+            static const uint8_t ADV[] = { 0x02, 0x01, 0x1A, 0x0A, 0xFF, 0x4C, 0x00, 0x10, 0x05, 0x03, 0x1C, 0x12, 0x34, 0x56 };
+            const uint8_t nm[6] = { 0x6E, 0x22, 0x33, 0x44, 0x55, 0x77 };
+            engine.huntBle(hm, "(iPhone?)", rawBleKindOf(ADV, sizeof ADV));
+            engine.checkHuntBle(hm, -64); SimClock::nowMs += 2100;
+            engine.checkHuntBle(hm, -62); SimClock::nowMs += 12000;
+            engine.checkHuntSwap(nm, -63, ADV, sizeof ADV, millis());
+        } else
         engine.huntBle(hm, poseIdx == 1 ? "BIGFOOT" : "AirTag");
         if (poseIdx == 1) {
             engine.checkHuntBle(hm, -36); SimClock::nowMs += 2100;

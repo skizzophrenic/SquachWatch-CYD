@@ -655,7 +655,15 @@ void clippyRelease(uint32_t now) {
 }
 
 // ---- the wire ----------------------------------------------------------------
-static uint8_t s_cGrid[CLIP_H][CLIP_W];     // 0 nothing, 1 outline, 2 wire, 3 highlight
+// 0 nothing, 1 outline, 2 wire, 3 highlight: two bits a cell, four cells a
+// byte, so the grid is 368 bytes of fixed RAM rather than 1,472.
+static uint8_t s_cGrid[CLIP_H][(CLIP_W + 3) / 4];
+static inline uint8_t clipCell(int gy, int gx) { return (uint8_t)((s_cGrid[gy][gx >> 2] >> ((gx & 3) * 2)) & 3); }
+static inline void clipSet(int gy, int gx, uint8_t c) {
+    uint8_t& b = s_cGrid[gy][gx >> 2];
+    const int sh = (gx & 3) * 2;
+    b = (uint8_t)((b & ~(3 << sh)) | ((c & 3) << sh));
+}
 static float   s_cSq = 1.0f;                // squash: 1 none, under 1 flattened
 
 static inline void clipMap(float& x, float& y) {
@@ -671,7 +679,7 @@ static void clipStamp(float x, float y, int r, uint8_t code) {
             if (dx * dx + dy * dy > r * r + r) continue;
             const int gx = cx + dx, gy = cy + dy;
             if (gx < 0 || gy < 0 || gx >= CLIP_W || gy >= CLIP_H) continue;
-            if (s_cGrid[gy][gx] < code || code == 3) s_cGrid[gy][gx] = code;
+            if (clipCell(gy, gx) < code || code == 3) clipSet(gy, gx, code);
         }
 }
 // The wire as one path: inner leg, small turn, up, top turn, the long leg,
@@ -719,9 +727,9 @@ static void clipDraw(TFT_eSPI& t, int x, int y, uint32_t now, ClipFace face) {
     for (int gy = 0; gy < CLIP_H; gy++) {
         int gx = 0;
         while (gx < CLIP_W) {
-            const uint8_t c = s_cGrid[gy][gx];
+            const uint8_t c = clipCell(gy, gx);
             int e = gx + 1;
-            while (e < CLIP_W && s_cGrid[gy][e] == c) e++;
+            while (e < CLIP_W && clipCell(gy, e) == c) e++;
             if (c) t.drawFastHLine(x + gx, y + gy, e - gx, col[c == 1 ? OUT : c == 2 ? WIRE : HI]);
             gx = e;
         }

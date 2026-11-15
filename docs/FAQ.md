@@ -130,8 +130,8 @@ None of this leaves the board unless you plug it in and ask for it.
 
 **Who can read it:** anyone holding the board, unless you lock it. **Settings > SECURITY** has:
 
-- **PIN LOCK** with a 4, 6 or 8 digit PIN, **AUTO-LOCK** (on sleep, or after 1 to 30 idle minutes) and **LOCK AT BOOT**. Detection keeps running while locked; **ALERTS LOCKED** decides how much an alert shows to a stranger (FULL, TYPE ONLY or NONE).
-- **DURESS PIN.** A second PIN that looks like it unlocks the board, but first wipes it: the squad phrase and key, saved WiFi passwords, the ignore list, the black box log and crash history, the SD card's log files and the watch's wardrive log. Then it restarts quietly and comes up looking like an ordinary, empty SquachWatch. Your other settings survive the wipe.
+- **PIN LOCK** with a 4, 6 or 8 digit PIN, **AUTO-LOCK** (on sleep, or after 1 to 30 idle minutes) and **LOCK AT BOOT** (on by default once you set a PIN, so a reset does not unlock it). Detection keeps running while locked; **ALERTS LOCKED** decides how much an alert shows to a stranger (FULL, TYPE ONLY or NONE).
+- **DURESS PIN.** A second PIN that looks like it unlocks the board, but first wipes it: the squad phrase and key, saved WiFi passwords, the ignore list, the devices seen on several days, the LoRa DM keys and names, the black box log and crash history, the SD card's log files and the watch's wardrive log. Then it restarts quietly and comes up looking like an ordinary, empty SquachWatch. Your other settings survive the wipe.
 - **WIPE AFTER 10.** The same wipe after ten wrong guesses.
 
 Be honest with yourself about what the PIN does: it stops a snoop who picks the board up. It does not stop someone with a USB cable and some time, because the flash can be read directly. The board tells you this when you set the PIN, too.
@@ -148,7 +148,7 @@ Be honest with yourself about what the PIN does: it stops a snoop who picks the 
 
 **The speaker.** The Freenove ESP32-S3 2.8" and 3.5" have one. SOUND in Settings is OFF (the default), ALERTS (a device you've never seen, a watch-list hit, a low battery) or ALL (those plus a squad message, a visitor, throws and landings, C1iPPY, the toaster and the lamp noticing the cable). VOLUME is 0-100% on its - and + buttons; each press plays a sample. Nothing plays while the screen is dimmed or at night (11 pm to 5 am), except a watch-list hit.
 
-**The battery lamp.** On the Freenove ESP32-S3 2.8" and 3.5" and the T-Watch, a little lava lamp under the menu button is the battery: the lava is the charge. On the cable, bubbles stream up and a rainbow runs through the cap and base; under 10% it flickers. The Freenove boards work out the cable from the battery voltage jumping when you plug in, so it can take a few seconds to notice. Boards with no battery don't show a lamp.
+**The battery lamp.** On the Freenove ESP32-S3 2.8" and 3.5" and the T-Watch, a little lava lamp under the menu button is the battery: the lava is the charge. On the cable, bubbles stream up and a rainbow runs through the cap and base; under 10% it flickers. The Freenove boards work out the cable from the battery voltage jumping when you plug in, so it can take a few seconds to notice. Boards with no battery don't show a lamp. Rather not have it? **Settings → APPEARANCE → LAVA LAMP: OFF**.
 
 The DIYmalls JC2432W328C has a physical BAT connector and battery switch, but the board's battery-sensing circuit and charger have not been verified. SquachWatch does not show a battery percentage for it, and USB power must not be taken as evidence that USB charging is supported. See the [JC2432W328C hardware guide](DIYMALLS-28.md) before connecting a battery.
 
