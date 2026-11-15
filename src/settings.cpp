@@ -1247,12 +1247,15 @@ void cycleSquachySize() {
 bool typeEnabled(DetectionType t) {
     uint8_t idx = (uint8_t)t;
     if (idx == 0 || idx >= (uint8_t)DetectionType::COUNT) return true;  // UNKNOWN, or out of range -- never gated
+    // MY ALERTS has no row in TYPE FILTER: the list is its switch, and an
+    // empty list matches nothing.
+    if (t == DetectionType::MINE) return true;
     return (s_typeMask & (1u << idx)) != 0;
 }
 
 void toggleType(DetectionType t) {
     uint8_t idx = (uint8_t)t;
-    if (idx == 0 || idx >= (uint8_t)DetectionType::COUNT) return;
+    if (idx == 0 || idx >= (uint8_t)DetectionType::MINE) return;
     s_typeMask ^= (1u << idx);
     s_prefs.putUInt("typemask", s_typeMask);
     // Stamped alongside the mask so a later firmware can tell which
@@ -1262,7 +1265,7 @@ void toggleType(DetectionType t) {
 
 uint8_t enabledTypeCount() {
     uint8_t n = 0;
-    for (uint8_t t = 1; t < (uint8_t)DetectionType::COUNT; t++) {
+    for (uint8_t t = 1; t < (uint8_t)DetectionType::MINE; t++) {
         if (s_typeMask & (1u << t)) n++;
     }
     return n;

@@ -120,6 +120,10 @@ uint16_t colorFor(DetectionType t) {
             return VAPOR_YELLOW;
         case DetectionType::RAVEN:
         case DetectionType::ALPR:
+        // MY ALERTS: amber, with the police kit. It was asked for to spot
+        // patrol cars by their routers, and whatever else it ends up
+        // watching for, it is something the owner wanted to be warned about.
+        case DetectionType::MINE:
             return AMBER;
         case DetectionType::AIRTAG:
         case DetectionType::DRONE:
@@ -1189,6 +1193,17 @@ void drawTypeIcon(TFT_eSPI& t, DetectionType type, int cx, int cy, int s) {
         t.fillCircle(cx+s/2,cy+s/4,s/3,ICO_STEM);
         t.fillRect(cx+s/2-s/5,cy+s/4-3,s*2/5,6,ICO_INK);
         t.fillRect(cx+s/2-3,cy+s/4-s/5,6,s*2/5,ICO_INK);
+        break;
+    case DetectionType::MINE:
+        // A plain router -- the in-car kind it was asked for -- with its
+        // two aerials and the name it shouts drawn as a tag on a string.
+        housing(t, cx-s, cy, s*2, s/2);
+        for(int i=0;i<3;i++) t.fillCircle(cx-s/2+i*s/3, cy+s/4, s/12, ICO_LED);
+        t.fillRect(cx-s*3/4, cy-s*3/4, 3, s*3/4, ICO_METAL);
+        t.fillRect(cx+s*3/4-3, cy-s*3/4, 3, s*3/4, ICO_METAL);
+        for(int i=1;i<=2;i++) t.drawCircle(cx, cy, i*s/3, ICO_WARN);
+        t.fillRect(cx-s/2, cy-s, s, s/3, ICO_PLASTIC);                    // the name tag
+        t.fillRect(cx-s/2+3, cy-s+s/8, s-6, s/12, SHELL_LO);
         break;
     default:
         t.drawCircle(cx,cy,s,ICO_METAL);

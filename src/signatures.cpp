@@ -643,6 +643,9 @@ Confidence confidenceFor(DetectionType t) {
         // it is NOT is a claim about intent -- see the docs.
         case DetectionType::IBEACON:
         case DetectionType::EVILTWIN:
+        // MY ALERTS: the owner named the network. Whether it is what they
+        // think it is, is theirs to judge; that it matched is certain.
+        case DetectionType::MINE:
             return Confidence::HIGH_CONF;
         // Was High when it was only Ray-Ban Meta's 0xFD5F service UUID, which
         // is specific to the glasses. Broadening it to the Meta, Luxottica and

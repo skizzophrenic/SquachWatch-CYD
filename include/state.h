@@ -33,7 +33,13 @@ enum class DetectionType : uint8_t {
     // chip, and sixteen Espressif prefixes already sit under FLOCK. HACKER
     // takes exact signatures only, which is what keeps it worth alerting on.
     HACKER  = 17,
-    COUNT   = 18
+    // MY ALERTS: a WiFi name matching one of the owner's own patterns (see
+    // my_alerts.h). Kept LAST and outside everything that walks the catalogue
+    // of known kit -- the DEX, BINGO and the TYPE FILTER stop short of it
+    // (they loop to MINE, not COUNT): it is not a kind of device anybody
+    // could collect, and its on/off switch is the list itself.
+    MINE    = 18,
+    COUNT   = 19
 };
 
 inline const char* detectionTypeName(DetectionType t) {
@@ -55,6 +61,7 @@ inline const char* detectionTypeName(DetectionType t) {
         case DetectionType::EVILTWIN:    return "EVIL TWIN";
         case DetectionType::IBEACON:     return "IBEACON";
         case DetectionType::HACKER:      return "HACKER";
+        case DetectionType::MINE:        return "MY ALERT";
         default:                         return "UNKNOWN";
     }
 }
@@ -196,8 +203,9 @@ enum class AppState : uint8_t {
     LORA_CHAT        = 38, // LORA CHATS, from WATCH SETTINGS (SQUACH_LORA builds). See ui_lorachat.h.
     LORA_HOME        = 39, // LORA, the T-Deck's radio landing page. See ui_lorahome.h.
     LORA_SETTINGS    = 40, // LORA SETTINGS, only from the LORA page. See ui_lorasettings.h.
-    SENSING          = 41  // HUMAN SENSING (SENSE_CYD_APP builds): WiFi motion sensing on the CYD's own
+    SENSING          = 41, // HUMAN SENSING (SENSE_CYD_APP builds): WiFi motion sensing on the CYD's own
                            // radio, from Settings > HUMAN SENSING. See ui_sensing_cyd.h and sense_cyd.h.
+    MY_ALERTS        = 42  // MY ALERTS, from Settings: the owner's own WiFi names. See ui_myalerts.h.
 };
 
 enum class ButtonId : uint8_t {

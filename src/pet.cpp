@@ -328,6 +328,7 @@ static const char* clipCatchLine(uint8_t type) {
         case DetectionType::EVILTWIN:    return "That WiFi has an evil twin. Tip: don't join the evil one.";
         case DetectionType::HACKER:      return "It looks like a hacker tool. Hello, colleague.";
         case DetectionType::IBEACON:     return "A shop beacon wants to sell you things. Tip: walk faster.";
+        case DetectionType::MINE:        return "It looks like the WiFi you asked about. Would you like a reminder?";
         default:                         return nullptr;
     }
 }

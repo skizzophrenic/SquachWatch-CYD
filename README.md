@@ -48,6 +48,7 @@ the glitchy SquachWatch wordmark.
 | `DEAUTH` | WiFi deauthentication floods | Rate-detected burst, not a signature: 12 deauth or disassociation frames in 3 s from one transmitter, or 6 of them to the broadcast address, or 24 broadcast ones from any mix of senders (a tool spoofing many networks at once) |
 | `EVILTWIN` | Rogue / spoofed access points | One SSID beaconing from two BSSIDs that disagree about encryption |
 | `IBEACON` | Retail proximity beacons | Exact Apple header `4C 00 02 15` — **off by default**, see below |
+| `MY ALERT` | WiFi networks whose names match your own patterns | Settings → MY ALERTS; see [Alert controls](#alert-controls) |
 | `HACKER` | Flipper Zero, Pwnagotchi, WiFi Pineapple, ESP deauthers | Flipper Zero's service UUIDs `0x3081`–`0x3083` and its name (not Flipper's company ID or OUI, which the BUSY Bar desk sign uses); the Pwnagotchi's own beacon payload; `Pineapple_` and `pwned` SSIDs |
 
 ### Confidence is per signature, not per type
@@ -319,6 +320,7 @@ the screen.
 | **AUTO SNOOZE** | Settings: OFF, AFTER 5, AFTER 10 | After that many alerts a device has to come 7 dB closer than it ever has before it may interrupt again. Its allowance comes back after half an hour |
 | **ALERT FILTER** | Settings: ALL, MED+, HIGH ONLY | The lowest confidence allowed to take over the screen |
 | **TYPE FILTER** | Settings | Whole detection types on or off. An off type is dropped, not logged |
+| **MY ALERTS** | Settings | Up to eight WiFi names of your own to alert on, each with an optional label for the alert card. Plain text catches names that start with it; `*` stands for anything and `?` for one character, so `veh*` catches `veh912` and `veh9??` catches `veh901`. Patterns need at least two fixed characters. A duress wipe clears the list |
 | **Watch list** | Hold a LOG row, then WATCH | When that device turns up you get **LOCKED ON**: a radar scope with its signal and whether it is getting closer, which stays until you tap it. A watched device always gets through AUTO SNOOZE and spam floods |
 | **HUNT MODE** | HUNT on the alert card, or hold a LOG row or a SCAN result | A signal gauge to walk the device down. While a hunt runs, the HUNTING pill on the main screen takes you back to it; STOP HUNT ends it. A phone changes its Bluetooth address every 15 minutes or so: hunting one picked from SCAN, the board notices when it goes quiet and a new one of its kind turns up, and asks whether to follow it |
 | **Phone labels** | SCAN → BLE | Devices that give no name are labelled from their broadcast when it says what they are: (iPhone?), (Android?), (Samsung?), (AirPods?), (Apple). Best guesses, hence the question marks. iPhones never broadcast their own name over Bluetooth |

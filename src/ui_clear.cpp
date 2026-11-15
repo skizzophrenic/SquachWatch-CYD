@@ -20,6 +20,7 @@
 #include "squachy.h"
 #include "detection.h"
 #include "ignore_list.h"   // the NEARBY headline leaves ignored and snoozed devices out
+#include "my_alerts.h"     // MY ALERTS takes the twelfth counter while its list is in use
 #include "emote_script.h"
 #include <esp_system.h>
 #include "crowd_bench.h"
@@ -2915,6 +2916,7 @@ static const char* counterLabel(DetectionType t) {
         // keeps its own label everywhere else -- it just does not get its
         // own column here, because its count is inside this one.
         case DetectionType::HACKER:      return "HACK";
+        case DetectionType::MINE:        return "MINE";
         default:                         return "?";
     }
 }
@@ -2931,8 +2933,16 @@ static const char* counterLabel(DetectionType t) {
 // whereas a rogue AP is a different kind of problem and had nowhere to
 // go. It has somewhere to go now -- HACKER, below. Row stays at 12
 // columns either way, so the layout has never moved.
+// MY ALERTS takes the twelfth column while its list has anything in it, and
+// beacons (which otherwise have that column) fold into TRACKER for as long as
+// it does -- they are filed with the trackers everywhere else already. Twelve
+// columns either way, so the row never grows into Squachy's band.
+static bool mineColumn()   { return MyAlerts::count() > 0; }
+static bool beaconFolded() { return mineColumn() && Settings::typeEnabled(DetectionType::IBEACON); }
+
 static uint16_t counterCount(const DetectionEngine& eng, DetectionType t) {
     uint16_t n = eng.countByType(t);
+    if (t == DetectionType::AIRTAG && beaconFolded()) n += eng.countByType(DetectionType::IBEACON);
     if (t == DetectionType::AIRTAG) {
         n += eng.countByType(DetectionType::GOOGLE_TAG)
            + eng.countByType(DetectionType::TILE)
@@ -3046,7 +3056,8 @@ bool uiClearColumnHolds(DetectionType column, DetectionType d) {
     if (d == column) return true;
     switch (column) {
         case DetectionType::AIRTAG:
-            return d == DetectionType::GOOGLE_TAG || d == DetectionType::TILE || d == DetectionType::SAMSUNG_TAG;
+            return d == DetectionType::GOOGLE_TAG || d == DetectionType::TILE || d == DetectionType::SAMSUNG_TAG ||
+                   (d == DetectionType::IBEACON && beaconFolded());
         case DetectionType::CAMERA: return d == DetectionType::RING;
         case DetectionType::HACKER: return d == DetectionType::EVILTWIN;
         default:                    return false;
@@ -3083,7 +3094,8 @@ static const uint8_t MAX_COUNTER_TYPES = FIXED_COUNTER_TYPES_N + 1;
 static uint8_t activeCounterTypes(DetectionType* out) {
     uint8_t n = 0;
     for (; n < FIXED_COUNTER_TYPES_N; n++) out[n] = FIXED_COUNTER_TYPES[n];
-    if (Settings::typeEnabled(DetectionType::IBEACON)) out[n++] = DetectionType::IBEACON;
+    if (mineColumn())                                       out[n++] = DetectionType::MINE;
+    else if (Settings::typeEnabled(DetectionType::IBEACON)) out[n++] = DetectionType::IBEACON;
     return n;
 }
 // Portrait (narrow) caps at 4 per row -- see the comment above. Landscape
@@ -3728,6 +3740,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
                     case DetectionType::RAVEN:  case DetectionType::ALPR:   case DetectionType::AIRTAG:
                     case DetectionType::SAMSUNG_TAG: case DetectionType::GOOGLE_TAG: case DetectionType::TILE:
                     case DetectionType::EVILTWIN:    case DetectionType::HACKER:
+                    case DetectionType::MINE:
                         s_serious = true; break;
                     default: break;
                 }

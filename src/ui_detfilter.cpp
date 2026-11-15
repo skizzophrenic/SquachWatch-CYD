@@ -10,7 +10,7 @@ static int g_scroll = 0;
 
 // Real types only (1..COUNT-1) -- UNKNOWN is the "matched something but
 // not a specific brand" fallback, not a type someone would toggle off.
-static uint8_t rowCount() { return (uint8_t)DetectionType::COUNT - 1; }
+static uint8_t rowCount() { return (uint8_t)DetectionType::MINE - 1; }   // MY ALERTS is switched by its own list
 static DetectionType rowType(uint8_t i) { return (DetectionType)(i + 1); }
 
 // Same fixed-height-at-size-2 approach Settings uses -- needs a live

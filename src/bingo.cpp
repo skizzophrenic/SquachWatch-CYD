@@ -65,7 +65,7 @@ uint32_t weekOfDay(uint32_t day) { return day / 7u; }
 void deal(const DetectionEngine* eng) {
     uint8_t pool[(uint8_t)DetectionType::COUNT];
     uint8_t n = 0;
-    for (uint8_t t = 1; t < (uint8_t)DetectionType::COUNT; t++) pool[n++] = t;
+    for (uint8_t t = 1; t < (uint8_t)DetectionType::MINE; t++) pool[n++] = t;   // MY ALERTS is nobody else's card
 
     if (n > CELLS) {
         // Drop (n - CELLS) of them, preferring ones never seen here.
