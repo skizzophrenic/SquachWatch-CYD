@@ -62,9 +62,9 @@ static const int PIN_AMP = -1;
 #elif defined(WS_C5_35)
 // Waveshare C5 3.5": ESP32-C5 -> I2S -> ES8311 (0x18 on the shared touch bus)
 // -> NS4150B amp -> onboard speaker. NO external MCLK net: the codec clocks off
-// BCLK (see codecInit's no-MCLK branch). NO software amp/codec enable either --
-// Codec_CE is tied to the power/reset rail, so the chain powers up on its own;
-// the amp quiets when the I2S clocks stop between sounds. Pins from the hardware
+// BCLK (see the board's own codecInit). The amp enable is not a GPIO: it is the
+// 0x24 expander's EXIO5, which WsExio::begin() drives high at start-up. The
+// amp quiets when the I2S clocks stop between sounds. Pins from the hardware
 // ref: BCLK 23, LRCK 10, DOUT 25. (Mic/DIN 24 is unused: TX/DAC only.)
 static const int PIN_MCK = -1, PIN_BCK = 23, PIN_WS = 10, PIN_DOUT = 25;
 static const int PIN_AMP = -1;
@@ -206,36 +206,61 @@ static uint8_t rd(uint8_t r) {
 // asleep. The divider registers (02-08) only matter to the codec as a bus
 // master, but they are set to the table's 4.096 MHz / 16 kHz row anyway, as
 // the driver does. Volume register 32 sits at the driver's 85%.
+#if defined(WS_C5_35)
+// Waveshare C5 3.5": the register sequence of the ESP32-C5-BSP driver, which
+// is the one heard on this board. No MCLK pin, so the codec clocks off SCLK
+// (BCLK x8 = 256 x 16 kHz), which must already be running: begin() installs
+// and starts I2S before this. The short sequence the other boards use left
+// the speaker silent here: it never wrote the analog power registers (10, 11),
+// the internal reference (44) or the DAC unmute (31).
+static bool codecInit() {
+    uint8_t v;
+    if (rd(0x0D) != 0xFA) wr(0x0D, 0xFA);
+    wr(0x44, 0x08); wr(0x44, 0x08);         // I2C noise immunity, twice as the vendor does
+    wr(0x01, 0x30); wr(0x02, 0x00); wr(0x03, 0x10);
+    wr(0x16, 0x24); wr(0x04, 0x10); wr(0x05, 0x00);
+    wr(0x0B, 0x00); wr(0x0C, 0x00); wr(0x10, 0x1F);
+    wr(0x11, 0x7F); wr(0x00, 0x80);
+    v = rd(0x00); wr(0x00, (uint8_t)(v & 0xBF));           // serial port slave
+    wr(0x01, 0xBF);                         // clock from SCLK, every clock on
+    v = rd(0x06); wr(0x06, (uint8_t)(v & ~0x20));          // SCLK not inverted
+    wr(0x13, 0x10); wr(0x1B, 0x0A); wr(0x1C, 0x6A);
+    wr(0x44, 0x58);                         // internal reference
+    v = rd(0x02); wr(0x02, (uint8_t)((v & 0x07) | (3 << 3)));   // SCLK x8
+    wr(0x05, 0x00);                         // ADC and DAC dividers 1
+    v = rd(0x03); wr(0x03, (uint8_t)((v & 0x80) | 0x10));  // single speed, ADC OSR
+    v = rd(0x04); wr(0x04, (uint8_t)((v & 0x80) | 0x10));  // DAC OSR
+    v = rd(0x07); wr(0x07, (uint8_t)(v & 0xC0));           // LRCK divider high
+    wr(0x08, 0xFF);                         // LRCK divider low
+    v = rd(0x06); wr(0x06, (uint8_t)((v & 0xE0) | 0x03));  // BCLK divider 4
+    v = rd(0x09); wr(0x09, (uint8_t)((v | 0x0C) & 0xFC));  // SDP in: 16-bit I2S
+    v = rd(0x0A); wr(0x0A, (uint8_t)((v | 0x0C) & 0xFC));  // SDP out: 16-bit I2S
+    wr(0x00, 0x80); wr(0x01, 0xBF);
+    v = rd(0x09); wr(0x09, (uint8_t)(v & ~0x40));          // DAC serial input on
+    wr(0x17, 0xBF);
+    wr(0x0E, 0x02);                         // PGA and ADC modulator
+    wr(0x12, 0x00);                         // DAC up
+    wr(0x14, 0x1A);
+    v = rd(0x14); wr(0x14, (uint8_t)(v & ~0x40));          // no digital microphone
+    wr(0x0D, 0x01);                         // analog circuitry up
+    wr(0x15, 0x40);
+    wr(0x37, 0x08);                         // DAC equalizer bypass
+    wr(0x45, 0x00);
+    const bool ok = wr(0x32, 0xD8);         // DAC volume, 85%
+    v = rd(0x31); wr(0x31, (uint8_t)(v & 0x9F));           // DAC unmuted
+    return ok;
+}
+#else
 static bool codecInit() {
     if (!wr(0x00, 0x1F)) return false;      // reset everything
     delay(20);
     wr(0x00, 0x00);
     wr(0x00, 0x80);                         // power on
-#if defined(WS_C5_35)
-    // No external MCLK on this board: the ES8311 clocks off SCLK (BCLK, GPIO23),
-    // which must already be running (begin() installs/starts I2S before this).
-    // REG01 bit7 selects SCLK as the source; 0x3F keeps every clock enabled.
-    // The coeff registers (02-08) below stay on the {4096000, 16000} row
-    // (16 kHz x mclk_div 256), same as the MCLK case. Per the hardware ref;
-    // if sound is silent/distorted on the bench, REG02's clock field is the
-    // first thing to tune (hwref notes use_mclk=false wants its field = 3).
-    wr(0x01, 0x3F | 0x80);                  // clock from SCLK (no MCLK pin)
-#else
     wr(0x01, 0x3F);                         // MCLK from the MCLK pin, every clock on
-#endif
-#if defined(WS_C5_35)
-    // No MCLK pin: the codec clocks off SCLK (BCLK ~512 kHz = 32 x 16 kHz).
-    // REG02 bits[4:3] are the clock pre-multiplier (0=x1,1=x2,2=x4,3=x8); set
-    // x8 so the codec's internal clock is ~4.096 MHz -- the same clock the
-    // coeff registers 03-08 below are tuned for. With x1 the DAC ran at an
-    // eighth of that and produced no usable output.
-    wr(0x02, (uint8_t)((rd(0x02) & 0x07) | (3 << 3)));
-#else
     wr(0x02, (uint8_t)(rd(0x02) & 0x07));   // pre-divider 1, multiplier 1x
 #if defined(CARDPUTER_ADV)
     wr(0x01, 0xBF);                         // MCLK made from BCLK, every clock on
     wr(0x02, 0x18);                         // BCLK x8 = 256 x 16 kHz
-#endif
 #endif
     wr(0x03, 0x10);                         // single speed, ADC OSR
     wr(0x04, 0x10);                         // DAC OSR
@@ -255,6 +280,7 @@ static bool codecInit() {
     wr(0x32, 0xD8);                         // DAC volume, 85%
     return true;
 }
+#endif
 
 // ---- the amplifier ---------------------------------------------------------
 #if defined(STICKS3)
