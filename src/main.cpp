@@ -9701,8 +9701,6 @@ void loop() {
                             engine.resetLifetime();
                             Dex::reset();
                             Regulars::reset();
-                        } else if (pending == SettingsRow::BORING_MODE) {
-                            Settings::toggleBoringMode();
                         } else if (pending == SettingsRow::REPLAY_INTRO) {
                             Squachy::replayIntro();
                             enterClear();
@@ -9970,14 +9968,12 @@ void loop() {
                             uiSettingsSetConfirm(row);
                             break;
                         case SettingsRow::BORING_MODE:
-                            // Asked on the way IN only. Boring mode hides
-                            // every Squachy row, which is exactly what makes
-                            // it hard to undo by accident -- but turning it
-                            // back off restores all of them, so a panel there
-                            // would just be friction on the fix for the thing
-                            // the panel exists to warn about.
-                            if (Settings::boringMode()) Settings::toggleBoringMode();
-                            else                        uiSettingsSetConfirm(row);
+                            // No panel either way. It had one on the way in
+                            // when this was BORING MODE, a blank screen worth
+                            // stopping for; TERMINAL MODE is a dashboard people
+                            // pick on purpose, its row stays where it was, and
+                            // the same tap puts Squachy back.
+                            Settings::toggleBoringMode();
                             break;
                         case SettingsRow::CHECK_COLORS: enterColorCheck(true); break;
                         case SettingsRow::DIAGNOSTICS:  enterDiagnostics(); break;
