@@ -58,8 +58,8 @@ void save() {
 
 uint32_t weekOfDay(uint32_t day) { return day / 7u; }
 
-// A card: sixteen of the seventeen types, so exactly one sits out. The one
-// that sits out is picked from the types this board has never seen, which is
+// A card: sixteen of the eighteen types, so two sit out. The ones that sit
+// out are picked from the types this board has never seen, which is
 // what keeps a card winnable somewhere quiet -- a card that keeps every rare
 // type is a card nobody finishes.
 void deal(const DetectionEngine* eng) {

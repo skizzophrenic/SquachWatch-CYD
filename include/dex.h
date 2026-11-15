@@ -1,6 +1,6 @@
 // SquachWatch-CYD — the SQUACHY-DEX: one entry per detection type.
 //
-// BINGO is a card you fill once a week. The DEX never finishes: seventeen
+// BINGO is a card you fill once a week. The DEX never finishes: eighteen
 // numbered entries, a silhouette for every type never caught, and a card
 // behind each with what it is, where it lives, what Squachy thinks of it,
 // and this board's own record against it. The counts come from the

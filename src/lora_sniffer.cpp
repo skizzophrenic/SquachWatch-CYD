@@ -17,6 +17,8 @@
 #include "lora_classify.h"
 #include "lora_meshcore.h"
 #include "lora_nodes.h"
+#include "lora_opalert.h"
+#include "lora_lorawan.h"
 #include "lora_meshtastic.h"
 #include "lora_crypto.h"
 #include "lora_channels.h"
@@ -679,6 +681,8 @@ void forgetNames() {
     Serial.println("[lora] remembered Meshtastic names forgotten, stored copy included");
 }
 
+static void wanHook(const LoRaWAN::Decoded& d, const Packet& pk, uint32_t now);   // with takeOperatorHit, below
+
 bool begin() {
     s_lock = xSemaphoreCreateMutex();
     // Before the radio, like the channel keys below: the names are the
@@ -686,6 +690,7 @@ bool begin() {
     namesRestore();
     dmRestore();
     mcRestore();
+    Nodes::setLoRaWANHook(wanHook);
     memset(&s_stats, 0, sizeof s_stats);
     // The request log exists before the first request can be issued, which is
     // the point of it: an empty log is a claim the owner can check.
@@ -1243,6 +1248,22 @@ static void mcTick(uint32_t now) {
     }
 }
 
+// LoRaWAN's one listening post: the first downlink profile of the band plan
+// (RX2 at SF9 in EU 868), else any LoRaWAN profile there is. Not the Class B
+// beacon, which names no operator.
+static bool wanProfile(uint8_t& idx) {
+    int16_t any = -1;
+    for (uint8_t i = 0; i < profileCount(); i++) {
+        const Profile& p = profile(i);
+        if (p.group != PG_LORAWAN || (p.flags & PF_IMPLICIT)) continue;
+        if (p.flags & PF_INVERT) { idx = i; return true; }
+        if (any < 0) any = i;
+    }
+    if (any < 0) return false;
+    idx = (uint8_t)any;
+    return true;
+}
+
 void applyListen(uint8_t listen) {
     uint8_t mt = 0, mc = 0;
     const bool haveMt = meshProfile(Proto::MESHTASTIC, mt);
@@ -1252,6 +1273,13 @@ void applyListen(uint8_t listen) {
         case 0: s_noLinger = false; setMode(Mode::OFF); break;
         case 1: s_noLinger = false; if (haveMt) { s_focus = mt; setMode(Mode::FOCUS); } break;
         case 2: s_noLinger = false; if (haveMc) { s_focus = mc; setMode(Mode::FOCUS); } break;
+        case 4: {
+            uint8_t wan = 0;
+            s_noLinger = false;
+            if (wanProfile(wan)) { s_focus = wan; setMode(Mode::FOCUS); }
+            else setMode(Mode::OFF);      // no LoRaWAN in this band plan: say nothing rather than listen elsewhere
+            break;
+        }
         default:
             // Both: the survey over just these two. A CAD on each takes
             // tens of milliseconds, far inside either network's preamble.
@@ -1269,7 +1297,7 @@ void applyListen(uint8_t listen) {
             setMode(Mode::SURVEY);
             break;
     }
-    Serial.printf("[lora] listening: %s\n", listen == 0 ? "off" : listen == 1 ? "Meshtastic" : listen == 2 ? "MeshCore" : "Meshtastic and MeshCore in turn");
+    Serial.printf("[lora] listening: %s\n", listen == 0 ? "off" : listen == 1 ? "Meshtastic" : listen == 2 ? "MeshCore" : listen == 4 ? "LoRaWAN downlinks" : "Meshtastic and MeshCore in turn");
 }
 
 uint16_t rssiTrail(int8_t* out, uint16_t cap) {
@@ -1453,6 +1481,36 @@ bool nodeAt(uint8_t i, Nodes::Node& out) {
     xSemaphoreGive(s_lock);
     return n != nullptr;
 }
+// ---- LoRaWAN operators -----------------------------------------------------------
+// Sightings on their way to the detection engine. wanHook runs on the radio
+// task inside s_lock (Nodes::note calls it); takeOperatorHit runs on loop().
+// One slot per operator: a later frame overwrites its own entry, so the queue
+// holds the newest signal of each and a busy network cannot fill it.
+static const uint8_t OP_Q_CAP = 8;
+static OpAlert::Hit s_opQ[OP_Q_CAP];
+static uint8_t      s_opQN = 0;
+
+static void wanHook(const LoRaWAN::Decoded& d, const Packet& pk, uint32_t now) {
+    OpAlert::Hit h;
+    if (!OpAlert::note(d, pk, now, h)) return;
+    for (uint8_t i = 0; i < s_opQN; i++)
+        if (s_opQ[i].netId == h.netId) { s_opQ[i] = h; return; }
+    if (s_opQN < OP_Q_CAP) s_opQ[s_opQN++] = h;     // full: loop() is stalled, and the next frame asks again
+}
+
+bool takeOperatorHit(OpAlert::Hit& out) {
+    if (!s_lock || !s_opQN) return false;           // the count is one byte: an unlocked peek is fine
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(20)) != pdTRUE) return false;
+    const bool have = s_opQN > 0;
+    if (have) {
+        out = s_opQ[0];
+        s_opQN--;
+        memmove(&s_opQ[0], &s_opQ[1], s_opQN * sizeof s_opQ[0]);
+    }
+    xSemaphoreGive(s_lock);
+    return have;
+}
+
 uint8_t nodeSnapshot(Nodes::Node* out, uint8_t cap, uint8_t from) {
     if (!out || !cap || !s_lock) return 0;
     if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(20)) != pdTRUE) return 0;
@@ -2328,7 +2386,7 @@ bool console(const char* line) {
         // Meshtastic, MeshCore, both. For the night a board's screen froze
         // with the radio on a shared bus (the T-Deck, 2026-10-12).
         const int v = atoi(a + 6);
-        Settings::setLoraListen((uint8_t)(v < 0 ? 0 : v > 3 ? 3 : v));
+        Settings::setLoraListen((uint8_t)(v < 0 ? 0 : v > 4 ? 3 : v));
         applyListen(Settings::loraListen());
         return true;
     }

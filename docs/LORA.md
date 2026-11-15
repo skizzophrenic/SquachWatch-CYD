@@ -1250,8 +1250,13 @@ This detector needs no content at all, only the header fields:
 - plus a maker hint when a join is caught: the DevEUI's OUI belonging to a
   tracker vendor
 
-It fits the existing detection model (`Detection`, alerts, the DEX) as a new
-type, say `LORA_TRACKER`, alongside `LORA_NODE` for plain sightings. Keep it
+The plain sighting is built, one level up from a node: `LORAWAN`, one
+Detection per **operator** heard (`lora_opalert.h`, and `docs/DETECTIONS.md`
+for the rules). It goes through the ALERT, the LOG, IGNORE, SNOOZE and HUNT
+like any other type.
+
+The tracker detector is not. It fits the same model (`Detection`, alerts, the
+DEX) as a further type, say `LORA_TRACKER`. Keep it
 local, as everything else is (see [section 8](#8-the-law)). A DevAddr can
 change on rejoin, so the check has to tolerate gaps.
 

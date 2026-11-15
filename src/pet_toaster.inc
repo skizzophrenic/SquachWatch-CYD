@@ -115,6 +115,7 @@ static const char* toastCatchLine(uint8_t type) {
         case DetectionType::EVILTWIN:    return "An evil twin network. I only have good twins.";
         case DetectionType::HACKER:      return "A hacker tool! I am mostly brave.";
         case DetectionType::IBEACON:     return "A shop beacon. I'm not for sale.";
+        case DetectionType::LORAWAN:     return "A LoRaWAN network. Long range. I'm short range.";
         default:                         return nullptr;
     }
 }

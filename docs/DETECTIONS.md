@@ -548,6 +548,51 @@ plenty of things that are not a Pineapple produce one.
 
 ---
 
+## LoRaWAN operators — `LORAWAN` — **High or Medium, by address type**
+
+Only on a board with a LoRa radio (`SQUACH_LORA`), and only while that radio
+is listening on a LoRaWAN profile. Everything else on this page is WiFi or
+Bluetooth; this one comes from the sniffer in `docs/LORA.md`.
+
+Every LoRaWAN data frame starts with the device's address in the clear, and
+the front of that address is the operator's NetID. The LoRa Alliance registry
+is in flash (`include/lora_netid_table.h`, 143 rows), so the board can say
+whose network it is hearing without asking anybody: "Oresundskraft", "The
+Things Network", "Netmore".
+
+**One detection per operator, not per device.** A utility's meters share a
+NetID and a street holds hundreds of them. The log row carries an address
+made up from the NetID -- `02:4C:57` and the three NetID bytes -- so IGNORE,
+SNOOZE, WATCH and HUNT work on the operator the way they work on a device.
+HUNT's gauge moves when the operator's next frame lands, which is minutes
+apart, and it is whichever of its devices spoke: a bearing on a network,
+not on one meter.
+
+**It alerts once.** A row in the log goes quiet after a minute, and a network
+that speaks every ten minutes would otherwise come back as news every time.
+The alert returns only after the operator has been unheard for an hour.
+
+| What | Grade |
+|---|---|
+| DevAddr type 0-2 (the whole NetID is in the address) | **High** |
+| DevAddr type 3-7 (11 to 17 bits of a 21-bit NetID) | **Medium** -- the registry row it lands on is the likeliest owner |
+
+### What is deliberately NOT counted
+
+- **Join requests, join accepts and Class B beacons.** None carries a
+  DevAddr. A join request names the device's maker and stays in NODES.
+- **NetID 0 and 1**, "private/experimental". Not an operator, and where an
+  all-zero or garbage header lands.
+- **A single downlink.** Gateways send downlinks without a payload CRC, so
+  one frame off RX2 is only as good as its header checksum. The same
+  operator has to be heard twice within the hour. An uplink whose CRC held
+  counts at once.
+
+The payload is encrypted and is never touched. `test/lora_opalert_test.cpp`
+pins all of the above.
+
+---
+
 ## License / attribution
 
 | Source | License | Used for |

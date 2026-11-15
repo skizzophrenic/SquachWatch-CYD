@@ -33,7 +33,14 @@ enum class DetectionType : uint8_t {
     // chip, and sixteen Espressif prefixes already sit under FLOCK. HACKER
     // takes exact signatures only, which is what keeps it worth alerting on.
     HACKER  = 17,
-    COUNT   = 18
+    // A LoRaWAN operator's network within earshot: a utility's meters, a
+    // city's sensors, The Things Network. One per OPERATOR, not per device --
+    // the DevAddr prefix names who runs it (lora_opalert.h), and a street of
+    // meters is one fact, not three hundred. Only a board with a LoRa radio
+    // can raise it, and only while that radio is listening on a LoRaWAN
+    // profile.
+    LORAWAN = 18,
+    COUNT   = 19
 };
 
 inline const char* detectionTypeName(DetectionType t) {
@@ -55,6 +62,7 @@ inline const char* detectionTypeName(DetectionType t) {
         case DetectionType::EVILTWIN:    return "EVIL TWIN";
         case DetectionType::IBEACON:     return "IBEACON";
         case DetectionType::HACKER:      return "HACKER";
+        case DetectionType::LORAWAN:     return "LORAWAN";
         default:                         return "UNKNOWN";
     }
 }

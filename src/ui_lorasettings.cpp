@@ -133,7 +133,8 @@ void buildMain() {
         Row& r = add(LISTEN, "LISTEN");
         snprintf(r.value, sizeof r.value, "%s", Settings::loraListenName());
         r.valCol = Settings::loraListen() ? Theme::CYAN : dim(Theme::WHITE, 150);
-        snprintf(r.hint, sizeof r.hint, "WHICH NETWORKS THE RADIO HEARS");
+        snprintf(r.hint, sizeof r.hint, "%s", Settings::loraListen() == 4 ? "OPERATOR ALERTS. NO MESH TRAFFIC"
+                                                                         : "WHICH NETWORKS THE RADIO HEARS");
     }
     {
         Row& r = add(PRESET, "MESHTASTIC PRESET");
