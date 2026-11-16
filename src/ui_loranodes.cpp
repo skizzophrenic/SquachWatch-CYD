@@ -11,6 +11,7 @@
 #include "lora_meshtastic.h"
 #include "lora_meshcore.h"
 #include "theme.h"
+#include "settings.h"
 #include "privacy.h"
 #include <Arduino.h>
 #include <esp_heap_caps.h>
@@ -21,7 +22,9 @@ namespace {
 
 const int W = 320;
 const int HEADER_H = 18;
-const int TABS_Y = HEADER_H + 2, TABS_H = 14, TAB_W = 104;
+const int TABS_Y = HEADER_H + 2, TABS_H = 14, TAB_W = 80;
+// The DIRECT switch, right of the three tabs.
+const int DIR_X = 4 + 3 * TAB_W, DIR_W = W - 4 - DIR_X;
 const int LIST_TOP = TABS_Y + TABS_H + 2;
 const int BAR_Y = 226;
 const int LIST_BOT = BAR_Y - 1;
@@ -77,6 +80,8 @@ void age(uint32_t now, uint32_t ms, char* out, size_t cap) {
 void status(const char* s) { snprintf(s_status, sizeof s_status, "%s", s); s_statusAt = s_now; }
 
 bool inTab(const Lora::Nodes::Node& n, uint8_t tab) {
+    // DIRECT: only nodes heard transmitting themselves at least once.
+    if (Settings::loraNodesDirect() && !n.directPackets) return false;
     if (tab == T_MT) return n.proto == Lora::Proto::MESHTASTIC;
     if (tab == T_MC) return n.proto == Lora::Proto::MESHCORE;
     return true;
@@ -153,7 +158,8 @@ bool dmPeer(const Lora::Nodes::Node& n, uint32_t& peer) {
 void drawHeader(TFT_eSPI& t) {
     t.fillRect(0, 0, W, HEADER_H, Theme::BG);
     char title[32];
-    snprintf(title, sizeof title, "LORA > NODES  %u", (unsigned)s_snapN);
+    if (Settings::loraNodesDirect()) snprintf(title, sizeof title, "LORA > NODES  %u DIRECT OF %u", (unsigned)countIn(T_ALL), (unsigned)s_snapN);
+    else                             snprintf(title, sizeof title, "LORA > NODES  %u", (unsigned)s_snapN);
     small(t, 8, 4, title, Theme::WHITE);
     small(t, W - 6 - 54, 4, "[ BACK ]", Theme::PURPLE);
     t.drawFastHLine(0, HEADER_H - 1, W, dim(Theme::CYAN, 70));
@@ -173,11 +179,21 @@ void drawTabs(TFT_eSPI& t) {
         const int tw = t.textWidth(s);
         small(t, x + (TAB_W - 4 - tw) / 2, TABS_Y + 3, s, on ? COL[i] : dim(COL[i], 150), on ? dim(COL[i], 60) : Theme::BG);
     }
+    // DIRECT: filled when on, an outline when off.
+    const bool d = Settings::loraNodesDirect();
+    const uint16_t dc = Theme::GREEN;
+    if (d) t.fillRoundRect(DIR_X, TABS_Y, DIR_W, TABS_H, 3, dim(dc, 70));
+    else   t.drawRoundRect(DIR_X, TABS_Y, DIR_W, TABS_H, 3, dim(dc, 90));
+    const char* lab = d ? "DIRECT ON" : "DIRECT";
+    t.setTextFont(1); t.setTextSize(1);
+    small(t, DIR_X + (DIR_W - t.textWidth(lab)) / 2, TABS_Y + 3, lab, d ? Theme::WHITE : dim(dc, 160), d ? dim(dc, 70) : Theme::BG);
 }
 
 void drawRows(TFT_eSPI& t) {
     if (!s_shownN) {
-        const char* a = s_snapN ? "NONE ON THIS NETWORK YET" : "NOBODY HEARD SINCE THE RADIO STARTED";
+        const char* a = !s_snapN ? "NOBODY HEARD SINCE THE RADIO STARTED"
+                      : Settings::loraNodesDirect() ? "NONE HEARD DIRECT: DIRECT OFF SHOWS ALL"
+                      : "NONE ON THIS NETWORK YET";
         small(t, 10, LIST_TOP + 12, a, dim(Theme::WHITE, 160));
         small(t, 10, LIST_TOP + 26, "A NODE SHOWS UP WHEN IT NEXT TRANSMITS:", dim(Theme::WHITE, 120));
         small(t, 10, LIST_TOP + 36, "A NODEINFO, POSITION, ADVERT OR MESSAGE", dim(Theme::WHITE, 120));
@@ -211,7 +227,7 @@ void drawRows(TFT_eSPI& t) {
 
 void drawBar(TFT_eSPI& t) {
     t.fillRect(0, BAR_Y, W, 240 - BAR_Y, 0x0862);
-    const char* s = "TAP A NODE TO MESSAGE IT.  DRAG OR W / S SCROLLS";
+    const char* s = "TAP A NODE TO MESSAGE IT.  W/S SCROLL, D = DIRECT";
     uint16_t c = dim(Theme::WHITE, 150);
     if (s_status[0] && s_now - s_statusAt < 2500) { s = s_status; c = Theme::VAPOR_YELLOW; }
     clipText(t, 6, BAR_Y + 3, s, c, W - 12, 0x0862);
@@ -264,6 +280,7 @@ LoraNodesHit uiLoraNodesTap(int x, int y, uint32_t now) {
     s_now = now;
     if (y < HEADER_H + 2) return x >= W - 80 ? LoraNodesHit::BACK : LoraNodesHit::NONE;
     if (y < LIST_TOP) {
+        if (x >= DIR_X) { Settings::toggleLoraNodesDirect(); s_scroll = 0; buildOrder(); return LoraNodesHit::NONE; }
         const int i = (x - 4) / TAB_W;
         if (i >= 0 && i < 3) selectTab((uint8_t)i);
         return LoraNodesHit::NONE;
@@ -296,6 +313,7 @@ void uiLoraNodesKey(char c, uint32_t now) {
     else if (c == 'a' || c == 'A') selectTab(T_ALL);
     else if (c == 't' || c == 'T') selectTab(T_MT);
     else if (c == 'c' || c == 'C') selectTab(T_MC);
+    else if (c == 'd' || c == 'D') { Settings::toggleLoraNodesDirect(); s_scroll = 0; buildOrder(); }
 }
 
 #endif  // (SQUACH_LORA && TDECK_PLUS) || SQUACH_LORA_FAKE

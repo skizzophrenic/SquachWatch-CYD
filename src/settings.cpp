@@ -231,6 +231,7 @@ static uint8_t  s_loraDetect   = 0;   // ON
 static bool     s_loraAlerts   = true;
 static uint8_t  s_loraHops     = 3;
 static bool     s_loraMsgSnd   = true;
+static bool     s_loraNodDir   = false;
 static char     s_loraMtPre[16] = { 0 };   // "" = LongFast
 static char     s_loraTxCh[2][24] = { { 0 }, { 0 } };   // [0] Meshtastic, [1] MeshCore; "" = default
 
@@ -495,6 +496,8 @@ uint8_t loraHops() { return s_loraHops; }
 void cycleLoraHops() { s_loraHops = (uint8_t)(s_loraHops >= 7 ? 1 : s_loraHops + 1); s_prefs.putUChar("loraHops", s_loraHops); }
 bool loraMsgSound()       { return s_loraMsgSnd; }
 void toggleLoraMsgSound() { s_loraMsgSnd = !s_loraMsgSnd; s_prefs.putBool("loraMsgSnd", s_loraMsgSnd); }
+bool loraNodesDirect()       { return s_loraNodDir; }
+void toggleLoraNodesDirect() { s_loraNodDir = !s_loraNodDir; s_prefs.putBool("loraNodDir", s_loraNodDir); }
 const char* loraMtPreset() { return s_loraMtPre; }
 void setLoraMtPreset(const char* name) {
     snprintf(s_loraMtPre, sizeof s_loraMtPre, "%s", name ? name : "");
@@ -717,6 +720,7 @@ void load() {
     s_loraHops     = s_prefs.getUChar("loraHops", 3);
     if (s_loraHops < 1 || s_loraHops > 7) s_loraHops = 3;
     s_loraMsgSnd   = s_prefs.getBool("loraMsgSnd", true);
+    s_loraNodDir   = s_prefs.getBool("loraNodDir", false);
     s_loraMtPre[0] = '\0';
     if (s_prefs.isKey("loraMtPre")) s_prefs.getString("loraMtPre", s_loraMtPre, sizeof s_loraMtPre);
     s_loraTxCh[0][0] = s_loraTxCh[1][0] = '\0';

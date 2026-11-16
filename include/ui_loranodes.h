@@ -5,7 +5,11 @@
 // ago can still be found by name. Opened by a tap on the LORA page's "N NODES"
 // header or on an empty part of the dish; BACK returns there.
 //
-// Three tabs: ALL (every network the radio decodes), MESHTASTIC, MESHCORE.
+// Three tabs: ALL (every network the radio decodes), MESHTASTIC, MESHCORE,
+// and a DIRECT switch beside them that keeps only the nodes this radio has
+// heard transmit themselves -- its neighbours, not the whole mesh behind
+// the relays. The switch is remembered, and the LORA page's NODES tab
+// follows it.
 // One row a node, the most recently heard first: its name, network, handle and
 // role, how it was heard (direct with its signal, or through a relay and how
 // many hops), and how long ago. A Meshtastic row, or a MeshCore one whose
@@ -32,5 +36,6 @@ uint32_t     uiLoraNodesPeer();
 Lora::Proto  uiLoraNodesPeerProto();
 // A drag, in pixels: positive shows what is further down.
 void         uiLoraNodesScrollBy(int px);
-// The keyboard: W / S scroll, A / T / C pick the ALL / MESHTASTIC / MESHCORE tab.
+// The keyboard: W / S scroll, A / T / C pick the ALL / MESHTASTIC / MESHCORE tab,
+// D flips DIRECT (Settings::loraNodesDirect: only nodes heard first-hand).
 void         uiLoraNodesKey(char c, uint32_t now);

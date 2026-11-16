@@ -163,7 +163,10 @@ void drawHeader(TFT_eSPI& t, uint32_t now) {
 // because it timed out rather than because there is nothing.
 Lora::Hit  s_pHits[Lora::HIT_CAP];
 uint8_t    s_pHitN = 0;
-const uint8_t SNAP_NODES = 32;                    // plenty for a dish this size
+// The whole table: the NODES tab lists the newest, wherever they sit in it.
+// The dish still draws at most DISH_NODES of them.
+const uint8_t SNAP_NODES = Lora::Nodes::CAP;
+const uint8_t DISH_NODES = 32;                    // plenty for a dish this size
 // The big copies, about 13 KB, in PSRAM: the T-Deck has 7.8 MB of it free
 // and its internal RAM is what the radios and the frame push live on.
 struct PageSnap {
@@ -723,14 +726,14 @@ void drawDish(TFT_eSPI& t, uint32_t now) {
     }
     // The nodes.
     // The page's own copy (see refreshSnapshot); the table holds 96.
-    const uint8_t SNAP = SNAP_NODES;
+    const uint8_t SNAP = DISH_NODES;
     const Lora::Nodes::Node* nodes = s_ps ? s_ps->nodes : nullptr;
     const uint8_t nn = s_ps ? s_pNodeN : 0;
     const Gnss::Fix& fix = Gnss::fix();
     const bool haveFix = fix.valid && Gnss::fresh(now);
     Blip blips[SNAP];
     uint8_t nb = 0, unknownN = 0;
-    for (uint8_t i = 0; i < nn; i++) {
+    for (uint8_t i = 0; i < nn && nb < SNAP; i++) {
         const Lora::Nodes::Node& n = nodes[i];
         if (n.proto != Lora::Proto::MESHTASTIC && n.proto != Lora::Proto::MESHCORE) continue;
         if (now - n.lastMs > 3600000u) continue;       // an hour: the dish is who is around now
@@ -847,13 +850,20 @@ void drawNodeRows(TFT_eSPI& t, uint32_t now, uint16_t col) {
     s_nodeRowsN = 0;
     const Lora::Nodes::Node* nodes = s_ps->nodes;
     uint8_t order[SNAP_NODES], n = 0;
-    for (uint8_t i = 0; i < s_pNodeN; i++) order[n++] = i;
+    const bool direct = Settings::loraNodesDirect();
+    for (uint8_t i = 0; i < s_pNodeN; i++) if (!direct || nodes[i].directPackets) order[n++] = i;
     for (uint8_t i = 1; i < n; i++)
         for (uint8_t j = i; j > 0 && nodes[order[j]].lastMs > nodes[order[j - 1]].lastMs; j--) {
             const uint8_t k = order[j]; order[j] = order[j - 1]; order[j - 1] = k;
         }
     if (!n) {
-        small(t, 10, CHAT_ROWS_Y + 4, "nobody heard yet: a node shows up when it transmits", dim(Theme::WHITE, 120));
+        small(t, 10, CHAT_ROWS_Y + 4, direct && s_pNodeN ? "no node heard direct yet (LORA > NODES: DIRECT)"
+                                                         : "nobody heard yet: a node shows up when it transmits", dim(Theme::WHITE, 120));
+        if (direct && s_pNodeN) {
+            char all[32];
+            snprintf(all, sizeof all, "ALL %u NODES >", (unsigned)Lora::nodeCount());
+            small(t, 8, CHAT_ROWS_Y + NODE_ROWS * CHAT_ROW_H + 1, all, col);
+        }
         return;
     }
     t.setTextFont(1); t.setTextSize(1);
@@ -877,7 +887,8 @@ void drawNodeRows(TFT_eSPI& t, uint32_t now, uint16_t col) {
         t.setTextColor(dim(Theme::WHITE, 110), bg); t.setCursor(316 - 4 - agoW, y + 1); t.print(ago);
     }
     char all[32];
-    snprintf(all, sizeof all, "ALL %u NODES >", (unsigned)Lora::nodeCount());
+    if (direct) snprintf(all, sizeof all, "%u DIRECT OF %u NODES >", (unsigned)n, (unsigned)Lora::nodeCount());
+    else        snprintf(all, sizeof all, "ALL %u NODES >", (unsigned)Lora::nodeCount());
     small(t, 8, CHAT_ROWS_Y + NODE_ROWS * CHAT_ROW_H + 1, all, col);
 }
 
@@ -906,7 +917,8 @@ void drawChats(TFT_eSPI& t, uint32_t now) {
         const bool hot = k == 2 && dmUnread && !on;
         const uint16_t fill = on ? dim(cols[k], 60) : hot ? dim(cols[k], 110) : dim(cols[k], 14);
         t.fillRect(x0 + 1, CHAT_Y + 1, w - 2, CHAT_TAB_H - 1, fill);
-        const unsigned n = k == 3 ? (unsigned)Lora::nodeCount() : (unsigned)(k == 2 && dmUnread ? dmUnread : s_pCount[k]);
+        unsigned n = k == 2 && dmUnread ? dmUnread : k < 3 ? s_pCount[k] : Lora::nodeCount();
+        if (k == 3 && Settings::loraNodesDirect()) { n = 0; for (uint8_t i = 0; i < s_pNodeN; i++) if (s_ps->nodes[i].directPackets) n++; }
         const int room = w - 4 - (k == 3 ? bw : 0);
         char lab[24];
         snprintf(lab, sizeof lab, "%s %u", names[k], n);

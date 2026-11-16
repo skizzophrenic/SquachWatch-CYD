@@ -409,6 +409,12 @@ namespace Settings {
     // message. ON by default. Key "loraMsgSnd".
     bool        loraMsgSound();
     void        toggleLoraMsgSound();
+    // LORA > NODES' DIRECT switch: list only the nodes this radio has heard
+    // transmit themselves (Nodes::Node::directPackets), not the ones only ever
+    // heard through relays. The LORA page's NODES tab follows it. OFF by
+    // default. Key "loraNodDir".
+    bool        loraNodesDirect();
+    void        toggleLoraNodesDirect();
     // MESHTASTIC PRESET: the preset Meshtastic is listened to and sent on, by
     // name ("MediumFast"), so it means the same in EU 868 and US 915. "" is
     // the default, LongFast. Found in the band plan by Lora::meshPresetFind.

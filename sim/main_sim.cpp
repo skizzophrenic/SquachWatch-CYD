@@ -1148,6 +1148,7 @@ int main(int argc, char** argv) {
         uiLoraNodesInit(frame, true);
         static const char TABKEY[3] = { 'a', 't', 'c' };
         uiLoraNodesKey(TABKEY[tabIdx >= 0 && tabIdx < 3 ? tabIdx : 0], now);
+        if (getenv("SQUACHSIM_NODEDIRECT")) uiLoraNodesKey('d', now);   // the DIRECT switch on
     }
     else if (screen == "wifiadd")    uiWifiAddInit(frame);
     else if (screen == "dex") {
