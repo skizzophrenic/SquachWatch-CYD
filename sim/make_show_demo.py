@@ -32,6 +32,18 @@ CYAN  = (0, 214, 214)
 # ---- the clips ----
 
 CLIPS = {
+    # v1.46.0 "They See Me Rollin", 320x240: the main screen, MY ALERTS with
+    # the seeded patrol-car list, a MY ALERT card (--alert 19, MINE) and a
+    # LoRaWAN operator's (--alert 18), HUNT after a long run (no bubble
+    # leftovers up top), and SYNTHWAVE for the trackball and the AU band.
+    "they-see-me-rollin": [
+        ("clear", 60, 40, ["--bg", "5"], {"SQUACHSIM_BATT": "80"}, 1400, "THEY SEE ME ROLLIN'. I SEE THEM TOO."),
+        ("myalerts", 10, 1, [], {}, 2400, "NEW: MY ALERTS. YOUR OWN WIFI NAMES, * AND ?"),
+        ("alert", 40, 40, ["--alert", "19"], {}, 1700, "VEH912? THAT'S A PATROL CAR'S HOTSPOT."),
+        ("alert", 40, 40, ["--alert", "18"], {}, 1600, "LORA BOARDS NAME WHOSE LORAWAN IS NEARBY."),
+        ("hunt", 1500, 30, [], {}, 1400, "HUNT STOPPED HOARDING SPEECH BUBBLES."),
+        ("clear", 60, 40, ["--bg", "10"], {"SQUACHSIM_BATT": "80"}, 1600, "T-DECK TRACKBALL. AUSSIE LORA. ROLL ON."),
+    ],
     # v1.45.0 "Skate Better", 320x240: the main screen on FIREFLIES, a deauth
     # flood's alert (--alert 14 DEAUTH) and an AirTag's (--alert 6), the
     # AQUARIUM with the memory the release handed back, TERMINAL MODE (one tap
