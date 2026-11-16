@@ -2381,7 +2381,24 @@ static TouchPoint pollTouch() {
     TouchPoint tp = { false, 0, 0 };
     int16_t a, b;
     const bool gotTouch = sampleTouchRaw(a, b);
+#if defined(TOUCH_ON_DISPLAY_BUS) || defined(CYD35R)
+    // A moving finger on these panels fails rawReadFiltered()'s "two reads
+    // agree" test now and then, and each failure looked like a lift: the
+    // drag ended, the next good read began a new press, and lifting off
+    // that one was a tap on whatever lay under it -- scrolling picked rows
+    // at random (#134). Gaps this short are now ridden over at the last
+    // good point; only a longer silence is a release.
+    static TouchPoint s_held = { false, 0, 0 };
+    static uint32_t   s_heldMs = 0;
+    constexpr uint32_t HOLD_OVER_MS = 120;
+    if (!gotTouch) {
+        if (s_held.valid && millis() - s_heldMs <= HOLD_OVER_MS) return s_held;
+        s_held.valid = false;
+        return tp;
+    }
+#else
     if (!gotTouch) return tp;
+#endif
     const int w = tft.width(), h = tft.height();
     float sx, sy;
     TouchFit::toScreen(s_touchFit, a, b, screenRotation, sx, sy);
@@ -2403,6 +2420,9 @@ static TouchPoint pollTouch() {
         if (tp.y < 0) tp.y = 0; else if (tp.y >= h) tp.y = h - 1;
     }
     tp.valid = sane;
+#if defined(TOUCH_ON_DISPLAY_BUS) || defined(CYD35R)
+    if (sane) { s_held = tp; s_heldMs = millis(); }
+#endif
     return tp;
 }
 
@@ -3774,6 +3794,14 @@ static void releaseFrameBuffer(const char* who) {
 static bool s_frameLent = false;
 static void lendFrameToDownload() {
     if (!frameBufferOk) return;
+#if defined(ESP32)
+    // Not on a board with PSRAM. There the internal heap has 80-110 KB to
+    // spare during a download, and the frame is often in PSRAM anyway, so
+    // lending it frees nothing the download wants. Worse, the QSPI/RGB
+    // panels (the Freenove 3.5in above all) cannot be drawn straight to
+    // through TFT_eSPI: the update screen came out as noise (#136).
+    if (psramFound()) return;
+#endif
     releaseFrameBuffer("ota");
     s_frameLent = true;
 }
