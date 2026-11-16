@@ -408,10 +408,10 @@ to three characters. It changes the screen only; nothing stored changes.
   Bubbles and a rainbow on the cable, a flicker under 10%. Boards with no
   battery don't show one. **Settings → APPEARANCE → LAVA LAMP** turns it
   off; TERMINAL MODE shows the battery in the LOG's title bar instead.
-- **POWER OFF** on the Freenove ESP32-S3 2.8" and 3.5": hold **BOOT** for
-  three seconds; press it to turn the board back on. (CHARGE MODE is on
-  the Settings list there.)
-- **The speaker** on the same two boards, the T-Deck Plus, the StickS3 and
+- **POWER OFF** on the Freenove ESP32-S3 3.5": hold **BOOT** for three
+  seconds; press it to turn the board back on. (CHARGE MODE is on the
+  Settings list there.) The 2.8" doesn't use its BOOT button yet.
+- **The speaker** on the Freenove ESP32-S3 2.8" and 3.5", the T-Deck Plus, the StickS3 and
   the Cardputer ADV: SOUND in Settings is OFF,
   ALERTS or ALL, with VOLUME on - and + buttons. Quiet at night and while
   the screen is dimmed, except for a watch-list hit.
