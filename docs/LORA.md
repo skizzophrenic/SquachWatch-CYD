@@ -433,7 +433,9 @@ EU_868 (869.4–869.65 MHz) has room for one 250 kHz slot, so every 250 kHz
 preset lands on **869.525 MHz**. The rest are:
 
 - LongSlow: 869.4625 MHz. LongMod: 869.5875 MHz.
-- EU_N_868 (NarrowSlow): 869.442 MHz.
+- EU_N_868 (NarrowSlow and NarrowFast, slot 1): 869.442 MHz (869.44165
+  exactly: 10.4 kHz of padding each side). NarrowFast is Norway's
+  mesh since October 2026.
 - EU_433: LongFast on 433.875 MHz.
 - US: LongFast on 906.875 MHz.
 

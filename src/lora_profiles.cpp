@@ -19,6 +19,10 @@ static const Profile PROFILES_EU[] = {
     // The old MeshCore EU preset: the same PHY as LongFast, only the sync word differs.
     { "MC EU old",      869525000, 2500, 11, 5, 0x12, 16, PF_CRC,          0, Proto::MESHCORE,   PG_MESH_EU },
     { "MT NarrowSlow",  869442000,  625,  8, 6, 0x2B, 16, PF_CRC,          0, Proto::MESHTASTIC, PG_MESH_EU },
+    // NarrowFast (2.8, EU_N_868): NarrowSlow's slot at SF7. Slot 1 is
+    // 869.4 + 0.03125 + 0.0104 padding = 869.44165 MHz, well inside the
+    // radio's tolerance of 869.442. What Norway's mesh moved to in Oct 2026.
+    { "MT NarrowFast",  869442000,  625,  7, 6, 0x2B, 16, PF_CRC,          0, Proto::MESHTASTIC, PG_MESH_EU },
     { "MT LongSlow",    869462500, 1250, 12, 8, 0x2B, 16, PF_CRC,          0, Proto::MESHTASTIC, PG_MESH_EU },
     { "MT LongMod",     869587500, 1250, 11, 8, 0x2B, 16, PF_CRC,          0, Proto::MESHTASTIC, PG_MESH_EU },
     { "MT MediumSlow",  869525000, 2500, 10, 5, 0x2B, 16, PF_CRC,          0, Proto::MESHTASTIC, PG_MESH_EU },
