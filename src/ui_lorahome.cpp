@@ -39,13 +39,19 @@ const int STRIP_Y = 59, STRIP_H = 46;
 const int INFO_Y = 109;
 const int CHAT_Y = 120, CHAT_TAB_H = 14, CHAT_BOTTOM = 212, CHAT_ROW_H = 12;
 const int CHAT_ROWS_Y = CHAT_Y + CHAT_TAB_H + 2;
-const int TAB_W = 104;                         // three tabs across the 312-wide window
+const int TAB_W = 78;                          // four tabs across the 312-wide window
 const int COMPOSE_Y = 213, COMPOSE_H = 12;
 const int BAR_Y = 226;
 
 // ---- state -----------------------------------------------------------------
 uint8_t  s_net = 0;                      // the switch: 0 Meshtastic, 1 MeshCore
 bool     s_dmTab = false;                // the chat window shows the DM conversations
+bool     s_nodesTab = false;             // ...or the nodes heard (the fourth tab)
+// The NODES tab's rows as drawn: which node each is, for a tap.
+const uint8_t NODE_ROWS = 5;            // and a sixth line, "ALL n NODES >"
+uint64_t s_nodeRowId[NODE_ROWS];
+Lora::Proto s_nodeRowProto[NODE_ROWS];
+uint8_t  s_nodeRowsN = 0;
 char     s_compose[161] = { 0 };
 uint8_t  s_composeN = 0;
 char     s_status[40] = { 0 };
@@ -834,39 +840,86 @@ void drawChatRain(TFT_eSPI& t) {
     t.resetViewport();
 }
 
+// The NODES tab: the most recently heard nodes, one line each, and a last
+// line that opens LORA > NODES for the rest. A tap on a node opens a DM, as
+// a tap on its dot does.
+void drawNodeRows(TFT_eSPI& t, uint32_t now, uint16_t col) {
+    s_nodeRowsN = 0;
+    const Lora::Nodes::Node* nodes = s_ps->nodes;
+    uint8_t order[SNAP_NODES], n = 0;
+    for (uint8_t i = 0; i < s_pNodeN; i++) order[n++] = i;
+    for (uint8_t i = 1; i < n; i++)
+        for (uint8_t j = i; j > 0 && nodes[order[j]].lastMs > nodes[order[j - 1]].lastMs; j--) {
+            const uint8_t k = order[j]; order[j] = order[j - 1]; order[j - 1] = k;
+        }
+    if (!n) {
+        small(t, 10, CHAT_ROWS_Y + 4, "nobody heard yet: a node shows up when it transmits", dim(Theme::WHITE, 120));
+        return;
+    }
+    t.setTextFont(1); t.setTextSize(1);
+    for (uint8_t i = 0; i < n && i < NODE_ROWS; i++) {
+        const Lora::Nodes::Node& nd = nodes[order[i]];
+        s_nodeRowId[i] = nd.id; s_nodeRowProto[i] = nd.proto; s_nodeRowsN = i + 1;
+        const int y = CHAT_ROWS_Y + i * CHAT_ROW_H;
+        const uint16_t bg = i == 0 ? dim(col, 22) : Theme::BG;
+        if (i == 0) t.fillRect(5, y - 1, 310, CHAT_ROW_H, bg);
+        char pv[24], ago[8], how[28];
+        const char* who = Privacy::name(nd.name[0] ? nd.name : nd.tag, pv, sizeof pv);
+        age(now, nd.lastMs, ago, sizeof ago);
+        const char* net = nd.proto == Lora::Proto::MESHTASTIC ? "MT" : nd.proto == Lora::Proto::MESHCORE ? "MC" : Lora::protoShort(nd.proto);
+        if (nd.directPackets && nd.hops == 0 && nd.rssi > -200) snprintf(how, sizeof how, "direct %d dBm", (int)nd.rssi);
+        else if (nd.hops) snprintf(how, sizeof how, "%u hop%s", (unsigned)nd.hops, nd.hops == 1 ? "" : "s");
+        else snprintf(how, sizeof how, "relayed");
+        const int agoW = t.textWidth(ago);
+        t.setTextColor(netCol(nd.proto), bg); t.setCursor(8, y + 1); t.print(net);
+        smallClipBg(t, 26, y + 1, who, Theme::WHITE, bg, 150);
+        smallClipBg(t, 182, y + 1, how, dim(Theme::WHITE, 150), bg, 316 - 8 - agoW - 182 - 4);
+        t.setTextColor(dim(Theme::WHITE, 110), bg); t.setCursor(316 - 4 - agoW, y + 1); t.print(ago);
+    }
+    char all[32];
+    snprintf(all, sizeof all, "ALL %u NODES >", (unsigned)Lora::nodeCount());
+    small(t, 8, CHAT_ROWS_Y + NODE_ROWS * CHAT_ROW_H + 1, all, col);
+}
+
 // The window: a tab per network along the top (the open one filled, each
 // with its count), then the open network's newest lines, newest first. The
 // open tab is the network the compose line sends to: one switch for both.
 void drawChats(TFT_eSPI& t, uint32_t now) {
     if (!s_ps) return;
-    const uint16_t cols[3] = { Theme::CYAN, Theme::PINK, Theme::VAPOR_YELLOW };
-    const char* names[3] = { "MESHTASTIC", "MESHCORE", "DMs" };
-    const uint8_t c = s_dmTab ? 2 : s_net;
+    const uint16_t cols[4] = { Theme::CYAN, Theme::PINK, Theme::VAPOR_YELLOW, Theme::GREEN };
+    const char* names[4] = { "MESHTASTIC", "MESHCORE", "DMs", "NODES" };
+    const char* shortNames[4] = { "MT", "MC", "DMs", "NODES" };
+    const uint8_t c = s_nodesTab ? 3 : s_dmTab ? 2 : s_net;
     const uint16_t dmUnread = uiLoraChatDmUnread();
-    t.drawRect(4, CHAT_Y, 312, CHAT_BOTTOM - CHAT_Y, dim(cols[c], 110));
+    // Something unread: a small badge at the far end of the tabs, inside the
+    // NODES tab, whose label moves left to make room.
+    const uint16_t unread = uiLoraChatUnread();
+    char badge[12] = "";
+    int bw = 0;
     t.setTextFont(1); t.setTextSize(1);
-    for (int k = 0; k < 3; k++) {
+    if (unread) { snprintf(badge, sizeof badge, "+%u", (unsigned)unread); bw = t.textWidth(badge) + 4; }
+    t.drawRect(4, CHAT_Y, 312, CHAT_BOTTOM - CHAT_Y, dim(cols[c], 110));
+    for (int k = 0; k < 4; k++) {
         const int x0 = 4 + k * TAB_W, w = TAB_W;
         const bool on = k == c;
         // Unread DMs light their tab even while another is open.
         const bool hot = k == 2 && dmUnread && !on;
         const uint16_t fill = on ? dim(cols[k], 60) : hot ? dim(cols[k], 110) : dim(cols[k], 14);
         t.fillRect(x0 + 1, CHAT_Y + 1, w - 2, CHAT_TAB_H - 1, fill);
+        const unsigned n = k == 3 ? (unsigned)Lora::nodeCount() : (unsigned)(k == 2 && dmUnread ? dmUnread : s_pCount[k]);
+        const int room = w - 4 - (k == 3 ? bw : 0);
         char lab[24];
-        snprintf(lab, sizeof lab, "%s %u", names[k], (unsigned)(k == 2 && dmUnread ? dmUnread : s_pCount[k]));
-        small(t, x0 + (w - t.textWidth(lab)) / 2, CHAT_Y + 4, lab, on || hot ? Theme::WHITE : dim(cols[k], 150), fill);
+        snprintf(lab, sizeof lab, "%s %u", names[k], n);
+        if (t.textWidth(lab) > room) snprintf(lab, sizeof lab, "%s %u", shortNames[k], n);
+        small(t, x0 + (room + 4 - t.textWidth(lab)) / 2, CHAT_Y + 4, lab, on || hot ? Theme::WHITE : dim(cols[k], 150), fill);
     }
     t.drawFastHLine(5, CHAT_Y + CHAT_TAB_H, 310, dim(cols[c], 110));
-    t.drawFastVLine(4 + TAB_W, CHAT_Y + 1, CHAT_TAB_H - 1, dim(Theme::WHITE, 40));
-    t.drawFastVLine(4 + 2 * TAB_W, CHAT_Y + 1, CHAT_TAB_H - 1, dim(Theme::WHITE, 40));
-    // Something unread: a small badge at the far end of the tabs.
-    const uint16_t unread = uiLoraChatUnread();
+    for (int k = 1; k < 4; k++) t.drawFastVLine(4 + k * TAB_W, CHAT_Y + 1, CHAT_TAB_H - 1, dim(Theme::WHITE, 40));
     if (unread) {
-        char badge[12]; snprintf(badge, sizeof badge, "%u NEW", (unsigned)unread);
-        const int bw = t.textWidth(badge) + 6;
-        t.fillRect(316 - 3 - bw, CHAT_Y + 2, bw, 10, Theme::VAPOR_YELLOW);
+        t.fillRect(316 - 2 - bw, CHAT_Y + 2, bw, 10, Theme::VAPOR_YELLOW);
         small(t, 316 - bw, CHAT_Y + 3, badge, Theme::BLACK, Theme::VAPOR_YELLOW);
     }
+    if (c == 3) { drawNodeRows(t, now, cols[3]); return; }
     if (!s_pKept[c]) {
         small(t, 10, CHAT_ROWS_Y + 4, c == 2 ? "no private messages yet: tap a Meshtastic line to start one"
                                      : c ? "no MeshCore messages yet" : "no Meshtastic messages yet", dim(Theme::WHITE, 120));
@@ -899,7 +952,7 @@ Lora::Proto netProto() { return s_net ? Lora::Proto::MESHCORE : Lora::Proto::MES
 
 // The chip's words: the channel Enter sends on, cut to CHIP_CHARS.
 void chipLabel(char* out, size_t cap) {
-    if (s_dmTab) { snprintf(out, cap, "PRIVATE"); return; }
+    if (s_dmTab || s_nodesTab) { snprintf(out, cap, "PRIVATE"); return; }
     const Lora::Proto p = netProto();
     char name[24];
     Lora::Chan::txName(p, Lora::Chan::txPick(p), name, sizeof name);
@@ -910,7 +963,7 @@ void chipLabel(char* out, size_t cap) {
 // The compose line now ends where the chip begins: the chip's width is set
 // by its name, so the line is measured first and drawn second.
 void drawCompose(TFT_eSPI& t, uint32_t now) {
-    const uint16_t accent = s_dmTab ? Theme::VAPOR_YELLOW : s_net ? Theme::PINK : Theme::CYAN;
+    const uint16_t accent = s_nodesTab ? Theme::GREEN : s_dmTab ? Theme::VAPOR_YELLOW : s_net ? Theme::PINK : Theme::CYAN;
     char chip[24];
     chipLabel(chip, sizeof chip);
     t.setTextFont(1); t.setTextSize(1);
@@ -923,8 +976,9 @@ void drawCompose(TFT_eSPI& t, uint32_t now) {
     t.drawRoundRect(4, COMPOSE_Y, w, COMPOSE_H, 2, dim(accent, 150));
     if (s_status[0] && now - s_statusAt < 2500) {
         smallClipBg(t, 8, COMPOSE_Y + 2, s_status, Theme::VAPOR_YELLOW, bg, w - 8);
-    } else if (s_dmTab) {
-        smallClipBg(t, 8, COMPOSE_Y + 2, "TAP A NAME TO MESSAGE THEM", dim(Theme::VAPOR_YELLOW, 170), bg, w - 8);
+    } else if (s_dmTab || s_nodesTab) {
+        smallClipBg(t, 8, COMPOSE_Y + 2, s_nodesTab ? "TAP A NODE TO MESSAGE IT" : "TAP A NAME TO MESSAGE THEM",
+                    dim(accent, 170), bg, w - 8);
     } else if (!Settings::loraTxDbm() && !s_composeN) {
         smallClipBg(t, 8, COMPOSE_Y + 2, "LORA TX IS OFF: SETTINGS", dim(Theme::WHITE, 120), bg, w - 8);
     } else if (!s_composeN) {
@@ -981,8 +1035,23 @@ void uiLoraHomeInit(TFT_eSPI& t) {
 
 }
 
-void uiLoraHomeToggleNet() { s_net = (uint8_t)(s_net ? 0 : 1); s_dmTab = false; }
-void uiLoraHomeShowDms() { s_dmTab = true; }
+void uiLoraHomeToggleNet() { s_net = (uint8_t)(s_net ? 0 : 1); s_dmTab = false; s_nodesTab = false; }
+void uiLoraHomeShowDms() { s_dmTab = true; s_nodesTab = false; }
+void uiLoraHomeShowNodes() { s_nodesTab = true; s_dmTab = false; }
+bool uiLoraHomeNodeAt(int y, uint32_t* peer, Lora::Proto* p) {
+    if (!s_nodesTab || y < CHAT_ROWS_Y) return false;
+    const int i = (y - CHAT_ROWS_Y) / CHAT_ROW_H;
+    if (i >= s_nodeRowsN) return false;
+    const uint64_t id = s_nodeRowId[i];
+    const Lora::Proto pr = s_nodeRowProto[i];
+    if (pr == Lora::Proto::MESHTASTIC && id && id <= 0xFFFFFFFFull) { *peer = (uint32_t)id; *p = pr; return true; }
+    const uint32_t mc = (uint32_t)(id >> 32);
+    if (pr == Lora::Proto::MESHCORE && mc && Lora::dmHasKey(Lora::Proto::MESHCORE, mc)) { *peer = mc; *p = pr; return true; }
+    snprintf(s_status, sizeof s_status, pr == Lora::Proto::MESHCORE ? "NOT A CONTACT YET: NO ADVERT HEARD" : "NO DMs ON THAT NETWORK");
+    s_statusAt = millis();
+    *peer = 0;
+    return true;
+}
 uint32_t uiLoraHomeTappedPeer() { return s_tapPeer; }
 Lora::Proto uiLoraHomeTappedProto() { return s_tapProto; }
 uint32_t uiLoraHomeDmPeerAt(int y, Lora::Proto* p) {
@@ -993,7 +1062,7 @@ uint32_t uiLoraHomeDmPeerAt(int y, Lora::Proto* p) {
     return s_ps->keep[2][i].peer;
 }
 void uiLoraHomeStepChannel(uint32_t now) {
-    if (s_dmTab) { snprintf(s_status, sizeof s_status, "TAP A NAME FIRST"); s_statusAt = now; return; }
+    if (s_dmTab || s_nodesTab) { snprintf(s_status, sizeof s_status, "TAP A NAME FIRST"); s_statusAt = now; return; }
     const Lora::Proto p = netProto();
     const uint8_t was = Lora::Chan::txPick(p);
     if (Lora::Chan::txStep(p) == was) {
@@ -1002,7 +1071,7 @@ void uiLoraHomeStepChannel(uint32_t now) {
         s_statusAt = now;
     }
 }
-void uiLoraHomeSetNet(uint8_t net) { s_net = net ? 1 : 0; s_dmTab = false; }
+void uiLoraHomeSetNet(uint8_t net) { s_net = net ? 1 : 0; s_dmTab = false; s_nodesTab = false; }
 uint8_t uiLoraHomeNet() { return s_net; }
 
 void uiLoraHomeTick(TFT_eSPI& t, uint32_t now) {
@@ -1075,9 +1144,11 @@ LoraHomeHit uiLoraHomeHit(TFT_eSPI& t, int x, int y) {
     if (y >= BAR_Y - 4) return x < 80 ? LoraHomeHit::CHATS : LoraHomeHit::NONE;
     if (y >= COMPOSE_Y - 2) return LoraHomeHit::NONE;
     if (y >= CHAT_Y - 2 && y < CHAT_Y + CHAT_TAB_H + 2)
-        return x < 4 + TAB_W ? LoraHomeHit::TAB_MESHTASTIC : x < 4 + 2 * TAB_W ? LoraHomeHit::TAB_MESHCORE : LoraHomeHit::TAB_DMS;
+        return x < 4 + TAB_W ? LoraHomeHit::TAB_MESHTASTIC : x < 4 + 2 * TAB_W ? LoraHomeHit::TAB_MESHCORE
+             : x < 4 + 3 * TAB_W ? LoraHomeHit::TAB_DMS : LoraHomeHit::TAB_NODES;
     if (y >= CHAT_Y + CHAT_TAB_H + 2 && y < COMPOSE_Y - 2)
-        return s_dmTab ? LoraHomeHit::CHAT_DMS : s_net ? LoraHomeHit::CHAT_MESHCORE : LoraHomeHit::CHAT_MESHTASTIC;
+        return s_nodesTab ? LoraHomeHit::CHAT_NODES : s_dmTab ? LoraHomeHit::CHAT_DMS
+             : s_net ? LoraHomeHit::CHAT_MESHCORE : LoraHomeHit::CHAT_MESHTASTIC;
     return LoraHomeHit::NONE;
 }
 
@@ -1085,7 +1156,7 @@ void uiLoraHomeKey(char c, uint32_t now) {
     if (c == '\b') { if (s_composeN) s_compose[--s_composeN] = '\0'; return; }
     if (c == '\n') {
         if (!s_composeN) return;
-        if (s_dmTab) { snprintf(s_status, sizeof s_status, "TAP A NAME FIRST"); s_statusAt = now; return; }
+        if (s_dmTab || s_nodesTab) { snprintf(s_status, sizeof s_status, "TAP A NAME FIRST"); s_statusAt = now; return; }
         if (!Settings::loraTxDbm()) { snprintf(s_status, sizeof s_status, "LORA TX IS OFF: SETTINGS"); s_statusAt = now; return; }
         // LORA SETTINGS' NAME, else the squad nickname (include/lora_myname.h),
         // on the channel the chip shows.

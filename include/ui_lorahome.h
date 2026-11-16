@@ -24,7 +24,7 @@
 
 enum class LoraHomeHit : uint8_t { NONE = 0, CHAT_MESHTASTIC, CHAT_MESHCORE, SWITCH, CHATS, BACK,
                                    TAB_MESHTASTIC, TAB_MESHCORE, SETTINGS, CHANNEL, TAB_DMS, CHAT_DMS, RADAR_DOT,
-                                   NODES };   // the header's "N NODES" or an empty part of the dish: LORA > NODES
+                                   NODES, TAB_NODES, CHAT_NODES };   // the header's "N NODES" or an empty part of the dish: LORA > NODES
 
 void        uiLoraHomeInit(TFT_eSPI& t);
 void        uiLoraHomeTick(TFT_eSPI& t, uint32_t now);
@@ -42,6 +42,12 @@ void        uiLoraHomeSetNet(uint8_t net);
 // The DMs tab of the chat window, and the conversation on the row at `y`
 // (0 = no row there).
 void        uiLoraHomeShowDms();
+// The chat window's fourth tab: the nodes heard, newest first. A tap on its
+// rows: true with *peer set when that node can be messaged, true with *peer 0
+// when it cannot (the compose line says why), false off the rows (the
+// "ALL n NODES >" line or below: open LORA > NODES).
+void        uiLoraHomeShowNodes();
+bool        uiLoraHomeNodeAt(int y, uint32_t* peer, Lora::Proto* p);
 uint32_t    uiLoraHomeDmPeerAt(int y, Lora::Proto* p = nullptr);
 // RADAR_DOT: the Meshtastic node whose dot on the dish was tapped.
 uint32_t    uiLoraHomeTappedPeer();

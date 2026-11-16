@@ -1113,6 +1113,7 @@ int main(int argc, char** argv) {
         uiLoraHomeInit(frame);
         uiLoraHomeSetNet(lc.net);
         if (tabIdx == 2) uiLoraHomeShowDms();     // --tab 2: the DMs tab
+        if (tabIdx == 3) uiLoraHomeShowNodes();   // --tab 3: the NODES tab
     }
     else if (screen == "lorachat") {
         SimLora::Config lc;

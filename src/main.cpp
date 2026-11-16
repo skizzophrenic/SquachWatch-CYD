@@ -10985,6 +10985,14 @@ void loop() {
                         case LoraHomeHit::TAB_MESHTASTIC:  uiLoraHomeSetNet(0); break;
                         case LoraHomeHit::TAB_MESHCORE:    uiLoraHomeSetNet(1); break;
                         case LoraHomeHit::TAB_DMS:         uiLoraHomeShowDms(); break;
+                        case LoraHomeHit::TAB_NODES:       uiLoraHomeShowNodes(); break;
+                        case LoraHomeHit::CHAT_NODES: {
+                            uint32_t peer = 0;
+                            Lora::Proto pp = Lora::Proto::MESHTASTIC;
+                            if (!uiLoraHomeNodeAt(gestureStartY, &peer, &pp)) enterLoraNodes(true);
+                            else if (peer) { uiLoraChatOpenDm(peer, pp); enterLoraChat(); }
+                            break;
+                        }
                         case LoraHomeHit::RADAR_DOT:       uiLoraChatOpenDm(uiLoraHomeTappedPeer(), uiLoraHomeTappedProto()); enterLoraChat(); break;
                         case LoraHomeHit::CHAT_DMS: {
                             // A conversation: open it; the empty part of the window: the list.
