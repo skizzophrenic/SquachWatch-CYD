@@ -9,6 +9,11 @@
 #include <stddef.h>
 #include "signatures.h"   // Confidence
 
+// LORA BEACON's bounds, in minutes: no closer than ten (both meshes' duty
+// cycle, and every node hearing it relays it), no further than a day.
+#define LORA_BEACON_MIN_MIN 10
+#define LORA_BEACON_MAX_MIN 1440
+
 namespace Settings {
     enum class Background : uint8_t {
         DIGITAL = 0, STARFIELD = 1, TOASTERS = 2,
@@ -405,6 +410,14 @@ namespace Settings {
     // sends, texts and the NodeInfo. 1-7, 3 by default. Key "loraHops".
     uint8_t     loraHops();
     void        cycleLoraHops();                 // 3 -> 4 ... 7 -> 1 ... 3
+    // BEACON: minutes between this board's own name announcements on both
+    // meshes (a MeshCore advert and a Meshtastic NodeInfo), so it shows in
+    // other nodes' lists without sending a text first. 0 = off; else
+    // LORA_BEACON_MIN_MIN..LORA_BEACON_MAX_MIN. Default LORA_BEACON_DEFAULT_MIN
+    // (0 unless the build sets it). Set with the console's LORA BEACON.
+    // Key "loraBcn".
+    uint16_t    loraBeaconMin();
+    void        setLoraBeaconMin(uint16_t minutes); // clamped; 0 stops it
     // MESSAGE SOUND: the ding (T-Deck) or buzz (watch) for a new LoRa chat
     // message. ON by default. Key "loraMsgSnd".
     bool        loraMsgSound();

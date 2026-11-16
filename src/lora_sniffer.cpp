@@ -528,6 +528,7 @@ static void namesSave(uint32_t now) {
 static const char* DM_NS = "loradm";
 static void dmTick(uint32_t now);
 static void mcTick(uint32_t now);
+static void beaconTick(uint32_t now);
 static uint32_t    s_dmKeysSavedAt = 0;
 
 static uint32_t myMeshtasticNum() { return 0x5A5A0000u | (uint32_t)(ESP.getEfuseMac() & 0xFFFF); }
@@ -860,6 +861,7 @@ void tick(uint32_t now) {
     dmKeysSave(now);
     mcSave(now);
     dmTick(now);
+    beaconTick(now);   // before mcTick, which sends the advert it queues
     mcTick(now);
     enrichScan(now);
     // Starts a short-lived worker when there is something to ask and WiFi is
@@ -1262,6 +1264,48 @@ static bool wanProfile(uint8_t& idx) {
     if (any < 0) return false;
     idx = (uint8_t)any;
     return true;
+}
+
+// BEACON (Settings::loraBeaconMin, LORA SETTINGS or LORA BEACON): our name on
+// both meshes every so many minutes, a MeshCore advert and a Meshtastic
+// NodeInfo, so other nodes list this board without a text from it first --
+// the way a stock node does on its own timer. OFF unless set. The first one
+// waits until two minutes after boot and for a trusted clock (at most ten
+// minutes): MeshCore drops an advert whose stamp is not newer than the last
+// it kept from us, and the untrusted stand-in counts from an older date than
+// a GPS stamp from before the restart. Nothing with TX POWER off; no NodeInfo
+// with ANNOUNCE NAME off (the advert still goes). Both at the power the DM
+// jobs use: the setting, at most EU_MESH_DBM_MAX on the EU plan.
+static const uint32_t BEACON_FIRST_MS = 120000, BEACON_CLOCK_WAIT_MS = 600000;
+static uint32_t s_beaconAt = 0;          // last one sent (or skipped); 0 = none yet
+static volatile bool s_beaconSoon = false;
+void beaconChanged() { s_beaconSoon = true; }
+
+static void beaconSend(uint32_t now) {
+    s_beaconAt = now ? now : 1;
+    const int8_t setDbm = (int8_t)Settings::loraTxDbm();
+    if (!setDbm) { Serial.println("[lora] beacon skipped: TX POWER is off"); return; }
+    if (McDm::ready() && xSemaphoreTake(s_lock, pdMS_TO_TICKS(200)) == pdTRUE) { McDm::advertNow(); xSemaphoreGive(s_lock); }
+    uint8_t idx = 0;
+    if (meshProfile(Proto::MESHTASTIC, idx)) {
+        const Profile& prof = profile(idx);
+        int8_t dbm = setDbm;
+        if (prof.group == PG_MESH_EU && dbm > EU_MESH_DBM_MAX) dbm = EU_MESH_DBM_MAX;
+        s_nodeInfoSent = false;          // due now, whenever the last went
+        announceIfDue(prof, MyName::longName(Settings::loraName(), Squachy::nickname()), dbm);
+    }
+    if (Settings::loraBeaconMin()) Serial.printf("[lora] beacon sent; next in %u min" "\n", (unsigned)Settings::loraBeaconMin());
+    else                           Serial.println("[lora] beacon sent (BEACON is OFF: no more on a timer)");
+}
+
+static void beaconTick(uint32_t now) {
+    const uint32_t every = (uint32_t)Settings::loraBeaconMin() * 60000u;
+    if (!every) { s_beaconSoon = false; return; }
+    if (now < BEACON_FIRST_MS) return;
+    if (!s_beaconAt && !Clock::trusted() && now < BEACON_CLOCK_WAIT_MS) return;
+    if (s_beaconSoon) { s_beaconSoon = false; beaconSend(now); return; }
+    if (s_beaconAt && now - s_beaconAt < every) return;
+    beaconSend(now);
 }
 
 void applyListen(uint8_t listen) {
@@ -2330,6 +2374,30 @@ bool console(const char* line) {
             Serial.printf("[lora]   %.8s  %-20s %s" "\n", hex, nm, hex);
         }
         Serial.printf("[lora] %u contacts; %u DMs in flight" "\n", (unsigned)((n ? n - 1 : 0) / 64), (unsigned)McDm::pending());
+        return true;
+    }
+    // LORA BEACON: the interval and when the next goes; LORA BEACON <minutes>
+    // sets it (0 or OFF stops it); LORA BEACON NOW sends one at once.
+    if (strncasecmp(a, "BEACON", 6) == 0 && (!a[6] || a[6] == ' ')) {
+        const char* v = a + 6;
+        while (*v == ' ') v++;
+        if (strncasecmp(v, "NOW", 3) == 0) { beaconSend(millis()); return true; }
+        if (*v) {
+            const long m = strncasecmp(v, "OFF", 3) == 0 ? 0 : strtol(v, nullptr, 10);
+            if (m < 0 || (m == 0 && strncasecmp(v, "OFF", 3) != 0 && *v != '0')) {
+                Serial.printf("[lora] LORA BEACON [OFF | NOW | minutes %u-%u]" "\n", (unsigned)LORA_BEACON_MIN_MIN, (unsigned)LORA_BEACON_MAX_MIN);
+                return true;
+            }
+            Settings::setLoraBeaconMin((uint16_t)(m > 65535 ? 65535 : m));
+            beaconChanged();
+        }
+        const uint16_t m = Settings::loraBeaconMin();
+        if (!m) { Serial.println("[lora] beacon: OFF"); return true; }
+        const uint32_t now = millis(), every = (uint32_t)m * 60000u;
+        long left = s_beaconSoon || !s_beaconAt ? -1 : (long)((every - (now - s_beaconAt)) / 60000u);
+        if (left < 0) Serial.printf("[lora] beacon: every %u min; next soon (after 2 min uptime and a GPS clock)" "\n", (unsigned)m);
+        else          Serial.printf("[lora] beacon: every %u min; next in ~%ld min" "\n", (unsigned)m, left);
+        if (!Settings::loraTxDbm()) Serial.println("[lora] (TX POWER is off: nothing will be sent)");
         return true;
     }
     if (strncasecmp(a, "MCADVERT", 8) == 0) {
