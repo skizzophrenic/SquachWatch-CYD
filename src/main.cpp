@@ -7224,11 +7224,15 @@ static void chargeDraw(uint32_t now) {
     PANEL.drawString(line, w / 2, h / 2 - 10);
     PANEL.setTextSize(1);
     PANEL.setTextColor(Theme::blend(TFT_BLACK, TFT_WHITE, 170), TFT_BLACK);
-    PANEL.drawString("Radios and screen are off so the battery fills faster.", w / 2, h / 2 + 20);
-    PANEL.drawString("About 4-6 hours from empty.", w / 2, h / 2 + 34);
+    // Two lines, not one: at size 1 the sentence was 324 px, wider than a
+    // portrait 240 px screen (and a landscape 320), and lost "Radios" and
+    // "faster." off its ends.
+    PANEL.drawString("Radios and screen are off", w / 2, h / 2 + 20);
+    PANEL.drawString("so the battery fills faster.", w / 2, h / 2 + 32);
+    PANEL.drawString("About 4-6 hours from empty.", w / 2, h / 2 + 46);
     PANEL.setTextColor(Theme::GREEN, TFT_BLACK);
     PANEL.setTextSize(2);
-    PANEL.drawString("TAP TO WAKE UP", w / 2, h / 2 + 64);
+    PANEL.drawString("TAP TO WAKE UP", w / 2, h / 2 + 72);
     PANEL.setTextDatum(TL_DATUM);
 #if !defined(FREENOVE_S3_35)
     FramePush::busUnlock();
