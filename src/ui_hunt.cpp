@@ -127,10 +127,15 @@ static void drawButtons(TFT_eSPI& t, int w, int h, bool ask) {
 void uiHuntTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance) {
     int w = t.width(), h = t.height();
 
-    Theme::drawTitleBar(t, ">> HUNT MODE <<");
-
     Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
     int bodyTop = 16, bodyBottom = bar.y - 4;
+
+    // The top band from the background first, as every other screen with
+    // this bar does: Squachy's bubble reaches up over it, and the body clear
+    // below starts under it, so each bubble's edges stayed there and piled up
+    // (#77).
+    t.fillRect(0, 0, w, bodyTop, Theme::BG);
+    Theme::drawTitleBar(t, ">> HUNT MODE <<");
 
     // A phone that went quiet and a new address of its kind that turned up
     // (DetectionEngine::checkHuntSwap): the gauge and Squachy give way to the
