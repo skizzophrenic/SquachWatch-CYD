@@ -802,7 +802,7 @@ void uiDeskTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adva
     char lbl[16];
     timerLabel(lbl, sizeof lbl, now);
     Theme::drawButton(t, tx, ty, tw, tth, lbl, s_timer != Timer::IDLE);
-    Theme::drawButton(t, bx, ty, bw, tth, "BACK", false);
+    Theme::drawButton(t, bx, ty, bw, tth, "MODE", false);   // on to TERMINAL MODE
     {
         int gx, gy, gs;
         gearRect(w, h, gx, gy, gs);

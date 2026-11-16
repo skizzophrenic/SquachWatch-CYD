@@ -922,7 +922,8 @@ void drawButtonBar(TFT_eSPI& t, ButtonId highlighted, ButtonBarMode mode) {
     // On the StickS3 that slot opens FOB MODE, the keychain screen.
     drawButton(t, g.x[2], g.y, g.w[2], g.h, mode == ButtonBarMode::LOG ? "[ CLR ]" : "[ FOB ]",
 #else
-    drawButton(t, g.x[2], g.y, g.w[2], g.h, mode == ButtonBarMode::LOG ? "[ CLR ]" : "[ DESK ]",
+    // MODE: the main screen, the desk and TERMINAL MODE in turn (main.cpp).
+    drawButton(t, g.x[2], g.y, g.w[2], g.h, mode == ButtonBarMode::LOG ? "[ CLR ]" : "[ MODE ]",
 #endif
                highlighted == ButtonId::CLR);
 }

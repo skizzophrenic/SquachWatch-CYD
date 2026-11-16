@@ -257,7 +257,7 @@ That's Squachy. The detection is the *why*, Squachy is the *fun*. He reacts to w
 
 Other things hiding in Settings: the SQUACHY-DEX (a card per detection type with your record), BINGO, Squachy's diary, and DESK MODE, a clock for your desk.
 
-**Don't want him?** **Settings > BEHAVIOR > TERMINAL MODE** (it used to be called BORING MODE) swaps him for a plain dashboard: a sortable LOG, an AIR graph, COUNTS and the LATEST catch. Detection is exactly the same. The same row turns him back on.
+**Don't want him?** Use **TERMINAL MODE**: the **MODE** button on the main screen (twice: the desk, then terminal) or **Settings > BEHAVIOR > TERMINAL MODE** (it used to be called BORING MODE). It swaps him for a dashboard built for the tool itself: a LOG you can sort by time, kind, device or signal, an AIR graph, COUNTS by kind and the LATEST catch, with WATCH, HUNT, INFO and IGNORE a tap away. Detection is exactly the same, and it stays that way through restarts. MODE again (or the same row) brings him back.
 
 ## Is this legal?
 

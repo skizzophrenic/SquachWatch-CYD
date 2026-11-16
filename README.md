@@ -28,6 +28,30 @@ the glitchy SquachWatch wordmark.
   <a href="https://squachwatch.com/emulator/"><b>Click it to drive it in your browser &rarr;</b></a>
 </p>
 
+## Three modes: Squachy, the desk, or just the data
+
+<p align="center">
+  <img src="docs/modes.png" width="880"
+       alt="The same board in its three modes: Squachy on the main screen, the desk clock, and TERMINAL MODE's dashboard of windows">
+</p>
+
+The **MODE** button, bottom right, steps through three ways of using the same
+detector. Detection never changes between them; only the screen does.
+
+- **Normal.** Squachy, the counters, the backgrounds and the pets. The fun one.
+- **Desk.** A big clock with Squachy under it, a focus timer, and a small card
+  when something turns up. Made to sit on a desk all day.
+- **TERMINAL MODE.** No mascot, no animation: a desktop of windows built for
+  people who want the tool. A **LOG** of every device you can sort by time,
+  kind, device or signal (tap a heading, tap again to flip it), an **AIR**
+  graph of how busy the airwaves are, **COUNTS** by kind, and the **LATEST**
+  catch. Tap a line (or LATEST) for WATCH, HUNT, INFO or IGNORE. Alerts still
+  take the full screen. It stays on through restarts until you change it.
+
+From the main screen MODE opens the desk; MODE on the desk goes to TERMINAL
+MODE; MODE there brings Squachy back. **Settings > BEHAVIOR > TERMINAL MODE**
+is the same switch. (On the StickS3 that button is FOB, its keychain mode.)
+
 ## What it detects
 
 | Type | What | How |
@@ -212,7 +236,8 @@ none of the saved networks is in range. REMOVE takes one off the list.
      The WiFi sweep only listens; it sends nothing.
    - **`[ LOG ]`** — open the detection log, each device once. It survives
      a restart: about 1,800 sightings are kept in flash.
-   - **`[ DESK ]`** — desk mode: the big clock, with Squachy under it.
+   - **`[ MODE ]`** — the next mode: the desk clock, then TERMINAL MODE,
+     then back to Squachy (see [Three modes](#three-modes-squachy-the-desk-or-just-the-data)).
    - On the LOG screen the third button is **`[ CLR ]`** — wipe the log and return.
 
    A tap near the left or right edge of the main screen changes the
@@ -284,8 +309,8 @@ set pieces two Squachys act out follow the same setting.
        alt="Desk mode: the date and time in big digits over the fire scene with Squachy talking below; a catch appears as a small card; a squad message drops out from behind the clock with the sender's polaroid; the focus timer starts; the LOG shows real times; the time zone card asks once.">
 </p>
 
-**DESK MODE** in Settings turns the board into the thing beside the
-keyboard: your background, the date and the time in big seven-segment
+**MODE** on the main screen (or **DESK MODE** in Settings) turns the board
+into the thing beside the keyboard: your background, the date and the time in big seven-segment
 digits on a plate over it, Squachy underneath doing what he does, and a
 focus timer. **FOCUS 25** starts twenty-five minutes: the scene clears, he
 goes still and quiet, and when it runs out the light on the back goes

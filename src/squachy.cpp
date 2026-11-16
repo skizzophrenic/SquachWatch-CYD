@@ -340,7 +340,7 @@ static const char* const ONBOARD_LINES[] = {
 #if defined(STICKS3)
     "Down there: SCAN rescans, LOG shows history, FOB is keychain mode.",
 #else
-    "Down there: SCAN rescans, LOG shows history, DESK is a big clock.",
+    "Down there: SCAN rescans, LOG shows history, MODE: clock, then terminal.",
 #endif
 #if defined(STICKS3)
     "Front button steps, hold it to pick. Side button goes back, hold it to go home.",

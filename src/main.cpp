@@ -9368,7 +9368,20 @@ void loop() {
                 // Only a press that started on THIS screen. One that began
                 // before an alert or the update window took over, and lifts
                 // after it handed back, is not a tap on DESK.
-                if (!clrHoldFired && clrHoldStart >= transitionStart) enterDesk();
+                if (!clrHoldFired && clrHoldStart >= transitionStart) {
+#if defined(STICKS3)
+                    enterDesk();                       // FOB MODE: the StickS3 has no desk
+#else
+                    // MODE: normal -> desk -> TERMINAL MODE -> normal. The desk's
+                    // own MODE button takes the middle step.
+                    if (Settings::boringMode()) {
+                        Settings::toggleBoringMode();
+                        Theme::showToast("NORMAL MODE", "Squachy's back", Theme::CYAN);
+                    } else {
+                        enterDesk();
+                    }
+#endif
+                }
             }
             break;
         }
@@ -11448,8 +11461,12 @@ void loop() {
                 } else if (uiDeskHitMessage(tp.x, tp.y)) {
                     lastTouch = now;
                 } else if (uiDeskHitBack(tp.x, tp.y, tft.width(), tft.height())) {
+                    // MODE: the step after the desk is TERMINAL MODE, on the main
+                    // screen (not the settings it may have come through).
                     lastTouch = now;
-                    enterClear();   // BACK means the main screen, not the settings it came through
+                    if (!Settings::boringMode()) Settings::toggleBoringMode();
+                    enterClear();
+                    Theme::showToast("TERMINAL MODE", "MODE again for Squachy", Theme::GREEN);
                 } else if (uiDeskHitSettings(tp.x, tp.y, tft.width(), tft.height())) {
                     // The desk's own page in Settings, and back to the desk on
                     // the way out. (The title bar's icon opens the main list.)
