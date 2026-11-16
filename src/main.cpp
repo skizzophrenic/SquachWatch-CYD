@@ -286,7 +286,24 @@ static void crashCrumbTick(uint32_t now, uint32_t lifetime, uint8_t screen) {
     last = now;
     g_crumb.uptimeMs  = now;
     g_crumb.heapFree  = ESP.getFreeHeap();
-    g_crumb.heapBlock = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    // INTERNAL SRAM, and it has to be asked for: MALLOC_CAP_8BIT alone also
+    // matches PSRAM on the boards that build with -DBOARD_HAS_PSRAM, and the
+    // call hands back the larger of the two pools' blocks -- which there is
+    // always PSRAM's megabytes. This is the one number read AFTER a panic, on
+    // the splash card, on DIAGNOSTICS and in the black box, and the whole
+    // point of it is to say whether the board died of a fragmented heap. A
+    // PSRAM board was recording a figure that could not fall however little
+    // internal SRAM was left, so it answered "not heap" to every crash,
+    // including the heap ones.
+    //
+    // It also has to match the line above it. ESP.getFreeHeap() on this core
+    // is heap_caps_get_free_size(MALLOC_CAP_INTERNAL), so heapFree was already
+    // internal -- the pair was an internal free size printed beside an
+    // external largest block, two different pools read as one reading.
+    //
+    // See the long note at the top of src/detection.cpp for why the mask is
+    // MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT and not MALLOC_CAP_INTERNAL alone.
+    g_crumb.heapBlock = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     g_crumb.lifetime  = lifetime;
     g_crumb.screen    = screen;
 }
