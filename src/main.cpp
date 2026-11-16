@@ -2769,7 +2769,15 @@ static void tdeckKeysTick(uint32_t now) {
     if (Wire.requestFrom((int)TDECK_KBD, 1) != 1) return;
     const uint8_t k = (uint8_t)Wire.read();
     if (k == 0 || k == 0x0C) return;             // nothing, or alt+C (its own)
-    tdeckKey(k == 0x0D ? '\n' : k == 0x08 ? '\b' : (char)k, now);
+    // SHIFT+$ comes back from the helper chip as 0x04, which no screen has any
+    // use for: it types the "=" the LoRa channel keys end in. (SYM+$ cannot be
+    // used: the chip answers 0x00 for it, the same byte as "no key".) Any other
+    // byte no screen can use is logged, so a dead key can be looked up.
+    // From PR #103 by shadowlab.
+    char c = k == 0x0D ? '\n' : k == 0x08 ? '\b' : (char)k;
+    if (k == 0x04) c = '=';
+    else if (k >= 0x7F || (k < 0x20 && k != 0x0D && k != 0x08)) Serial.printf("[kbd] key 0x%02X has no mapping\n", (unsigned)k);
+    tdeckKey(c, now);
 }
 #if defined(SQUACHSIM)
 // The browser emulator's keyboard (sw_key in sim/main_wasm.cpp): the byte the
