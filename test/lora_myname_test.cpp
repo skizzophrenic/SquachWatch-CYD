@@ -81,6 +81,13 @@ int main() {
             for (uint8_t i = 0; i < n; i++) allMt = allMt && profile(rows[i]).hint == Proto::MESHTASTIC;
             ck("the list is every Meshtastic preset, LongFast first", allMt && rows[0] == (uint8_t)lf);
         }
+        setRegion(REGION_EU);
+        const int16_t nf = meshPresetFind(Proto::MESHTASTIC, "NarrowFast");
+        ck("EU NarrowFast is 869.442 MHz SF7 BW62.5 CR4/6",
+           nf >= 0 && !strcmp(profile((uint8_t)nf).name, "MT NarrowFast") && profile((uint8_t)nf).freqHz == 869442000u &&
+           profile((uint8_t)nf).sf == 7 && profile((uint8_t)nf).bwKhz10 == 625 && profile((uint8_t)nf).cr == 6);
+        const int16_t ns = meshPresetFind(Proto::MESHTASTIC, "NarrowSlow");
+        ck("NarrowSlow is still its own row", ns >= 0 && ns != nf && profile((uint8_t)ns).sf == 8);
         setRegion(REGION_US);
         const int16_t ms = meshPresetFind(Proto::MESHTASTIC, "MediumSlow");
         ck("US MediumSlow is 914.875 MHz SF10", ms >= 0 && profile((uint8_t)ms).freqHz == 914875000u && profile((uint8_t)ms).sf == 10);

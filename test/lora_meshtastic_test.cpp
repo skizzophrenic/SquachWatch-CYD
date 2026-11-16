@@ -59,6 +59,7 @@ int main() {
         ck("MediumFast hash 0x1F", channelHash("MediumFast", key, 16) == 0x1F);
         ck("ShortSlow hash 0x77",  channelHash("ShortSlow", key, 16) == 0x77);
         ck("NarrowSlow in ham mode 0x10", channelHash("NarrowSlow", nullptr, 0) == 0x10);
+        ck("NarrowFast hash 0x15", channelHash("NarrowFast", key, 16) == 0x15);
         ck("built-in channel 0 is LongFast on the default key", channel(0).hash == 0x08 && channel(0).keyLen == 16);
     }
 
