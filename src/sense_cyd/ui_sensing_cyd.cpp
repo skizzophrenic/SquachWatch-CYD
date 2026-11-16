@@ -218,7 +218,18 @@ const Lay LAYS[] = {
        71, 45, 167,  64, true,   2, 111, 236, 22, HEAD_SM, false, false, 0.30f,  false, 16, 1 },
     { 640, 360,   2, 22, 196, 264, 34, 2,  202, 22, 436, 50, 4, 1, 4, 2, 3, 4, { TL_NOW, TL_FLOOR, TL_PEAK, TL_MARGIN },
       202, 76, 436, 210, true,   2, 290, 636, 40, HEAD_LG, true,  true,  0.60f,  true,  22, 2 },
+    // Upright 2.4/2.8in (#133). The AWOK has no rotate button and its touch is
+    // calibrated upright only, so "turn the board sideways" left it stuck. The
+    // 240x240 row with the extra 80 px given to the spectrum, all four tiles
+    // and a taller banner.
+    { 240, 320,   2, 22,  66, 204, 22, 1,   71, 22, 167, 62, 2, 2, 3, 1, 2, 4, { TL_NOW, TL_FLOOR, TL_PEAK, TL_MARGIN },
+       71, 88, 167, 138, true,   2, 230, 236, 50, HEAD_MD, true,  false, 0.42f,  true,  28, 1 },
 };
+// A panel with its own row is drawn as it is, upright or not.
+bool hasRow(int w, int h) {
+    for (const Lay& l : LAYS) if (l.w == w && l.h == h) return true;
+    return false;
+}
 // The row for this panel: its own size, or else the class it falls in.
 const Lay& layFor(int w, int h) {
     for (const Lay& l : LAYS) if (l.w == w && l.h == h) return l;
@@ -536,7 +547,7 @@ void uiSensingTick(TFT_eSPI& t, uint32_t now, bool advance) {
     s_lastMs = now;
     s_L = &layFor(t.width(), t.height());   // the panel can turn while this is up
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
-    if (t.width() < t.height()) {   // laid out for landscape only
+    if (t.width() < t.height() && !hasRow(t.width(), t.height())) {   // no upright layout for this size
         Theme::drawTitleBar(t, ">> HUMAN SENSING <<");
         text(t, t.width() / 2, t.height() / 2 - 20, "HUMAN SENSING", Theme::CYAN, Theme::BG, 2, 1);
         text(t, t.width() / 2, t.height() / 2 + 4, "turn the board sideways", Theme::WHITE, Theme::BG, 1, 1);
