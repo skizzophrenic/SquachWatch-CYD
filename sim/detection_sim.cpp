@@ -147,6 +147,8 @@ void DetectionEngine::mergeRemoteId(const uint8_t* mac, const uint8_t* payload,
     RemoteId::merge(payload, len, _rid, millis());
 }
 void DetectionEngine::postBtClassic(Detection d) { pushLog(d); }
+// A LoRaWAN operator (PR #138), on the LoRa builds: main.cpp posts it.
+void DetectionEngine::postLora(Detection d) { pushLog(d); }
 void DetectionEngine::postRawBle(RawBleResult r) {
     if (_rawBleCount < RAW_BLE_CAP) _rawBle[_rawBleCount++] = r;
 }
