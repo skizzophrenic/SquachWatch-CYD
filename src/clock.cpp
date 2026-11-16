@@ -75,6 +75,13 @@ extern volatile bool g_consoleMeaty;
 extern volatile bool g_consolePet;
 extern volatile bool g_consoleJail;
 extern volatile bool g_consoleFree;
+#if SQW_TRACKBALL
+// TBALL: the T-Deck trackball's edges on the console, on or off; TBALL n:
+// how many edges make one step (main.cpp, smallKeysRead).
+extern volatile uint8_t g_ballEdgesPerStep;
+extern volatile bool    g_ballTrace;
+void tdeckBallStatus();   // the counts and the lines' levels, after either
+#endif
 #if SQW_DEVTOOLS
 #include "shake.h"
 extern volatile uint8_t  g_devKey;
@@ -662,6 +669,21 @@ void pollSerial() {
         }
 #endif
         if (strcasecmp(line, "LEGEND") == 0) { g_consoleLegend = true; continue; }
+#if SQW_TRACKBALL
+        if (strcasecmp(line, "TBALL") == 0) {
+            g_ballTrace = !g_ballTrace;
+            Serial.printf("[ball] trace %s, %u edges a step\n", g_ballTrace ? "on" : "off", (unsigned)g_ballEdgesPerStep);
+            tdeckBallStatus();
+            continue;
+        }
+        if (strncasecmp(line, "TBALL ", 6) == 0) {
+            const int n = atoi(line + 6);
+            if (n >= 1 && n <= 50) g_ballEdgesPerStep = (uint8_t)n;
+            Serial.printf("[ball] %u edges a step\n", (unsigned)g_ballEdgesPerStep);
+            tdeckBallStatus();
+            continue;
+        }
+#endif
 #if defined(CARDPUTER_ADV)
         if (strcasecmp(line, "EXT ON") == 0)  { g_consoleExt = 1; continue; }
         if (strcasecmp(line, "EXT OFF") == 0) { g_consoleExt = 0; continue; }
