@@ -86,6 +86,7 @@
 void simSenseBegin(uint32_t now);   // sim/sense_cyd_sim.cpp
 void simSenseStep(uint32_t now);
 #include "ui_lorasettings.h"
+#include "ui_loranodes.h"
 #include "ui_lorachat.h"
 #include "lora_channels.h"
 #include "lora_sim.h"           // the made-up band the LORA page reads
@@ -320,6 +321,7 @@ static void usage() {
         "                    open tab's network (Yowie, #sasquatch, RidgeCrew); unset = default\n"
         "  lorachat          the T-Deck's LORA CHATS with its compose line (--size 320x240);\n"
         "                    --tab, SQUACHSIM_LORATYPE, SQUACHSIM_LORATX and SQUACHSIM_LORACH as lora\n"
+        "  loranodes         the T-Deck's LORA > NODES list (--size 320x240): --tab 0/1/2 = ALL / MESHTASTIC / MESHCORE;\n"
         "  lorasettings      the T-Deck's LORA SETTINGS page (--size 320x240): --scroll n moves it n rows,\n"
         "                    --tap f:x:y taps it, SQUACHSIM_LORATYPE types into an open edit line\n"
         "                    ('|' is Enter), SQUACHSIM_LORAREST=1 says the radios are resting\n"
@@ -746,7 +748,7 @@ int main(int argc, char** argv) {
     // last 80 seconds of packets -- and all of it is millis(), which starts at
     // zero here. An hour after boot, unless pinned, so none of it is "before
     // the board was on".
-    else if (screen == "lora" || screen == "lorasettings" || screen == "lorachat") now = 3600000u;
+    else if (screen == "lora" || screen == "lorasettings" || screen == "lorachat" || screen == "loranodes") now = 3600000u;
 
     // Virtual time, in the ONE-SHOT renderer too, not just the interactive
     // emulator.
@@ -924,6 +926,10 @@ int main(int argc, char** argv) {
             // HUMAN SENSING at this panel's size; SQUACHSIM_SENSE picks the room.
             simSenseStep(t);
             uiSensingTick(frame, t);
+        }
+        else if (screen == "loranodes") {
+            SimLora::step(t);
+            uiLoraNodesTick(frame, t);
         }
         else if (screen == "lorasettings") {
             SimLora::step(t);
@@ -1134,6 +1140,14 @@ int main(int argc, char** argv) {
         simLoraPick(tabIdx ? 1 : 0);
         uiLoraSettingsInit(frame, true);
     }
+    else if (screen == "loranodes") {
+        SimLora::Config lc;
+        lc.captureAt = now + (uint32_t)frames * STEP_MS;
+        SimLora::begin(lc);
+        uiLoraNodesInit(frame, true);
+        static const char TABKEY[3] = { 'a', 't', 'c' };
+        uiLoraNodesKey(TABKEY[tabIdx >= 0 && tabIdx < 3 ? tabIdx : 0], now);
+    }
     else if (screen == "wifiadd")    uiWifiAddInit(frame);
     else if (screen == "dex") {
         // Eleven of the seventeen caught, through the engine's own door, with
@@ -1338,6 +1352,7 @@ int main(int argc, char** argv) {
         else if (screen == "detfilter")  uiDetFilterScroll(1);
         else if (screen == "ignorelist") uiIgnoreListScroll(1);
         else if (screen == "lorasettings") uiLoraSettingsScrollBy(26);
+        else if (screen == "loranodes")  uiLoraNodesScrollBy(26);
         else                             uiSettingsScroll(1);
     }
 
@@ -1350,6 +1365,7 @@ int main(int argc, char** argv) {
     // Anything else is the background's.
     auto tapAt = [&](int x, int y, uint32_t when) {
         if (screen == "lorasettings") { uiLoraSettingsTap(x, y, when); return; }
+        if (screen == "loranodes") { uiLoraNodesTap(x, y, when); return; }
         // The pet first, as on the board: a still tap is a grab and a let-go.
         if (Pet::clippyHit(x, y)) { Pet::clippyGrab(x, y, when); Pet::clippyRelease(when); }
         else if (Squachy::hitTest(x, y)) { Squachy::noteTapAt(x, y); Squachy::trigger(Squachy::Event::PETTED); }

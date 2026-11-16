@@ -421,6 +421,7 @@ static void drawCrashCard(TFT_eSPI& t) {
 #include "ui_lorachat.h"
 #include "ui_lorahome.h"
 #include "ui_lorasettings.h"
+#include "ui_loranodes.h"
 #endif
 
 // Two CYD board variants are supported from this one firmware:
@@ -2600,6 +2601,9 @@ static void tdeckKey(char c, uint32_t now) {
     else if (state == AppState::LORA_CHAT) uiLoraChatKey(c, now);
     else if (state == AppState::LORA_HOME) uiLoraHomeKey(c, now);
     else if (state == AppState::LORA_SETTINGS) uiLoraSettingsKey(c, now);
+#if defined(TDECK_PLUS)
+    else if (state == AppState::LORA_NODES) uiLoraNodesKey(c, now);
+#endif
     // Enter on the home screen opens the LORA page, when the radio is on: the
     // keyboard is the reason to own a T-Deck (asked for 2026-10-15).
     else if (state == AppState::CLEAR && c == '\n' && Settings::loraListen() != 0) enterLoraHome();
@@ -3260,8 +3264,10 @@ static AppState s_backToLora = AppState::CLEAR;
 static void enterLoraChat();
 static void enterLoraHome();
 static void enterLoraSettings(bool fresh);
+static void enterLoraNodes(bool fresh);
 static bool onLoraPage() {
-    return state == AppState::LORA_HOME || state == AppState::LORA_SETTINGS || state == AppState::LORA_CHAT;
+    return state == AppState::LORA_HOME || state == AppState::LORA_SETTINGS || state == AppState::LORA_CHAT ||
+           state == AppState::LORA_NODES;
 }
 #endif
 
@@ -3287,6 +3293,7 @@ static void enterClear() {
         s_backToLora = AppState::CLEAR;
         if (to == AppState::LORA_HOME)          { enterLoraHome(); return; }
         if (to == AppState::LORA_SETTINGS)      { enterLoraSettings(false); return; }
+        if (to == AppState::LORA_NODES)         { enterLoraNodes(false); return; }
         if (to == AppState::LORA_CHAT)          { enterLoraChat(); return; }
     }
 #endif
@@ -4192,6 +4199,12 @@ static void enterLoraSettings(bool fresh) {
     state = AppState::LORA_SETTINGS;
     transitionStart = millis();
     uiLoraSettingsInit(*canvas, fresh);
+}
+static void enterLoraNodes(bool fresh) {
+    s_backToLora = AppState::CLEAR;
+    state = AppState::LORA_NODES;
+    transitionStart = millis();
+    uiLoraNodesInit(*canvas, fresh);
 }
 
 // SQUACHWATCH DETECTIONS on LORA SETTINGS: OFF ON LORA PAGE rests WiFi and
@@ -10982,6 +10995,7 @@ void loop() {
                             break;
                         }
                         case LoraHomeHit::SETTINGS:        enterLoraSettings(true); break;
+                        case LoraHomeHit::NODES:           enterLoraNodes(true); break;
                         case LoraHomeHit::CHANNEL:         uiLoraHomeStepChannel(now); break;
                         default: break;
                     }
@@ -11017,6 +11031,39 @@ void loop() {
                 if (!gestureMoved && now - gestureDownMs <= TAP_MAX_MS) {
                     lastTouch = now;
                     if (uiLoraSettingsTap(gestureStartX, gestureStartY, now) == LoraSetHit::BACK) enterLoraHome();
+                }
+            }
+            break;
+        }
+        case AppState::LORA_NODES: {
+            if (loraPageAlertTick(now)) break;   // ON-SCREEN DETECTIONS
+            drawTwoBand([&](TFT_eSPI& t, bool) { uiLoraNodesTick(t, now); });
+            // As LORA SETTINGS: a drag scrolls by the finger's own pixels, a
+            // still, short touch is a tap.
+            static bool gestureActive = false;
+            static bool gestureMoved  = false;
+            static int  gestureStartX = 0, gestureStartY = 0;
+            static int  lastY = -1;
+            static uint32_t gestureDownMs = 0;
+            if (touchJustDown) {
+                gestureActive = true; gestureMoved = false;
+                gestureStartX = tp.x; gestureStartY = tp.y; lastY = tp.y; gestureDownMs = now;
+            }
+            if (tp.valid && gestureActive) {
+                const int dy = tp.y - lastY;
+                if (gestureMoved ? dy != 0 : abs(tp.y - gestureStartY) > 8) {
+                    gestureMoved = true;
+                    uiLoraNodesScrollBy(-dy);
+                    lastY = tp.y;
+                }
+            }
+            if (touchJustUp && gestureActive) {
+                gestureActive = false;
+                if (!gestureMoved && now - gestureDownMs <= TAP_MAX_MS) {
+                    lastTouch = now;
+                    const LoraNodesHit h = uiLoraNodesTap(gestureStartX, gestureStartY, now);
+                    if (h == LoraNodesHit::BACK) enterLoraHome();
+                    else if (h == LoraNodesHit::OPEN_DM) { uiLoraChatOpenDm(uiLoraNodesPeer(), uiLoraNodesPeerProto()); enterLoraChat(); }
                 }
             }
             break;
