@@ -267,7 +267,7 @@ board 2026-10-12. The console is the native USB port.
 | Keyboard | the same I2C, address 0x55: one character per read, 0x0D enter, 0x08 backspace. Alt+B toggles its own backlight |
 | SD card (SPI) | CS 39 |
 | Speaker | MAX98357A on I2S: BCK 7, WS 5, DOUT 6 (no codec, no enable pin) |
-| GPS (MIA-M10Q) | its TX into GPIO 44, 9600 baud, on Serial1 |
+| GPS (MIA-M10Q) | its TX into GPIO 44, on Serial1. It talks at 38400 baud out of the box; the firmware tries 9600 and 38400 until a sentence parses |
 | Battery | GPIO 4 through a 1:2 divider |
 | Power enable | GPIO 10, HIGH or nothing past the chip has power on battery |
 | Trackball | hall sensors up 3, down 15, left 1, right 2 (each line toggles as the ball rolls); the ball's press GPIO 0 (BOOT, LOW when pressed). It drives the key cursor beside the touch panel |

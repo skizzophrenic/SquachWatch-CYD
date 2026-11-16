@@ -551,8 +551,11 @@ plenty of things that are not a Pineapple produce one.
 ## LoRaWAN operators — `LORAWAN` — **High or Medium, by address type**
 
 Only on a board with a LoRa radio (`SQUACH_LORA`), and only while that radio
-is listening on a LoRaWAN profile. Everything else on this page is WiFi or
-Bluetooth; this one comes from the sniffer in `docs/LORA.md`.
+is listening on a LoRaWAN profile: set **LORA** to LORAWAN (WATCH SETTINGS on
+the T-Watch; Settings > SYSTEM, or LORA SETTINGS > LISTEN, on the T-Deck
+Plus). The mesh chats go quiet while it listens there. Everything else on
+this page is WiFi or Bluetooth; this one comes from the sniffer in
+`docs/LORA.md`. Its counter tile reads LWAN.
 
 Every LoRaWAN data frame starts with the device's address in the clear, and
 the front of that address is the operator's NetID. The LoRa Alliance registry

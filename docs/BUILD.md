@@ -75,14 +75,23 @@ web flasher offers:
 | `awok` | AWOK 2.4", ESP32 Marauder v6.1 |
 | `rlphantom-r` | RL Phantom 2.4", ESP32-2432S024R |
 | `freenove-s3` | Freenove ESP32-S3 2.8", FNK0104 (BETA) |
+| `freenove-s3-40mhz` | The same Freenove 2.8" with the screen at 40 MHz, for a torn picture: untick 80 MHz under Advanced on the flasher |
+| `freenove-s3-35` | Freenove ESP32-S3 3.5", FNK0104N (BETA) |
 | `crowpanel7` | Elecrow CrowPanel Advance 7.0 (BETA) — see below |
 | `nm-cyd-c5` | RockBase NM-CYD-C5, ESP32-C5 (BETA) — see [NM-CYD-C5](NM-CYD-C5.md) |
+| `marauder-v8` | Marauder V8 (justcallmekoko), ESP32-C5 (BETA) |
+| `tdeck-plus` | LilyGo T-Deck Plus (BETA) |
 | `sticks3` | M5Stack StickS3 (BETA) |
 | `cardputer-adv` | M5Stack Cardputer ADV — not the original Cardputer (BETA) |
 | `twatch-s3` | LilyGo T-Watch S3 / S3 Plus (BETA) |
 
 The rest are not on the flasher: `freenove-s3-40` is the Freenove
-ESP32-S3 4.0" (FNK0104S), run on one board so far; `*-crowd`, `*-flood`,
+ESP32-S3 4.0" (FNK0104S), run on one board so far; `waveshare-c5-28` is the
+Waveshare ESP32-C5-Touch-LCD-2.8 (see [WAVESHARE-C5-28](WAVESHARE-C5-28.md));
+`cyd-gps`, `cyd-ili9341-gps`, `freenove-s3-gps` and `freenove-s3-35-gps` are
+the GPS builds for a module you wire on (see [PINOUT](PINOUT.md));
+`rlphantom-r-alt` is for the RL Phantom batch that shows a noise band,
+mirrored text and washed-out colours on `rlphantom-r`; `*-crowd`, `*-flood`,
 `twatch-s3-loratx` and the `crowpanel7-*` extras are bench builds,
 `cyd35` is the frozen 3.5" build, and `rlphantom` (the Phantom's
 capacitive build) has never run on a real board. `tab5` is the M5Stack

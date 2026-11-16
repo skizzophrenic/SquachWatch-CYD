@@ -17,6 +17,8 @@ under the cursor and loop, so you never page.
 - **Wiggle** wakes the screen. POWER SAVER is on by default and the screen goes dark after a minute.
 - **FOB MODE** takes DESK's place on the home bar: big Squachy and alerts, no chrome, dark after a minute.
 - No SECURITY menu and no typing. A PIN set by an older build never locks it.
+- Updates go over Bluetooth only (Settings > SYSTEM > UPDATE FIRMWARE, then [squachwatch.com/update](https://squachwatch.com/update/)), or by USB. With no way to type a WiFi password, there is no WiFi update and no WIFI NETWORKS row.
+- It has a speaker: Settings > SOUND (OFF, ALERTS or ALL) and VOLUME.
 - No GPS, no SD card, no wardriving.
 
 ## M5Stack Cardputer ADV
