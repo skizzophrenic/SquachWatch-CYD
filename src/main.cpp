@@ -547,6 +547,10 @@ static void drawCrashCard(TFT_eSPI& t) {
 // Waveshare's own ST7789 init sends INVON (0x21). UNCONFIRMED by eye until
 // the board is looked at; INVERT in Settings flips it if wrong.
 constexpr bool PANEL_NEEDS_INVERSION = true;
+#elif defined(RLPHANTOM_R_ALT)
+// The S024R batch that wants ILI9341_2 also wants inversion on: confirmed on
+// the reporter's board (#88), washed-out colours without it.
+constexpr bool PANEL_NEEDS_INVERSION = true;
 #elif defined(TWATCH_S3)
 // Confirmed on the watch 2026-09-22: the ST7789 wants inversion on (as
 // LilyGo's own setup says); false showed every colour inverted.
