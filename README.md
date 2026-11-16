@@ -688,6 +688,32 @@ per costume, and the labels are read out of the source rather than typed
 next to it — so a renamed or newly added outfit cannot end up captioned
 wrongly. Regenerate with `python3 make_gallery.py` in `sim/`.
 
+### Hints for the hidden ones
+
+No spoilers here, only where to look. Each hidden outfit and pet arrived in
+a release, and that release's notes drop a hint. Read them on the
+[releases page](https://github.com/skizzophrenic/SquachWatch-CYD/releases).
+
+| Hidden thing | Hint is in |
+|---|---|
+| WOLF PELT | v1.5.4 |
+| CHROME WING | v1.5.6 |
+| VOID EYE, SNOW PARKA | v1.5.16 |
+| VAPOR SHAGGY | v1.5.18 |
+| SHARK SUIT, THE YETI | v1.13.0 |
+| YZZERD, and the aura | v1.27.0 |
+| OVER 9000 | v1.28.0 |
+| SHAMBLER | v1.29.0 |
+| TH3 0N3 | v1.30.0 |
+| C1iPPY | v1.31.0 |
+| T0@$TY | v1.32.0 |
+| STRIPES and BALL & CHAIN | v1.33.0 |
+| M3@ty | v1.37.0 |
+
+Impatient? Some say the button that used to read CLR never forgot what it
+was for, and that whoever holds on to it long enough walks away with
+everything. Squachy won't confirm it. He won't deny it either.
+
 ## Project layout
 
 ```
