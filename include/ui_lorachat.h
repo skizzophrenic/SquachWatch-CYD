@@ -22,6 +22,9 @@ uint16_t    uiLoraChatDmUnread();
 // it), "< ALL DMs" (back to the list), a line in the MESHTASTIC tab (opens a
 // conversation with whoever said it). True when it did something.
 bool        uiLoraChatTap(int x, int y, uint32_t now);
+// The tabs, the rows a tap acts on, the chip and BACK, for the T-Deck's
+// trackball pointer to light the one under it.
+uint8_t     uiLoraChatStopRects(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint8_t cap);
 // When that conversation was last open (millis), for the LORA page's NEW.
 uint32_t    uiLoraChatDmSeenMs(uint32_t peer);
 

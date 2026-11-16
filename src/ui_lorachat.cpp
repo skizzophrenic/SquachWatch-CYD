@@ -70,6 +70,7 @@ int            s_rowTop[KEEP], s_rowBot[KEEP];
 uint8_t        s_rowsDrawn = 0, s_rowsFrom = 0;
 // The open conversation's header line: where "< ALL" was drawn.
 int            s_headY = -100;
+int            s_drawW = 320, s_drawH = 240;   // the screen as last drawn, for uiLoraChatStopRects
 
 // When each conversation was last open, for its unread count. A small table:
 // the oldest entry goes when it is full, and its node's old messages count
@@ -371,6 +372,7 @@ void uiLoraChatTick(TFT_eSPI& t, uint32_t now) {
     s_seenTotal = ringTotal();   // looking at it is reading it
     if (s_tab == 2 && s_peer) markSeen(s_peer, now);
     const int w = t.width(), h = t.height();
+    s_drawW = w; s_drawH = h;
     int bodyBottom = h - Theme::pinnedBackH(w) - 2;
 #if LORACHAT_COMPOSE
     bodyBottom -= COMPOSE_H + 4;
@@ -559,6 +561,34 @@ void uiLoraChatKey(char c, uint32_t now) {
 void uiLoraChatKey(char, uint32_t) {}
 void uiLoraChatStepChannel(uint32_t) {}
 #endif
+
+uint8_t uiLoraChatStopRects(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint8_t cap) {
+    uint8_t n = 0;
+    auto add = [&](int x, int y, int w, int h) {
+        if (n < cap) { rx[n] = (int16_t)x; ry[n] = (int16_t)y; rw[n] = (int16_t)w; rh[n] = (int16_t)h; n++; }
+    };
+    const int w = s_drawW, h = s_drawH;
+    const int tabY = Theme::LIST_TOP, tw = (w - 8) / 3;
+    for (int i = 0; i < 3; i++) {                        // the tabs
+        const int x0 = 4 + i * tw + (i ? 2 : 0), x1 = 4 + (i + 1) * tw - 2;
+        add(x0, tabY, x1 - x0, TAB_H);
+    }
+    if (s_tab == 2 && s_peer) add(2, s_headY - 3, 66, 14);   // "< ALL DMs"
+    // The rows a tap does something with: the DMs list's, and the MESHTASTIC
+    // tab's lines with someone to message.
+    for (uint8_t k = 0; k < s_rowsDrawn; k++) {
+        const uint8_t i = (uint8_t)(s_rowsFrom + k);
+        if (i >= s_rowN) break;
+        const bool acts = (s_tab == 2 && !s_peer) || (s_tab == 0 && s_rows[i].peer);
+        if (acts) add(4, s_rowTop[k], w - 8, s_rowBot[k] - s_rowTop[k] + 1);
+    }
+#if LORACHAT_COMPOSE
+    if (s_chipW) add(s_chipX, s_chipY, s_chipW, s_chipH);   // the channel chip
+#endif
+    const int bh = Theme::pinnedBackH(w);
+    add(0, h - bh, w, bh);                               // [ BACK ]
+    return n;
+}
 
 LoraChatHit uiLoraChatHit(TFT_eSPI& t, int x, int y) {
 #if LORACHAT_COMPOSE
