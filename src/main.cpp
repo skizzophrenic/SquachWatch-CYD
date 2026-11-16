@@ -1130,9 +1130,9 @@ static void extPush() {
 }
 #endif
 
-// The key cursor below: the boards with no touch panel, and the ones with a
-// trackball (SQW_TRACKBALL, set in platformio.ini: the T-Deck Plus), whose
-// ball drives the same cursor beside the touch panel (see pollTouch).
+// The key cursor below: the boards with no touch panel. The T-Deck's
+// trackball (SQW_TRACKBALL, set in platformio.ini) is a pointer instead
+// (tdeckBallPoll), but borrows this code's BACK, its hold and its highlight.
 #if defined(SQW_SMALL) || SQW_TRACKBALL
 #define SQW_KEYCURSOR 1
 #else
@@ -1149,7 +1149,6 @@ static void extPush() {
 static bool           s_stickKey2Was = false, s_stickKey2Long = false, s_stickKey1Was = false;
 static uint32_t       s_stickKey2At = 0;
 static const uint32_t STICK_HOLD_MS = 600, STICK_SHOW_MS = 8000;
-static const uint32_t TDECK_CURSOR_MS = 15000;   // the T-Deck's highlight, after the ball last moved
 // kind 0 presses; 1 scrolls the list down, 2 up; 3 presses and holds
 // for a long press (a LOG row's WATCH/HUNT panel opens on a hold).
 struct StickPt { int16_t x, y; uint8_t kind; };
@@ -1348,30 +1347,23 @@ static SmallKeys smallKeysRead() {
 // The T-Deck's trackball: four hall sensors round the ball, one line each
 // (up GPIO3, down 15, left 1, right 2: LilyGo's utilities.h), each toggling
 // as the ball rolls that way, and the ball itself a button on GPIO0 (BOOT,
-// LOW while pressed). Every edge is counted in an interrupt; a few edges the
-// same way make one step of the cursor: down and right to the next stop, up
-// and left to the one before, as the Cardputer's arrows do. The press is the
-// press at the cursor, held as long as the ball is, so a long press is still
-// one. With the cursor hidden, the first roll or press only shows it. The
-// keyboard's Backspace, off a text screen, is BACK (tdeckKey, below).
+// LOW while pressed). Every edge is counted in an interrupt. The ball is a
+// mouse: it moves a pointer over any screen, and pressed it is a finger at
+// the pointer (tdeckBallPoll, below). The keyboard's Backspace, off a text
+// screen, is BACK (tdeckKey, below).
 static const int TB_UP = 3, TB_DOWN = 15, TB_LEFT = 1, TB_RIGHT = 2, TB_PRESS = 0;
 static volatile uint16_t s_tbEdges[4];   // up, down, left, right
 static void IRAM_ATTR tbIsrUp()    { s_tbEdges[0]++; }
 static void IRAM_ATTR tbIsrDown()  { s_tbEdges[1]++; }
 static void IRAM_ATTR tbIsrLeft()  { s_tbEdges[2]++; }
 static void IRAM_ATTR tbIsrRight() { s_tbEdges[3]++; }
-volatile uint8_t g_ballEdgesPerStep = 4;   // TBALL n on the console
+volatile uint8_t g_ballSpeed = 5;          // TBALL n on the console: pixels an edge, before the speed-up
 volatile bool    g_ballTrace = false;      // TBALL: print the edges as they come
 static uint16_t s_tbSeen[4];
-static int16_t  s_tbAcc = 0;               // edges towards the next stop (+) or the last (-), not yet a step
-static uint32_t s_tbLastEdge = 0;
-static bool     s_tbPressRaw = false, s_tbPress = false, s_tbPressShowOnly = false;
+static bool     s_tbPressRaw = false, s_tbPress = false;
 static uint32_t s_tbPressAt = 0;
 static bool     s_tbOk = false;
 static bool     s_tdeckBackKey = false;    // Backspace off a text screen
-static const uint32_t TB_ROLL_GAP_MS = 400;   // a pause this long starts a new roll
-static bool stickCursorShown(uint32_t now);
-static bool stickListBusy();
 static void tdeckBallBegin() {
     static const int pins[4] = { TB_UP, TB_DOWN, TB_LEFT, TB_RIGHT };
     static void (*const isr[4])() = { tbIsrUp, tbIsrDown, tbIsrLeft, tbIsrRight };
@@ -1382,8 +1374,8 @@ static void tdeckBallBegin() {
     }
     pinMode(TB_PRESS, INPUT_PULLUP);
     s_tbOk = true;
-    Serial.printf("[keys] trackball on GPIO %d/%d/%d/%d, press GPIO %d, %u edges a step\n",
-                  TB_UP, TB_DOWN, TB_LEFT, TB_RIGHT, TB_PRESS, (unsigned)g_ballEdgesPerStep);
+    Serial.printf("[keys] trackball on GPIO %d/%d/%d/%d, press GPIO %d, speed %u\n",
+                  TB_UP, TB_DOWN, TB_LEFT, TB_RIGHT, TB_PRESS, (unsigned)g_ballSpeed);
 }
 // TBALL on the console: every edge counted since boot and each line's level
 // now, so a ball that seems dead can be told from one nobody is rolling.
@@ -1393,62 +1385,13 @@ void tdeckBallStatus() {
                   (unsigned)s_tbEdges[0], (unsigned)s_tbEdges[1], (unsigned)s_tbEdges[2], (unsigned)s_tbEdges[3],
                   digitalRead(TB_UP), digitalRead(TB_DOWN), digitalRead(TB_LEFT), digitalRead(TB_RIGHT), digitalRead(TB_PRESS));
 }
-// Anything for stickPoll to do: a roll not yet taken, the ball down, BACK.
-static bool tdeckBallPending() {
-#if SQW_DEVTOOLS
-    if (g_devKey || s_devPressUntil) return true;   // KEY NEXT / PRESS from the console
-#endif
-    if (!s_tbOk) return s_tdeckBackKey;
-    for (int i = 0; i < 4; i++) if (s_tbEdges[i] != s_tbSeen[i]) return true;
-    const int step = g_ballEdgesPerStep ? g_ballEdgesPerStep : 1;
-    return s_tdeckBackKey || s_tbPress || s_tbPressRaw || digitalRead(TB_PRESS) == LOW ||
-           s_tbAcc >= step || s_tbAcc <= -step;
-}
 // Off the glass: nothing the ball did before the finger counts.
 static void tdeckBallForget() {
     for (int i = 0; i < 4; i++) s_tbSeen[i] = s_tbEdges[i];
-    s_tbAcc = 0;
 }
-static SmallKeys smallKeysRead() {
-    SmallKeys k = {};
-    if (s_tdeckBackKey) { s_tdeckBackKey = false; k.back = true; }
-    if (!s_tbOk) return k;
-    const uint32_t now = millis();
-    uint16_t d[4];
-    for (int i = 0; i < 4; i++) {
-        const uint16_t e = s_tbEdges[i];
-        d[i] = (uint16_t)(e - s_tbSeen[i]);
-        s_tbSeen[i] = e;
-    }
-    const int step = g_ballEdgesPerStep ? g_ballEdgesPerStep : 1;
-    const int fwd = d[1] + d[3], bwd = d[0] + d[2];
-    if (fwd || bwd) {
-        if (now - s_tbLastEdge > TB_ROLL_GAP_MS) s_tbAcc = 0;   // a new roll: the last one's leftovers don't count
-        s_tbLastEdge = now;
-        int acc = s_tbAcc + fwd - bwd;
-        // A hard flick queues at most three steps, not a page of them.
-        if (acc > 3 * step) acc = 3 * step; else if (acc < -3 * step) acc = -3 * step;
-        s_tbAcc = (int16_t)acc;
-        if (g_ballTrace) Serial.printf("[ball] up %u down %u left %u right %u -> %d\n", d[0], d[1], d[2], d[3], acc);
-    }
-    // One step a poll; the rest wait while a list step settles.
-    if (!stickListBusy()) {
-        if (s_tbAcc >= step)       { k.next = true; s_tbAcc -= step; }
-        else if (s_tbAcc <= -step) { k.prev = true; s_tbAcc += step; }
-    }
-    const bool raw = digitalRead(TB_PRESS) == LOW;
-    if (raw != s_tbPressRaw) { s_tbPressRaw = raw; s_tbPressAt = now; }
-    else if (raw != s_tbPress && now - s_tbPressAt >= 20) {   // 20 ms steady: a press, not a bounce
-        s_tbPress = raw;
-        if (raw) {
-            s_tbPressShowOnly = !stickCursorShown(now);
-            if (s_tbPressShowOnly) k.select = true;   // with the cursor hidden: only shows it
-            if (g_ballTrace) Serial.printf("[ball] press%s\n", s_tbPressShowOnly ? " (shows the cursor)" : "");
-        }
-    }
-    k.press = s_tbPress && !s_tbPressShowOnly;
-    return k;
-}
+// The shared key cursor's keys (stickPoll), which the T-Deck does not use:
+// the pointer reads the ball itself.
+static SmallKeys smallKeysRead() { return SmallKeys{}; }
 #else
 // The StickS3, the same scheme as FUD: FRONT (KEY1) click steps to the next
 // stop, FRONT held selects. SIDE (KEY2) click is BACK, SIDE held is HOME.
@@ -1664,6 +1607,10 @@ static bool stickIsRectScreen() {
 #if SQUACH_MESH
         || state == AppState::MESH_COMPOSE || state == AppState::SQUAD || state == AppState::MESH_PHRASE
 #endif
+#if SQW_TRACKBALL && SQUACH_LORA && defined(TDECK_PLUS)
+        // Only the pointer's hover asks these: the T-Deck has no stops.
+        || state == AppState::LORA_HOME || state == AppState::LORA_SETTINGS || state == AppState::LORA_CHAT
+#endif
         ;
 }
 static uint8_t stickScreenRects(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint8_t cap) {
@@ -1673,6 +1620,11 @@ static uint8_t stickScreenRects(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* 
         case AppState::MESH_COMPOSE: return uiMeshComposeStopRects(rx, ry, rw, rh, cap);
         case AppState::SQUAD:        return uiSquadStopRects(rx, ry, rw, rh, cap);
         case AppState::MESH_PHRASE:  return uiMeshPhraseStopRects(rx, ry, rw, rh, cap);
+#endif
+#if SQW_TRACKBALL && SQUACH_LORA && defined(TDECK_PLUS)
+        case AppState::LORA_HOME:     return uiLoraHomeStopRects(rx, ry, rw, rh, cap);
+        case AppState::LORA_SETTINGS: return uiLoraSettingsStopRects(rx, ry, rw, rh, cap);
+        case AppState::LORA_CHAT:     return uiLoraChatStopRects(rx, ry, rw, rh, cap);
 #endif
         default: return 0;
     }
@@ -2003,9 +1955,6 @@ static int16_t  s_listPendY = 0;         // ...and where it was
 static uint32_t s_listPendAt = 0;       // when the scroll was asked for
 static uint8_t  s_listPendTries = 0;
 static const uint32_t LIST_SETTLE_MS = 150;   // several redraws: the hit tests read the last draw
-#if SQW_TRACKBALL
-static bool stickListBusy() { return s_listPend != 0; }
-#endif
 
 static bool stickListScroll(int delta) {
     switch (state) {
@@ -2083,10 +2032,6 @@ static bool stickListSettle(StickPt* pts, uint8_t& n) {
 // The highlight is always up on every screen but the main one, which is
 // Squachy's stage: there it shows after a key and fades after STICK_SHOW_MS.
 static bool stickCursorShown(uint32_t now) {
-#if SQW_TRACKBALL
-    // A touch board: the highlight only while the trackball is in use.
-    return s_stickShownAt && now - s_stickShownAt < TDECK_CURSOR_MS;
-#endif
     // A scan with nothing found yet has nothing worth lighting up: no
     // highlight until a row arrives, unless a key was just pressed.
     if ((state == AppState::RAWSCAN || state == AppState::WIFI_ADD) && !s_stickHasRows)
@@ -2113,13 +2058,7 @@ static TouchPoint stickPoll() {
     // shows no highlight.
     if (state != s_stickStopState) {
         s_stickStopState = state; s_stickStop = 0; s_listPend = 0;
-#if SQW_TRACKBALL
-        // The ball that opened this screen goes on through it: the
-        // highlight stays up, on the first stop.
-        if (s_stickShownAt) s_stickShownAt = now ? now : 1;
-#else
         s_stickShownAt = 0;
-#endif
     }
     StickPt pts[STICK_STOPS_MAX];
     uint8_t n = stickStops(pts);
@@ -2271,9 +2210,6 @@ static TouchPoint stickPoll() {
     if (keys.select && n && !s_stickHoldUntil && !s_stickDrag) {
         if (!stickCursorShown(now)) {
             s_stickShownAt = now ? now : 1;
-#if SQW_TRACKBALL
-            lastTouch = now;   // the ball pressed to find the cursor also wakes a dimmed screen
-#endif
         } else {
             const StickPt at = pts[s_stickStop];
             s_stickShownAt = now ? now : 1;
@@ -2333,21 +2269,95 @@ static TouchPoint stickPoll() {
     return tp;
 }
 #if SQW_TRACKBALL
-// The T-Deck's two pointers. A finger on the glass wins, puts the highlight
-// out and throws away what the ball was doing. Off the glass, the ball's
-// cursor runs, but only while there is something for it to do: the stops'
-// hit-test sweep is not worth a frame's time while nobody is rolling.
-static TouchPoint tdeckBallPoll() {
-    const uint32_t now = millis();
-    if (!tdeckBallPending() && !s_stickHoldUntil && !s_stickDrag && !s_listPend && !stickCursorShown(now))
-        return TouchPoint{ false, 0, 0 };
-    return stickPoll();
+// ---- the T-Deck's pointer --------------------------------------------------
+// The trackball is a mouse. Rolled, it moves an arrow over the screen, any
+// screen; pressed, it is a finger on the glass at the arrow's tip for as long
+// as it is held, so every screen takes it the way it takes a touch: a tap, a
+// long press, and a press rolled is a drag (a list scrolls). The faster the
+// roll, the further each edge goes. The arrow hides 15 s after the ball last
+// did anything, and at once when a finger touches the glass; a press while it
+// is hidden only shows it. Backspace off a text screen is BACK: a tap on the
+// screen's own way back, as the StickS3's BACK is (stickBackPoint).
+static const uint32_t TDECK_POINTER_MS = 15000;
+static int16_t  s_ptrX = 160, s_ptrY = 120;
+static uint32_t s_ptrShownAt = 0;           // 0: hidden
+static bool     s_ptrDown = false;          // pressing at the arrow this frame
+static bool     s_ptrPressShowOnly = false; // this press only showed the arrow
+static bool tdeckPointerShown(uint32_t now) {
+    return s_ptrShownAt && now - s_ptrShownAt < TDECK_POINTER_MS;
 }
+static TouchPoint tdeckBallPoll() {
+    TouchPoint tp = { false, 0, 0 };
+    const uint32_t now = millis();
+    const int w = tft.width(), h = tft.height();
+    s_ptrDown = false;
+    // BACK's tap, held a moment as a finger's would be.
+    if (s_stickHoldUntil) {
+        if ((int32_t)(now - s_stickHoldUntil) < 0) { tp.valid = true; tp.x = s_stickHoldPt.x; tp.y = s_stickHoldPt.y; return tp; }
+        s_stickHoldUntil = 0;
+        return tp;   // a frame up before anything else touches
+    }
+    if (s_tdeckBackKey) {
+        s_tdeckBackKey = false;
+        StickPt at = { 0, 0, 0 };
+        if (stickBackPoint(at)) {
+            s_stickHoldPt = at;
+            s_stickHoldUntil = now + 120;
+            Serial.printf("[keys] back at %d,%d (screen %u)\n", (int)at.x, (int)at.y, (unsigned)state);
+            tp.valid = true; tp.x = at.x; tp.y = at.y;
+            return tp;
+        }
+        s_stickHome = true;
+        Serial.println("[keys] back: no way back here, going home");
+    }
+    if (!s_tbOk) return tp;
+    uint16_t d[4];
+    for (int i = 0; i < 4; i++) {
+        const uint16_t e = s_tbEdges[i];
+        d[i] = (uint16_t)(e - s_tbSeen[i]);
+        s_tbSeen[i] = e;
+    }
+    const int edges = d[0] + d[1] + d[2] + d[3];
+    if (edges) {
+        // Slow is precise, fast goes far: every edge past the first in one
+        // poll adds two pixels to each of them.
+        const int speed = g_ballSpeed ? g_ballSpeed : 1;
+        const int gain = speed + (edges > 1 ? 2 * (edges - 1) : 0);
+        int x = s_ptrX + ((int)d[3] - (int)d[2]) * gain;
+        int y = s_ptrY + ((int)d[1] - (int)d[0]) * gain;
+        if (x < 0) x = 0; else if (x > w - 1) x = w - 1;
+        if (y < 0) y = 0; else if (y > h - 1) y = h - 1;
+        s_ptrX = (int16_t)x; s_ptrY = (int16_t)y;
+        s_ptrShownAt = now ? now : 1;
+        // Rolling keeps the screen awake (and wakes it), but is not a touch:
+        // the screens debounce taps against lastTouch, and a press straight
+        // after a roll has to land.
+        lastTouch = now - TOUCH_DEBOUNCE_MS - 1;
+        if (g_ballTrace) Serial.printf("[ball] up %u down %u left %u right %u -> %d,%d\n", d[0], d[1], d[2], d[3], x, y);
+    }
+    const bool raw = digitalRead(TB_PRESS) == LOW;
+    if (raw != s_tbPressRaw) { s_tbPressRaw = raw; s_tbPressAt = now; }
+    else if (raw != s_tbPress && now - s_tbPressAt >= 20) {   // 20 ms steady: a press, not a bounce
+        s_tbPress = raw;
+        if (raw) {
+            s_ptrPressShowOnly = !tdeckPointerShown(now);
+            if (s_ptrPressShowOnly) lastTouch = now;   // also wakes a dimmed screen
+            if (g_ballTrace) Serial.printf("[ball] press at %d,%d%s\n", s_ptrX, s_ptrY, s_ptrPressShowOnly ? " (shows the pointer)" : "");
+        }
+        s_ptrShownAt = now ? now : 1;
+    }
+    if (s_tbPress && !s_ptrPressShowOnly) {
+        s_ptrShownAt = now ? now : 1;
+        s_ptrDown = true;
+        tp.valid = true; tp.x = s_ptrX; tp.y = s_ptrY;
+    }
+    return tp;
+}
+// A finger on the glass wins: the arrow goes, and what the ball was doing.
 static void tdeckBallTouched() {
-    s_stickShownAt = 0;
+    s_ptrShownAt = 0;
+    s_ptrDown = false;
     s_stickHoldUntil = 0;
-    s_stickDrag = 0;
-    s_listPend = 0;
     tdeckBallForget();
 }
 #endif
@@ -2426,7 +2436,15 @@ static inline uint8_t rgb332(uint8_t r, uint8_t g, uint8_t b) {
     return (uint8_t)((r & 0xE0) | ((g & 0xE0) >> 3) | (b >> 6));
 }
 
+static void stickPaint(TFT_eSPI& t, uint32_t now, int x0, int y0, int x1, int y1, bool region, const StickPt& p);
+#if SQW_TRACKBALL
+static void tdeckPointerDraw(TFT_eSPI& t, uint32_t now);
+#endif
 static void stickDrawCursor(TFT_eSPI& t, uint32_t now) {
+#if SQW_TRACKBALL
+    tdeckPointerDraw(t, now);
+    return;
+#endif
     if (!stickCursorShown(now)) return;
     StickPt pts[STICK_STOPS_MAX];
     const uint8_t n = stickStops(pts);
@@ -2456,6 +2474,12 @@ static void stickDrawCursor(TFT_eSPI& t, uint32_t now) {
         const int rx = (p.kind == 1 || p.kind == 2) ? 9 : 14, ry = (p.kind == 1 || p.kind == 2) ? 8 : 11;
         x0 = p.x - rx; x1 = p.x + rx; y0 = p.y - ry; y1 = p.y + ry;
     }
+    stickPaint(t, now, x0, y0, x1, y1, region, p);
+}
+// The highlight itself, over (x0,y0)-(x1,y1): lit whole when `region`, a
+// frame only when not; an arrow on a scroll stop (p.kind 1 or 2).
+static void stickPaint(TFT_eSPI& t, uint32_t now, int x0, int y0, int x1, int y1, bool region, const StickPt& p) {
+    const int w = tft.width(), h = tft.height();
     if (x0 < 0) x0 = 0;
     if (y0 < 0) y0 = 0;
     if (x1 > w - 1) x1 = w - 1;
@@ -2532,6 +2556,120 @@ static void stickDrawCursor(TFT_eSPI& t, uint32_t now) {
         }
     }
 }
+#if SQW_TRACKBALL
+// The arrow: X its black edge, o its face, the tip (top left) the point
+// that presses.
+static const char* const PTR_ART[] = {
+    "X",
+    "XX",
+    "XoX",
+    "XooX",
+    "XoooX",
+    "XooooX",
+    "XoooooX",
+    "XooooooX",
+    "XoooooooX",
+    "XooooooooX",
+    "XoooooXXXX",
+    "XooXooX",
+    "XoX XooX",
+    "XX  XooX",
+    "X    XooX",
+    "     XooX",
+    "      XX",
+};
+static const int PTR_H = sizeof PTR_ART / sizeof PTR_ART[0];
+// What the arrow and the hover's highlight were drawn over, put back once
+// the frame has gone to the panel (tdeckPointerUndraw): screens that only
+// repaint what changes would keep them otherwise, a trail of arrows.
+static uint8_t* s_ptrUnder = nullptr;
+static int16_t  s_ptrUnderY0 = -1, s_ptrUnderY1 = -1;
+// The hover: what the screen says is under the arrow, kept while the arrow
+// stays put (growing it is a few hundred hit tests).
+static int16_t  s_hovX = -1, s_hovY = -1;
+static AppState s_hovState = AppState::BOOT;
+static uint32_t s_hovAt = 0;
+static bool     s_hovOn = false;
+static int16_t  s_hovX0, s_hovY0, s_hovX1, s_hovY1;
+static void tdeckHover(int px, int py, uint32_t now) {
+    if (px == s_hovX && py == s_hovY && state == s_hovState && now - s_hovAt < 250) return;
+    s_hovX = (int16_t)px; s_hovY = (int16_t)py; s_hovState = state; s_hovAt = now;
+    s_hovOn = false;
+    const int w = tft.width(), h = tft.height();
+    if (stickIsRectScreen()) {
+        // The screen's own buttons: the smallest one the arrow is in.
+        const uint8_t CAP = 48;   // the LORA page's dish has up to 32 dots
+        int16_t rx[CAP], ry[CAP], rw[CAP], rh[CAP];
+        const uint8_t k = stickScreenRects(rx, ry, rw, rh, CAP);
+        int32_t best = INT32_MAX;
+        for (uint8_t i = 0; i < k; i++) {
+            if (px < rx[i] || px >= rx[i] + rw[i] || py < ry[i] || py >= ry[i] + rh[i]) continue;
+            const int32_t a = (int32_t)rw[i] * rh[i];
+            if (a >= best) continue;
+            best = a;
+            s_hovX0 = rx[i]; s_hovY0 = ry[i]; s_hovX1 = rx[i] + rw[i] - 1; s_hovY1 = ry[i] + rh[i] - 1;
+            s_hovOn = rw[i] >= 6 && rh[i] >= 6;
+        }
+        return;
+    }
+    // Anything else whose hit test answers without acting: what it names
+    // under the arrow, grown outwards while the answer holds.
+    const int id = stickRegionId(px, py);
+    if (id < 0) return;
+    int x0 = px, x1 = px, y0 = py, y1 = py;
+    while (x0 > 0     && stickRegionId(x0 - 1, py) == id) x0--;
+    while (x1 < w - 1 && stickRegionId(x1 + 1, py) == id) x1++;
+    while (y0 > 0     && stickRegionId(px, y0 - 1) == id) y0--;
+    while (y1 < h - 1 && stickRegionId(px, y1 + 1) == id) y1++;
+    s_hovX0 = (int16_t)x0; s_hovY0 = (int16_t)y0; s_hovX1 = (int16_t)x1; s_hovY1 = (int16_t)y1;
+    s_hovOn = (x1 - x0) >= 6 && (y1 - y0) >= 6;
+}
+static void tdeckPointerDraw(TFT_eSPI& t, uint32_t now) {
+    if (!tdeckPointerShown(now)) return;
+    if (&t != (TFT_eSPI*)&frame || frame.getColorDepth() != 8) return;
+    uint8_t* buf = frame.buf();
+    const int bw = frame.bufW(), bh = frame.bufH();
+    if (!buf || bw <= 0 || bh <= 0) return;
+    if (!s_ptrUnder) s_ptrUnder = (uint8_t*)heap_caps_malloc((size_t)bw * bh, MALLOC_CAP_SPIRAM);
+    if (!s_ptrUnder) return;
+    const int px = s_ptrX, py = s_ptrY;
+    tdeckHover(px, py, now);
+    // Save every row the drawing will touch first.
+    int y0 = py, y1 = py + PTR_H - 1;
+    if (s_hovOn) { if (s_hovY0 < y0) y0 = s_hovY0; if (s_hovY1 > y1) y1 = s_hovY1; }
+    if (y0 < 0) y0 = 0;
+    if (y1 > bh - 1) y1 = bh - 1;
+    memcpy(s_ptrUnder + (size_t)y0 * bw, buf + (size_t)y0 * bw, (size_t)(y1 - y0 + 1) * bw);
+    s_ptrUnderY0 = (int16_t)y0; s_ptrUnderY1 = (int16_t)y1;
+    if (s_hovOn) {
+        const StickPt p = { (int16_t)px, (int16_t)py, 0 };
+        stickPaint(t, now, s_hovX0, s_hovY0, s_hovX1, s_hovY1, true, p);
+    }
+    // Pink while it presses, white otherwise.
+    const uint8_t face = s_ptrDown ? rgb332(0xFF, 0x2E, 0xC8) : 0xFF;
+    for (int r = 0; r < PTR_H; r++) {
+        const int y = py + r;
+        if (y < 0 || y >= bh) continue;
+        uint8_t* row = buf + (size_t)y * bw;
+        for (int c = 0; PTR_ART[r][c]; c++) {
+            const int x = px + c;
+            if (x < 0 || x >= bw) continue;
+            const char k = PTR_ART[r][c];
+            if (k == 'X') row[x] = 0x00;
+            else if (k == 'o') row[x] = face;
+        }
+    }
+}
+// After the push: the frame as the screen drew it, for the next frame.
+static void tdeckPointerUndraw() {
+    if (s_ptrUnderY0 < 0 || !s_ptrUnder) return;
+    uint8_t* buf = frame.buf();
+    const int bw = frame.bufW();
+    if (buf) memcpy(buf + (size_t)s_ptrUnderY0 * bw, s_ptrUnder + (size_t)s_ptrUnderY0 * bw,
+                    (size_t)(s_ptrUnderY1 - s_ptrUnderY0 + 1) * bw);
+    s_ptrUnderY0 = s_ptrUnderY1 = -1;
+}
+#endif
 #endif
 
 // Raw touch -> screen, the same way on every board: the Fit gives a point
@@ -11678,6 +11816,9 @@ void loop() {
 #endif
         FrameProf::lap(FrameProf::POST);
         pushFrame(0, 0);
+#if SQW_TRACKBALL
+        tdeckPointerUndraw();
+#endif
         FrameProf::lap(FrameProf::PUSH);
     }
 #endif

@@ -39,6 +39,9 @@ void       uiLoraSettingsTick(TFT_eSPI& t, uint32_t now, bool resting);
 LoraSetHit uiLoraSettingsTap(int x, int y, uint32_t now);
 // A drag, in pixels: positive moves the list up (shows what is further down).
 void       uiLoraSettingsScrollBy(int px);
+// BACK and the rows on the list, for the T-Deck's trackball pointer to light
+// the one under it.
+uint8_t    uiLoraSettingsStopRects(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint8_t cap);
 // The keyboard: W/S scroll, unless an edit line is open, which takes every key.
 void       uiLoraSettingsKey(char c, uint32_t now);
 bool       uiLoraSettingsEditing();

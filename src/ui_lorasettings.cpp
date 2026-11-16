@@ -681,6 +681,24 @@ LoraSetHit uiLoraSettingsTap(int x, int y, uint32_t now) {
     return LoraSetHit::NONE;
 }
 
+uint8_t uiLoraSettingsStopRects(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint8_t cap) {
+    uint8_t n = 0;
+    auto add = [&](int x, int y, int w, int h) {
+        if (n < cap) { rx[n] = (int16_t)x; ry[n] = (int16_t)y; rw[n] = (int16_t)w; rh[n] = (int16_t)h; n++; }
+    };
+    add(W - 62, 1, 58, 14);                              // [ BACK ]
+    for (uint8_t i = 0; i < s_rowN; i++) {
+        if (s_rows[i].section) continue;
+        // The part of the row that is on the list, between the header and the bar.
+        int y0 = s_rowY[i], y1 = s_rowY[i] + ROW_H - 1;
+        if (y0 < LIST_TOP) y0 = LIST_TOP;
+        if (y1 > LIST_BOT - 1) y1 = LIST_BOT - 1;
+        if (y1 - y0 < 6) continue;
+        add(4, y0, W - 8, y1 - y0);
+    }
+    return n;
+}
+
 void uiLoraSettingsScrollBy(int px) {
     s_scroll[(int)s_view] += px;
     clampScroll();

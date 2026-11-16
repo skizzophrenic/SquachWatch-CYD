@@ -1077,6 +1077,27 @@ LoraHomeHit uiLoraHomeHit(TFT_eSPI& t, int x, int y) {
     return LoraHomeHit::NONE;
 }
 
+uint8_t uiLoraHomeStopRects(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint8_t cap) {
+    uint8_t n = 0;
+    auto add = [&](int x, int y, int w, int h) {
+        if (n < cap) { rx[n] = (int16_t)x; ry[n] = (int16_t)y; rw[n] = (int16_t)w; rh[n] = (int16_t)h; n++; }
+    };
+    add(1, 0, 23, 14);                                   // LORA SETTINGS, the three bars
+    add(320 - 62, 0, 58, 13);                            // [ BACK ]
+    for (int k = 0; k < 3; k++) add(4 + k * TAB_W, CHAT_Y, TAB_W, CHAT_TAB_H);             // the chat tabs
+    if (s_dmTab && s_pKept[2]) {
+        // A conversation a row.
+        for (uint8_t i = 0; i < s_pKept[2]; i++) add(5, CHAT_ROWS_Y - 1 + i * CHAT_ROW_H, 310, CHAT_ROW_H);
+    } else {
+        add(5, CHAT_ROWS_Y - 1, 310, CHAT_BOTTOM - CHAT_ROWS_Y);   // the window: a tap opens the chats
+    }
+    add(s_chipX, COMPOSE_Y, s_chipW, COMPOSE_H);         // the channel chip
+    add(s_switchX, COMPOSE_Y, s_switchW, COMPOSE_H * 2); // MESHTASTIC / MESHCORE
+    add(2, BAR_Y, 60, 240 - BAR_Y);                      // [ CHATS ]
+    for (uint8_t i = 0; i < s_dotN; i++) add(s_dots[i].x - 5, s_dots[i].y - 5, 11, 11);   // the dish's dots, last
+    return n;
+}
+
 void uiLoraHomeKey(char c, uint32_t now) {
     if (c == '\b') { if (s_composeN) s_compose[--s_composeN] = '\0'; return; }
     if (c == '\n') {

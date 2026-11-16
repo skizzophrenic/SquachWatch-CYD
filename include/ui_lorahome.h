@@ -46,6 +46,9 @@ uint32_t    uiLoraHomeDmPeerAt(int y, Lora::Proto* p = nullptr);
 uint32_t    uiLoraHomeTappedPeer();
 Lora::Proto uiLoraHomeTappedProto();
 uint8_t     uiLoraHomeNet();
+// Where the page's buttons are, for the T-Deck's trackball pointer to light
+// the one under it (its hit test acts, so it cannot be asked).
+uint8_t     uiLoraHomeStopRects(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint8_t cap);
 // The keyboard while the page is up: printable keys type, '\b' deletes,
 // '\n' sends what is typed on the switch's network.
 void        uiLoraHomeKey(char c, uint32_t now);
