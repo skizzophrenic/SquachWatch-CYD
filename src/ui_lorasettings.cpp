@@ -133,7 +133,8 @@ void buildMain() {
         Row& r = add(LISTEN, "LISTEN");
         snprintf(r.value, sizeof r.value, "%s", Settings::loraListenName());
         r.valCol = Settings::loraListen() ? Theme::CYAN : dim(Theme::WHITE, 150);
-        snprintf(r.hint, sizeof r.hint, "WHICH NETWORKS THE RADIO HEARS");
+        snprintf(r.hint, sizeof r.hint, "%s", Settings::loraListen() == 4 ? "OPERATOR ALERTS. NO MESH TRAFFIC"
+                                                                         : "WHICH NETWORKS THE RADIO HEARS");
     }
     {
         Row& r = add(PRESET, "MESHTASTIC PRESET");
@@ -156,7 +157,7 @@ void buildMain() {
         snprintf(r.value, sizeof r.value, "%s", Settings::loraTxName());
         r.valCol = Settings::loraTxDbm() ? Theme::AMBER : dim(Theme::WHITE, 150);
         if (!Settings::loraTxDbm())                                  snprintf(r.hint, sizeof r.hint, "OFF: THE CHATS CANNOT SEND");
-        else if (Lora::region() == Lora::REGION_EU && Settings::loraTxDbm() > 14) snprintf(r.hint, sizeof r.hint, "EU 868: SENT AT 14 dBm");
+        else if (Lora::region() == Lora::REGION_EU && Settings::loraTxDbm() > 14) snprintf(r.hint, sizeof r.hint, "EU 869: KEEP UNDER 10% DUTY CYCLE");
         else                                                         snprintf(r.hint, sizeof r.hint, "WHAT THE CHATS SEND AT");
     }
     {

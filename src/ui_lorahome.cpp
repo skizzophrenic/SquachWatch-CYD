@@ -110,7 +110,7 @@ void drawHeader(TFT_eSPI& t, uint32_t now) {
     char line[40];
     const uint8_t nodes = Lora::nodeCount();
     snprintf(line, sizeof line, "LORA  %s  %u NODES",
-             Settings::loraListen() == 3 ? "BOTH" : Settings::loraListen() == 2 ? "MESHCORE" : "MESHTASTIC", (unsigned)nodes);
+             Settings::loraListen() == 4 ? "LORAWAN" : Settings::loraListen() == 3 ? "BOTH" : Settings::loraListen() == 2 ? "MESHCORE" : "MESHTASTIC", (unsigned)nodes);
     t.setTextFont(1); t.setTextSize(1);
     small(t, (t.width() - t.textWidth(line)) / 2, 3, line, Theme::WHITE);
     if (Lora::mode() != Lora::Mode::OFF && (now / 600) % 2) small(t, 60, 3, "LIVE", Theme::GREEN);

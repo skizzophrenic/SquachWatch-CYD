@@ -143,6 +143,11 @@ uint16_t colorFor(DetectionType t) {
         // flood or a rogue AP -- and often literally the box producing one.
         case DetectionType::HACKER:
             return RED;
+        // Infrastructure, and said so: a utility's meter network is not
+        // watching anybody and is not attacking anything. It gets the colour
+        // nothing else on this screen uses for a warning.
+        case DetectionType::LORAWAN:
+            return GREEN;
         default:
             return GREEN;
     }
@@ -1189,6 +1194,13 @@ void drawTypeIcon(TFT_eSPI& t, DetectionType type, int cx, int cy, int s) {
         t.fillCircle(cx+s/2,cy+s/4,s/3,ICO_STEM);
         t.fillRect(cx+s/2-s/5,cy+s/4-3,s*2/5,6,ICO_INK);
         t.fillRect(cx+s/2-3,cy+s/4-s/5,6,s*2/5,ICO_INK);
+        break;
+    case DetectionType::LORAWAN:
+        // A mast on its foot, and two rings of what comes off the top of it.
+        t.fillTriangle(cx-s/2,cy+s,cx+s/2,cy+s,cx,cy+s/4,SHELL_LO);
+        t.fillRect(cx-1,cy-s/2,3,s*3/2,ICO_METAL);
+        for(int i=1;i<=2;i++) t.drawCircle(cx,cy-s/2,s/4+i*s/4,ICO_LENS);
+        t.fillCircle(cx,cy-s/2,3,ICO_LED);
         break;
     default:
         t.drawCircle(cx,cy,s,ICO_METAL);

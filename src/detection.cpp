@@ -2131,6 +2131,43 @@ void DetectionEngine::postBle(Detection d) {
     pushLog(d);
 }
 
+void DetectionEngine::postLora(Detection d) {
+    if (!Settings::typeEnabled(d.type)) return;
+    const uint32_t now = millis();
+    for (uint8_t i = 0; i < _logCount; i++) {
+        const uint8_t slot = (_logHead + LOG_CAP - 1 - i) % LOG_CAP;
+        Detection& row = _log[slot];
+        if (memcmp(row.mac, d.mac, 6) != 0 || row.type != d.type) continue;
+        // A row kept from before this boot has no lastSeen to measure from,
+        // and the first frame of a new boot is news either way.
+        const bool gone = row.restored || (now - row.lastSeen) > LORA_GONE_MS;
+        {
+            const uint8_t nowAt = (uint8_t)(now >> 11);
+            if (row.prevAt != nowAt) { row.prevRssi = row.rssi; row.prevAt = nowAt; }
+        }
+        row.rssi     = d.rssi;
+        row.lastSeen = now;
+        Bingo::note(d.type);
+        Dex::note(d.type, d.rssi);
+        Regulars::note(d.mac, d.type);
+        if (!row.active) {
+            row.active = true;
+            _typeCounts[(uint8_t)d.type]++;
+        }
+        if (gone) {
+            row.hits++;
+            row.restored  = 0;
+            row.firstSeen = d.firstSeen;       // a fresh sighting, for the alert; the caller's stamp
+            _latest = &row;
+            _latestNew = false;
+            _latestSeq = _latestSeq + 1;
+            queueBlackBox(row, true);
+        }
+        return;
+    }
+    pushLog(d);
+}
+
 // Nothing calls this today (the Classic inquiry was never switched on), but
 // if something does, it gets the same MAC+type merge as BLE rather than a
 // new row per sighting.
@@ -2911,7 +2948,11 @@ void DetectionEngine::expireStale() {
         uint8_t slot = (_logHead + LOG_CAP - 1 - i) % LOG_CAP;
         // Signed: lastSeen is written from the radio tasks and can land a
         // moment after `now` was read.
-        if (_log[slot].active && (int32_t)(now - _log[slot].lastSeen) > (int32_t)STALE_MS) {
+        // A LoRaWAN operator's devices speak minutes apart, not seconds: on
+        // the Bluetooth clock its row would leave the counters between every
+        // two frames.
+        const uint32_t limit = _log[slot].type == DetectionType::LORAWAN ? LORA_STALE_MS : STALE_MS;
+        if (_log[slot].active && (int32_t)(now - _log[slot].lastSeen) > (int32_t)limit) {
             _log[slot].active = false;
             // A Bluetooth address heard for a burst and never again is what a
             // fake tag looks like; enough of one type and the type goes quiet.

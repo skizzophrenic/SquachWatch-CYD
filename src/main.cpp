@@ -7729,6 +7729,38 @@ void loop() {
     cydGpsTick(millis());
 #endif
     Lora::tick(now);   // nothing outside a SQUACH_LORA build
+#if SQUACH_LORA
+    // A LoRaWAN operator's network, heard: one Detection per operator
+    // (lora_opalert.h), so the ALERT, the LOG, IGNORE and SNOOZE treat it as
+    // they treat an AirTag. Channel 0 files it with the Bluetooth rows -- the
+    // namespace WATCH and HUNT keep an address in -- and feeding both of
+    // those here is what makes HUNT's gauge move when the operator's next
+    // frame lands. That is every few minutes, not every second: a bearing on
+    // a network, and a slow one.
+    {
+        Lora::OpAlert::Hit h;
+        while (Lora::takeOperatorHit(h)) {
+            Detection d;
+            memset(&d, 0, sizeof d);
+            memcpy(d.mac, h.mac, 6);
+            d.rssi      = h.rssi;
+            d.channel   = 0;
+            d.type      = DetectionType::LORAWAN;
+            d.vendor    = "LoRaWAN";
+            snprintf(d.name, sizeof d.name, "%s", h.name);
+            // loop()'s own `now`, not millis(): the alert test further down
+            // this pass measures the catch's age from it, and a stamp after
+            // `now` would put the card off to the next pass.
+            d.firstSeen = d.lastSeen = now;
+            d.hits      = 1;
+            d.conf      = h.exact ? Confidence::HIGH_CONF : Confidence::MED_CONF;
+            d.active    = true;
+            engine.postLora(d);
+            engine.checkWatchBle(d.mac, d.rssi);
+            engine.checkHuntBle(d.mac, d.rssi);
+        }
+    }
+#endif
 #if SQUACH_LORA && defined(TWATCH_S3)
     twatchLoraBuzzTick(now);
 #elif SQUACH_LORA && defined(TDECK_PLUS)

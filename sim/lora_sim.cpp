@@ -315,6 +315,7 @@ bool packetAt(uint16_t idxFromNewest, Packet& out) {
 }
 
 uint8_t nodeCount() { return NODE_N; }
+bool takeOperatorHit(OpAlert::Hit&) { return false; }
 
 uint8_t nodeSnapshot(Nodes::Node* out, uint8_t cap, uint8_t from) {
     Nodes::Node all[NODE_N];

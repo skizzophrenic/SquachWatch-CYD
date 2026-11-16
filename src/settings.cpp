@@ -109,7 +109,7 @@ static const uint32_t DEFAULT_OFF = (1u << (uint8_t)DetectionType::IBEACON);
 // type on), computed once at namespace-init time rather than a hand-
 // maintained literal so it can never drift out of sync with COUNT.
 // 32-bit, not 16. DetectionType::COUNT reached 17 when IBEACON was added
-// (and 18 with HACKER),
+// (18 with HACKER, 19 with LORAWAN),
 // and bit 16 does not exist in a uint16_t -- the shift is undefined and the
 // last type silently loses its switch. NVS has always stored this through
 // putUInt/getUInt, so the saved format is unchanged and nothing migrates.
@@ -428,23 +428,26 @@ void adjustSoundVolume(int8_t delta) {
 uint8_t loraMode()  { return s_loraMode; }
 void cycleLoraMode() { s_loraMode = (uint8_t)((s_loraMode + 1) % 3); s_prefs.putUChar("loraMode", s_loraMode); }
 uint8_t loraListen() { return s_loraListen; }
-// BOTH, MESHTASTIC, MESHCORE, OFF, and round.
+// BOTH, MESHTASTIC, MESHCORE, LORAWAN, OFF, and round. 0-3 are a bit each
+// for the two meshes, which the LORA page reads as such; 4 is neither of
+// them: the radio parked on LoRaWAN's downlink channel, where the meshes are
+// not heard and the LORAWAN detection is.
 void cycleLoraListen() {
-    static const uint8_t NEXT[4] = { 3, 2, 0, 1 };
-    s_loraListen = NEXT[s_loraListen & 3];
+    static const uint8_t NEXT[5] = { 3, 2, 4, 1, 0 };
+    s_loraListen = NEXT[s_loraListen <= 4 ? s_loraListen : 0];
     s_prefs.putUChar("loraLstn", s_loraListen);
 }
-void setLoraListen(uint8_t v) { s_loraListen = v & 3; s_prefs.putUChar("loraLstn", s_loraListen); }
+void setLoraListen(uint8_t v) { s_loraListen = v > 4 ? 3 : v; s_prefs.putUChar("loraLstn", s_loraListen); }
 const char* loraListenName() {
-    static const char* const N[4] = { "OFF", "MESHTASTIC", "MESHCORE", "BOTH" };
-    return N[s_loraListen & 3];
+    static const char* const N[5] = { "OFF", "MESHTASTIC", "MESHCORE", "BOTH", "LORAWAN" };
+    return N[s_loraListen <= 4 ? s_loraListen : 3];
 }
 uint8_t loraTxDbm() { return s_loraTx; }
 void cycleLoraTx() {
-    s_loraTx = s_loraTx == 0 ? 10 : s_loraTx == 10 ? 20 : 0;
+    s_loraTx = s_loraTx == 0 ? 10 : s_loraTx == 10 ? 20 : s_loraTx == 20 ? 22 : 0;
     s_prefs.putUChar("loraTx", s_loraTx);
 }
-const char* loraTxName() { return s_loraTx == 0 ? "OFF" : s_loraTx == 10 ? "10 dBm" : "20 dBm"; }
+const char* loraTxName() { return s_loraTx == 0 ? "OFF" : s_loraTx == 10 ? "10 dBm" : s_loraTx == 20 ? "20 dBm" : "22 dBm"; }
 uint8_t loraRegion() { return s_loraRegion; }
 void setLoraRegion(uint8_t r) { s_loraRegion = r > 2 ? 0 : r; s_prefs.putUChar("loraRgn", s_loraRegion); }
 uint8_t loraFocus() { return s_loraFocus; }
@@ -693,7 +696,7 @@ void load() {
     s_loraFocus    = s_prefs.getUChar("loraFocus", 0);
     s_loraRegion   = s_prefs.getUChar("loraRgn", 0);
     s_loraListen   = s_prefs.getUChar("loraLstn", 3);
-    if (s_loraListen > 3) s_loraListen = 3;
+    if (s_loraListen > 4) s_loraListen = 3;
     s_loraTx = s_prefs.getUChar("loraTx", 0);
     if (s_loraTx != 10 && s_loraTx != 20) s_loraTx = 0;
     if (s_loraRegion > 2) s_loraRegion = 0;

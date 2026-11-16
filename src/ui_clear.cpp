@@ -2915,6 +2915,7 @@ static const char* counterLabel(DetectionType t) {
         // keeps its own label everywhere else -- it just does not get its
         // own column here, because its count is inside this one.
         case DetectionType::HACKER:      return "HACK";
+        case DetectionType::LORAWAN:     return "LWAN";
         default:                         return "?";
     }
 }
@@ -3079,11 +3080,25 @@ static const uint8_t FIXED_COUNTER_TYPES_N =
 // the one that asked for the type gets it, and the rule above stays true
 // without anybody having to remember it. Twelve is what this row has
 // always drawn, so the layout never grows.
-static const uint8_t MAX_COUNTER_TYPES = FIXED_COUNTER_TYPES_N + 1;
+//
+// A board with a LoRa radio has one more thing it can catch, a LoRaWAN
+// operator's network, and the rule above gives it a column: LWAN, after the
+// rest. Nothing folds it in -- it is neither a tracker, a camera nor an
+// attack. A column with nothing in it is not drawn, so the row only grows
+// while an operator is in earshot.
+#if SQUACH_LORA
+static const uint8_t LORA_COUNTER_TYPES = 1;
+#else
+static const uint8_t LORA_COUNTER_TYPES = 0;
+#endif
+static const uint8_t MAX_COUNTER_TYPES = FIXED_COUNTER_TYPES_N + 1 + LORA_COUNTER_TYPES;
 static uint8_t activeCounterTypes(DetectionType* out) {
     uint8_t n = 0;
     for (; n < FIXED_COUNTER_TYPES_N; n++) out[n] = FIXED_COUNTER_TYPES[n];
     if (Settings::typeEnabled(DetectionType::IBEACON)) out[n++] = DetectionType::IBEACON;
+#if SQUACH_LORA
+    out[n++] = DetectionType::LORAWAN;
+#endif
     return n;
 }
 // Portrait (narrow) caps at 4 per row -- see the comment above. Landscape
@@ -3096,8 +3111,11 @@ static const uint8_t MAX_PER_ROW_PORTRAIT   = 4;
 static const uint8_t COUNTER_ROWS_LANDSCAPE = 2;
 // Three rows in portrait at eleven columns and at twelve alike, so turning
 // beacons on never moves the counters up into Squachy's band.
+// The LoRa column is left out of this sum on purpose: counting it would
+// reserve a fourth row on every portrait LoRa board for the one day all
+// thirteen are live at once, and Squachy would pay for it every other day.
 static const uint8_t COUNTER_ROWS_PORTRAIT  =
-    (MAX_COUNTER_TYPES + MAX_PER_ROW_PORTRAIT - 1) / MAX_PER_ROW_PORTRAIT;  // ceil
+    (FIXED_COUNTER_TYPES_N + 1 + MAX_PER_ROW_PORTRAIT - 1) / MAX_PER_ROW_PORTRAIT;  // ceil
 
 #if SQUACH_MESH
 // The ordinary visit: ours on the left at SMALL, the guest walking in on the

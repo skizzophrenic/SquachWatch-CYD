@@ -237,9 +237,14 @@ static void noteMeshCore(const Packet& pk, uint32_t now, uint32_t epoch) {
     }
 }
 
+static LoRaWANHook s_wanHook = nullptr;
+void setLoRaWANHook(LoRaWANHook fn) { s_wanHook = fn; }
+
 static void noteLoRaWAN(const Packet& pk, uint32_t now) {
     LoRaWAN::Decoded d;
-    if (!LoRaWAN::decode(pk, d) || d.isBeacon) return;
+    if (!LoRaWAN::decode(pk, d)) return;
+    if (s_wanHook) s_wanHook(d, pk, now);
+    if (d.isBeacon) return;
     const LoRaWAN::Frame& f = d.f;
     if (f.mtype == LoRaWAN::JOIN_REQUEST) {
         uint64_t id = 0;

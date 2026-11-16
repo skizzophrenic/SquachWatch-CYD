@@ -339,13 +339,13 @@ namespace Settings {
     // default: the radio takes turns between the two). Applied by
     // Lora::applyListen().
     uint8_t     loraListen();
-    void        setLoraListen(uint8_t v);   // 0 off, 1 Meshtastic, 2 MeshCore, 3 both
+    void        setLoraListen(uint8_t v);   // 0 off, 1 Meshtastic, 2 MeshCore, 3 both, 4 LoRaWAN
     void        cycleLoraListen();
     const char* loraListenName();
     // LORA TX (the T-Deck): what the chats' compose line sends at. 0 = off,
     // else dBm. Off by default: a sniffer that talks is opt-in.
     uint8_t     loraTxDbm();
-    void        cycleLoraTx();         // OFF -> 10 dBm -> 20 dBm -> OFF
+    void        cycleLoraTx();         // OFF -> 10 dBm -> 20 dBm -> 22 dBm -> OFF
     const char* loraTxName();
     uint8_t     loraRegion();
     void        setLoraRegion(uint8_t r);

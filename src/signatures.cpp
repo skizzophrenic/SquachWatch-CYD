@@ -669,6 +669,11 @@ Confidence confidenceFor(DetectionType t) {
         // their own. This is the value a caller gets when nothing more
         // specific was established.
         case DetectionType::HACKER:
+        // The base grade, for a DevAddr of type 3 and up: eleven to seventeen
+        // bits of a 21-bit NetID reach the air, so the registry row it lands
+        // on is the likeliest owner and not the only possible one. Types 0-2
+        // carry the whole NetID and are graded HIGH where the sighting is made.
+        case DetectionType::LORAWAN:
             return Confidence::MED_CONF;
         default:
             return Confidence::LOW_CONF;
