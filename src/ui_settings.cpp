@@ -15,6 +15,7 @@
 #include "settings.h"
 #include "security.h"
 #include "ignore_list.h"
+#include "my_alerts.h"
 #include "squachy.h"
 #include "bingo.h"
 #include "dex.h"
@@ -91,6 +92,9 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::WIFI_BANDS,
 #endif
     SettingsRow::DETECTION_FILTER,
+    // The owner's own WiFi names, between what the board filters out and
+    // what it has been told to ignore.
+    SettingsRow::MY_ALERTS,
     SettingsRow::IGNORED_DEVICES,
 #if defined(SENSE_CYD_APP)
     // Beside what the detector listens for: what the board's radio senses
@@ -369,6 +373,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::WIFI_BANDS:
 #endif
         case SettingsRow::DETECTION_FILTER:
+        case SettingsRow::MY_ALERTS:
         case SettingsRow::IGNORED_DEVICES:
 #if defined(SENSE_CYD_APP)
         case SettingsRow::SENSING:
@@ -1292,7 +1297,12 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             // keeps the full name in its title bar.
             label = "TYPE FILTER";
             snprintf(valBuf, valBufN, "%u/%u", (unsigned)Settings::enabledTypeCount(),
-                     (unsigned)DetectionType::COUNT - 1);
+                     (unsigned)DetectionType::MINE - 1);
+            value = valBuf;
+            break;
+        case SettingsRow::MY_ALERTS:
+            label = "MY ALERTS";
+            snprintf(valBuf, valBufN, "%u", (unsigned)MyAlerts::count());
             value = valBuf;
             break;
         case SettingsRow::IGNORED_DEVICES:

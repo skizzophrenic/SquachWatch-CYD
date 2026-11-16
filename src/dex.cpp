@@ -140,7 +140,7 @@ const Entry& entry(DetectionType t) {
 DetectionType typeAt(uint8_t i) { return (DetectionType)(i + 1); }
 uint8_t indexOf(DetectionType t) {
     const uint8_t v = (uint8_t)t;
-    return (v >= 1 && v < (uint8_t)DetectionType::COUNT) ? (uint8_t)(v - 1) : ENTRIES;
+    return (v >= 1 && v < (uint8_t)DetectionType::MINE) ? (uint8_t)(v - 1) : ENTRIES;
 }
 
 Rarity rarity(DetectionType t)       { return entry(t).rarity; }

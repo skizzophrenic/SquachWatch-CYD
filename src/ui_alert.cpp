@@ -30,6 +30,7 @@ static const char* targetLabel(DetectionType t) {
         case DetectionType::IBEACON:     return "PROXIMITY BEACON";
         case DetectionType::HACKER:      return "HACKER HARDWARE";
         case DetectionType::LORAWAN:     return "LORAWAN NETWORK";
+        case DetectionType::MINE:        return "MY ALERT";
         default:                     return "UNKNOWN";
     }
 }

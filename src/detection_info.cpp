@@ -48,6 +48,8 @@ static const char* const EXPLAIN_TEXT[] = {
     "Wireless testing hardware: a Flipper Zero, a Pwnagotchi, a WiFi Pineapple or an ESP deauther. These are legitimate tools and most owners are hobbyists or people paid to break things -- but unlike everything else here, this is gear that transmits at other radios rather than just watching. A Pwnagotchi reports its own name and how many WiFi handshakes it has captured, because it is trying to be seen by others like it. Nothing here flags a bare ESP32 dev board: that would flag half the electronics in the room, and this detector too.",
     // LORAWAN
     "A LoRaWAN network is in range: the long-range, low-power radio that utility meters, parking sensors and city infrastructure report home over. The name is the OPERATOR, read from the network prefix every device address starts with -- not a device, and not who owns one. Everything such a network carries is encrypted and stays that way; this is the envelope, not the letter. One alert per operator, however many of its devices are in earshot. Only a board with a LoRa radio hears it, and only while LORA is listening on a LoRaWAN profile -- the RX2 downlink profiles hear the most.",
+    // MINE
+    "A WiFi network whose name matches one of YOUR patterns, from Settings > MY ALERTS. Nothing in the built-in tables says what it is: you told the board to watch for this name, and here it is. The label on the alert is the one you gave the pattern. Network names are chosen by whoever runs the router, so anyone can name theirs to match.",
 };
 static const uint8_t EXPLAIN_TEXT_N = sizeof(EXPLAIN_TEXT) / sizeof(EXPLAIN_TEXT[0]);
 

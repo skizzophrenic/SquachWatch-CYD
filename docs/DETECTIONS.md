@@ -593,6 +593,28 @@ pins all of the above.
 
 ---
 
+## Your own WiFi names — `MINE` (shown as `MY ALERT`) — **High confidence**
+
+Not a signature table: Settings → MY ALERTS lets the owner type up to eight
+network names to alert on, because some of the most useful patterns are
+local. It was asked for by a tester whose city's patrol cars run in-car
+routers named `veh` plus the unit number, and whose county does the same.
+
+- Checked against every beacon's SSID, after the evil-twin check and ahead
+  of the OUI and SSID tables, so a name the owner asked about wins over a
+  vendor guess for the same router.
+- Plain text is a prefix (the built-in SSID table's rule). `*` and `?` make
+  it a whole-name glob, case-insensitive. Under two fixed characters is
+  refused; under three is saved with a warning.
+- High confidence because the match is exact. What it means is the owner's
+  call: anyone can name a router anything.
+- No DEX card, not on the BINGO card and not in TYPE FILTER: the list is
+  its own switch. While the list has anything in it, MINE takes the main
+  screen's twelfth counter and beacons (if on) fold into TRACKER.
+- Never shared with the squad: the label is the owner's own words.
+
+---
+
 ## License / attribution
 
 | Source | License | Used for |

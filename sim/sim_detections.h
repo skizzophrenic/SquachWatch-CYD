@@ -27,6 +27,7 @@
 #include <cstdint>
 #include "state.h"
 #include "signatures.h"
+#include "my_alerts.h"
 
 struct SimDetectionProfile {
     DetectionType type;
@@ -115,6 +116,9 @@ inline const SimDetectionProfile kSimProfiles[] = {
     // LORAWAN -- the made-up address Lora::OpAlert::macFor gives an operator,
     // and the operator's name where a device's would be.
     { DetectionType::LORAWAN,     {0x02, 0x4C, 0x57}, "LoRaWAN",     "Oresundskraft",  -97, false, "LoRaWAN operator" },
+    // MY ALERTS -- an in-car router of the kind it was asked for. The label
+    // is the first pattern on the list when there is one (see below).
+    { DetectionType::MINE,        {0x02, 0x76, 0x45}, "CITY PD",     "veh912",         -64, true,  "My alert (car WiFi)" },
 };
 inline const size_t kSimProfileCount = sizeof(kSimProfiles) / sizeof(kSimProfiles[0]);
 
@@ -150,6 +154,12 @@ inline void simMakeDetection(Detection& d, const SimDetectionProfile& p, uint32_
     d.conf      = confidenceFor(p.type);
     d.vendor = p.vendor;   // a pointer into the seed table, as on the board
     snprintf(d.name,   sizeof(d.name),   "%s", p.name);
+    // MY ALERTS reads as the owner's own list when they have one: their first
+    // entry's label on the plate, as the board would write it.
+    if (p.type == DetectionType::MINE) {
+        const int8_t slot = MyAlerts::nth(0);
+        if (slot >= 0) d.vendor = MyAlerts::tag((uint8_t)slot);
+    }
     d.firstSeen = now;
     d.lastSeen  = now;
     d.hits      = 1;

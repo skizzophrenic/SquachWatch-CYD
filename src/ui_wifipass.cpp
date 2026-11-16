@@ -35,6 +35,11 @@ bool     s_sym     = false;
 bool     s_show    = false;
 uint32_t s_typedAt = 0;               // the last character shows for a moment
 WifiPassResult s_result = WifiPassResult::NONE;
+// What the header asks for and the rules for OK: a password unless
+// uiWifiPassInitText() said otherwise.
+const char* s_prompt     = "PASSWORD FOR";
+uint8_t     s_max        = PASS_MAX;
+bool        s_allowEmpty = false;
 
 // Top of the first key row, as layout() worked it out. The chassis is drawn
 // from here rather than from TOP_H: the rows are bottom-aligned and their
@@ -169,10 +174,10 @@ void type(char ch, uint32_t now) {
         case K_SHIFT: s_shift = !s_shift; break;
         case K_SYM:   s_sym = !s_sym; s_shift = false; break;
         case K_DEL:   if (s_len) s_buf[--s_len] = '\0'; break;
-        case K_OK:    if (s_len) s_result = WifiPassResult::OK; break;
+        case K_OK:    if (s_len || s_allowEmpty) s_result = WifiPassResult::OK; break;
         case K_NONE:  break;
         default:
-            if (s_len < PASS_MAX) { s_buf[s_len++] = ch; s_buf[s_len] = '\0'; s_typedAt = now; }
+            if (s_len < s_max) { s_buf[s_len++] = ch; s_buf[s_len] = '\0'; s_typedAt = now; }
             break;
     }
 }
@@ -271,9 +276,10 @@ void drawAll(TFT_eSPI& t, uint32_t now) {
     Theme::bodyFontOn(t);
     t.setTextColor(Theme::VAPOR_PINK, Theme::BG);
     t.setCursor(BACK_X + BACK_W + 8, BACK_Y + 1);
-    t.print(big ? "PASSWORD FOR " : "PASSWORD FOR");
+    t.print(s_prompt);
+    if (big) t.print(" ");
     t.setTextColor(Theme::CYAN, Theme::BG);
-    const int sx = BACK_X + BACK_W + 8 + (big ? t.textWidth("PASSWORD FOR ") : 0);
+    const int sx = BACK_X + BACK_W + 8 + (big ? t.textWidth(s_prompt) + t.textWidth(" ") : 0);
     t.setCursor(sx, big ? BACK_Y + 1 : BACK_Y + 11);
     char ssid[40];
     const int maxChars = (w - sx - MARGIN) / t.textWidth("M");
@@ -305,12 +311,28 @@ void uiWifiPassInit(TFT_eSPI& t, const char* ssid) {
     s_ssid[sizeof s_ssid - 1] = '\0';
     uiWifiPassClear();
     s_shift = s_sym = s_show = false;
+    s_prompt = "PASSWORD FOR";
+    s_max = PASS_MAX;
+    s_allowEmpty = false;
     s_result = WifiPassResult::NONE;
     s_armed = s_lastKey = -1;
     layout(t.width(), t.height());
     s_full   = true;
     s_initAt = millis();
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
+}
+
+void uiWifiPassInitText(TFT_eSPI& t, const char* prompt, const char* subject, const char* initial,
+                        uint8_t maxLen, bool allowEmpty) {
+    uiWifiPassInit(t, subject);
+    s_prompt     = prompt ? prompt : "";
+    s_max        = maxLen && maxLen < PASS_MAX ? maxLen : PASS_MAX;
+    s_allowEmpty = allowEmpty;
+    s_show       = true;
+    if (initial) {
+        snprintf(s_buf, (size_t)s_max + 1, "%s", initial);
+        s_len = (uint8_t)strlen(s_buf);
+    }
 }
 
 void uiWifiPassTick(TFT_eSPI& t, uint32_t now) {
