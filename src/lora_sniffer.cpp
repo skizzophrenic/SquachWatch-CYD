@@ -760,10 +760,12 @@ bool begin() {
             const char* z = Clock::zoneName(Settings::timeZone());
             static const char* const AMERICAS[] = { "US ", "ARIZONA", "ALASKA", "HAWAII", "ATLANTIC", "NEWFOUNDLAND",
                                                     "BRAZIL", "MEXICO", "COLOMBIA", "CHILE", "ARGENTINA" };
+            static const char* const ANZ[] = { "AUS ", "QUEENSLAND", "DARWIN", "NEW ZEALAND" };
             r = 1;
             for (const char* a : AMERICAS) if (z && strncmp(z, a, strlen(a)) == 0) { r = 2; break; }
+            for (const char* a : ANZ)      if (z && strncmp(z, a, strlen(a)) == 0) { r = 3; break; }
         }
-        setRegion(r == 2 ? REGION_US : REGION_EU);
+        setRegion(r == 2 ? REGION_US : r == 3 ? REGION_AU : REGION_EU);
         Serial.printf("[lora] band plan %s (%s)\n", regionName(), Settings::loraRegion() == 0 ? "from the time zone" : "set by LORA REGION");
     }
     uint64_t mask = 0;
@@ -2394,7 +2396,8 @@ bool console(const char* line) {
         const char* v = a + 6; while (*v == ' ') v++;
         uint8_t r = 255;
         if (strcasecmp(v, "AUTO") == 0) r = 0; else if (strcasecmp(v, "EU") == 0) r = 1; else if (strcasecmp(v, "US") == 0) r = 2;
-        if (r == 255) { Serial.printf("[lora] band plan %s; LORA REGION AUTO|EU|US (restarts)\n", regionName()); return true; }
+        else if (strcasecmp(v, "AU") == 0) r = 3;
+        if (r == 255) { Serial.printf("[lora] band plan %s; LORA REGION AUTO|EU|US|AU (restarts)\n", regionName()); return true; }
         Settings::setLoraRegion(r);
         Serial.println("[lora] band plan saved; restarting to apply");
         delay(200);

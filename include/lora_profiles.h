@@ -8,13 +8,14 @@
 
 namespace Lora {
 
-// Which table: EU 868 (with its 433 rows) or US 915. Chosen once, before the
-// sniffer starts (Lora::begin), because profile indices are only stable
-// within one table. EU until told otherwise, which is what the host tests get.
-enum : uint8_t { REGION_EU = 0, REGION_US = 1 };
+// Which table: EU 868 (with its 433 rows), US 915 or AU 915 (Australia and
+// New Zealand, 915-928 MHz). Chosen once, before the sniffer starts
+// (Lora::begin), because profile indices are only stable within one table.
+// EU until told otherwise, which is what the host tests get.
+enum : uint8_t { REGION_EU = 0, REGION_US = 1, REGION_AU = 2 };
 void        setRegion(uint8_t r);
 uint8_t     region();
-const char* regionName();   // "EU 868", "US 915"
+const char* regionName();   // "EU 868", "US 915", "AU 915"
 
 // The table and its length. Indices are stable within a build and are what
 // a Packet's `profile` field holds, so nothing persists them.

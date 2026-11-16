@@ -449,7 +449,7 @@ void cycleLoraTx() {
 }
 const char* loraTxName() { return s_loraTx == 0 ? "OFF" : s_loraTx == 10 ? "10 dBm" : s_loraTx == 20 ? "20 dBm" : "22 dBm"; }
 uint8_t loraRegion() { return s_loraRegion; }
-void setLoraRegion(uint8_t r) { s_loraRegion = r > 2 ? 0 : r; s_prefs.putUChar("loraRgn", s_loraRegion); }
+void setLoraRegion(uint8_t r) { s_loraRegion = r > 3 ? 0 : r; s_prefs.putUChar("loraRgn", s_loraRegion); }   // 0 AUTO, 1 EU, 2 US, 3 AU
 uint8_t loraFocus() { return s_loraFocus; }
 void setLoraFocus(uint8_t ix) { s_loraFocus = ix; s_prefs.putUChar("loraFocus", ix); }
 // Keys: 8, 9, 9 and 9 characters, inside NVS's limit of 15, and none of them is
@@ -698,8 +698,8 @@ void load() {
     s_loraListen   = s_prefs.getUChar("loraLstn", 3);
     if (s_loraListen > 4) s_loraListen = 3;
     s_loraTx = s_prefs.getUChar("loraTx", 0);
-    if (s_loraTx != 10 && s_loraTx != 20) s_loraTx = 0;
-    if (s_loraRegion > 2) s_loraRegion = 0;
+    if (s_loraTx != 10 && s_loraTx != 20 && s_loraTx != 22) s_loraTx = 0;   // 22 came with #138 and was lost at every restart
+    if (s_loraRegion > 3) s_loraRegion = 0;
     // False, every time, unless somebody has said otherwise on this board.
     s_loraLookups  = s_prefs.getBool("loraLkup", false);
     s_loraLkCall   = s_prefs.getBool("loraLkCal", false);
