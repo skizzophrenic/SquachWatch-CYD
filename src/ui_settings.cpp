@@ -75,7 +75,7 @@ static const SettingsRow ALL_ROWS[] = {
     // to ten rows, so the main list carries one row that opens it.
     SettingsRow::WATCH_SETTINGS,
 #endif
-    SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE, SettingsRow::DESK_FULL, SettingsRow::AUTO_QUIET,
+    SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE, SettingsRow::AUTO_QUIET,
 #if defined(CROWPANEL7)
     // Beside ALERT FILTER and AUTO SNOOZE because it is about alerts: one
     // switch, not a page of knobs like the light. Compiled only for the
@@ -363,7 +363,6 @@ static RowGroupId groupFor(SettingsRow r) {
             return RowGroupId::FONTS;
         case SettingsRow::BORING_MODE:
         case SettingsRow::CONFIDENCE:
-        case SettingsRow::DESK_FULL:
         case SettingsRow::AUTO_QUIET:
 #if defined(CROWPANEL7)
         case SettingsRow::BUZZER:
@@ -1228,7 +1227,7 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             label = "CLOCK FORMAT"; value = Settings::clock24Hour() ? "24 HOUR" : "12 HOUR";
             break;
         case SettingsRow::DESK_ALERT:
-            label = "ALERT POPUP"; value = Settings::deskAlertBig() ? "BIG" : "SMALL";
+            label = "DESK ALERT"; value = Settings::deskAlertName();
             break;
 #if SQUACH_MESH
         case SettingsRow::DESK_SQUAD:
@@ -1267,9 +1266,6 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             break;
         case SettingsRow::CONFIDENCE:
             label = "ALERT FILTER"; value = Settings::minConfidenceLabel();
-            break;
-        case SettingsRow::DESK_FULL:
-            label = "DESK ALERT"; value = Settings::deskAlertFull() ? "FULL SCREEN" : "POPUP";
             break;
         case SettingsRow::AUTO_QUIET:
             label = "AUTO SNOOZE"; value = Settings::autoQuietLabel();

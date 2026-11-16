@@ -10146,7 +10146,6 @@ void loop() {
                             break;
                         }
                         case SettingsRow::CONFIDENCE: Settings::cycleMinConfidence(); break;
-                        case SettingsRow::DESK_FULL:  Settings::toggleDeskAlertFull(); break;
                         case SettingsRow::AUTO_QUIET:  Settings::cycleAutoQuiet(); break;
 #if defined(CROWPANEL7)
                         case SettingsRow::BUZZER:
@@ -10333,7 +10332,7 @@ void loop() {
                         case SettingsRow::CLOCK_SIZE:     Settings::cycleClockSize();     break;
                         case SettingsRow::CLOCK_BACKDROP: Settings::cycleClockBackdrop(); break;
                         case SettingsRow::CLOCK_FORMAT:  Settings::toggleClock24Hour();   break;
-                        case SettingsRow::DESK_ALERT:    Settings::toggleDeskAlertBig();  break;
+                        case SettingsRow::DESK_ALERT:    Settings::cycleDeskAlert();      break;
 #if SQUACH_MESH
                         case SettingsRow::DESK_SQUAD:   Settings::toggleDeskSquad();     break;
                         case SettingsRow::DESK_CROWD:   Settings::cycleDeskCrowd();      break;
@@ -11402,21 +11401,24 @@ void loop() {
                 enterSysProps();
                 break;
             }
-            // The same test CLEAR makes, but the answer is a small card
-            // beside the clock, and Squachy's reaction, not a new screen.
+            // The same test CLEAR makes. The answer is DESK ALERT's: a small
+            // card beside the clock (the default) or a big one, with Squachy's
+            // reaction, or the full ALERT screen.
             {
                 const Detection* latest = freshCatch(now);
                 if (latest &&
                     latest->conf >= Settings::minConfidence() && !IgnoreList::silenced(latest->mac) &&
                     alertMayInterrupt(*latest)) {
                     lastAlertType = latest->type;
-                    squachyCatch(latest->type, latest->mac, latest->hits, latest->rssi, latest->conf);
                     if (Settings::deskAlertFull()) {
-                        // DESK ALERT = FULL SCREEN: straight to the ALERT screen, as CLEAR does.
+                        // DESK ALERT = FULL SCREEN: straight to the ALERT screen, as CLEAR
+                        // does. Squachy hears about the catch when that screen closes, as
+                        // on CLEAR: telling him here too counted every catch twice.
                         uiAlertSetRedacted(false);
                         enterAlert(*latest);
                         break;
                     }
+                    squachyCatch(latest->type, latest->mac, latest->hits, latest->rssi, latest->conf);
                     uiDeskAlert(*latest, now);
                 }
             }
@@ -11436,12 +11438,15 @@ void loop() {
                 const int ez = tft.width() / 10;
                 const bool edge = (tp.x < ez || tp.x >= tft.width() - ez) && tp.y >= 16 &&
                                   tp.y < Theme::computeButtonBar(tft.width(), tft.height()).y;
-                if (uiDeskHitMessage(tp.x, tp.y)) {
-                    lastTouch = now;
-                } else if (uiDeskHitAlert(tp.x, tp.y, now)) {
+                // The alert card first: the BIG CARD covers the squad message
+                // box, and a tap on it meant for the alert would otherwise only
+                // mark the message read.
+                if (uiDeskHitAlert(tp.x, tp.y, now)) {
                     lastTouch = now;
                     uiAlertSetRedacted(false);
                     enterAlert(*uiDeskAlertDetection());
+                } else if (uiDeskHitMessage(tp.x, tp.y)) {
+                    lastTouch = now;
                 } else if (uiDeskHitBack(tp.x, tp.y, tft.width(), tft.height())) {
                     lastTouch = now;
                     enterClear();   // BACK means the main screen, not the settings it came through

@@ -78,15 +78,15 @@ namespace Settings {
     uint8_t     clockSize();
     const char* clockSizeName();
     void        cycleClockSize();
-    // deskAlertBig: a detection on the desk fills most of the screen for its
-    // few seconds, instead of the small card at the bottom left.
-    // deskAlertFull: on the desk, a detection opens the full ALERT screen at
-    // once, as it does on CLEAR (the default). Off, it is the popup above,
-    // and a tap on that opens the full screen.
+    // DESK ALERT, what a catch does on the desk (PR #112 by GreyFox01):
+    // CARD, the small card at the bottom left (the default, as it always was);
+    // BIG CARD, a box filling most of the screen for its few seconds; FULL
+    // SCREEN, straight to the ALERT screen as CLEAR does. A tap on either card
+    // opens the full alert.
     bool        deskAlertFull();
-    void        toggleDeskAlertFull();
     bool        deskAlertBig();
-    void        toggleDeskAlertBig();
+    void        cycleDeskAlert();
+    const char* deskAlertName();
     uint8_t     clockBackdrop();
     const char* clockBackdropName();
     void        cycleClockBackdrop();

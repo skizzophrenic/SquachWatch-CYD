@@ -707,6 +707,15 @@ int main(int argc, char** argv) {
         for (int g = 0; g < 4 && Settings::clockSize() != z; g++)     Settings::cycleClockSize();
         for (int g = 0; g < 8 && Settings::clockBackdrop() != b; g++) Settings::cycleClockBackdrop();
     }
+    // SQUACHSIM_DESKALERT=0|1|2: DESK ALERT as CARD, BIG CARD or FULL SCREEN.
+    if (const char* da = getenv("SQUACHSIM_DESKALERT")) {
+        const int want = atoi(da);
+        for (int g = 0; g < 3; g++) {
+            const int now = Settings::deskAlertFull() ? 2 : Settings::deskAlertBig() ? 1 : 0;
+            if (now == want) break;
+            Settings::cycleDeskAlert();
+        }
+    }
     // Off by default on the board, so the counter column only exists when
     // somebody has asked for the type.
     if (beacons && !Settings::typeEnabled(DetectionType::IBEACON))

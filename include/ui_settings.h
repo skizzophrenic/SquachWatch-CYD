@@ -63,8 +63,7 @@ enum class SettingsRow : uint8_t {
     CLOCK_FONT,      // on the DESK MODE page: segments or Bangers
     CLOCK_SIZE,      // on the DESK MODE page: small, medium, large, extra-large
     CLOCK_BACKDROP,  // on the DESK MODE page: what plays inside the clock
-    DESK_FULL,       // beside ALERT FILTER: on the desk, a detection opens the full ALERT, or only the popup
-    DESK_ALERT,      // on the DESK MODE page: a detection is a small card, or a near full-screen box
+    DESK_ALERT,      // on the DESK MODE page: a catch is a small card, a big card, or the full ALERT
     WATCH_BATTERY,   // the T-Watch only: charge and voltage, under WATCH
     WATCH_RADIO,     // the T-Watch only: the radio duty cycle, under WATCH
     WATCH_LISTEN,    // the T-Watch only: BLE LISTEN, how much of the time the receiver is open

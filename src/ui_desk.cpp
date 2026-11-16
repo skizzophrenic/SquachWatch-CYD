@@ -352,31 +352,34 @@ static void drawAlertBig(TFT_eSPI& t, int barY, uint32_t now) {
     t.fillRoundRect(x, y, cw, ch, 6, Theme::BG);
     t.drawRoundRect(x, y, cw, ch, 6, edge);
     t.drawRoundRect(x + 1, y + 1, cw - 2, ch - 2, 5, edge);
-    const int s = cw >= 280 ? 30 : 22;                       // the icon's half-size
-    const int iconCx = x + 14 + s;
-    t.fillRect(iconCx - s - 6, y + ch / 2 - s - 6, 2 * s + 12, 2 * s + 12, Theme::BG);
-    Theme::drawTypeIcon(t, d.type, iconCx, y + ch / 2 - 6, s);
-    const int tx = iconCx + s + 14;                           // the text column
-    const int avail = x + cw - 8 - tx;
-    const int sz = avail >= 11 * 18 ? 3 : 2;
-    const int cpl = avail / (6 * 2);                          // size-2 characters per line
+    // Stacked and centred: the icon on top, then the type, the name and the
+    // signal. Some icons (the drone's rotors, META's glasses) reach well past
+    // their half-size sideways, so centring is what keeps them inside the box,
+    // and the name gets the card's whole width.
+    const int s = ch >= 200 ? 30 : ch >= 150 ? 24 : 18;      // the icon's half-size
+    const int inner = cw - 20;                               // text width inside the border
+    const int sz = inner >= 11 * 18 ? 3 : 2;                 // the type's size
+    const int cpl = inner / 12;                              // size-2 characters per line
     char ty[16], who[24], pv[40], sig[16];
     snprintf(ty, sizeof ty, "%.11s", detectionTypeName(d.type));
     snprintf(who, sizeof who, "%.*s", cpl > 23 ? 23 : cpl,
              d.name[0] ? Privacy::name(d.name, pv, sizeof pv) : vendorText(d));
     snprintf(sig, sizeof sig, "%d dBm", d.rssi);
-    const int blockH = sz * 8 + 8 + 16 + 8 + 16;
-    int ty0 = y + (ch - blockH) / 2 - 4;
+    const int blockH = 2 * s + 12 + sz * 8 + 8 + 16 + 6 + 16;
+    int yy = y + (ch - 12 - blockH) / 2;
+    const int cx = x + cw / 2;
+    Theme::drawTypeIcon(t, d.type, cx, yy + s, s);
+    yy += 2 * s + 12;
     t.setTextSize(sz);
     t.setTextColor(c, Theme::BG);
-    t.setCursor(tx, ty0); t.print(ty);
-    ty0 += sz * 8 + 8;
+    t.setCursor(cx - t.textWidth(ty) / 2, yy); t.print(ty);
+    yy += sz * 8 + 8;
     t.setTextSize(2);
     t.setTextColor(Theme::WHITE, Theme::BG);
-    t.setCursor(tx, ty0); t.print(who);
-    ty0 += 16 + 8;
+    t.setCursor(cx - t.textWidth(who) / 2, yy); t.print(who);
+    yy += 16 + 6;
     t.setTextColor(Theme::CYAN, Theme::BG);
-    t.setCursor(tx, ty0); t.print(sig);
+    t.setCursor(cx - t.textWidth(sig) / 2, yy); t.print(sig);
     t.setTextSize(1);
     const char* hint = "TAP TO OPEN";
     t.setTextColor(Theme::W95_SHADOW, Theme::BG);
