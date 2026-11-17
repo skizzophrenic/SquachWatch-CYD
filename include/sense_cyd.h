@@ -69,7 +69,9 @@ uint8_t     senseCydMode();                 // SENSE_MODE_*
 
 // SENSE OPEN / SENSE CLOSE / SENSE OPEN NOWIFI on the console (bench): 1 open the
 // screen, 2 back to the detector, 3 open it as if no network were saved (the
-// ADD WIFI state, without touching the saved list); main.cpp acts and clears it.
+// ADD WIFI state, without touching the saved list); SENSE NEXT / SENSE BACK: 4 / 5,
+// the next or previous page on the boards with SCOPE, SNEAK and VITALS.
+// main.cpp acts and clears it.
 extern volatile uint8_t g_senseConsole;
 
 // SPECTRUM.EXE: rows of 32 bins (0-2.42 Hz), 0-255 over the room's recent level,

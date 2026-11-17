@@ -627,6 +627,8 @@ void pollSerial() {
         if (strcasecmp(line, "SENSE OPEN") == 0) { g_senseConsole = 1; continue; }
         if (strcasecmp(line, "SENSE OPEN NOWIFI") == 0) { g_senseConsole = 3; continue; }   // as if none were saved
         if (strcasecmp(line, "SENSE CLOSE") == 0) { g_senseConsole = 2; continue; }
+        if (strcasecmp(line, "SENSE NEXT") == 0)  { g_senseConsole = 4; continue; }   // the next page (SCOPE...)
+        if (strcasecmp(line, "SENSE BACK") == 0)  { g_senseConsole = 5; continue; }
         if (strncasecmp(line, "SENSE ", 6) == 0) { ::senseCydCommand(line + 6); continue; }
 #endif
         if (strcasecmp(line, "INVERT") == 0) { g_consoleInvert = true; continue; }

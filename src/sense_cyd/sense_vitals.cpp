@@ -326,7 +326,10 @@ void feed(float c1, uint8_t q) {
 uint32_t lastFrameAt() { return s_frameAt; }
 
 void update(uint32_t now) {
-    s_m.live = s_frameAt && now - s_frameAt < 1500;
+    // Signed: feed() stamps millis(), which can be a little past the loop's
+    // "now", and unsigned that read as a frame 49 days old (WAITING
+    // flickered on the bench, 2026-11-17).
+    s_m.live = s_frameAt && (int32_t)(now - s_frameAt) < 1500;
     s_m.rate = SenseStore::fresh(now) ? SenseStore::last().rate : 0;
     if (s_any) { s_any = false; metricsStep(); }
     // One console line every 10 s while VITALS is up, for a bench log.

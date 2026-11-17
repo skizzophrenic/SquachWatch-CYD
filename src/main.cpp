@@ -6818,6 +6818,11 @@ void consoleFrameShot() {
     if (!frameBufferOk || frame.getColorDepth() != 8 || !frame.getPointer()) { Serial.println("[sense] shot: no 8-bit frame"); return; }
     const uint8_t* px = (const uint8_t*)frame.getPointer();
     const int w = frame.width(), h = frame.height();
+#if defined(SQW_S3) || defined(TAB5) || defined(WAVESHARE_C5)
+    // Native USB drops what the host has not read yet (setup()); a shot is
+    // only ever asked for by a host that is reading, so it may wait for it.
+    Serial.setTxTimeoutMs(250);
+#endif
     Serial.printf("#SHOT %d %d rgb332\n", w, h);
     static const char HX[] = "0123456789abcdef";
     // From the heap for the length of the shot: a bench command has no
@@ -6834,6 +6839,10 @@ void consoleFrameShot() {
     }
     free(line);
     Serial.println("#SHOT END");
+#if defined(SQW_S3) || defined(TAB5) || defined(WAVESHARE_C5)
+    Serial.flush();
+    Serial.setTxTimeoutMs(0);
+#endif
 }
 #endif
 
@@ -8093,6 +8102,9 @@ void loop() {
             const uint8_t c = g_senseConsole; g_senseConsole = 0;
             if ((c == 1 || c == 3) && state != AppState::SENSING) { s_senseNoWifi = c == 3; enterSensing(); }
             else if (c == 2 && state == AppState::SENSING) enterClear();
+#if SENSE_RICH
+            else if ((c == 4 || c == 5) && state == AppState::SENSING) uiSensingSwipe(c == 4 ? 1 : -1);
+#endif
         }
         // Booted straight into SENSING: give the detector's radio 8 s to settle
         // first. Started at once, the first join came up deaf (no CSI, every

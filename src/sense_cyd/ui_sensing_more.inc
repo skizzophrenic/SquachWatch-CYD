@@ -499,11 +499,17 @@ void vitalsScreen(TFT_eSPI& t, uint32_t now) {
     const int wy = sy + sh + (big ? 4 : 3), wh = big ? B - wy - 44 : B - wy - 26;
     t.drawRect(lx, wy, lw, wh, Theme::PURPLE);
     const int rows = Vitals::waterfallRows();
+    // One line per band per row, its colour worked out once: a pixel at a
+    // time, the full waterfall took the 3.5in from 41 to 17 frames a second
+    // over its first minute (bench, 2026-11-17).
+    const int ww = lw - 2;
     for (int r = 0; r < wh - 2 && r < rows; r++) {
         const uint8_t* row = Vitals::waterfallRow((uint8_t)r);
-        for (int i = 0; i < lw - 2; i++) {
-            const uint8_t v = row[i * Vitals::BINS / (lw - 2)];
-            if (v > 20) t.drawPixel(lx + 1 + i, wy + 1 + r, ramp(v));
+        for (int k = 0; k < Vitals::BINS; k++) {
+            const uint8_t v = row[k];
+            if (v <= 20) continue;
+            const int x0 = (k * ww + Vitals::BINS - 1) / Vitals::BINS, x1 = ((k + 1) * ww + Vitals::BINS - 1) / Vitals::BINS;
+            if (x1 > x0) t.drawFastHLine(lx + 1 + x0, wy + 1 + r, x1 - x0, ramp(v));
         }
     }
     textT(t, lx + 3, wy + 3, "NOW", slate(), 1);
