@@ -1,5 +1,6 @@
 // SquachWatch-CYD — desk mode. See ui_desk.h.
 #include "ui_desk.h"
+#include "pet.h"
 #include "clock.h"
 #include "theme.h"
 #include "privacy.h"
@@ -639,6 +640,9 @@ void uiDeskTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adva
     }
     t.setTextSize(1);
     Theme::drawTitleBar(t, ">> DESK <<");
+    // Mothman, when he is the pet, hangs off the plate's right-hand end; not
+    // while the focus timer runs, which is the desk asking for no company.
+    if (!running && !Settings::boringMode()) Pet::drawMothmanPerch(t, px + pw - 19, plateBottom, now);
 
     // Bangers draws into the same cells the segments use, so the plate, the
     // AM/PM and everything measured off them stay where they are. Each digit

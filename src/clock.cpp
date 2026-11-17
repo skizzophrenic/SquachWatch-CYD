@@ -694,6 +694,13 @@ void pollSerial() {
         if (strcasecmp(line, "YETI DISCO") == 0) { Pet::yetiDance(0); Serial.println("[yeti] disco"); continue; }
         if (strcasecmp(line, "YETI FLOSS") == 0) { Pet::yetiDance(1); Serial.println("[yeti] floss"); continue; }
         if (strcasecmp(line, "TOASTER") == 0) { g_consoleToaster = true; continue; }
+        // MOTHMAN LOCK: find him again, from the red eyes in the treeline.
+        if (strcasecmp(line, "MOTHMAN LOCK") == 0) {
+            Serial.println(Squachy::relockMothman()
+                ? "[mothman] locked: tap the red eyes in Fireflies"
+                : "[mothman] could not save discovery reset");
+            continue;
+        }
         // MEATY unlocks him; MEATY IGLOO / DOG / SHAKE / SPLIT / DANCE, his shapes on demand.
         if (strcasecmp(line, "MEATY") == 0) { g_consoleMeaty = true; continue; }
         if (strncasecmp(line, "MEATY ", 8) == 0) {

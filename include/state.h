@@ -213,7 +213,8 @@ enum class AppState : uint8_t {
     LORA_SETTINGS    = 40, // LORA SETTINGS, only from the LORA page. See ui_lorasettings.h.
     SENSING          = 41, // HUMAN SENSING (SENSE_CYD_APP builds): WiFi motion sensing on the CYD's own
                            // radio, from Settings > HUMAN SENSING. See ui_sensing_cyd.h and sense_cyd.h.
-    MY_ALERTS        = 42  // MY ALERTS, from Settings: the owner's own WiFi names. See ui_myalerts.h.
+    MY_ALERTS        = 42, // MY ALERTS, from Settings: the owner's own WiFi names. See ui_myalerts.h.
+    CRYPTID_GUIDE    = 43  // CRYPTID FIELD GUIDE, from Settings: Mothman's page. See ui_cryptid_guide.h.
 };
 
 enum class ButtonId : uint8_t {

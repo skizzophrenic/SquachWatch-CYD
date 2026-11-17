@@ -94,6 +94,7 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/regulars.cpp \
             $(SRC)/notices.cpp \
             $(SRC)/ui_dex.cpp \
+            $(SRC)/ui_cryptid_guide.cpp \
             $(SRC)/detection_info.cpp \
             $(SRC)/device_info.cpp \
             $(SRC)/idle_events.cpp \

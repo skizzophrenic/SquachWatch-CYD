@@ -684,6 +684,8 @@ static const char* s_clippyIntro     = nullptr;
 static bool     s_toasterUnlocked    = false;  // earned by tapping the same flying toaster three times
 static bool     s_ballUnlocked    = false;      // the ball and chain, earned by serving a sentence
 static const char* s_toasterIntro    = nullptr;
+static bool     s_mothmanUnlocked = false;     // earned by tapping the red eyes in the FIREFLIES treeline
+static bool     s_mothmanPowerOutfit = false;  // RED WINGS: earned by tapping Mothman while he is out
 static bool     s_meatyUnlocked    = false;  // earned by knocking three times on the SNOWFALL igloo
 static const char* s_meatyIntro    = nullptr;
 // Whether the card has been shown for him. Kept separately from the unlock
@@ -1123,6 +1125,8 @@ enum class OutfitId : uint8_t {
     SHAMBLER,
     TH3_0N3,
     STRIPES,
+    MOTH_HOOD,
+    RED_WINGS,
     COUNT
 };
 
@@ -1176,6 +1180,8 @@ static const OutfitDef OUTFITS[] = {
     // Earned by serving ten minutes in them -- the sentence for throwing a
     // pet ten times inside a minute. See jailStart().
     { "STRIPES",        OUTFIT_BY_EVENT },
+    { "MOTH HOOD",      OUTFIT_BY_EVENT },
+    { "RED WINGS",      OUTFIT_BY_EVENT },
 };
 static const uint8_t OUTFITS_N = sizeof(OUTFITS) / sizeof(OUTFITS[0]);
 static_assert(OUTFITS_N == (uint8_t)OutfitId::COUNT, "OUTFITS must match OutfitId");
@@ -1210,6 +1216,8 @@ static bool outfitUnlocked(uint8_t i) {
             case OutfitId::SHAMBLER:   return s_shamblerUnlocked;
             case OutfitId::TH3_0N3:    return s_th3Unlocked;
             case OutfitId::STRIPES:    return s_stripesUnlocked;
+            case OutfitId::MOTH_HOOD:  return s_mothmanUnlocked;
+            case OutfitId::RED_WINGS:  return s_mothmanPowerOutfit;
             default:                   return false;
         }
     }
@@ -1542,6 +1550,8 @@ static void ensurePrefsLoaded() {
     s_toasterUnlocked    = s_petPrefs.getBool("toaster", false);
     s_ballUnlocked       = s_petPrefs.getBool("ball", false);
     s_meatyUnlocked    = s_petPrefs.getBool("meaty", false);
+    s_mothmanUnlocked  = s_petPrefs.getBool("mothman", false);
+    s_mothmanPowerOutfit = s_petPrefs.getBool("mothWings", false);
     // The master unlock means every pet too, including ones that did not
     // exist when it was entered: a board that has it catches up at boot.
     if (s_allOutfitsUnlocked) {
@@ -1550,6 +1560,8 @@ static void ensurePrefsLoaded() {
         if (!s_toasterUnlocked) { s_toasterUnlocked = true; s_petPrefs.putBool("toaster", true); }
         if (!s_ballUnlocked)    { s_ballUnlocked = true;    s_petPrefs.putBool("ball", true); }
         if (!s_meatyUnlocked) { s_meatyUnlocked = true; s_petPrefs.putBool("meaty", true); }
+        if (!s_mothmanUnlocked) { s_mothmanUnlocked = true; s_petPrefs.putBool("mothman", true); }
+        if (!s_mothmanPowerOutfit) { s_mothmanPowerOutfit = true; s_petPrefs.putBool("mothWings", true); }
     }
     // Defaults ON once earned: somebody who just unlocked a pet wants to
     // see it, not to go and find a switch.
@@ -2757,7 +2769,7 @@ bool consumePetUnlockCard() {
 bool petUnlocked() { ensurePrefsLoaded(); return s_petUnlocked; }
 bool clippyUnlocked() { ensurePrefsLoaded(); return s_clippyUnlocked; }
 bool toasterUnlocked() { ensurePrefsLoaded(); return s_toasterUnlocked; }
-bool anyPetUnlocked() { ensurePrefsLoaded(); return s_petUnlocked || s_clippyUnlocked || s_toasterUnlocked || s_ballUnlocked || s_meatyUnlocked; }
+bool anyPetUnlocked() { ensurePrefsLoaded(); return s_petUnlocked || s_clippyUnlocked || s_toasterUnlocked || s_ballUnlocked || s_meatyUnlocked || s_mothmanUnlocked; }
 bool meatyUnlocked() { ensurePrefsLoaded(); return s_meatyUnlocked; }
 bool ballUnlocked() { ensurePrefsLoaded(); return s_ballUnlocked; }
 bool ballPetOn() { ensurePrefsLoaded(); return s_ballUnlocked && (PetId)s_petSel == PetId::BALL && !s_jailLeft; }
@@ -2778,6 +2790,7 @@ static bool petOutNow() {
     if (p == PetId::TOASTER) return s_toasterUnlocked;
     if (p == PetId::BALL)    return s_ballUnlocked;
     if (p == PetId::MEATY) return s_meatyUnlocked;
+    if (p == PetId::MOTHMAN) return s_mothmanUnlocked;
     return false;
 }
 
@@ -2788,6 +2801,51 @@ static constexpr bool kSmallBoard = true;
 #else
 static constexpr bool kSmallBoard = false;
 #endif
+
+bool mothmanUnlocked() { ensurePrefsLoaded(); return s_mothmanUnlocked; }
+
+// The Field Guide's EQUIP: straight to him, rather than round the PET row.
+void equipMothman() {
+    if (!mothmanUnlocked() || jailed()) return;
+    s_petSel = (uint8_t)PetId::MOTHMAN;
+    s_petPrefs.putUChar("petSel", s_petSel);
+}
+
+// The red eyes in the FIREFLIES treeline, tapped. The pet and MOTH HOOD
+// together; the outfit gets the usual OUTFIT UNLOCKED card on top of the
+// toast, the same as every other costume earned by an event.
+void unlockMothman() {
+    if (mothmanUnlocked()) return;
+    // The same manners as the other pets: out at once when nobody else is.
+    const bool equip = !petOutNow() && !kSmallBoard;
+    s_mothmanUnlocked = true;
+    s_petPrefs.putBool("mothman", true);
+    if (equip) equipMothman();
+    refreshOutfitUnlocks();
+    Theme::showToast("MOTHMAN FOUND", "Field Guide + Moth Hood", Theme::RED, 3500);
+}
+
+// The console's MOTHMAN LOCK: find him again. RED WINGS stays earned; it
+// only comes from tapping him, and he has to be found first for that.
+bool relockMothman() {
+    if (!mothmanUnlocked()) return true;
+    if (!s_petPrefs.putBool("mothman", false)) return false;
+    s_mothmanUnlocked = false;
+    if ((PetId)s_petSel == PetId::MOTHMAN) {
+        s_petSel = (uint8_t)PetId::OFF;
+        s_petPrefs.putUChar("petSel", s_petSel);
+    }
+    return true;
+}
+
+// Mothman tapped on the main screen while he is out: the first time earns
+// RED WINGS, which says so with the OUTFIT UNLOCKED card.
+void unlockMothmanPowerOutfit() {
+    if (!mothmanUnlocked() || s_mothmanPowerOutfit) return;
+    s_mothmanPowerOutfit = true;
+    s_petPrefs.putBool("mothWings", true);
+    refreshOutfitUnlocks();
+}
 
 void unlockClippy(const char* why) {
     ensurePrefsLoaded();
@@ -2918,6 +2976,7 @@ const char* petName() {
         case PetId::TOASTER: return "T0@$TY";
         case PetId::BALL:   return "BALL & CHAIN";
         case PetId::MEATY: return "M3@ty";
+        case PetId::MOTHMAN: return "MOTHMAN";
         default:            return "OFF";
     }
 }
@@ -3147,6 +3206,10 @@ void unlockAllOutfits() {
     if (!s_toasterUnlocked) { s_toasterUnlocked = true; s_petPrefs.putBool("toaster", true); }
     if (!s_ballUnlocked) { s_ballUnlocked = true; s_petPrefs.putBool("ball", true); }
     if (!s_meatyUnlocked) { s_meatyUnlocked = true; s_petPrefs.putBool("meaty", true); }
+    // Mothman too, and his RED WINGS with him, so the Field Guide reads as
+    // found rather than offering a hunt for something already handed over.
+    if (!s_mothmanUnlocked) { s_mothmanUnlocked = true; s_petPrefs.putBool("mothman", true); }
+    if (!s_mothmanPowerOutfit) { s_mothmanPowerOutfit = true; s_petPrefs.putBool("mothWings", true); }
     // No popups for the cheat: it already has its own rainbow-and-confetti
     // tell below, and eleven modals in a row would bury it. Mark the lot as
     // seen so nothing queues now or on the next boot.
@@ -4751,6 +4814,20 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
     using namespace Theme;
 
     switch (outfit) {
+        case OutfitId::MOTH_HOOD:
+        case OutfitId::RED_WINGS: {
+            const uint16_t hood = outfit == OutfitId::RED_WINGS ? 0x600B : 0x31AA;
+            const int hoodTop = hy - S(9);
+            const int top = hoodTop < s_topLimit ? s_topLimit : hoodTop;
+            const int antennaTop = top - S(4) < s_topLimit ? s_topLimit : top - S(4);
+            t.fillTriangle(cx2 - S(12), hy, cx2, top, cx2 + S(12), hy, hood);
+            for (int side : {-1, 1}) {
+                const int x = cx2 + side * S(5);
+                t.drawLine(x, hy - S(2), x + side * S(5), antennaTop, hood);
+                t.fillCircle(x, hy - S(2), S(2) < 1 ? 1 : S(2), 0xFA08);
+            }
+            break;
+        }
         case OutfitId::STRIPES: {
             // The striped pillbox cap, sat on his crown with his crest poking
             // out of the top, and a short brim under it.
@@ -6443,6 +6520,15 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
                         218.0f, -beat, 0.22f, 0, WHITE, WHITE, -0.55f, 26.0f, cBr);
         Theme::drawWing(t, (float)(cx2 + S(13)), sy, len * shine,
                         -38.0f, beat, 0.22f, 0, WHITE, WHITE, 0.55f, 26.0f, cBr);
+    }
+
+    if (outfitNow == OutfitId::RED_WINGS) {
+        const float y = hy + S(20);
+        // drawWing() multiplies the flap by its lift (26 degrees here), so it
+        // is a fraction: 0.3 is a beat of about eight degrees either way.
+        const float flap = 0.3f * sinf(now / 95.0f);
+        Theme::drawWing(t, cx2 - S(10), y, S(21), 218.0f, -flap, 0.55f, 3, 0xA165, BLACK, -0.55f, 26.0f, 0x5825);
+        Theme::drawWing(t, cx2 + S(10), y, S(21), -38.0f, flap, 0.55f, 3, 0xA165, BLACK, 0.55f, 26.0f, 0x5825);
     }
 
     // ---- WOLF PELT's hide down his back ------------------------------------

@@ -673,8 +673,9 @@ None of this finds anything. All of it is why you leave him on.
 | **SHADES COLOR** | Settings → APPEARANCE | The tint of his shades. CYAN to start; PINK, GREEN and PURPLE come as you pet him (10, 25 and 50 pets) |
 | **AURA** | Settings → APPEARANCE | Once he is a Legend: LIT or OUT for his flame aura |
 | **DETECTIONS** | Settings → APPEARANCE | XP puts the counters along the top as taskbar buttons, one per kind in range (tap one for the closest); CLASSIC brings back the full counter rows |
-| **PET** | Settings → APPEARANCE | Someone to keep him company, once earned: VAPOR SHAGGY, THE YETI, C1iPPY, T0@$TY, BALL & CHAIN or M3@ty (knock on the igloo in the snow) |
+| **PET** | Settings → APPEARANCE | Someone to keep him company, once earned: VAPOR SHAGGY, THE YETI, C1iPPY, T0@$TY, BALL & CHAIN, M3@ty (knock on the igloo in the snow) or MOTHMAN |
 | **FONTS** | Settings → APPEARANCE | A slider for each kind of text: MENUS, TEXT, BUTTONS, BUBBLES, PETS and the XP TILES, each as far as your screen can go. Tap a label to switch it between PIXEL and SMOOTH. The preview box shows the one you just moved |
+| **CRYPTID FIELD GUIDE** | Settings | A page for every cryptid he has found, and a clue for the ones he has not. EQUIP puts a found one out as his pet |
 | **SQUACHY-DEX** | Settings | A card per detection type: lore, habitat, radio, rarity, and your own record with it. Whatever you catch most, ten or more, becomes his nemesis |
 | **BINGO** | Settings | A weekly card of sixteen detection types. Four in a row is a line, and finished weeks make a streak |
 | **SQUACHY'S DIARY** | Settings | Lifetime catches, most caught, first ever catch, best streaks, times petted |
@@ -695,17 +696,17 @@ blue-to-gold flame behind him, and the AURA row appears.
 
 ## Every outfit
 
-Squachy has nineteen costumes, picked in **Settings → APPEARANCE → OUTFIT**.
+Squachy has twenty-one costumes, picked in **Settings → APPEARANCE → OUTFIT**.
 TANOOKI and UNICORN are his from the start. Seven are earned by lifetime
 catches: TINFOIL at 5, SHADOW at 15, PLUMBER BRO at 25, TALL BRO at 40, SPACE
-at 60, BLUE BLUR at 100 and CAPTAIN at 150. The other ten are hidden behind
+at 60, BLUE BLUR at 100 and CAPTAIN at 150. The other twelve are hidden behind
 things nobody tells you about, most of them on the background they belong
 to, and one of those is a punishment rather than a prize. Two of them are
 in the animation at the top of this page.
 
 <p align="center">
   <img src="docs/outfits.png" width="880"
-       alt="All nineteen of Squachy's outfits, rendered by the firmware">
+       alt="All twenty-one of Squachy's outfits, rendered by the firmware">
 </p>
 
 No fabricated marketing shots, which was the promise here before there was
@@ -735,6 +736,7 @@ a release, and that release's notes drop a hint. Read them on the
 | T0@$TY | v1.32.0 |
 | STRIPES and BALL & CHAIN | v1.33.0 |
 | M3@ty | v1.37.0 |
+| MOTHMAN, MOTH HOOD, RED WINGS | v1.47.0 |
 
 Impatient? Some say the button that used to read CLR never forgot what it
 was for, and that whoever holds on to it long enough walks away with

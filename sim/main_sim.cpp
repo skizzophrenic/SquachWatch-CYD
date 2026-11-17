@@ -76,6 +76,7 @@
 #include "ota_core.h"
 #include "ui_wifinets.h"
 #include "ui_myalerts.h"
+#include "ui_cryptid_guide.h"
 #include "my_alerts.h"
 #include "png_writer.h"
 #include "touch_cal.h"
@@ -327,6 +328,8 @@ static void usage() {
         "                    ('|' is Enter), SQUACHSIM_LORAREST=1 says the radios are resting\n"
         "  dex               --pose N opens entry N\'s card (1-17); 0 is the index\n"
         "  myalerts          MY ALERTS with three patterns (SQUACHSIM_MYALERTS_EMPTY=1: none)\n"
+        "  fieldguide        the CRYPTID FIELD GUIDE, nobody found yet; --pet 7 renders it with\n"
+        "                    Mothman found (--pet 7 on clear puts him out; --outfit 20/21 his two)\n"
         "  alertkbd          ...and its keyboard, typing a pattern\n"
         "  touchcal          the touch calibration, played by a scripted finger:\n"
         "                    --frames skips that many 66 ms frames, --sequence films\n"
@@ -542,7 +545,8 @@ int main(int argc, char** argv) {
         if (petIdx == (int)Squachy::PetId::TOASTER) Squachy::unlockToaster(nullptr);
         if (petIdx == (int)Squachy::PetId::BALL) Squachy::unlockBall();
         if (petIdx == (int)Squachy::PetId::MEATY) Squachy::unlockMeaty(nullptr);
-        for (int k = 0; k < 8 && (int)Squachy::petChoice() != petIdx; k++) Squachy::cyclePet();
+        if (petIdx == (int)Squachy::PetId::MOTHMAN) Squachy::unlockMothman();
+        for (int k = 0; k < (int)Squachy::PetId::COUNT && (int)Squachy::petChoice() != petIdx; k++) Squachy::cyclePet();
     }
 
     SquachMesh::Peer guest{};
@@ -915,6 +919,7 @@ int main(int argc, char** argv) {
         else if (screen == "sysprops") uiSysPropsTick(frame, t, engine);
         else if (screen == "wifinets") uiWifiNetsTick(frame, t);
         else if (screen == "myalerts") uiMyAlertsTick(frame, t);
+        else if (screen == "fieldguide") uiCryptidGuideDraw(frame, t);
         else if (screen == "alertkbd") uiWifiPassTick(frame, t);
         else if (screen == "wifiadd")  uiWifiAddTick(frame, t, engine);
         else if (screen == "lora") {

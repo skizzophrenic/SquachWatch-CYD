@@ -116,6 +116,7 @@ static void cydGpsTick(uint32_t now);
 #include "bingo.h"
 #include "dex.h"
 #include "ui_dex.h"
+#include "ui_cryptid_guide.h"
 #include "regulars.h"
 #include "notices.h"
 #include "theme.h"            // the crash card on the splash
@@ -1924,6 +1925,13 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         for (uint8_t i = 0; i < k; i++) add(xs[i], ys[i]);
         return n;
     }
+    if (state == AppState::CRYPTID_GUIDE) {
+        const auto bar = Theme::computeButtonBar(w, h);
+        add(bar.x[0] + bar.w[0] / 2, bar.y + bar.h / 2);
+        if (Squachy::mothmanUnlocked() && !Squachy::jailed())
+            add(bar.x[2] + bar.w[2] / 2, bar.y + bar.h / 2);
+        return n;
+    }
     if (state == AppState::DIARY) {
         add(w / 2, h / 2);              // anywhere goes back
         return n;
@@ -3364,6 +3372,10 @@ static bool stickBackPoint(StickPt& at) {
             return put(w / 2, h - Theme::pinnedBackH(w) / 2);
         case AppState::OUTFIT_UNLOCK:
             return put(w / 2, h / 2);                                  // the card closes on a tap anywhere
+        case AppState::CRYPTID_GUIDE: {
+            const auto bar = Theme::computeButtonBar(w, h);            // its [ BACK ], bottom left
+            return put(bar.x[0] + bar.w[0] / 2, bar.y + bar.h / 2);
+        }
         case AppState::DESK:        return sweep([&](int x, int y) { return uiDeskHitBack(x, y, w, h); });
         case AppState::HUNT:        return sweep([&](int x, int y) { return uiHuntHitBack(x, y, w, h); });
         case AppState::DIAGNOSTICS: return sweep([&](int x, int y) { return uiDiagnosticsHitBack(x, y, w, h); });
@@ -8266,6 +8278,7 @@ void loop() {
          state == AppState::IGNORE_LIST || state == AppState::POWER_SAVER || state == AppState::SECURITY ||
          state == AppState::STATUS_LIGHT ||
          state == AppState::DIARY || state == AppState::HUNT || state == AppState::DIAGNOSTICS ||
+         state == AppState::CRYPTID_GUIDE ||
          state == AppState::DESK) &&
         Theme::lockButtonHit(tp.x, tp.y, tft.width())) {
         lastTouch = now;
@@ -8610,7 +8623,8 @@ void loop() {
         (state == AppState::CLEAR || state == AppState::LOG ||
                       state == AppState::SETTINGS || state == AppState::OUTFIT ||
                       state == AppState::RAWSCAN || state == AppState::DETECTION_FILTER ||
-                      state == AppState::IGNORE_LIST || state == AppState::DESK) &&
+                      state == AppState::IGNORE_LIST || state == AppState::DESK ||
+                      state == AppState::CRYPTID_GUIDE) &&
         Theme::rotateButtonHit(tp.x, tp.y, tft.width()) &&
         (now - lastTouch) > TOUCH_DEBOUNCE_MS)) {
         if (g_consoleRotate) { g_consoleRotate = false; Serial.printf("[console] rotation -> %u\n", (unsigned)((screenRotation + 1) % 4)); }
@@ -8681,7 +8695,8 @@ void loop() {
                       state == AppState::RAWSCAN || state == AppState::DETECTION_FILTER ||
                       state == AppState::IGNORE_LIST || state == AppState::POWER_SAVER ||
                       state == AppState::SECURITY || state == AppState::STATUS_LIGHT ||
-                      state == AppState::DESK || state == AppState::SENSING) &&
+                      state == AppState::DESK || state == AppState::SENSING ||
+                      state == AppState::CRYPTID_GUIDE) &&
         Theme::settingsButtonHit(tp.x, tp.y) &&
         // ...but not where the watch/hunt pill is sitting. The gear's tap box
         // is 55x50, much larger than its 28px glyph, so it reaches into the
@@ -8697,7 +8712,8 @@ void loop() {
         }
         else if (state == AppState::OUTFIT || state == AppState::DETECTION_FILTER ||
             state == AppState::IGNORE_LIST || state == AppState::POWER_SAVER ||
-            state == AppState::SECURITY || state == AppState::SENSING) enterSettings();
+            state == AppState::SECURITY || state == AppState::SENSING ||
+            state == AppState::CRYPTID_GUIDE) enterSettings();
         else if (state == AppState::SETTINGS) {
             // The gear on a sub-page goes back up a level, the way it does
             // from every other screen Settings opens.
@@ -8879,6 +8895,25 @@ void loop() {
                 // it wants the board back, not another list.
                 if (uiBingoHitTest(*canvas, tp.x, tp.y, tft.width(), tft.height()) == BingoTap::BACK)
                     goHome();
+            }
+            break;
+        }
+        case AppState::CRYPTID_GUIDE: {
+            drawTwoBand([&](TFT_eSPI& t, bool) { uiCryptidGuideDraw(t, now); });
+            if (touchJustDown && now - lastTouch > TOUCH_DEBOUNCE_MS) {
+                lastTouch = now;
+                switch (Theme::hitTestButtonBar(tp.x, tp.y, tft.width(), tft.height())) {
+                    case ButtonId::SCAN:
+                        enterSettings();
+                        break;
+                    case ButtonId::CLR:
+                        if (Squachy::mothmanUnlocked() && !Squachy::jailed()) {
+                            Squachy::equipMothman();
+                            goHome();
+                        }
+                        break;
+                    default: break;
+                }
             }
             break;
         }
@@ -9199,6 +9234,22 @@ void loop() {
                     }
                 }
                 break;
+            }
+            // The red eyes in the FIREFLIES treeline, and Mothman himself once
+            // he is out: a tap on either is theirs. The chirp is the GPS-fix
+            // pair of notes -- the same two pitches, and no new recipe to carry.
+            if (state == AppState::CLEAR && touchJustDown && !boring && !s_scanPickerOpen &&
+                now - lastTouch > TOUCH_DEBOUNCE_MS) {
+                if (Theme::mothmanEyesTap(tp.x, tp.y, now)) {
+                    Squachy::unlockMothman();
+                    Sound::play(Sound::Id::WD_FIX);
+                    lastTouch = now;
+                    break;
+                }
+                if (Pet::mothmanTap(tp.x, tp.y, now)) {
+                    lastTouch = now;
+                    break;
+                }
             }
             static bool clipActive = false;
             // On the small boards neither he nor Squachy takes a tap: the
@@ -10475,6 +10526,11 @@ void loop() {
                         case SettingsRow::VIEW_DIARY:   enterDiary(); break;
                         case SettingsRow::BINGO:        enterBingo(); break;
                         case SettingsRow::DEX:          enterDex(); break;
+                        case SettingsRow::CRYPTID_GUIDE:
+                            state = AppState::CRYPTID_GUIDE;
+                            transitionStart = now;
+                            lastTouch = now;
+                            break;
                         case SettingsRow::APPEARANCE:  uiSettingsOpenAppearance(true); break;
                         case SettingsRow::AURA:        Settings::toggleAura(); break;
                         case SettingsRow::DET_STYLE:   Settings::toggleDetXp(); break;

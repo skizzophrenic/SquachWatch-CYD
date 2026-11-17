@@ -109,6 +109,7 @@ enum class SettingsRow : uint8_t {
     SENSING,         // HUMAN SENSING: WiFi motion sensing on the CYD's own radio (opens the screen)
 #endif
     MY_ALERTS,       // MY ALERTS: the owner's own WiFi names to alert on (opens the screen)
+    CRYPTID_GUIDE,   // CRYPTID FIELD GUIDE: who has been found, and equipping Mothman (opens the screen)
     BACK,
     COUNT,
     NONE = 255
