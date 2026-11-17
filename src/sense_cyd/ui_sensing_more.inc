@@ -518,6 +518,7 @@ void vitalsScreen(TFT_eSPI& t, uint32_t now) {
     {   // the lab's marks: holds and heart locks, where they happened
         Vitals::Event ev[8];
         const uint8_t ne = Vitals::events(ev, 8);
+        int lastLabel = -100;   // two marks a moment apart get one label, not two on top of each other
         for (uint8_t k = 0; k < ne; k++) {
             if (ev[k].kind != Vitals::Ev::HOLD && ev[k].kind != Vitals::Ev::HEART_LOCK) continue;
             const int r = (int)((m.session - ev[k].t) / 0.3f);
@@ -525,6 +526,8 @@ void vitalsScreen(TFT_eSPI& t, uint32_t now) {
             const bool hold = ev[k].kind == Vitals::Ev::HOLD;
             const uint16_t c = hold ? Theme::AMBER : Theme::VAPOR_PINK;
             t.drawFastHLine(lx + 1, wy + 1 + r, lw - 2, c);
+            if (r - lastLabel < 11 && lastLabel - r < 11) continue;
+            lastLabel = r;
             if (hold) snprintf(b, sizeof b, "HOLD %u s", (unsigned)ev[k].val);
             else snprintf(b, sizeof b, big ? "HEART LOCK %u" : "HEART %u", (unsigned)ev[k].val);
             textT(t, lx + (big ? 40 : 30), wy + 1 + r - 9 < wy + 2 ? wy + r + 3 : wy + 1 + r - 9, b, c, 1);
