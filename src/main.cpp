@@ -8125,6 +8125,7 @@ void loop() {
 #endif
             else if (c == 6 && state == AppState::SENSING) senseSleep();
             else if (c == 7) senseWake();
+            else if (c == 8) enterWifiAdd();   // WIFI ADD (bench)
         }
         // Booted straight into SENSING: give the detector's radio 8 s to settle
         // first. Started at once, the first join came up deaf (no CSI, every

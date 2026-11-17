@@ -34,6 +34,8 @@ void bootStage(uint8_t s);   // main.cpp: the power diary's steps through setup(
 #define SQW_BLE 1
 #if SQW_WIFI_HOSTED
 #include "tab5_radio.h"
+#include <esp_wifi.h>   // the C6 driver's scan, over ESP-Hosted (startRawWifiScan)
+#include <esp_event.h>
 #else
 #include <WiFi.h>
 #include <esp_wifi.h>
@@ -2229,20 +2231,71 @@ const RawBleResult* DetectionEngine::rawBleAt(uint8_t idx) const {
 }
 
 #if SQW_WIFI_HOSTED
-// The driver's own network scan is not on the link yet: a WIFI sweep on the
-// Tab5 finishes at once with nothing to show.
+// The C6 driver's own network scan, over ESP-Hosted (each esp_wifi_* call on
+// the P4 is an RPC to the C6). The sniffer is off while it runs, as it is for
+// a scan everywhere. The add-a-network screen and SCAN read the results: it
+// said "No networks found" on the Tab5 until this (2026-11-17), because the
+// sweep used to finish at once with nothing. Strongest first, one row per
+// name (the strongest access point of each), hidden networks left out.
+static wifi_ap_record_t* s_hostRec = nullptr;
+static uint16_t          s_hostRecN = 0;
+static volatile bool     s_hostScanDone = false;
+static bool              s_hostScanOk = false, s_hostCollected = false;
+static uint32_t          s_hostScanAt = 0;
+static void hostScanDone(void*, esp_event_base_t, int32_t, void*) { s_hostScanDone = true; }
+static void hostCollect() {
+    s_hostCollected = true;
+    free(s_hostRec); s_hostRec = nullptr; s_hostRecN = 0;
+    if (!s_hostScanOk) return;
+    uint16_t n = 0;
+    if (esp_wifi_scan_get_ap_num(&n) != ESP_OK || !n) { esp_wifi_clear_ap_list(); return; }
+    if (n > 24) n = 24;
+    wifi_ap_record_t* r = (wifi_ap_record_t*)calloc(n, sizeof(wifi_ap_record_t));
+    if (!r) { esp_wifi_clear_ap_list(); return; }
+    uint16_t got = n;
+    if (esp_wifi_scan_get_ap_records(&got, r) != ESP_OK) { free(r); return; }
+    for (uint16_t i = 1; i < got; i++) { wifi_ap_record_t x = r[i]; int j = i; while (j && r[j - 1].rssi < x.rssi) { r[j] = r[j - 1]; j--; } r[j] = x; }
+    uint16_t k = 0;
+    for (uint16_t i = 0; i < got; i++) {
+        if (!r[i].ssid[0]) continue;
+        bool dup = false;
+        for (uint16_t j = 0; j < k && !dup; j++) dup = !strcmp((const char*)r[j].ssid, (const char*)r[i].ssid);
+        if (!dup) r[k++] = r[i];
+    }
+    s_hostRec = r; s_hostRecN = k > 12 ? 12 : k;
+    Serial.printf("[scan] wifi: %u networks heard over the C6\n", (unsigned)s_hostRecN);
+}
 void DetectionEngine::startRawWifiScan() {
     if (g_rawMode == RawScanMode::REST) wakeRadios();
     g_rawMode = RawScanMode::WIFI;
     sniffOff();
+    static bool registered = false;
+    if (!registered) { esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, hostScanDone, nullptr, nullptr); registered = true; }
+    free(s_hostRec); s_hostRec = nullptr; s_hostRecN = 0;
+    s_hostScanDone = false; s_hostCollected = false;
+    wifi_scan_config_t cfg = {};
+    cfg.show_hidden = false;
+    cfg.scan_type = WIFI_SCAN_TYPE_ACTIVE;
+    cfg.scan_time.active.min = 60;
+    cfg.scan_time.active.max = 120;
+    const esp_err_t e = esp_wifi_scan_start(&cfg, false);
+    s_hostScanOk = e == ESP_OK;
+    s_hostScanAt = millis();
+    if (!s_hostScanOk) { Serial.printf("[scan] wifi scan refused: %s\n", esp_err_to_name(e)); s_hostScanDone = true; }
 }
-bool DetectionEngine::rawWifiScanDone() const { return g_rawMode == RawScanMode::WIFI; }
-uint8_t DetectionEngine::rawWifiCount() const { return 0; }
-const char* DetectionEngine::rawWifiSsid(uint8_t) const { return ""; }
-int8_t DetectionEngine::rawWifiRssi(uint8_t) const { return 0; }
-uint8_t DetectionEngine::rawWifiChannel(uint8_t) const { return 0; }
-bool DetectionEngine::rawWifiOpen(uint8_t) const { return false; }
-const uint8_t* DetectionEngine::rawWifiBssid(uint8_t) const { return nullptr; }
+bool DetectionEngine::rawWifiScanDone() const {
+    if (g_rawMode != RawScanMode::WIFI) return false;
+    // The event, or 8 s (a scan of every channel takes ~2 s): either way, collect.
+    if (!s_hostScanDone && millis() - s_hostScanAt > 8000) s_hostScanDone = true;
+    if (s_hostScanDone && !s_hostCollected) hostCollect();
+    return s_hostScanDone;
+}
+uint8_t DetectionEngine::rawWifiCount() const { return rawWifiScanDone() ? (uint8_t)s_hostRecN : 0; }
+const char* DetectionEngine::rawWifiSsid(uint8_t i) const { return i < rawWifiCount() ? (const char*)s_hostRec[i].ssid : ""; }
+int8_t DetectionEngine::rawWifiRssi(uint8_t i) const { return i < rawWifiCount() ? s_hostRec[i].rssi : 0; }
+uint8_t DetectionEngine::rawWifiChannel(uint8_t i) const { return i < rawWifiCount() ? s_hostRec[i].primary : 0; }
+bool DetectionEngine::rawWifiOpen(uint8_t i) const { return i < rawWifiCount() && s_hostRec[i].authmode == WIFI_AUTH_OPEN; }
+const uint8_t* DetectionEngine::rawWifiBssid(uint8_t i) const { return i < rawWifiCount() ? s_hostRec[i].bssid : nullptr; }
 
 #else
 void DetectionEngine::startRawWifiScan() {

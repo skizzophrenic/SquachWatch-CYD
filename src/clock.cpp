@@ -660,6 +660,7 @@ void pollSerial() {
         if (strcasecmp(line, "SENSE BACK") == 0)  { g_senseConsole = 5; continue; }
         if (strcasecmp(line, "SENSE SLEEP") == 0) { g_senseConsole = 6; continue; }   // the SLEEP button
         if (strcasecmp(line, "SENSE WAKE") == 0)  { g_senseConsole = 7; continue; }
+        if (strcasecmp(line, "WIFI ADD") == 0)    { g_senseConsole = 8; continue; }   // the add-a-network screen (its scan), for the bench
         if (strncasecmp(line, "SENSE ", 6) == 0) { ::senseCydCommand(line + 6); continue; }
 #endif
         if (strcasecmp(line, "INVERT") == 0) { g_consoleInvert = true; continue; }
