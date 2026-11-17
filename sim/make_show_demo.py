@@ -32,6 +32,18 @@ CYAN  = (0, 214, 214)
 # ---- the clips ----
 
 CLIPS = {
+    # v1.47.0 "You Break it You Bought It", 320x240: MODE's three stops
+    # (Squachy, the desk with the X-LARGE clock, TERMINAL MODE, each with the
+    # card the button shows), the desk's BIG CARD alert, then Mothman out on
+    # FIREFLIES (--pet 7) and his page in the Cryptid Field Guide.
+    "you-break-it": [
+        ("clear", 60, 40, ["--bg", "5"], {"SQUACHSIM_BATT": "80", "SQUACHSIM_TOAST": "NORMAL MODE|Squachy's back"}, 1400, "NEW: ONE BUTTON, THREE MODES. MEET MODE."),
+        ("desk", 30, 40, [], {"SQUACHSIM_EPOCH": "1789396740", "SQUACHSIM_CLOCK": "1,3,0", "SQUACHSIM_TOAST": "DESK MODE|MODE again for terminal"}, 1500, "MODE ONCE: THE DESK. NOW EXTRA LARGE."),
+        ("clear", 60, 40, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_BATT": "80", "SQUACHSIM_TOAST": "TERMINAL MODE|MODE again for Squachy"}, 1600, "TWICE: TERMINAL MODE. ALL TOOL, NO MASCOT."),
+        ("desk", 30, 40, [], {"SQUACHSIM_EPOCH": "1789396740", "SQUACHSIM_CLOCK": "1,3,0", "SQUACHSIM_DESKALERT": "1", "SQUACH_ALERT": "1"}, 1500, "THE DESK CAN SHOUT NOW. BIG CARD."),
+        ("clear", 60, 60, ["--bg", "5", "--pet", "7"], {"SQUACHSIM_BATT": "80"}, 1600, "SOMETHING IN THE TREELINE. HE'S OUT NOW."),
+        ("fieldguide", 10, 20, ["--pet", "7"], {}, 1700, "THE CRYPTID FIELD GUIDE. ONE DOWN."),
+    ],
     # v1.46.0 "They See Me Rollin", 320x240: the main screen, MY ALERTS with
     # the seeded patrol-car list, a MY ALERT card (--alert 19, MINE) and a
     # LoRaWAN operator's (--alert 18), HUNT after a long run (no bubble
