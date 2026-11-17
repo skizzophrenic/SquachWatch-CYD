@@ -46,6 +46,9 @@ struct Router {
     int8_t   rssi;
     uint16_t rate;
     uint8_t  score, cal, rel;
+    uint32_t hotAt;           // millis() its score last stood at the MOTION line (calibrated)
+    bool     everHot;
+    int8_t   trail[4];        // its last four RSSI readings, newest first (the Tab5's DISH)
 };
 const Router& router();
 const Router& path(uint8_t idx);   // idx < PATHS; 0 is router()

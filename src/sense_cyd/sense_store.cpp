@@ -73,8 +73,16 @@ void status(const SenseReport& r, uint32_t now) {
 void path(uint8_t idx, uint16_t tag, int8_t rssi, uint16_t rate, uint8_t score, uint8_t cal, uint8_t rel, uint32_t now) {
     if (idx >= PATHS) return;
     Router& p = s_path[idx];
+    if (p.tag != tag || !p.live) {          // a new transmitter in this slot
+        memset(&p, 0, sizeof p);
+        for (int k = 0; k < 4; k++) p.trail[k] = rssi;
+    } else {
+        memmove(p.trail + 1, p.trail, 3);
+        p.trail[0] = rssi;
+    }
     p.live = true; p.tag = tag; p.rssi = rssi; p.rate = rate;
     p.score = score; p.cal = cal; p.rel = rel;
+    if (score >= 28 && cal >= 100) { p.hotAt = now; p.everHot = true; }
     s_pathAt[idx] = now;
 }
 void router(uint16_t tag, int8_t rssi, uint16_t rate, uint8_t score, uint8_t cal, uint8_t rel, uint32_t now) {

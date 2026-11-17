@@ -206,7 +206,10 @@ static void IRAM_ATTR csiCb(void* ctx, wifi_csi_info_t* info) {
   for (int i = 0; i < kMaxTargets; i++)
     if (s_targets[i].used && memcmp(s_targets[i].mac, info->mac, 6) == 0) { want = i; break; }
   if (want < 0) return;
-  if (now - s_targets[want].queuedAt < kMinGapMs) return;   // counted above, not modelled
+  // The router the tablet pings is exempt: its replies are the stream we
+  // asked for, ~50 a second, and with its beacons in between the cap threw
+  // a third of them away (31/s modelled of 50 pings, bench 2026-11-17).
+  if (!isPinned(s_targets[want].mac) && now - s_targets[want].queuedAt < kMinGapMs) return;   // counted above, not modelled
   s_targets[want].queuedAt = now;
   const uint8_t next = (uint8_t)((s_wr + 1) % kQueueSize);
   if (next == s_rd) { s_dropped++; return; }

@@ -16,7 +16,8 @@
 //
 // One radio path, the router answering the CYD's pings, so there is no list of
 // paths: the room goes to the two windows.
-#if defined(SENSE_CYD_APP)
+// The Tab5 has its own screens (ui_sensing_tab5.cpp), the sensing app's.
+#if defined(SENSE_CYD_APP) && !defined(TAB5)
 #include "ui_sensing_cyd.h"
 #include "sense_store.h"
 #include "sense_cyd.h"
