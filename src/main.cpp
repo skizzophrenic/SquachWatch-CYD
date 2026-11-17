@@ -28,6 +28,7 @@
 #include "tab5_display.h"
 #include "tab5_panel.h"
 #include "tab5_blit.h"
+#include "tab5_radio.h"
 #define SQW_PUSH_ROWS() Tab5Blit::lastRows()
 #else
 #define SQW_PUSH_ROWS() FramePush::lastRows()
@@ -5604,6 +5605,103 @@ static bool panelTextOk() { return true; }
 static void panelShow()   {}
 #endif
 
+#if defined(TAB5)
+// ---- Tab5: the one-time radio update ---------------------------------------
+// A Tab5 from the box runs M5Stack's firmware on its C6 radio chip, which
+// links but cannot sniff. When the link came up and the hello did not answer,
+// this asks once per boot: UPDATE RADIO writes our C6 image (carried inside
+// this firmware) and restarts; LATER boots on with the radio off. Two writes
+// that never brought a hello and it stops offering: the C6 has no way back
+// from a bad image short of soldered wires, so it is never written blind or
+// in a loop.
+static void tab5RadioScreen(const char* head, const char* l1, const char* l2, const char* l3,
+                            const char* bLeft, const char* bRight, int pct) {
+    TFT_eSPI& t = *canvas;
+    const int w = t.width(), h = t.height();
+    t.fillScreen(Theme::BG);
+    t.setTextFont(1);
+    t.setTextSize(4);
+    t.setTextColor(Theme::AMBER, Theme::BG);
+    t.setCursor((w - t.textWidth(head)) / 2, h / 6);
+    t.print(head);
+    t.setTextSize(2);
+    t.setTextColor(Theme::WHITE, Theme::BG);
+    int y = h / 6 + 70;
+    for (const char* l : { l1, l2, l3 }) {
+        if (l && *l) { t.setCursor((w - t.textWidth(l)) / 2, y); t.print(l); }
+        y += 34;
+    }
+    if (pct >= 0) {
+        const int bw = w * 2 / 3, bx = (w - bw) / 2, by = y + 20;
+        t.drawRect(bx, by, bw, 28, Theme::CYAN);
+        t.fillRect(bx + 3, by + 3, (bw - 6) * pct / 100, 22, Theme::CYAN);
+    }
+    const int bh = 70, by = h - bh - 30, bw = w / 3;
+    if (bLeft)  Theme::drawButton(t, w / 2 - bw - 20, by, bw, bh, bLeft, false, 2);
+    if (bRight) Theme::drawButton(t, w / 2 + 20, by, bw, bh, bRight, false, 2);
+    if (canvas != &tft) pushFrame(0, 0);
+}
+
+// Which of the two buttons tab5RadioScreen drew a tap landed on: -1 none,
+// 0 left, 1 right. Waits for a whole tap (down, then up).
+static int tab5RadioWaitTap() {
+    const int w = tft.width(), h = tft.height(), bh = 70, by = h - bh - 30, bw = w / 3;
+    bool down = false; int x = 0, y = 0;
+    for (;;) {
+        TouchPoint tp = pollTouch();
+        if (tp.valid) { down = true; x = tp.x; y = tp.y; }
+        else if (down) {
+            down = false;
+            if (y >= by && y < by + bh) {
+                if (x >= w / 2 - bw - 20 && x < w / 2 - 20) return 0;
+                if (x >= w / 2 + 20 && x < w / 2 + 20 + bw) return 1;
+            }
+        }
+        delay(20);
+    }
+}
+
+static uint32_t s_radioPctAt = 0;
+static void tab5RadioProgress(uint32_t done, uint32_t total) {
+    // A frame every few hundred milliseconds is plenty, and keeps the push
+    // from slowing the write.
+    const uint32_t now = millis();
+    if (done < total && now - s_radioPctAt < 300) return;
+    s_radioPctAt = now;
+    char l[40];
+    snprintf(l, sizeof l, "%lu of %lu KB", (unsigned long)(done / 1024), (unsigned long)(total / 1024));
+    tab5RadioScreen("UPDATING RADIO", "Writing the radio's firmware.", "Keep the Tab5 plugged in.", l,
+                    nullptr, nullptr, (int)(done * 100 / total));
+}
+
+static void tab5RadioUpdatePrompt() {
+    if (!Tab5Radio::needsUpdate()) return;
+    if (Tab5Radio::updateTries() >= 2) {
+        Serial.println("[c6] radio update tried twice without a hello; not offering again (docs/TAB5.md)");
+        tab5RadioScreen("RADIO UPDATE", "The radio update did not take, twice.", "SquachWatch runs without WiFi and",
+                        "Bluetooth. See docs/TAB5.md for help.", nullptr, "OK", -1);
+        tab5RadioWaitTap();
+        return;
+    }
+    tab5RadioScreen("RADIO UPDATE", "This Tab5's radio still runs its", "factory firmware. One update, about a",
+                    "minute, and it hears WiFi and Bluetooth.", "LATER", "UPDATE", -1);
+    if (tab5RadioWaitTap() != 1) {
+        Serial.println("[c6] radio update: LATER; booting with the radio off");
+        return;
+    }
+    char why[64] = "";
+    s_radioPctAt = 0;
+    tab5RadioProgress(0, Tab5Radio::imageSize());
+    if (Tab5Radio::update(tab5RadioProgress, why, sizeof why)) {
+        tab5RadioScreen("RADIO UPDATED", "Restarting to use it.", "", "", nullptr, nullptr, 100);
+        delay(1500);
+        ESP.restart();
+    }
+    tab5RadioScreen("RADIO UPDATE", "It did not work:", why, "Nothing changed. Try again next boot.", nullptr, "OK", -1);
+    tab5RadioWaitTap();
+}
+#endif
+
 void setup() {
 #if defined(ARDUINO_ARCH_ESP32) && !defined(CROWPANEL7) && !defined(TAB5)
     g_frameSprite = &frame;
@@ -6364,6 +6462,9 @@ void setup() {
     }
 #endif
     engine.init();
+#if defined(TAB5)
+    tab5RadioUpdatePrompt();   // only when the C6 linked but has no sniff extension
+#endif
 #if SQUACH_LORA
     // The LoRa radio, after WiFi and Bluetooth: its own task and its own bus.
     // Receive only. Console LORA for what it hears.

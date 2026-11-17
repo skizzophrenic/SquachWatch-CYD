@@ -33,6 +33,12 @@
 extern "C" {
 #include "esp_hosted.h"
 #include "esp_hosted_transport_config.h"
+#include "esp_hosted_ota.h"
+#include <Preferences.h>
+
+// Our C6 image, linked in whole (board_build.embed_files in [env:tab5]).
+extern const uint8_t c6_image_start[] asm("_binary_tools_tab5_c6_c6_radio_bin_start");
+extern const uint8_t c6_image_end[]   asm("_binary_tools_tab5_c6_c6_radio_bin_end");
 }
 
 namespace {
@@ -62,6 +68,7 @@ const uint32_t PI4IO2_FREQ = 100000;
 
 // ---- State -------------------------------------------------------------------
 bool              s_up = false;
+bool              s_needsUpdate = false;   // linked, but no hello: M5Stack's stock C6 image
 QueueHandle_t     s_q  = nullptr;
 const UBaseType_t Q_DEPTH = 32;         // 32 x 608 B: a burst of beacons on a busy channel
 char              s_tag[17] = "";
@@ -249,8 +256,25 @@ bool begin() {
     while (!s_helloAt && millis() - t0 < 2000) delay(10);
     if (!s_helloAt) {
         Serial.println("[c6] no answer to hello: the C6 runs a stock ESP-Hosted image, not the sniff one");
+        // The link is up, which is all a radio update needs. Kept up for it.
+        s_needsUpdate = true;
         s_up = false;
         return false;
+    }
+#if defined(TAB5_FORCE_RADIO_UPDATE)
+    // Bench only: offer the update even to a C6 that answered, so the write
+    // path can be walked on a unit whose radio is already ours (and, built
+    // with Espressif's stock image in c6_radio.bin, put the stock one back).
+    s_needsUpdate = true;
+    Serial.println("[c6] TAB5_FORCE_RADIO_UPDATE: offering the radio update anyway");
+#endif
+    {
+        // A good hello: whatever writes came before worked.
+        Preferences p;
+        if (p.begin("tab5c6", false)) {
+            if (p.getUChar("tries", 0) != 0) p.putUChar("tries", 0);
+            p.end();
+        }
     }
     Serial.printf("[c6] hello: \"%s\", sniffing %u, %lu ms\n", s_tag, (unsigned)s_helloSniffing, (unsigned long)(s_helloAt - t0));
     // The C6's WiFi driver, which the sniff extension rides on, starts only
@@ -287,6 +311,62 @@ bool begin() {
 
 bool up() { return s_up; }
 const char* tag() { return s_tag; }
+
+bool needsUpdate() { return s_needsUpdate; }
+
+uint8_t updateTries() {
+    Preferences p;
+    if (!p.begin("tab5c6", true)) return 0;
+    const uint8_t n = p.getUChar("tries", 0);
+    p.end();
+    return n;
+}
+
+uint32_t imageSize() { return (uint32_t)(c6_image_end - c6_image_start); }
+
+bool update(void (*progress)(uint32_t, uint32_t), char* why, size_t whyLen) {
+    auto fail = [&](const char* w, esp_err_t e) {
+        snprintf(why, whyLen, "%s%s%s", w, e != ESP_OK ? ": " : "", e != ESP_OK ? esp_err_to_name(e) : "");
+        Serial.printf("[c6] radio update stopped: %s\n", why);
+        return false;
+    };
+    if (!s_needsUpdate) return fail("the radio link is not up", ESP_OK);
+    const uint32_t total = imageSize();
+    // An ESP image starts with 0xE9. Anything else, or something far too
+    // small, is not ours to write: the C6 has no way back from a bad image
+    // short of soldered wires.
+    if (total < 200000 || c6_image_start[0] != 0xE9) return fail("the built-in radio image looks wrong", ESP_OK);
+    {
+        // Counted before the first byte goes, so a board that dies mid-write
+        // still remembers the try.
+        Preferences p;
+        if (p.begin("tab5c6", false)) { p.putUChar("tries", (uint8_t)(updateTries() + 1)); p.end(); }
+    }
+    Serial.printf("[c6] radio update: %lu bytes\n", (unsigned long)total);
+    if (s_up) { sniff(false); delay(200); }   // the bench's forced case: quiet the link first
+    esp_err_t e = esp_hosted_slave_ota_begin();
+    if (e != ESP_OK) return fail("the radio would not start the update", e);
+    // From a RAM buffer, not straight out of flash: the transport may want
+    // to DMA what it is handed.
+    static uint8_t buf[1400];
+    uint32_t done = 0;
+    while (done < total) {
+        const uint32_t n = total - done < sizeof buf ? total - done : (uint32_t)sizeof buf;
+        memcpy(buf, c6_image_start + done, n);
+        e = esp_hosted_slave_ota_write(buf, n);
+        if (e != ESP_OK) return fail("writing to the radio failed", e);
+        done += n;
+        if (progress) progress(done, total);
+    }
+    e = esp_hosted_slave_ota_end();
+    if (e != ESP_OK) return fail("the radio did not accept the image", e);
+    // Older slaves (M5Stack's 1.4.1 among them) switch over by themselves at
+    // the end and do not know this call, which is not an error there; on
+    // anything newer it is the switch.
+    e = esp_hosted_slave_ota_activate();
+    Serial.printf("[c6] radio update written; activate: %s\n", esp_err_to_name(e));
+    return true;
+}
 
 bool bleBegin() {
     // The C6's Bluetooth controller, over the link begin() brought up. Its
