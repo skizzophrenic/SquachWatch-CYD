@@ -20,7 +20,7 @@
 // with PSRAM and a screen big enough, 480x320 or 320x240. Everywhere else
 // HUMAN SENSING is the one screen, exactly as it was. SENSE_RICH_SIM is the
 // emulator's render tool.
-#if defined(SENSE_CYD_APP) && (defined(TDECK_PLUS) || defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(SENSE_RICH_SIM))
+#if defined(SENSE_CYD_APP) && (defined(TDECK_PLUS) || defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TAB5) || defined(SENSE_RICH_SIM))
 #define SENSE_RICH 1
 #else
 #define SENSE_RICH 0
@@ -36,9 +36,12 @@
 
 // What the radio is doing.
 #define SENSE_MODE_OFF       0
+#define SENSE_MODE_PARK      1   // the Tab5's own radio, no network saved: listening on one channel
 #define SENSE_MODE_STA       2   // joined, pinging the router
 #define SENSE_MODE_JOINING   3
 
+// Readings flowing: joined and pinging, or (the Tab5) listening.
+inline bool senseModeLive(uint8_t m) { return m == SENSE_MODE_STA || m == SENSE_MODE_PARK; }
 #define SENSE_LINE_HZ        10  // status updates a second
 
 // One status update from the engine, ten a second.
@@ -70,7 +73,8 @@ uint8_t     senseCydMode();                 // SENSE_MODE_*
 // SENSE OPEN / SENSE CLOSE / SENSE OPEN NOWIFI on the console (bench): 1 open the
 // screen, 2 back to the detector, 3 open it as if no network were saved (the
 // ADD WIFI state, without touching the saved list); SENSE NEXT / SENSE BACK: 4 / 5,
-// the next or previous page on the boards with SCOPE, SNEAK and VITALS.
+// the next or previous page on the boards with SCOPE, SNEAK and VITALS;
+// SENSE SLEEP / SENSE WAKE: 6 / 7, the SLEEP button and the tap that wakes it.
 // main.cpp acts and clears it.
 extern volatile uint8_t g_senseConsole;
 

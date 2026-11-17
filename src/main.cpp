@@ -2708,6 +2708,14 @@ static bool readTouchRaw(int16_t& a, int16_t& b) {
 #endif
 }
 
+#if defined(SENSE_CYD_APP)
+// HUMAN SENSING's SLEEP: the backlight off while sensing runs on (VITALS by
+// the bed all night); the next tap or key only wakes it.
+static bool s_senseDark = false;
+static void applyBrightness();
+static void senseWake()  { if (!s_senseDark) return; s_senseDark = false; applyBrightness(); Serial.println("[sense] screen on"); }
+static void senseSleep() { if (s_senseDark) return; s_senseDark = true; applyBrightness(); Serial.println("[sense] SLEEP: screen off, sensing runs on"); }
+#endif
 #if defined(TDECK_PLUS)
 // ---- T-Deck Plus: power rail, bus tidying, and the stepped backlight ------
 // GPIO10 is the board's power enable: on battery nothing past the S3 has
@@ -2817,8 +2825,9 @@ static void tdeckKey(char c, uint32_t now) {
 #endif
 #if defined(SENSE_CYD_APP)
     // HUMAN SENSING's three buttons from the keyboard: Backspace is BACK, R
-    // re-calibrates, O is OFF (back to the detector). The screen's own
-    // buttons still work by touch.
+    // re-calibrates, S is SLEEP (any key wakes). O still goes straight back
+    // to the detector. The screen's own buttons still work by touch.
+    else if (state == AppState::SENSING && s_senseDark) senseWake();
     else if (state == AppState::SENSING) {
 #if SENSE_RICH
         if (uiSensingKey(c, now)) {}   // , . pages; ENTER/L on SNEAK; N on VITALS
@@ -2828,6 +2837,8 @@ static void tdeckKey(char c, uint32_t now) {
         else if (c == 'r' || c == 'R') {
             senseCydCommand("cal");
             Theme::showToast("RECALIBRATING", "Keep the room still for 15 s", Theme::AMBER);
+        } else if (c == 's' || c == 'S') {
+            senseSleep();
         } else if (c == 'o' || c == 'O') {
             Theme::showToast("SENSING OFF", "Detector back on", Theme::CYAN);
             enterClear();
@@ -2923,6 +2934,9 @@ void simBootPress() { pocketPress(millis()); }
 static void applyCpuClock();
 static void applyBrightness() {
     uint8_t duty = s_screenDimmed ? Settings::dimLevel() : Settings::brightness();
+#if defined(SENSE_CYD_APP)
+    if (s_senseDark) duty = 0;
+#endif
 #if defined(TWATCH_S3)
     if (s_screenDimmed) {
         if (!s_panelAsleep) {
@@ -5698,7 +5712,7 @@ static void tab5RadioProgress(uint32_t done, uint32_t total) {
                     nullptr, nullptr, (int)(done * 100 / total));
 }
 
-static void tab5RadioUpdatePrompt() {
+static void tab5RadioUpdatePrompt(bool forSensing = false) {
     if (!Tab5Radio::needsUpdate()) return;
     if (Tab5Radio::updateTries() >= 2) {
         Serial.println("[c6] radio update tried twice without a hello; not offering again (docs/TAB5.md)");
@@ -5707,10 +5721,14 @@ static void tab5RadioUpdatePrompt() {
         tab5RadioWaitTap();
         return;
     }
-    tab5RadioScreen("RADIO UPDATE", "This Tab5's radio still runs its", "factory firmware. One update, about a",
-                    "minute, and it hears WiFi and Bluetooth.", "LATER", "UPDATE", -1);
+    if (forSensing)
+        tab5RadioScreen("RADIO UPDATE", "HUMAN SENSING needs newer firmware on", "this Tab5's radio. One update, about a",
+                        "minute, then the Tab5 restarts.", "LATER", "UPDATE", -1);
+    else
+        tab5RadioScreen("RADIO UPDATE", "This Tab5's radio still runs its", "factory firmware. One update, about a",
+                        "minute, and it hears WiFi and Bluetooth.", "LATER", "UPDATE", -1);
     if (tab5RadioWaitTap() != 1) {
-        Serial.println("[c6] radio update: LATER; booting with the radio off");
+        Serial.println(forSensing ? "[c6] sensing radio update: LATER" : "[c6] radio update: LATER; booting with the radio off");
         return;
     }
     char why[64] = "";
@@ -8105,10 +8123,24 @@ void loop() {
 #if SENSE_RICH
             else if ((c == 4 || c == 5) && state == AppState::SENSING) uiSensingSwipe(c == 4 ? 1 : -1);
 #endif
+            else if (c == 6 && state == AppState::SENSING) senseSleep();
+            else if (c == 7) senseWake();
         }
         // Booted straight into SENSING: give the detector's radio 8 s to settle
         // first. Started at once, the first join came up deaf (no CSI, every
         // ping lost) on the bench, 2026-11-09; opened later it never did.
+#if defined(TAB5)
+        // Bench: C6UPDATE on the console (clock.cpp) writes the radio now.
+        if (Tab5Radio::g_c6UpdateConsole) {
+            Tab5Radio::g_c6UpdateConsole = false;
+            Tab5Radio::allowUpdate();
+            char why[64] = "";
+            s_radioPctAt = 0;
+            Serial.printf("[c6] radio update: %lu bytes\n", (unsigned long)Tab5Radio::imageSize());
+            if (Tab5Radio::update(tab5RadioProgress, why, sizeof why)) { Serial.println("[c6] written; restarting"); delay(800); ESP.restart(); }
+            Serial.printf("[c6] update failed: %s\n", why);
+        }
+#endif
         const bool want = state == AppState::SENSING && millis() > 8000;
         if (want && !senseCydRunning()) {
             // Remembered (NVS), so a board switched off in SENSING boots back
@@ -8133,9 +8165,19 @@ void loop() {
                 strncpy(ssid, OtaWifi::savedSsidAt((uint8_t)k), sizeof ssid - 1);
                 OtaWifi::savedPassAt((uint8_t)k, pass, sizeof pass);
             }
+#if defined(TAB5)
+            // A radio that sniffs but cannot sense (an older C6 image): the
+            // update is offered here, where it is wanted, not at every boot.
+            if (!Tab5Radio::senseCapable() && Tab5Radio::up()) {
+                Tab5Radio::offerSenseUpdate();
+                tab5RadioUpdatePrompt(true);
+                FramePush::invalidate();
+            }
+#endif
             senseCydStart(ssid, pass);
             memset(pass, 0, sizeof pass);
         } else if (!want && senseCydRunning()) {
+            if (s_senseDark) senseWake();   // left any other way (a lock, an alert): the screen comes back
             if (Settings::sensing()) Settings::setSensing(false);
             senseCydStop();
             SenseStore::end();
@@ -11801,6 +11843,8 @@ void loop() {
             // A tap acts on release, where the finger went down.
             static bool sGesture = false;
             static int  sDownX = 0, sDownY = 0, sLastX = 0, sLastY = 0;
+            // Asleep (SLEEP): the touch that wakes it does nothing else.
+            if (s_senseDark) { if (touchJustUp) { senseWake(); lastTouch = now; sGesture = false; } break; }
             if (touchJustDown) { sGesture = true; sDownX = sLastX = tp.x; sDownY = sLastY = tp.y; }
             if (tp.valid) { sLastX = tp.x; sLastY = tp.y; }
             if (touchJustUp && sGesture && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
@@ -11822,10 +11866,9 @@ void loop() {
                     // No saved network: straight to the list to add one. Leaving
                     // SENSING hands the radio back, which the add screen's scan needs.
                     enterWifiNets();
-                } else if (tap == SensingTap::OFF) {
-                    // Straight back to the detector (the loop gives it the radio back).
-                    Theme::showToast("SENSING OFF", "Detector back on", Theme::CYAN);
-                    enterClear();
+                } else if (tap == SensingTap::SLEEP) {
+                    // The screen off; sensing runs on. A tap wakes it.
+                    senseSleep();
                 }
             }
             break;

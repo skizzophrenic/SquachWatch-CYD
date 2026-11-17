@@ -25,6 +25,9 @@
 #include "squachy.h"
 #if SENSE_RICH
 #include "sense_vitals.h"
+#if defined(TAB5)
+#include "tab5_radio.h"
+#endif
 #endif
 #include <Arduino.h>
 #include <math.h>
@@ -141,10 +144,13 @@ Word stateWord(uint32_t now) {
     Word r; r.sub[0] = 0;
     const SenseReport& s = SenseStore::last();
     const char* net = senseCydNetwork();
+#if defined(TAB5)
+    if (!Tab5Radio::senseCapable()) { r.w = "UPDATE RADIO"; r.c = Theme::AMBER; snprintf(r.sub, sizeof r.sub, "reopen HUMAN SENSING to update"); return r; }
+#endif
     if (!net[0]) { r.w = "ADD WIFI"; r.c = Theme::AMBER; snprintf(r.sub, sizeof r.sub, "tap here to save a network"); }
     else if (!SenseStore::heard()) { r.w = "STARTING"; r.c = Theme::AMBER; snprintf(r.sub, sizeof r.sub, "waking the radio"); }
     else if (!SenseStore::fresh(now)) { r.w = "RADIO LOST"; r.c = Theme::AMBER; snprintf(r.sub, sizeof r.sub, "nothing for %lu s", (unsigned long)((now - SenseStore::lastAt()) / 1000)); }
-    else if (s.mode != SENSE_MODE_STA) {
+    else if (!senseModeLive(s.mode)) {
         r.w = "JOINING"; r.c = Theme::AMBER;
         const char* shown = Settings::privacyMode() ? "a saved network" : net;   // Privacy Mode: no name
         // The driver's reason in words. A refused board waits, longer each
@@ -273,7 +279,7 @@ void backdrop(TFT_eSPI& t, uint32_t now) {
 
 void statusLine(TFT_eSPI& t, uint32_t now) {
     const SenseReport& s = SenseStore::last();
-    const bool fresh = SenseStore::fresh(now) && s.mode == SENSE_MODE_STA;
+    const bool fresh = SenseStore::fresh(now) && senseModeLive(s.mode);
     char b[40];
     if (fresh && (now % 1000) < 600) t.fillCircle(36, 9, 3, Theme::GREEN);
 #if defined(__EMSCRIPTEN__)
@@ -341,7 +347,7 @@ void spectrum(TFT_eSPI& t) {
     if (!n) {   // nothing yet: the first spectrum needs 12.8 s of readings
         const SenseReport& s = SenseStore::last();
         const int my = wy0 + (rows * rowH) * 10 / 27;   // 40 px down the 2.8"'s 108
-        textT(t, SP_X + SP_W / 2, my, s.mode == SENSE_MODE_STA ? "LISTENING" : "WAITING", mixc(Theme::BG, Theme::WHITE, 140), 1, 1);
+        textT(t, SP_X + SP_W / 2, my, senseModeLive(s.mode) ? "LISTENING" : "WAITING", mixc(Theme::BG, Theme::WHITE, 140), 1, 1);
         textT(t, SP_X + SP_W / 2, my + 12, SP_W >= 72 ? "to the room" : "...", mixc(Theme::BG, Theme::WHITE, 110), 1, 1);
     }
     for (int f = 0; f <= 2; f++) {
@@ -530,11 +536,11 @@ void banner(TFT_eSPI& t, uint32_t now) {
 void buttons(TFT_eSPI& t) {
 #if SENSE_RICH
     static const char* const PAGES[4][3] = {
-        { "[ BACK ]", "[ RECAL ]", "[ OFF ]" }, { "[ BACK ]", "[ RECAL ]", "[ OFF ]" },
-        { "[ BACK ]", "[ START RUN ]", "[ LEVEL ]" }, { "[ BACK ]", "[ NEW SESSION ]", "[ OFF ]" } };
+        { "[ BACK ]", "[ RECAL ]", "[ SLEEP ]" }, { "[ BACK ]", "[ RECAL ]", "[ SLEEP ]" },
+        { "[ BACK ]", "[ START RUN ]", "[ LEVEL ]" }, { "[ BACK ]", "[ NEW SESSION ]", "[ SLEEP ]" } };
     const char* const* LB = PAGES[s_page & 3];
 #else
-    static const char* const LB[3] = { "[ BACK ]", "[ RECAL ]", "[ OFF ]" };
+    static const char* const LB[3] = { "[ BACK ]", "[ RECAL ]", "[ SLEEP ]" };
 #endif
     if (!s_L->btOn) {   // no touch screen: what the keys do, under the banner
         const int y = s_L->bnY + s_L->bnH + 1;
@@ -628,7 +634,7 @@ SensingTap uiSensingTap(int x, int y, int screenW, int screenH, uint32_t now) {
         for (int i = 0; i < 3; i++) if (x >= g.x[i] && x <= g.x[i] + g.w) {
             if (i == 0) return SensingTap::BACK;
             if (i == 1) return SensingTap::RECAL;
-            return SensingTap::OFF;
+            return SensingTap::SLEEP;
         }
         return SensingTap::NONE;
     }

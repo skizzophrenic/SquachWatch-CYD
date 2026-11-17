@@ -14,7 +14,11 @@ void uiSensingTick(TFT_eSPI& t, uint32_t now, bool advance = true);
 
 // What a tap asks main.cpp to do.
 // ADD_WIFI: no saved network, the banner tapped (to WIFI NETWORKS).
-enum class SensingTap : uint8_t { NONE, BACK, RECAL, OFF, ADD_WIFI };
+// The same three buttons on every board: BACK (leave; the detector gets the
+// radio back), the page's own action (RECAL, START RUN, NEW SESSION), and
+// SLEEP (the screen off, sensing on; a tap or a key wakes it). SNEAK keeps
+// LEVEL on the right: a game is not left running in the dark.
+enum class SensingTap : uint8_t { NONE, BACK, RECAL, SLEEP, ADD_WIFI };
 SensingTap uiSensingTap(int x, int y, int screenW, int screenH, uint32_t now);
 // The middle of the banner, where the boards with no touch screen (StickS3,
 // Cardputer) put their one cursor stop: pressed, it re-calibrates.

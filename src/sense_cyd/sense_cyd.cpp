@@ -15,7 +15,8 @@
 // Notes go to the console as "[sense] ..."; nothing is saved.
 //
 // Console (SENSE <cmd>): cal | win <ms> | caltime <ms> | hold <ms> | pingms <ms> | rates | stat | help
-#if defined(SENSE_CYD_APP)
+// The Tab5 has its own engine (sense_tab5.cpp): its radio is the C6, over ESP-Hosted.
+#if defined(SENSE_CYD_APP) && !defined(TAB5)
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_wifi.h>

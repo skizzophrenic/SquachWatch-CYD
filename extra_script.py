@@ -64,6 +64,10 @@ _SENSE_SKIP = ("crowpanel7-paneltest", "crowpanel7-probe", "crowpanel7-touchtrac
 if env.BoardConfig().get("build.mcu", "") in ("esp32", "esp32s3") and env["PIOENV"] not in _SENSE_SKIP \
         and not env["PIOENV"].startswith("tab5"):
     env.Append(BUILD_FLAGS=["-DSENSE_CYD_APP=1"])
+# The Tab5 (ESP32-P4) senses through its C6 radio (src/sense_cyd/sense_tab5.cpp);
+# its bench envs (tab5-paneltest, tab5-radiotest) stay without it.
+elif env["PIOENV"] == "tab5":
+    env.Append(BUILD_FLAGS=["-DSENSE_CYD_APP=1"])
 
 
 # ---------------------------------------------------------------------------

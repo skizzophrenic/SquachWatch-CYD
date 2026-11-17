@@ -131,6 +131,7 @@ void onStats(uint32_t, const uint8_t* d, size_t n, void*) {
 // the first product run on the bench (2026-10-19) went silent at 71 s with
 // nothing printed, and this is how the next one says where.
 volatile uint32_t    s_loopBeat = 0;
+volatile bool        s_sensingLink = false;   // HUMAN SENSING has the link: the detector (and its beat) is paused
 volatile const char* s_where    = "idle";
 volatile uint32_t    s_sends = 0, s_sendUsLast = 0, s_sendUsMax = 0, s_sendFails = 0;
 
@@ -139,7 +140,7 @@ void diagTask(void*) {
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(5000));
         const uint32_t beat = s_loopBeat;
-        if (beat == lastBeat && s_up) {
+        if (beat == lastBeat && s_up && !s_sensingLink) {
             stalledFor += 5;
             Serial.printf("[c6] LOOP STALLED %lu s: last at %s; sends %lu (fails %lu, last %lu us, max %lu us); rx %lu, qfull %lu, pending %u; heap %lu\n",
                           (unsigned long)stalledFor, (const char*)s_where, (unsigned long)s_sends, (unsigned long)s_sendFails,
@@ -296,8 +297,16 @@ bool begin() {
         if (r != ESP_OK && r != ESP_ERR_INVALID_STATE) Serial.printf("[c6] esp_netif_init: %s\n", esp_err_to_name(r));
         r = esp_event_loop_create_default();
         if (r != ESP_OK && r != ESP_ERR_INVALID_STATE) Serial.printf("[c6] event loop: %s\n", esp_err_to_name(r));
+        // The station's network interface: HUMAN SENSING joins a saved
+        // network on it and pings the router (sense_tab5.cpp).
+        static esp_netif_t* sta = nullptr;
+        if (!sta) sta = esp_netif_create_default_wifi_sta();
         wifi_init_config_t wcfg = WIFI_INIT_CONFIG_DEFAULT();
         wcfg.nvs_enable = 0;   // as the core does over ESP-Hosted
+        // The C6 applies this config field by field, and the core's default
+        // has CSI off: every CSI setting was refused until this (sensing
+        // app bench, 2026-11-17).
+        wcfg.csi_enable = 1;
         const esp_err_t ei = esp_wifi_init(&wcfg);
         const esp_err_t es = (ei == ESP_OK) ? esp_wifi_set_storage(WIFI_STORAGE_RAM) : ei;
         const esp_err_t em = (ei == ESP_OK) ? esp_wifi_set_mode(WIFI_MODE_STA) : ei;
@@ -403,6 +412,51 @@ bool bleBegin() {
 bool sniff(bool on) {
     const uint8_t v = on ? 1 : 0;
     return send(CMD_SNIFF, &v, 1);
+}
+
+// ---- HUMAN SENSING ----------------------------------------------------------
+namespace {
+const uint32_t SENSE_CMD_TEXT = 0x5110;   // sense_proto.h: one command line, no newline
+const uint32_t SENSE_EVT_LINE = 0x5210;   // one line out, no newline
+void (*s_senseLine)(const char*, size_t) = nullptr;
+void onSenseLine(uint32_t, const uint8_t* d, size_t n, void*) {
+    if (s_senseLine && d && n) s_senseLine((const char*)d, n);
+}
+}  // namespace
+
+bool senseCapable() { return s_up && strcmp(s_tag, "squach-sniff 2") >= 0 && !strncmp(s_tag, "squach-sniff ", 13); }
+
+void offerSenseUpdate() { if (s_up && !senseCapable()) s_needsUpdate = true; }
+volatile bool g_c6UpdateConsole = false;
+void allowUpdate() { if (s_up) s_needsUpdate = true; }
+
+bool senseLink(bool on, void (*onLine)(const char*, size_t)) {
+    if (!s_up) return false;
+    if (on) {
+        s_senseLine = onLine;
+        s_sensingLink = true;
+        esp_hosted_register_custom_callback(EVT_FRAME, nullptr, nullptr);
+        const esp_err_t e = esp_hosted_register_custom_callback(SENSE_EVT_LINE, onSenseLine, nullptr);
+        if (e != ESP_OK) {
+            Serial.printf("[c6] sensing's line handler refused: %s\n", esp_err_to_name(e));
+            esp_hosted_register_custom_callback(EVT_FRAME, onFrame, nullptr);
+            s_senseLine = nullptr;
+            s_sensingLink = false;
+            return false;
+        }
+        return true;
+    }
+    esp_hosted_register_custom_callback(SENSE_EVT_LINE, nullptr, nullptr);
+    s_senseLine = nullptr;
+    s_sensingLink = false;
+    const esp_err_t e = esp_hosted_register_custom_callback(EVT_FRAME, onFrame, nullptr);
+    if (e != ESP_OK) Serial.printf("[c6] frame handler back: %s\n", esp_err_to_name(e));
+    return e == ESP_OK;
+}
+
+bool senseSend(const char* cmd) {
+    if (!cmd || !*cmd) return false;
+    return send(SENSE_CMD_TEXT, cmd, strlen(cmd));
 }
 
 bool setChannel(uint8_t ch) {

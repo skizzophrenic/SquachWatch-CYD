@@ -72,7 +72,7 @@ void scopeScreen(TFT_eSPI& t, uint32_t now) {
     const int B = g.y - 3;
     const Word w = stateWord(now);
     const SenseReport& s = SenseStore::last();
-    const bool live = SenseStore::fresh(now) && s.mode == SENSE_MODE_STA;
+    const bool live = SenseStore::fresh(now) && senseModeLive(s.mode);
     stars(t, now, T + 2, B - 40);
     // the far hills
     {
@@ -271,7 +271,7 @@ void sneakLevel() { if (s_sn.phase != S_COUNT && s_sn.phase != S_RUN) s_sn.level
 
 void sneakStep(uint32_t now) {
     const SenseReport& s = SenseStore::last();
-    const bool live = SenseStore::fresh(now) && s.mode == SENSE_MODE_STA && s.state >= SENSE_STATE_STILL;
+    const bool live = SenseStore::fresh(now) && senseModeLive(s.mode) && s.state >= SENSE_STATE_STILL;
     if (s_sn.phase == S_IDLE && live) {   // a preview of the line, from the room as it is
         s_sn.base += (s.score - s_sn.base) * 0.02f;
         s_sn.target = levelTarget(s_sn.level, s_sn.base);
@@ -313,7 +313,7 @@ void sneakScreen(TFT_eSPI& t, uint32_t now) {
     const Bar g = barGeom(W, t.height());
     const int B = g.y - 3;
     const SenseReport& s = SenseStore::last();
-    const bool live = SenseStore::fresh(now) && s.mode == SENSE_MODE_STA && s.state >= SENSE_STATE_STILL;
+    const bool live = SenseStore::fresh(now) && senseModeLive(s.mode) && s.state >= SENSE_STATE_STILL;
     int ox = 0;
     if (s_sn.phase == S_CAUGHT && now - s_sn.caughtAt < 500) { const int k = 5 - (int)((now - s_sn.caughtAt) / 100); ox = (int)(hash32(now / 30) % (2 * k + 1)) - k; }
     // the corridor
@@ -396,7 +396,7 @@ void sneakScreen(TFT_eSPI& t, uint32_t now) {
     textT(t, mx, my + mh + 4, b, Theme::WHITE, big ? 2 : 1);
     snprintf(b, sizeof b, "STAY UNDER %u", (unsigned)s_sn.target);
     textT(t, mx + mw, my + mh + 4, b, Theme::VAPOR_PINK, big ? 2 : 1, 2);
-    const char* say = !SenseStore::fresh(now) || s.mode != SENSE_MODE_STA ? "WAITING FOR THE ROUTER"
+    const char* say = !SenseStore::fresh(now) || !senseModeLive(s.mode) ? "WAITING FOR THE ROUTER"
                     : s.state == SENSE_STATE_CAL ? "CALIBRATING: HOLD STILL"
                     : s.state == SENSE_STATE_LOWDATA ? "LOW SIGNAL: NO RUN UNTIL THE ROOM IS HEARD"
                     : s_sn.phase == S_IDLE ? (s_L->btOn ? "TAP START RUN" : "PRESS START RUN")
@@ -443,7 +443,7 @@ void vitalsScreen(TFT_eSPI& t, uint32_t now) {
     const Bar g = barGeom(W, t.height());
     const int B = g.y - 3;
     const SenseReport& s = SenseStore::last();
-    const bool joined = SenseStore::fresh(now) && s.mode == SENSE_MODE_STA;
+    const bool joined = SenseStore::fresh(now) && senseModeLive(s.mode);
     const bool breathOk = m.live && !m.motion && m.bpm > 0;
     const bool heartOk = breathOk && m.conf > 0.35f;
     char b[48];
@@ -463,7 +463,7 @@ void vitalsScreen(TFT_eSPI& t, uint32_t now) {
         chip("BREATH LOCK", breathOk && m.snr >= 12, Theme::CYAN);
         chip("HEART LOCK", heartOk, Theme::VAPOR_PINK);
     }
-    textT(t, W - 4, T + (big ? 24 : 6), !joined ? "WAITING FOR WIFI" : (big ? "JOINED: PINGING ROUTER" : "PINGING ROUTER"),
+    textT(t, W - 4, T + (big ? 24 : 6), !joined ? "WAITING FOR WIFI" : s.mode == SENSE_MODE_PARK ? (big ? "NO WIFI: LISTENING" : "LISTENING") : (big ? "JOINED: PINGING ROUTER" : "PINGING ROUTER"),
           joined ? Theme::GREEN : Theme::AMBER, 1, 2);
 
     // left: the breathing spectrum over its waterfall

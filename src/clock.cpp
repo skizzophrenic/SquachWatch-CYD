@@ -3,6 +3,9 @@
 #include "serial_flush.h"
 #include "security.h"   // a locked device takes no console commands
 #include "ota_wifi.h"    // the WIFI command lists the saved networks
+#if defined(TAB5)
+#include "tab5_radio.h"   // C6UPDATE, for the bench
+#endif
 #if defined(SENSE_CYD_APP)
 #include "sense_cyd.h"      // SENSE <cmd>
 void consoleFrameShot();     // main.cpp: SENSE SHOT
@@ -548,7 +551,11 @@ void pollSerial() {
     // A line buffer rather than a parser. Anything that is not the one
     // command is answered and dropped -- this is a debug port, and silence
     // in response to a typo is worse than a line of help.
+#if defined(TAB5) && defined(SENSE_CYD_APP)
+    static char line[112];   // WIFISAVE <32-byte name><TAB><64-byte password>
+#else
     static char line[48];
+#endif
     static uint8_t len = 0;
 
     while (Serial.available() > 0) {
@@ -568,6 +575,28 @@ void pollSerial() {
             Serial.println("[security] locked -- unlock it on the screen first.");
             continue;
         }
+#if defined(TAB5) && defined(SENSE_CYD_APP)
+        // WIFISAVE <name><TAB><password>: the Tab5 has no WIFI NETWORKS screen
+        // yet, so tools/tab5_wifi.py sends this (asking for the password
+        // without showing it). Never echoed; the buffer is wiped after.
+        if (strcasecmp(line, "C6UPDATE") == 0) { Tab5Radio::g_c6UpdateConsole = true; continue; }   // bench
+        if (strcasecmp(line, "WIFI FORGET") == 0) {   // the USE network out of the list
+            const uint8_t before = OtaWifi::savedCount();
+            OtaWifi::forget();
+            Serial.printf("[wifi] %s; %u saved now\n", OtaWifi::savedCount() < before ? "forgotten" : "nothing to forget", (unsigned)OtaWifi::savedCount());
+            continue;
+        }
+        if (strncasecmp(line, "WIFISAVE ", 9) == 0) {
+            char* name = line + 9;
+            char* tab = strchr(name, '\t');
+            if (tab) *tab = 0;
+            const bool ok = tab && OtaWifi::saveNetwork(name, tab + 1);
+            memset(line, 0, sizeof line);
+            Serial.println(ok ? "[wifi] network saved; HUMAN SENSING joins it next time it opens"
+                              : "[wifi] WIFISAVE: not saved (WIFISAVE <name><TAB><password>)");
+            continue;
+        }
+#endif
 
         if (strncasecmp(line, "FLOOD ", 6) == 0) {
             // A thousand a second is five times the loudest room measured;
@@ -629,6 +658,8 @@ void pollSerial() {
         if (strcasecmp(line, "SENSE CLOSE") == 0) { g_senseConsole = 2; continue; }
         if (strcasecmp(line, "SENSE NEXT") == 0)  { g_senseConsole = 4; continue; }   // the next page (SCOPE...)
         if (strcasecmp(line, "SENSE BACK") == 0)  { g_senseConsole = 5; continue; }
+        if (strcasecmp(line, "SENSE SLEEP") == 0) { g_senseConsole = 6; continue; }   // the SLEEP button
+        if (strcasecmp(line, "SENSE WAKE") == 0)  { g_senseConsole = 7; continue; }
         if (strncasecmp(line, "SENSE ", 6) == 0) { ::senseCydCommand(line + 6); continue; }
 #endif
         if (strcasecmp(line, "INVERT") == 0) { g_consoleInvert = true; continue; }

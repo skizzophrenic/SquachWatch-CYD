@@ -95,4 +95,18 @@ uint16_t pending();
 
 Stats stats();
 
+// HUMAN SENSING on this radio (the C6 image with tag "squach-sniff 2" carries
+// sense_c6.cpp, tools/tab5-c6/sense/). The host takes three custom-message
+// handlers and the sniff link holds all three, so while sensing runs its
+// line event borrows the frame slot (the detector is off then) and gives it
+// back after. Lines arrive one per call, on the RPC task: copy, never act.
+bool senseCapable();                                    // the C6 answered with a sensing image
+void offerSenseUpdate();                                // a sniff-only image: let update() run (main asks first)
+// Bench: C6UPDATE on the console writes the carried image now, no prompt
+// (the NVS tries guard still counts; a good hello afterwards clears it).
+extern volatile bool g_c6UpdateConsole;
+void allowUpdate();
+bool senseLink(bool on, void (*onLine)(const char* line, size_t n));
+bool senseSend(const char* cmd);                        // one command line, as the C6 reads them
+
 }  // namespace Tab5Radio
