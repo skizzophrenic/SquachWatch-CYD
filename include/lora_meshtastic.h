@@ -54,6 +54,21 @@ uint8_t        channelCount();
 // A copy, not a reference -- see the note in lora_meshcore.h. Past the end
 // gives a zeroed, disabled channel.
 Channel        channel(uint8_t i);
+// Change the key of the PRIMARY channel -- the built-in row of the preset named
+// -- from the published default. keyLen 16, or 0 for none (in the clear); a
+// null key or empty name puts the default back. The preset's hash follows.
+void           setPrimaryKey(const char* presetName, const uint8_t* key, uint8_t keyLen);
+// A key as typed for it: base64 or hex of 16 bytes (shorter is zero-padded, as
+// the firmware does), a one-byte PSK as the apps show it ("AQ=="), "default"
+// or "none". False for a bad key and for a 32-byte one (AES-256 is not here).
+bool           parsePrimaryKey(const char* text, uint8_t key[16], uint8_t& keyLen);
+// One-byte PSKs have unambiguous spellings that need no '=': "psk77", "PSK 77"
+// or "#77". A bare "77" or "01" is hex (one byte, PSK 0x77 / 1), never base64;
+// base64 for one byte must be written as the apps do ("AQ=="). parsePrimaryKey
+// and addChannel both read keys this way.
+// What the text would be if saved now, for the edit line ("PSK 77: DEFAULT
+// KEY +76", "16-BYTE KEY", "NOT A KEY YET"); false when it would be refused.
+bool           describePrimaryKey(const char* text, char* out, size_t cap);
 // The user's own; false when the table is full, the name is already held, or
 // the key does not parse.
 bool           addChannel(const char* name, const char* keyText);

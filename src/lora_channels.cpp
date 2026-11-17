@@ -365,7 +365,19 @@ uint8_t addGroup(uint8_t g) {
     return added;
 }
 
+void applyMeshtastic() {
+    setMeshtasticOverride(Settings::loraMtRegion(), Settings::loraMtPreset(), Settings::loraMtSlot());
+    if (Settings::loraMtKeyCustom()) {
+        uint8_t key[16];
+        Settings::loraMtKey(key);
+        Meshtastic::setPrimaryKey(mtPrimary(), key, Settings::loraMtKeyLen());
+    } else {
+        Meshtastic::setPrimaryKey(nullptr, nullptr, 0);
+    }
+}
+
 uint8_t restore() {
+    applyMeshtastic();
     uint8_t* buf = scratch();
     if (!buf) return 0;
     const size_t n = Settings::loraChannels(buf, BLOB_MAX);
