@@ -255,9 +255,9 @@ A squad gets you:
 
 That's Squachy. The detection is the *why*, Squachy is the *fun*. He reacts to what the board catches, cracks jokes when nothing's happening, grows through stages as your lifetime catch count climbs (his fur changes at 25, 100 and 500 catches, and at 500 he is a Legend with a flame aura), and earns outfits and pets along the way. Some of those you earn by catching things; some are hidden, and I'm not telling you where. Tap him. He likes that.
 
-Other things hiding in Settings: the SQUACHY-DEX (a card per detection type with your record), BINGO, Squachy's diary, and DESK MODE, a clock for your desk.
+Other things hiding in Settings: the SQUACHY-DEX (a card per detection type with your record), BINGO, Squachy's diary, and DESK SETTINGS, for the desk clock that MODE opens.
 
-**Don't want him?** Use **TERMINAL MODE**: the **MODE** button on the main screen (twice: the desk, then terminal) or **Settings > BEHAVIOR > TERMINAL MODE** (it used to be called BORING MODE). It swaps him for a dashboard built for the tool itself: a LOG you can sort by time, kind, device or signal, an AIR graph, COUNTS by kind and the LATEST catch, with WATCH, HUNT, INFO and IGNORE a tap away. Detection is exactly the same, and it stays that way through restarts. MODE again (or the same row) brings him back.
+**Don't want him?** Use **TERMINAL MODE**: the **MODE** button on the main screen, twice (the desk, then terminal). On the StickS3 it's **Settings > BEHAVIOR > TERMINAL MODE**. It used to be called BORING MODE. It swaps him for a dashboard built for the tool itself: a LOG you can sort by time, kind, device or signal, an AIR graph, COUNTS by kind and the LATEST catch, with WATCH, HUNT, INFO and IGNORE a tap away. Detection is exactly the same, and it stays that way through restarts. MODE again brings him back.
 
 ## Is this legal?
 

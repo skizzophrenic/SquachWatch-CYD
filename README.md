@@ -49,8 +49,8 @@ detector. Detection never changes between them; only the screen does.
   take the full screen. It stays on through restarts until you change it.
 
 From the main screen MODE opens the desk; MODE on the desk goes to TERMINAL
-MODE; MODE there brings Squachy back. **Settings > BEHAVIOR > TERMINAL MODE**
-is the same switch. (On the StickS3 that button is FOB, its keychain mode.)
+MODE; MODE there brings Squachy back. (On the StickS3 that button is FOB, its
+keychain mode, so TERMINAL MODE is a row in its Settings instead.)
 
 ## What it detects
 
@@ -274,7 +274,7 @@ flasher's **Set Time & Zone** button sends this computer's clock and zone
 down the same cable right after flashing; the first time the clock is set
 with no zone chosen, a card on the main screen asks, with the live time in
 the zone it shows so you can see when it's right; and the **ZONE** row on the
-DESK MODE page changes it later (tap its left half to step west, its right
+DESK SETTINGS page changes it later (tap its left half to step west, its right
 half to step east). Daylight saving takes care of itself. Without
 a saved network the clock can still be set over serial with a `TIME <epoch>`
 line, and `ZONE US EASTERN` sets the zone the same way. The console runs at
@@ -309,7 +309,7 @@ set pieces two Squachys act out follow the same setting.
        alt="Desk mode: the date and time in big digits over the fire scene with Squachy talking below; a catch appears as a small card; a squad message drops out from behind the clock with the sender's polaroid; the focus timer starts; the LOG shows real times; the time zone card asks once.">
 </p>
 
-**MODE** on the main screen (or **DESK MODE** in Settings) turns the board
+**MODE** on the main screen turns the board
 into the thing beside the keyboard: your background, the date and the time in big seven-segment
 digits on a plate over it, Squachy underneath doing what he does, and a
 focus timer. **FOCUS 25** starts twenty-five minutes: the scene clears, he
@@ -326,7 +326,8 @@ stands, as a polaroid of the sender's Squachy with his name in the margin,
 the message on a note beside it and the time it came, until you tap it.
 The power saver never dims this screen.
 
-**Settings → DESK MODE** is the desk's own page:
+**Settings → DESK SETTINGS** is the desk's own page (the gear on the desk
+opens it too):
 
 | Row | What it does |
 |---|---|
@@ -624,7 +625,7 @@ from that board's side is ADD TO SQUAD, in person.
 - **CROWD** in the SquachMesh menu: NONE (no visits or crowd on the main
   screen; the squad badge, messages and heads-ups carry on), ONE (the
   ordinary visit, one guest at a time) or UP TO 3 to UP TO 8 (the roaming
-  crowd). The desk has its own copy on the DESK MODE page.
+  crowd). The desk has its own copy on the DESK SETTINGS page.
 - **The inbox.** The SQUAD screen keeps the last few messages beside the
   visitor, newest first; tap one to reply. They live in memory only and are
   gone after a restart.
@@ -681,8 +682,8 @@ None of this finds anything. All of it is why you leave him on.
 | **REPLAY INTRO** | Settings | Runs the first-boot walkthrough again, after asking |
 | **RESET STATS** | Settings → SYSTEM | Clears every detection total, after asking. Outfits earned by count lock again; ones you found stay yours |
 | **Regulars** | Automatic | A device seen on three different days gets a name, on its LOG row and when he greets it |
-| **TERMINAL MODE** | Settings | Swaps Squachy and the pets for a desktop of windows: a LOG you can sort by time, kind, device or signal (tap a heading, tap again to flip), the AIR graph, COUNTS by kind and the LATEST catch. Tap a picked line again, or LATEST, for WATCH / HUNT / INFO / IGNORE. For when you just want a detector (it used to be BORING MODE) |
-| **DESK MODE** | Settings, or DESK on the main screen | The clock, [above](#desk-mode) |
+| **TERMINAL MODE** | MODE on the main screen (Settings on the StickS3) | Swaps Squachy and the pets for a desktop of windows: a LOG you can sort by time, kind, device or signal (tap a heading, tap again to flip), the AIR graph, COUNTS by kind and the LATEST catch. Tap a picked line again, or LATEST, for WATCH / HUNT / INFO / IGNORE. For when you just want a detector (it used to be BORING MODE) |
+| **DESK MODE** | MODE on the main screen; its settings in Settings → DESK SETTINGS | The clock, [above](#desk-mode) |
 
 And he can be thrown: press and hold him until he notices, drag, and let go
 while your finger is still moving. Some of the pets can be thrown too. They

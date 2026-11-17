@@ -75,7 +75,12 @@ static const SettingsRow ALL_ROWS[] = {
     // to ten rows, so the main list carries one row that opens it.
     SettingsRow::WATCH_SETTINGS,
 #endif
-    SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE, SettingsRow::AUTO_QUIET,
+#if defined(STICKS3)
+    // TERMINAL MODE has its own button everywhere else (MODE, bottom right);
+    // the StickS3's is FOB, so its way in stays here.
+    SettingsRow::BORING_MODE,
+#endif
+    SettingsRow::CONFIDENCE, SettingsRow::AUTO_QUIET,
 #if defined(CROWPANEL7)
     // Beside ALERT FILTER and AUTO SNOOZE because it is about alerts: one
     // switch, not a page of knobs like the light. Compiled only for the
@@ -237,10 +242,11 @@ static const SettingsRow SYSTEM_ROWS[] = {
 };
 static const uint8_t SYSTEM_ROWS_N = sizeof(SYSTEM_ROWS) / sizeof(SYSTEM_ROWS[0]);
 
-// The DESK MODE page: everything about the desk in one place, so it can grow.
-// The way in comes first; then how it looks; then who is on it.
+// The DESK SETTINGS page: everything about the desk in one place, so it can
+// grow. How it looks first; then who is on it. (Its OPEN row went when the
+// main screen's MODE button became the way in.)
 static const SettingsRow DESK_ROWS[] = {
-    SettingsRow::DESK_OPEN, SettingsRow::DESK_BACKGROUND,
+    SettingsRow::DESK_BACKGROUND,
     SettingsRow::CLOCK_FONT, SettingsRow::CLOCK_SIZE, SettingsRow::CLOCK_BACKDROP,
     SettingsRow::CLOCK_FORMAT,
     SettingsRow::DESK_ALERT,
@@ -1545,7 +1551,7 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             break;
         }
         case SettingsRow::DESK_MODE:
-            label = "DESK MODE";
+            label = "DESK SETTINGS";
             value = ">";
             break;
         case SettingsRow::RESET_STATS:
@@ -1631,7 +1637,7 @@ if (!Theme::stillBackdrop(t)) switch (Settings::background()) {
     const char* pageTitle = ">> SETTINGS <<";
     if (s_page == SettingsPage::APPEARANCE) pageTitle = ">> APPEARANCE <<";
     else if (s_page == SettingsPage::SYSTEM) pageTitle = ">> SYSTEM <<";
-    else if (s_page == SettingsPage::DESK)   pageTitle = ">> DESK MODE <<";
+    else if (s_page == SettingsPage::DESK)   pageTitle = ">> DESK SETTINGS <<";
     else if (s_page == SettingsPage::WATCH)  pageTitle = ">> WATCH SETTINGS <<";
     else if (s_page == SettingsPage::FONTS)  pageTitle = ">> FONTS <<";
     Theme::drawTitleBar(t, pageTitle);
