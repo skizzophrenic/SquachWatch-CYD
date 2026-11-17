@@ -1,4 +1,4 @@
-# M5Stack Tab5 (ESP32-P4 + ESP32-C6): experimental
+# M5Stack Tab5 (ESP32-P4 + ESP32-C6): BETA
 
 A 5" tablet: an **ESP32-P4** application processor with a 1280×720 MIPI-DSI
 panel and capacitive touch, and an **ESP32-C6** beside it for the radios. It is
@@ -17,12 +17,13 @@ C6.
 | Flash / PSRAM | 4 MB / none | **16 MB / 32 MB** |
 | USB | CH340 | the P4's own USB-serial-JTAG (USB-C) |
 
-**Status: experimental, on the web flasher's test builds only** (squachwatch.com/?lab=1). It runs the whole UI with
-WiFi and Bluetooth detection on one unit. The C6 needs its own firmware written
-first (see [The C6 needs our firmware](#the-c6-needs-our-firmware)), which is
-the main reason it is not on the public list yet. Flashing the Tab5 from the
-browser never touches the C6: on a Tab5 whose C6 still has M5Stack's firmware,
-the app runs with WiFi and Bluetooth off.
+**Status: BETA, on the web flasher** from v1.47.0. It runs the whole UI with
+WiFi and Bluetooth detection. The C6 radio needs our firmware, and the app
+carries it: on the first boot of a Tab5 whose C6 still runs M5Stack's (or any
+other) firmware, a **RADIO UPDATE** screen offers to write it. Tap UPDATE and
+keep the Tab5 plugged in; it takes about 15 seconds, then the Tab5 restarts
+with its radio working. LATER boots without WiFi and Bluetooth and asks again
+next time. See [The C6 needs our firmware](#the-c6-needs-our-firmware).
 
 ## What works and what does not
 
@@ -37,7 +38,8 @@ the app runs with WiFi and Bluetooth off.
 | SD card | Not driven yet |
 | Speaker, battery, power button | Not driven yet |
 | Updates over WiFi or Bluetooth | Not yet. The radio sniffs; it does not connect |
-| Web flasher | Test builds only (`?lab=1`), from the first lab run after 2026-10-19 |
+| Web flasher | Yes, from v1.47.0 (BETA) |
+| Radio update | The app updates the C6 itself on first boot (proven on the bench from Espressif's stock 2.12.13; not yet from M5Stack's factory 1.4.1) |
 
 ## Build and flash
 
@@ -181,9 +183,16 @@ build needs **ESP-Hosted 2.12.13 plus our extension** on the C6. Without the
 extension the P4's hello goes unanswered, and the board runs with WiFi and
 Bluetooth both off and says so on the console.
 
-The C6 is written **from the P4, over the SDIO link**, by a small tool
-flashed to the P4 for the purpose. No wires are needed. How to rebuild it, the
-images, and the patches are in [tools/tab5-c6/README.md](../tools/tab5-c6/README.md).
+The C6 is written **from the P4, over the SDIO link**, by the app itself. The
+firmware carries our C6 image (`tools/tab5-c6/c6_radio.bin`) and, when the
+link comes up but our hello goes unanswered, offers the RADIO UPDATE screen.
+UPDATE streams the image with ESP-Hosted's own slave OTA (the route the
+Arduino core uses to update a co-processor), then restarts; the panel init
+power-cycles the C6, which comes up on the new image. The image is checked
+before a byte is sent, each try is counted first, and after two writes that
+never brought a hello the app stops offering. No wires are needed. How to
+rebuild the image, and the older stand-alone write tool, are in
+[tools/tab5-c6/README.md](../tools/tab5-c6/README.md).
 
 > **There is no rollback on the C6.** An image that boots and then crashes
 > leaves the radio dead until it is rewritten over wires: six pads beside the

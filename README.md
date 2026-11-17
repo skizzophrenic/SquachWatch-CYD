@@ -128,7 +128,7 @@ whole firmware but has had fewer hours on it. The longer answer is in
 | M5Stack StickS3 | BETA | 1.14" screen, landscape, two buttons. A keychain: shake and knock poke Squachy, FOB MODE. [docs/SMALL-BOARDS.md](docs/SMALL-BOARDS.md) |
 | M5Stack Cardputer ADV | BETA | Driven from its keyboard, with hotkeys. Not the original Cardputer. SD card, the XL mod EXT screen, and a Grove GPS for **wardriving**. [docs/SMALL-BOARDS.md](docs/SMALL-BOARDS.md) |
 | LilyGo T-Watch S3 / S3 Plus | BETA | On your wrist, with a battery and a buzz. Listens to **LoRa**; the S3 Plus adds **GPS**. See [On the watch](#on-the-watch) |
-| M5Stack Tab5 | Test builds only (`?lab=1`) | 5" 1280×720 tablet on an ESP32-P4, whose radio is a separate ESP32-C6. WiFi and Bluetooth detection both work, but the C6 needs our firmware written first. No SD, sound or battery yet. [docs/TAB5.md](docs/TAB5.md) |
+| M5Stack Tab5 | BETA | 5" 1280×720 tablet on an ESP32-P4, whose radio is a separate ESP32-C6. WiFi and Bluetooth detection both work. On its first boot it offers a one-time update for the radio chip (about 15 seconds; keep it plugged in). No SD, sound or battery yet. [docs/TAB5.md](docs/TAB5.md) |
 
 Board builds and their confirmed hardware support are listed in
 `platformio.ini`. Compatible variants can share an environment when runtime
