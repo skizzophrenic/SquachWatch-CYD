@@ -31,6 +31,8 @@
 #include "lora_myname.h"
 #include "lora_dm.h"
 #include "lora_mcdm.h"
+#include "emoji_cp.h"
+#include "lora_pb.h"
 #include "squachy.h"
 #include "clock.h"
 #include <Preferences.h>
@@ -588,7 +590,10 @@ static void mcOnText(uint32_t peer, const char* name, const MeshCore::DirectText
     pk.proto = Proto::MESHCORE; pk.ms = now;
     char who[32];
     if (name && name[0]) snprintf(who, sizeof who, "%s", name); else snprintf(who, sizeof who, "%08lx", (unsigned long)peer);
-    Msgs::noteDm(peer, false, 0, 0, who, t.text, pk, now, true, 0, Msgs::meshCoreKey(who, t.text, t.timestamp), Proto::MESHCORE);
+    char shown[sizeof t.text];                     // folded to ASCII for the screen; the key is of the raw text
+    memcpy(shown, t.text, sizeof shown);
+    Pb::asciiFold(shown, true);
+    Msgs::noteDm(peer, false, 0, 0, who, shown, pk, now, true, 0, Msgs::meshCoreKey(who, t.text, t.timestamp), Proto::MESHCORE);
     Serial.printf("[lora] MeshCore DM from %s: %s" "\n", who, t.text);
 }
 static void mcHook(const MeshCore::Decoded& d, uint32_t now) { McDm::onFrame(d, now); }
@@ -1056,6 +1061,10 @@ static void announceIfDue(const Profile& prof, const char* name, int8_t dbm) {
 
 bool sendText(Proto p, const char* name, const char* text, int8_t dbm, int16_t chan) {
     if (!s_present || !text || !*text || !name) return false;
+    // The compose line holds emoji as two-byte tokens (emoji_cp.h); the air gets
+    // UTF-8, the chat keeps the tokens so it draws the sprite.
+    char wire[300];
+    Emoji::expand(text, wire, sizeof wire);
     if (p != Proto::MESHCORE && p != Proto::MESHTASTIC) return false;
     uint8_t idx = 0;
     if (!meshProfile(p, idx)) return false;
@@ -1082,7 +1091,7 @@ bool sendText(Proto p, const char* name, const char* text, int8_t dbm, int16_t c
         snprintf(chName, sizeof chName, "%s", ch.name);
         const uint32_t stamp = Clock::trusted() ? Clock::nowEpoch() : 1790000000u;
         MeshCore::GroupText g;
-        n = MeshCore::sealGroupText(ch, stamp, name, text, f, &g);
+        n = MeshCore::sealGroupText(ch, stamp, name, wire, f, &g);
         if (!n) return false;
         // What a relay's copy decodes to: the name, the text as it fitted, the stamp.
         key = Lora::Msgs::meshCoreKey(g.sender, g.text, g.timestamp);
@@ -1092,7 +1101,7 @@ bool sendText(Proto p, const char* name, const char* text, int8_t dbm, int16_t c
         const Meshtastic::Channel ch = ci == def ? presetChannelKey(prof) : Meshtastic::channel(ci);
         snprintf(chName, sizeof chName, "%s", ch.name);
         uint32_t id = 0;
-        n = meshtasticFrame((uint8_t)Meshtastic::PORT_TEXT, (const uint8_t*)text, strlen(text), f, id, ch);
+        n = meshtasticFrame((uint8_t)Meshtastic::PORT_TEXT, (const uint8_t*)wire, strlen(wire), f, id, ch);
         if (!n) return false;
         key = Lora::Msgs::meshtasticKey(0x5A5A0000u | (uint32_t)(ESP.getEfuseMac() & 0xFFFF), id);
         announceIfDue(prof, name, dbm);
@@ -1181,8 +1190,10 @@ uint32_t sendDm(Proto p, uint32_t to, const char* text) {
     uint32_t id = esp_random() | 1u;
     if (!s_lock || xSemaphoreTake(s_lock, pdMS_TO_TICKS(200)) != pdTRUE) return 0;
     uint8_t st = 0;
-    if (p == Proto::MESHCORE) { id = McDm::send(to, text, id, now); st = (uint8_t)McDm::state(id); }
-    else                      { id = Dm::send(to, text, id, now);   st = (uint8_t)Dm::state(id); }
+    char wire[300];                       // emoji tokens to UTF-8 for the air (see sendText)
+    Emoji::expand(text, wire, sizeof wire);
+    if (p == Proto::MESHCORE) { id = McDm::send(to, wire, id, now); st = (uint8_t)McDm::state(id); }
+    else                      { id = Dm::send(to, wire, id, now);   st = (uint8_t)Dm::state(id); }
     if (id) {
         Packet pk; memset(&pk, 0, sizeof pk);
         pk.proto = p; pk.ms = now;

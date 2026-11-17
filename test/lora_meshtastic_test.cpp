@@ -8,6 +8,7 @@
 // the text that went in -- and with the wrong key it must not.
 #include "lora_meshtastic.h"
 #include "lora_crypto.h"
+#include "lora_pb.h"
 #include "test_util.h"
 #include <cstring>
 #include <cstdio>
@@ -324,6 +325,74 @@ int main() {
            d.data.requestId == 0x0BADF00Du && d.routing.errorReason == 0);
         const size_t wn = encodeData(PORT_NODEINFO, routing, 2, true, 0, data);
         ck("want_response travels in the Data", wn == dn - 5 + 2 && data[wn - 2] == 0x18 && data[wn - 1] == 0x01);
+    }
+
+    suite("Received emoji: a picture, a placeholder, or a '?'");
+    {
+        auto fold = [](const char* in, bool emoji, char* out, size_t cap) {
+            snprintf(out, cap, "%s", in);
+            Pb::asciiFold(out, emoji);
+        };
+        char b[64];
+        const char PH[3] = { (char)Emoji::TOKEN, (char)Emoji::PLACEHOLDER, 0 };
+        fold("hi \xF0\x9F\x91\x8D", true, b, sizeof b);                       // thumbs up: in the set
+        ck("a known emoji is its sprite token", b[3] == (char)Emoji::TOKEN && (uint8_t)b[4] == 0x20 + Emoji::indexOf(0x1F44D));
+        fold("\xF0\x9F\xA6\x96", true, b, sizeof b);                            // T-rex, not in the set
+        ck("an unknown emoji is the placeholder", !strcmp(b, PH) && Emoji::isToken(b) && Emoji::isPlaceholder(b));
+        fold("\xF0\x9F\xA6\x96", false, b, sizeof b);
+        ck("without emoji support it is still '?'", !strcmp(b, "?"));
+        fold("a\xE4\xB8\xAD" "b", true, b, sizeof b);                          // a CJK character
+        ck("CJK stays '?'", !strcmp(b, "a?b"));
+        fold("\xF0\x9F\xA6\x96\xF0\x9F\xA6\x95", true, b, sizeof b);
+        ck("two unknown emoji are two tiles", !strncmp(b, PH, 2) && !strncmp(b + 2, PH, 2) && b[4] == 0);
+        fold("\xF0\x9F\x91\xA8\xE2\x80\x8D\xF0\x9F\xA6\xB0", true, b, sizeof b);   // man + ZWJ + red hair
+        ck("a ZWJ sequence of unknowns is one tile", !strcmp(b, PH));
+        fold("\xF0\x9F\x87\xA9\xF0\x9F\x87\xAA", true, b, sizeof b);      // the German flag
+        ck("a flag is one tile", !strcmp(b, PH));
+        fold("\xF0\x9F\x87\xA9 \xF0\x9F\x87\xAA", true, b, sizeof b);
+        ck("two lone flag letters are not glued across a space", strlen(b) == 5);
+        char w[64];
+        fold("x\xF0\x9F\xA6\x96y", true, b, sizeof b);
+        Emoji::plain(b);
+        ck("plain() makes it '?'", !strcmp(b, "x?y"));
+        fold("x\xF0\x9F\xA6\x96y", true, b, sizeof b);
+        Emoji::expand(b, w, sizeof w);
+        ck("and a reply never puts it on the air as a code point", !strcmp(w, "x?y"));
+    }
+
+    suite("Control characters in received text");
+    {
+        char b[64];
+        snprintf(b, sizeof b, "Getting\nVoter ID\r\n\tcard");
+        Pb::asciiFold(b, true);
+        ck("a newline is a space, a CR is gone", !strcmp(b, "Getting Voter ID  card"));
+        snprintf(b, sizeof b, "a\x01 b");     // a forged emoji-token byte
+        Pb::asciiFold(b, true);
+        ck("a stray 0x01 is a space and cannot open a token", !strcmp(b, "a  b"));
+        snprintf(b, sizeof b, "x\x7F" "y");
+        Pb::asciiFold(b, false);
+        ck("DEL too", !strcmp(b, "x y"));
+    }
+
+    suite("How many bytes a message takes on the air");
+    {
+        const char thumbs[3] = { (char)Emoji::TOKEN, (char)(0x20 + Emoji::indexOf(0x1F44D)), 0 };   // U+1F44D: 4 bytes
+        const char heart[3]  = { (char)Emoji::TOKEN, (char)(0x20 + Emoji::indexOf(0x2764)), 0 };    // U+2764: 3 bytes
+        const char ph[3]     = { (char)Emoji::TOKEN, (char)Emoji::PLACEHOLDER, 0 };
+        ck("a pictograph is four UTF-8 bytes", Emoji::tokenBytes(thumbs) == 4);
+        ck("a symbol is three", Emoji::tokenBytes(heart) == 3);
+        ck("the placeholder goes as one '?'", Emoji::tokenBytes(ph) == 1);
+        char b[64];
+        snprintf(b, sizeof b, "hi %s%s!", thumbs, heart);
+        ck("wireBytes adds them up: 3 + 4 + 3 + 1", Emoji::wireBytes(b) == 11);
+        char w[64];
+        ck("and it is what expand() really writes", Emoji::expand(b, w, sizeof w) == Emoji::wireBytes(b));
+        // A line of 60 thumbs-up is 120 bytes on screen but 240 on the air.
+        char many[200] = { 0 };
+        for (int i = 0; i < 60; i++) { many[2 * i] = thumbs[0]; many[2 * i + 1] = thumbs[1]; }
+        char big[300];
+        ck("60 emoji are 120 bytes in the line and 240 on the air", strlen(many) == 120 && Emoji::wireBytes(many) == 240 &&
+           Emoji::expand(many, big, sizeof big) == 240);
     }
 
     return report();

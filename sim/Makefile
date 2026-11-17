@@ -154,7 +154,7 @@ SIM_SRCS := $(SIM_DIR)/main_sim.cpp $(SIM_DIR)/detection_sim.cpp $(SRC)/touch_ca
 # The chats screen (`lorachat`) and the compose lines' channel chip read the
 # decoders' real channel tables and Lora::Chan's pick, so those come too.
 SIM_SRCS += $(SRC)/ui_lorahome.cpp $(SRC)/ui_lorasettings.cpp $(SIM_DIR)/lora_sim.cpp             $(SRC)/lora_profiles.cpp $(SRC)/lora_crypto.cpp
-SIM_SRCS += $(SRC)/ui_lorachat.cpp $(SRC)/lora_meshtastic.cpp $(SRC)/lora_meshcore.cpp $(SRC)/lora_channels.cpp
+SIM_SRCS += $(SRC)/ui_lorachat.cpp $(SRC)/lora_meshtastic.cpp $(SRC)/lora_meshcore.cpp $(SRC)/lora_channels.cpp $(SRC)/emoji_draw.cpp $(SRC)/emoji_data.cpp
 SIM_FLAGS := -DSQUACH_LORA_FAKE=1
 
 # HUMAN SENSING's screen (the `sensing` screen): the real screen and store from
@@ -286,7 +286,7 @@ WASM_TDECK_OUT  := $(WASM_DIR)/squachsim-tdeck.js
 WASM_TDECK_SRCS := $(UI_SRCS) $(SRC)/main.cpp $(SRC)/cap_touch.cpp $(SRC)/touch_cal.cpp \
              $(SRC)/ui_lorahome.cpp $(SRC)/ui_lorasettings.cpp $(SRC)/ui_lorachat.cpp \
              $(SRC)/lora_profiles.cpp $(SRC)/lora_crypto.cpp $(SRC)/lora_meshtastic.cpp \
-             $(SRC)/lora_meshcore.cpp $(SRC)/lora_channels.cpp \
+             $(SRC)/lora_meshcore.cpp $(SRC)/lora_channels.cpp $(SRC)/emoji_draw.cpp $(SRC)/emoji_data.cpp \
              $(SIM_DIR)/lora_sim.cpp $(SIM_DIR)/gt911_sim.cpp $(SIM_DIR)/main_wasm.cpp $(SIM_DIR)/detection_sim.cpp \
              $(SENSE_SRCS)
 WASM_TDECK_FLAGS := $(filter-out -DSQUACHSIM_BOOT=1,$(WASM_FLAGS)) \
@@ -309,7 +309,7 @@ WASM_TWATCH_OUT  := $(WASM_DIR)/squachsim-twatch.js
 WASM_TWATCH_SRCS := $(UI_SRCS) $(SRC)/main.cpp $(SRC)/cap_touch.cpp $(SRC)/touch_cal.cpp \
              $(SRC)/ui_lorahome.cpp $(SRC)/ui_lorasettings.cpp $(SRC)/ui_lorachat.cpp \
              $(SRC)/lora_profiles.cpp $(SRC)/lora_crypto.cpp $(SRC)/lora_meshtastic.cpp \
-             $(SRC)/lora_meshcore.cpp $(SRC)/lora_channels.cpp \
+             $(SRC)/lora_meshcore.cpp $(SRC)/lora_channels.cpp $(SRC)/emoji_draw.cpp $(SRC)/emoji_data.cpp \
              $(SRC)/wardrive.cpp $(SIM_DIR)/lora_sim.cpp $(SIM_DIR)/main_wasm.cpp $(SIM_DIR)/detection_sim.cpp \
              $(SENSE_SRCS)
 WASM_TWATCH_FLAGS := $(filter-out -DSQUACHSIM_BOOT=1,$(WASM_FLAGS)) \
