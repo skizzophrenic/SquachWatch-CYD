@@ -64,6 +64,8 @@ static BaseType_t xQueueReceive(QueueHandle_t q, void *item, int to) { (void)to;
 static void (*g_taskfn)(void *);
 static BaseType_t xTaskCreate(void (*fn)(void *), const char *nm, int st, void *arg, int pr, TaskHandle_t *h) { (void)nm; (void)st; (void)arg; (void)pr; (void)h; g_taskfn = fn; return pdTRUE; }
 /* The extension itself; the test turns its task loop by hand (sniff_once). */
+/* The sensing extension (the sensing project's sense_c6.cpp) is not here: never on. */
+bool squach_sense_on(void) { return false; }
 #include "../squach_sniff.c"
 
 /* ---- helpers ----------------------------------------------------------------- */
