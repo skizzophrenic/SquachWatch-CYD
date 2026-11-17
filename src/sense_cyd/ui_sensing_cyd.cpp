@@ -23,6 +23,9 @@
 #include "settings.h"
 #include "theme.h"
 #include "squachy.h"
+#if SENSE_RICH
+#include "sense_vitals.h"
+#endif
 #include <Arduino.h>
 #include <math.h>
 #include <stdio.h>
@@ -35,6 +38,9 @@ const uint32_t HOLD_MS     = 15000;   // the engine's PRESENCE hold
 const int      STRIP_SPAN  = 300;     // 30 s at 10 statuses a second
 
 uint32_t s_enterMs = 0, s_lastMs = 0;
+#if SENSE_RICH
+uint8_t s_page = 0;   // 0 SENSING, 1 SCOPE, 2 SNEAK, 3 VITALS
+#endif
 const char* s_lastWord = nullptr;
 uint32_t s_wordAt = 0;
 
@@ -522,7 +528,14 @@ void banner(TFT_eSPI& t, uint32_t now) {
 }
 
 void buttons(TFT_eSPI& t) {
+#if SENSE_RICH
+    static const char* const PAGES[4][3] = {
+        { "[ BACK ]", "[ RECAL ]", "[ OFF ]" }, { "[ BACK ]", "[ RECAL ]", "[ OFF ]" },
+        { "[ BACK ]", "[ START RUN ]", "[ LEVEL ]" }, { "[ BACK ]", "[ NEW SESSION ]", "[ OFF ]" } };
+    const char* const* LB = PAGES[s_page & 3];
+#else
     static const char* const LB[3] = { "[ BACK ]", "[ RECAL ]", "[ OFF ]" };
+#endif
     if (!s_L->btOn) {   // no touch screen: what the keys do, under the banner
         const int y = s_L->bnY + s_L->bnH + 1;
         if (y + 8 <= t.height()) textT(t, t.width() / 2, y, "PRESS: RECAL   HOME: LEAVE", mixc(Theme::BG, Theme::WHITE, 120), 1, 1);
@@ -532,6 +545,19 @@ void buttons(TFT_eSPI& t) {
     for (int k = 0; k < 3; k++) Theme::drawButton(t, g.x[k], g.y, g.w, g.h, LB[k], false, s_L->btLabel);
 }
 
+#if SENSE_RICH
+#include "ui_sensing_more.inc"
+
+// The four page dots, in the title bar between the readings and the dBm.
+int dotsX(int W) { return (192 + (W - 74)) / 2 - 15; }
+void pageDots(TFT_eSPI& t) {
+    const int x0 = dotsX(t.width());
+    for (int k = 0; k < 4; k++) {
+        if (k == s_page) t.fillCircle(x0 + k * 10, 9, 3, Theme::VAPOR_PINK);
+        else t.fillCircle(x0 + k * 10, 9, 2, mixc(Theme::BG, Theme::VAPOR_PURPLE, 150));
+    }
+}
+#endif
 }  // namespace
 
 void uiSensingInit(TFT_eSPI& t) {
@@ -554,6 +580,20 @@ void uiSensingTick(TFT_eSPI& t, uint32_t now, bool advance) {
         buttons(t);
         return;
     }
+#if SENSE_RICH
+    // The chest signal runs only while VITALS is showing (~116 KB of PSRAM).
+    senseCydVitals(s_page == 3);
+    if (s_page) {
+        if (s_page == 1) scopeScreen(t, now);
+        else if (s_page == 2) sneakScreen(t, now);
+        else vitalsScreen(t, now);
+        Theme::drawTitleBar(t, ">> HUMAN SENSING <<");
+        statusLine(t, now);
+        pageDots(t);
+        buttons(t);
+        return;
+    }
+#endif
     backdrop(t, now);
     spectrum(t);
     tileRow(t, now);
@@ -561,13 +601,29 @@ void uiSensingTick(TFT_eSPI& t, uint32_t now, bool advance) {
     banner(t, now);
     Theme::drawTitleBar(t, ">> HUMAN SENSING <<");
     statusLine(t, now);
+#if SENSE_RICH
+    pageDots(t);
+#endif
     buttons(t);
 }
 
 SensingTap uiSensingTap(int x, int y, int screenW, int screenH, uint32_t now) {
-    (void)now;
     s_L = &layFor(screenW, screenH);
     const Bar g = barGeom(screenW, screenH);
+#if SENSE_RICH
+    // The page dots: a tap on them turns the page (left half back, right half on).
+    {
+        const int x0 = dotsX(screenW);
+        if (y < 20 && x >= x0 - 10 && x <= x0 + 40) { uiSensingSwipe(x < x0 + 15 ? -1 : 1); return SensingTap::NONE; }
+    }
+    if (s_L->btOn && y >= g.y - 2 && y <= g.y + g.h + 4 && s_page >= 2) {
+        // SNEAK's START RUN and LEVEL, VITALS' NEW SESSION: this screen's own.
+        for (int i = 1; i < 3; i++) if (x >= g.x[i] && x <= g.x[i] + g.w) {
+            if (s_page == 2) { if (i == 1) sneakStart(now); else sneakLevel(); return SensingTap::NONE; }
+            if (i == 1) { Vitals::newSession(now); return SensingTap::NONE; }
+        }
+    }
+#endif
     if (s_L->btOn && y >= g.y - 2 && y <= g.y + g.h + 4) {
         for (int i = 0; i < 3; i++) if (x >= g.x[i] && x <= g.x[i] + g.w) {
             if (i == 0) return SensingTap::BACK;
@@ -584,6 +640,30 @@ SensingTap uiSensingTap(int x, int y, int screenW, int screenH, uint32_t now) {
     }
     return SensingTap::NONE;
 }
+#if SENSE_RICH
+void uiSensingSwipe(int dir) {
+    s_page = (uint8_t)((s_page + 4 + (dir < 0 ? -1 : 1)) % 4);
+    s_lastWord = nullptr;
+}
+uint8_t uiSensingPage() { return s_page; }
+bool uiSensingKey(char c, uint32_t now) {
+    if (c == ',' || c == '<') { uiSensingSwipe(-1); return true; }
+    if (c == '.' || c == '>') { uiSensingSwipe(1); return true; }
+    if (s_page == 2 && (c == '\n' || c == '\r' || c == ' ')) { sneakStart(now); return true; }
+    if (s_page == 2 && (c == 'l' || c == 'L')) { sneakLevel(); return true; }
+    if (s_page == 3 && (c == 'n' || c == 'N')) { Vitals::newSession(now); return true; }
+    return false;
+}
+uint8_t uiSensingStops(int screenW, int screenH, int16_t* xs, int16_t* ys, uint8_t cap) {
+    s_L = &layFor(screenW, screenH);
+    uint8_t n = 0;
+    const int x0 = dotsX(screenW);
+    if (n < cap) { xs[n] = (int16_t)(x0 + 25); ys[n] = 9; n++; }   // the dots: on to the next screen
+    const Bar g = barGeom(screenW, screenH);
+    for (int i = 0; i < 3 && n < cap; i++) { xs[n] = (int16_t)(g.x[i] + g.w / 2); ys[n] = (int16_t)(g.y + g.h / 2); n++; }
+    return n;
+}
+#endif
 void uiSensingBannerStop(int screenW, int screenH, int16_t& x, int16_t& y) {
     s_L = &layFor(screenW, screenH);
     x = (int16_t)(s_L->bnX + s_L->bnW / 2);

@@ -1964,10 +1964,18 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         // One stop, the banner: a press there re-calibrates (or, with no
         // network saved, opens WIFI NETWORKS). HOME leaves, as from anywhere,
         // and hands the radio back to the detector.
+#if SENSE_RICH
+        // The page dots and the three buttons (touch boards: the T-Deck).
+        int16_t xs[4], ys[4];
+        const uint8_t k = uiSensingStops(w, h, xs, ys, 4);
+        for (uint8_t i = 0; i < k; i++) add(xs[i], ys[i]);
+        return n;
+#else
         int16_t bx, by;
         uiSensingBannerStop(w, h, bx, by);
         add(bx, by);
         return n;
+#endif
     }
 #endif
     add(w / 2, h - 12);                 // BACK, pinned to the bottom edge
@@ -2812,6 +2820,10 @@ static void tdeckKey(char c, uint32_t now) {
     // re-calibrates, O is OFF (back to the detector). The screen's own
     // buttons still work by touch.
     else if (state == AppState::SENSING) {
+#if SENSE_RICH
+        if (uiSensingKey(c, now)) {}   // , . pages; ENTER/L on SNEAK; N on VITALS
+        else
+#endif
         if (c == '\b') enterSettings();
         else if (c == 'r' || c == 'R') {
             senseCydCommand("cal");
@@ -11776,10 +11788,17 @@ void loop() {
             drawTwoBand([&](TFT_eSPI& t, bool advance) { uiSensingTick(t, now, advance); });
             // A tap acts on release, where the finger went down.
             static bool sGesture = false;
-            static int  sDownX = 0, sDownY = 0;
-            if (touchJustDown) { sGesture = true; sDownX = tp.x; sDownY = tp.y; }
+            static int  sDownX = 0, sDownY = 0, sLastX = 0, sLastY = 0;
+            if (touchJustDown) { sGesture = true; sDownX = sLastX = tp.x; sDownY = sLastY = tp.y; }
+            if (tp.valid) { sLastX = tp.x; sLastY = tp.y; }
             if (touchJustUp && sGesture && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 sGesture = false;
+#if SENSE_RICH
+                // A sideways drag of 60 px or more is a swipe to the next or
+                // previous screen; anything else is a tap where it went down.
+                const int sdx = sLastX - sDownX, sdy = sLastY - sDownY;
+                if (sdx * sdx > 60 * 60 && sdx * sdx > 2 * sdy * sdy) { uiSensingSwipe(sdx < 0 ? 1 : -1); lastTouch = now; break; }
+#endif
                 const SensingTap tap = uiSensingTap(sDownX, sDownY, tft.width(), tft.height(), now);
                 if (tap != SensingTap::NONE) lastTouch = now;
                 if (tap == SensingTap::BACK) {

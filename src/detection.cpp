@@ -790,6 +790,8 @@ static BleScanCallbacks g_bleScanCallbacks;
 //
 // 802.11 frame header: bytes 0..23 contain frame control, duration,
 // addr1 (DA, offset 4), addr2 (SA, offset 10), addr3 (BSSID, offset 16).
+volatile bool g_sniffMuted = false;
+
 static void onWifiFrame(const uint8_t* frame, uint16_t sigLen, uint16_t avail, int8_t rssi, uint8_t channel) {
     s_wifiRaw++;
     if (!g_engine) return;
@@ -1075,6 +1077,7 @@ bool DetectionEngine::init() {
     filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA;
     esp_wifi_set_promiscuous_filter(&filter);
     esp_wifi_set_promiscuous_rx_cb([](void* buf, wifi_promiscuous_pkt_type_t) {
+        if (g_sniffMuted) return;   // HUMAN SENSING has the channel (include/detection.h)
         const wifi_promiscuous_pkt_t* pkt = (const wifi_promiscuous_pkt_t*)buf;
         onWifiFrame(pkt->payload, pkt->rx_ctrl.sig_len, pkt->rx_ctrl.sig_len, pkt->rx_ctrl.rssi, pkt->rx_ctrl.channel);
     });

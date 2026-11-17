@@ -16,6 +16,16 @@
 #pragma once
 #include <stdint.h>
 
+// The boards with the extra sensing screens (SCOPE, SNEAK, VITALS): the S3s
+// with PSRAM and a screen big enough, 480x320 or 320x240. Everywhere else
+// HUMAN SENSING is the one screen, exactly as it was. SENSE_RICH_SIM is the
+// emulator's render tool.
+#if defined(SENSE_CYD_APP) && (defined(TDECK_PLUS) || defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(SENSE_RICH_SIM))
+#define SENSE_RICH 1
+#else
+#define SENSE_RICH 0
+#endif
+
 #if defined(SENSE_CYD_APP)
 // The state of the room, as the motion model calls it.
 #define SENSE_STATE_CAL      0   // calibrating: hold still
@@ -64,6 +74,11 @@ extern volatile uint8_t g_senseConsole;
 
 // SPECTRUM.EXE: rows of 32 bins (0-2.42 Hz), 0-255 over the room's recent level,
 // row 0 the newest, three a second; the peak bin standing 8 dB clear, or -1.
+#if SENSE_RICH
+// VITALS: the chest signal (src/sense_cyd/csi_vitals.*) runs only while the
+// VITALS screen asks for it; its frames go to Vitals (include/sense_vitals.h).
+void        senseCydVitals(bool on);
+#endif
 int            senseCydSpecRows();
 int            senseCydSpecRowsMax();   // the most rows it keeps (108, ~11 s)
 const uint8_t* senseCydSpecRow(int r);

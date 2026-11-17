@@ -156,6 +156,11 @@ emitter_sync_test_SRCS       := $(SRC)/signatures.cpp $(EMIT)/src/emit_shots.cpp
 emitter_sync_test_FLAGS      := -I$(EMIT)/include
 endif
 
+# HUMAN SENSING's chest signal (VITALS, the S3 boards) through its 8-bit input.
+TESTS += chestsig_test
+chestsig_test_SRCS  := $(SRC)/sense_cyd/csi_vitals.cpp
+chestsig_test_FLAGS := -DSENSE_MODEL_HOST=1
+
 .PHONY: all clean
 all: $(addprefix run-,$(TESTS))
 

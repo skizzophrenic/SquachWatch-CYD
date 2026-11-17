@@ -22,8 +22,10 @@ struct Hist {
 static Hist*       s_h = nullptr;
 static uint16_t    s_head = 0, s_count = 0;
 
-static Router      s_router = {};
-static uint32_t    s_routerAt = 0;
+// Slot 0 is the router; 1-3 are SCOPE's other paths (SENSE_RICH only fills them).
+static Router      s_path[PATHS] = {};
+static uint32_t    s_pathAt[PATHS] = {};
+static Router&     s_router = s_path[0];
 
 static uint8_t     s_evHead = 0, s_evCount = 0;
 static bool        s_inMotion = false;
@@ -33,14 +35,15 @@ void begin() {
     s_heard = false; s_motionSeen = false; s_inMotion = false;
     s_head = s_count = 0; s_evHead = s_evCount = 0; s_count_total = 0;
     memset(&s_last, 0, sizeof s_last);
-    memset(&s_router, 0, sizeof s_router);
-    s_routerAt = 0;
+    memset(s_path, 0, sizeof s_path);
+    memset(s_pathAt, 0, sizeof s_pathAt);
 }
 void end() { s_heard = false; s_head = s_count = 0; s_evHead = s_evCount = 0; free(s_h); s_h = nullptr; }
 
 void tick(uint32_t now) {
     // Signed: the engine stamps with a millis() read after the loop read `now`.
-    if (s_router.live && (int32_t)(now - s_routerAt) > 5000) s_router.live = false;
+    for (uint8_t k = 0; k < PATHS; k++)
+        if (s_path[k].live && (int32_t)(now - s_pathAt[k]) > 5000) s_path[k].live = false;
 }
 
 void status(const SenseReport& r, uint32_t now) {
@@ -67,10 +70,15 @@ void status(const SenseReport& r, uint32_t now) {
     s_inMotion = m;
 }
 
+void path(uint8_t idx, uint16_t tag, int8_t rssi, uint16_t rate, uint8_t score, uint8_t cal, uint8_t rel, uint32_t now) {
+    if (idx >= PATHS) return;
+    Router& p = s_path[idx];
+    p.live = true; p.tag = tag; p.rssi = rssi; p.rate = rate;
+    p.score = score; p.cal = cal; p.rel = rel;
+    s_pathAt[idx] = now;
+}
 void router(uint16_t tag, int8_t rssi, uint16_t rate, uint8_t score, uint8_t cal, uint8_t rel, uint32_t now) {
-    s_router.live = true; s_router.tag = tag; s_router.rssi = rssi; s_router.rate = rate;
-    s_router.score = score; s_router.cal = cal; s_router.rel = rel;
-    s_routerAt = now;
+    path(0, tag, rssi, rate, score, cal, rel, now);
 }
 
 // Signed, as in tick(): a status can be a few ms "newer" than the caller's now,
@@ -88,6 +96,8 @@ uint8_t stateAt(uint16_t i) { return s_h ? s_h->state[slot(i)] : 0; }
 bool presenceAt(uint16_t i) { if (!s_h) return false; const uint16_t k = slot(i); return (s_h->pres[k >> 3] >> (k & 7)) & 1; }
 
 const Router& router() { return s_router; }
+const Router& path(uint8_t idx) { return s_path[idx < PATHS ? idx : 0]; }
+uint8_t livePaths() { uint8_t n = 0; for (uint8_t k = 0; k < PATHS; k++) if (s_path[k].live) n++; return n; }
 
 uint8_t events(Event* out, uint8_t cap) {
     uint8_t n = 0;

@@ -20,6 +20,10 @@ void tick(uint32_t now);      // ages the router out after 5 s without news
 // From the engine.
 void status(const SenseReport& r, uint32_t now);
 void router(uint16_t tag, int8_t rssi, uint16_t rate, uint8_t score, uint8_t cal, uint8_t rel, uint32_t now);
+// SCOPE's other paths (SENSE_RICH): slot 1-3, the busiest other transmitters
+// the radio hears on the router's channel. Slot 0 is the router.
+void path(uint8_t idx, uint16_t tag, int8_t rssi, uint16_t rate, uint8_t score, uint8_t cal, uint8_t rel, uint32_t now);
+static const uint8_t PATHS = 4;
 
 // A status within the last two seconds: the engine is running.
 bool fresh(uint32_t now);
@@ -44,6 +48,8 @@ struct Router {
     uint8_t  score, cal, rel;
 };
 const Router& router();
+const Router& path(uint8_t idx);   // idx < PATHS; 0 is router()
+uint8_t livePaths();
 
 // Movements: a MOTION stretch, newest first.
 struct Event { uint32_t at; uint32_t ms; bool open; };
