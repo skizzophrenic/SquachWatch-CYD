@@ -339,8 +339,10 @@ static const char* const ONBOARD_LINES[] = {
     "All zeroes down there means nothing's around. It flips to a big flashing ALERT the second something matches.",
 #if defined(STICKS3)
     "Down there: SCAN rescans, LOG shows history, FOB is keychain mode.",
+    "Just want the data? Settings > TERMINAL MODE swaps me for a dashboard. No hard feelings.",
 #else
-    "Down there: SCAN rescans, LOG shows history, MODE: clock, then terminal.",
+    "Down there: SCAN rescans, LOG shows history, MODE switches how this looks.",
+    "MODE once: a desk clock. Twice: TERMINAL MODE, all data, no me. Three times and I'm back.",
 #endif
 #if defined(STICKS3)
     "Front button steps, hold it to pick. Side button goes back, hold it to go home.",
