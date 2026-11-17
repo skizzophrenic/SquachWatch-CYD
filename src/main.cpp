@@ -9379,6 +9379,8 @@ void loop() {
                         Theme::showToast("NORMAL MODE", "Squachy's back", Theme::CYAN);
                     } else {
                         enterDesk();
+                        if (state == AppState::DESK)
+                            Theme::showToast("DESK MODE", "MODE again for terminal", Theme::AMBER);
                     }
 #endif
                 }
