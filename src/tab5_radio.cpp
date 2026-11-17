@@ -251,7 +251,15 @@ bool begin() {
     // refused by the host library before it ever leaves.
     s_helloAt = 0;
     const uint8_t q = '?';
-    if (!send(CMD_HELLO, &q, 1)) { s_up = false; return false; }
+    if (!send(CMD_HELLO, &q, 1)) {
+        // Refused before it left (ESP_ERR_NOT_FOUND): a slave built without
+        // custom messages at all, which is what Espressif's stock image and
+        // M5Stack's are. The link itself is up, so the radio update can run.
+        Serial.println("[c6] the C6 has no custom messages: a stock ESP-Hosted image, not the sniff one");
+        s_needsUpdate = true;
+        s_up = false;
+        return false;
+    }
     const uint32_t t0 = millis();
     while (!s_helloAt && millis() - t0 < 2000) delay(10);
     if (!s_helloAt) {
