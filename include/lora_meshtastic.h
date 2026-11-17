@@ -102,6 +102,24 @@ uint16_t buildFrame(const Channel& c, uint32_t from, uint32_t id, uint8_t hops, 
 // when asked, request_id when non-zero} into `out` (room for 212); returns
 // its length. buildChannelFrame: that Data under the channel's key, to `to`,
 // want_ack as asked -- an ACK, or a NodeInfo sent to one node.
+// What this board broadcasts about itself. `out` needs room for 40 (position)
+// or 56 (telemetry). The position keeps `precisionBits` of the coordinates
+// (32 = all of them; 0 sends nothing and returns 0).
+size_t   encodePosition(int32_t lat7, int32_t lon7, int32_t altM, bool hasAlt, uint32_t epoch, uint8_t sats,
+                        uint8_t precisionBits, uint8_t* out);
+// NeighborInfo (port 71): who we are, how often we say so, and the nodes heard
+// directly with the SNR each was heard at. At most 10 neighbors (the firmware's
+// own cap); `out` needs room for 160. Returns the length.
+size_t   encodeNeighborInfo(uint32_t self, uint32_t lastSentBy, uint32_t intervalSecs,
+                            const uint32_t* ids, const float* snr, uint8_t n, uint8_t* out);
+size_t   encodeDeviceTelemetry(uint32_t epoch, uint8_t batteryPct, float volts, float chanUtil, float airUtilTx,
+                               uint32_t uptimeSecs, uint8_t* out);
+// OK to MQTT, the official client's flag: every Data this file encodes carries
+// the bitfield's bit 0 while it is on, which is how a stock node's gateway
+// knows it may uplink a packet to MQTT (Discord bridges, Meshview and so on).
+// Off by default, as in the official client. A flag only: this board has no
+// MQTT client of its own.
+void     setOkToMqtt(bool on);
 size_t   encodeData(uint8_t port, const uint8_t* payload, size_t plen, bool wantResponse, uint32_t requestId,
                     uint8_t* out);
 uint16_t buildChannelFrame(const Channel& c, uint32_t from, uint32_t to, uint32_t id, uint8_t hops, bool wantAck,

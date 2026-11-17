@@ -459,6 +459,11 @@ int main() {
         Lora::Chan::save();
     }
 
+    suite("The public channel");
+    {
+        ck("the stock primary channel, on the published key, is public", Lora::Chan::primaryIsPublic());
+    }
+
     suite("A Meshtastic channel with no key at all");
     {
         // Ham mode: plaintext, so the hash is the name's alone and there are
