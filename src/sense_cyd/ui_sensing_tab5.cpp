@@ -596,11 +596,9 @@ void banner(TFT_eSPI& t, uint32_t now) {
                   : moving ? VP::POINT                      // pointing at the trace, normal face
                   : s.presence ? VP::CROUCH
                   : (since == UINT32_MAX || since > 120000) ? VP::SLEEPY : VP::NONE;
-    // He pops up out of the band, far enough in from the right that he never
-    // covers the strength readout at the end of MOTION.EXE's line.
-#if !defined(TAB5)
-#endif
-    if (P(10)) squachy(t, -1, pose, 520, by + bh - 3, 0.8f, now);
+    // He stands inside the band, at its right end: taller, he poked up into
+    // MOTION.EXE's graph above it (2026-11-17).
+    if (P(10)) squachy(t, -1, pose, 604, by + bh - 3, 0.55f, now);
     else squachy(t, 7, pose, 604, by + bh - 2, 0.6f, now);
 }
 
@@ -1067,18 +1065,22 @@ void drawScope(TFT_eSPI& t, uint32_t now, uint32_t dt) {
     const uint32_t quiet = Tab5Sense::sinceMotion(now);
     const VP pose = !fresh ? VP::SAD : (jump ? VP::STARTLED : (freshK >= 0 ? VP::POINT : (hotK >= 0 ? VP::CHEER
                   : (quiet == UINT32_MAX || quiet > 120000) ? VP::SLEEPY : VP::NONE)));
+    // Lines of 17 characters at most: his bubble is right-aligned on the
+    // screen, and a longer one reached over the radar's outer ring (2026-11-17).
     char say[40] = "";
     if (P(14)) {
         if (!fresh) snprintf(say, sizeof say, "Lost the signal!");
-        else if (cal) snprintf(say, sizeof say, "Shh... calibrating.");
-        else if (FX(FX_VOICE) && freshK >= 0) snprintf(say, sizeof say, "On %s's path!", pathName((uint8_t)freshK));
-        else if (FX(FX_VOICE) && hotK >= 0) snprintf(say, sizeof say, "Watching %s", pathName((uint8_t)hotK));
-        else if (FX(FX_VOICE) && s.presence) snprintf(say, sizeof say, "Someone's still here.");
+        else if (cal) snprintf(say, sizeof say, "Shh, calibrating");
+        else if (FX(FX_VOICE) && freshK >= 0) snprintf(say, sizeof say, "%s's path!", pathName((uint8_t)freshK));
+        else if (FX(FX_VOICE) && hotK >= 0) snprintf(say, sizeof say, "Eyes on %s", pathName((uint8_t)hotK));
+        else if (FX(FX_VOICE) && s.presence) snprintf(say, sizeof say, "Someone's here.");
         else if (freshK >= 0) snprintf(say, sizeof say, "%s moved!", pathName((uint8_t)freshK));
-        else if (hotK >= 0) snprintf(say, sizeof say, "Tracking %s", pathName((uint8_t)hotK));
-        else if (Tab5Sense::sinceMotion(now) > 60000) snprintf(say, sizeof say, "War never changes.");
+        else if (hotK >= 0) snprintf(say, sizeof say, "Eyes on %s", pathName((uint8_t)hotK));
+        else if (Tab5Sense::sinceMotion(now) > 60000) snprintf(say, sizeof say, "All quiet.");
     }
-    squachy(t, -1, pose, 552, 252, 1.55f, now, say[0] ? say : nullptr);
+    // Feet clear of the PATH ACTIVITY panel below him (drawn after him, it
+    // cut his feet off at 252).
+    squachy(t, -1, pose, 552, 238, 1.55f, now, say[0] ? say : nullptr);
     const uint16_t panel = mixc(Theme::BG, Theme::PURPLE, 34);
     t.fillRect(470, 244, 162, 86, panel); t.drawRect(470, 244, 162, 86, Theme::PURPLE);
     if (FX(FX_CONSOLE)) {
@@ -1326,7 +1328,9 @@ void drawSneak(TFT_eSPI& t, uint32_t now) {
     else if (s_sn.phase == S_CLEAN) prog = 1.0f;
     else if (s_sn.phase == S_CAUGHT) prog = s_sn.caughtProg;
     const VP pose = s_sn.phase == S_CAUGHT ? VP::STARTLED : (s_sn.phase == S_CLEAN ? VP::CHEER : (s_sn.phase == S_RUN || s_sn.phase == S_COUNT ? VP::CROUCH : VP::NONE));
-    const int sqx = 150 + (int)(prog * (P(19) ? 320 : 340)) + ox;
+    // His run ends short of the HIGH SCORES panel (x 487 on): at 470 his
+    // right half stood in it.
+    const int sqx = 150 + (int)(prog * 250) + ox;
     int bob = 0;
     if (P(14) && s_sn.phase == S_RUN) bob = (int)(3 * fabsf(sinf(now / 160.0f)));
     if (P(14)) t.fillEllipse(sqx, 306 + oy, 34, 6, mixc(Theme::BG, Theme::BLACK, 200));
@@ -1476,27 +1480,6 @@ void heartIcon(TFT_eSPI& t, int x, int y, int s, uint16_t c) {
     t.fillCircle(x - s / 2, y - s / 4, s / 2 + 1, c); t.fillCircle(x + s / 2, y - s / 4, s / 2 + 1, c);
     t.fillTriangle(x - s - 1, y - s / 6, x + s + 1, y - s / 6, x, y + s, c);
 }
-// Dr. Squach: Squachy's head in goggles over a lab coat collar.
-void drSquach(TFT_eSPI& t, int x, int y, float s, uint32_t now, bool talking) {
-    auto S = [&](float v) { return (int)lroundf(v * s); };
-    const uint16_t brown = 0x8AA4, tan = 0xE52B, dark = 0x3920;
-    t.fillTriangle(x - S(40), y + S(60), x - S(30), y + S(30), x + S(30), y + S(30), Theme::WHITE);
-    t.fillTriangle(x - S(40), y + S(60), x + S(30), y + S(30), x + S(40), y + S(60), Theme::WHITE);
-    t.fillTriangle(x - S(10), y + S(30), x, y + S(52), x + S(10), y + S(30), brown);
-    t.fillRect(x + S(18), y + S(38), S(10), S(3) + 1, Theme::CYAN);
-    for (int k = -3; k <= 3; k++) t.fillTriangle(x + S(k * 8 - 5), y - S(26), x + S(k * 9), y - S(42 + (k & 1 ? 5 : 0)), x + S(k * 8 + 5), y - S(26), brown);
-    t.fillCircle(x, y, S(32), brown);
-    t.fillEllipse(x, y + S(7), S(22), S(19), tan);
-    t.fillRect(x - S(30), y - S(10), S(60), S(6), 0x4208);
-    for (int g = -1; g <= 1; g += 2) {
-        t.fillCircle(x + g * S(12), y - S(6), S(11), 0x2104);
-        t.fillCircle(x + g * S(12), y - S(6), S(8), Theme::CYAN);
-        t.fillRect(x + g * S(12) - S(4), y - S(10), S(3) + 1, S(3) + 1, Theme::WHITE);
-    }
-    if (talking && (now / 140) % 2) t.fillEllipse(x, y + S(15), S(6), S(5), dark);
-    else arc(t, x, y + S(10), S(9), 0.3f, 2.84f, dark, 2);
-}
-
 void drawVitals(TFT_eSPI& t, uint32_t now) {
     Vitals::update(now);
     const Vitals::Metrics& m = Vitals::metrics();
@@ -1703,7 +1686,13 @@ void drawVitals(TFT_eSPI& t, uint32_t now) {
     t.setTextFont(2); const int bw = t.textWidth(b) + 14;
     t.fillRect(580 - bw, 305, bw, 24, Theme::BG); t.drawRect(580 - bw, 305, bw, 24, Theme::CYAN);
     f2(t, 587 - bw, 309, b, Theme::CYAN);
-    drSquach(t, 608, 300, 0.5f, now, true);
+    // Squachy himself in the corner (the app drew a goggled "Dr. Squach" head
+    // here; the real one reads better, asked for 2026-11-17).
+    {
+        using VP = Squachy::VisitPose;
+        const VP pose = m.motion ? VP::STARTLED : (lock || clean) ? VP::CHEER : !enough ? VP::NONE : VP::CROUCH;
+        squachy(t, -1, pose, 612, 331, 0.55f, now);
+    }
 }
 
 }  // namespace
