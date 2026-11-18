@@ -65,20 +65,25 @@ void CsiVitals::addSample(const int8_t* bytes, size_t length, bool firstWordInva
   accN_++;
 }
 
-bool CsiVitals::tick(uint32_t now, float& c1, float& c2, uint8_t& n, uint8_t& q) {
-  if (!win_ || !cov_) return false;
+bool CsiVitals::frame(uint32_t now, float* x, int& T, uint8_t& n) {
   if (!started_) { if (!accN_) return false; started_ = true; frameStart_ = now; return false; }
   if (now - frameStart_ < kFrameMs) return false;
   // a stall longer than a frame closes one frame, not a burst of them
   frameStart_ = now - ((now - frameStart_) % kFrameMs);
-  const int T = tones_;
+  T = tones_;
   if (!T) return false;
-  float x[kMaxTones];
   n = (uint8_t)(accN_ > 255 ? 255 : accN_);
   if (accN_) { for (int i = 0; i < T; i++) x[i] = acc_[i] / accN_; memcpy(last_, x, sizeof(float) * T); haveLast_ = true; }
   else if (haveLast_) memcpy(x, last_, sizeof(float) * T);
   else return false;
   memset(acc_, 0, sizeof acc_); accN_ = 0;
+  return true;
+}
+
+bool CsiVitals::tick(uint32_t now, float& c1, float& c2, uint8_t& n, uint8_t& q) {
+  if (!win_ || !cov_) return false;
+  float x[kMaxTones]; int T = 0;
+  if (!frame(now, x, T, n)) return false;
   // slow drift out: ~5 s EMA per tone (a plain mean until it has 100 frames)
   meanN_ = meanN_ < 100 ? meanN_ + 1 : 100;
   const float a = 1.0f / meanN_;

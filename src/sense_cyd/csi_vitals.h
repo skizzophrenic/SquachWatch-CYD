@@ -44,6 +44,10 @@ class CsiVitals {
   // went into it (0 = a gap, the last frame repeated), q how much of the
   // movement the first component explains, 0-100.
   bool tick(uint32_t nowMs, float& c1, float& c2, uint8_t& n, uint8_t& q);
+  // A frame closed elsewhere (the Tab5's C6 averages its readings into one
+  // every 50 ms and sends it): x is T tones' normalised amplitudes. The rest
+  // is tick()'s: drift out, the window, a refit every 2 s, the projections.
+  bool push(const float* x, int T, float& c1, float& c2, uint8_t& q);
   int tones() const { return tones_; }
 
  private:

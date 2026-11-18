@@ -87,6 +87,15 @@ bool CsiVitals::tick(uint32_t now, float& c1, float& c2, uint8_t& n, uint8_t& q)
   else if (haveLast_) memcpy(x, last_, sizeof(float) * T);
   else return false;
   memset(acc_, 0, sizeof acc_); accN_ = 0;
+  return push(x, T, c1, c2, q);
+}
+
+bool CsiVitals::push(const float* x, int T, float& c1, float& c2, uint8_t& q) {
+  if (!win_ || !cov_ || T <= 0 || T > kMaxTones) return false;
+  if (T != tones_) {   // a frame from elsewhere in a new layout: start over
+    if (tones_) { const int keep = T; reset(); tones_ = keep; }
+    else tones_ = T;
+  }
   // slow drift out: ~5 s EMA per tone (a plain mean until it has 100 frames)
   meanN_ = meanN_ < 100 ? meanN_ + 1 : 100;
   const float a = 1.0f / meanN_;

@@ -42,6 +42,11 @@ class CsiVitals {
   // went into it (0 = a gap, the last frame repeated), q how much of the
   // movement the first component explains, 0-100.
   bool tick(uint32_t nowMs, float& c1, float& c2, uint8_t& n, uint8_t& q);
+  // FRAMES mode (`vitals frames`): only the frame, every 50 ms -- each
+  // tone's amplitude, normalised and averaged -- for the tablet to fit
+  // (SquachWatch's Tab5 runs the 20 s fit on its P4). Needs no begin(): no
+  // window here. x has room for kMaxTones.
+  bool frame(uint32_t nowMs, float* x, int& T, uint8_t& n);
   int tones() const { return tones_; }
 
  private:

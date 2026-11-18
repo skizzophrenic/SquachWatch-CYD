@@ -29,8 +29,10 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <new>
 #include "sense_store.h"
 #include "sense_vitals.h"
+#include "csi_vitals.h"
 #include "tab5_radio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -73,6 +75,12 @@ volatile uint32_t s_pingOk = 0, s_pingLost = 0;
 uint32_t s_okAt = 0, s_lostAt = 0;
 esp_ping_handle_t s_ping = nullptr;
 bool     s_vitOn = false;
+// VITALS' chest signal is fitted here, on the P4: the C6 sends a frame every
+// 50 ms (`vitals frames`) and this does the 20 s fit it had no room for
+// beside its Bluetooth controller (10 s there, a weak breathing signal on
+// the bench, 2026-11-17). The window lives in PSRAM.
+CsiVitals* s_cv = nullptr;
+uint32_t   s_cvFrames = 0;
 const uint32_t GIVE_UP_MS = 30000, RETRY_MS = 3000;
 
 void note(const char* fmt, ...) {
@@ -155,7 +163,7 @@ void wentUp(uint32_t now) {
     snprintf(cmd, sizeof cmd, "station %02x:%02x:%02x:%02x:%02x:%02x %u", ap.bssid[0], ap.bssid[1], ap.bssid[2],
              ap.bssid[3], ap.bssid[4], ap.bssid[5], (unsigned)ap.primary);
     Tab5Radio::senseSend(cmd);
-    if (s_vitOn) Tab5Radio::senseSend("vitals on");   // again, so it follows the router
+    if (s_vitOn) Tab5Radio::senseSend("vitals frames");   // again, so it follows the router
     s_join = Join::UP; s_everUp = true; s_reason = 0;
     s_statAt = now; s_okAt = s_pingOk; s_lostAt = s_pingLost;
     note("joined: channel %u rssi %d, %s", (unsigned)ap.primary, (int)ap.rssi, pinging ? "pinging the router every 20 ms" : "THE PING DID NOT START");
@@ -292,6 +300,17 @@ void parse(char* l, uint32_t now) {
     }
 }
 
+// 0x01, n, T, then T x u16 LE (amplitude x 8192): one 50 ms frame from the C6.
+void frameIn(const uint8_t* b, size_t len) {
+    if (!s_cv || !s_vitOn || len < 3) return;
+    const int T = b[2];
+    if (T <= 0 || T > CsiVitals::kMaxTones || len < (size_t)(3 + 2 * T)) return;
+    float x[CsiVitals::kMaxTones];
+    for (int i = 0; i < T; i++) x[i] = (float)(b[3 + 2 * i] | (b[4 + 2 * i] << 8)) / 8192.0f;
+    float c1, c2; uint8_t q;
+    if (s_cv->push(x, T, c1, c2, q)) { s_cvFrames++; Vitals::feed(c1, q); }
+}
+
 }  // namespace
 
 // ---- sense_cyd.h ---------------------------------------------------------------
@@ -318,7 +337,7 @@ void senseCydStart(const char* ssid, const char* pass) {
 
 void senseCydStop() {
     if (!s_running) return;
-    if (s_vitOn) { Tab5Radio::senseSend("vitals off"); Vitals::end(); s_vitOn = false; }
+    if (s_vitOn) { Tab5Radio::senseSend("vitals off"); Vitals::end(); delete s_cv; s_cv = nullptr; s_vitOn = false; }
     Tab5Radio::senseSend("off");
     stopPing();
     if (s_join == Join::JOINING || s_join == Join::UP) esp_wifi_disconnect();
@@ -337,7 +356,10 @@ void senseCydTick() {
     const uint32_t now = millis();
     joinTick(now);
     Line l;
-    for (int k = 0; k < 64 && s_q && xQueueReceive(s_q, &l, 0) == pdTRUE; k++) parse(l.text, now);
+    for (int k = 0; k < 64 && s_q && xQueueReceive(s_q, &l, 0) == pdTRUE; k++) {
+        if ((uint8_t)l.text[0] == 0x01) frameIn((const uint8_t*)l.text, l.len);   // a VITALS frame
+        else parse(l.text, now);
+    }
     SenseStore::tick(now);
 }
 
@@ -352,15 +374,19 @@ uint8_t     senseCydMode()    { return s_mode; }
 
 void senseCydVitals(bool on) {
     if (on && !s_vitOn && s_running && s_linked) {
-        if (!Vitals::begin(millis())) { note("VITALS: no memory"); return; }
-        s_vitOn = true;
-        Tab5Radio::senseSend("vitals on");
-        note("VITALS on: the chest signal is worked out on the radio");
+        if (!s_cv) s_cv = new (std::nothrow) CsiVitals();
+        if (!s_cv || !s_cv->begin() || !Vitals::begin(millis())) {
+            note("VITALS: no memory"); delete s_cv; s_cv = nullptr; Vitals::end(); return;
+        }
+        s_vitOn = true; s_cvFrames = 0;
+        Tab5Radio::senseSend("vitals frames");
+        note("VITALS on: frames from the radio, the 20 s fit on the Tab5");
     } else if (!on && s_vitOn) {
         Tab5Radio::senseSend("vitals off");
         Vitals::end();
+        delete s_cv; s_cv = nullptr;   // the window (PSRAM) goes back
         s_vitOn = false;
-        note("VITALS off");
+        note("VITALS off: %lu frames fitted", (unsigned long)s_cvFrames);
     }
 }
 

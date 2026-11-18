@@ -132,6 +132,7 @@ static uint32_t s_startedMs = 0, s_lastLineMs = 0, s_lastRankMs = 0, s_lastInfoM
 
 // VITALS: park-and-follow only on this radio (no network to ping).
 static bool      s_vitals = false;
+static bool      s_vitFramesOnly = false;   // `vitals frames`: send the frames, the tablet fits
 static CsiVitals* s_vit = nullptr;
 static int       s_vitTarget = -1;
 static uint8_t   s_vitMac[6];
@@ -558,7 +559,7 @@ static void recalibrate() {
 }
 
 static void help() {
-  note("commands (C6): park <chan>|auto | station <bssid> <chan> | off | cal | win <ms> | caltime <ms> | hold <ms> | vitals on|off | info | rates | raw 0|1 | help");
+  note("commands (C6): park <chan>|auto | station <bssid> <chan> | off | cal | win <ms> | caltime <ms> | hold <ms> | vitals on|frames|off | info | rates | raw 0|1 | help");
 }
 
 // The loudest 2.4 GHz access point's channel, by a blocking scan. Sensing
@@ -602,7 +603,33 @@ static void scan(bool pick) {
   }
 }
 
+// FRAMES: each 50 ms frame goes to the tablet as one binary message on the
+// line event -- 0x01, n (readings in it), T (tones), then T x u16 LE of the
+// tone's normalised amplitude x 8192 -- and the tablet runs the fit (its P4
+// has the memory for a full 20 s window and a float unit; here the window
+// had to shrink to 10 s beside the Bluetooth controller, bench 2026-11-17).
+static const uint8_t SENSE_BIN_FRAME = 0x01;
+static void vitalsFramesOn() {
+  if (!s_vit) s_vit = new (std::nothrow) CsiVitals();
+  if (!s_vit) { note("vitals frames: no memory"); s_vitals = false; return; }
+  s_vit->reset(); s_vitals = true; s_vitFramesOnly = true; s_vitTarget = -1; s_vitFrames = 0;
+  note("vitals frames on: %s; the tablet fits", s_havePin ? "from the router" : "from the busiest transmitter");
+}
+static void sendFrame(const float* x, int T, uint8_t n) {
+  uint8_t b[3 + 2 * CsiVitals::kMaxTones];
+  b[0] = SENSE_BIN_FRAME; b[1] = n; b[2] = (uint8_t)T;
+  for (int i = 0; i < T; i++) {
+    float v = x[i] * 8192.0f; if (v < 0) v = 0; if (v > 65535.0f) v = 65535.0f;
+    const uint16_t u = (uint16_t)lroundf(v);
+    b[3 + 2 * i] = (uint8_t)(u & 0xFF); b[4 + 2 * i] = (uint8_t)(u >> 8);
+  }
+  const esp_err_t e = esp_hosted_send_custom_data(SENSE_EVT_LINE, b, (size_t)(3 + 2 * T));
+  if (e != ESP_OK) { s_txFail++; s_txErr = (int)e; }
+}
+
 static void vitalsOn() {
+  s_vitFramesOnly = false;
+  if (s_vit && !s_vit->window()) { delete s_vit; s_vit = nullptr; }   // a frames-only one has no window
   if (!s_vit) s_vit = new (std::nothrow) CsiVitals();
   if (!s_vit || !s_vit->begin()) {
     note("vitals: no memory for the chest signal on this radio (heap %lu)", (unsigned long)esp_get_free_heap_size());
@@ -641,12 +668,13 @@ static void command(char* line) {
   } else if (!strcmp(line, "join") || !strcmp(line, "forget") || !strcmp(line, "vitalsnet")) {
     note("%s: not on this radio; it listens (park) only", line);
   } else if (!strcmp(line, "vitals")) {
-    if (arg && !strncmp(arg, "on", 2)) vitalsOn();
+    if (arg && !strncmp(arg, "frames", 6)) vitalsFramesOn();
+    else if (arg && !strncmp(arg, "on", 2)) vitalsOn();
     else {
       if (s_vitals) note("vitals off");
       s_vitals = false;
       // The window and covariance (~120 KB of the C6's heap) go back.
-      delete s_vit; s_vit = nullptr; s_vitTarget = -1;
+      delete s_vit; s_vit = nullptr; s_vitTarget = -1; s_vitFramesOnly = false;
     }
   } else if (!strcmp(line, "cal")) {
     recalibrate();
@@ -758,7 +786,10 @@ static void senseOnce() {
       lv *= 100.0f; if (lv > 1000.0f) lv = 1000.0f; s_live = (uint16_t)lv;
       sendStatus(now);
     }
-    if (s_vitals && s_vit) {
+    if (s_vitals && s_vit && s_vitFramesOnly) {
+      float x[CsiVitals::kMaxTones]; int T = 0; uint8_t n = 0;
+      if (s_vit->frame(now, x, T, n)) { s_vitFrames++; sendFrame(x, T, n); }
+    } else if (s_vitals && s_vit) {
       float c1, c2; uint8_t n, q;
       const uint32_t f0 = (uint32_t)esp_timer_get_time();
       const bool closed = s_vit->tick(now, c1, c2, n, q);

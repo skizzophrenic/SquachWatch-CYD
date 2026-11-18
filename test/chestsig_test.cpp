@@ -53,5 +53,33 @@ int main() {
            v.tones(), frames, frames / 90.0, lastQ, fabs(corr), nc);
     const bool ok = v.tones() == 50 && frames > 90 * 18 && fabs(corr) > 0.85;
     printf("  c1 follows the breathing, gain steps and all            %s\n", ok ? "ok" : "FAIL");
-    return ok ? 0 : 1;
+
+    // The Tab5's split (sense_tab5.cpp): the C6 closes the frames (12-bit
+    // readings, 64 tones) and sends each tone's normalised amplitude as a
+    // u16 of x 8192; push() does the rest. The rounding must not lose the
+    // breathing, which moves the amplitudes by about a percent.
+    CsiVitals w;
+    if (!w.begin()) { printf("FAIL alloc 2\n"); return 1; }
+    double wb[64], wbr[64];
+    for (int k = 0; k < 64; k++) { wb[k] = 0.6 + 0.8 * urand(); wbr[k] = (urand() - 0.5) * 0.03; }
+    double sxy2 = 0, sxx2 = 0, syy2 = 0; int nc2 = 0, fr2 = 0;
+    for (int f = 0; f < 20 * 90; f++) {
+        const double tt = f / 20.0, br = sin(6.283185307 * fb * tt);
+        float x[64]; double tot = 0;
+        for (int k = 0; k < 64; k++) { x[k] = (float)(wb[k] * (1 + wbr[k] * br + 0.004 * gauss())); tot += x[k]; }
+        for (int k = 0; k < 64; k++) {   // normalised as the C6 does, then the wire's rounding
+            const double v = x[k] * 64 / tot * 8192.0;
+            x[k] = (float)(lround(v < 0 ? 0 : v > 65535 ? 65535 : v) / 8192.0);
+        }
+        float c1, c2; uint8_t q;
+        if (w.push(x, 64, c1, c2, q)) {
+            fr2++;
+            if (tt > 30) { sxy2 += c1 * br; sxx2 += (double)c1 * c1; syy2 += br * br; nc2++; }
+        }
+    }
+    const double corr2 = sxy2 / sqrt(sxx2 * syy2 + 1e-30);
+    printf("chest signal (Tab5: C6 frames, u16 wire, fit on the P4): frames %d  |corr| %.3f over %d\n", fr2, fabs(corr2), nc2);
+    const bool ok2 = fr2 == 20 * 90 && fabs(corr2) > 0.85;
+    printf("  c1 follows the breathing through the wire's rounding    %s\n", ok2 ? "ok" : "FAIL");
+    return ok && ok2 ? 0 : 1;
 }
