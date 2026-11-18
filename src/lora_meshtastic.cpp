@@ -68,6 +68,12 @@ static uint8_t s_nUser = 0;
 // Index-for-index with channel(). A parallel array rather than a field in
 // Channel, because channel() builds each preset from the tables above on every
 // call and a counter in that struct would be reset by its own getter.
+// The primary channel's key, when the user has changed it from the published
+// default: the built-in row of that preset takes it (see channel()).
+static char    s_priName[24] = { 0 };
+static uint8_t s_priKey[16];
+static uint8_t s_priLen = 0;
+static bool    s_priSet = false;
 static uint32_t s_frames[N_BUILTIN + MAX_USER];
 static uint32_t s_lastMs[N_BUILTIN + MAX_USER];
 
@@ -86,7 +92,8 @@ Channel channel(uint8_t i) {
     memset(&c, 0, sizeof c);
     if (i < N_PRESETS) {
         strncpy(c.name, PRESET_NAMES[i], sizeof c.name - 1);
-        memcpy(c.key, DEFAULT_KEY, 16); c.keyLen = 16;
+        if (s_priSet && strcasecmp(c.name, s_priName) == 0) { memcpy(c.key, s_priKey, 16); c.keyLen = s_priLen; }
+        else { memcpy(c.key, DEFAULT_KEY, 16); c.keyLen = 16; }
         c.hash = channelHash(c.name, c.key, 16);
         c.enabled = true;      // built in, never switched off
         return c;
@@ -104,6 +111,86 @@ Channel channel(uint8_t i) {
     return c;
 }
 
+void setPrimaryKey(const char* presetName, const uint8_t* key, uint8_t keyLen) {
+    s_priSet = presetName && *presetName && key && (keyLen == 16 || keyLen == 0);
+    if (!s_priSet) { s_priName[0] = '\0'; s_priLen = 0; return; }
+    snprintf(s_priName, sizeof s_priName, "%s", presetName);
+    memset(s_priKey, 0, sizeof s_priKey);
+    memcpy(s_priKey, key, keyLen);
+    s_priLen = keyLen;
+}
+
+// A one-byte PSK in the unambiguous spellings that need no '=': "psk77",
+// "PSK 77" or "#77" (0..255). -1 when the text is not one of those.
+static int explicitPsk(const char* t) {
+    while (*t == ' ') t++;
+    const char* d;
+    if (!strncasecmp(t, "psk", 3)) d = t + 3;
+    else if (*t == '#')            d = t + 1;
+    else                           return -1;
+    while (*d == ' ') d++;
+    if (!*d) return -1;
+    int v = 0;
+    for (; *d; d++) {
+        if (*d < '0' || *d > '9') return -1;
+        v = v * 10 + (*d - '0');
+        if (v > 255) return -1;
+    }
+    return v;
+}
+
+// The bytes a typed key stands for. The explicit PSK forms first; then base64,
+// where ONE byte only counts when it is written the way the apps write it
+// ("AQ==", four characters, two '='): fromBase64 is lenient, and a bare "77"
+// or "01" would otherwise come out as one base64 byte (0xEF, 0xD3) and never
+// reach the hex reader, giving a PSK nobody typed. Then hex.
+static size_t keyBytes(const char* text, uint8_t* out, size_t cap) {
+    const int p = explicitPsk(text);
+    if (p >= 0) { out[0] = (uint8_t)p; return 1; }
+    size_t n = fromBase64(text, out, cap);
+    const size_t len = strlen(text);
+    if (n == 1 && !(len == 4 && text[2] == '=' && text[3] == '=')) n = 0;
+    if (n != 16 && n != 32 && n != 1) n = fromHex(text, out, cap);
+    return n;
+}
+
+bool describePrimaryKey(const char* text, char* out, size_t cap) {
+    if (!out || !cap) return false;
+    out[0] = '\0';
+    if (!text) text = "";
+    while (*text == ' ') text++;
+    if (!*text)                    { snprintf(out, cap, "EMPTY = THE DEFAULT KEY"); return true; }
+    if (!strcasecmp(text, "default")) { snprintf(out, cap, "DEFAULT KEY (PSK 1)"); return true; }
+    if (!strcasecmp(text, "none") || !strcmp(text, "0")) { snprintf(out, cap, "NONE: IN THE CLEAR"); return true; }
+    uint8_t tmp[32];
+    const size_t n = keyBytes(text, tmp, sizeof tmp);
+    if (n == 1) {
+        if (!tmp[0])      snprintf(out, cap, "PSK 0: NONE, IN THE CLEAR");
+        else if (tmp[0] == 1) snprintf(out, cap, "PSK 1: THE DEFAULT KEY");
+        else              snprintf(out, cap, "PSK %u: DEFAULT KEY +%u", (unsigned)tmp[0], (unsigned)(tmp[0] - 1));
+        return true;
+    }
+    if (n >= 2 && n <= 16) { snprintf(out, cap, n == 16 ? "16-BYTE KEY" : "%u BYTES, ZERO-PADDED TO 16", (unsigned)n); return true; }
+    if (n == 32)           { snprintf(out, cap, "32 BYTES: AES-256 NOT SUPPORTED"); return false; }
+    snprintf(out, cap, "NOT A KEY YET");
+    return false;
+}
+
+bool parsePrimaryKey(const char* text, uint8_t key[16], uint8_t& keyLen) {
+    memset(key, 0, 16);
+    keyLen = 0;
+    if (!text) return false;
+    while (*text == ' ') text++;
+    if (!*text) return false;
+    if (!strcasecmp(text, "default")) { expandPsk(1, key); keyLen = 16; return true; }
+    if (!strcasecmp(text, "none") || !strcmp(text, "0")) return true;     // in the clear
+    uint8_t tmp[32];
+    size_t n = keyBytes(text, tmp, sizeof tmp);
+    if (n == 1) { expandPsk(tmp[0], key); keyLen = tmp[0] ? 16 : 0; return true; }
+    if (n >= 1 && n <= 16) { memcpy(key, tmp, n); keyLen = 16; return true; }   // zero-padded, as the firmware does
+    return false;                                  // 32 bytes is AES-256, which this build cannot seal or open
+}
+
 bool addChannel(const char* name, const char* keyText) {
     if (s_nUser >= MAX_USER || !name || !*name) return false;
     // A preset's name is already held, so "LongFast" with a key of one's own
@@ -115,16 +202,18 @@ bool addChannel(const char* name, const char* keyText) {
     memset(&c, 0, sizeof c);
     strncpy(c.name, name, sizeof c.name - 1);
     size_t n = 0;
-    if (keyText && *keyText) {
-        n = fromBase64(keyText, c.key, sizeof c.key);
-        if (n != 16 && n != 32 && n != 1) n = fromHex(keyText, c.key, sizeof c.key);
+    bool zeroOk = false;
+    if (keyText && !strcasecmp(keyText, "default")) { expandPsk(1, c.key); n = 16; }
+    else if (keyText && *keyText) {
+        n = keyBytes(keyText, c.key, sizeof c.key);
+        if (n == 1 && !c.key[0]) zeroOk = true;               // "psk0": asked for no key
         if (n == 1) { expandPsk(c.key[0], c.key); n = c.key[0] ? 16 : 0; }
         else if (n > 0 && n < 16) { memset(c.key + n, 0, 16 - n); n = 16; }   // zero-padded, as the firmware does
         else if (n > 16 && n < 32) { memset(c.key + n, 0, 32 - n); n = 32; }
         else if (n != 16 && n != 32 && n != 0) return false;
     }
     // A key that was given and did not parse is a typo, not "no key".
-    if (keyText && *keyText && n == 0 && !(keyText[0] == '0' && keyText[1] == '\0')) return false;
+    if (keyText && *keyText && n == 0 && !zeroOk && !(keyText[0] == '0' && keyText[1] == '\0')) return false;
     c.keyLen = (uint8_t)n;
     c.hash = channelHash(c.name, c.key, c.keyLen);
     c.enabled = true;
