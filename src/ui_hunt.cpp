@@ -116,13 +116,50 @@ static void drawGauge(TFT_eSPI& t, int cx, int cy, int r, float frac, uint16_t n
     t.fillCircle(cx, cy, 4, needleColor);
 }
 
+static void drawButtons(TFT_eSPI& t, int w, int h, bool ask) {
+    int bx, by, bw, bh;
+    backButtonRect(w, h, bx, by, bw, bh);
+    Theme::drawButton(t, bx, by, bw, bh, ask ? "[ NO ]" : "[ BACK ]", false);
+    stopButtonRect(w, h, bx, by, bw, bh);
+    Theme::drawButton(t, bx, by, bw, bh, ask ? "[ YES ]" : "[ STOP ]", false);
+}
+
 void uiHuntTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance) {
     int w = t.width(), h = t.height();
 
-    Theme::drawTitleBar(t, ">> HUNT MODE <<");
-
     Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
     int bodyTop = 16, bodyBottom = bar.y - 4;
+
+    // The top band from the background first, as every other screen with
+    // this bar does: Squachy's bubble reaches up over it, and the body clear
+    // below starts under it, so each bubble's edges stayed there and piled up
+    // (#77).
+    t.fillRect(0, 0, w, bodyTop, Theme::BG);
+    Theme::drawTitleBar(t, ">> HUNT MODE <<");
+
+    // A phone that went quiet and a new address of its kind that turned up
+    // (DetectionEngine::checkHuntSwap): the gauge and Squachy give way to the
+    // question, and the bar's buttons answer it -- NO where BACK is, so a
+    // BACK key is the safe answer.
+    if (eng.huntSwapOffered()) {
+        t.fillRect(0, bodyTop, w, bar.y - bodyTop, Theme::BG);
+        char pv[40], l2[48], l3[32];
+        snprintf(l2, sizeof l2, "A new %s turned up", Privacy::name(eng.huntLabel(), pv, sizeof pv));
+        snprintf(l3, sizeof l3, "at %d dBm. Follow it?", (int)eng.huntSwapRssi());
+        const char* lines[4] = { "IT WENT QUIET.", "Phones change their ID.", l2, l3 };
+        Theme::bodyFontOn(t);
+        t.setTextWrap(false);
+        const int lh = t.fontHeight() + (Theme::compact() ? 1 : 4);
+        int y = bodyTop + ((bodyBottom - bodyTop) - 4 * lh) / 2;
+        for (int i = 0; i < 4; i++, y += lh) {
+            t.setTextColor(i == 0 ? Theme::AMBER : Theme::WHITE, Theme::BG);
+            t.setCursor((w - t.textWidth(lines[i])) / 2, y);
+            t.print(lines[i]);
+        }
+        Theme::bodyFontOff(t);
+        drawButtons(t, w, h, true);
+        return;
+    }
     t.fillRect(0, bodyTop, w, bodyBottom - bodyTop, Theme::BG);
 
     // Mini Squachy cameo, same reduced-header-strip reuse ui_rawscan.cpp
@@ -291,9 +328,5 @@ void uiHuntTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adva
     t.print(trend);
     Theme::bodyFontOff(t);
 
-    int bx, by, bw, bh;
-    backButtonRect(w, h, bx, by, bw, bh);
-    Theme::drawButton(t, bx, by, bw, bh, "[ BACK ]", false);
-    stopButtonRect(w, h, bx, by, bw, bh);
-    Theme::drawButton(t, bx, by, bw, bh, "[ STOP ]", false);
+    drawButtons(t, w, h, false);
 }

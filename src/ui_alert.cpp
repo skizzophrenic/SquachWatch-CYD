@@ -25,9 +25,12 @@ static const char* targetLabel(DetectionType t) {
         case DetectionType::GOOGLE_TAG:  return "GOOGLE TAG";
         case DetectionType::TILE:        return "TILE";
         case DetectionType::RING:        return "RING CAM";
+        case DetectionType::DEAUTH:      return "DEAUTH FLOOD";   // had no case: its banner read UNKNOWN
         case DetectionType::EVILTWIN:    return "EVIL TWIN AP";
         case DetectionType::IBEACON:     return "PROXIMITY BEACON";
         case DetectionType::HACKER:      return "HACKER HARDWARE";
+        case DetectionType::LORAWAN:     return "LORAWAN NETWORK";
+        case DetectionType::MINE:        return "MY ALERT";
         default:                     return "UNKNOWN";
     }
 }
@@ -551,6 +554,11 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
                  s_last.rssi, s_last.channel, (unsigned)s_last.hits);
     else
 #endif
+    // A LoRaWAN operator has no WiFi channel and is not Bluetooth: "CH 0"
+    // would be a number that means nothing.
+    if (s_last.type == DetectionType::LORAWAN)
+        snprintf(info, sizeof(info), "%d dBm   LORA   x%u", s_last.rssi, (unsigned)s_last.hits);
+    else
     snprintf(info, sizeof(info), "%d dBm   CH %u   x%u",
              s_last.rssi, s_last.channel, (unsigned)s_last.hits);
     t.setTextColor(confColor, Theme::BG);

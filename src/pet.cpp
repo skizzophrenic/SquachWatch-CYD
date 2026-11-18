@@ -328,6 +328,8 @@ static const char* clipCatchLine(uint8_t type) {
         case DetectionType::EVILTWIN:    return "That WiFi has an evil twin. Tip: don't join the evil one.";
         case DetectionType::HACKER:      return "It looks like a hacker tool. Hello, colleague.";
         case DetectionType::IBEACON:     return "A shop beacon wants to sell you things. Tip: walk faster.";
+        case DetectionType::LORAWAN:     return "It looks like a LoRaWAN network. The meters are talking.";
+        case DetectionType::MINE:        return "It looks like the WiFi you asked about. Would you like a reminder?";
         default:                         return nullptr;
     }
 }
@@ -655,7 +657,15 @@ void clippyRelease(uint32_t now) {
 }
 
 // ---- the wire ----------------------------------------------------------------
-static uint8_t s_cGrid[CLIP_H][CLIP_W];     // 0 nothing, 1 outline, 2 wire, 3 highlight
+// 0 nothing, 1 outline, 2 wire, 3 highlight: two bits a cell, four cells a
+// byte, so the grid is 368 bytes of fixed RAM rather than 1,472.
+static uint8_t s_cGrid[CLIP_H][(CLIP_W + 3) / 4];
+static inline uint8_t clipCell(int gy, int gx) { return (uint8_t)((s_cGrid[gy][gx >> 2] >> ((gx & 3) * 2)) & 3); }
+static inline void clipSet(int gy, int gx, uint8_t c) {
+    uint8_t& b = s_cGrid[gy][gx >> 2];
+    const int sh = (gx & 3) * 2;
+    b = (uint8_t)((b & ~(3 << sh)) | ((c & 3) << sh));
+}
 static float   s_cSq = 1.0f;                // squash: 1 none, under 1 flattened
 
 static inline void clipMap(float& x, float& y) {
@@ -671,7 +681,7 @@ static void clipStamp(float x, float y, int r, uint8_t code) {
             if (dx * dx + dy * dy > r * r + r) continue;
             const int gx = cx + dx, gy = cy + dy;
             if (gx < 0 || gy < 0 || gx >= CLIP_W || gy >= CLIP_H) continue;
-            if (s_cGrid[gy][gx] < code || code == 3) s_cGrid[gy][gx] = code;
+            if (clipCell(gy, gx) < code || code == 3) clipSet(gy, gx, code);
         }
 }
 // The wire as one path: inner leg, small turn, up, top turn, the long leg,
@@ -719,9 +729,9 @@ static void clipDraw(TFT_eSPI& t, int x, int y, uint32_t now, ClipFace face) {
     for (int gy = 0; gy < CLIP_H; gy++) {
         int gx = 0;
         while (gx < CLIP_W) {
-            const uint8_t c = s_cGrid[gy][gx];
+            const uint8_t c = clipCell(gy, gx);
             int e = gx + 1;
-            while (e < CLIP_W && s_cGrid[gy][e] == c) e++;
+            while (e < CLIP_W && clipCell(gy, e) == c) e++;
             if (c) t.drawFastHLine(x + gx, y + gy, e - gx, col[c == 1 ? OUT : c == 2 ? WIRE : HI]);
             gx = e;
         }
@@ -1072,7 +1082,67 @@ bool drawnAt(int& x, int& y) {
     return false;
 }
 
+// ---- Mothman --------------------------------------------------------------
+// He hovers in the right-hand part of the band rather than walking the floor
+// like the others. Where he was last drawn, in screen pixels, is kept for the
+// tap test, and only trusted for a quarter second: a tap on the spot he left
+// when the screen changed under him is not a tap on him.
+static int s_mothX = 0, s_mothY = 0;
+static uint32_t s_mothDrawnAt = 0, s_mothPowerAt = 0;
+static constexpr uint32_t MOTH_POWER_MS = 3500;   // how long a tap's glowing swoop lasts
+
+static bool mothmanOut() {
+    return Squachy::petChoice() == Squachy::PetId::MOTHMAN &&
+           Squachy::mothmanUnlocked() && !Squachy::jailed();
+}
+
+// Wings first, then the body over their roots, then the red eyes. Powered,
+// the wings go red, beat faster and a ring pulses round him.
+void drawMothman(TFT_eSPI& t, int x, int y, int scale, uint32_t now, bool powered) {
+    const uint16_t wing = powered ? 0xA165 : 0x51ED;
+    const uint16_t shade = powered ? 0x5825 : 0x2947;
+    const int flap = (int)(3.0f * sinf(now / (powered ? 40.0f : 95.0f)));
+    for (int side : {-1, 1}) {
+        const int tip = x + side * 15 * scale;
+        const int high = y - (7 + flap) * scale;
+        t.fillTriangle(x, y, tip, high, x + side * 11 * scale, y + 7 * scale, wing);
+        t.fillTriangle(x, y + 2 * scale, tip, high, x + side * 8 * scale, y + 4 * scale, shade);
+        t.drawLine(x, y, tip, high, wing);
+        t.drawLine(x + side * 2 * scale, y - 3 * scale,
+                   x + side * 5 * scale, y - 8 * scale, wing);
+    }
+    t.fillCircle(x, y + 2 * scale, 5 * scale, 0x39CA);
+    t.fillCircle(x, y - 3 * scale, 5 * scale, 0x39CA);
+    t.fillCircle(x - 2 * scale, y - 3 * scale, scale, 0xFA08);
+    t.fillCircle(x + 2 * scale, y - 3 * scale, scale, 0xFA08);
+    if (powered) t.drawCircle(x, y, (16 + (now / 90) % 4) * scale, 0xF986);
+}
+
+// On the DESK clock he hangs from the plate's edge by two legs.
+void drawMothmanPerch(TFT_eSPI& t, int x, int y, uint32_t now) {
+    if (!mothmanOut()) return;
+    const int k = 1;
+    t.drawLine(x - 3, y, x - 3, y + 7, 0x51ED);
+    t.drawLine(x + 3, y, x + 3, y + 7, 0x51ED);
+    drawMothman(t, x, y + 11, k, now);
+}
+
+// The tap is his whenever it lands on him, so a second tap mid-swoop does
+// not fall through to Squachy; only a fresh swoop chirps.
+bool mothmanTap(int x, int y, uint32_t now) {
+    if (!mothmanOut() || !s_mothDrawnAt || now - s_mothDrawnAt > 250 ||
+        abs(x - s_mothX) > 18 * s_k || abs(y - s_mothY) > 12 * s_k) return false;
+    if (!s_mothPowerAt || now - s_mothPowerAt >= MOTH_POWER_MS) {
+        s_mothPowerAt = now;
+        Squachy::unlockMothmanPowerOutfit();
+        Sound::play(Sound::Id::WD_FIX);     // the GPS-fix pair: two rising notes
+    }
+    return true;
+}
+
 void reset() {
+    s_mothDrawnAt = 0;
+    s_mothPowerAt = 0;
     toasterReset();
     meatyReset();
     jailReset();
@@ -1283,6 +1353,23 @@ void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom) {
         return;
     }
     s_mX = -100;
+    if (which == Squachy::PetId::MOTHMAN) {
+        s_phase = Phase::AWAY;
+        s_yPhase = YPhase::AWAY;
+        // A slow drift on two sines, a third of the way down the band; a
+        // tap's swoop widens the side-to-side to a third of the screen.
+        if (mothmanOut() && screenW >= 40 && bandBottom - bandTop >= 26) {
+            const bool powered = s_mothPowerAt && now - s_mothPowerAt < MOTH_POWER_MS;
+            const int x = screenW * 3 / 4 + (int)((powered ? screenW / 6 : 6) * sinf(now / 230.0f));
+            const int y = bandTop + 14 + (bandBottom - bandTop - 26) / 3
+                          + (int)(5.0f * sinf(now / 180.0f));
+            s_mothX = x * s_k;
+            s_mothY = y * s_k;
+            s_mothDrawnAt = now;
+            drawMothman(t, x, y, 1, now, powered);
+        }
+        return;
+    }
     if (!Squachy::petUnlocked() || which == Squachy::PetId::OFF) {
         s_phase  = Phase::AWAY;
         s_yPhase = YPhase::AWAY;
@@ -1532,6 +1619,7 @@ bool anyOut(uint32_t now) {
     if (which == Squachy::PetId::CLIPPY)  return Squachy::clippyUnlocked();
     if (which == Squachy::PetId::TOASTER) return Squachy::toasterUnlocked();
     if (which == Squachy::PetId::MEATY) return Squachy::meatyUnlocked();
+    if (which == Squachy::PetId::MOTHMAN) return mothmanOut();
     return Squachy::petUnlocked() && which != Squachy::PetId::OFF;
 }
 

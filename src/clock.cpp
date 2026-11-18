@@ -3,6 +3,9 @@
 #include "serial_flush.h"
 #include "security.h"   // a locked device takes no console commands
 #include "ota_wifi.h"    // the WIFI command lists the saved networks
+#if defined(TAB5)
+#include "tab5_radio.h"   // C6UPDATE, for the bench
+#endif
 #if defined(SENSE_CYD_APP)
 #include "sense_cyd.h"      // SENSE <cmd>
 void consoleFrameShot();     // main.cpp: SENSE SHOT
@@ -75,6 +78,13 @@ extern volatile bool g_consoleMeaty;
 extern volatile bool g_consolePet;
 extern volatile bool g_consoleJail;
 extern volatile bool g_consoleFree;
+#if SQW_TRACKBALL
+// TBALL: the T-Deck trackball's edges on the console, on or off; TBALL n:
+// how many edges make one step (main.cpp, smallKeysRead).
+extern volatile uint8_t g_ballEdgesPerStep;
+extern volatile bool    g_ballTrace;
+void tdeckBallStatus();   // the counts and the lines' levels, after either
+#endif
 #if SQW_DEVTOOLS
 #include "shake.h"
 extern volatile uint8_t  g_devKey;
@@ -541,7 +551,11 @@ void pollSerial() {
     // A line buffer rather than a parser. Anything that is not the one
     // command is answered and dropped -- this is a debug port, and silence
     // in response to a typo is worse than a line of help.
+#if defined(TAB5) && defined(SENSE_CYD_APP)
+    static char line[112];   // WIFISAVE <32-byte name><TAB><64-byte password>
+#else
     static char line[48];
+#endif
     static uint8_t len = 0;
 
     while (Serial.available() > 0) {
@@ -561,6 +575,28 @@ void pollSerial() {
             Serial.println("[security] locked -- unlock it on the screen first.");
             continue;
         }
+#if defined(TAB5) && defined(SENSE_CYD_APP)
+        // WIFISAVE <name><TAB><password>: the Tab5 has no WIFI NETWORKS screen
+        // yet, so tools/tab5_wifi.py sends this (asking for the password
+        // without showing it). Never echoed; the buffer is wiped after.
+        if (strcasecmp(line, "C6UPDATE") == 0) { Tab5Radio::g_c6UpdateConsole = true; continue; }   // bench
+        if (strcasecmp(line, "WIFI FORGET") == 0) {   // the USE network out of the list
+            const uint8_t before = OtaWifi::savedCount();
+            OtaWifi::forget();
+            Serial.printf("[wifi] %s; %u saved now\n", OtaWifi::savedCount() < before ? "forgotten" : "nothing to forget", (unsigned)OtaWifi::savedCount());
+            continue;
+        }
+        if (strncasecmp(line, "WIFISAVE ", 9) == 0) {
+            char* name = line + 9;
+            char* tab = strchr(name, '\t');
+            if (tab) *tab = 0;
+            const bool ok = tab && OtaWifi::saveNetwork(name, tab + 1);
+            memset(line, 0, sizeof line);
+            Serial.println(ok ? "[wifi] network saved; HUMAN SENSING joins it next time it opens"
+                              : "[wifi] WIFISAVE: not saved (WIFISAVE <name><TAB><password>)");
+            continue;
+        }
+#endif
 
         if (strncasecmp(line, "FLOOD ", 6) == 0) {
             // A thousand a second is five times the loudest room measured;
@@ -593,18 +629,18 @@ void pollSerial() {
             continue;
         }
         if (strncasecmp(line, "CLOCK ", 6) == 0) {
-            // CLOCK <font 0-1> <size 0-2> <backdrop 0-6>: the desk clock's
+            // CLOCK <font 0-1> <size 0-3> <backdrop 0-6>: the desk clock's
             // look, set from the bench, so its frame time can be measured for
             // each without a finger on the glass.
             int f = -1, z = -1, b = -1;
-            if (sscanf(line + 6, "%d %d %d", &f, &z, &b) == 3 && f >= 0 && f < 2 && z >= 0 && z < 3 && b >= 0 && b < 7) {
+            if (sscanf(line + 6, "%d %d %d", &f, &z, &b) == 3 && f >= 0 && f < 2 && z >= 0 && z < 4 && b >= 0 && b < 7) {
                 for (int g = 0; g < 2 && Settings::clockFont() != f; g++)     Settings::cycleClockFont();
-                for (int g = 0; g < 3 && Settings::clockSize() != z; g++)     Settings::cycleClockSize();
+                for (int g = 0; g < 4 && Settings::clockSize() != z; g++)     Settings::cycleClockSize();
                 for (int g = 0; g < 7 && Settings::clockBackdrop() != b; g++) Settings::cycleClockBackdrop();
                 Serial.printf("[clock] look: %s, %s, %s\n", Settings::clockFontName(),
                               Settings::clockSizeName(), Settings::clockBackdropName());
             } else {
-                Serial.println("[clock] CLOCK <font 0-1> <size 0-2> <backdrop 0-6>");
+                Serial.println("[clock] CLOCK <font 0-1> <size 0-3> <backdrop 0-6>");
             }
             continue;
         }
@@ -620,6 +656,11 @@ void pollSerial() {
         if (strcasecmp(line, "SENSE OPEN") == 0) { g_senseConsole = 1; continue; }
         if (strcasecmp(line, "SENSE OPEN NOWIFI") == 0) { g_senseConsole = 3; continue; }   // as if none were saved
         if (strcasecmp(line, "SENSE CLOSE") == 0) { g_senseConsole = 2; continue; }
+        if (strcasecmp(line, "SENSE NEXT") == 0)  { g_senseConsole = 4; continue; }   // the next page (SCOPE...)
+        if (strcasecmp(line, "SENSE BACK") == 0)  { g_senseConsole = 5; continue; }
+        if (strcasecmp(line, "SENSE SLEEP") == 0) { g_senseConsole = 6; continue; }   // the SLEEP button
+        if (strcasecmp(line, "SENSE WAKE") == 0)  { g_senseConsole = 7; continue; }
+        if (strcasecmp(line, "WIFI ADD") == 0)    { g_senseConsole = 8; continue; }   // the add-a-network screen (its scan), for the bench
         if (strncasecmp(line, "SENSE ", 6) == 0) { ::senseCydCommand(line + 6); continue; }
 #endif
         if (strcasecmp(line, "INVERT") == 0) { g_consoleInvert = true; continue; }
@@ -662,6 +703,21 @@ void pollSerial() {
         }
 #endif
         if (strcasecmp(line, "LEGEND") == 0) { g_consoleLegend = true; continue; }
+#if SQW_TRACKBALL
+        if (strcasecmp(line, "TBALL") == 0) {
+            g_ballTrace = !g_ballTrace;
+            Serial.printf("[ball] trace %s, %u edges a step\n", g_ballTrace ? "on" : "off", (unsigned)g_ballEdgesPerStep);
+            tdeckBallStatus();
+            continue;
+        }
+        if (strncasecmp(line, "TBALL ", 6) == 0) {
+            const int n = atoi(line + 6);
+            if (n >= 1 && n <= 50) g_ballEdgesPerStep = (uint8_t)n;
+            Serial.printf("[ball] %u edges a step\n", (unsigned)g_ballEdgesPerStep);
+            tdeckBallStatus();
+            continue;
+        }
+#endif
 #if defined(CARDPUTER_ADV)
         if (strcasecmp(line, "EXT ON") == 0)  { g_consoleExt = 1; continue; }
         if (strcasecmp(line, "EXT OFF") == 0) { g_consoleExt = 0; continue; }
@@ -672,6 +728,13 @@ void pollSerial() {
         if (strcasecmp(line, "YETI DISCO") == 0) { Pet::yetiDance(0); Serial.println("[yeti] disco"); continue; }
         if (strcasecmp(line, "YETI FLOSS") == 0) { Pet::yetiDance(1); Serial.println("[yeti] floss"); continue; }
         if (strcasecmp(line, "TOASTER") == 0) { g_consoleToaster = true; continue; }
+        // MOTHMAN LOCK: find him again, from the red eyes in the treeline.
+        if (strcasecmp(line, "MOTHMAN LOCK") == 0) {
+            Serial.println(Squachy::relockMothman()
+                ? "[mothman] locked: tap the red eyes in Fireflies"
+                : "[mothman] could not save discovery reset");
+            continue;
+        }
         // MEATY unlocks him; MEATY IGLOO / DOG / SHAKE / SPLIT / DANCE, his shapes on demand.
         if (strcasecmp(line, "MEATY") == 0) { g_consoleMeaty = true; continue; }
         if (strncasecmp(line, "MEATY ", 8) == 0) {

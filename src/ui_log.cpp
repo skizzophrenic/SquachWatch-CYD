@@ -43,6 +43,9 @@ static void invalidatePage() { s_pageOk = false; }
 // device from yesterday seen again today moves to the live rows, and its grey
 // copy has to go -- but at most once a second, since a rebuild reads the
 // whole flash history and a busy room adds rows several times a second.
+// Three seconds, not one: each rebuild is a run of allocations up to 16 KB
+// with the radios running, and a grey copy lingering two more seconds costs
+// nothing. The index is let go when the LOG closes (uiLogLeave).
 static bool     s_indexWanted = true;
 static uint8_t  s_sigCount    = 0xFF;
 static uint32_t s_sigNewest   = 0;
@@ -57,7 +60,7 @@ static void ensureIndex(const DetectionEngine& eng) {
     const bool cleared = kept < s_sigKept;   // a CLR: positions mean nothing now
     const bool changed = n != s_sigCount || newestKey != s_sigNewest;
     if (!s_indexWanted && !cleared && !changed) return;
-    if (!s_indexWanted && !cleared && millis() - s_indexAt < 1000) return;
+    if (!s_indexWanted && !cleared && millis() - s_indexAt < 3000) return;
 
     uint32_t keys[64];   // the ring's LOG_CAP; logCount() never exceeds it
     for (uint8_t i = 0; i < n; i++) {
@@ -124,6 +127,13 @@ const Detection* uiLogRow(const DetectionEngine& eng, int idx) {
     // the name it was given and leaves the vendor empty, which vendorText()
     // already handles.
     return &row;
+}
+
+void uiLogLeave() {
+    // The index's position list (up to 4 KB) is only for this screen; it
+    // used to stay allocated from the first LOG visit until a restart.
+    if (LogIndex::filtering()) LogIndex::release();
+    s_indexWanted = true;
 }
 
 void uiLogInit(TFT_eSPI& t) {

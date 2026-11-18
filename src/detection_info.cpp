@@ -3,6 +3,7 @@
 #include "detection.h"
 #include "device_info.h"
 #include <stdio.h>
+#include <string.h>
 
 namespace DetectionInfo {
 
@@ -45,6 +46,10 @@ static const char* const EXPLAIN_TEXT[] = {
     "A proximity beacon, the kind bolted inside shops, stadiums and airports. It does not track you by itself -- it shouts an ID, and an app you already installed notices and reports where you are. The number shown is which deployment and which unit, so the same first half in two places is the same operator. This is the one detection that ships switched OFF, and about volume rather than importance: one shop can put more beacons in range than this device would otherwise see all week. Turn it on in DETECTION FILTER.",
     // HACKER
     "Wireless testing hardware: a Flipper Zero, a Pwnagotchi, a WiFi Pineapple or an ESP deauther. These are legitimate tools and most owners are hobbyists or people paid to break things -- but unlike everything else here, this is gear that transmits at other radios rather than just watching. A Pwnagotchi reports its own name and how many WiFi handshakes it has captured, because it is trying to be seen by others like it. Nothing here flags a bare ESP32 dev board: that would flag half the electronics in the room, and this detector too.",
+    // LORAWAN
+    "A LoRaWAN network is in range: the long-range, low-power radio that utility meters, parking sensors and city infrastructure report home over. The name is the OPERATOR, read from the network prefix every device address starts with -- not a device, and not who owns one. Everything such a network carries is encrypted and stays that way; this is the envelope, not the letter. One alert per operator, however many of its devices are in earshot. Only a board with a LoRa radio hears it, and only while LORA is listening on a LoRaWAN profile -- the RX2 downlink profiles hear the most.",
+    // MINE
+    "A WiFi network whose name matches one of YOUR patterns, from Settings > MY ALERTS. Nothing in the built-in tables says what it is: you told the board to watch for this name, and here it is. The label on the alert is the one you gave the pattern. Network names are chosen by whoever runs the router, so anyone can name theirs to match.",
 };
 static const uint8_t EXPLAIN_TEXT_N = sizeof(EXPLAIN_TEXT) / sizeof(EXPLAIN_TEXT[0]);
 
@@ -61,8 +66,9 @@ const char* explain(DetectionType t) {
     return EXPLAIN_TEXT[idx];
 }
 
-const char* explainLive(DetectionType t, const DetectionEngine& eng) {
+const char* explainLive(DetectionType t, const DetectionEngine& eng, const uint8_t* mac) {
     if (t != DetectionType::DRONE) return explain(t);
+    if (mac && memcmp(mac, eng.remoteIdMac(), 6) != 0) return explain(t);
 
     const RemoteId::Info& rid = eng.remoteId();
     if (!rid.haveBasic && !rid.haveLoc && !rid.haveOperator) return explain(t);
@@ -89,8 +95,8 @@ const char* explainLive(DetectionType t, const DetectionEngine& eng) {
 }
 
 const char* explainFor(DetectionType t, const char* vendor, const char* name,
-                       const DetectionEngine& eng) {
-    if (t == DetectionType::DRONE) return explainLive(t, eng);
+                       const DetectionEngine& eng, const uint8_t* mac) {
+    if (t == DetectionType::DRONE) return explainLive(t, eng, mac);
     const DeviceInfo::Device* d = DeviceInfo::find(t, vendor, name);
     return d ? d->text : explain(t);
 }

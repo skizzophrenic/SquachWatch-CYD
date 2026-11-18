@@ -228,6 +228,7 @@ const char* listenLine() {
         case 0:  return "LORA IS OFF (WATCH SETTINGS > LORA)";
         case 1:  return "LISTENING: MESHTASTIC";
         case 2:  return "LISTENING: MESHCORE";
+        case 4:  return "LISTENING: LORAWAN (NO CHATS THERE)";
         default: return "LISTENING: BOTH";
     }
 }

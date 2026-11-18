@@ -45,6 +45,7 @@ void uiClearInfoOnly(bool on);
 // Boards without a battery never set one, and their screen does not change.
 typedef bool (*BatterySource)(uint8_t& pct, bool& charging);
 void uiClearSetBatterySource(BatterySource fn);
+bool uiClearHasBattery();   // a source is set: this board can show a battery
 
 // TERMINAL MODE (Settings::boringMode()): the windows on the home screen.
 // True while a gesture that started on a window is theirs.

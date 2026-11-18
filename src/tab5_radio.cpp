@@ -33,6 +33,12 @@
 extern "C" {
 #include "esp_hosted.h"
 #include "esp_hosted_transport_config.h"
+#include "esp_hosted_ota.h"
+#include <Preferences.h>
+
+// Our C6 image, linked in whole (board_build.embed_files in [env:tab5]).
+extern const uint8_t c6_image_start[] asm("_binary_tools_tab5_c6_c6_radio_bin_start");
+extern const uint8_t c6_image_end[]   asm("_binary_tools_tab5_c6_c6_radio_bin_end");
 }
 
 namespace {
@@ -62,6 +68,7 @@ const uint32_t PI4IO2_FREQ = 100000;
 
 // ---- State -------------------------------------------------------------------
 bool              s_up = false;
+bool              s_needsUpdate = false;   // linked, but no hello: M5Stack's stock C6 image
 QueueHandle_t     s_q  = nullptr;
 const UBaseType_t Q_DEPTH = 32;         // 32 x 608 B: a burst of beacons on a busy channel
 char              s_tag[17] = "";
@@ -124,6 +131,7 @@ void onStats(uint32_t, const uint8_t* d, size_t n, void*) {
 // the first product run on the bench (2026-10-19) went silent at 71 s with
 // nothing printed, and this is how the next one says where.
 volatile uint32_t    s_loopBeat = 0;
+volatile bool        s_sensingLink = false;   // HUMAN SENSING has the link: the detector (and its beat) is paused
 volatile const char* s_where    = "idle";
 volatile uint32_t    s_sends = 0, s_sendUsLast = 0, s_sendUsMax = 0, s_sendFails = 0;
 
@@ -132,7 +140,7 @@ void diagTask(void*) {
     for (;;) {
         vTaskDelay(pdMS_TO_TICKS(5000));
         const uint32_t beat = s_loopBeat;
-        if (beat == lastBeat && s_up) {
+        if (beat == lastBeat && s_up && !s_sensingLink) {
             stalledFor += 5;
             Serial.printf("[c6] LOOP STALLED %lu s: last at %s; sends %lu (fails %lu, last %lu us, max %lu us); rx %lu, qfull %lu, pending %u; heap %lu\n",
                           (unsigned long)stalledFor, (const char*)s_where, (unsigned long)s_sends, (unsigned long)s_sendFails,
@@ -244,13 +252,38 @@ bool begin() {
     // refused by the host library before it ever leaves.
     s_helloAt = 0;
     const uint8_t q = '?';
-    if (!send(CMD_HELLO, &q, 1)) { s_up = false; return false; }
+    if (!send(CMD_HELLO, &q, 1)) {
+        // Refused before it left (ESP_ERR_NOT_FOUND): a slave built without
+        // custom messages at all, which is what Espressif's stock image and
+        // M5Stack's are. The link itself is up, so the radio update can run.
+        Serial.println("[c6] the C6 has no custom messages: a stock ESP-Hosted image, not the sniff one");
+        s_needsUpdate = true;
+        s_up = false;
+        return false;
+    }
     const uint32_t t0 = millis();
     while (!s_helloAt && millis() - t0 < 2000) delay(10);
     if (!s_helloAt) {
         Serial.println("[c6] no answer to hello: the C6 runs a stock ESP-Hosted image, not the sniff one");
+        // The link is up, which is all a radio update needs. Kept up for it.
+        s_needsUpdate = true;
         s_up = false;
         return false;
+    }
+#if defined(TAB5_FORCE_RADIO_UPDATE)
+    // Bench only: offer the update even to a C6 that answered, so the write
+    // path can be walked on a unit whose radio is already ours (and, built
+    // with Espressif's stock image in c6_radio.bin, put the stock one back).
+    s_needsUpdate = true;
+    Serial.println("[c6] TAB5_FORCE_RADIO_UPDATE: offering the radio update anyway");
+#endif
+    {
+        // A good hello: whatever writes came before worked.
+        Preferences p;
+        if (p.begin("tab5c6", false)) {
+            if (p.getUChar("tries", 0) != 0) p.putUChar("tries", 0);
+            p.end();
+        }
     }
     Serial.printf("[c6] hello: \"%s\", sniffing %u, %lu ms\n", s_tag, (unsigned)s_helloSniffing, (unsigned long)(s_helloAt - t0));
     // The C6's WiFi driver, which the sniff extension rides on, starts only
@@ -264,8 +297,16 @@ bool begin() {
         if (r != ESP_OK && r != ESP_ERR_INVALID_STATE) Serial.printf("[c6] esp_netif_init: %s\n", esp_err_to_name(r));
         r = esp_event_loop_create_default();
         if (r != ESP_OK && r != ESP_ERR_INVALID_STATE) Serial.printf("[c6] event loop: %s\n", esp_err_to_name(r));
+        // The station's network interface: HUMAN SENSING joins a saved
+        // network on it and pings the router (sense_tab5.cpp).
+        static esp_netif_t* sta = nullptr;
+        if (!sta) sta = esp_netif_create_default_wifi_sta();
         wifi_init_config_t wcfg = WIFI_INIT_CONFIG_DEFAULT();
         wcfg.nvs_enable = 0;   // as the core does over ESP-Hosted
+        // The C6 applies this config field by field, and the core's default
+        // has CSI off: every CSI setting was refused until this (sensing
+        // app bench, 2026-11-17).
+        wcfg.csi_enable = 1;
         const esp_err_t ei = esp_wifi_init(&wcfg);
         const esp_err_t es = (ei == ESP_OK) ? esp_wifi_set_storage(WIFI_STORAGE_RAM) : ei;
         const esp_err_t em = (ei == ESP_OK) ? esp_wifi_set_mode(WIFI_MODE_STA) : ei;
@@ -287,6 +328,62 @@ bool begin() {
 
 bool up() { return s_up; }
 const char* tag() { return s_tag; }
+
+bool needsUpdate() { return s_needsUpdate; }
+
+uint8_t updateTries() {
+    Preferences p;
+    if (!p.begin("tab5c6", true)) return 0;
+    const uint8_t n = p.getUChar("tries", 0);
+    p.end();
+    return n;
+}
+
+uint32_t imageSize() { return (uint32_t)(c6_image_end - c6_image_start); }
+
+bool update(void (*progress)(uint32_t, uint32_t), char* why, size_t whyLen) {
+    auto fail = [&](const char* w, esp_err_t e) {
+        snprintf(why, whyLen, "%s%s%s", w, e != ESP_OK ? ": " : "", e != ESP_OK ? esp_err_to_name(e) : "");
+        Serial.printf("[c6] radio update stopped: %s\n", why);
+        return false;
+    };
+    if (!s_needsUpdate) return fail("the radio link is not up", ESP_OK);
+    const uint32_t total = imageSize();
+    // An ESP image starts with 0xE9. Anything else, or something far too
+    // small, is not ours to write: the C6 has no way back from a bad image
+    // short of soldered wires.
+    if (total < 200000 || c6_image_start[0] != 0xE9) return fail("the built-in radio image looks wrong", ESP_OK);
+    {
+        // Counted before the first byte goes, so a board that dies mid-write
+        // still remembers the try.
+        Preferences p;
+        if (p.begin("tab5c6", false)) { p.putUChar("tries", (uint8_t)(updateTries() + 1)); p.end(); }
+    }
+    Serial.printf("[c6] radio update: %lu bytes\n", (unsigned long)total);
+    if (s_up) { sniff(false); delay(200); }   // the bench's forced case: quiet the link first
+    esp_err_t e = esp_hosted_slave_ota_begin();
+    if (e != ESP_OK) return fail("the radio would not start the update", e);
+    // From a RAM buffer, not straight out of flash: the transport may want
+    // to DMA what it is handed.
+    static uint8_t buf[1400];
+    uint32_t done = 0;
+    while (done < total) {
+        const uint32_t n = total - done < sizeof buf ? total - done : (uint32_t)sizeof buf;
+        memcpy(buf, c6_image_start + done, n);
+        e = esp_hosted_slave_ota_write(buf, n);
+        if (e != ESP_OK) return fail("writing to the radio failed", e);
+        done += n;
+        if (progress) progress(done, total);
+    }
+    e = esp_hosted_slave_ota_end();
+    if (e != ESP_OK) return fail("the radio did not accept the image", e);
+    // Older slaves (M5Stack's 1.4.1 among them) switch over by themselves at
+    // the end and do not know this call, which is not an error there; on
+    // anything newer it is the switch.
+    e = esp_hosted_slave_ota_activate();
+    Serial.printf("[c6] radio update written; activate: %s\n", esp_err_to_name(e));
+    return true;
+}
 
 bool bleBegin() {
     // The C6's Bluetooth controller, over the link begin() brought up. Its
@@ -315,6 +412,51 @@ bool bleBegin() {
 bool sniff(bool on) {
     const uint8_t v = on ? 1 : 0;
     return send(CMD_SNIFF, &v, 1);
+}
+
+// ---- HUMAN SENSING ----------------------------------------------------------
+namespace {
+const uint32_t SENSE_CMD_TEXT = 0x5110;   // sense_proto.h: one command line, no newline
+const uint32_t SENSE_EVT_LINE = 0x5210;   // one line out, no newline
+void (*s_senseLine)(const char*, size_t) = nullptr;
+void onSenseLine(uint32_t, const uint8_t* d, size_t n, void*) {
+    if (s_senseLine && d && n) s_senseLine((const char*)d, n);
+}
+}  // namespace
+
+bool senseCapable() { return s_up && strcmp(s_tag, "squach-sniff 2") >= 0 && !strncmp(s_tag, "squach-sniff ", 13); }
+
+void offerSenseUpdate() { if (s_up && !senseCapable()) s_needsUpdate = true; }
+volatile bool g_c6UpdateConsole = false;
+void allowUpdate() { if (s_up) s_needsUpdate = true; }
+
+bool senseLink(bool on, void (*onLine)(const char*, size_t)) {
+    if (!s_up) return false;
+    if (on) {
+        s_senseLine = onLine;
+        s_sensingLink = true;
+        esp_hosted_register_custom_callback(EVT_FRAME, nullptr, nullptr);
+        const esp_err_t e = esp_hosted_register_custom_callback(SENSE_EVT_LINE, onSenseLine, nullptr);
+        if (e != ESP_OK) {
+            Serial.printf("[c6] sensing's line handler refused: %s\n", esp_err_to_name(e));
+            esp_hosted_register_custom_callback(EVT_FRAME, onFrame, nullptr);
+            s_senseLine = nullptr;
+            s_sensingLink = false;
+            return false;
+        }
+        return true;
+    }
+    esp_hosted_register_custom_callback(SENSE_EVT_LINE, nullptr, nullptr);
+    s_senseLine = nullptr;
+    s_sensingLink = false;
+    const esp_err_t e = esp_hosted_register_custom_callback(EVT_FRAME, onFrame, nullptr);
+    if (e != ESP_OK) Serial.printf("[c6] frame handler back: %s\n", esp_err_to_name(e));
+    return e == ESP_OK;
+}
+
+bool senseSend(const char* cmd) {
+    if (!cmd || !*cmd) return false;
+    return send(SENSE_CMD_TEXT, cmd, strlen(cmd));
 }
 
 bool setChannel(uint8_t ch) {

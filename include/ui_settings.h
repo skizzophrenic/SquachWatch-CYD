@@ -61,8 +61,9 @@ enum class SettingsRow : uint8_t {
     DESK_CROWD,      // on the DESK MODE page: how many of them
     DESK_VISIT,      // on the DESK MODE page: one visitor chats, or does the whole visit
     CLOCK_FONT,      // on the DESK MODE page: segments or Bangers
-    CLOCK_SIZE,      // on the DESK MODE page: small, medium, large
+    CLOCK_SIZE,      // on the DESK MODE page: small, medium, large, extra-large
     CLOCK_BACKDROP,  // on the DESK MODE page: what plays inside the clock
+    DESK_ALERT,      // on the DESK MODE page: a catch is a small card, a big card, or the full ALERT
     WATCH_BATTERY,   // the T-Watch only: charge and voltage, under WATCH
     WATCH_RADIO,     // the T-Watch only: the radio duty cycle, under WATCH
     WATCH_LISTEN,    // the T-Watch only: BLE LISTEN, how much of the time the receiver is open
@@ -94,6 +95,7 @@ enum class SettingsRow : uint8_t {
     PRIVACY,         // PRIVACY MODE: addresses and names masked on screen, on the SYSTEM page
     EXT_SCREEN,      // the Cardputer ADV only: a second panel on the EXT header
     DET_STYLE,       // on the APPEARANCE page: XP or CLASSIC detection counters
+    LAVA_LAMP,       // on the APPEARANCE page, boards with a battery: the home screen's lamp, on or off
     CLOCK_FORMAT,    // on the DESK MODE page: 12-hour or 24-hour time
     FONTS,           // on the APPEARANCE page: opens the FONTS page
     FONT_MENUS,      // on the FONTS page: list and settings rows
@@ -106,6 +108,8 @@ enum class SettingsRow : uint8_t {
 #if defined(SENSE_CYD_APP)
     SENSING,         // HUMAN SENSING: WiFi motion sensing on the CYD's own radio (opens the screen)
 #endif
+    MY_ALERTS,       // MY ALERTS: the owner's own WiFi names to alert on (opens the screen)
+    CRYPTID_GUIDE,   // CRYPTID FIELD GUIDE: who has been found, and equipping Mothman (opens the screen)
     BACK,
     COUNT,
     NONE = 255

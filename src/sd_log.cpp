@@ -1,4 +1,6 @@
 // SquachWatch-CYD — SD log implementation
+#include <fcntl.h>
+#include <unistd.h>
 #include "sd_log.h"
 #include "frame_push.h"   // busLock(): the card shares the panel's bus
 #include "sd_row.h"
@@ -75,7 +77,14 @@ bool SdLog::begin() {
     // sits on the amplifier. So no log and no wipe of it here.
     return false;
 #endif
-    Serial.printf("[sd] mounting: heap %lu, largest block %lu\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    // INTERNAL SRAM, not whatever pool happens to have the biggest block in
+    // it: what a failed mount runs out of is the driver's own buffers, and
+    // those are internal. MALLOC_CAP_8BIT alone also matches PSRAM on the
+    // boards that build with -DBOARD_HAS_PSRAM, so on those this line used to
+    // print a megabyte-scale number and say nothing at all about the pool the
+    // mount was actually short of. See the note at the top of detection.cpp.
+    Serial.printf("[sd] mounting: heap %lu, largest block %lu\n", (unsigned long)ESP.getFreeHeap(),
+                  (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
     // SDMMC on the S3's GPIO matrix. Pins from Freenove's own SDMMC sketch and
     // the schematic: CLK 38, CMD 40, D0 39, D1 41, D2 48, D3 47 on the 2.8",
@@ -212,12 +221,32 @@ void SdLog::openDaily() {
 
 void SdLog::logEvent(const Detection& d) {
     if (!_ready) return;
+    char line[SdRow::ROW_MAX];
+#if defined(CYD_GPS)
+    // Where the board is now. The queue drains on the loop task within a
+    // frame or two of the detection, so this is where it was seen.
+    SdRow::line(line, sizeof(line), d,
+                Clock::trusted() ? Clock::nowEpoch() : 0, millis(),
+                &Gnss::fix(), Gnss::faked(), millis());
+#else
+    SdRow::line(line, sizeof(line), d,
+                Clock::trusted() ? Clock::nowEpoch() : 0, millis(),
+                nullptr, false, 0);
+#endif
+    // Straight to the file through the VFS (every board mounts the card at
+    // "/sd"), not through CARD.open(): the Arduino File puts a 4 KB stdio
+    // buffer on the heap at the first write and frees it at close, so every
+    // logged detection needed 4 KB in one piece on a board with ~25 KB of
+    // largest block, while WiFi's receive buffers came and went around it.
+    // The FAT file slot this uses was set aside at mount (SD_MAX_FILES).
+    char path[48];
+    snprintf(path, sizeof path, "/sd%s", _filename);
     // The card shares the panel's SPI bus on the boards that have it there;
     // on the C5 the push runs in a task, so the write waits for a frame in
     // flight (a no-op everywhere else).
     FramePush::busLock();
-    File f = CARD.open(_filename, FILE_APPEND);
-    if (!f) {
+    const int fd = ::open(path, O_WRONLY | O_APPEND | O_CREAT, 0644);
+    if (fd < 0) {
         FramePush::busUnlock();
 #if defined(NM_CYD_C5)
         // Once, not once per detection: a card that mounts but cannot be
@@ -239,21 +268,11 @@ void SdLog::logEvent(const Detection& d) {
 #endif
         return;
     }
-    char line[SdRow::ROW_MAX];
-#if defined(CYD_GPS)
-    // Where the board is now. The queue drains on the loop task within a
-    // frame or two of the detection, so this is where it was seen.
-    SdRow::line(line, sizeof(line), d,
-                Clock::trusted() ? Clock::nowEpoch() : 0, millis(),
-                &Gnss::fix(), Gnss::faked(), millis());
-#else
-    SdRow::line(line, sizeof(line), d,
-                Clock::trusted() ? Clock::nowEpoch() : 0, millis(),
-                nullptr, false, 0);
-#endif
-    f.print(line);
-    f.close();
+    const size_t n = strlen(line);
+    const ssize_t w = ::write(fd, line, n);
+    ::close(fd);
     FramePush::busUnlock();
+    (void)w;
 }
 
 void SdLog::wipe() {

@@ -75,6 +75,9 @@
 #include "ui_sysprops.h"
 #include "ota_core.h"
 #include "ui_wifinets.h"
+#include "ui_myalerts.h"
+#include "ui_cryptid_guide.h"
+#include "my_alerts.h"
 #include "png_writer.h"
 #include "touch_cal.h"
 #include "ui_lorahome.h"
@@ -324,6 +327,10 @@ static void usage() {
         "                    --tap f:x:y taps it, SQUACHSIM_LORATYPE types into an open edit line\n"
         "                    ('|' is Enter), SQUACHSIM_LORAREST=1 says the radios are resting\n"
         "  dex               --pose N opens entry N\'s card (1-17); 0 is the index\n"
+        "  myalerts          MY ALERTS with three patterns (SQUACHSIM_MYALERTS_EMPTY=1: none)\n"
+        "  fieldguide        the CRYPTID FIELD GUIDE, nobody found yet; --pet 7 renders it with\n"
+        "                    Mothman found (--pet 7 on clear puts him out; --outfit 20/21 his two)\n"
+        "  alertkbd          ...and its keyboard, typing a pattern\n"
         "  touchcal          the touch calibration, played by a scripted finger:\n"
         "                    --frames skips that many 66 ms frames, --sequence films\n"
         "  --portrait        render 240x320 instead of 320x240\n"
@@ -538,7 +545,8 @@ int main(int argc, char** argv) {
         if (petIdx == (int)Squachy::PetId::TOASTER) Squachy::unlockToaster(nullptr);
         if (petIdx == (int)Squachy::PetId::BALL) Squachy::unlockBall();
         if (petIdx == (int)Squachy::PetId::MEATY) Squachy::unlockMeaty(nullptr);
-        for (int k = 0; k < 8 && (int)Squachy::petChoice() != petIdx; k++) Squachy::cyclePet();
+        if (petIdx == (int)Squachy::PetId::MOTHMAN) Squachy::unlockMothman();
+        for (int k = 0; k < (int)Squachy::PetId::COUNT && (int)Squachy::petChoice() != petIdx; k++) Squachy::cyclePet();
     }
 
     SquachMesh::Peer guest{};
@@ -702,6 +710,15 @@ int main(int argc, char** argv) {
         for (int g = 0; g < 4 && Settings::clockFont() != f; g++)     Settings::cycleClockFont();
         for (int g = 0; g < 4 && Settings::clockSize() != z; g++)     Settings::cycleClockSize();
         for (int g = 0; g < 8 && Settings::clockBackdrop() != b; g++) Settings::cycleClockBackdrop();
+    }
+    // SQUACHSIM_DESKALERT=0|1|2: DESK ALERT as CARD, BIG CARD or FULL SCREEN.
+    if (const char* da = getenv("SQUACHSIM_DESKALERT")) {
+        const int want = atoi(da);
+        for (int g = 0; g < 3; g++) {
+            const int now = Settings::deskAlertFull() ? 2 : Settings::deskAlertBig() ? 1 : 0;
+            if (now == want) break;
+            Settings::cycleDeskAlert();
+        }
     }
     // Off by default on the board, so the counter column only exists when
     // somebody has asked for the type.
@@ -901,6 +918,9 @@ int main(int argc, char** argv) {
         else if (screen == "petunlock" || screen == "unlock") uiOutfitUnlockTick(frame, t, engine);
         else if (screen == "sysprops") uiSysPropsTick(frame, t, engine);
         else if (screen == "wifinets") uiWifiNetsTick(frame, t);
+        else if (screen == "myalerts") uiMyAlertsTick(frame, t);
+        else if (screen == "fieldguide") uiCryptidGuideDraw(frame, t);
+        else if (screen == "alertkbd") uiWifiPassTick(frame, t);
         else if (screen == "wifiadd")  uiWifiAddTick(frame, t, engine);
         else if (screen == "lora") {
             SimLora::step(t);
@@ -1037,7 +1057,7 @@ int main(int argc, char** argv) {
         if (const char* ep = getenv("SQUACHSIM_EPOCH")) Clock::setEpoch((uint32_t)strtoul(ep, nullptr, 10));
         if (getenv("SQUACH_ALERT") && engine.logAt(0)) uiDeskAlert(*engine.logAt(0), now);
     }
-    else if (screen == "rawscan")    uiRawScanInit(frame, true);
+    else if (screen == "rawscan")    { engine.startRawBleScan(); uiRawScanInit(frame, true); }
     else if (screen == "watchalert") {
         // Watching the seeded AirTag, with a signal that has been climbing for
         // the last twenty seconds -- so the screen has a name, a type and a
@@ -1093,6 +1113,19 @@ int main(int argc, char** argv) {
         }
     }
     else if (screen == "wifinets")   uiWifiNetsInit(frame);
+    else if (screen == "myalerts" || screen == "alertkbd") {
+        // A list like the one the feature was asked for: patrol cars by
+        // their routers' names, the county's too, and one with no label.
+        MyAlerts::begin();
+        MyAlerts::clear();
+        if (!getenv("SQUACHSIM_MYALERTS_EMPTY")) {
+            MyAlerts::add("veh9*", "CITY PD");
+            MyAlerts::add("cty??", "COUNTY");
+            MyAlerts::add("*-pd-*", "");
+        }
+        if (screen == "myalerts") uiMyAlertsInit(frame);
+        else uiWifiPassInitText(frame, "WIFI NAME TO WATCH", "* = anything, ? = one", "veh9*", MyAlerts::PAT_MAX, false);
+    }
     else if (screen == "lora") {
         SimLora::Config lc;
         lc.captureAt = now + (uint32_t)frames * STEP_MS;
@@ -1277,6 +1310,15 @@ int main(int argc, char** argv) {
     else if (screen == "hunt")       {
         // --pose 1: the target is in your hand, two strong samples in, CAUGHT!
         const uint8_t hm[6] = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66 };
+        if (poseIdx == 2) {
+            // --pose 2: a hunted iPhone took a new ID, and the screen asks.
+            static const uint8_t ADV[] = { 0x02, 0x01, 0x1A, 0x0A, 0xFF, 0x4C, 0x00, 0x10, 0x05, 0x03, 0x1C, 0x12, 0x34, 0x56 };
+            const uint8_t nm[6] = { 0x6E, 0x22, 0x33, 0x44, 0x55, 0x77 };
+            engine.huntBle(hm, "(iPhone?)", rawBleKindOf(ADV, sizeof ADV));
+            engine.checkHuntBle(hm, -64); SimClock::nowMs += 2100;
+            engine.checkHuntBle(hm, -62); SimClock::nowMs += 12000;
+            engine.checkHuntSwap(nm, -63, ADV, sizeof ADV, millis());
+        } else
         engine.huntBle(hm, poseIdx == 1 ? "BIGFOOT" : "AirTag");
         if (poseIdx == 1) {
             engine.checkHuntBle(hm, -36); SimClock::nowMs += 2100;

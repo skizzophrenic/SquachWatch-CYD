@@ -20,6 +20,7 @@
 #include "squachy.h"
 #include "detection.h"
 #include "ignore_list.h"   // the NEARBY headline leaves ignored and snoozed devices out
+#include "my_alerts.h"     // MY ALERTS takes the twelfth counter while its list is in use
 #include "emote_script.h"
 #include <esp_system.h>
 #include "crowd_bench.h"
@@ -1746,6 +1747,7 @@ static int16_t s_cornerClockPillR = -1;
 // goes on the screen as runs -- about 40 fillRects a frame, not 300.
 static BatterySource s_battSrc = nullptr;
 void uiClearSetBatterySource(BatterySource fn) { s_battSrc = fn; }
+bool uiClearHasBattery() { return s_battSrc != nullptr; }
 
 static float lampHash(uint32_t a, uint32_t b) {
     uint32_t h = (a * 374761393u + b * 668265263u) ^ 0x5bd1e995u;
@@ -1903,8 +1905,9 @@ static void drawLavaLamp(TFT_eSPI& t, uint32_t now, uint8_t L, bool chg) {
 
 // Asks the board for its battery once a second, and draws the lamp when there
 // is a cell to show.
-static void drawBatteryGauge(TFT_eSPI& t, uint32_t now) {
-    if (!s_battSrc) return;
+// The battery as last read: once a second at most. False with no cell to show.
+static bool battRead(uint32_t now, uint8_t& pctOut, bool& chgOut) {
+    if (!s_battSrc) return false;
     static uint32_t at = 0;
     static bool     has = false, chg = false;
     static uint8_t  pct = 0;
@@ -1913,7 +1916,16 @@ static void drawBatteryGauge(TFT_eSPI& t, uint32_t now) {
         has = s_battSrc(pct, chg);
         if (pct > 100) pct = 100;
     }
-    if (!has) return;
+    pctOut = pct; chgOut = chg;
+    return has;
+}
+
+static void drawBatteryGauge(TFT_eSPI& t, uint32_t now) {
+    // TERMINAL MODE has its own battery, in the LOG's title bar: the lamp
+    // stood on the LOG's title and its TIME heading.
+    if (Settings::boringMode() || !Settings::lavaLamp()) return;   // LAVA LAMP OFF (#132)
+    uint8_t pct; bool chg;
+    if (!battRead(now, pct, chg)) return;
     int h2, ox, oy;
     lampPlace(t, h2, ox, oy);
     if (DrawBand::has(oy, oy + (21 * h2 >> 1))) drawLavaLamp(t, now, pct, chg);
@@ -2904,6 +2916,8 @@ static const char* counterLabel(DetectionType t) {
         // keeps its own label everywhere else -- it just does not get its
         // own column here, because its count is inside this one.
         case DetectionType::HACKER:      return "HACK";
+        case DetectionType::LORAWAN:     return "LWAN";
+        case DetectionType::MINE:        return "MINE";
         default:                         return "?";
     }
 }
@@ -2920,8 +2934,16 @@ static const char* counterLabel(DetectionType t) {
 // whereas a rogue AP is a different kind of problem and had nowhere to
 // go. It has somewhere to go now -- HACKER, below. Row stays at 12
 // columns either way, so the layout has never moved.
+// MY ALERTS takes the twelfth column while its list has anything in it, and
+// beacons (which otherwise have that column) fold into TRACKER for as long as
+// it does -- they are filed with the trackers everywhere else already. Twelve
+// columns either way, so the row never grows into Squachy's band.
+static bool mineColumn()   { return MyAlerts::count() > 0; }
+static bool beaconFolded() { return mineColumn() && Settings::typeEnabled(DetectionType::IBEACON); }
+
 static uint16_t counterCount(const DetectionEngine& eng, DetectionType t) {
     uint16_t n = eng.countByType(t);
+    if (t == DetectionType::AIRTAG && beaconFolded()) n += eng.countByType(DetectionType::IBEACON);
     if (t == DetectionType::AIRTAG) {
         n += eng.countByType(DetectionType::GOOGLE_TAG)
            + eng.countByType(DetectionType::TILE)
@@ -3035,7 +3057,8 @@ bool uiClearColumnHolds(DetectionType column, DetectionType d) {
     if (d == column) return true;
     switch (column) {
         case DetectionType::AIRTAG:
-            return d == DetectionType::GOOGLE_TAG || d == DetectionType::TILE || d == DetectionType::SAMSUNG_TAG;
+            return d == DetectionType::GOOGLE_TAG || d == DetectionType::TILE || d == DetectionType::SAMSUNG_TAG ||
+                   (d == DetectionType::IBEACON && beaconFolded());
         case DetectionType::CAMERA: return d == DetectionType::RING;
         case DetectionType::HACKER: return d == DetectionType::EVILTWIN;
         default:                    return false;
@@ -3068,11 +3091,26 @@ static const uint8_t FIXED_COUNTER_TYPES_N =
 // the one that asked for the type gets it, and the rule above stays true
 // without anybody having to remember it. Twelve is what this row has
 // always drawn, so the layout never grows.
-static const uint8_t MAX_COUNTER_TYPES = FIXED_COUNTER_TYPES_N + 1;
+//
+// A board with a LoRa radio has one more thing it can catch, a LoRaWAN
+// operator's network, and the rule above gives it a column: LWAN, after the
+// rest. Nothing folds it in -- it is neither a tracker, a camera nor an
+// attack. A column with nothing in it is not drawn, so the row only grows
+// while an operator is in earshot.
+#if SQUACH_LORA
+static const uint8_t LORA_COUNTER_TYPES = 1;
+#else
+static const uint8_t LORA_COUNTER_TYPES = 0;
+#endif
+static const uint8_t MAX_COUNTER_TYPES = FIXED_COUNTER_TYPES_N + 1 + LORA_COUNTER_TYPES;
 static uint8_t activeCounterTypes(DetectionType* out) {
     uint8_t n = 0;
     for (; n < FIXED_COUNTER_TYPES_N; n++) out[n] = FIXED_COUNTER_TYPES[n];
-    if (Settings::typeEnabled(DetectionType::IBEACON)) out[n++] = DetectionType::IBEACON;
+    if (mineColumn())                                       out[n++] = DetectionType::MINE;
+    else if (Settings::typeEnabled(DetectionType::IBEACON)) out[n++] = DetectionType::IBEACON;
+#if SQUACH_LORA
+    out[n++] = DetectionType::LORAWAN;
+#endif
     return n;
 }
 // Portrait (narrow) caps at 4 per row -- see the comment above. Landscape
@@ -3085,8 +3123,11 @@ static const uint8_t MAX_PER_ROW_PORTRAIT   = 4;
 static const uint8_t COUNTER_ROWS_LANDSCAPE = 2;
 // Three rows in portrait at eleven columns and at twelve alike, so turning
 // beacons on never moves the counters up into Squachy's band.
+// The LoRa column is left out of this sum on purpose: counting it would
+// reserve a fourth row on every portrait LoRa board for the one day all
+// thirteen are live at once, and Squachy would pay for it every other day.
 static const uint8_t COUNTER_ROWS_PORTRAIT  =
-    (MAX_COUNTER_TYPES + MAX_PER_ROW_PORTRAIT - 1) / MAX_PER_ROW_PORTRAIT;  // ceil
+    (FIXED_COUNTER_TYPES_N + 1 + MAX_PER_ROW_PORTRAIT - 1) / MAX_PER_ROW_PORTRAIT;  // ceil
 
 #if SQUACH_MESH
 // The ordinary visit: ours on the left at SMALL, the guest walking in on the
@@ -3717,6 +3758,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
                     case DetectionType::RAVEN:  case DetectionType::ALPR:   case DetectionType::AIRTAG:
                     case DetectionType::SAMSUNG_TAG: case DetectionType::GOOGLE_TAG: case DetectionType::TILE:
                     case DetectionType::EVILTWIN:    case DetectionType::HACKER:
+                    case DetectionType::MINE:
                         s_serious = true; break;
                     default: break;
                 }

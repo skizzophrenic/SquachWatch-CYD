@@ -19,7 +19,64 @@ struct RawBleResult {
     int8_t  rssi;
     int8_t  prev;       // the reading before this one; equal to rssi until there is one
     char    name[24];   // empty if the device didn't advertise one
+    uint8_t kind;       // RawBleKind: what its advert looks like, for the unnamed ones
 };
+
+// What a raw-scan device's advert says it is, when it gives no name (phones
+// almost never do: iOS keeps "Dave's iPhone" off the air). A best guess from
+// who made the advert and what it is for, so a phone can be picked out of the
+// list and HUNTed. Ranked: a later advert only ever raises the guess.
+enum RawBleKind : uint8_t {
+    RAW_KIND_NONE = 0,
+    RAW_KIND_APPLE,      // Apple, nothing more specific
+    RAW_KIND_SAMSUNG,    // Samsung's company ID: Galaxy phones, also Buds, tags, TVs
+    RAW_KIND_AIRPODS,    // Apple proximity pairing (0x07)
+    RAW_KIND_ANDROID,    // Google Nearby / Quick Share (service 0xFEF3)
+    RAW_KIND_IPHONE,     // Apple Nearby Info / Handoff (0x10, 0x0C): an iPhone, or an iPad, Mac or Watch in use
+};
+// In brackets, so Privacy Mode leaves it alone like "(unnamed)": it is ours, not theirs.
+inline const char* rawBleKindLabel(uint8_t k) {
+    switch (k) {
+        case RAW_KIND_IPHONE:  return "(iPhone?)";
+        case RAW_KIND_ANDROID: return "(Android?)";
+        case RAW_KIND_AIRPODS: return "(AirPods?)";
+        case RAW_KIND_SAMSUNG: return "(Samsung?)";
+        case RAW_KIND_APPLE:   return "(Apple)";
+        default:               return "(unnamed)";
+    }
+}
+// The guess from an advert's raw bytes (length-type-data fields).
+inline uint8_t rawBleKindOf(const uint8_t* p, size_t n) {
+    uint8_t k = RAW_KIND_NONE;
+    auto raise = [&](uint8_t v) { if (v > k) k = v; };
+    for (size_t i = 0; i + 1 < n; ) {
+        const uint8_t len = p[i];
+        if (!len || i + 1 + len > n) break;
+        const uint8_t type = p[i + 1];
+        const uint8_t* d = p + i + 2;
+        const size_t dn = len - 1;
+        if (type == 0xFF && dn >= 2) {
+            const uint16_t cid = (uint16_t)(d[0] | (d[1] << 8));
+            if (cid == 0x004C) {
+                raise(RAW_KIND_APPLE);
+                for (size_t j = 2; j + 1 < dn; ) {          // Continuity: type, length, data
+                    const uint8_t t = d[j], l = d[j + 1];
+                    if (t == 0x10 || t == 0x0C) raise(RAW_KIND_IPHONE);
+                    else if (t == 0x07)         raise(RAW_KIND_AIRPODS);
+                    j += 2 + l;
+                }
+            } else if (cid == 0x0075) raise(RAW_KIND_SAMSUNG);
+        } else if ((type == 0x16 && dn >= 2) || type == 0x02 || type == 0x03) {
+            // Service data (its UUID first), or a list of 16-bit service UUIDs.
+            for (size_t j = 0; j + 1 < dn; j += 2) {
+                if ((uint16_t)(d[j] | (d[j + 1] << 8)) == 0xFEF3) raise(RAW_KIND_ANDROID);
+                if (type == 0x16) break;
+            }
+        }
+        i += 1 + len;
+    }
+    return k;
+}
 
 #if SQUACH_MESH
 // Phase 0: does advertising cost anything worth caring about?
@@ -148,6 +205,11 @@ bool     wifi5Enabled();                // 5 GHz on, and the radio accepted some
 void     setWifi5Enabled(bool on);      // takes effect at the next sweep
 #endif
 extern char g_bootRadioLine[192];     // how the radios started this boot
+// HUMAN SENSING on the boards with the extra screens (SENSE_RICH) listens to
+// the whole channel while it has the radio, for SCOPE's paths. The detector's
+// promiscuous handler stays installed, so it is told to drop what it is fed
+// until sensing hands the radio back.
+extern volatile bool g_sniffMuted;
 uint32_t advertsSeen();      // adverts the radio has handed over since boot, seatbelt or not
 const volatile uint32_t* advertKinds();   // [ind, direct, scan, nonconn, other] since boot
 // The scan window, 1..100 of the 100 ms interval, changed live: WINDOW N on
@@ -185,6 +247,11 @@ public:
     // moves under AUTO SNOOZE. True to the RAM log only -- a device evicted
     // from the ring and seen again reads as new, as the LOG screen shows it.
     bool latestIsNew() const { return _latestNew; }
+    // Bumped every time latest() is pointed at a sighting worth announcing (a
+    // new row, a device coming back, a deauth flood). The screens remember
+    // the last number they announced, so a catch is announced once, whenever
+    // the loop gets to it -- not only if it got there within 200 ms.
+    uint32_t latestSeq() const { return _latestSeq; }
     uint16_t countByType(DetectionType t) const { return _typeCounts[(uint8_t)t]; }
 
     // Lifetime total across reboots (persisted to NVS), unlike the
@@ -249,6 +316,19 @@ public:
 
     // Called from the BT Classic inquiry callback when a name match hits.
     void postBtClassic(Detection d);
+
+    // A LoRaWAN operator's network (Lora::OpAlert), from loop(). The same
+    // merge by address as postBle(), with one difference that is the reason
+    // it is separate: postBle() re-announces a row that went stale, and a row
+    // goes stale after STALE_MS of silence. That is right for an AirTag, which
+    // advertises every two seconds, and wrong for a network whose meters speak
+    // every ten minutes -- every frame would be a comeback and every comeback
+    // an alert. Here a row comes back quietly unless the operator has been
+    // unheard for LORA_GONE_MS, which is long enough to mean you left.
+    void postLora(Detection d);
+    static const uint32_t LORA_GONE_MS = 60UL * 60UL * 1000UL;
+    // ...and how long before its row stops counting as here (expireStale).
+    static const uint32_t LORA_STALE_MS = 10UL * 60UL * 1000UL;
 
     // Called from the BLE scan callback while a raw BLE scan is active
     // (see startRawBleScan()) -- every advertisement, not just known
@@ -439,7 +519,9 @@ public:
     // at-a-time replacement rule, just its own mac/label/RSSI history.
     // No alert flag/cooldown of its own -- HUNT MODE is a screen you're
     // actively looking at already, so there's nothing to pop up over.
-    void huntBle(const uint8_t* mac, const char* name);
+    // rawKind (RawBleKind): what the raw scan took the device for. A phone's
+    // kind turns on the ID-change watch below; 0 for everything else.
+    void huntBle(const uint8_t* mac, const char* name, uint8_t rawKind = 0);
     void huntWifi(const uint8_t* bssid, const char* ssid);
     void clearHunt();
     // The hunt half of isWatched(), and for the same reason: HUNT was the
@@ -460,6 +542,80 @@ public:
     // member.
     void checkWatchBle(const uint8_t* mac, int8_t rssi);
     void checkHuntBle(const uint8_t* mac, int8_t rssi);
+
+    // ---- A hunted phone that changed its ID -----------------------------
+    // Phones take a new random Bluetooth address every ~15 minutes, and the
+    // hunt, which follows one address, goes quiet. Hunting something the raw
+    // scan labelled (iPhone?, Android?...), every advert of that same kind is
+    // noted with when its address was first heard; once the target has been
+    // quiet HUNT_SWAP_QUIET_MS, an address of its kind first heard no earlier
+    // than just before the target went quiet, within HUNT_SWAP_DB of its last
+    // reading, is offered: "it changed its ID?". A guess, so the HUNT screen
+    // asks. Called from the BLE scan callback with the advert's bytes.
+    static const uint32_t HUNT_SWAP_QUIET_MS  = 10000;   // ~30 adverts missed
+    static const uint32_t HUNT_SWAP_MAX_MS    = 600000;  // after 10 min quiet, stop guessing
+    static const uint32_t HUNT_SWAP_OVERLAP_MS = 3000;   // the new address can start a moment before the old stops
+    static const int      HUNT_SWAP_DB        = 15;
+    static const uint8_t  HUNT_OTHERS_CAP     = 32;
+    static const uint32_t HUNT_OTHERS_BUSY_MS = 60000;   // evicting one heard this lately = the table is too small for the room
+    void checkHuntSwap(const uint8_t* mac, int8_t rssi, const uint8_t* adv, size_t len, uint32_t now) {
+        if (_huntKind != WatchKind::BLE || !_huntBleKind || _swapReady || !adv) return;
+        if (memcmp(mac, _huntMac, 6) == 0) return;
+        if (rawBleKindOf(adv, len) != _huntBleKind) return;
+        int idx = -1, stalest = 0;
+        for (uint8_t i = 0; i < _huntOthersN; i++) {
+            if (memcmp(_huntOthers[i].mac, mac, 6) == 0) { idx = i; break; }
+            if ((int32_t)(_huntOthers[i].last - _huntOthers[stalest].last) < 0) stalest = i;
+        }
+        if (idx < 0) {
+            // Full: the address heard least lately goes, which is an ID a
+            // phone has already rotated away from. Phones still in the room
+            // keep their entries, so a bystander is never mistaken for new.
+            // If even the stalest was heard in the last minute, the room has
+            // more of this kind than the table holds and nobody can say who
+            // is new: the newcomer is marked unknown and never offered.
+            bool unknown = false;
+            if (_huntOthersN < HUNT_OTHERS_CAP) idx = _huntOthersN++;
+            else { idx = stalest; unknown = (uint32_t)(now - _huntOthers[idx].last) < HUNT_OTHERS_BUSY_MS; }
+            memcpy(_huntOthers[idx].mac, mac, 6);
+            _huntOthers[idx].first = now;
+            _huntOthers[idx].declined = false;
+            _huntOthers[idx].unknown = unknown;
+        }
+        _huntOthers[idx].last = now;
+        const HuntOther& o = _huntOthers[idx];
+        if (o.declined || o.unknown || !_huntSeenMs) return;
+        const uint32_t quiet = now - _huntSeenMs;
+        if (quiet < HUNT_SWAP_QUIET_MS || quiet > HUNT_SWAP_MAX_MS) return;
+        if ((int32_t)(o.first - (_huntSeenMs - HUNT_SWAP_OVERLAP_MS)) < 0) return;   // was already about
+        const int d = (int)rssi - (int)_huntSeenRssi;
+        if (d > HUNT_SWAP_DB || d < -HUNT_SWAP_DB) return;
+        memcpy(_swapMac, mac, 6);
+        _swapRssi = rssi;
+        _swapReady = true;
+    }
+    bool    huntSwapOffered() const { return _swapReady; }
+    int8_t  huntSwapRssi() const { return _swapRssi; }
+    uint8_t huntBleKind() const { return _huntBleKind; }
+    // YES: the hunt follows the new address, keeping its readings.
+    void huntSwapAccept(uint32_t now) {
+        if (!_swapReady) return;
+        memcpy(_huntMac, _swapMac, 6);
+        _huntSeenMs = now; _huntSeenRssi = _swapRssi;
+        _swapReady = false;
+    }
+    // NO: that address is not asked about again this hunt.
+    void huntSwapDecline() {
+        for (uint8_t i = 0; i < _huntOthersN; i++)
+            if (memcmp(_huntOthers[i].mac, _swapMac, 6) == 0) _huntOthers[i].declined = true;
+        _swapReady = false;
+    }
+    // The raw scan's guess for a device in its list, 0 if it is not there.
+    uint8_t rawBleKindFor(const uint8_t* mac) const {
+        for (uint8_t i = 0; i < _rawBleCount; i++)
+            if (memcmp(_rawBle[i].mac, mac, 6) == 0) return _rawBle[i].kind;
+        return 0;
+    }
 
     // SD log helper accessor.
     SdLog& sd() { return _sd; }
@@ -483,7 +639,6 @@ private:
     static const uint8_t  LOG_CAP       = 64;
     static const uint8_t  WIFI_Q_CAP    = 8;
     static const uint32_t STALE_MS      = 60000;
-    static const uint32_t ALERT_GRACE_MS= 200;
     static const uint8_t  RAW_BLE_CAP   = 20;
 
     // Raw (unfiltered) BLE scan results -- see startRawBleScan(). Not a
@@ -529,6 +684,13 @@ private:
     static const uint32_t DEAUTH_WINDOW_MS   = 3000;   // ...this window...
     static const uint32_t DEAUTH_COOLDOWN_MS = 15000;  // ...then this long before re-firing.
     static const uint8_t  DEAUTH_SENDERS     = 4;      // transmitters tracked at once
+    // A "deauth all" tool spoofs each target network as the sender, so with
+    // five or more networks on the channel no single slot fills, and slots
+    // kept pushing each other out. This many broadcast frames in the window
+    // from any mix of senders is a flood too. Routers almost never deauth
+    // broadcast, so it is a high bar the home router that tripped the old
+    // any-sender rule does not come near.
+    static const uint8_t  DEAUTH_BCAST_ALL   = 24;
     struct DeauthQEntry {
         uint8_t mac[6];
         int8_t  rssi;
@@ -582,7 +744,9 @@ private:
     volatile uint8_t      _deauthQHead = 0;
     volatile uint8_t      _deauthQTail = 0;
     DeauthSender _deauthSenders[DEAUTH_SENDERS] = {};
-    uint32_t _deauthLastFireMs = 0;
+    uint32_t _deauthLastFireMs = 0;     // 0 = never fired
+    uint32_t _deauthAllStart = 0;       // the any-sender broadcast window
+    uint8_t  _deauthAllBcast = 0;
 
     // Watched target -- see the public watchBle()/watchWifi() section
     // above.
@@ -618,6 +782,21 @@ private:
     uint8_t   _huntRssiHead  = 0;
     uint8_t   _huntRssiCount = 0;
     uint32_t  _huntRssiLastMs = 0;
+    // The ID-change watch (checkHuntSwap). _huntSeenMs/_huntSeenRssi are the
+    // target's last advert, every one, not the gauge's 2 s samples.
+    uint8_t   _huntBleKind = 0;
+    volatile uint32_t _huntSeenMs = 0;
+    int8_t    _huntSeenRssi = 0;
+    struct HuntOther { uint8_t mac[6]; bool declined; bool unknown; uint32_t first; uint32_t last; };
+    HuntOther _huntOthers[HUNT_OTHERS_CAP];
+    uint8_t   _huntOthersN = 0;
+    uint8_t   _swapMac[6] = {0};
+    int8_t    _swapRssi = 0;
+    volatile bool _swapReady = false;
+    void huntSwapReset(uint8_t kind) {
+        _huntBleKind = kind; _huntSeenMs = 0; _huntSeenRssi = 0;
+        _huntOthersN = 0; _swapReady = false;
+    }
     void checkHuntWifi(const uint8_t* mac, int8_t rssi);
     void recordHuntRssi(int8_t rssi);
 
@@ -631,7 +810,7 @@ private:
     uint8_t    _logHead  = 0;            // next slot to write
     Detection* _latest   = nullptr;      // pointer into _log or null
     bool       _latestNew = false;       // _latest is a fresh row, not a reactivation
-    uint32_t   _latestChangeMs = 0;
+    volatile uint32_t _latestSeq = 0;   // see latestSeq(); written on the radio tasks
     DetectionType _lastAlertType = DetectionType::UNKNOWN;
 
     // Live counters (one per DetectionType)
@@ -689,6 +868,7 @@ private:
     void processWiFiQ();
     void processDeauthQ();
     void expireStale();
+    void resumeAgeing();     // give active rows back the time the radios were away
     void hopChannel();
 #if SQW_WIFI_5G
     bool start5(uint32_t now);

@@ -47,6 +47,7 @@ static const bool DEFAULT_ROTATION_LOCK = false;
 static bool        s_rotationLocked = DEFAULT_ROTATION_LOCK;
 static bool        s_aura = true;
 static bool        s_detXp = true;
+static bool        s_lavaLamp = true;
 // Eight is the ceiling because the radio's own squad ring holds eight (see
 // SQUAD_N in mesh.cpp). A menu that offered thirty would be offering something
 // the hardware cannot hear: the ninth board in the room evicts the first, and
@@ -73,7 +74,9 @@ static bool        s_backgroundLocked = false;
 static uint8_t     s_deskBg     = 255;     // 255: not picked yet, follow s_background
 static bool        s_deskActive = false;
 static uint8_t     s_clockFont     = 0;   // 0 segments, 1 Bangers
-static uint8_t     s_clockSize     = 1;   // 0 small, 1 medium, 2 large
+static uint8_t     s_clockSize     = 1;   // 0 small, 1 medium, 2 large, 3 XL
+static bool        s_deskAlertFull = false;   // a desk detection opens the full ALERT by itself
+static bool        s_deskAlertBig  = false;   // the desk alert: a near full-screen box, not the small card
 static uint8_t     s_clockBackdrop = 0;   // 0 plain, 1 rain, 2 snow, 3 toasters, 4 fire, 5 stars, 6 fireflies
 static bool        s_clock24Hour   = false;
 // FONTS: per kind of text, 0..4 for -2..+2 around the built size (2 is as
@@ -108,7 +111,7 @@ static const uint32_t DEFAULT_OFF = (1u << (uint8_t)DetectionType::IBEACON);
 // type on), computed once at namespace-init time rather than a hand-
 // maintained literal so it can never drift out of sync with COUNT.
 // 32-bit, not 16. DetectionType::COUNT reached 17 when IBEACON was added
-// (and 18 with HACKER),
+// (18 with HACKER, 19 with LORAWAN),
 // and bit 16 does not exist in a uint16_t -- the shift is undefined and the
 // last type silently loses its switch. NVS has always stored this through
 // putUInt/getUInt, so the saved format is unchanged and nothing migrates.
@@ -178,6 +181,7 @@ static bool     s_wakeOnAlert  = true;
 static bool     s_quietTrack   = true;
 static bool     s_privacy      = false;
 static bool     s_sensing      = false;
+static uint8_t  s_sensePage    = 0;
 static bool     s_extScreen    = false;
 struct __attribute__((packed)) RunEntry { uint16_t boot, minutes; };
 static const uint8_t RUNS_N = 8;
@@ -295,6 +299,7 @@ bool     wakeOnAlert()      { return s_wakeOnAlert; }
 bool     quietTrackers()    { return s_quietTrack; }
 bool     privacyMode()      { return s_privacy; }
 bool     sensing()          { return s_sensing; }
+uint8_t  sensePage()        { return s_sensePage; }
 bool     extScreen()        { return s_extScreen; }
 bool     watchPlus()        { return s_watchPlus; }
 bool     buzz()             { return s_buzzMode != 0; }
@@ -395,6 +400,11 @@ void setSensing(bool on) {
     s_sensing = on;
     s_prefs.putBool("sensing", s_sensing);
 }
+void setSensePage(uint8_t p) {
+    if (p == s_sensePage) return;
+    s_sensePage = p;
+    s_prefs.putUChar("sensePg", p);
+}
 void toggleQuietTrackers() {
     s_quietTrack = !s_quietTrack;
     s_prefs.putBool("qTrack", s_quietTrack);
@@ -427,25 +437,28 @@ void adjustSoundVolume(int8_t delta) {
 uint8_t loraMode()  { return s_loraMode; }
 void cycleLoraMode() { s_loraMode = (uint8_t)((s_loraMode + 1) % 3); s_prefs.putUChar("loraMode", s_loraMode); }
 uint8_t loraListen() { return s_loraListen; }
-// BOTH, MESHTASTIC, MESHCORE, OFF, and round.
+// BOTH, MESHTASTIC, MESHCORE, LORAWAN, OFF, and round. 0-3 are a bit each
+// for the two meshes, which the LORA page reads as such; 4 is neither of
+// them: the radio parked on LoRaWAN's downlink channel, where the meshes are
+// not heard and the LORAWAN detection is.
 void cycleLoraListen() {
-    static const uint8_t NEXT[4] = { 3, 2, 0, 1 };
-    s_loraListen = NEXT[s_loraListen & 3];
+    static const uint8_t NEXT[5] = { 3, 2, 4, 1, 0 };
+    s_loraListen = NEXT[s_loraListen <= 4 ? s_loraListen : 0];
     s_prefs.putUChar("loraLstn", s_loraListen);
 }
-void setLoraListen(uint8_t v) { s_loraListen = v & 3; s_prefs.putUChar("loraLstn", s_loraListen); }
+void setLoraListen(uint8_t v) { s_loraListen = v > 4 ? 3 : v; s_prefs.putUChar("loraLstn", s_loraListen); }
 const char* loraListenName() {
-    static const char* const N[4] = { "OFF", "MESHTASTIC", "MESHCORE", "BOTH" };
-    return N[s_loraListen & 3];
+    static const char* const N[5] = { "OFF", "MESHTASTIC", "MESHCORE", "BOTH", "LORAWAN" };
+    return N[s_loraListen <= 4 ? s_loraListen : 3];
 }
 uint8_t loraTxDbm() { return s_loraTx; }
 void cycleLoraTx() {
-    s_loraTx = s_loraTx == 0 ? 10 : s_loraTx == 10 ? 20 : 0;
+    s_loraTx = s_loraTx == 0 ? 10 : s_loraTx == 10 ? 20 : s_loraTx == 20 ? 22 : 0;
     s_prefs.putUChar("loraTx", s_loraTx);
 }
-const char* loraTxName() { return s_loraTx == 0 ? "OFF" : s_loraTx == 10 ? "10 dBm" : "20 dBm"; }
+const char* loraTxName() { return s_loraTx == 0 ? "OFF" : s_loraTx == 10 ? "10 dBm" : s_loraTx == 20 ? "20 dBm" : "22 dBm"; }
 uint8_t loraRegion() { return s_loraRegion; }
-void setLoraRegion(uint8_t r) { s_loraRegion = r > 2 ? 0 : r; s_prefs.putUChar("loraRgn", s_loraRegion); }
+void setLoraRegion(uint8_t r) { s_loraRegion = r > 3 ? 0 : r; s_prefs.putUChar("loraRgn", s_loraRegion); }   // 0 AUTO, 1 EU, 2 US, 3 AU
 uint8_t loraFocus() { return s_loraFocus; }
 void setLoraFocus(uint8_t ix) { s_loraFocus = ix; s_prefs.putUChar("loraFocus", ix); }
 // Keys: 8, 9, 9 and 9 characters, inside NVS's limit of 15, and none of them is
@@ -603,6 +616,7 @@ void load() {
     // anything about the aura, and should see it once before deciding.
     s_aura           = s_prefs.getBool("aura", true);
     s_detXp          = s_prefs.getBool("detxp", true);
+    s_lavaLamp       = s_prefs.getBool("lavalamp", true);
     s_rotation = s_prefs.getUChar("rot", DEFAULT_ROTATION);
     if (s_rotation > 3) s_rotation = DEFAULT_ROTATION;
 #if defined(TDECK_PLUS)
@@ -612,6 +626,8 @@ void load() {
     s_deskBg = s_prefs.getUChar("deskBg", 255);
     s_clockFont     = s_prefs.getUChar("clkfont", 0);
     s_clockSize     = s_prefs.getUChar("clksize", 1);
+    s_deskAlertBig  = s_prefs.getBool("dskabig", false);
+    s_deskAlertFull = s_prefs.getBool("dskafull", false);
     for (int i = 0; i < (int)FontKind::COUNT; i++) {
         s_fontStep[i] = s_prefs.getUChar(FONT_KEYS[i], FONT_DEFAULT[i]);
         if (s_fontStep[i] > 4) s_fontStep[i] = FONT_DEFAULT[i];
@@ -621,7 +637,7 @@ void load() {
     s_clockBackdrop = s_prefs.getUChar("clkbg", 0);
     s_clock24Hour   = s_prefs.getBool("clk24", false);
     if (s_clockFont > 1)     s_clockFont = 0;
-    if (s_clockSize > 2)     s_clockSize = 1;
+    if (s_clockSize > 3)     s_clockSize = 1;
     if (s_clockBackdrop >= CLOCK_BG_N) s_clockBackdrop = 0;
     if (s_deskBg != 255 && s_deskBg >= BACKGROUND_COUNT) s_deskBg = 255;
     s_brightness = s_prefs.getUChar("bri", 255);
@@ -671,6 +687,7 @@ void load() {
     s_quietTrack   = s_prefs.getBool("qTrack", true);
     s_privacy      = s_prefs.getBool("privacy", false);
     s_sensing      = s_prefs.getBool("sensing", false);
+    s_sensePage    = s_prefs.getUChar("sensePg", 0);
     s_extScreen    = s_prefs.getBool("extscr", false);
     if (s_prefs.getBytesLength("runs") == sizeof s_runs) s_prefs.getBytes("runs", s_runs, sizeof s_runs);
     s_watchPlus    = s_prefs.getBool("wPlus", false);
@@ -691,10 +708,10 @@ void load() {
     s_loraFocus    = s_prefs.getUChar("loraFocus", 0);
     s_loraRegion   = s_prefs.getUChar("loraRgn", 0);
     s_loraListen   = s_prefs.getUChar("loraLstn", 3);
-    if (s_loraListen > 3) s_loraListen = 3;
+    if (s_loraListen > 4) s_loraListen = 3;
     s_loraTx = s_prefs.getUChar("loraTx", 0);
-    if (s_loraTx != 10 && s_loraTx != 20) s_loraTx = 0;
-    if (s_loraRegion > 2) s_loraRegion = 0;
+    if (s_loraTx != 10 && s_loraTx != 20 && s_loraTx != 22) s_loraTx = 0;   // 22 came with #138 and was lost at every restart
+    if (s_loraRegion > 3) s_loraRegion = 0;
     // False, every time, unless somebody has said otherwise on this board.
     s_loraLookups  = s_prefs.getBool("loraLkup", false);
     s_loraLkCall   = s_prefs.getBool("loraLkCal", false);
@@ -811,8 +828,19 @@ uint8_t     clockFont()         { return s_clockFont; }
 const char* clockFontName()     { return s_clockFont ? "BANGERS" : "DIGITAL"; }
 void        cycleClockFont()    { s_clockFont = (uint8_t)((s_clockFont + 1) % 2); s_prefs.putUChar("clkfont", s_clockFont); }
 uint8_t     clockSize()         { return s_clockSize; }
-const char* clockSizeName()     { static const char* const N[3] = { "SMALL", "MEDIUM", "LARGE" }; return N[s_clockSize]; }
-void        cycleClockSize()    { s_clockSize = (uint8_t)((s_clockSize + 1) % 3); s_prefs.putUChar("clksize", s_clockSize); }
+const char* clockSizeName()     { static const char* const N[4] = { "SMALL", "MEDIUM", "LARGE", "X-LARGE" }; return N[s_clockSize]; }
+void        cycleClockSize()    { s_clockSize = (uint8_t)((s_clockSize + 1) % 4); s_prefs.putUChar("clksize", s_clockSize); }
+bool        deskAlertBig()      { return s_deskAlertBig; }
+bool        deskAlertFull()     { return s_deskAlertFull; }
+// CARD -> BIG CARD -> FULL SCREEN -> CARD, kept as the two switches.
+void        cycleDeskAlert() {
+    if (s_deskAlertFull)     { s_deskAlertFull = false; s_deskAlertBig = false; }
+    else if (s_deskAlertBig) { s_deskAlertFull = true; }
+    else                     { s_deskAlertBig = true; }
+    s_prefs.putBool("dskafull", s_deskAlertFull);
+    s_prefs.putBool("dskabig", s_deskAlertBig);
+}
+const char* deskAlertName() { return s_deskAlertFull ? "FULL SCREEN" : s_deskAlertBig ? "BIG CARD" : "CARD"; }
 uint8_t     clockBackdrop()     { return s_clockBackdrop; }
 const char* clockBackdropName() {
     static const char* const N[CLOCK_BG_N] = { "PLAIN", "RAIN", "SNOW", "TOASTERS", "FIRE", "STARFIELD", "FIREFLIES" };
@@ -853,12 +881,18 @@ bool previewBackground(Background b) {
     return true;
 }
 
+// A tap on the screen edge steps the background, and a flash write in the
+// same frame stalls the very frame that should show the new one (and a
+// row of taps is a row of writes). The choice is saved once the taps stop.
+static const uint32_t BG_SAVE_AFTER_MS = 1500;
+static uint32_t s_bgDirtyAt = 0;   // 0 = saved
+
 void cycleBackground() {
     for (uint8_t i = 0; i < BACKGROUND_COUNT; i++) {
         s_background = (Background)(((uint8_t)s_background + 1) % BACKGROUND_COUNT);
         if (backgroundSelectable(s_background)) break;
     }
-    s_prefs.putUChar("bg", (uint8_t)s_background);
+    s_bgDirtyAt = millis() | 1u;
 }
 
 void cyclePrevBackground() {
@@ -866,7 +900,14 @@ void cyclePrevBackground() {
         s_background = (Background)(((uint8_t)s_background + BACKGROUND_COUNT - 1) % BACKGROUND_COUNT);
         if (backgroundSelectable(s_background)) break;
     }
-    s_prefs.putUChar("bg", (uint8_t)s_background);
+    s_bgDirtyAt = millis() | 1u;
+}
+
+void tick(uint32_t now) {
+    if (s_bgDirtyAt && now - s_bgDirtyAt >= BG_SAVE_AFTER_MS) {
+        s_bgDirtyAt = 0;
+        s_prefs.putUChar("bg", (uint8_t)s_background);
+    }
 }
 
 bool inverted() { return s_inverted; }
@@ -936,6 +977,12 @@ void setFontStep(FontKind k, uint8_t step) {
 void toggleDetXp() {
     s_detXp = !s_detXp;
     s_prefs.putBool("detxp", s_detXp);
+}
+
+bool lavaLamp() { return s_lavaLamp; }
+void toggleLavaLamp() {
+    s_lavaLamp = !s_lavaLamp;
+    s_prefs.putBool("lavalamp", s_lavaLamp);
 }
 
 void toggleAura() {
@@ -1226,12 +1273,15 @@ void cycleSquachySize() {
 bool typeEnabled(DetectionType t) {
     uint8_t idx = (uint8_t)t;
     if (idx == 0 || idx >= (uint8_t)DetectionType::COUNT) return true;  // UNKNOWN, or out of range -- never gated
+    // MY ALERTS has no row in TYPE FILTER: the list is its switch, and an
+    // empty list matches nothing.
+    if (t == DetectionType::MINE) return true;
     return (s_typeMask & (1u << idx)) != 0;
 }
 
 void toggleType(DetectionType t) {
     uint8_t idx = (uint8_t)t;
-    if (idx == 0 || idx >= (uint8_t)DetectionType::COUNT) return;
+    if (idx == 0 || idx >= (uint8_t)DetectionType::MINE) return;
     s_typeMask ^= (1u << idx);
     s_prefs.putUInt("typemask", s_typeMask);
     // Stamped alongside the mask so a later firmware can tell which
@@ -1241,7 +1291,7 @@ void toggleType(DetectionType t) {
 
 uint8_t enabledTypeCount() {
     uint8_t n = 0;
-    for (uint8_t t = 1; t < (uint8_t)DetectionType::COUNT; t++) {
+    for (uint8_t t = 1; t < (uint8_t)DetectionType::MINE; t++) {
         if (s_typeMask & (1u << t)) n++;
     }
     return n;

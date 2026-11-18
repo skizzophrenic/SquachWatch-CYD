@@ -49,7 +49,7 @@ namespace Settings {
     void       cyclePalette();       // advances+wraps, persists, applies to Theme
 
     Background background();
-    void       cycleBackground();    // advances+wraps, persists
+    void       cycleBackground();    // advances+wraps, persists (saved by tick() once the taps stop)
     // For the bench: this session only, NOT saved, so the owner's own pick
     // is back at the next boot. Refuses a background the menu cannot reach.
     bool       previewBackground(Background b);
@@ -68,7 +68,8 @@ namespace Settings {
     Background deskBackground();
 
     // The desk clock. FONT: 0 the segment digits, 1 Bangers. SIZE: 0 small,
-    // 1 medium (the size it has always been), 2 large. BACKDROP: what plays
+    // 1 medium (the size it has always been), 2 large, 3 X-LARGE (half as big
+    // again as medium, held back where it would not fit). BACKDROP: what plays
     // inside its plate -- 0 plain, 1 digital rain, 2 snow, 3 flying toasters,
     // 4 fire, 5 starfield, 6 fireflies. The time format is 12 or 24 hour.
     uint8_t     clockFont();
@@ -77,6 +78,15 @@ namespace Settings {
     uint8_t     clockSize();
     const char* clockSizeName();
     void        cycleClockSize();
+    // DESK ALERT, what a catch does on the desk (PR #112 by GreyFox01):
+    // CARD, the small card at the bottom left (the default, as it always was);
+    // BIG CARD, a box filling most of the screen for its few seconds; FULL
+    // SCREEN, straight to the ALERT screen as CLEAR does. A tap on either card
+    // opens the full alert.
+    bool        deskAlertFull();
+    bool        deskAlertBig();
+    void        cycleDeskAlert();
+    const char* deskAlertName();
     uint8_t     clockBackdrop();
     const char* clockBackdropName();
     void        cycleClockBackdrop();
@@ -84,6 +94,7 @@ namespace Settings {
     bool        clock24Hour();
     void        toggleClock24Hour();
     void       cyclePrevBackground(); // same, but backward
+    void       tick(uint32_t now);    // from loop(): writes a background choice once the taps stop
 
     // Disables the two CLEAR-screen gestures that cycle background
     // (the left/right edge-zone tap, and boring mode's "tap anywhere"
@@ -148,6 +159,10 @@ namespace Settings {
     // the full counter rows at the bottom, as before v1.31.0).
     bool       detXp();
     void       toggleDetXp();
+    // LAVA LAMP on the APPEARANCE page, on boards with a battery: the home
+    // screen's battery lamp, on (the default) or off (issue #132).
+    bool       lavaLamp();
+    void       toggleLavaLamp();
 
     // FONTS on the APPEARANCE page: a slider per kind of text, around the
     // size each board was built with. 0..4 for -2..+2; 2 is as built. Theme
@@ -266,6 +281,10 @@ namespace Settings {
     // switched off there boots back into it.
     bool       sensing();
     void       setSensing(bool on);
+    // Which HUMAN SENSING page was showing (0 SENSING .. 3 VITALS), so a
+    // restart comes back to it. Saved when the page is turned.
+    uint8_t    sensePage();
+    void       setSensePage(uint8_t p);
     // EXT SCREEN (the Cardputer ADV): a second panel on the EXT header shows
     // the main scene, and the built-in screen is left for the menus.
     bool       extScreen();
@@ -334,13 +353,13 @@ namespace Settings {
     // default: the radio takes turns between the two). Applied by
     // Lora::applyListen().
     uint8_t     loraListen();
-    void        setLoraListen(uint8_t v);   // 0 off, 1 Meshtastic, 2 MeshCore, 3 both
+    void        setLoraListen(uint8_t v);   // 0 off, 1 Meshtastic, 2 MeshCore, 3 both, 4 LoRaWAN
     void        cycleLoraListen();
     const char* loraListenName();
     // LORA TX (the T-Deck): what the chats' compose line sends at. 0 = off,
     // else dBm. Off by default: a sniffer that talks is opt-in.
     uint8_t     loraTxDbm();
-    void        cycleLoraTx();         // OFF -> 10 dBm -> 20 dBm -> OFF
+    void        cycleLoraTx();         // OFF -> 10 dBm -> 20 dBm -> 22 dBm -> OFF
     const char* loraTxName();
     uint8_t     loraRegion();
     void        setLoraRegion(uint8_t r);

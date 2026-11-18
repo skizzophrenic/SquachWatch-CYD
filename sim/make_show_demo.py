@@ -32,6 +32,66 @@ CYAN  = (0, 214, 214)
 # ---- the clips ----
 
 CLIPS = {
+    # v1.48.0 "Every Breath You Take", on the Tab5's 640x360 (its own screens,
+    # squachsim-tab5 from build_tab5_sim.sh: "_SIM" picks the binary): the
+    # four HUMAN SENSING pages, then VITALS on the Freenove S3 3.5in (480x320)
+    # and SCOPE on the T-Deck Plus's 320x240, letterboxed.
+    "every-breath": [
+        ("sensing", 60, 40, [], {"_SIM": "squachsim-tab5", "SQUACHSIM_PAGE": "0", "SQUACHSIM_SENSE": "presence"}, 1500, "THE TAB5 SENSES THE ROOM NOW. ITS OWN RADIO."),
+        ("sensing", 60, 40, [], {"_SIM": "squachsim-tab5", "SQUACHSIM_PAGE": "1", "SQUACHSIM_SENSE": "motion"}, 1500, "SCOPE: EVERY WIFI PATH ON RADAR."),
+        ("sensing", 60, 40, [], {"_SIM": "squachsim-tab5", "SQUACHSIM_PAGE": "2", "SQUACHSIM_SENSE": "clear"}, 1500, "SNEAK: CROSS THE ROOM. DON'T GET CAUGHT."),
+        ("sensing", 60, 40, [], {"_SIM": "squachsim-tab5", "SQUACHSIM_PAGE": "3", "SQUACHSIM_SENSE": "presence"}, 1800, "VITALS: SIT STILL. IT COUNTS YOUR BREATHS."),
+        ("sensing", 60, 40, [], {"_SIZE": "480x320", "SQUACHSIM_PAGE": "3", "SQUACHSIM_SENSE": "presence"}, 1500, "ON THE FREENOVE S3 BOARDS TOO."),
+        ("sensing", 60, 40, [], {"_SIZE": "320x240", "SQUACHSIM_PAGE": "1", "SQUACHSIM_SENSE": "motion"}, 1600, "AND THE T-DECK PLUS. SWIPE FOR PAGES."),
+    ],
+    # v1.47.0 "You Break it You Bought It", 320x240: MODE's three stops
+    # (Squachy, the desk with the X-LARGE clock, TERMINAL MODE, each with the
+    # card the button shows), the desk's BIG CARD alert, then Mothman out on
+    # FIREFLIES (--pet 7) and his page in the Cryptid Field Guide.
+    "you-break-it": [
+        ("clear", 60, 40, ["--bg", "5"], {"SQUACHSIM_BATT": "80", "SQUACHSIM_TOAST": "NORMAL MODE|Squachy's back"}, 1400, "NEW: ONE BUTTON, THREE MODES. MEET MODE."),
+        ("desk", 30, 40, [], {"SQUACHSIM_EPOCH": "1789396740", "SQUACHSIM_CLOCK": "1,3,0", "SQUACHSIM_TOAST": "DESK MODE|MODE again for terminal"}, 1500, "MODE ONCE: THE DESK. NOW EXTRA LARGE."),
+        ("clear", 60, 40, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_BATT": "80", "SQUACHSIM_TOAST": "TERMINAL MODE|MODE again for Squachy"}, 1600, "TWICE: TERMINAL MODE. ALL TOOL, NO MASCOT."),
+        ("desk", 30, 40, [], {"SQUACHSIM_EPOCH": "1789396740", "SQUACHSIM_CLOCK": "1,3,0", "SQUACHSIM_DESKALERT": "1", "SQUACH_ALERT": "1"}, 1500, "THE DESK CAN SHOUT NOW. BIG CARD."),
+        ("clear", 60, 60, ["--bg", "5", "--pet", "7"], {"SQUACHSIM_BATT": "80"}, 1600, "SOMETHING IN THE TREELINE. HE'S OUT NOW."),
+        ("fieldguide", 10, 20, ["--pet", "7"], {}, 1700, "THE CRYPTID FIELD GUIDE. ONE DOWN."),
+    ],
+    # v1.46.0 "They See Me Rollin", 320x240: the main screen, MY ALERTS with
+    # the seeded patrol-car list, a MY ALERT card (--alert 19, MINE) and a
+    # LoRaWAN operator's (--alert 18), HUNT after a long run (no bubble
+    # leftovers up top), and SYNTHWAVE for the trackball and the AU band.
+    "they-see-me-rollin": [
+        ("clear", 60, 40, ["--bg", "5"], {"SQUACHSIM_BATT": "80"}, 1400, "THEY SEE ME ROLLIN'. I SEE THEM TOO."),
+        ("myalerts", 10, 1, [], {}, 2400, "NEW: MY ALERTS. YOUR OWN WIFI NAMES, * AND ?"),
+        ("alert", 40, 40, ["--alert", "19"], {}, 1700, "VEH912? THAT'S A PATROL CAR'S HOTSPOT."),
+        ("alert", 40, 40, ["--alert", "18"], {}, 1600, "LORA BOARDS NAME WHOSE LORAWAN IS NEARBY."),
+        ("hunt", 1500, 30, [], {}, 1400, "HUNT STOPPED HOARDING SPEECH BUBBLES."),
+        ("clear", 60, 40, ["--bg", "10"], {"SQUACHSIM_BATT": "80"}, 1600, "T-DECK TRACKBALL. AUSSIE LORA. ROLL ON."),
+    ],
+    # v1.45.0 "Skate Better", 320x240: the main screen on FIREFLIES, a deauth
+    # flood's alert (--alert 14 DEAUTH) and an AirTag's (--alert 6), the
+    # AQUARIUM with the memory the release handed back, TERMINAL MODE (one tap
+    # now, no panel), and SYNTHWAVE for the self-review.
+    "skate-better": [
+        ("clear", 60, 40, ["--bg", "5"], {"SQUACHSIM_BATT": "80"}, 1500, "SKATE BETTER. SAME BOARD, FEWER FALLS."),
+        ("alert", 40, 40, ["--alert", "14"], {}, 1500, "DEAUTH FLOODS DON'T SNEAK PAST."),
+        ("alert", 40, 40, ["--alert", "6"], {}, 1400, "EVERY CATCH GETS ITS ALERT. EVERY ONE."),
+        ("clear", 60, 40, ["--bg", "3"], {"SQUACHSIM_BATT": "80"}, 1500, "9 KB LIGHTER. MORE ROOM FOR THE RADIOS."),
+        ("clear", 60, 40, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_BATT": "80"}, 1500, "TERMINAL MODE: ONE TAP. NO LECTURE."),
+        ("clear", 60, 40, ["--bg", "10"], {"SQUACHSIM_BATT": "80"}, 1600, "WE PENTESTED OURSELVES. IT FOUND THINGS."),
+    ],
+    # v1.44.0 "Unbreaking Bad", 320x240: the main screen hearing the room
+    # again, SCAN > BLE with its phone labels (the emulator's seeded room,
+    # sim/detection_sim.cpp), HUNT asking about a phone's new ID (--pose 2),
+    # TERMINAL MODE's battery in the LOG title bar, and Squachy back on the
+    # boot screen with TERMINAL MODE on.
+    "unbreaking-bad": [
+        ("clear", 60, 40, ["--bg", "5"], {"SQUACHSIM_BATT": "80"}, 1500, "SCANS HEAR THE ROOM AGAIN. MY BAD."),
+        ("rawscan", 30, 30, [], {}, 1600, "UNNAMED PHONES GET A BEST GUESS."),
+        ("hunt", 30, 30, ["--pose", "2"], {}, 1800, "PHONE CHANGED ITS ID? FOLLOW IT."),
+        ("clear", 60, 40, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_BATT": "80"}, 1500, "TERMINAL MODE GOT A BATTERY."),
+        ("boot", 60, 40, [], {"SQUACHSIM_TERMINAL": "1"}, 1400, "AND SQUACHY STILL WAVES AT BOOT."),
+    ],
     # v1.43.0 "When You're Bored Then You're Boring", 320x240: TERMINAL MODE
     # (SQUACHSIM_TERMINAL) on the live log, then sorted by KIND, dBm and
     # DEVICE (SQUACHSIM_TMSORT), then the StickS3 / Cardputer panel.
@@ -436,6 +496,7 @@ CLIP_SIZE = {
     "squachwatch-squared": (240, 240, 2),
     "the-big-screen": (480, 320, 1),
     "good-company":   (480, 320, 1),
+    "every-breath":   (640, 360, 1),
 }
 
 def clip_geom(clip):
@@ -484,9 +545,11 @@ def render(clip):
         # env, for the StickS3); encode() letterboxes it into the clip.
         env = dict(env)
         sw, sh = cw, ch
+        # "_SIM": another emulator binary beside this one (squachsim-tab5).
+        ssim = os.path.join(HERE, env.pop("_SIM")) if "_SIM" in env else sim
         if "_SIZE" in env:
             sw, sh = (int(v) for v in env.pop("_SIZE").split("x"))
-        run([sim, screen, os.path.join(out, "x.png"), "--frames", str(warm),
+        run([ssim, screen, os.path.join(out, "x.png"), "--frames", str(warm),
              "--sequence", str(n), "--raw", raw,
              "--size", "%dx%d" % (sw, sh)] + extra, env)
         if os.path.getsize(raw) != sw * sh * 3 * n:

@@ -12,6 +12,7 @@
 #include "lora_pkt.h"
 #include "lora_meshtastic.h"
 #include "lora_meshcore.h"
+#include "lora_lorawan.h"
 
 namespace Lora {
 namespace Nodes {
@@ -95,6 +96,10 @@ void setMeshtasticHook(MeshtasticHook fn);
 // The same for MeshCore (Lora::McDm: adverts, DMs to us, their ACKs).
 typedef void (*MeshCoreHook)(const MeshCore::Decoded& d, uint32_t now);
 void setMeshCoreHook(MeshCoreHook fn);
+// And for LoRaWAN, with the packet beside it for the signal and the CRC
+// (Lora::OpAlert: which operator's network that was).
+typedef void (*LoRaWANHook)(const LoRaWAN::Decoded& d, const Packet& pk, uint32_t now);
+void setLoRaWANHook(LoRaWANHook fn);
 
 uint8_t     count();
 const Node* at(uint8_t i);

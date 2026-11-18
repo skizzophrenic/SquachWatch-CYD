@@ -548,6 +548,76 @@ plenty of things that are not a Pineapple produce one.
 
 ---
 
+## LoRaWAN operators — `LORAWAN` — **High or Medium, by address type**
+
+Only on a board with a LoRa radio (`SQUACH_LORA`), and only while that radio
+is listening on a LoRaWAN profile: set **LORA** to LORAWAN (WATCH SETTINGS on
+the T-Watch; Settings > SYSTEM, or LORA SETTINGS > LISTEN, on the T-Deck
+Plus). The mesh chats go quiet while it listens there. Everything else on
+this page is WiFi or Bluetooth; this one comes from the sniffer in
+`docs/LORA.md`. Its counter tile reads LWAN.
+
+Every LoRaWAN data frame starts with the device's address in the clear, and
+the front of that address is the operator's NetID. The LoRa Alliance registry
+is in flash (`include/lora_netid_table.h`, 143 rows), so the board can say
+whose network it is hearing without asking anybody: "Oresundskraft", "The
+Things Network", "Netmore".
+
+**One detection per operator, not per device.** A utility's meters share a
+NetID and a street holds hundreds of them. The log row carries an address
+made up from the NetID -- `02:4C:57` and the three NetID bytes -- so IGNORE,
+SNOOZE, WATCH and HUNT work on the operator the way they work on a device.
+HUNT's gauge moves when the operator's next frame lands, which is minutes
+apart, and it is whichever of its devices spoke: a bearing on a network,
+not on one meter.
+
+**It alerts once.** A row in the log goes quiet after a minute, and a network
+that speaks every ten minutes would otherwise come back as news every time.
+The alert returns only after the operator has been unheard for an hour.
+
+| What | Grade |
+|---|---|
+| DevAddr type 0-2 (the whole NetID is in the address) | **High** |
+| DevAddr type 3-7 (11 to 17 bits of a 21-bit NetID) | **Medium** -- the registry row it lands on is the likeliest owner |
+
+### What is deliberately NOT counted
+
+- **Join requests, join accepts and Class B beacons.** None carries a
+  DevAddr. A join request names the device's maker and stays in NODES.
+- **NetID 0 and 1**, "private/experimental". Not an operator, and where an
+  all-zero or garbage header lands.
+- **A single downlink.** Gateways send downlinks without a payload CRC, so
+  one frame off RX2 is only as good as its header checksum. The same
+  operator has to be heard twice within the hour. An uplink whose CRC held
+  counts at once.
+
+The payload is encrypted and is never touched. `test/lora_opalert_test.cpp`
+pins all of the above.
+
+---
+
+## Your own WiFi names — `MINE` (shown as `MY ALERT`) — **High confidence**
+
+Not a signature table: Settings → MY ALERTS lets the owner type up to eight
+network names to alert on, because some of the most useful patterns are
+local. It was asked for by a tester whose city's patrol cars run in-car
+routers named `veh` plus the unit number, and whose county does the same.
+
+- Checked against every beacon's SSID, after the evil-twin check and ahead
+  of the OUI and SSID tables, so a name the owner asked about wins over a
+  vendor guess for the same router.
+- Plain text is a prefix (the built-in SSID table's rule). `*` and `?` make
+  it a whole-name glob, case-insensitive. Under two fixed characters is
+  refused; under three is saved with a warning.
+- High confidence because the match is exact. What it means is the owner's
+  call: anyone can name a router anything.
+- No DEX card, not on the BINGO card and not in TYPE FILTER: the list is
+  its own switch. While the list has anything in it, MINE takes the main
+  screen's twelfth counter and beacons (if on) fold into TRACKER.
+- Never shared with the squad: the label is the owner's own words.
+
+---
+
 ## License / attribution
 
 | Source | License | Used for |

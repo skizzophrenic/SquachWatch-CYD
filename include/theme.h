@@ -638,6 +638,11 @@ namespace Theme {
     // True once, after three knocks on the igloo that goes by in the SNOWFALL
     // snow. Same contract; main.cpp turns it into Squachy::unlockMeaty().
     bool consumeIglooKnock();
+    // True when a tap lands on the red eyes in the FIREFLIES treeline while
+    // they are showing, and puts them away. main.cpp turns it into
+    // Squachy::unlockMothman(). Once he is found the eyes come back green
+    // and take no taps.
+    bool mothmanEyesTap(int x, int y, uint32_t now);
     // True once, after the owl on the FIRE background was tapped while asking
     // WHAT REEKS?! (every third time he speaks). main.cpp turns it into
     // Squachy::unlockShambler().
@@ -740,6 +745,14 @@ namespace Theme {
     // clock draws anything else, or when this is called on leaving the desk.
     void drawClockBackdrop(TFT_eSPI& t, uint32_t now, int x, int y, int w, int h, uint8_t kind);
     void releaseClockBackdrop();
+
+    // FIRE's heat (6.4 KB on a 2.8"), DIGITAL's trails and TERMINAL's columns
+    // are only let go when another background is picked, so a screen with no
+    // background (UPDATE, HUMAN SENSING) would otherwise run with them pinned
+    // in the middle of the heap. Called on the way into those; the next
+    // screen that draws the background takes them back on its first frame.
+    // Not LOG or SETTINGS: those draw the background behind their lists.
+    void releaseBackgroundBuffers();
 
     // True during the shared random glitch burst drawBangersText()
     // already rolls every ~5-10s (see its own comment) -- exposed so

@@ -207,5 +207,15 @@ int main() {
            Msgs::meshCoreKey("ab", "c", 1) != Msgs::meshCoreKey("a", "bc", 1));
     }
 
+    suite("A line break in a message stays on its own row");
+    {
+        Msgs::clear();
+        say(Proto::MESHCORE, 0, "YETI", "first line\r\nsecond\tline", -80, 9000);
+        Msgs::Msg m;
+        ck("the break is a space, the CR is gone", Msgs::at(0, m) && strcmp(m.text, "first line second line") == 0);
+        say(Proto::MESHCORE, 0, "BIG\nFOOT", "hi", -80, 9100);
+        ck("a sender name cannot break a row either", Msgs::at(0, m) && strcmp(m.sender, "BIG FOOT") == 0);
+    }
+
     return report();
 }

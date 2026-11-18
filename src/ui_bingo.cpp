@@ -50,6 +50,7 @@ const char* shortName(DetectionType t) {
         case DetectionType::EVILTWIN:    return "TWIN";
         case DetectionType::IBEACON:     return "BEACON";
         case DetectionType::HACKER:      return "HACK";
+        case DetectionType::LORAWAN:     return "LWAN";
         default:                         return "?";
     }
 }

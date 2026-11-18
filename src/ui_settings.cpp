@@ -15,6 +15,7 @@
 #include "settings.h"
 #include "security.h"
 #include "ignore_list.h"
+#include "my_alerts.h"
 #include "squachy.h"
 #include "bingo.h"
 #include "dex.h"
@@ -74,7 +75,12 @@ static const SettingsRow ALL_ROWS[] = {
     // to ten rows, so the main list carries one row that opens it.
     SettingsRow::WATCH_SETTINGS,
 #endif
-    SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE, SettingsRow::AUTO_QUIET,
+#if defined(STICKS3)
+    // TERMINAL MODE has its own button everywhere else (MODE, bottom right);
+    // the StickS3's is FOB, so its way in stays here.
+    SettingsRow::BORING_MODE,
+#endif
+    SettingsRow::CONFIDENCE, SettingsRow::AUTO_QUIET,
 #if defined(CROWPANEL7)
     // Beside ALERT FILTER and AUTO SNOOZE because it is about alerts: one
     // switch, not a page of knobs like the light. Compiled only for the
@@ -91,6 +97,9 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::WIFI_BANDS,
 #endif
     SettingsRow::DETECTION_FILTER,
+    // The owner's own WiFi names, between what the board filters out and
+    // what it has been told to ignore.
+    SettingsRow::MY_ALERTS,
     SettingsRow::IGNORED_DEVICES,
 #if defined(SENSE_CYD_APP)
     // Beside what the detector listens for: what the board's radio senses
@@ -120,7 +129,7 @@ static const SettingsRow ALL_ROWS[] = {
     // -- see APPEARANCE_ROWS. Everything about how he LOOKS is on one page;
     // what stays here is what he DOES.
     SettingsRow::REPLAY_INTRO, SettingsRow::SHOW_OFF, SettingsRow::VIEW_DIARY,
-    SettingsRow::BINGO, SettingsRow::DEX,
+    SettingsRow::BINGO, SettingsRow::DEX, SettingsRow::CRYPTID_GUIDE,
 #if !defined(STICKS3)   // the StickS3 has FOB MODE on the main screen in its place
     SettingsRow::DESK_MODE,
 #endif
@@ -160,7 +169,7 @@ static const SettingsRow APPEARANCE_ROWS[] = {
     SettingsRow::SHADES_COLOR, SettingsRow::BANTER, SettingsRow::AURA,
     // Then how the SCREEN looks.
     SettingsRow::THEME, SettingsRow::BACKGROUND, SettingsRow::BACKGROUND_LOCK, SettingsRow::DET_STYLE,
-    SettingsRow::BRIGHTNESS,
+    SettingsRow::LAVA_LAMP, SettingsRow::BRIGHTNESS,
     SettingsRow::INVERT, SettingsRow::RGB_SWAP, SettingsRow::ROTATION_LOCK,
     // And the one light that is not on the screen at all.
     SettingsRow::STATUS_LIGHT,
@@ -233,12 +242,14 @@ static const SettingsRow SYSTEM_ROWS[] = {
 };
 static const uint8_t SYSTEM_ROWS_N = sizeof(SYSTEM_ROWS) / sizeof(SYSTEM_ROWS[0]);
 
-// The DESK MODE page: everything about the desk in one place, so it can grow.
-// The way in comes first; then how it looks; then who is on it.
+// The DESK SETTINGS page: everything about the desk in one place, so it can
+// grow. How it looks first; then who is on it. (Its OPEN row went when the
+// main screen's MODE button became the way in.)
 static const SettingsRow DESK_ROWS[] = {
-    SettingsRow::DESK_OPEN, SettingsRow::DESK_BACKGROUND,
+    SettingsRow::DESK_BACKGROUND,
     SettingsRow::CLOCK_FONT, SettingsRow::CLOCK_SIZE, SettingsRow::CLOCK_BACKDROP,
     SettingsRow::CLOCK_FORMAT,
+    SettingsRow::DESK_ALERT,
     SettingsRow::TIME_ZONE,
 #if SQUACH_MESH
     SettingsRow::DESK_SQUAD, SettingsRow::DESK_CROWD, SettingsRow::DESK_VISIT,
@@ -321,6 +332,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::CLOCK_SIZE:
         case SettingsRow::CLOCK_BACKDROP:
         case SettingsRow::CLOCK_FORMAT:
+        case SettingsRow::DESK_ALERT:
             return RowGroupId::DESK;
         case SettingsRow::DESK_SQUAD:
         case SettingsRow::DESK_CROWD:
@@ -344,6 +356,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::PET:
         case SettingsRow::BANTER:
         case SettingsRow::DET_STYLE:
+        case SettingsRow::LAVA_LAMP:
         case SettingsRow::FONTS:
             return RowGroupId::APPEARANCE;
         case SettingsRow::FONT_MENUS:
@@ -368,6 +381,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::WIFI_BANDS:
 #endif
         case SettingsRow::DETECTION_FILTER:
+        case SettingsRow::MY_ALERTS:
         case SettingsRow::IGNORED_DEVICES:
 #if defined(SENSE_CYD_APP)
         case SettingsRow::SENSING:
@@ -380,6 +394,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::VIEW_DIARY:
         case SettingsRow::BINGO:
         case SettingsRow::DEX:
+        case SettingsRow::CRYPTID_GUIDE:
         case SettingsRow::DESK_MODE:
         case SettingsRow::SHOW_OFF:
             return RowGroupId::SQUACHY;
@@ -460,6 +475,8 @@ static uint8_t buildDisplayList(DisplayItem* out) {
         // does not have yet would be a switch that does nothing.
         if (r == SettingsRow::PET && !Squachy::anyPetUnlocked()) continue;
         if (r == SettingsRow::AURA && !Squachy::hasAura()) continue;
+        // No battery to show, no lamp to switch.
+        if (r == SettingsRow::LAVA_LAMP && !uiClearHasBattery()) continue;
         // Not a secret, just impossible: a board without a second app slot or
         // a Bluetooth server has nothing to update into.
         if ((r == SettingsRow::UPDATE_FIRMWARE || r == SettingsRow::UPDATE_CHECK) && !OtaCore::available()) continue;
@@ -821,12 +838,6 @@ static const ConfirmText CONFIRMS[] = {
     { SettingsRow::RESET_STATS, "RESET STATS?",
       "Clears every detection total.",
       "Outfits earned by count re-lock.", "RESET" },
-    // The second line is the whole reason this row has a panel: boring mode
-    // hides every Squachy row, so the first thing it does is take away the
-    // OUTFIT row, and the way back is not obvious once it has.
-    { SettingsRow::BORING_MODE, "TERMINAL MODE?",
-      "Swaps Squachy for the dashboard;",
-      "his rows hide. Same row undoes.", "TURN ON" },
     { SettingsRow::REPLAY_INTRO, "REPLAY INTRO?",
       "Runs the first-boot walkthrough",
       "again, from the top.", "REPLAY" },
@@ -1222,6 +1233,9 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
         case SettingsRow::CLOCK_FORMAT:
             label = "CLOCK FORMAT"; value = Settings::clock24Hour() ? "24 HOUR" : "12 HOUR";
             break;
+        case SettingsRow::DESK_ALERT:
+            label = "DESK ALERT"; value = Settings::deskAlertName();
+            break;
 #if SQUACH_MESH
         case SettingsRow::DESK_SQUAD:
             label = "SQUAD ON DESK"; value = Settings::deskSquad() ? "ON" : "OFF";
@@ -1295,7 +1309,12 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             // keeps the full name in its title bar.
             label = "TYPE FILTER";
             snprintf(valBuf, valBufN, "%u/%u", (unsigned)Settings::enabledTypeCount(),
-                     (unsigned)DetectionType::COUNT - 1);
+                     (unsigned)DetectionType::MINE - 1);
+            value = valBuf;
+            break;
+        case SettingsRow::MY_ALERTS:
+            label = "MY ALERTS";
+            snprintf(valBuf, valBufN, "%u", (unsigned)MyAlerts::count());
             value = valBuf;
             break;
         case SettingsRow::IGNORED_DEVICES:
@@ -1511,6 +1530,10 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             label = "DETECTIONS";
             value = Settings::detXp() ? "XP" : "CLASSIC";
             break;
+        case SettingsRow::LAVA_LAMP:
+            label = "LAVA LAMP";
+            value = Settings::lavaLamp() ? "ON" : "OFF";
+            break;
         case SettingsRow::VIEW_DIARY:
             label = "SQUACHY'S DIARY";
             break;
@@ -1521,6 +1544,10 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             value = bingoVal;
             break;
         }
+        case SettingsRow::CRYPTID_GUIDE:
+            label = "CRYPTID FIELD GUIDE";
+            value = Squachy::mothmanUnlocked() ? "1/1 >" : "0/1 >";
+            break;
         case SettingsRow::DEX: {
             label = "SQUACHY-DEX";
             static char dexVal[12];
@@ -1529,7 +1556,7 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             break;
         }
         case SettingsRow::DESK_MODE:
-            label = "DESK MODE";
+            label = "DESK SETTINGS";
             value = ">";
             break;
         case SettingsRow::RESET_STATS:
@@ -1615,7 +1642,7 @@ if (!Theme::stillBackdrop(t)) switch (Settings::background()) {
     const char* pageTitle = ">> SETTINGS <<";
     if (s_page == SettingsPage::APPEARANCE) pageTitle = ">> APPEARANCE <<";
     else if (s_page == SettingsPage::SYSTEM) pageTitle = ">> SYSTEM <<";
-    else if (s_page == SettingsPage::DESK)   pageTitle = ">> DESK MODE <<";
+    else if (s_page == SettingsPage::DESK)   pageTitle = ">> DESK SETTINGS <<";
     else if (s_page == SettingsPage::WATCH)  pageTitle = ">> WATCH SETTINGS <<";
     else if (s_page == SettingsPage::FONTS)  pageTitle = ">> FONTS <<";
     Theme::drawTitleBar(t, pageTitle);
@@ -1646,7 +1673,7 @@ if (!Theme::stillBackdrop(t)) switch (Settings::background()) {
             // value goes, rather than gone. See isSquachyOnlyRow().
             const bool off = Settings::boringMode() && isSquachyOnlyRow(items[idx].row);
             if (off) {
-                drawRow(t, w, y, itemH, label, "boring mode", false, Theme::W95_SHADOW, h > w);
+                drawRow(t, w, y, itemH, label, "terminal", false, Theme::W95_SHADOW, h > w);
             } else if (isTwoLineRow(items[idx].row)) {
                 drawTwoLineRow(t, w, y, itemH, label, value, groupColor(items[idx].group),
                                items[idx].row == SettingsRow::BACKGROUND ||

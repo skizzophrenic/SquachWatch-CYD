@@ -16,13 +16,20 @@
 //
 // One radio path, the router answering the CYD's pings, so there is no list of
 // paths: the room goes to the two windows.
-#if defined(SENSE_CYD_APP)
+// The Tab5 has its own screens (ui_sensing_tab5.cpp), the sensing app's.
+#if defined(SENSE_CYD_APP) && !defined(TAB5) && !defined(SENSE_TAB5_SIM)   // SENSE_TAB5_SIM: the emulator draws the Tab5 screens
 #include "ui_sensing_cyd.h"
 #include "sense_store.h"
 #include "sense_cyd.h"
 #include "settings.h"
 #include "theme.h"
 #include "squachy.h"
+#if SENSE_RICH
+#include "sense_vitals.h"
+#if defined(TAB5)
+#include "tab5_radio.h"
+#endif
+#endif
 #include <Arduino.h>
 #include <math.h>
 #include <stdio.h>
@@ -35,6 +42,9 @@ const uint32_t HOLD_MS     = 15000;   // the engine's PRESENCE hold
 const int      STRIP_SPAN  = 300;     // 30 s at 10 statuses a second
 
 uint32_t s_enterMs = 0, s_lastMs = 0;
+#if SENSE_RICH
+uint8_t s_page = 0;   // 0 SENSING, 1 SCOPE, 2 SNEAK, 3 VITALS
+#endif
 const char* s_lastWord = nullptr;
 uint32_t s_wordAt = 0;
 
@@ -135,10 +145,13 @@ Word stateWord(uint32_t now) {
     Word r; r.sub[0] = 0;
     const SenseReport& s = SenseStore::last();
     const char* net = senseCydNetwork();
+#if defined(TAB5)
+    if (!Tab5Radio::senseCapable()) { r.w = "UPDATE RADIO"; r.c = Theme::AMBER; snprintf(r.sub, sizeof r.sub, "reopen HUMAN SENSING to update"); return r; }
+#endif
     if (!net[0]) { r.w = "ADD WIFI"; r.c = Theme::AMBER; snprintf(r.sub, sizeof r.sub, "tap here to save a network"); }
     else if (!SenseStore::heard()) { r.w = "STARTING"; r.c = Theme::AMBER; snprintf(r.sub, sizeof r.sub, "waking the radio"); }
     else if (!SenseStore::fresh(now)) { r.w = "RADIO LOST"; r.c = Theme::AMBER; snprintf(r.sub, sizeof r.sub, "nothing for %lu s", (unsigned long)((now - SenseStore::lastAt()) / 1000)); }
-    else if (s.mode != SENSE_MODE_STA) {
+    else if (!senseModeLive(s.mode)) {
         r.w = "JOINING"; r.c = Theme::AMBER;
         const char* shown = Settings::privacyMode() ? "a saved network" : net;   // Privacy Mode: no name
         // The driver's reason in words. A refused board waits, longer each
@@ -218,7 +231,18 @@ const Lay LAYS[] = {
        71, 45, 167,  64, true,   2, 111, 236, 22, HEAD_SM, false, false, 0.30f,  false, 16, 1 },
     { 640, 360,   2, 22, 196, 264, 34, 2,  202, 22, 436, 50, 4, 1, 4, 2, 3, 4, { TL_NOW, TL_FLOOR, TL_PEAK, TL_MARGIN },
       202, 76, 436, 210, true,   2, 290, 636, 40, HEAD_LG, true,  true,  0.60f,  true,  22, 2 },
+    // Upright 2.4/2.8in (#133). The AWOK has no rotate button and its touch is
+    // calibrated upright only, so "turn the board sideways" left it stuck. The
+    // 240x240 row with the extra 80 px given to the spectrum, all four tiles
+    // and a taller banner.
+    { 240, 320,   2, 22,  66, 204, 22, 1,   71, 22, 167, 62, 2, 2, 3, 1, 2, 4, { TL_NOW, TL_FLOOR, TL_PEAK, TL_MARGIN },
+       71, 88, 167, 138, true,   2, 230, 236, 50, HEAD_MD, true,  false, 0.42f,  true,  28, 1 },
 };
+// A panel with its own row is drawn as it is, upright or not.
+bool hasRow(int w, int h) {
+    for (const Lay& l : LAYS) if (l.w == w && l.h == h) return true;
+    return false;
+}
 // The row for this panel: its own size, or else the class it falls in.
 const Lay& layFor(int w, int h) {
     for (const Lay& l : LAYS) if (l.w == w && l.h == h) return l;
@@ -256,7 +280,7 @@ void backdrop(TFT_eSPI& t, uint32_t now) {
 
 void statusLine(TFT_eSPI& t, uint32_t now) {
     const SenseReport& s = SenseStore::last();
-    const bool fresh = SenseStore::fresh(now) && s.mode == SENSE_MODE_STA;
+    const bool fresh = SenseStore::fresh(now) && senseModeLive(s.mode);
     char b[40];
     if (fresh && (now % 1000) < 600) t.fillCircle(36, 9, 3, Theme::GREEN);
 #if defined(__EMSCRIPTEN__)
@@ -266,11 +290,24 @@ void statusLine(TFT_eSPI& t, uint32_t now) {
 #else
     textT(t, 42, 6, fresh ? "LIVE" : (senseCydNetwork()[0] ? "WAIT" : "NO WIFI"), fresh ? Theme::GREEN : Theme::AMBER, 1);
 #endif
+    int cx = 84;
+#if SENSE_RICH
+    // SCOPE, SNEAK and VITALS are EXPERIMENTAL (more than "something moved"
+    // asks a lot of one router's signal): the tag sits where the channel
+    // reading does, which follows it only where the bar has room.
+    if (s_page) {
+        t.drawRect(cx - 3, 3, 12 * 6 + 5, 12, Theme::AMBER);
+        textT(t, cx, 6, "EXPERIMENTAL", Theme::AMBER, 1);
+        cx += 12 * 6 + 8;
+    }
+#endif
     if (SenseStore::heard() && s.chan) {
         const int W = t.width();
+        // With the tag it has to clear the page dots, not just the dBm.
+        const int lim = cx == 84 ? W - 52 : (192 + (W - 74)) / 2 - 15 - 8;
         snprintf(b, sizeof b, "2.4 GHz ch %u  %u/s", (unsigned)s.chan, (unsigned)s.rate);
-        if (84 + (int)strlen(b) * 6 > W - 52) snprintf(b, sizeof b, "ch %u %u/s", (unsigned)s.chan, (unsigned)s.rate);
-        textT(t, 84, 6, b, Theme::CYAN, 1);
+        if (cx + (int)strlen(b) * 6 > lim) snprintf(b, sizeof b, "ch %u %u/s", (unsigned)s.chan, (unsigned)s.rate);
+        if (cx + (int)strlen(b) * 6 <= lim || cx == 84) textT(t, cx, 6, b, Theme::CYAN, 1);
         if (s.rssi > -127) { snprintf(b, sizeof b, "%d dBm", (int)s.rssi); textT(t, W - 32, 6, b, Theme::VAPOR_PURPLE, 1, 2); }
     }
 }
@@ -324,7 +361,7 @@ void spectrum(TFT_eSPI& t) {
     if (!n) {   // nothing yet: the first spectrum needs 12.8 s of readings
         const SenseReport& s = SenseStore::last();
         const int my = wy0 + (rows * rowH) * 10 / 27;   // 40 px down the 2.8"'s 108
-        textT(t, SP_X + SP_W / 2, my, s.mode == SENSE_MODE_STA ? "LISTENING" : "WAITING", mixc(Theme::BG, Theme::WHITE, 140), 1, 1);
+        textT(t, SP_X + SP_W / 2, my, senseModeLive(s.mode) ? "LISTENING" : "WAITING", mixc(Theme::BG, Theme::WHITE, 140), 1, 1);
         textT(t, SP_X + SP_W / 2, my + 12, SP_W >= 72 ? "to the room" : "...", mixc(Theme::BG, Theme::WHITE, 110), 1, 1);
     }
     for (int f = 0; f <= 2; f++) {
@@ -511,7 +548,14 @@ void banner(TFT_eSPI& t, uint32_t now) {
 }
 
 void buttons(TFT_eSPI& t) {
-    static const char* const LB[3] = { "[ BACK ]", "[ RECAL ]", "[ OFF ]" };
+#if SENSE_RICH
+    static const char* const PAGES[4][3] = {
+        { "[ BACK ]", "[ RECAL ]", "[ SLEEP ]" }, { "[ BACK ]", "[ RECAL ]", "[ SLEEP ]" },
+        { "[ BACK ]", "[ START RUN ]", "[ LEVEL ]" }, { "[ BACK ]", "[ NEW SESSION ]", "[ SLEEP ]" } };
+    const char* const* LB = PAGES[s_page & 3];
+#else
+    static const char* const LB[3] = { "[ BACK ]", "[ RECAL ]", "[ SLEEP ]" };
+#endif
     if (!s_L->btOn) {   // no touch screen: what the keys do, under the banner
         const int y = s_L->bnY + s_L->bnH + 1;
         if (y + 8 <= t.height()) textT(t, t.width() / 2, y, "PRESS: RECAL   HOME: LEAVE", mixc(Theme::BG, Theme::WHITE, 120), 1, 1);
@@ -521,11 +565,27 @@ void buttons(TFT_eSPI& t) {
     for (int k = 0; k < 3; k++) Theme::drawButton(t, g.x[k], g.y, g.w, g.h, LB[k], false, s_L->btLabel);
 }
 
+#if SENSE_RICH
+#include "ui_sensing_more.inc"
+
+// The four page dots, in the title bar between the readings and the dBm.
+int dotsX(int W) { return (192 + (W - 74)) / 2 - 15; }
+void pageDots(TFT_eSPI& t) {
+    const int x0 = dotsX(t.width());
+    for (int k = 0; k < 4; k++) {
+        if (k == s_page) t.fillCircle(x0 + k * 10, 9, 3, Theme::VAPOR_PINK);
+        else t.fillCircle(x0 + k * 10, 9, 2, mixc(Theme::BG, Theme::VAPOR_PURPLE, 150));
+    }
+}
+#endif
 }  // namespace
 
 void uiSensingInit(TFT_eSPI& t) {
     s_L = &layFor(t.width(), t.height());
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
+#if SENSE_RICH
+    s_page = (uint8_t)(Settings::sensePage() & 3);   // the last page, across a restart too
+#endif
     s_enterMs = s_lastMs = millis();
     s_lastWord = nullptr;
 }
@@ -536,13 +596,27 @@ void uiSensingTick(TFT_eSPI& t, uint32_t now, bool advance) {
     s_lastMs = now;
     s_L = &layFor(t.width(), t.height());   // the panel can turn while this is up
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
-    if (t.width() < t.height()) {   // laid out for landscape only
+    if (t.width() < t.height() && !hasRow(t.width(), t.height())) {   // no upright layout for this size
         Theme::drawTitleBar(t, ">> HUMAN SENSING <<");
         text(t, t.width() / 2, t.height() / 2 - 20, "HUMAN SENSING", Theme::CYAN, Theme::BG, 2, 1);
         text(t, t.width() / 2, t.height() / 2 + 4, "turn the board sideways", Theme::WHITE, Theme::BG, 1, 1);
         buttons(t);
         return;
     }
+#if SENSE_RICH
+    // The chest signal runs only while VITALS is showing (~116 KB of PSRAM).
+    senseCydVitals(s_page == 3);
+    if (s_page) {
+        if (s_page == 1) scopeScreen(t, now);
+        else if (s_page == 2) sneakScreen(t, now);
+        else vitalsScreen(t, now);
+        Theme::drawTitleBar(t, ">> HUMAN SENSING <<");
+        statusLine(t, now);
+        pageDots(t);
+        buttons(t);
+        return;
+    }
+#endif
     backdrop(t, now);
     spectrum(t);
     tileRow(t, now);
@@ -550,18 +624,34 @@ void uiSensingTick(TFT_eSPI& t, uint32_t now, bool advance) {
     banner(t, now);
     Theme::drawTitleBar(t, ">> HUMAN SENSING <<");
     statusLine(t, now);
+#if SENSE_RICH
+    pageDots(t);
+#endif
     buttons(t);
 }
 
 SensingTap uiSensingTap(int x, int y, int screenW, int screenH, uint32_t now) {
-    (void)now;
     s_L = &layFor(screenW, screenH);
     const Bar g = barGeom(screenW, screenH);
+#if SENSE_RICH
+    // The page dots: a tap on them turns the page (left half back, right half on).
+    {
+        const int x0 = dotsX(screenW);
+        if (y < 20 && x >= x0 - 10 && x <= x0 + 40) { uiSensingSwipe(x < x0 + 15 ? -1 : 1); return SensingTap::NONE; }
+    }
+    if (s_L->btOn && y >= g.y - 2 && y <= g.y + g.h + 4 && s_page >= 2) {
+        // SNEAK's START RUN and LEVEL, VITALS' NEW SESSION: this screen's own.
+        for (int i = 1; i < 3; i++) if (x >= g.x[i] && x <= g.x[i] + g.w) {
+            if (s_page == 2) { if (i == 1) sneakStart(now); else sneakLevel(); return SensingTap::NONE; }
+            if (i == 1) { Vitals::newSession(now); return SensingTap::NONE; }
+        }
+    }
+#endif
     if (s_L->btOn && y >= g.y - 2 && y <= g.y + g.h + 4) {
         for (int i = 0; i < 3; i++) if (x >= g.x[i] && x <= g.x[i] + g.w) {
             if (i == 0) return SensingTap::BACK;
             if (i == 1) return SensingTap::RECAL;
-            return SensingTap::OFF;
+            return SensingTap::SLEEP;
         }
         return SensingTap::NONE;
     }
@@ -573,6 +663,31 @@ SensingTap uiSensingTap(int x, int y, int screenW, int screenH, uint32_t now) {
     }
     return SensingTap::NONE;
 }
+#if SENSE_RICH
+void uiSensingSwipe(int dir) {
+    s_page = (uint8_t)((s_page + 4 + (dir < 0 ? -1 : 1)) % 4);
+    Settings::setSensePage(s_page);
+    s_lastWord = nullptr;
+}
+uint8_t uiSensingPage() { return s_page; }
+bool uiSensingKey(char c, uint32_t now) {
+    if (c == ',' || c == '<') { uiSensingSwipe(-1); return true; }
+    if (c == '.' || c == '>') { uiSensingSwipe(1); return true; }
+    if (s_page == 2 && (c == '\n' || c == '\r' || c == ' ')) { sneakStart(now); return true; }
+    if (s_page == 2 && (c == 'l' || c == 'L')) { sneakLevel(); return true; }
+    if (s_page == 3 && (c == 'n' || c == 'N')) { Vitals::newSession(now); return true; }
+    return false;
+}
+uint8_t uiSensingStops(int screenW, int screenH, int16_t* xs, int16_t* ys, uint8_t cap) {
+    s_L = &layFor(screenW, screenH);
+    uint8_t n = 0;
+    const int x0 = dotsX(screenW);
+    if (n < cap) { xs[n] = (int16_t)(x0 + 25); ys[n] = 9; n++; }   // the dots: on to the next screen
+    const Bar g = barGeom(screenW, screenH);
+    for (int i = 0; i < 3 && n < cap; i++) { xs[n] = (int16_t)(g.x[i] + g.w / 2); ys[n] = (int16_t)(g.y + g.h / 2); n++; }
+    return n;
+}
+#endif
 void uiSensingBannerStop(int screenW, int screenH, int16_t& x, int16_t& y) {
     s_L = &layFor(screenW, screenH);
     x = (int16_t)(s_L->bnX + s_L->bnW / 2);

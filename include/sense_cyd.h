@@ -16,6 +16,16 @@
 #pragma once
 #include <stdint.h>
 
+// The boards with the extra sensing screens (SCOPE, SNEAK, VITALS): the S3s
+// with PSRAM and a screen big enough, 480x320 or 320x240. Everywhere else
+// HUMAN SENSING is the one screen, exactly as it was. SENSE_RICH_SIM is the
+// emulator's render tool.
+#if defined(SENSE_CYD_APP) && (defined(TDECK_PLUS) || defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TAB5) || defined(SENSE_RICH_SIM))
+#define SENSE_RICH 1
+#else
+#define SENSE_RICH 0
+#endif
+
 #if defined(SENSE_CYD_APP)
 // The state of the room, as the motion model calls it.
 #define SENSE_STATE_CAL      0   // calibrating: hold still
@@ -26,9 +36,12 @@
 
 // What the radio is doing.
 #define SENSE_MODE_OFF       0
+#define SENSE_MODE_PARK      1   // the Tab5's own radio, no network saved: listening on one channel
 #define SENSE_MODE_STA       2   // joined, pinging the router
 #define SENSE_MODE_JOINING   3
 
+// Readings flowing: joined and pinging, or (the Tab5) listening.
+inline bool senseModeLive(uint8_t m) { return m == SENSE_MODE_STA || m == SENSE_MODE_PARK; }
 #define SENSE_LINE_HZ        10  // status updates a second
 
 // One status update from the engine, ten a second.
@@ -59,11 +72,19 @@ uint8_t     senseCydMode();                 // SENSE_MODE_*
 
 // SENSE OPEN / SENSE CLOSE / SENSE OPEN NOWIFI on the console (bench): 1 open the
 // screen, 2 back to the detector, 3 open it as if no network were saved (the
-// ADD WIFI state, without touching the saved list); main.cpp acts and clears it.
+// ADD WIFI state, without touching the saved list); SENSE NEXT / SENSE BACK: 4 / 5,
+// the next or previous page on the boards with SCOPE, SNEAK and VITALS;
+// SENSE SLEEP / SENSE WAKE: 6 / 7, the SLEEP button and the tap that wakes it.
+// main.cpp acts and clears it.
 extern volatile uint8_t g_senseConsole;
 
 // SPECTRUM.EXE: rows of 32 bins (0-2.42 Hz), 0-255 over the room's recent level,
 // row 0 the newest, three a second; the peak bin standing 8 dB clear, or -1.
+#if SENSE_RICH
+// VITALS: the chest signal (src/sense_cyd/csi_vitals.*) runs only while the
+// VITALS screen asks for it; its frames go to Vitals (include/sense_vitals.h).
+void        senseCydVitals(bool on);
+#endif
 int            senseCydSpecRows();
 int            senseCydSpecRowsMax();   // the most rows it keeps (108, ~11 s)
 const uint8_t* senseCydSpecRow(int r);

@@ -643,6 +643,9 @@ Confidence confidenceFor(DetectionType t) {
         // it is NOT is a claim about intent -- see the docs.
         case DetectionType::IBEACON:
         case DetectionType::EVILTWIN:
+        // MY ALERTS: the owner named the network. Whether it is what they
+        // think it is, is theirs to judge; that it matched is certain.
+        case DetectionType::MINE:
             return Confidence::HIGH_CONF;
         // Was High when it was only Ray-Ban Meta's 0xFD5F service UUID, which
         // is specific to the glasses. Broadening it to the Meta, Luxottica and
@@ -669,6 +672,11 @@ Confidence confidenceFor(DetectionType t) {
         // their own. This is the value a caller gets when nothing more
         // specific was established.
         case DetectionType::HACKER:
+        // The base grade, for a DevAddr of type 3 and up: eleven to seventeen
+        // bits of a 21-bit NetID reach the air, so the registry row it lands
+        // on is the likeliest owner and not the only possible one. Types 0-2
+        // carry the whole NetID and are graded HIGH where the sighting is made.
+        case DetectionType::LORAWAN:
             return Confidence::MED_CONF;
         default:
             return Confidence::LOW_CONF;

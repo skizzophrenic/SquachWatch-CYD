@@ -230,6 +230,19 @@ int main() {
         ck("cleared", !Dm::hasKey(THEM));
         ck("loaded back", Dm::loadKeys(buf, n) && Dm::hasKey(THEM) && !Dm::keysDirty());
         ck("a damaged blob is refused", !Dm::loadKeys(buf, n - 1));
+        // After a restart nothing has been sealed yet, so before the fix
+        // every saved key was the first to go when the table filled.
+        uint8_t fake[32];
+        int refusedFull = 0;
+        for (uint32_t i = 0; i < 200; i++) {
+            memset(fake, 0, sizeof fake);
+            fake[0] = 9; fake[1] = (uint8_t)i; fake[2] = (uint8_t)(i >> 8);
+            if (Dm::learnKey(0x0BAD0000u + i, fake) == Dm::L_FULL) refusedFull++;
+        }
+        ck("a flood of made-up nodes does not push a saved key out", Dm::hasKey(THEM));
+        (void)refusedFull;   // the made-up keys push each other out instead
+        Dm::clearKeys();
+        Dm::loadKeys(buf, n);
     }
 
     suite("What send() refuses");

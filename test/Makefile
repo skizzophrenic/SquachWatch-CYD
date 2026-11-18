@@ -23,7 +23,7 @@ CXX      ?= g++
 CXXFLAGS := -std=c++17 -O1 -g -Wall -Wextra -Wno-unused-parameter \
             -I$(SIM) -I$(INC)
 
-TESTS := remote_id_test ibeacon_test signatures_test emitter_roundtrip_test ignore_list_test hacker_test pwnagotchi_test shim_fidelity_test squachmesh_test qwerty_test meshmsg_test device_info_test security_test emote_script_test blackbox_test bingo_test hunt_test bgretire_test autoquiet_test framepush_test touchfit_test logindex_test dex_test regulars_test spam_test gnss_test sd_row_test wigle_test wardrive_test wardrive_seen_test privacy_test lora_survey_test lora_msgs_test lora_json_test lora_feed_test lora_airtime_test lora_ident_test lora_enrich_test lora_channels_test lora_nodes_test lora_crypto_test lora_meshtastic_test lora_dm_test lora_mcdm_test lora_meshcore_test lora_lorawan_test lora_ham_test lora_names_test lora_myname_test mesh_airtime_test mesh_tx_policy_test mesh_appearance_test mesh_primary_transport_test mesh_visit_appearance_test
+TESTS := remote_id_test ibeacon_test signatures_test emitter_roundtrip_test ignore_list_test hacker_test pwnagotchi_test shim_fidelity_test squachmesh_test qwerty_test meshmsg_test device_info_test security_test emote_script_test blackbox_test bingo_test hunt_test bgretire_test autoquiet_test framepush_test touchfit_test logindex_test dex_test regulars_test spam_test gnss_test sd_row_test wigle_test wardrive_test wardrive_seen_test privacy_test lora_survey_test lora_msgs_test lora_json_test lora_feed_test lora_airtime_test lora_ident_test lora_enrich_test lora_channels_test lora_nodes_test lora_crypto_test lora_meshtastic_test lora_dm_test lora_mcdm_test lora_meshcore_test lora_lorawan_test lora_opalert_test lora_ham_test lora_names_test lora_myname_test mesh_airtime_test mesh_tx_policy_test mesh_appearance_test mesh_primary_transport_test mesh_visit_appearance_test rawkind_test huntswap_test adfields_test myalerts_test
 
 # Only the units under test get linked in. Pulling the whole firmware
 # would drag in TFT_eSPI, NimBLE and the UI, and a test that needs a
@@ -33,6 +33,7 @@ ibeacon_test_SRCS            := $(SRC)/signatures.cpp
 signatures_test_SRCS         := $(SRC)/signatures.cpp
 emitter_roundtrip_test_SRCS  := $(SRC)/remote_id.cpp
 ignore_list_test_SRCS        := $(SRC)/ignore_list.cpp
+myalerts_test_SRCS           := $(SRC)/my_alerts.cpp
 hacker_test_SRCS             := $(SRC)/signatures.cpp
 pwnagotchi_test_SRCS         := $(SRC)/signatures.cpp
 squachmesh_test_SRCS         := $(SRC)/squachmesh.cpp
@@ -71,6 +72,7 @@ autoquiet_test_SRCS       := $(SIM)/detection_sim.cpp $(SRC)/remote_id.cpp
 bgretire_test_SRCS := $(SRC)/settings.cpp $(SRC)/lora_myname.cpp
 hunt_test_SRCS               := $(SRC)/settings.cpp $(SRC)/lora_myname.cpp
 privacy_test_SRCS            := $(SRC)/settings.cpp $(SRC)/lora_myname.cpp
+huntswap_test_SRCS           := $(SIM)/detection_sim.cpp $(SRC)/remote_id.cpp
 # Header-only, both: the colour arithmetic the overlapped frame push
 # builds its table from is inline in frame_push.h, and the shim under
 # test IS sim/TFT_eSPI.h.
@@ -100,6 +102,7 @@ lora_mcdm_test_SRCS         := $(SRC)/lora_mcdm.cpp $(SRC)/lora_meshcore.cpp $(S
 lora_meshcore_test_SRCS      := $(SRC)/lora_meshcore.cpp $(SRC)/lora_crypto.cpp
 # LoRaWAN: the envelope, the registry, MAC commands, the MIC and cipher on a published vector, the beacon.
 lora_lorawan_test_SRCS       := $(SRC)/lora_lorawan.cpp $(SRC)/lora_crypto.cpp
+lora_opalert_test_SRCS       := $(SRC)/lora_opalert.cpp $(SRC)/lora_lorawan.cpp $(SRC)/lora_crypto.cpp
 # LoRa APRS, MeshCom and FANET: plaintext, so every field is a coordinate that must land where it says.
 lora_ham_test_SRCS           := $(SRC)/lora_aprs.cpp $(SRC)/lora_fanet.cpp $(SRC)/lora_crypto.cpp
 # The channel list across a reboot, through the settings store and the
@@ -152,6 +155,11 @@ TESTS += emitter_sync_test
 emitter_sync_test_SRCS       := $(SRC)/signatures.cpp $(EMIT)/src/emit_shots.cpp $(EMIT)/src/emit_data.cpp
 emitter_sync_test_FLAGS      := -I$(EMIT)/include
 endif
+
+# HUMAN SENSING's chest signal (VITALS, the S3 boards) through its 8-bit input.
+TESTS += chestsig_test
+chestsig_test_SRCS  := $(SRC)/sense_cyd/csi_vitals.cpp
+chestsig_test_FLAGS := -DSENSE_MODEL_HOST=1
 
 .PHONY: all clean
 all: $(addprefix run-,$(TESTS))

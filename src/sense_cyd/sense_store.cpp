@@ -11,59 +11,82 @@ static SenseReport s_last = {};
 static uint32_t    s_lastAt = 0, s_motionAt = 0, s_count_total = 0;
 static bool        s_motionSeen = false;
 
-static uint8_t     s_score[HISTORY];
-static uint8_t     s_state[HISTORY];
-static uint8_t     s_pres[(HISTORY + 7) / 8];
+// The history and the movements (~1.9 KB) live on the heap between begin()
+// and end(), not in fixed RAM: every board paid for them all the time.
+struct Hist {
+    uint8_t score[HISTORY];
+    uint8_t state[HISTORY];
+    uint8_t pres[(HISTORY + 7) / 8];
+    Event   ev[EVENTS];
+};
+static Hist*       s_h = nullptr;
 static uint16_t    s_head = 0, s_count = 0;
 
-static Router      s_router = {};
-static uint32_t    s_routerAt = 0;
+// Slot 0 is the router; 1-3 are SCOPE's other paths (SENSE_RICH only fills them).
+static Router      s_path[PATHS] = {};
+static uint32_t    s_pathAt[PATHS] = {};
+static Router&     s_router = s_path[0];
 
-static Event       s_ev[EVENTS];
 static uint8_t     s_evHead = 0, s_evCount = 0;
 static bool        s_inMotion = false;
 
 void begin() {
+    if (!s_h) s_h = (Hist*)calloc(1, sizeof(Hist));
     s_heard = false; s_motionSeen = false; s_inMotion = false;
     s_head = s_count = 0; s_evHead = s_evCount = 0; s_count_total = 0;
     memset(&s_last, 0, sizeof s_last);
-    memset(&s_router, 0, sizeof s_router);
-    s_routerAt = 0;
+    memset(s_path, 0, sizeof s_path);
+    memset(s_pathAt, 0, sizeof s_pathAt);
 }
-void end() { s_heard = false; }
+void end() { s_heard = false; s_head = s_count = 0; s_evHead = s_evCount = 0; free(s_h); s_h = nullptr; }
 
 void tick(uint32_t now) {
     // Signed: the engine stamps with a millis() read after the loop read `now`.
-    if (s_router.live && (int32_t)(now - s_routerAt) > 5000) s_router.live = false;
+    for (uint8_t k = 0; k < PATHS; k++)
+        if (s_path[k].live && (int32_t)(now - s_pathAt[k]) > 5000) s_path[k].live = false;
 }
 
 void status(const SenseReport& r, uint32_t now) {
+    if (!s_h) return;
     s_last = r; s_lastAt = now; s_heard = true; s_count_total++;
     if (r.state == SENSE_STATE_MOTION) { s_motionAt = now; s_motionSeen = true; }
-    s_score[s_head] = r.score;
-    s_state[s_head] = r.state;
+    s_h->score[s_head] = r.score;
+    s_h->state[s_head] = r.state;
     const uint8_t bit = (uint8_t)(1u << (s_head & 7));
-    if (r.presence) s_pres[s_head >> 3] |= bit; else s_pres[s_head >> 3] &= (uint8_t)~bit;
+    if (r.presence) s_h->pres[s_head >> 3] |= bit; else s_h->pres[s_head >> 3] &= (uint8_t)~bit;
     s_head = (uint16_t)((s_head + 1) % HISTORY);
     if (s_count < HISTORY) s_count++;
     // A MOTION stretch opens an event, and closing it records how long it ran.
     const bool m = r.state == SENSE_STATE_MOTION;
     if (m && !s_inMotion) {
-        s_ev[s_evHead] = { now, 0, true };
+        s_h->ev[s_evHead] = { now, 0, true };
         s_evHead = (uint8_t)((s_evHead + 1) % EVENTS);
         if (s_evCount < EVENTS) s_evCount++;
     }
     if (s_evCount) {
-        Event& e = s_ev[(s_evHead + EVENTS - 1) % EVENTS];
+        Event& e = s_h->ev[(s_evHead + EVENTS - 1) % EVENTS];
         if (e.open) { e.ms = now - e.at; if (!m) e.open = false; }
     }
     s_inMotion = m;
 }
 
+void path(uint8_t idx, uint16_t tag, int8_t rssi, uint16_t rate, uint8_t score, uint8_t cal, uint8_t rel, uint32_t now) {
+    if (idx >= PATHS) return;
+    Router& p = s_path[idx];
+    if (p.tag != tag || !p.live) {          // a new transmitter in this slot
+        memset(&p, 0, sizeof p);
+        for (int k = 0; k < 4; k++) p.trail[k] = rssi;
+    } else {
+        memmove(p.trail + 1, p.trail, 3);
+        p.trail[0] = rssi;
+    }
+    p.live = true; p.tag = tag; p.rssi = rssi; p.rate = rate;
+    p.score = score; p.cal = cal; p.rel = rel;
+    if (score >= 28 && cal >= 100) { p.hotAt = now; p.everHot = true; }
+    s_pathAt[idx] = now;
+}
 void router(uint16_t tag, int8_t rssi, uint16_t rate, uint8_t score, uint8_t cal, uint8_t rel, uint32_t now) {
-    s_router.live = true; s_router.tag = tag; s_router.rssi = rssi; s_router.rate = rate;
-    s_router.score = score; s_router.cal = cal; s_router.rel = rel;
-    s_routerAt = now;
+    path(0, tag, rssi, rate, score, cal, rel, now);
 }
 
 // Signed, as in tick(): a status can be a few ms "newer" than the caller's now,
@@ -76,15 +99,18 @@ uint32_t sinceMotion(uint32_t now) { return s_motionSeen ? ((int32_t)(now - s_mo
 
 uint16_t count() { return s_count; }
 static uint16_t slot(uint16_t i) { return (uint16_t)((s_head + HISTORY - s_count + i) % HISTORY); }
-uint8_t scoreAt(uint16_t i) { return s_score[slot(i)]; }
-uint8_t stateAt(uint16_t i) { return s_state[slot(i)]; }
-bool presenceAt(uint16_t i) { const uint16_t k = slot(i); return (s_pres[k >> 3] >> (k & 7)) & 1; }
+uint8_t scoreAt(uint16_t i) { return s_h ? s_h->score[slot(i)] : 0; }
+uint8_t stateAt(uint16_t i) { return s_h ? s_h->state[slot(i)] : 0; }
+bool presenceAt(uint16_t i) { if (!s_h) return false; const uint16_t k = slot(i); return (s_h->pres[k >> 3] >> (k & 7)) & 1; }
 
 const Router& router() { return s_router; }
+const Router& path(uint8_t idx) { return s_path[idx < PATHS ? idx : 0]; }
+uint8_t livePaths() { uint8_t n = 0; for (uint8_t k = 0; k < PATHS; k++) if (s_path[k].live) n++; return n; }
 
 uint8_t events(Event* out, uint8_t cap) {
     uint8_t n = 0;
-    for (uint8_t k = 0; k < s_evCount && n < cap; k++) out[n++] = s_ev[(s_evHead + EVENTS - 1 - k) % EVENTS];
+    if (!s_h) return 0;
+    for (uint8_t k = 0; k < s_evCount && n < cap; k++) out[n++] = s_h->ev[(s_evHead + EVENTS - 1 - k) % EVENTS];
     return n;
 }
 
