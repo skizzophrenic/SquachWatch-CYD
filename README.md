@@ -362,18 +362,32 @@ on top and the last 11 seconds sliding down), the **NOW / FLOOR / PEAK /
 MARGIN** tiles, **MOTION** (the last 30 seconds against the line that
 counts as movement) and a banner: CLEAR, PRESENCE (someone moved in the
 last 15 seconds), or what the radio is doing. **RECAL** re-learns the empty
-room, **OFF** hands the radio back to the detector, and **BACK** goes to
-Settings. Detection pauses while this screen is up: there is one radio.
-On the T-Deck, Backspace, R and O do the same; on the StickS3 and the
-Cardputer, the cursor's press re-calibrates and HOME leaves.
+room, **SLEEP** turns the screen off while sensing carries on (a tap or a
+key wakes it), and **BACK** goes to Settings. Detection pauses while this
+screen is up: there is one radio. On the T-Deck, Backspace, R and S do the
+same, and O hands the radio straight back to the detector; on the StickS3
+and the Cardputer, the cursor's press re-calibrates and HOME leaves.
+
+**Three more pages** on the boards with the room for them (the Freenove S3
+3.5in and 2.8in, the T-Deck Plus and the Tab5): swipe, or press , and . on
+the T-Deck, to turn the page. The dots at the top say which page you are on,
+and the board comes back to the same page after a restart.
+
+| Page | What it shows |
+|---|---|
+| **SCOPE** | A radar of the WiFi paths around the board (your router plus the busiest other transmitters), each one lighting up as something moves through it |
+| **SNEAK** | A game: START RUN, then cross the room without tripping the sensor. LEVEL sets how still you have to be (the Tab5 also keeps a high score table) |
+| **VITALS** | Sit still between the board and the router and it reads your breathing from the signal: breaths a minute, a waterfall of the rhythm, a breath loop and a session log. NEW SESSION starts the log again. It is a toy, not a medical device |
+
 
 It works best with you somewhere between the board and the router. If the
 router refuses the board, it waits longer each time before trying again
 (20 seconds, then 40, up to 5 minutes) instead of getting itself blocked.
 A board switched off on this screen comes back to it. Privacy Mode keeps
 the network's name and address off the screen and the console. Every
-ESP32 and ESP32-S3 board has it; the ESP32-C5 boards and the Tab5 do not
-yet.
+ESP32 and ESP32-S3 board has it, and so does the Tab5, which senses with
+its own ESP32-C6 radio (it joins your network over the C6, so add one in
+**SETTINGS > WIFI NETWORKS** first). The ESP32-C5 boards do not yet.
 
 ## Alert controls
 

@@ -37,7 +37,8 @@ next time. See [The C6 needs our firmware](#the-c6-needs-our-firmware).
 | Portrait | Not yet. The picture is locked landscape |
 | SD card | Not driven yet |
 | Speaker, battery, power button | Not driven yet |
-| Updates over WiFi or Bluetooth | Not yet. The radio sniffs; it does not connect |
+| HUMAN SENSING | Works, on the C6: it joins your saved network, pings the router 50 times a second and reads the C6's channel data. All four pages (SENSING, SCOPE, SNEAK, VITALS); VITALS' 20 s fit runs on the P4 |
+| Updates over WiFi or Bluetooth | Not yet. The radio joins a network only for HUMAN SENSING |
 | Web flasher | Yes, from v1.47.0 (BETA) |
 | Radio update | The app updates the C6 itself on first boot (proven on the bench from Espressif's stock 2.12.13; not yet from M5Stack's factory 1.4.1) |
 
@@ -284,6 +285,4 @@ seconds; it was missed once and caught on a rerun.
 ## Not done yet
 
 SD card, speaker, battery and power button, portrait, the PPA for faster
-animated backgrounds, updates over WiFi or Bluetooth, and a place on the web
-flasher (which also needs the C6 firmware solved for someone who has never
-opened a terminal).
+animated backgrounds, and updates over WiFi or Bluetooth.

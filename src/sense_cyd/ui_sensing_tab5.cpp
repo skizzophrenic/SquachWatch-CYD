@@ -16,7 +16,7 @@
 // emulator. P(n) gates a pass so the emulator can show any one of them; on
 // the board every pass is on and the gate compiles away.
 #include "sense_cyd.h"
-#if defined(SENSE_CYD_APP) && defined(TAB5)
+#if defined(SENSE_CYD_APP) && (defined(TAB5) || defined(SENSE_TAB5_SIM))   // SENSE_TAB5_SIM: the emulator (sim/build_tab5_sim.sh)
 #include "ui_sensing_cyd.h"
 #include "sense_store.h"
 #include "sense_vitals.h"
@@ -62,7 +62,6 @@ VLink vitalsLink(uint32_t now) {
     if (!SenseStore::fresh(now)) return SenseStore::heard() ? VLink::NO_SIGNAL : VLink::ASKING;
     return senseModeLive(SenseStore::last().mode) ? VLink::ASKING : VLink::JOINING;
 }
-uint8_t s_savedMode = 0;   // the page, for this boot (the app kept it in NVS)
 
 constexpr uint8_t s_pass = 255;
 inline bool P(uint8_t n) { return s_pass >= n; }
@@ -1730,7 +1729,7 @@ void drawVitals(TFT_eSPI& t, uint32_t now) {
 void uiSensingInit(TFT_eSPI& t) {
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
     // Back to whichever screen was showing last, across a reboot too.
-    if (s_savedMode < M_COUNT) s_mode = s_savedMode;
+    s_mode = (uint8_t)(Settings::sensePage() % M_COUNT);
     s_enterMs = s_lastMs = millis();
     s_lastWord = nullptr;
     if (s_glass) memset(s_glass, 0, (size_t)G_W * G_H * 2);
@@ -1777,7 +1776,7 @@ SensingTap uiSensingTap(int x, int y, int screenW, int screenH, uint32_t now) {
 
 void uiSensingSwipe(int dir) {
     s_mode = (uint8_t)((s_mode + M_COUNT + (dir < 0 ? -1 : 1)) % M_COUNT);
-    s_savedMode = s_mode;
+    Settings::setSensePage(s_mode);
     s_lastWord = nullptr;
     if (s_glass) memset(s_glass, 0, (size_t)G_W * G_H * 2);
     if (s_phos) memset(s_phos, 0, (size_t)GL_W * ST_H);

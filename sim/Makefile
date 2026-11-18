@@ -165,7 +165,7 @@ SIM_FLAGS := -DSQUACH_LORA_FAKE=1
 # SENSE_RICH_SIM: the render tool also draws SCOPE, SNEAK and VITALS (the
 # SENSE_RICH boards' screens) at any size; SQUACHSIM_PAGE=1..3 picks one. The
 # web build is left without it: it plays the boards that do not have them.
-SENSE_SRCS := $(SRC)/sense_cyd/ui_sensing_cyd.cpp $(SRC)/sense_cyd/sense_store.cpp $(SRC)/sense_cyd/sense_vitals.cpp $(SIM_DIR)/sense_cyd_sim.cpp
+SENSE_SRCS := $(SRC)/sense_cyd/ui_sensing_cyd.cpp $(SRC)/sense_cyd/ui_sensing_tab5.cpp $(SRC)/sense_cyd/sense_store.cpp $(SRC)/sense_cyd/sense_vitals.cpp $(SIM_DIR)/sense_cyd_sim.cpp
 
 # The interactive target additionally compiles the firmware's real
 # main.cpp -- its actual setup()/loop(), state machine, gesture handling

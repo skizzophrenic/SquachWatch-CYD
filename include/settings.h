@@ -281,6 +281,10 @@ namespace Settings {
     // switched off there boots back into it.
     bool       sensing();
     void       setSensing(bool on);
+    // Which HUMAN SENSING page was showing (0 SENSING .. 3 VITALS), so a
+    // restart comes back to it. Saved when the page is turned.
+    uint8_t    sensePage();
+    void       setSensePage(uint8_t p);
     // EXT SCREEN (the Cardputer ADV): a second panel on the EXT header shows
     // the main scene, and the built-in screen is left for the menus.
     bool       extScreen();

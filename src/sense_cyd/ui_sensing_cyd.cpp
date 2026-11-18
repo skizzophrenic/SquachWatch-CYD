@@ -17,7 +17,7 @@
 // One radio path, the router answering the CYD's pings, so there is no list of
 // paths: the room goes to the two windows.
 // The Tab5 has its own screens (ui_sensing_tab5.cpp), the sensing app's.
-#if defined(SENSE_CYD_APP) && !defined(TAB5)
+#if defined(SENSE_CYD_APP) && !defined(TAB5) && !defined(SENSE_TAB5_SIM)   // SENSE_TAB5_SIM: the emulator draws the Tab5 screens
 #include "ui_sensing_cyd.h"
 #include "sense_store.h"
 #include "sense_cyd.h"
@@ -570,6 +570,9 @@ void pageDots(TFT_eSPI& t) {
 void uiSensingInit(TFT_eSPI& t) {
     s_L = &layFor(t.width(), t.height());
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
+#if SENSE_RICH
+    s_page = (uint8_t)(Settings::sensePage() & 3);   // the last page, across a restart too
+#endif
     s_enterMs = s_lastMs = millis();
     s_lastWord = nullptr;
 }
@@ -650,6 +653,7 @@ SensingTap uiSensingTap(int x, int y, int screenW, int screenH, uint32_t now) {
 #if SENSE_RICH
 void uiSensingSwipe(int dir) {
     s_page = (uint8_t)((s_page + 4 + (dir < 0 ? -1 : 1)) % 4);
+    Settings::setSensePage(s_page);
     s_lastWord = nullptr;
 }
 uint8_t uiSensingPage() { return s_page; }
