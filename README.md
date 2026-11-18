@@ -371,7 +371,10 @@ and the Cardputer, the cursor's press re-calibrates and HOME leaves.
 **Three more pages** on the boards with the room for them (the Freenove S3
 3.5in and 2.8in, the T-Deck Plus and the Tab5): swipe, or press , and . on
 the T-Deck, to turn the page. The dots at the top say which page you are on,
-and the board comes back to the same page after a restart.
+and the board comes back to the same page after a restart. These three are
+**EXPERIMENTAL** and say so at the top of the screen: telling more than "something
+moved" from one router's signal is hard, and they can be wrong. SENSING itself
+is not.
 
 | Page | What it shows |
 |---|---|

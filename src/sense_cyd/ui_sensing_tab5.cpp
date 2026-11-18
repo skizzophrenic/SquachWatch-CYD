@@ -1752,6 +1752,13 @@ void uiSensingTick(TFT_eSPI& t, uint32_t now, bool advance) {
     else drawSensing(t, now, dt);
     if (s_mode == M_SENSING) statusLine(t, now);
     modeDots(t);
+    // SCOPE, SNEAK and VITALS are EXPERIMENTAL: more than "something moved"
+    // asks a lot of one router's signal. Beside the page dots.
+    if (s_mode != M_SENSING) {
+        const int x = 320 + (M_COUNT - 1) * 7 + 14;
+        t.drawRect(x - 3, 2, 12 * 6 + 5, 12, Theme::AMBER);
+        textT(t, x, 4, "EXPERIMENTAL", Theme::AMBER, 1);
+    }
     buttons(t);
 }
 

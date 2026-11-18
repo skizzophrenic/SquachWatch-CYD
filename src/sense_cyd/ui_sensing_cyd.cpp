@@ -290,11 +290,26 @@ void statusLine(TFT_eSPI& t, uint32_t now) {
 #else
     textT(t, 42, 6, fresh ? "LIVE" : (senseCydNetwork()[0] ? "WAIT" : "NO WIFI"), fresh ? Theme::GREEN : Theme::AMBER, 1);
 #endif
+    int cx = 84;
+#if SENSE_RICH
+    // SCOPE, SNEAK and VITALS are EXPERIMENTAL (more than "something moved"
+    // asks a lot of one router's signal): the tag sits where the channel
+    // reading does, which follows it only where the bar has room.
+    if (s_page) {
+        t.drawRect(cx - 3, 3, 12 * 6 + 5, 12, Theme::AMBER);
+        textT(t, cx, 6, "EXPERIMENTAL", Theme::AMBER, 1);
+        cx += 12 * 6 + 8;
+    }
+#endif
     if (SenseStore::heard() && s.chan) {
         const int W = t.width();
         snprintf(b, sizeof b, "2.4 GHz ch %u  %u/s", (unsigned)s.chan, (unsigned)s.rate);
-        if (84 + (int)strlen(b) * 6 > W - 52) snprintf(b, sizeof b, "ch %u %u/s", (unsigned)s.chan, (unsigned)s.rate);
-        textT(t, 84, 6, b, Theme::CYAN, 1);
+        if (cx + (int)strlen(b) * 6 > W - 52) snprintf(b, sizeof b, "ch %u %u/s", (unsigned)s.chan, (unsigned)s.rate);
+#if SENSE_RICH
+        // with the tag, only if it clears the page dots
+        if (cx == 84 || cx + (int)strlen(b) * 6 <= (192 + (W - 74)) / 2 - 15 - 8)
+#endif
+        textT(t, cx, 6, b, Theme::CYAN, 1);
         if (s.rssi > -127) { snprintf(b, sizeof b, "%d dBm", (int)s.rssi); textT(t, W - 32, 6, b, Theme::VAPOR_PURPLE, 1, 2); }
     }
 }
