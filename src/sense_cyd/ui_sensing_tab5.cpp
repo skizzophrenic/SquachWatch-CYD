@@ -221,7 +221,7 @@ void buttons(TFT_eSPI& t) {
     const char* const* l = s_mode == M_SNEAK ? SNEAKB : (s_mode == M_VITALS ? VITB : SENSE);
     // The page may leave a free font selected; drawButton measures the first
     // label with whatever is set, and BACK came out small on VITALS.
-    t.setFreeFont(nullptr); t.setTextFont(1);
+    t.setTextFont(1);   // also drops a free font (gfxFont = NULL)
     for (int k = 0; k < 3; k++) Theme::drawButton(t, g.x[k], g.y, g.w[k], g.h, l[k], false);
 }
 

@@ -303,13 +303,11 @@ void statusLine(TFT_eSPI& t, uint32_t now) {
 #endif
     if (SenseStore::heard() && s.chan) {
         const int W = t.width();
+        // With the tag it has to clear the page dots, not just the dBm.
+        const int lim = cx == 84 ? W - 52 : (192 + (W - 74)) / 2 - 15 - 8;
         snprintf(b, sizeof b, "2.4 GHz ch %u  %u/s", (unsigned)s.chan, (unsigned)s.rate);
-        if (cx + (int)strlen(b) * 6 > W - 52) snprintf(b, sizeof b, "ch %u %u/s", (unsigned)s.chan, (unsigned)s.rate);
-#if SENSE_RICH
-        // with the tag, only if it clears the page dots
-        if (cx == 84 || cx + (int)strlen(b) * 6 <= (192 + (W - 74)) / 2 - 15 - 8)
-#endif
-        textT(t, cx, 6, b, Theme::CYAN, 1);
+        if (cx + (int)strlen(b) * 6 > lim) snprintf(b, sizeof b, "ch %u %u/s", (unsigned)s.chan, (unsigned)s.rate);
+        if (cx + (int)strlen(b) * 6 <= lim || cx == 84) textT(t, cx, 6, b, Theme::CYAN, 1);
         if (s.rssi > -127) { snprintf(b, sizeof b, "%d dBm", (int)s.rssi); textT(t, W - 32, 6, b, Theme::VAPOR_PURPLE, 1, 2); }
     }
 }
