@@ -174,20 +174,26 @@ uint32_t channelLastMs(uint8_t i) { return i < channelCount() ? s_lastMs[i] : 0;
 // ---- the cipher ---------------------------------------------------------------
 void decrypt(const Header& h, const Channel& c, uint8_t* payload, uint8_t len) {
     if (!c.keyLen) return;
-    // AES-256 for 32-byte keys is the firmware's rule; this reads the
-    // 16-byte ones, which is every preset. A 32-byte key falls through as
-    // "cannot open", never as a wrong answer.
-    if (c.keyLen != 16) return;
+    // The firmware picks the cipher by key length: AES-128 for 16 bytes (every
+    // preset), AES-256 for 32 (a private channel with a full-length key, the
+    // kind the apps generate). Same CTR, same nonce. Any other length cannot open.
+    if (c.keyLen != 16 && c.keyLen != 32) return;
     uint8_t nonce[16] = {0};
     wr32le(nonce, h.id);            // packet id as a 64-bit little-endian number
     wr32le(nonce + 8, h.from);      // then the sender; the last four bytes stay zero
+    if (c.keyLen == 32) {
+        Aes256 k;
+        k.setKey(c.key);
+        ctr(k, nonce, payload, len);
+        return;
+    }
     Aes128 k;
     k.setKey(c.key);
     ctr(k, nonce, payload, len);
 }
 
 bool canSend(const Channel& c) {
-    return c.enabled && c.name[0] && (c.keyLen == 16 || c.keyLen == 0);
+    return c.enabled && c.name[0] && (c.keyLen == 32 || c.keyLen == 16 || c.keyLen == 0);
 }
 
 size_t encodeData(uint8_t port, const uint8_t* payload, size_t plen, bool wantResponse, uint32_t requestId,
