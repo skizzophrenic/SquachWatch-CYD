@@ -252,8 +252,14 @@ int main() {
 
         ck("a 32-byte key added", addChannel("Big", "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="));
         const Channel b = channel((uint8_t)findChannel("Big"));
-        ck("cannot be sent on (no AES-256 here)", b.keyLen == 32 && !canSend(b) &&
-           buildFrame(b, 1, 2, 3, PORT_TEXT, (const uint8_t*)msg, 5, f) == 0);
+        ck("can be sent on (AES-256)", b.keyLen == 32 && canSend(b));
+        {
+            const uint16_t bn = buildFrame(b, 1, 2, 3, PORT_TEXT, (const uint8_t*)msg, 5, f);
+            ck("sealed: the text is not in the clear", bn > 0 && !contains(f, bn, msg, 5));
+            memset(&pk, 0, sizeof pk); memcpy(pk.data, f, bn); pk.len = (uint8_t)bn;
+            ck("and it reads back on that channel", decode(pk, d) && d.haveData &&
+               d.channelIdx == findChannel("Big") && !strcmp(d.text, msg));
+        }
         clearUserChannels();
     }
 
@@ -324,6 +330,23 @@ int main() {
            d.data.requestId == 0x0BADF00Du && d.routing.errorReason == 0);
         const size_t wn = encodeData(PORT_NODEINFO, routing, 2, true, 0, data);
         ck("want_response travels in the Data", wn == dn - 5 + 2 && data[wn - 2] == 0x18 && data[wn - 1] == 0x01);
+    }
+
+    {   // A 32-byte channel key is AES-256-CTR with the same nonce. The vector is from an
+        // independent implementation (Python cryptography): key 00..1f, from 3b1c9a2e,
+        // id 1a2b3c4d, Data{portnum=1, payload="hello"}.
+        static const uint8_t CT[] = { 0x42, 0xaf, 0x61, 0xfe, 0x95, 0x54, 0x89, 0x6e, 0x0c };
+        Channel c; memset(&c, 0, sizeof c);
+        for (uint8_t i = 0; i < 32; i++) c.key[i] = i;
+        c.keyLen = 32; strcpy(c.name, "Fam256"); c.enabled = true;
+        Header h; memset(&h, 0, sizeof h); h.from = 0x3b1c9a2e; h.id = 0x1a2b3c4d;
+        uint8_t buf[sizeof CT]; memcpy(buf, CT, sizeof CT);
+        decrypt(h, c, buf, sizeof buf);
+        ck("AES-256 channel opens to the known plaintext", memcmp(buf, TEXT_DATA, sizeof TEXT_DATA) == 0);
+        decrypt(h, c, buf, sizeof buf);
+        ck("and seals back to the same ciphertext", memcmp(buf, CT, sizeof CT) == 0);
+        ck("a 32-byte channel can send", canSend(c));
+        ck("its hash covers all 32 key bytes", channelHash("Fam256", c.key, 32) == 0x7b);
     }
 
     return report();
