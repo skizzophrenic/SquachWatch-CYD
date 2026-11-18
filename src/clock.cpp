@@ -548,7 +548,7 @@ void pollSerial() {
     // A line buffer rather than a parser. Anything that is not the one
     // command is answered and dropped -- this is a debug port, and silence
     // in response to a typo is worse than a line of help.
-    static char line[48];
+    static char line[128];   // room for LORA CHAN MT <name> <32-byte base64 key>
     static uint8_t len = 0;
 
     while (Serial.available() > 0) {
