@@ -13,6 +13,7 @@
 #include "my_alerts.h"
 #include "clock.h"
 #include "sound.h"
+#include "tag_ring.h"
 #if SQW_BOOT_POWEROFF
 void bootStage(uint8_t s);   // main.cpp: the power diary's steps through setup()
 #define BOOT_STAGE(n) bootStage(n)
@@ -776,6 +777,10 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
         } else {
             det.vendor = "BLE";
         }
+#if SQW_RING
+        // RING connects later and wants the address type this advert used.
+        if (TagRing::canRing(det.type)) TagRing::noteSeen(det.mac, adv->getAddress().getType(), adv->isConnectable());
+#endif
         g_engine->postBle(det);
     }
 };

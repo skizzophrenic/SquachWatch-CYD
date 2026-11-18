@@ -62,11 +62,13 @@ bool uiAlertHitMoreInfo(int x, int y, int screenW, int screenH);
 // uiAlertHitMoreInfo() above -- once the panel is up it owns the touch.
 bool uiAlertHitHunt(int x, int y, int screenW, int screenH);
 
-// Hit test for the IGNORE button, top-right. Same 70x48 footprint as HUNT
-// and MORE INFO so the three read as one set of controls, and in the one
-// corner the rest of this screen's centred layout leaves clear at every
-// rotation. Same "only meaningful while the info panel is down" caveat.
-bool uiAlertHitIgnore(int x, int y, int screenW, int screenH);
+// RING (see tag_ring.h), left of IGNORE, on tracker alerts on the boards
+// built with it. False everywhere else. SetRinging holds it down while the
+// board is connected to the tracker.
+bool uiAlertRingShown();
+bool uiAlertHitRing(int x, int y, int screenW, int screenH);
+bool uiAlertRingCentre(int screenW, int screenH, int& cx, int& cy);
+void uiAlertSetRinging(bool on);
 
 // Hit test for the IGNORE button, top-right. Same 70x48 footprint as HUNT
 // and MORE INFO so the three read as one set of controls, and in the one

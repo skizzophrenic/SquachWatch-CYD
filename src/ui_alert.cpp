@@ -5,6 +5,7 @@
 #include "signatures.h"
 #include "detection.h"
 #include "ignore_list.h"
+#include "tag_ring.h"
 #include <Arduino.h>
 #if defined(CYD_GPS)
 #include "sd_row.h"   // degreesText() for the place line
@@ -37,6 +38,8 @@ static const char* targetLabel(DetectionType t) {
 
 static Detection s_last;
 static bool s_touched = false;
+static bool s_ringing = false;   // RING held down while the board talks to the tracker
+void uiAlertSetRinging(bool on) { s_ringing = on; }
 static bool s_redacted = false;
 void uiAlertSetRedacted(bool r) { s_redacted = r; }
 
@@ -302,6 +305,39 @@ bool uiAlertHitIgnore(int x, int y, int screenW, int screenH) {
            y >= by - SLOP && y <= by + bh + SLOP;
 }
 
+// RING, on the trackers only (and only on the boards built with it): the same
+// system button as IGNORE, just left of it in the header strip. The label's
+// budget is measured off this one when it is there.
+static bool ringShown() { return TagRing::canRing(s_last.type); }
+static void ringBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, int& bh) {
+    int ix, iy, iw, ih;
+    ignoreBtnRect(screenW, screenH, ix, iy, iw, ih);
+    bw = wideAlert(screenW) ? 76 : 52;
+    if (tinyAlert(screenH)) bw = 40;
+    bh = ih;
+    bx = ix - 10 - bw;
+    by = iy;
+}
+
+bool uiAlertRingShown() { return ringShown(); }
+
+bool uiAlertHitRing(int x, int y, int screenW, int screenH) {
+    if (!ringShown()) return false;
+    int bx, by, bw, bh;
+    ringBtnRect(screenW, screenH, bx, by, bw, bh);
+    // Less sideways slop than IGNORE's: the two sit 10 px apart.
+    return x >= bx - 3 && x <= bx + bw + 3 && y >= by - 6 && y <= by + bh + 6;
+}
+
+bool uiAlertRingCentre(int screenW, int screenH, int& cx, int& cy) {
+    if (!ringShown()) return false;
+    int bx, by, bw, bh;
+    ringBtnRect(screenW, screenH, bx, by, bw, bh);
+    cx = bx + bw / 2;
+    cy = by + bh / 2;
+    return true;
+}
+
 // SNOOZE, bottom centre. The corners are taken and the plate ends well
 // above the bottom row, so between HUNT and MORE INFO is the one strip
 // left clear on every rotation: 92 px on the narrow one, 84 used.
@@ -401,7 +437,8 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
         // shows up on the narrow board. Read from ignoreBtnRect rather than
         // restated, so the two cannot drift when the button is resized.
         int ibx, iby, ibw, ibh;
-        ignoreBtnRect(w, h, ibx, iby, ibw, ibh);
+        if (ringShown()) ringBtnRect(w, h, ibx, iby, ibw, ibh);
+        else             ignoreBtnRect(w, h, ibx, iby, ibw, ibh);
         // The 6 is the gap between this label and the button, down from 8 to
         // pay for the button's new edge margin without shrinking the button
         // or pushing "CARD SKIMMER" -- the longest name that still fits the
@@ -691,6 +728,12 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
         // changes what the device does from now on.
         Theme::drawWin95Button(t, bx, by, bw, bh,
                                already ? "MUTED" : "IGNORE", already, true);
+    }
+    // RING: held down while the board is connected to the tracker.
+    if (ringShown()) {
+        int bx, by, bw, bh;
+        ringBtnRect(w, h, bx, by, bw, bh);
+        Theme::drawWin95Button(t, bx, by, bw, bh, "RING", s_ringing, true);
     }
 
     {

@@ -364,6 +364,7 @@ static void drawCrashCard(TFT_eSPI& t) {
 #include "ui_clear.h"
 #include "crowd_bench.h"
 #include "ui_alert.h"
+#include "tag_ring.h"
 #include "ui_log.h"
 #include "ui_rawscan.h"
 #include "ui_watchalert.h"
@@ -1773,6 +1774,8 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         add(w / 2, h - 15);             // SNOOZE
         add(w - 37, h - 15);            // INFO
         add(w - 35, 14);                // IGNORE
+        int rx, ry;
+        if (uiAlertRingCentre(w, h, rx, ry)) add(rx, ry);   // RING, on trackers
         return n;
     }
     if (state == AppState::OUTFIT_UNLOCK) return 0;   // a card: SELECT or BACK closes it
@@ -2423,6 +2426,7 @@ static int stickRegionId(int x, int y) {
             if (uiAlertHitSnooze(x, y, w, h))   return 9400;
             if (uiAlertHitHunt(x, y, w, h))     return 9401;
             if (uiAlertHitMoreInfo(x, y, w, h)) return 9402;
+            if (uiAlertHitRing(x, y, w, h))     return 9404;
             if (uiAlertHitIgnore(x, y, w, h))   return 9403;
             return -1;
         case AppState::HUNT:
@@ -3739,6 +3743,7 @@ static void armLogConfirm(const Detection& d) {
         const bool has = BlackBox::lastPosition(d.mac, (uint8_t)d.type, la, lo);
         uiLogSetConfirmWhere(has, la, lo);
     }
+    uiLogSetConfirmRing(s_confirmIsBle && TagRing::canRing(d.type));
     s_confirmPending = true;
     s_confirmArmed   = false;
 }
@@ -3876,6 +3881,7 @@ volatile bool g_consoleAdc = false;     // ADC: the spare analog inputs, for fin
 volatile bool g_consoleXyzzy = false;   // XYZZY: the TERMINAL background types the magic word now
 volatile bool g_consoleClippy = false;    // CLIPPY: unlock C1iPPY, for the bench
 volatile bool g_consoleToaster = false;   // TOASTER: unlock T0@$TY, for the bench
+volatile bool g_consoleRing    = false;   // RING: ring the tracker heard most recently, for the bench
 volatile bool g_consoleBall    = false;   // BALL: unlock the ball and chain as a pet, for the bench
 volatile bool g_consoleMeaty = false;   // MEATY: unlock him, for the bench
 volatile bool g_consolePet     = false;   // PET: the next earned pet, as the Settings row would
@@ -8646,6 +8652,27 @@ void loop() {
         Serial.println(line);
     }
 #endif
+#if SQW_RING
+    if (g_consoleRing) {
+        g_consoleRing = false;
+        uint8_t mac[6];
+        if (!TagRing::latest(mac))              Serial.println("[ring] no tracker heard since boot");
+        else if (!TagRing::start(engine, mac))  Serial.println("[ring] busy");
+        else Serial.printf("[ring] ringing %02X:%02X:%02X:%02X:%02X:%02X\n",
+                           mac[5], mac[4], mac[3], mac[2], mac[1], mac[0]);
+    }
+    {
+        // A ring has finished: the radio is back, the button comes up, and
+        // the answer is a toast on whatever screen is showing.
+        const TagRing::Result r = TagRing::poll(engine);
+        if (r != TagRing::Result::NONE) {
+            uiAlertSetRinging(false);
+            uiLogSetRinging(false);
+            Theme::showToast(TagRing::title(r), TagRing::detail(r),
+                             r == TagRing::Result::RANG ? Theme::GREEN : Theme::AMBER);
+        }
+    }
+#endif
     if (g_consoleInvert) {
         g_consoleInvert = false;
         Settings::toggleInvert();
@@ -9733,6 +9760,22 @@ void loop() {
                     s_infoShowingPrimer  = !Settings::infoPrimerShown();
                     s_infoPending        = true;
                     s_infoArmed          = false;
+#if SQW_RING
+                } else if (uiAlertHitRing(tp.x, tp.y, tft.width(), tft.height())) {
+                    // The card stays up while the tracker is asked to beep,
+                    // and its timer starts again so it does not close
+                    // mid-ring. The answer arrives as a toast (see loop()).
+                    alertStart = now;
+                    if (TagRing::busy()) {
+                        Theme::showToast("RINGING...", "Still asking it", Theme::AMBER);
+                    } else if (TagRing::start(engine, s_alertMac)) {
+                        uiAlertSetRinging(true);
+                        Theme::showToast("RINGING...", "Asking it to beep", Theme::AMBER);
+                        Serial.println("[ring] from the alert");
+                    } else {
+                        Theme::showToast("CAN'T RING", "Bluetooth is busy", Theme::RED);
+                    }
+#endif
                 } else if (uiAlertHitIgnore(tp.x, tp.y, tft.width(), tft.height())) {
                     // Toggle, not just add: the button reads MUTED once the
                     // device is on the list, so tapping it again has to be
@@ -9971,6 +10014,22 @@ void loop() {
                     } else if (ctap == LogConfirmTap::CANCEL) {
                         lastTouch = now;
                         s_confirmPending = false;
+#if SQW_RING
+                    } else if (ctap == LogConfirmTap::RING) {
+                        // The panel closes; the answer comes as a toast over
+                        // the LOG when the tracker has been asked (loop()).
+                        lastTouch = now;
+                        s_confirmPending = false;
+                        if (TagRing::busy()) {
+                            Theme::showToast("RINGING...", "Still asking it", Theme::AMBER);
+                        } else if (TagRing::start(engine, s_confirmMac)) {
+                            uiLogSetRinging(true);
+                            Theme::showToast("RINGING...", "Asking it to beep", Theme::AMBER);
+                            Serial.println("[ring] from the LOG");
+                        } else {
+                            Theme::showToast("CAN'T RING", "Bluetooth is busy", Theme::RED);
+                        }
+#endif
                     }
                 }
                 break;

@@ -74,6 +74,7 @@ extern volatile uint8_t g_consoleHeadsUp;
 extern volatile bool g_consoleClippy;
 extern volatile bool g_consoleToaster;
 extern volatile bool g_consoleBall;
+extern volatile bool g_consoleRing;
 extern volatile bool g_consoleMeaty;
 extern volatile bool g_consolePet;
 extern volatile bool g_consoleJail;
@@ -750,6 +751,7 @@ void pollSerial() {
             continue;
         }
         if (strcasecmp(line, "BALL") == 0)    { g_consoleBall = true; continue; }
+        if (strcasecmp(line, "RING") == 0)    { g_consoleRing = true; continue; }
         if (strcasecmp(line, "PET") == 0)     { g_consolePet = true; continue; }
         if (strcasecmp(line, "JAIL") == 0)    { g_consoleJail = true; continue; }
         if (strcasecmp(line, "FREE") == 0)    { g_consoleFree = true; continue; }
