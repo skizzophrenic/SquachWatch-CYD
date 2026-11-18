@@ -379,6 +379,10 @@ and the board comes back to the same page after a restart.
 | **SNEAK** | A game: START RUN, then cross the room without tripping the sensor. LEVEL sets how still you have to be (the Tab5 also keeps a high score table) |
 | **VITALS** | Sit still between the board and the router and it reads your breathing from the signal: breaths a minute, a waterfall of the rhythm, a breath loop and a session log. NEW SESSION starts the log again. It is a toy, not a medical device |
 
+<p align="center">
+  <img src="docs/every-breath.gif" width="640"
+       alt="The Tab5's four HUMAN SENSING pages (SENSING, SCOPE, SNEAK, VITALS), then VITALS on the Freenove S3 3.5 inch and SCOPE on the T-Deck Plus.">
+</p>
 
 It works best with you somewhere between the board and the router. If the
 router refuses the board, it waits longer each time before trying again

@@ -32,6 +32,18 @@ CYAN  = (0, 214, 214)
 # ---- the clips ----
 
 CLIPS = {
+    # v1.48.0 "Every Breath You Take", on the Tab5's 640x360 (its own screens,
+    # squachsim-tab5 from build_tab5_sim.sh: "_SIM" picks the binary): the
+    # four HUMAN SENSING pages, then VITALS on the Freenove S3 3.5in (480x320)
+    # and SCOPE on the T-Deck Plus's 320x240, letterboxed.
+    "every-breath": [
+        ("sensing", 60, 40, [], {"_SIM": "squachsim-tab5", "SQUACHSIM_PAGE": "0", "SQUACHSIM_SENSE": "presence"}, 1500, "THE TAB5 SENSES THE ROOM NOW. ITS OWN RADIO."),
+        ("sensing", 60, 40, [], {"_SIM": "squachsim-tab5", "SQUACHSIM_PAGE": "1", "SQUACHSIM_SENSE": "motion"}, 1500, "SCOPE: EVERY WIFI PATH ON RADAR."),
+        ("sensing", 60, 40, [], {"_SIM": "squachsim-tab5", "SQUACHSIM_PAGE": "2", "SQUACHSIM_SENSE": "clear"}, 1500, "SNEAK: CROSS THE ROOM. DON'T GET CAUGHT."),
+        ("sensing", 60, 40, [], {"_SIM": "squachsim-tab5", "SQUACHSIM_PAGE": "3", "SQUACHSIM_SENSE": "presence"}, 1800, "VITALS: SIT STILL. IT COUNTS YOUR BREATHS."),
+        ("sensing", 60, 40, [], {"_SIZE": "480x320", "SQUACHSIM_PAGE": "3", "SQUACHSIM_SENSE": "presence"}, 1500, "ON THE FREENOVE S3 BOARDS TOO."),
+        ("sensing", 60, 40, [], {"_SIZE": "320x240", "SQUACHSIM_PAGE": "1", "SQUACHSIM_SENSE": "motion"}, 1600, "AND THE T-DECK PLUS. SWIPE FOR PAGES."),
+    ],
     # v1.47.0 "You Break it You Bought It", 320x240: MODE's three stops
     # (Squachy, the desk with the X-LARGE clock, TERMINAL MODE, each with the
     # card the button shows), the desk's BIG CARD alert, then Mothman out on
@@ -484,6 +496,7 @@ CLIP_SIZE = {
     "squachwatch-squared": (240, 240, 2),
     "the-big-screen": (480, 320, 1),
     "good-company":   (480, 320, 1),
+    "every-breath":   (640, 360, 1),
 }
 
 def clip_geom(clip):
@@ -532,9 +545,11 @@ def render(clip):
         # env, for the StickS3); encode() letterboxes it into the clip.
         env = dict(env)
         sw, sh = cw, ch
+        # "_SIM": another emulator binary beside this one (squachsim-tab5).
+        ssim = os.path.join(HERE, env.pop("_SIM")) if "_SIM" in env else sim
         if "_SIZE" in env:
             sw, sh = (int(v) for v in env.pop("_SIZE").split("x"))
-        run([sim, screen, os.path.join(out, "x.png"), "--frames", str(warm),
+        run([ssim, screen, os.path.join(out, "x.png"), "--frames", str(warm),
              "--sequence", str(n), "--raw", raw,
              "--size", "%dx%d" % (sw, sh)] + extra, env)
         if os.path.getsize(raw) != sw * sh * 3 * n:
