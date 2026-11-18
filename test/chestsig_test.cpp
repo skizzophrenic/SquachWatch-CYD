@@ -54,7 +54,7 @@ int main() {
     const bool ok = v.tones() == 50 && frames > 90 * 18 && fabs(corr) > 0.85;
     printf("  c1 follows the breathing, gain steps and all            %s\n", ok ? "ok" : "FAIL");
 
-    // The Tab5's split (sense_tab5.cpp): the C6 closes the frames (12-bit
+    // The Tab5's split (sense_tab5.cpp): the C6 closes the frames (int8
     // readings, 64 tones) and sends each tone's normalised amplitude as a
     // u16 of x 8192; push() does the rest. The rounding must not lose the
     // breathing, which moves the amplitudes by about a percent.

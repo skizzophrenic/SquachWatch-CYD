@@ -36,8 +36,12 @@ class CsiVitals {
   ~CsiVitals() { free(win_); free(cov_); }   // the window goes back (the C6 lends it)
   bool begin();                          // allocate the window; false if out of memory
   void reset();
-  // One CSI sample (12-bit I/Q, little-endian words, as the C5 delivers them).
-  void addSample(const int8_t* bytes, size_t length, bool firstWordInvalid);
+  // One CSI sample: 12-bit I/Q in little-endian words, as the C5 delivers
+  // them, or (int8) one signed byte each, imaginary then real, as the C6
+  // does (bench dump 2026-11-17: the C6's bytes are NOT 12-bit words; read
+  // as words they were scrambled). More than kMaxTones tones (the 256-byte
+  // layout) are averaged in neighbouring pairs down to kMaxTones.
+  void addSample(const int8_t* bytes, size_t length, bool firstWordInvalid, bool int8 = false);
   // True when a frame closed: c1/c2 are its projections, n how many samples
   // went into it (0 = a gap, the last frame repeated), q how much of the
   // movement the first component explains, 0-100.

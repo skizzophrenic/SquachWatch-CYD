@@ -44,8 +44,32 @@ void CsiVitals::reset() {
   memset(v1_, 0, sizeof v1_); memset(v2_, 0, sizeof v2_);
 }
 
-void CsiVitals::addSample(const int8_t* bytes, size_t length, bool firstWordInvalid) {
+void CsiVitals::addSample(const int8_t* bytes, size_t length, bool firstWordInvalid, bool int8) {
   if (!bytes || length < 16) return;
+  if (int8) {
+    const size_t first = firstWordInvalid ? 2 : 0;          // four bytes = two tones
+    const int m = (int)(length / 2) - (int)first;
+    if (m < 8) return;
+    const int r = (m + kMaxTones - 1) / kMaxTones;          // tones per bin
+    const int n = m / r;
+    if (tones_ && n != tones_) { reset(); }
+    tones_ = n;
+    float mag[kMaxTones], total = 0;
+    for (int i = 0; i < n; i++) {
+      float a = 0;
+      for (int k = 0; k < r; k++) {
+        const int8_t* c = bytes + (first + (size_t)(i * r + k)) * 2;
+        const float im = c[0], re = c[1];
+        a += sqrtf(re * re + im * im);
+      }
+      mag[i] = a / r; total += mag[i];
+    }
+    if (total < 1.0f) return;
+    const float scale = (float)n / total;
+    for (int i = 0; i < n; i++) acc_[i] += mag[i] * scale;
+    accN_++;
+    return;
+  }
   size_t scalars = (length / 2) & ~(size_t)1;
   const size_t first = firstWordInvalid ? 2 : 0;
   if (scalars <= first + 3) return;

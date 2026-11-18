@@ -738,10 +738,22 @@ static void senseOnce() {
       if (!tg.lockedLen) tg.lockedLen = s.length;
       if (s.length == tg.lockedLen) {
         tg.accepted++;
-        if (s_vitals && t == s_vitTarget && s_vit) s_vit->addSample(s.iq, s.length, s.first_word_invalid);
-        tg.model.addSample(s.iq, s.length, s.rssi, s.at, s.first_word_invalid, CsiMotionModel::SampleEncoding::SIGNED_12_LE);
+        if (s_vitals && t == s_vitTarget && s_vit) s_vit->addSample(s.iq, s.length, s.first_word_invalid, true);
+        tg.model.addSample(s.iq, s.length, s.rssi, s.at, s.first_word_invalid, CsiMotionModel::SampleEncoding::SIGNED_8_IMAG_REAL);
       } else {
         tg.otherLayout++;
+      }
+      // raw 2: whole samples, hex, from VITALS' transmitter (one in ten),
+      // to see the bytes' format (bench).
+      static uint8_t rawEvery = 0;
+      if (s_raw == 2 && t == s_vitTarget && ++rawEvery >= 10) {
+        rawEvery = 0;
+        for (int part = 0; part * 64 < s.length; part++) {
+          char h[SENSE_LINE_MAX];
+          int n = snprintf(h, sizeof h, "# hex %u %u fwi%u ", s.length, part, s.first_word_invalid);
+          for (int i = part * 64; i < s.length && i < part * 64 + 64; i++) n += snprintf(h + n, sizeof h - n, "%02x", (uint8_t)s.iq[i]);
+          outLine(h);
+        }
       }
       if (s_raw == 1) {
         char b2[160];
