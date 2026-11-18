@@ -243,7 +243,6 @@ Tiles tiles() {
 // ============================================================================
 // SENSING
 // ============================================================================
-const int DISH_CX = 104, DISH_CY = 100, DISH_R = 70;
 const int ST_X = 196, ST_Y = 82, ST_W = 434, ST_H = 92;
 const int GL_W = ST_W - 2;
 const int STRIP_SPAN = 300;          // samples in MOTION.EXE: 30 s at the radio's 10 a second
@@ -263,36 +262,66 @@ void backdrop(TFT_eSPI& t, uint32_t now) {
     }
 }
 
-void dish(TFT_eSPI& t, uint32_t now) {
-    const int dx = DISH_CX, dy = DISH_CY + 8;
-    if (P(9)) osWindow(t, 6, 20, 186, 158, "DISH.EXE", Theme::BG);
-    const uint16_t ring = mixc(Theme::BG, Theme::PURPLE, 90);
-    for (int r = 1; r <= 3; r++) t.drawCircle(dx, dy, DISH_R * r / 3, ring);
-    t.drawFastHLine(dx - DISH_R, dy, DISH_R * 2, ring);
-    t.drawFastVLine(dx, dy - DISH_R, DISH_R * 2, ring);
-    const float sa = fmodf(now / 1400.0f, 6.2831853f);
-    for (int k = 0; k < 14; k++) {
-        const float a = sa - k * 0.05f;
-        t.drawLine(dx, dy, dx + (int)(cosf(a) * DISH_R), dy + (int)(sinf(a) * DISH_R), mixc(Theme::BG, Theme::PURPLE, 210 - k * 14));
-    }
-    for (uint8_t k = 0; k < Tab5Sense::PATHS; k++) {
-        const Tab5Sense::Path& p = Tab5Sense::path(k);
-        if (!p.live) continue;
-        const float a = -1.5708f + k * 1.5708f + 0.7854f;
-        const float r = DISH_R * clampf((p.rssi + 45) / -42.0f, 0.3f, 1.0f);
-        const int x = dx + (int)(cosf(a) * r), y = dy + (int)(sinf(a) * r);
-        const bool hot = pathHot(p);
-        const uint32_t ago = now - p.hotAt;
-        if (p.everHot && ago < 3000) for (int q = 0; q < (P(10) ? 3 : 1); q++) {
-            const uint32_t aq = ago + q * 400; if (aq > 3000) continue;
-            t.drawCircle(x, y, 4 + (int)(aq / 110), mixc(Theme::BG, Theme::VAPOR_PINK, 256 - (int)(aq * 256 / 3000)));
+// SPECTRUM.EXE, where the app had DISH.EXE (asked for 2026-11-17: "a way
+// better graphic"). The same picture as the other boards' (ui_sensing_cyd.cpp):
+// how fast the room's readings swing, 0-2.4 Hz across, the newest spectrum as
+// bars on top and the last ~11 s falling below it as a waterfall. The engine
+// builds the rows (sense_tab5.cpp) from the radio's ten lines a second.
+uint16_t spRamp(uint8_t v) {
+    if (v < 64)  return mixc(Theme::BG, mixc(Theme::BG, Theme::PURPLE, 170), v * 4);
+    if (v < 128) return mixc(mixc(Theme::BG, Theme::PURPLE, 170), Theme::PINK, (v - 64) * 4);
+    if (v < 192) return mixc(Theme::PINK, Theme::VAPOR_YELLOW, (v - 128) * 4);
+    return mixc(Theme::VAPOR_YELLOW, Theme::WHITE, (v - 192) * 4);
+}
+void spectrumPanel(TFT_eSPI& t) {
+    const int SP_X = 6, SP_Y = 20, SP_W = 186, SP_H = 158;
+    osWindow(t, SP_X, SP_Y, SP_W, SP_H, "SPECTRUM.EXE", Theme::BG);
+    const int bins = 32, bw = (SP_W - 2) / bins;                  // 5 px a bin
+    const int x0 = SP_X + 1 + ((SP_W - 2) - bins * bw) / 2;
+    const int cy0 = SP_Y + 12, ch = 30;                           // the newest spectrum
+    const int wy0 = cy0 + ch + 3, rowH = 1;                       // the waterfall below it
+    int rows = (SP_Y + SP_H - 10 - wy0) / rowH;
+    if (rows > senseCydSpecRowsMax()) rows = senseCydSpecRowsMax();
+    const int ay = wy0 + rows * rowH + 2;                         // the Hz axis
+    const float binHz = senseCydSpecBinHz();
+    const uint8_t* top = senseCydSpecRow(0);
+    if (top) {
+        for (int b = 1; b < bins; b++) {
+            const int hgt = top[b] * ch / 255;
+            if (hgt <= 0) continue;
+            t.fillRect(x0 + b * bw, cy0 + ch - hgt, bw, hgt, mixc(Theme::BG, Theme::VAPOR_PINK, 80));
+            t.drawFastHLine(x0 + b * bw, cy0 + ch - hgt, bw, Theme::VAPOR_PINK);
         }
-        const uint16_t pc = P(6) ? *pathColour(k) : Theme::CYAN;
-        t.fillCircle(x, y, 4, hot ? Theme::PINK : pc);
-        if (P(10) && (now / 200) % 2 && hot) t.drawCircle(x, y, 6, Theme::WHITE);
-        textT(t, x + (x < dx ? -8 : 8), y - 4, pathName(k), hot ? Theme::VAPOR_PINK : pc, 1, x < dx ? 2 : 0);
+        const int pk = senseCydSpecPeak();
+        if (pk > 0) {   // the peak in Hz: a rhythm in the room, not a measurement of anyone
+            const int px = x0 + pk * bw + bw / 2, py = cy0 + ch - top[pk] * ch / 255;
+            t.fillCircle(px, py, 1, Theme::WHITE);
+            char lb[10]; snprintf(lb, sizeof lb, "%.2fHz", pk * binHz);
+            const int lw = (int)strlen(lb) * 6;
+            int lx = px + 4 + lw > SP_X + SP_W - 2 ? px - 4 - lw : px + 4;
+            if (lx < SP_X + 2) lx = SP_X + 2;
+            textT(t, lx, py - 4 < cy0 ? cy0 : py - 4, lb, Theme::WHITE, 1);
+        }
     }
-    t.fillRect(dx - 3, dy - 3, 6, 6, Theme::WHITE);
+    t.drawFastHLine(SP_X + 1, cy0 + ch + 1, SP_W - 2, mixc(Theme::BG, Theme::PURPLE, 120));
+    const int n = senseCydSpecRows();
+    for (int r = 0; r < rows && r < n; r++) {
+        const uint8_t* row = senseCydSpecRow(r);
+        if (!row) break;
+        for (int b = 1; b < bins; b++) if (row[b] > 5) t.fillRect(x0 + b * bw, wy0 + r * rowH, bw, rowH, spRamp(row[b]));
+    }
+    if (!n) {   // nothing yet: the first spectrum needs 12.8 s of readings
+        const SenseReport& s = Tab5Sense::last();
+        const int my = wy0 + rows * rowH / 3;
+        textT(t, SP_X + SP_W / 2, my, senseModeLive(s.mode) ? "LISTENING" : "WAITING", mixc(Theme::BG, Theme::WHITE, 140), 1, 1);
+        textT(t, SP_X + SP_W / 2, my + 12, "to the room", mixc(Theme::BG, Theme::WHITE, 110), 1, 1);
+    }
+    for (int f = 0; f <= 2; f++) {
+        const int ax = x0 + (int)lroundf(f / binHz) * bw;
+        if (ax > SP_X + SP_W - 4) continue;
+        t.drawFastVLine(ax, ay - 2, 2, Theme::VAPOR_PURPLE);
+        textT(t, f == 2 ? ax - 12 : ax, ay, f == 2 ? "2Hz" : (f ? "1" : "0"), Theme::VAPOR_PURPLE, 1);
+    }
 }
 
 void tileRow(TFT_eSPI& t, uint32_t now) {
@@ -687,7 +716,7 @@ void statusLine(TFT_eSPI& t, uint32_t now) {
 
 void drawSensing(TFT_eSPI& t, uint32_t now, uint32_t dt) {
     if (P(10)) backdrop(t, now);
-    dish(t, now);
+    spectrumPanel(t);
     tileRow(t, now);
     strip(t, now, dt);
     banner(t, now);
