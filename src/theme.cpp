@@ -5096,6 +5096,8 @@ void showToast(const char* head, const char* sub, uint16_t accent, uint32_t ms) 
     s_toastUntil  = millis() + ms;
 }
 
+bool toastUp(uint32_t now) { return s_toastUntil && (int32_t)(now - s_toastUntil) < 0; }
+
 void drawToast(TFT_eSPI& t, uint32_t now) {
     if (!s_toastUntil) return;
     if ((int32_t)(now - s_toastUntil) >= 0) { s_toastUntil = 0; return; }

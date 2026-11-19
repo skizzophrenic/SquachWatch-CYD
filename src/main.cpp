@@ -3000,8 +3000,14 @@ static void applyBrightness() {
 // setCpuFrequencyMhz() reconfigures peripherals, so calling it every frame
 // would be both wasteful and a good way to find a driver's re-entrancy bug.
 static uint16_t s_cpuMhzApplied = 240;
+// TERMINAL MODE at rest (see terminalRestBudgetUs): 80 MHz. Not on the Tab5
+// (a P4: other clocks) or the CrowPanel 7 (its RGB panel is fed by the CPU).
+static bool s_termRest = false;
 static void applyCpuClock() {
     uint16_t want = Settings::cpuMhz();
+#if !defined(TAB5) && !defined(CROWPANEL7)
+    if (s_termRest && want > 80) want = 80;
+#endif
 #if defined(TWATCH_S3)
     // Asleep, the watch only listens and waits for a tap: SLEEP CPU, which
     // never goes above the screen-on clock. About 25 mA at 80 instead of 240.
@@ -7864,6 +7870,75 @@ static void bootButtonTick(uint32_t now) {
 #endif
 #endif
 
+// ---- TERMINAL MODE at rest ---------------------------------------------------
+// TERMINAL MODE is text and numbers: once nobody has touched it for a few
+// seconds it redraws four times a second, and twice after half a minute, with
+// the CPU at 80 MHz. The radios lose nothing: the loop's radio work runs every
+// 20 ms through the wait (terminalRestWait), as it does at full speed. A
+// touch, a key, the ball or a new catch ends the rest at once.
+static const uint32_t TERM_REST_AFTER_MS = 3000;
+static const uint32_t TERM_SLOWER_AFTER_MS = 30000;
+static uint32_t       s_termWokeAt = 0;   // an input ended the last rest
+
+static void terminalRestSet(bool on) {
+    if (on == s_termRest) return;
+    s_termRest = on;
+    applyCpuClock();
+    Serial.printf("[term] %s (CPU %u MHz)\n", on ? "resting" : "awake", (unsigned)s_cpuMhzApplied);
+}
+
+// The frame budget at rest, in microseconds; 0 while TERMINAL MODE is not
+// resting (or not up).
+static uint32_t terminalRestBudgetUs(uint32_t now, uint32_t idleMs) {
+#if defined(SQUACHSIM)
+    (void)now; (void)idleMs;
+    return 0;   // the emulator draws in the browser's own frames
+#else
+    const bool rest = state == AppState::CLEAR && Settings::boringMode() &&
+                      idleMs > TERM_REST_AFTER_MS &&
+                      now - transitionStart > TERM_REST_AFTER_MS &&
+                      now - s_termWokeAt > 1000 &&
+                      !Theme::toastUp(now);
+    terminalRestSet(rest);
+    if (!rest) return 0;
+    return idleMs > TERM_SLOWER_AFTER_MS ? 500000UL : 250000UL;
+#endif
+}
+
+static void terminalRestWait(uint32_t ms) {
+    const uint32_t until = millis() + ms;
+    const uint32_t seq = engine.latestSeq();
+    for (;;) {
+        const int32_t left = (int32_t)(until - millis());
+        if (left <= 0) return;
+        delay(left > 20 ? 20 : (uint32_t)left);
+        engine.loop();   // the WiFi queue holds 8 frames; the hop keeps its own clock
+        // A catch: draw it now. The clock stays where it is -- in a busy room
+        // catches come every second, and the clock is not switched that often.
+        if (engine.latestSeq() != seq) return;
+        bool input = false;
+#if !defined(SQW_SMALL)
+        int16_t a, b;
+        if (sampleTouchRaw(a, b)) input = true;
+#endif
+#if SQW_TRACKBALL
+        if (tdeckBallPending()) input = true;
+#endif
+#if defined(STICKS3)
+        if (digitalRead(STICK_KEY1) == LOW || digitalRead(STICK_KEY2) == LOW) input = true;
+#endif
+#if defined(CARDPUTER_ADV)
+        if (s_cardKeysOk) { const int cnt = cardRead(0x03); if (cnt > 0 && (cnt & 0x0F)) input = true; }
+#endif
+        if (input) break;
+    }
+    // A finger, a key or the ball: full speed for it, and no rest again for a
+    // second even if the loop never counts it as a touch (a light brush), so
+    // the clock is not switched every frame.
+    s_termWokeAt = millis();
+    terminalRestSet(false);
+}
+
 
 void loop() {
     // Cheap and unconditional: available() is a register read, and this
@@ -12141,10 +12216,17 @@ void loop() {
         }
 #endif
         const uint8_t fps = Settings::idleFps();
-        if (fps && idleMs > (uint32_t)Settings::idleAfterSec() * 1000UL) {
-            const uint32_t budgetUs = 1000000UL / fps;
-            const uint32_t spentUs  = micros() - frameStartUs;
-            if (spentUs < budgetUs) idleWait((budgetUs - spentUs) / 1000UL);
+        uint32_t budgetUs = 0;
+        if (fps && idleMs > (uint32_t)Settings::idleAfterSec() * 1000UL) budgetUs = 1000000UL / fps;
+        // TERMINAL MODE at rest: whichever is slower, its pace or the saver's.
+        const uint32_t restUs = terminalRestBudgetUs(now, idleMs);
+        if (restUs > budgetUs) budgetUs = restUs;
+        if (budgetUs) {
+            const uint32_t spentUs = micros() - frameStartUs;
+            if (spentUs < budgetUs) {
+                if (restUs) terminalRestWait((budgetUs - spentUs) / 1000UL);
+                else        idleWait((budgetUs - spentUs) / 1000UL);
+            }
         }
     }
 
