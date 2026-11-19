@@ -2,6 +2,9 @@
 #include "ui_wifipass.h"
 #include "theme.h"
 #include "privacy.h"
+#if defined(M5_STOPWATCH)
+#include "stopwatch_ui.h"
+#endif
 #include <Arduino.h>
 #include <stdio.h>
 #include <string.h>
@@ -20,6 +23,11 @@ const uint8_t PASS_MAX = 63;          // the WPA2 limit
 const char K_NONE  = 0;
 const char K_SHIFT = 1;
 const char K_SYM   = 2;
+#if defined(M5_STOPWATCH)
+const char K_PAGE = 3, K_NUM = 4, K_ABC = 5;
+uint8_t s_group = 0, s_page = 0;
+const char* const WATCH_CHARS[] = {"abcdefghijklmnopqrstuvwxyz ", "1234567890 ", "!@#$%^&*()-_=+[]{}\\|;:'\",.<>/?`~ "};
+#endif
 const char K_DEL   = '\b';
 const char K_OK    = '\n';
 
@@ -68,10 +76,17 @@ struct Filter {
     }
 } s_filter;
 
+#if defined(M5_STOPWATCH)
+const int TOP_H = 138;
+const int BACK_X = 162, BACK_Y = 28, BACK_W = 142, BACK_H = 40;
+const int FIELD_Y = 96, FIELD_H = 28;
+#else
 const int TOP_H   = 52;               // header and field above the keys
-const int MARGIN  = 4, GAP = 2, ROW_GAP = 4;
+
 const int BACK_X  = 4, BACK_Y = 3, BACK_W = 52, BACK_H = 18;
 const int FIELD_Y = 28, FIELD_H = 20;
+#endif
+const int MARGIN = 4, GAP = 2, ROW_GAP = 4;
 const int SHOW_W  = 50;
 
 // Letters page and symbols page, row by row. A zero is a blank key.
@@ -91,6 +106,27 @@ void put(int x, int y, int w, int h, char ch) {
 
 void layout(int w, int h) {
     s_keyN = 0;
+#if defined(M5_STOPWATCH)
+    s_keyTop=138;
+    const char tabs[]={K_ABC,K_NUM,K_SYM,K_PAGE};
+    for(int i=0;i<4;++i) put(55+i*90,138,84,40,tabs[i]);
+    const char* chars=WATCH_CHARS[s_group];
+    const int len=strlen(chars);
+    for(int row=0;row<3;++row) {
+        const int y=186+row*50;
+        const int margin=RoundLayout::inset(y,44,w,20);
+        const int kw=(w-2*margin-4*6)/5;
+        for(int col=0;col<5;++col) {
+            const int at=s_page*15+row*5+col;
+            if(at>=len) continue;
+            char c=chars[at];
+            if(s_shift && c>='a' && c<='z') c-=32;
+            put(margin+col*(kw+6),y,kw,44,c);
+        }
+    }
+    put(35,398,110,38,K_SHIFT); put(178,398,110,38,K_DEL); put(321,398,110,38,K_OK);
+    return;
+#endif
 #if defined(CARDPUTER_ADV)
     // The Cardputer types on its own keyboard: no keys on the screen, which
     // at 135 rows covered the field being typed into.
@@ -99,7 +135,12 @@ void layout(int w, int h) {
     return;
 #endif
     const int avail = w - 2 * MARGIN;
-    const int bandTop = TOP_H + 4, bandBottom = h - 4;
+    const int bandTop = TOP_H + 4, bandBottom = h -
+#if defined(M5_STOPWATCH)
+        64;
+#else
+        4;
+#endif
     int rh = (bandBottom - bandTop - 4 * ROW_GAP) / 5;
     if (rh > 40) rh = 40;
     if (rh < 22) rh = 22;
@@ -129,6 +170,7 @@ void layout(int w, int h) {
     put(MARGIN, y, side, rh, K_SYM);
     put(MARGIN + side + GAP, y, avail - 2 * side - 2 * GAP, rh, ' ');
     put(MARGIN + avail - side, y, side, rh, K_OK);
+    RoundLayout::keys(s_keys, s_keyN, w);
 }
 
 int keyAt(int x, int y, int reach) {
@@ -149,7 +191,15 @@ int keyAt(int x, int y, int reach) {
 const char* label(char ch, char* one) {
     switch (ch) {
         case K_SHIFT: return "SHIFT";
-        case K_SYM:   return s_sym ? "abc" : "#+=";
+        case K_SYM:
+#if defined(M5_STOPWATCH)
+            return "#+=";
+        case K_PAGE: return "NEXT";
+        case K_NUM: return "123";
+        case K_ABC: return "ABC";
+#else
+            return s_sym ? "abc" : "#+=";
+#endif
         case K_DEL:   return "DEL";
         case K_OK:    return "OK";
         case ' ':     return "SPACE";
@@ -161,7 +211,7 @@ bool inRect(int x, int y, int rx, int ry, int rw, int rh) {
     return x >= rx - 4 && x <= rx + rw + 4 && y >= ry - 4 && y <= ry + rh + 4;
 }
 
-int showX(int w) { return w - MARGIN - SHOW_W; }
+int showX(int w) { return w - MARGIN - SHOW_W - RoundLayout::inset(FIELD_Y, FIELD_H, w); }
 
 void press(int x, int y, uint32_t now) {
     s_filter.down(x, y);
@@ -172,7 +222,15 @@ void press(int x, int y, uint32_t now) {
 void type(char ch, uint32_t now) {
     switch (ch) {
         case K_SHIFT: s_shift = !s_shift; break;
-        case K_SYM:   s_sym = !s_sym; s_shift = false; break;
+        case K_SYM:
+#if defined(M5_STOPWATCH)
+            s_group=2; s_page=0; break;
+        case K_ABC: s_group=0; s_page=0; break;
+        case K_NUM: s_group=1; s_page=0; break;
+        case K_PAGE: s_page=(s_page+1)%((strlen(WATCH_CHARS[s_group])+14)/15); break;
+#else
+            s_sym = !s_sym; s_shift = false; break;
+#endif
         case K_DEL:   if (s_len) s_buf[--s_len] = '\0'; break;
         case K_OK:    if (s_len || s_allowEmpty) s_result = WifiPassResult::OK; break;
         case K_NONE:  break;
@@ -201,13 +259,30 @@ int      s_cursorX = 0;
 // whole screen is drawn every frame until it is done.
 const uint32_t SETTLE_MS = 400;
 
-int fieldW(int w) { return showX(w) - GAP - MARGIN; }
+int fieldX(int w) { return MARGIN + RoundLayout::inset(FIELD_Y - 3, FIELD_H + 6, w); }
+int fieldW(int w) { return showX(w) - GAP - fieldX(w); }
 
 void drawKey(TFT_eSPI& t, uint8_t i) {
     const Key& k = s_keys[i];
     // A blank on the symbols page is chassis, not a hole in it.
     if (k.ch == K_NONE) { t.fillRect(k.x, k.y, k.w, k.h, Theme::W95_FACE); return; }
     const bool lit = (s_armed == (int8_t)i) || (k.ch == K_SHIFT && s_shift);
+#if defined(M5_STOPWATCH)
+    {
+    char one[2];
+    const char* lab=label(k.ch,one);
+    const bool active=lit || (k.ch==K_ABC && s_group==0) || (k.ch==K_NUM && s_group==1) || (k.ch==K_SYM && s_group==2);
+    if(StopWatchUI::button(k.x,k.y,k.w,k.h,lab,active)) return;
+    t.fillRoundRect(k.x,k.y,k.w,k.h,12,active ? Theme::PURPLE:Theme::BG);
+    t.drawRoundRect(k.x,k.y,k.w,k.h,12,Theme::CYAN);
+    t.setTextFont(1); t.setTextSize(k.ch>='!' && k.ch<='~' ? 3:2);
+    if(t.textWidth(lab)>k.w-8) t.setTextSize(1);
+    t.setTextColor(Theme::WHITE);
+    t.setCursor(k.x+(k.w-t.textWidth(lab))/2,k.y+(k.h-t.fontHeight())/2);t.print(lab);
+    t.setTextSize(1);
+    return;
+    }
+#endif
     Theme::drawSteelKey(t, k.x, k.y, k.w, k.h, lit);
     char one[2];
     const char* lab = label(k.ch, one);
@@ -227,8 +302,8 @@ void drawField(TFT_eSPI& t, int w, uint32_t now) {
     // black screen in it and green text on that. Drawn here rather than
     // once in drawAll() because the cursor brings us back every frame and
     // a bezel that is only painted on a full redraw gets eaten by it.
-    Theme::drawSteelPanel(t, MARGIN - 3, FIELD_Y - 3, fw + 6, FIELD_H + 6, true);
-    t.fillRect(MARGIN, FIELD_Y, fw, FIELD_H, Theme::BLACK);
+    Theme::drawSteelPanel(t, fieldX(w) - 3, FIELD_Y - 3, fw + 6, FIELD_H + 6, true);
+    t.fillRect(fieldX(w), FIELD_Y, fw, FIELD_H, Theme::BLACK);
     const bool reveal = s_len && now - s_typedAt < 900;
     char shown[PASS_MAX + 1];
     for (uint8_t i = 0; i < s_len; i++) shown[i] = (s_show || (reveal && i + 1 == s_len)) ? s_buf[i] : '*';
@@ -238,9 +313,9 @@ void drawField(TFT_eSPI& t, int w, uint32_t now) {
     const int fits = (fw - 8) / cw;
     const char* tail = s_len > fits ? shown + (s_len - fits) : shown;
     t.setTextColor(Theme::GREEN, Theme::BLACK);
-    t.setCursor(MARGIN + 4, FIELD_Y + (FIELD_H - t.fontHeight()) / 2);
+    t.setCursor(fieldX(w) + 4, FIELD_Y + (FIELD_H - t.fontHeight()) / 2);
     t.print(tail);
-    s_cursorX = MARGIN + 4 + t.textWidth(tail) + 1;
+    s_cursorX = fieldX(w) + 4 + t.textWidth(tail) + 1;
     const bool cursor = (now / 500) % 2;
     t.fillRect(s_cursorX, FIELD_Y + 3, 2, FIELD_H - 6, cursor ? Theme::GREEN : Theme::BLACK);
     t.setTextSize(1);
@@ -266,12 +341,19 @@ void drawAll(TFT_eSPI& t, uint32_t now) {
     // but floating on black they read as a wireframe of a keyboard rather
     // than as one. The panel is the whole difference.
     const int panelTop = s_keyTop - ROW_GAP;
+#if !defined(M5_STOPWATCH)
     if (s_keyN) Theme::drawSteelPanel(t, 0, panelTop, w, h - panelTop, false);
+#endif
     t.setTextWrap(false);
     // Header: BACK, then which network this is for.
     Theme::drawWin95Button(t, BACK_X, BACK_Y, BACK_W, BACK_H, "BACK", false);
     // On the large panels the two lines become one, in the body font: the
     // 16-row face has no room to stack in the 25 rows above the field.
+#if defined(M5_STOPWATCH)
+    t.setTextSize(1); t.setTextColor(Theme::CYAN, Theme::BG);
+    char title[34]; snprintf(title, sizeof title, "%.28s", s_ssid);
+    t.setCursor((w - t.textWidth(title)) / 2, 72); t.print(title);
+#else
     const bool big = Theme::large();
     Theme::bodyFontOn(t);
     t.setTextColor(Theme::VAPOR_PINK, Theme::BG);
@@ -287,6 +369,7 @@ void drawAll(TFT_eSPI& t, uint32_t now) {
     snprintf(ssid, sizeof ssid, "%.*s", maxChars > 32 ? 32 : maxChars, Privacy::name(s_ssid, pv, sizeof pv));
     t.print(ssid);
     Theme::bodyFontOff(t);
+#endif
     drawField(t, w, now);
     drawShow(t, w);
     drawKeys(t);
@@ -311,6 +394,9 @@ void uiWifiPassInit(TFT_eSPI& t, const char* ssid) {
     s_ssid[sizeof s_ssid - 1] = '\0';
     uiWifiPassClear();
     s_shift = s_sym = s_show = false;
+#if defined(M5_STOPWATCH)
+    s_group=s_page=0;
+#endif
     s_prompt = "PASSWORD FOR";
     s_max = PASS_MAX;
     s_allowEmpty = false;
@@ -336,6 +422,10 @@ void uiWifiPassInitText(TFT_eSPI& t, const char* prompt, const char* subject, co
 }
 
 void uiWifiPassTick(TFT_eSPI& t, uint32_t now) {
+#if defined(M5_STOPWATCH)
+    // The curved footer and touch registry are rebuilt at each frame boundary.
+    s_full = true;
+#endif
     const int w = t.width(), h = t.height();
     layout(w, h);
     if (s_full || now - s_initAt < SETTLE_MS) { drawAll(t, now); return; }
@@ -375,7 +465,13 @@ void uiWifiPassTouch(int x, int y, uint32_t now, WifiPassTouch phase) {
             // SHOW sits right of the field; its x depends on the screen width,
             // which the last layout() pass left in the rightmost key.
             if (s_keyN && y >= FIELD_Y - 4 && y <= FIELD_Y + FIELD_H + 4 &&
-                x >= (s_keys[9].x + s_keys[9].w) - SHOW_W - 4) {
+                x >=
+#if defined(M5_STOPWATCH)
+                showX(466)-4 && x<=showX(466)+SHOW_W+4
+#else
+                (s_keys[9].x + s_keys[9].w) - SHOW_W - 4
+#endif
+                ) {
                 s_show = !s_show;
                 return;
             }
@@ -414,3 +510,18 @@ bool uiWifiPassBackRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
     x = BACK_X; y = BACK_Y; w = BACK_W; h = BACK_H;
     return true;
 }
+
+#if defined(M5_STOPWATCH)
+uint8_t uiWifiPassStopRects(int16_t* x,int16_t* y,int16_t* w,int16_t* h,uint8_t cap) {
+    uint8_t n=0;
+    auto add=[&](int a,int b,int c,int d) {if(n<cap){x[n]=a;y[n]=b;w[n]=c;h[n]=d;++n;}};
+    add(BACK_X,BACK_Y,BACK_W,BACK_H);
+    add(showX(466),FIELD_Y,SHOW_W,FIELD_H);
+    for(uint8_t i=0;i<s_keyN;++i) {
+        const auto& k=s_keys[i];
+        if(k.ch==K_OK && !s_allowEmpty && !s_len) continue;
+        add(k.x,k.y,k.w,k.h);
+    }
+    return n;
+}
+#endif

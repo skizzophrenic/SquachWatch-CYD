@@ -9,7 +9,11 @@
 
 namespace {
 
+#if defined(M5_STOPWATCH)
+const int ROW_Y0 = 94;
+#else
 const int ROW_Y0  = 36;
+#endif
 const int ROW_GAP = 3;
 // A size up on the large panels, where rows carry the 16-row body font.
 int btnH() { return Theme::dialogBtnH(28); }
@@ -39,17 +43,28 @@ Bar bar(TFT_eSPI& t, int n) {
         b.x[i] = (t.width() - span) / 2 + c * (b.w + gap);
         b.y[i] = t.height() - 6 - (b.rows - r) * btnH() - (b.rows - 1 - r) * 6;
     }
+#if defined(M5_STOPWATCH)
+    const int y = t.height() - 78;
+    b.rows = 1;
+    b.w = (t.width() - 2 * RoundLayout::inset(y, btnH(), t.width()) - (n - 1) * gap) / n;
+    const int left = (t.width() - (n * b.w + (n - 1) * gap)) / 2;
+    for (int i = 0; i < n; ++i) { b.x[i] = left + i * (b.w + gap); b.y[i] = y; }
+#endif
     return b;
 }
 
 int rowsThatFit(TFT_eSPI& t, int barTop) {
+#if defined(M5_STOPWATCH)
+    if (barTop > t.height() - RoundLayout::FOOTER) barTop = t.height() - RoundLayout::FOOTER;
+#endif
     const int n = (barTop - 6 - ROW_Y0) / (rowH() + ROW_GAP);
     return n < 1 ? 1 : n;
 }
 
 void paragraph(TFT_eSPI& t, int y, uint16_t c, const char* s) {
     // Wrapped at the screen width, on the small font, a word at a time.
-    const int maxW = t.width() - 16;
+    const int margin = 8 + RoundLayout::inset(y, t.fontHeight(), t.width());
+    const int maxW = t.width() - 2 * margin;
     char line[72] = "";
     t.setTextColor(c, Theme::BG);
     while (*s) {
@@ -61,14 +76,14 @@ void paragraph(TFT_eSPI& t, int y, uint16_t c, const char* s) {
         char trial[72];
         snprintf(trial, sizeof trial, "%s%s%s", line, line[0] ? " " : "", word);
         if (line[0] && t.textWidth(trial) > maxW) {
-            t.setCursor(8, y); t.print(line); y += t.fontHeight() + 3;
+            t.setCursor(margin, y); t.print(line); y += t.fontHeight() + 3;
             snprintf(line, sizeof line, "%s", word);
         } else {
             snprintf(line, sizeof line, "%s", trial);
         }
         s = e;
     }
-    if (line[0]) { t.setCursor(8, y); t.print(line); }
+    if (line[0]) { t.setCursor(margin, y); t.print(line); }
 }
 
 const char* resultWords(OtaWifi::SavedResult r) {
@@ -114,7 +129,7 @@ void uiWifiNetsTick(TFT_eSPI& t, uint32_t now) {
     Theme::drawTitleBar(t, ">> WIFI NETWORKS <<");
     Theme::bodyFontOn(t);
     t.setTextWrap(false);
-    const int w = t.width();
+    int w = t.width();
     const uint8_t n = OtaWifi::savedCount();
     const Bar b = bar(t, 4);
     if (!n) {
@@ -130,6 +145,7 @@ void uiWifiNetsTick(TFT_eSPI& t, uint32_t now) {
     const int fit = rowsThatFit(t, b.y[0]);
     for (int i = 0; i < n && i < fit; i++) {
         const int y = ROW_Y0 + i * (rowH() + ROW_GAP);
+        RoundRow roundRow(t, w, y, rowH());
         const bool sel = i == s_selected;
         const bool use = i == OtaWifi::savedUse();
         t.fillRect(8, y, w - 16, rowH(), Theme::TASKBAR);
@@ -192,13 +208,13 @@ void uiWifiAddTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     Theme::drawTitleBar(t, ">> ADD A NETWORK <<");
     Theme::bodyFontOn(t);
     t.setTextWrap(false);
-    const int w = t.width();
+    int w = t.width();
     const Bar b = bar(t, 2);
     const int fit = rowsThatFit(t, b.y[0]);
     if (!eng.rawWifiScanDone()) {
         const char* dots[] = { "SCANNING", "SCANNING.", "SCANNING..", "SCANNING..." };
         t.setTextColor(Theme::CYAN, Theme::BG);
-        t.setCursor(8, ROW_Y0 + 4);
+        t.setCursor(8 + RoundLayout::inset(ROW_Y0 + 4, t.fontHeight(), w), ROW_Y0 + 4);
         t.print(dots[(now / 400) % 4]);
     } else if (!eng.rawWifiCount()) {
         paragraph(t, ROW_Y0 + 4, Theme::WHITE, "No networks found. Move closer to the router and press RESCAN.");
@@ -206,6 +222,7 @@ void uiWifiAddTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     const uint8_t n = eng.rawWifiCount();
     for (int i = 0; i < n && i < fit; i++) {
         const int y = ROW_Y0 + i * (rowH() + ROW_GAP);
+        RoundRow row(t, w, y, rowH());
         const char* ssid = eng.rawWifiSsid((uint8_t)i);
         const bool saved = OtaWifi::savedIndexOf(ssid) >= 0;
         const bool open  = eng.rawWifiOpen((uint8_t)i);

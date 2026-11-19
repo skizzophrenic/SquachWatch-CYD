@@ -87,6 +87,10 @@ jobs:
       - name: Build LilyGo T-Deck Plus (ESP32-S3)
         run: pio run -e tdeck-plus
 
+      # Bring-up only: compile without publishing a flasher manifest.
+      - name: Build M5Stack StopWatch (ESP32-S3)
+        run: pio run -e stopwatch
+
       # The Freenove ESP32-S3 2.8" at 40 MHz, for panels that tear at 80.
       # Packaged as one image, flashed at 0x0, so it can be tested on
       # hardware before it goes on the flasher.

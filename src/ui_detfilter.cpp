@@ -5,7 +5,7 @@
 #include "settings.h"
 #include <Arduino.h>
 
-static const int TOP_MARGIN = 16;
+static const int TOP_MARGIN = Theme::LIST_TOP;
 static int g_scroll = 0;
 
 // Real types only (1..COUNT-1) -- UNKNOWN is the "matched something but
@@ -19,6 +19,9 @@ static DetectionType rowType(uint8_t i) { return (DetectionType)(i + 1); }
 static void computeGeom(TFT_eSPI& t, int screenH, int& top, int& bodyBottom, int& rowH) {
     top = TOP_MARGIN + Theme::listHeadingH();
     bodyBottom = screenH - Theme::pinnedBackH(t.width()) - 2;
+#if defined(M5_STOPWATCH)
+    t.setTextFont(1); // stable row metrics for drawing and touch dispatch
+#endif
     t.setTextSize(Theme::uiMenuTextSize(t));
     // Two pixels taller than the text strictly needs on each side: a 24 px
     // row was a near miss for a thumb, 26 is not, and seven of them still
@@ -37,6 +40,7 @@ void uiDetFilterScroll(int delta) {
 }
 
 static void drawRow(TFT_eSPI& t, int w, int y, int hgt, DetectionType type) {
+    RoundRow roundRow(t, w, y, hgt);
     bool on = Settings::typeEnabled(type);
     Theme::drawListRowPanel(t, w, y, hgt);
     Theme::menuFontOn(t, false);   // FONTS > MENUS

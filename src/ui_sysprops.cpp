@@ -58,6 +58,10 @@ Geom geom(TFT_eSPI& t) {
     g.py = g.tabY + TAB_H;
     g.pw = g.w - 8;
     g.ph = g.btnY - 5 - g.py;
+#if defined(M5_STOPWATCH)
+    g.x=44;g.y=76;g.w=378;g.h=360;TAB_H=32;BTN_H=38;
+    g.tabY=100;g.tabW=123;g.px=44;g.py=144;g.pw=378;g.ph=190;g.btnY=398;
+#endif
     return g;
 }
 
@@ -318,6 +322,22 @@ void uiSysPropsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool 
     const Buttons b = buttons(t, g);   // also switches to font 2
     t.setTextWrap(false);
 
+#if defined(M5_STOPWATCH)
+    t.setTextFont(1);t.setTextSize(2);t.setTextColor(Theme::CYAN);
+    t.setCursor((w-t.textWidth("SYSTEM PROPERTIES"))/2,62);t.print("SYSTEM PROPERTIES");
+    for(uint8_t i=0;i<TAB_N;++i)
+        Theme::drawButton(t,g.x+4+i*g.tabW,g.tabY,g.tabW-4,TAB_H,TAB_NAME[i],i==s_tab);
+    t.fillRoundRect(g.px,g.py,g.pw,g.ph,24,Theme::W95_FACE);
+    Theme::bubbleFontOn(t);t.setTextSize(1);
+    if(s_tab==TAB_UPDATE) drawUpdateTab(t,g);
+    else if(s_tab==TAB_NOTES) drawNotesTab(t,g);
+    else drawBoardTab(t,g);
+    if(s_tab==TAB_UPDATE) {
+        Theme::drawButton(t,b.updX,g.btnY,b.updW,BTN_H,"UPDATE",false);
+        Theme::drawButton(t,b.laterX,g.btnY,b.laterW,BTN_H,"LATER",false);
+    } else Theme::drawButton(t,b.closeX,g.btnY,b.closeW,BTN_H,"CLOSE",false);
+    Theme::bubbleFontOff(t);return;
+#endif
     raised(t, g.x, g.y, g.w, g.h);
 
     // Title bar, with the close box at its right end.
@@ -381,6 +401,9 @@ uint8_t uiSysPropsStops(TFT_eSPI& t, int16_t* xs, int16_t* ys, uint8_t cap) {
         add(b.closeX + b.closeW / 2, g.btnY + BTN_H / 2);
     }
     for (uint8_t i = 0; i < TAB_N; i++) add(g.x + 4 + i * g.tabW + g.tabW / 2, g.tabY + TAB_H / 2);
+#if defined(M5_STOPWATCH)
+    if(s_tab==TAB_UPDATE) add(g.px+g.pw/2,checkboxY(g)+8);
+#endif
     return n;
 }
 
@@ -394,7 +417,9 @@ SysPropsHit uiSysPropsTouch(TFT_eSPI& t, int x, int y) {
     if (x < g.x || x >= g.x + g.w || y < g.y || y >= g.y + g.h) return SysPropsHit::CLOSE;
 
     const int cx = g.x + g.w - 6 - 16;
+#if !defined(M5_STOPWATCH)
     if (in(x, y, cx, g.y + 5, 16, TITLE_H - 4)) return SysPropsHit::CLOSE;
+#endif
 
     for (uint8_t i = 0; i < TAB_N; i++)
         if (in(x, y, g.x + 4 + i * g.tabW, g.tabY - 2, g.tabW, TAB_H + 4)) { s_tab = i; return SysPropsHit::NONE; }

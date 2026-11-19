@@ -28,6 +28,15 @@ static void computeGeom(int w, int h,
                          int& ordX, int& ordY, int& ordW, int& ordH,
                          int& doneX, int& doneY, int& doneW, int& doneH) {
     (void)h;
+#if defined(M5_STOPWATCH)
+    squachyScale = 0.8f; squachyBaseY = 120;
+    captionTop = 136; captionMaxW = 300;
+    wordsTop = 180; wordRowH = 32;
+    invX = 78; invY = 298; invW = 150; invH = 38;
+    ordX = 238; ordY = 298; ordW = 150; ordH = 38;
+    doneX = 133; doneY = 380; doneW = 200; doneH = 38;
+    return;
+#endif
 #if defined(SQW_SMALL)
     // 135 rows: the stacked layout below put BLUE and every button off the
     // bottom. One caption line, the three words on one line, the buttons

@@ -105,8 +105,8 @@ public:
         _rotation = r;
     }
     uint8_t getRotation() const { return _rotation; }
-    int16_t width()  const { return _w; }
-    int16_t height() const { return _h; }
+    virtual int16_t width()  const { return _w; }
+    virtual int16_t height() const { return _h; }
     void invertDisplay(bool) {}
     void fillScreen(uint32_t color) { fillRect(0, 0, _w, _h, color); }
 
@@ -629,6 +629,9 @@ public:
         }
         _vpX = x; _vpY = y; _vpW = w; _vpH = h; _vpActive = true; _vpDatum = datum;
     }
+    // Match TFT_eSprite: a datum viewport changes the logical dimensions.
+    int16_t width() const override { return _vpActive && _vpDatum ? _vpW : _w; }
+    int16_t height() const override { return _vpActive && _vpDatum ? _vpH : _h; }
     void resetViewport() override { _vpActive = false; }
     int32_t getViewportX()      override { return _vpActive && _vpDatum ? _vpX : 0; }
     int32_t getViewportY()      override { return _vpActive && _vpDatum ? _vpY : 0; }

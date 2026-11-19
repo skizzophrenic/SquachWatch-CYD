@@ -58,6 +58,10 @@ struct SenseReport {
   int8_t   rssi;      // dBm
   uint32_t drop;      // readings lost to a full queue since the start
   bool     presence;  // MOTION now, or within the hold time (15 s)
+#if defined(M5_STOPWATCH)
+  uint16_t variation, baseline; // normalized amplitude deviation, x1000
+  uint8_t amplitude, phase, shape; // component evidence, 0-100
+#endif
 };
 
 void        senseCydStart(const char* ssid, const char* pass);   // ssid "" = none saved

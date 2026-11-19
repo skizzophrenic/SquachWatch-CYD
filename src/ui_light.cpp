@@ -8,7 +8,7 @@
 #include "status_light.h"
 #include <Arduino.h>
 
-static const int TOP_MARGIN = 16;
+static const int TOP_MARGIN = Theme::LIST_TOP;
 static int g_scroll = 0;
 
 static uint8_t rowCount() { return (uint8_t)LightRow::COUNT; }
@@ -17,6 +17,9 @@ static LightRow rowAt(uint8_t i) { return (LightRow)i; }
 static void computeGeom(TFT_eSPI& t, int screenH, int& top, int& bodyBottom, int& rowH) {
     top = TOP_MARGIN + Theme::listHeadingH();
     bodyBottom = screenH - Theme::pinnedBackH(t.width()) - 2;
+#if defined(M5_STOPWATCH)
+    t.setTextFont(1); // stable row metrics for drawing and touch dispatch
+#endif
     t.setTextSize(Theme::uiMenuTextSize(t));
     // Two pixels taller than the text strictly needs on each side: a 24 px
     // row was a near miss for a thumb, 26 is not, and seven of them still
@@ -73,6 +76,7 @@ static void rowContent(LightRow r, char* valBuf, size_t valBufN,
 }
 
 static void drawRow(TFT_eSPI& t, int w, int y, int hgt, LightRow r, bool compact) {
+    RoundRow roundRow(t, w, y, hgt);
     char buf[16];
     const char* label = "";
     const char* value = nullptr;

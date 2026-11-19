@@ -9,7 +9,11 @@
 
 namespace {
 
+#if defined(M5_STOPWATCH)
+const int ROW_Y0 = 94;
+#else
 const int ROW_Y0  = 36;
+#endif
 const int ROW_GAP = 2;
 int btnH() { return Theme::dialogBtnH(28); }
 // One line a row, pattern left and label right: eight of them have to fit
@@ -40,10 +44,20 @@ Bar bar(TFT_eSPI& t, int n) {
         b.x[i] = (t.width() - span) / 2 + c * (b.w + gap);
         b.y[i] = t.height() - 6 - (b.rows - r) * btnH() - (b.rows - 1 - r) * 6;
     }
+#if defined(M5_STOPWATCH)
+    const int y = t.height() - 78;
+    b.rows = 1;
+    b.w = (t.width() - 2 * RoundLayout::inset(y, btnH(), t.width()) - (n - 1) * gap) / n;
+    const int left = (t.width() - (n * b.w + (n - 1) * gap)) / 2;
+    for (int i = 0; i < n; ++i) { b.x[i] = left + i * (b.w + gap); b.y[i] = y; }
+#endif
     return b;
 }
 
 int rowsThatFit(TFT_eSPI& t, int barTop) {
+#if defined(M5_STOPWATCH)
+    if (barTop > t.height() - RoundLayout::FOOTER) barTop = t.height() - RoundLayout::FOOTER;
+#endif
     const int n = (barTop - 4 - ROW_Y0) / (rowH(t) + ROW_GAP);
     return n < 1 ? 1 : n;
 }
@@ -100,7 +114,7 @@ void uiMyAlertsTick(TFT_eSPI& t, uint32_t now) {
     Theme::drawTitleBar(t, ">> MY ALERTS <<");
     Theme::bodyFontOn(t);
     t.setTextWrap(false);
-    const int w = t.width();
+    int w = t.width();
     const uint8_t n = MyAlerts::count();
     const Bar b = bar(t, 4);
     if (!n) {
@@ -119,6 +133,7 @@ void uiMyAlertsTick(TFT_eSPI& t, uint32_t now) {
     for (int r = first; r < n && r < first + fit; r++) {
         const int slot = MyAlerts::nth((uint8_t)r);
         const int y = ROW_Y0 + (r - first) * (rh + ROW_GAP);
+        RoundRow roundRow(t, w, y, rh);
         const bool sel = slot == s_selected;
         t.fillRect(8, y, w - 16, rh, Theme::TASKBAR);
         t.drawRect(8, y, w - 16, rh, sel ? Theme::VAPOR_PINK : Theme::VAPOR_PURPLE);

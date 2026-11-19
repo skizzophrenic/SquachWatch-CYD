@@ -34,7 +34,12 @@ Btns btns(TFT_eSPI& t) {
     b.leftX  = (t.width() - (b.w * 2 + gap)) / 2;
     b.rightX = b.leftX + b.w + gap;
     b.oneX   = (t.width() - b.w) / 2;
-    b.y      = t.height() - btnH() - 8;
+    b.y      = t.height() - btnH() -
+#if defined(M5_STOPWATCH)
+48;
+#else
+8;
+#endif
     return b;
 }
 

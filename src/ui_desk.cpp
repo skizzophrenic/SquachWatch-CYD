@@ -1,9 +1,12 @@
-// SquachWatch-CYD — desk mode. See ui_desk.h.
+// SquachWatch-CYD â€” desk mode. See ui_desk.h.
 #include "ui_desk.h"
 #include "pet.h"
 #include "clock.h"
 #include "theme.h"
 #include "privacy.h"
+#if defined(M5_STOPWATCH)
+#include "stopwatch_ui.h"
+#endif
 #include "squachy.h"
 #include <Arduino.h>
 #include <stdio.h>
@@ -398,6 +401,25 @@ static void drawAlertCard(TFT_eSPI& t, int barY, uint32_t now, bool compact, int
     // which lives at the top over the clock. He is the one thing on this
     // screen that can stand being partly covered for nine seconds.
     if (Settings::deskAlertBig() && !compact) { drawAlertBig(t, barY, now); return; }
+#if defined(M5_STOPWATCH)
+    // Keep the notification and its focus target inside the circular glass.
+    s_cardX = 83; s_cardY = 272; s_cardW = 300; s_cardH = 64;
+    StopWatchUI::button(s_cardX, s_cardY, s_cardW, s_cardH, "DEVICE", false);
+    t.fillRoundRect(s_cardX, s_cardY, s_cardW, s_cardH, 8, Theme::BG);
+    const bool roundLit = (now - s_alertAt > 2000) || ((now / 250) & 1);
+    t.drawRoundRect(s_cardX, s_cardY, s_cardW, s_cardH, 8, roundLit ? c : Theme::W95_SHADOW);
+    Theme::drawTypeIcon(t, d.type, s_cardX + 25, s_cardY + 32, 14);
+    t.setTextFont(1); t.setTextSize(2);
+    char line[24], privateName[40];
+    snprintf(line, sizeof line, "%.19s", detectionTypeName(d.type));
+    t.setTextColor(c, Theme::BG); t.setCursor(s_cardX + 54, s_cardY + 5); t.print(line);
+    snprintf(line, sizeof line, "%.19s", d.name[0] ? Privacy::name(d.name, privateName, sizeof privateName) : vendorText(d));
+    t.setTextColor(Theme::WHITE, Theme::BG); t.setCursor(s_cardX + 54, s_cardY + 24); t.print(line);
+    snprintf(line, sizeof line, "%d dBm  OPEN >", d.rssi);
+    t.setTextColor(Theme::CYAN, Theme::BG); t.setCursor(s_cardX + 54, s_cardY + 43); t.print(line);
+    t.setTextSize(1);
+    return;
+#endif
     s_cardW = compact ? 72 : CARD_W;
     s_cardH = CARD_H;
     s_cardX = compact ? t.width() - s_cardW - 4 : leftX;
@@ -574,7 +596,12 @@ void uiDeskTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adva
     const bool tall    = h * 5 > w * 8;
     const int  tallFeet = h * 4 / 5;
     const int  tallTop  = tallFeet - w * 3 / 4;
-    int yBase = lowered ? 43 : 26;
+    int yBase =
+#if defined(M5_STOPWATCH)
+112; // Plate starts at 89, below the curved menu (bottom at 80).
+#else
+lowered ? 43 : 26;
+#endif
     if (tall) {
         const int skyBottom = tallTop - w * 2 / 5;
         const int c = (16 + skyBottom) / 2 - (dh - 18) / 2;
@@ -810,8 +837,14 @@ void uiDeskTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adva
     {
         int gx, gy, gs;
         gearRect(w, h, gx, gy, gs);
+#if defined(M5_STOPWATCH)
+        // Rim buttons are rendered later at their curved positions. A gear
+        // drawn here would remain at the old rectangular coordinates.
+        Theme::drawButton(t, gx, gy, gs, gs, "SETUP", false);
+#else
         Theme::drawButton(t, gx, gy, gs, gs, "", false);
         drawGear(t, gx + gs / 2, gy + gs / 2, gs / 2 - 5, Theme::CYAN, Theme::BG);
+#endif
     }
 
     // Over everything, so it is never behind his bubble. Bottom left is

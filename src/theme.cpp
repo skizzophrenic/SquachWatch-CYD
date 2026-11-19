@@ -1,5 +1,6 @@
 // SquachWatch-CYD — theme implementation
 #include "theme.h"
+#include "stopwatch_ui.h"
 #include "draw_band.h"
 #include "frame_prof.h"
 #include "caustic_tile.h"
@@ -269,6 +270,9 @@ void drawSteelKey(TFT_eSPI& t, int x, int y, int w, int h, bool lit) {
 }
 
 bool settingsButtonHit(int x, int y) {
+#if defined(M5_STOPWATCH)
+    return StopWatchArc::contains(StopWatchUI::menuArc(),x,y);
+#endif
     return x >= 0 && x < SETTINGS_HIT_W && y >= 0 && y < SETTINGS_HIT_H;
 }
 
@@ -316,6 +320,9 @@ static void drawLockIcon(TFT_eSPI& t, int w, int barH) {
 }
 
 bool lockButtonHit(int x, int y, int w) {
+#if defined(M5_STOPWATCH)
+    return Security::enabled() && x >= 318 && x < 362 && y >= 44 && y < 88;
+#endif
     if (!Security::enabled()) return false;
     const int x0 = lockIconX(w);
     return x >= x0 - (LOCK_HIT_W - LOCK_ICON_W) && x < x0 + LOCK_ICON_W &&
@@ -387,7 +394,11 @@ int listHeadingY(TFT_eSPI& t) {
 void drawListHeading(TFT_eSPI& t, const char* text, uint16_t color) {
     t.setTextSize(large() && fontDelta(Settings::FontKind::TEXT) >= 0 ? 2 : 1);
     t.setTextColor(color, BG);
+#if defined(M5_STOPWATCH)
+    t.setCursor((t.width() - t.textWidth(text)) / 2, listHeadingY(t));
+#else
     t.setCursor(8, listHeadingY(t));
+#endif
     t.print(text);
     t.setTextSize(1);
 }
@@ -407,8 +418,13 @@ void drawListRowPanel(TFT_eSPI& t, int w, int y, int hgt) {
     // as well so the text, centred on the row, stays centred on the tile.
     const int x0 = 3, ww = w - 10, hh = hgt - 4;
     if (ww <= 0 || hh <= 0) return;
+#if defined(M5_STOPWATCH)
+    t.fillRoundRect(x0, y + 1, ww, hh, 10, BG);
+    t.drawRoundRect(x0, y + 1, ww, hh, 10, PURPLE);
+#else
     t.fillRect(x0, y + 1, ww, hh, BG);
     t.drawRect(x0, y + 1, ww, hh, PURPLE);
+#endif
 }
 
 static bool s_compact = false;
@@ -418,9 +434,18 @@ static bool s_large = false;
 void setLarge(bool on)   { s_large = on; }
 bool large()             { return s_large; }
 int  listRowPad()        { return s_compact ? 5 : 10; }
-int pinnedBackH(int panelW) { return s_compact ? 18 : (panelW >= 400 ? 36 : PINNED_BACK_H); }
+int pinnedBackH(int panelW) {
+#if defined(M5_STOPWATCH)
+    return RoundLayout::FOOTER;
+#endif
+    return s_compact ? 18 : (panelW >= 400 ? 36 : PINNED_BACK_H); }
 
 void drawPinnedBack(TFT_eSPI& t, const char* label) {
+#if defined(M5_STOPWATCH)
+    t.fillRect(0, t.height() - RoundLayout::FOOTER, t.width(), RoundLayout::FOOTER, BG);
+    drawButton(t, (t.width() - 184) / 2, t.height() - 68, 184, 38, label, false, 2);
+    return;
+#endif
     const int w = t.width(), h = pinnedBackH(w), y = t.height() - h;
     t.fillRect(0, y, w, h, BG);
     t.drawFastHLine(0, y, w, PURPLE);
@@ -437,11 +462,26 @@ void drawPinnedBack(TFT_eSPI& t, const char* label) {
 }
 
 bool pinnedBackHit(int x, int y, int screenW, int screenH) {
+#if defined(M5_STOPWATCH)
+    return x >= (screenW - 184) / 2 && x < (screenW + 184) / 2 &&
+           y >= screenH - 68 && y < screenH - 30;
+#endif
     return x >= 0 && x < screenW && y >= screenH - pinnedBackH(screenW) && y < screenH;
 }
 
 void drawTitleBar(TFT_eSPI& t, const char* title) {
     (void)title;
+#if defined(M5_STOPWATCH)
+    StopWatchUI::menu(t);
+    if (Security::enabled()) {
+        t.fillCircle(340, 66, 19, BG);
+        t.drawCircle(340, 66, 19, PURPLE);
+        t.drawRoundRect(335, 57, 10, 11, 4, AMBER);
+        t.fillRoundRect(332, 64, 16, 12, 3, AMBER);
+        t.drawFastVLine(340, 68, 4, BG);
+    }
+    return;
+#endif
     int w = t.width();
     drawSettingsIcon(t, ICON_BOX_H);
     // Gone when rotation is locked, not just on AWOK. It used to keep
@@ -473,12 +513,20 @@ void drawTitleBar(TFT_eSPI& t, const char* title) {
 
 uint8_t uiTextSize(TFT_eSPI& t, uint8_t base) {
     // The large panels in portrait too: 320 wide, but on 3.5" glass.
+#if defined(M5_STOPWATCH)
+    return base;
+#else
     return (base == 1 && (t.width() >= 400 || large())) ? 2 : base;
+#endif
 }
 
 uint8_t uiMenuTextSize(TFT_eSPI& t) {
     if (t.height() < 200) s_compact = true;
+    #if defined(M5_STOPWATCH)
+    const int s = 3 + fontDelta(Settings::FontKind::MENUS);
+#else
     const int s = (t.width() >= 400 ? 3 : 2) + fontDelta(Settings::FontKind::MENUS);
+#endif
     return (uint8_t)(s < 1 ? 1 : s > 4 ? 4 : s);
 }
 
@@ -500,7 +548,12 @@ void fontRange(TFT_eSPI& t, Settings::FontKind k, int8_t& lo, int8_t& hi) {
     switch (k) {
         case FontKind::MENUS: {
             // The system font at sizes 1 to 4, around the 2 or 3 rows are.
-            const int base = t.width() >= 400 ? 3 : 2;
+            const int base =
+#if defined(M5_STOPWATCH)
+2;
+#else
+t.width() >= 400 ? 3 : 2;
+#endif
             lo = (int8_t)(1 - base);
             hi = (int8_t)(s_compact ? 0 : 4 - base);
             break;
@@ -758,10 +811,18 @@ void drawButton(TFT_eSPI& t, int x, int y, int w, int h,
 #if defined(CARDPUTER_ADV)
     hotButton(x, y, w, h, label);
 #endif
+#if defined(M5_STOPWATCH)
+    if (StopWatchUI::button(x+(t.getViewportDatum()?t.getViewportX():0),y+(t.getViewportDatum()?t.getViewportY():0),w,h,label,pressed)) return;
+#endif
     uint16_t fill = pressed ? PURPLE : BG;
     uint16_t fg   = pressed ? labelOn(PURPLE) : CYAN;
+#if defined(M5_STOPWATCH)
+    t.fillRoundRect(x, y, w, h, h / 2, fill);
+    t.drawRoundRect(x, y, w, h, h / 2, PURPLE);
+#else
     t.fillRect(x, y, w, h, fill);
     t.drawRect(x, y, w, h, PURPLE);
+#endif
     // Button labels are short and their boxes grew with the panel, so this is
     // the safest place for the step-up. But not every button is a third of the
     // screen: the phone screen's QWERTY and BACK sit in boxes sized for size-1
@@ -777,7 +838,11 @@ void drawButton(TFT_eSPI& t, int x, int y, int w, int h,
     // A large panel's label that cannot take size 2 gets font 2 rather than
     // the 8-row system font: about as wide, half again as tall.
     bool body = false;
-    if (ts == 1 && textSize == 1 && large() && h >= 20) {
+    if (ts == 1 && textSize == 1 && (large()
+#if defined(M5_STOPWATCH)
+        || true
+#endif
+    ) && h >= 20) {
         t.setTextFont(2);
         t.setTextSize(1);
         body = t.textWidth(label) <= w - 6;
@@ -798,6 +863,10 @@ void drawButton(TFT_eSPI& t, int x, int y, int w, int h,
 
 void drawWin95Button(TFT_eSPI& t, int x, int y, int w, int h,
                      const char* label, bool sunken, bool bold) {
+#if defined(M5_STOPWATCH)
+    drawButton(t,x,y,w,h,label,sunken,2);
+    return;
+#endif
 #if defined(CARDPUTER_ADV)
     hotButton(x, y, w, h, label);
 #endif
@@ -893,11 +962,24 @@ int drawWin95Window(TFT_eSPI& t, int x, int y, int w, int h, const char* title) 
 
 ButtonBarGeom computeButtonBar(int screenW, int screenH) {
     ButtonBarGeom g;
+#if defined(M5_STOPWATCH)
+    {
+    g.y = screenH - 122; g.h = 76;
+    const int left = RoundLayout::inset(g.y, g.h, screenW);
+    const int bw = (screenW - 2 * left - 16) / 3;
+    for (int i = 0; i < 3; ++i) { g.x[i] = left + i * (bw + 8); g.w[i] = bw; }
+    return g;
+    }
+#endif
     // Half of the original 40px (which was sized to comfortably clear
     // ~9mm finger-touch-target guidance) — explicitly requested smaller
     // to free up more room above for content. Still tappable, just a
     // tighter target than the original guidance-driven size.
+#if defined(M5_STOPWATCH)
+    g.h = 32; // larger touch targets on the round watch; shared with hit testing
+#else
     g.h = 20;
+#endif
     const int margin = 8, gap = 8;
     g.y = screenH - g.h - 6;
     int bw = (screenW - 2 * margin - 2 * gap) / 3;
@@ -944,6 +1026,20 @@ void drawScanline(TFT_eSPI& t, int y, uint16_t color) {
 void drawScrollbar(TFT_eSPI& t, int x, int y, int h,
                    int totalItems, int visibleItems, int scrollOffset) {
     if (totalItems <= visibleItems || visibleItems <= 0) return;
+#if defined(M5_STOPWATCH)
+    // Follow the right rim rather than clipping a vertical bar off the glass.
+    const int roundTravel = totalItems - visibleItems;
+    const int offset = scrollOffset < 0 ? 0 : scrollOffset > roundTravel ? roundTravel : scrollOffset;
+    const int thumb = (90 * visibleItems / totalItems) < 6 ? 6 : 90 * visibleItems / totalItems;
+    const int start = -45 + (90 - thumb) * offset / roundTravel;
+    for (int a = -45; a <= 45; ++a) {
+        const float rad = a * 0.0174532925f;
+        const int px = t.width() / 2 + (int)(224 * cosf(rad));
+        const int py = t.height() / 2 + (int)(224 * sinf(rad));
+        t.fillCircle(px, py, 1, a >= start && a <= start + thumb ? CYAN : PURPLE);
+    }
+    return;
+#endif
 #if defined(SQW_SMALL)
     // Shown while the list moves, then gone: on a 240x135 screen a bar that
     // never leaves is one more thing in the way. A new list, or the same
@@ -1235,10 +1331,14 @@ void drawPulsingBorder(TFT_eSPI& t, uint32_t now, uint16_t a, uint16_t b,
     int w = t.width();
     int h = t.height();
     for (int i = 0; i < thick; i++) {
+#if defined(M5_STOPWATCH)
+        // No decorative ring on the circular glass. Alerts retain their own content.
+#else
         t.drawFastHLine(0, i, w, col);
         t.drawFastHLine(0, h - 1 - i, w, col);
         t.drawFastVLine(i, 0, h, col);
         t.drawFastVLine(w - 1 - i, 0, h, col);
+#endif
     }
 }
 
@@ -9584,7 +9684,9 @@ void drawSunsetSun(TFT_eSPI& t, int cx, int cy, int r, int yTop, int yHoriz) {
         int half = (int)sqrtf((float)(r * r - delta * delta));
         t.fillRect(cx - half, sy2, half * 2, 2, sunsetSkyColorAt(t, sy2, yTop, yHoriz));
     }
+#if !defined(M5_STOPWATCH)
     t.drawCircle(cx, cy, r, (uint16_t)0xFF5D);
+#endif
 }
 
 void drawSeagulls(TFT_eSPI& t, uint32_t now, int yTop, int yHoriz) {
@@ -9873,6 +9975,7 @@ void drawSynthwave(TFT_eSPI& t, uint32_t now, int yTop, int yBottom,
 
     SP_MARK(3);
     // ---- horizon bloom ---------------------------------------------
+#if !defined(M5_STOPWATCH)
     for (int dy = -2; dy <= 1; dy++) {
         int y = yHoriz + dy;
         if (y < yTop || y >= yBottom) continue;
@@ -9880,6 +9983,7 @@ void drawSynthwave(TFT_eSPI& t, uint32_t now, int yTop, int yBottom,
         t.drawFastHLine(0, y, w, blend((uint16_t)0x5847, (uint16_t)0xFCB7, a));
     }
 
+#endif
     // ---- water -----------------------------------------------------
     // Sky and sun, mirrored and foreshortened, in a single pass per row:
     // the surface colour first, then the sun's reflection blended over
@@ -10015,9 +10119,11 @@ void drawTransitionGlitch(TFT_eSPI& t, uint32_t elapsedMs, uint32_t totalMs) {
             }
         }
     }
+#if !defined(M5_STOPWATCH)
     if (random(0, 3) == 0) {
         t.drawFastHLine(0, random(0, h), w, blend(BG, WHITE, (uint16_t)(fade * 200)));
     }
+#endif
 }
 
 void drawSignalRadar(TFT_eSPI& t, int cx, int cy, int r, uint32_t now,
@@ -10619,6 +10725,7 @@ static uint8_t wrapInto(TFT_eSPI& t, const char* text, int maxW,
         char trial[N];
         if (lineBuf[0]) snprintf(trial, sizeof(trial), "%s %s", lineBuf, word);
         else            snprintf(trial, sizeof(trial), "%s", word);
+
         bool tooWide = lineBuf[0] &&
                        (t.textWidth(trial) > maxW || strlen(trial) >= sizeof(lineBuf) - 1);
         if (tooWide) {
@@ -10730,6 +10837,10 @@ bool infoPanelHitDismiss(int x, int y, int screenW, int screenH) {
 
 void drawInfoPanel(TFT_eSPI& t, int w, int h, uint32_t now,
                    const char* typeName, const char* text) {
+#if defined(M5_STOPWATCH)
+    StopWatchUI::modal();
+#endif
+
     if (s_compact) {
         if (now - s_infoDrawnAt > 400) s_infoPage = 0;
         s_infoDrawnAt = now;

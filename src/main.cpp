@@ -23,6 +23,14 @@
 #include "crowpanel7_buzzer.h"
 // The [frame] line's "rows" is whoever actually wrote them.
 #define SQW_PUSH_ROWS() CrowBlit::lastRows()
+#elif defined(M5_STOPWATCH)
+#include "stopwatch_board.h"
+#include "stopwatch_input.h"
+#include "stopwatch_ui.h"
+#include "stopwatch_round.h"
+#include "stopwatch_display.h"
+#include "stopwatch_geometry.h"
+#define SQW_PUSH_ROWS() StopWatch::lastRows()
 #elif defined(TAB5)
 #include "tab5_board.h"
 #include "tab5_display.h"
@@ -653,6 +661,8 @@ CrowPanelTFT        tft;
 // Likewise not a TFT_eSPI: a MIPI-DSI panel driven by M5GFX, wearing the
 // library's interface for the same reason -- see tab5_display.h.
 Tab5TFT             tft;
+#elif defined(M5_STOPWATCH)
+StopWatchTFT        tft;
 #elif defined(FREENOVE_S3_35)
 // Likewise not a TFT_eSPI: an ST77922 on a four-lane QSPI bus, wearing the
 // library's interface for the same reason -- see st77922_display.h.
@@ -753,7 +763,7 @@ const uint32_t      OUTFIT_UNLOCK_AUTO_MS = 12000;
 // bar -- except AWOK, which has no rotate button (see loop()) and
 // stays fixed at its case's one physical orientation, confirmed on
 // real hardware to be portrait/rotation 0.
-#if defined(AWOK)
+#if defined(AWOK) || defined(M5_STOPWATCH)
 uint8_t             screenRotation = 0;
 #else
 uint8_t             screenRotation = 1;
@@ -839,6 +849,9 @@ static bool rawReadResistive(int16_t& a, int16_t& b);
 // calibration is needed or wanted.
 static uint16_t CAP_NX_MIN = CROW_CAP_NX_MIN, CAP_NX_MAX = CROW_CAP_NX_MAX;
 static uint16_t CAP_NY_MIN = CROW_CAP_NY_MIN, CAP_NY_MAX = CROW_CAP_NY_MAX;
+#elif defined(M5_STOPWATCH)
+static uint16_t CAP_NX_MIN = 0, CAP_NX_MAX = StopWatchGeometry::WIDTH;
+static uint16_t CAP_NY_MIN = 0, CAP_NY_MAX = StopWatchGeometry::HEIGHT;
 #elif defined(TAB5)
 // M5GFX reports panel pixels of the rotated panel; a divide by TAB5_SCALE.
 static uint16_t CAP_NX_MIN = TAB5_CAP_NX_MIN, CAP_NX_MAX = TAB5_CAP_NX_MAX;
@@ -1135,7 +1148,7 @@ static void extPush() {
 // The key cursor below: the boards with no touch panel, and the ones with a
 // trackball (SQW_TRACKBALL, set in platformio.ini: the T-Deck Plus), whose
 // ball drives the same cursor beside the touch panel (see pollTouch).
-#if defined(SQW_SMALL) || SQW_TRACKBALL
+#if defined(SQW_SMALL) || SQW_TRACKBALL || defined(M5_STOPWATCH)
 #define SQW_KEYCURSOR 1
 #else
 #define SQW_KEYCURSOR 0
@@ -1451,6 +1464,33 @@ static SmallKeys smallKeysRead() {
     k.press = s_tbPress && !s_tbPressShowOnly;
     return k;
 }
+#elif defined(M5_STOPWATCH)
+static StopWatchInput::Controller s_watchInput;
+static uint8_t s_watchActions = 0;
+static bool s_senseWifiPicker=false;
+static bool stopwatchExtraMenu() {
+    return state==AppState::WIFI_NETS || state==AppState::WIFI_ADD || state==AppState::MY_ALERTS ||
+        state==AppState::BINGO || state==AppState::DEX ||
+        (state==AppState::UPDATE && OtaWifi::state()==OtaWifi::State::OFF &&
+         OtaBle::state()==OtaBle::State::OFF && !OtaCore::restartPending());
+}
+static uint16_t s_watchContext=0xffff;
+static uint16_t stopwatchContext() {
+    uint16_t sub = state == AppState::SETTINGS ? (uint16_t)uiSettingsCurrentPage() : 0;
+    if(state==AppState::DEX && uiDexCardOpen()) sub=1;
+    if (s_infoPending) sub += 8;
+    if (s_confirmPending || (state == AppState::SETTINGS && uiSettingsConfirmRow()!=SettingsRow::NONE)) sub += 16;
+    if (state == AppState::CLEAR && s_scanPickerOpen) sub += 32;
+    return (uint16_t)state * 64 + sub;
+}
+static bool stopwatchBackOverride();
+static SmallKeys smallKeysRead() {
+    const uint8_t a=s_watchActions; s_watchActions=0;
+    SmallKeys k={}; k.next=a&StopWatchInput::NEXT; k.select=a&StopWatchInput::SELECT;
+    k.back=a&StopWatchInput::BACK; k.home=a&StopWatchInput::HOME;
+    if(k.back && stopwatchBackOverride()) k.back=false;
+    return k;
+}
 #else
 // The StickS3, the same scheme as FUD: FRONT (KEY1) click steps to the next
 // stop, FRONT held selects. SIDE (KEY2) click is BACK, SIDE held is HOME.
@@ -1480,7 +1520,11 @@ static uint32_t       s_stickShownAt = 0;       // the cursor shows for a while 
 static bool           s_stickHome = false;      // KEY2 held: loop() goes home
 static int8_t         s_stickDrag = 0;          // a scripted drag under way: +1 down the list, -1 up
 static uint8_t        s_stickDragStep = 0;
-static const uint8_t  STICK_STOPS_MAX = 24;
+#if defined(M5_STOPWATCH)
+static const uint8_t STICK_STOPS_MAX = 64;
+#else
+static const uint8_t STICK_STOPS_MAX = 24;
+#endif
 
 // What is under a point on a list screen, as that screen's own hit test
 // sees it, or -1. The stops are found by sweeping this over the screen, so
@@ -1498,6 +1542,11 @@ static int stickListId(int x, int y) {
             }
             const SettingsRow r = uiSettingsHitTest(*canvas, x, y, w, h);
             if (r == SettingsRow::NONE) return -1;
+#if defined(M5_STOPWATCH)
+            if(uiSettingsRowIsOff(r)) return -1;
+            const int part=uiSettingsFontFocusPart(*canvas,x,y,w,h);
+            if(part) return part<0 ? -1 : 6000+(int)r*4+part;
+#endif
             // A stepper row (BRIGHT) answers only on its two buttons, each
             // its own stop, so the cursor lands on - or + and never on the
             // label, where a press does nothing.
@@ -1507,12 +1556,22 @@ static int stickListId(int x, int y) {
             }
             return (int)r;
         }
+#if defined(M5_STOPWATCH)
+        case AppState::STATUS_LIGHT: {
+            const LightRow r=uiLightHitTest(*canvas,x,y,w,h);
+            return r==LightRow::NONE ? -1 : (int)r;
+        }
+#endif
         case AppState::POWER_SAVER: {
             const PowerRow r = uiPowerHitTest(*canvas, x, y, w, h);
             return r == PowerRow::NONE ? -1 : (int)r;
         }
         case AppState::SECURITY: {
             const SecurityRow r = uiSecurityHitTest(*canvas, x, y, w, h);
+#if defined(M5_STOPWATCH)
+            if(r==SecurityRow::PIN_LENGTH && Security::enabled()) return -1;
+            if(r!=SecurityRow::PIN_LOCK && r!=SecurityRow::PIN_LENGTH && r!=SecurityRow::REMOTE_UPDATE && !Security::enabled()) return -1;
+#endif
             return r == SecurityRow::NONE ? -1 : (int)r;
         }
         case AppState::LOG: {
@@ -1551,6 +1610,9 @@ static int stickListId(int x, int y) {
 }
 static bool stickIsList() {
     return state == AppState::SETTINGS || state == AppState::POWER_SAVER ||
+#if defined(M5_STOPWATCH)
+           state == AppState::STATUS_LIGHT ||
+#endif
            state == AppState::SECURITY || state == AppState::DETECTION_FILTER ||
            state == AppState::MESH_MENU || state == AppState::LOG ||
            state == AppState::RAWSCAN || state == AppState::IGNORE_LIST;
@@ -1663,6 +1725,9 @@ static StickRect s_stickRect[STICK_STOPS_MAX];
 static bool      s_stickRectOn = false;
 static bool stickIsRectScreen() {
     return state == AppState::BINGO
+#if defined(M5_STOPWATCH)
+        || state == AppState::PHONE || state == AppState::PIN_ENTRY || state == AppState::LOCKED || state == AppState::WIFI_PASS
+#endif
 #if SQUACH_MESH
         || state == AppState::MESH_COMPOSE || state == AppState::SQUAD || state == AppState::MESH_PHRASE
 #endif
@@ -1670,6 +1735,11 @@ static bool stickIsRectScreen() {
 }
 static uint8_t stickScreenRects(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint8_t cap) {
     switch (state) {
+#if defined(M5_STOPWATCH)
+        case AppState::PHONE: case AppState::PIN_ENTRY: case AppState::LOCKED:
+            return uiPhoneStopRects(rx,ry,rw,rh,cap);
+        case AppState::WIFI_PASS: return uiWifiPassStopRects(rx,ry,rw,rh,cap);
+#endif
         case AppState::BINGO:        return uiBingoStopRects(*canvas, rx, ry, rw, rh, cap);
 #if SQUACH_MESH
         case AppState::MESH_COMPOSE: return uiMeshComposeStopRects(rx, ry, rw, rh, cap);
@@ -1714,7 +1784,12 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
     s_stickRectOn = false;
     auto add = [&](int x, int y, uint8_t kind = 0) { if (n < cap) out[n++] = { (int16_t)x, (int16_t)y, kind }; };
     if (s_infoPending && (state == AppState::LOG || state == AppState::ALERT)) {
+#if defined(M5_STOPWATCH)
+        StickPt at;
+        if(stickSweep([&](int x,int y){return Theme::infoPanelHitDismiss(x,y,w,h);},at)) add(at.x,at.y);
+#else
         add(w / 2, h - 17);             // MORE / GOT IT
+#endif
         return n;
     }
     if (state == AppState::CLEAR && s_fob) return 0;   // FOB MODE: nothing to point at
@@ -1734,7 +1809,11 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         const Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
         for (int b = 0; b < 3; b++) addR(bar.x[b], bar.y, bar.w[b], bar.h);   // SCAN, LOG, DESK
         if (n < cap) s_stickRect[n] = { 0, 0, 0, 0 };   // the menu: a frame round it, not lit
+#if defined(M5_STOPWATCH)
+        add(233,(int)(232.5f-StopWatchUI::menuArc().radius));
+#else
         add(13, 11);
+#endif
         int16_t rx[STICK_STOPS_MAX], ry[STICK_STOPS_MAX], rw[STICK_STOPS_MAX], rh[STICK_STOPS_MAX];
         const uint8_t k = uiTerminalStops(rx, ry, rw, rh, STICK_STOPS_MAX);
         for (uint8_t i = 0; i < k; i++) addR(rx[i], ry[i], rw[i], rh[i]);
@@ -1742,6 +1821,13 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         return n;
     }
     if (state == AppState::CLEAR) {
+#if defined(M5_STOPWATCH)
+        const auto bar=Theme::computeButtonBar(w,h);
+        for(int i=0;i<3;++i) add(bar.x[i]+bar.w[i]/2,bar.y+bar.h/2);
+        if (s_scanPickerOpen) return n;
+        add(233,(int)(232.5f-StopWatchUI::menuArc().radius));
+#else
+
         // The bar first, left to right, then the menu, the tiles, and any
         // card that is up. Squachy and his pet are not stops on these boards:
         // a cursor parked on him is clutter, and he gets poked by a shake.
@@ -1749,9 +1835,15 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         add(w / 2, h - 16);             // LOG
         add(w * 5 / 6 - 4, h - 16);     // DESK
         add(13, 11);                    // the menu
+#endif
         {
+#if defined(M5_STOPWATCH)
+            int16_t xs[12],ys[12];
+            const uint8_t k=uiClearCounterStops(xs,ys,12);
+#else
             int16_t xs[8], ys[8];        // the counter tiles
             const uint8_t k = uiClearCounterStops(xs, ys, 8);
+#endif
             for (uint8_t i = 0; i < k; i++) add(xs[i], ys[i]);
         }
         StickPt c;
@@ -1767,12 +1859,21 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         return n;
     }
     if (state == AppState::ALERT) {
+#if defined(M5_STOPWATCH)
+        StickPt at;
+        if(stickSweep([&](int x,int y){return uiAlertHitHunt(x,y,w,h);},at)) add(at.x,at.y);
+        if(stickSweep([&](int x,int y){return uiAlertHitSnooze(x,y,w,h);},at)) add(at.x,at.y);
+        if(stickSweep([&](int x,int y){return uiAlertHitMoreInfo(x,y,w,h);},at)) add(at.x,at.y);
+        if(stickSweep([&](int x,int y){return uiAlertHitIgnore(x,y,w,h);},at)) add(at.x,at.y);
+#else
+
         // No stop on the plate: a box over it hid the text, and BACK
         // dismisses it already.
         add(37, h - 15);                // HUNT
         add(w / 2, h - 15);             // SNOOZE
         add(w - 37, h - 15);            // INFO
         add(w - 35, 14);                // IGNORE
+#endif
         return n;
     }
     if (state == AppState::OUTFIT_UNLOCK) return 0;   // a card: SELECT or BACK closes it
@@ -1914,6 +2015,13 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
             const Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
             for (int b = 0; b < 3; b++) add(bar.x[b] + bar.w[b] / 2, bar.y + bar.h / 2);   // SCAN, LOG, CLR
         } else if (!panel) {
+#if defined(M5_STOPWATCH)
+            if(state==AppState::SETTINGS && uiSettingsCurrentPage()==SettingsPage::DESK) {
+                StickPt at;
+                if(stickSweep([&](int x,int y){return uiSettingsTapPinnedOk(x,y,w,h);},at))add(at.x,at.y);
+                if(stickSweep([&](int x,int y){return uiSettingsTapPinnedBack(*canvas,x,y,w,h) && !uiSettingsTapPinnedOk(x,y,w,h);},at))add(at.x,at.y);
+            } else
+#endif
             add(w / 2, h - Theme::pinnedBackH(w) / 2);                      // BACK
         }
         return n;
@@ -1937,9 +2045,14 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         return n;
     }
     if (state == AppState::OUTFIT) {
+#if defined(M5_STOPWATCH)
+        const auto bar=Theme::computeButtonBar(w,h);
+        for(int i=0;i<3;++i) add(bar.x[i]+bar.w[i]/2,bar.y+bar.h/2);
+#else
         add(w - 17, h - 22);            // the next outfit
         add(17, h - 22);                // the one before
         add(w / 2, h / 2);              // anywhere else goes back
+#endif
         return n;
     }
     if (state == AppState::DIAGNOSTICS) {
@@ -1950,13 +2063,23 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
     }
     if (state == AppState::HUNT) {
         const Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
+#if defined(M5_STOPWATCH)
+        StickPt at;
+        if(stickSweep([&](int x,int y){return uiHuntHitBack(x,y,w,h);},at))add(at.x,at.y);
+        if(stickSweep([&](int x,int y){return uiHuntHitStop(x,y,w,h);},at))add(at.x,at.y);
+#else
         add(w / 2 - 60, bar.y + bar.h / 2);   // BACK
         add(w / 2 + 60, bar.y + bar.h / 2);   // STOP
+#endif
         return n;
     }
     if (state == AppState::WATCH_ALERT) {
         add(w / 2, h / 3);              // anywhere dismisses
+#if defined(M5_STOPWATCH)
+        add(w / 2, h - 53);
+#else
         add(w / 2, h - 14);             // REMOVE FROM WATCH LIST
+#endif
         return n;
     }
 #if defined(SENSE_CYD_APP)
@@ -1964,7 +2087,11 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         // One stop, the banner: a press there re-calibrates (or, with no
         // network saved, opens WIFI NETWORKS). HOME leaves, as from anywhere,
         // and hands the radio back to the detector.
-#if SENSE_RICH
+#if defined(M5_STOPWATCH)
+        const auto bar=Theme::computeButtonBar(w,h);
+        for(int i=0;i<3;++i) add(bar.x[i]+bar.w[i]/2,bar.y+bar.h/2);
+        int16_t bx,by; uiSensingBannerStop(w,h,bx,by);add(bx,by);return n;
+#elif SENSE_RICH
         // The page dots and the three buttons (touch boards: the T-Deck).
         int16_t xs[4], ys[4];
         const uint8_t k = uiSensingStops(w, h, xs, ys, 4);
@@ -1977,6 +2104,12 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         return n;
 #endif
     }
+#endif
+#if defined(M5_STOPWATCH)
+    StopWatchUI::Rect buttons[STICK_STOPS_MAX];
+    const uint8_t k=StopWatchUI::controls(buttons,cap);
+    for(uint8_t i=0;i<k;++i) add(buttons[i].x+buttons[i].w/2,buttons[i].y+buttons[i].h/2);
+    return n;
 #endif
     add(w / 2, h - 12);                 // BACK, pinned to the bottom edge
     for (int r = 0; r < 3; r++)
@@ -1993,6 +2126,21 @@ static uint8_t stickStops(StickPt* out, bool fresh = false) {
     const uint32_t now = millis();
     if (fresh || !s_stickPtsAt || state != s_stickPtsState || now - s_stickPtsAt > 200) {
         s_stickPtsN = stickStopsBuild(s_stickPts, STICK_STOPS_MAX);
+#if defined(M5_STOPWATCH)
+        // Header controls participate only on screens whose handlers enable them.
+        const bool modal=s_infoPending || s_confirmPending || (state==AppState::SETTINGS && uiSettingsConfirmRow()!=SettingsRow::NONE);
+        const bool menu=state==AppState::CLEAR || state==AppState::LOG || state==AppState::SETTINGS || state==AppState::OUTFIT ||
+            state==AppState::RAWSCAN || state==AppState::DETECTION_FILTER || state==AppState::IGNORE_LIST || state==AppState::POWER_SAVER ||
+            state==AppState::SECURITY || state==AppState::STATUS_LIGHT || state==AppState::DESK || state==AppState::SENSING || state==AppState::CRYPTID_GUIDE || stopwatchExtraMenu();
+        auto header=[&](int x,int y) {
+            for(uint8_t i=0;i<s_stickPtsN;++i) if(s_stickPts[i].x==x && s_stickPts[i].y==y) return;
+            if(s_stickPtsN<STICK_STOPS_MAX) s_stickPts[s_stickPtsN++]={(int16_t)x,(int16_t)y,0};
+        };
+        if(!modal && !(state==AppState::CLEAR && (s_fob || s_scanPickerOpen || uiZoneCardWanted()))) {
+            if(menu) header(233,(int)(232.5f-StopWatchUI::menuArc().radius));
+            if(Security::enabled() && !Security::locked() && ((menu && state!=AppState::SENSING) || state==AppState::DIARY || state==AppState::HUNT || state==AppState::DIAGNOSTICS)) header(340,66);
+        }
+#endif
         s_stickPtsAt = now ? now : 1;
         s_stickPtsState = state;
     }
@@ -2027,6 +2175,9 @@ static bool stickListBusy() { return s_listPend != 0; }
 static bool stickListScroll(int delta) {
     switch (state) {
         case AppState::SETTINGS:         uiSettingsScroll(delta);  return true;
+#if defined(M5_STOPWATCH)
+        case AppState::STATUS_LIGHT:    uiLightScroll(delta); return true;
+#endif
         case AppState::POWER_SAVER:      uiPowerScroll(delta);     return true;
         case AppState::SECURITY:         uiSecurityScroll(delta);  return true;
         case AppState::DETECTION_FILTER: uiDetFilterScroll(delta); return true;
@@ -2100,6 +2251,9 @@ static bool stickListSettle(StickPt* pts, uint8_t& n) {
 // The highlight is always up on every screen but the main one, which is
 // Squachy's stage: there it shows after a key and fades after STICK_SHOW_MS.
 static bool stickCursorShown(uint32_t now) {
+#if defined(M5_STOPWATCH)
+    return StopWatchUI::focusReady(stopwatchContext(),s_watchContext);
+#endif
 #if SQW_TRACKBALL
     // A touch board: the highlight only while the trackball is in use.
     return s_stickShownAt && now - s_stickShownAt < TDECK_CURSOR_MS;
@@ -2129,7 +2283,11 @@ static TouchPoint stickPoll() {
     // key that opened it does not count, so a scan opening on nothing found
     // shows no highlight.
     if (state != s_stickStopState) {
+#if defined(M5_STOPWATCH)
+        s_stickStopState = state;
+#else
         s_stickStopState = state; s_stickStop = 0; s_listPend = 0;
+#endif
 #if SQW_TRACKBALL
         // The ball that opened this screen goes on through it: the
         // highlight stays up, on the first stop.
@@ -2260,7 +2418,11 @@ static TouchPoint stickPoll() {
         // Everywhere else every press moves.
         if (!stickCursorShown(now)) {
         } else if (!stickListStep(keys.next, pts, n)) {
+#if defined(M5_STOPWATCH)
+            s_stickStop=StopWatchInput::nextFocus(s_stickStop,n);
+#else
             s_stickStop = (uint8_t)((s_stickStop + (keys.next ? 1 : n - 1)) % n);
+#endif
         }
         s_stickShownAt = now ? now : 1;
         lastTouch = now;
@@ -2280,6 +2442,9 @@ static TouchPoint stickPoll() {
             tp.valid = true; tp.x = at.x; tp.y = at.y;
             return tp;
         }
+#if defined(M5_STOPWATCH)
+        if (state != AppState::LOCKED && state != AppState::PIN_ENTRY && state != AppState::UPDATE && state != AppState::COLOR_CHECK)
+#endif
         s_stickHome = true;
         Serial.println("[keys] back: no way back here, going home");
     }
@@ -2478,6 +2643,19 @@ static void stickDrawCursor(TFT_eSPI& t, uint32_t now) {
     if (x1 > w - 1) x1 = w - 1;
     if (y1 > h - 1) y1 = h - 1;
 
+#if defined(M5_STOPWATCH)
+    if (!StopWatchUI::focus(t,p.x,p.y)) {
+        // List hit tests can span the full width; their drawing uses RoundRow.
+        // Match that inset instead of outlining a clipped full-screen rectangle.
+        const int inset=RoundLayout::inset(y0,y1-y0+1,w);
+        if(x0<inset) x0=inset;
+        if(x1>w-inset-1) x1=w-inset-1;
+        if(x1<=x0 || y1<=y0) return;
+        t.drawRoundRect(x0,y0,x1-x0+1,y1-y0+1,8,Theme::WHITE);
+        t.drawRoundRect(x0+1,y0+1,x1-x0-1,y1-y0-1,7,Theme::CYAN);
+    }
+    return;
+#endif
     // The gradient, built once: purple > cyan > pink > purple, 24 steps.
     static uint8_t grad[24];
     static bool gradOk = false;
@@ -2551,6 +2729,44 @@ static void stickDrawCursor(TFT_eSPI& t, uint32_t now) {
 }
 #endif
 
+#if defined(M5_STOPWATCH)
+static StopWatchInput::FocusMemory s_watchFocus;
+static AppState s_watchParent=AppState::CLEAR;
+static uint16_t s_watchTrail[16];
+static uint8_t s_watchDepth=0;
+static int stopwatchFocusId(const StickPt& p) {
+    const int id=stickRegionId(p.x,p.y);
+    return id>=0 ? id : 100000 + p.y*512+p.x;
+}
+static TouchPoint stopwatchPoll() {
+    const uint16_t ctx=stopwatchContext();
+    if(StopWatchUI::context()!=ctx) return {false,0,0};
+    if(ctx!=s_watchContext) {
+        if(s_watchDepth && s_watchTrail[s_watchDepth-1]==ctx) --s_watchDepth;
+        else if(s_watchContext!=0xffff) {
+            if(s_watchDepth==16) {for(int i=1;i<16;++i)s_watchTrail[i-1]=s_watchTrail[i];--s_watchDepth;}
+            s_watchTrail[s_watchDepth++]=s_watchContext;
+        }
+        s_watchParent=s_watchDepth ? (AppState)(s_watchTrail[s_watchDepth-1]/64) : AppState::CLEAR;
+        s_watchContext=ctx; s_stickHoldUntil=0; s_stickDrag=0; s_listPend=0; s_stickPtsAt=0;
+        StickPt points[STICK_STOPS_MAX]; const uint8_t n=stickStops(points,true);
+        int ids[STICK_STOPS_MAX];for(uint8_t i=0;i<n;++i)ids[i]=stopwatchFocusId(points[i]);
+        s_stickStop=s_watchFocus.restore(ctx,ids,n);
+    }
+    // Keep a stable item selected when asynchronous scan results change.
+    // A pending list scroll chooses its new edge row in stickListSettle.
+    if(!s_listPend && !s_stickHoldUntil) {
+        StickPt current[STICK_STOPS_MAX];const uint8_t k=stickStops(current);
+        int ids[STICK_STOPS_MAX];for(uint8_t i=0;i<k;++i)ids[i]=stopwatchFocusId(current[i]);
+        s_stickStop=s_watchFocus.restore(ctx,ids,k);
+    }
+    const TouchPoint result=stickPoll();
+    StickPt points[STICK_STOPS_MAX];const uint8_t n=stickStops(points);
+    if(s_stickStop<n) s_watchFocus.save(ctx,stopwatchFocusId(points[s_stickStop]),s_stickStop);
+    return result;
+}
+#endif
+
 // Raw touch -> screen, the same way on every board: the Fit gives a point
 // in the panel's native (rotation 0) frame, and the rotation step turns it
 // into this rotation's coordinates. No board has its own maths any more.
@@ -2561,7 +2777,11 @@ static TouchPoint pollTouch() {
     TouchPoint tp = { false, 0, 0 };
     int16_t a, b;
     const bool gotTouch = sampleTouchRaw(a, b);
-#if SQW_TRACKBALL
+#if defined(M5_STOPWATCH)
+    if (!gotTouch) {int x=0,y=0;StopWatchUI::touchSample(false,x,y);return stopwatchPoll();}
+    s_watchActions=0; s_stickHoldUntil=0; s_stickDrag=0;
+    s_watchInput.consume();
+#elif SQW_TRACKBALL
     if (!gotTouch) return tdeckBallPoll();   // the trackball's cursor, off the glass
     tdeckBallTouched();
 #elif defined(TOUCH_ON_DISPLAY_BUS) || defined(CYD35R)
@@ -2603,6 +2823,9 @@ static TouchPoint pollTouch() {
         if (tp.y < 0) tp.y = 0; else if (tp.y >= h) tp.y = h - 1;
     }
     tp.valid = sane;
+#if defined(M5_STOPWATCH)
+    if(tp.valid && StopWatchUI::context()==stopwatchContext()) tp.valid=StopWatchUI::touchSample(true,tp.x,tp.y);
+#endif
 #if defined(TOUCH_ON_DISPLAY_BUS) || defined(CYD35R)
     if (sane) { s_held = tp; s_heldMs = millis(); }
 #endif
@@ -2673,7 +2896,9 @@ static bool rawReadFiltered(int16_t& a, int16_t& b) {
 // The one reader pollTouch(), the calibration and the diagnostics screen all
 // use, so what the calibration measures is exactly what touch then reads.
 static bool readTouchRaw(int16_t& a, int16_t& b) {
-#if defined(SQW_SMALL)
+#if defined(M5_STOPWATCH)
+    return StopWatch::readTouch(a, b);
+#elif defined(SQW_SMALL)
     (void)a; (void)b;
     return false;   // no touch panel at all: the buttons drive it
 #elif defined(CROWPANEL7) || defined(CYD32C) || defined(CYD35C) || defined(TDECK_PLUS)
@@ -2964,6 +3189,8 @@ static void applyBrightness() {
     // takes a bare I2C command byte on an inverted scale. CrowBL::set()
     // keeps the firmware's own 0..255-with-255-brightest convention.
     CrowBL::set(duty);
+#elif defined(M5_STOPWATCH)
+    StopWatch::brightness(duty);
 #elif defined(TAB5)
     // M5GFX's brightness: the backlight is a PWM pin it owns.
     Tab5Panel::backlight(duty);
@@ -3316,6 +3543,9 @@ static const bool DEFAULT_TOUCH_USABLE = true;
 
 static bool s_calRanThisBoot = false;   // for the RADIO report on the watch
 static void runTouchCalibration() {
+#if defined(M5_STOPWATCH)
+    s_watchInput=StopWatchInput::Controller{};s_watchActions=0;s_stickHoldUntil=0;
+#endif
     // The calibration draws straight at the panel. On the boards whose frames
     // go out from a task of their own, the last one may still be on the wire:
     // drawing over it scrambled the panel's commands and left it white (the
@@ -3373,10 +3603,21 @@ static bool stickBackPoint(StickPt& at) {
     const int w = tft.width(), h = tft.height();
     auto put = [&](int x, int y) { at = { (int16_t)x, (int16_t)y, 0 }; return true; };
 #define sweep(fn) stickSweep(fn, at)
-    if (s_infoPending && (state == AppState::LOG || state == AppState::ALERT)) return put(w / 2, h - 17);   // GOT IT
+    if (s_infoPending && (state == AppState::LOG || state == AppState::ALERT))
+#if defined(M5_STOPWATCH)
+        return sweep([&](int x,int y){return Theme::infoPanelHitDismiss(x,y,w,h);});
+#else
+        return put(w / 2, h - 17);
+#endif   // GOT IT
     switch (state) {
         case AppState::CLEAR:
-            if (s_scanPickerOpen) return put(w * 5 / 6 - 4, h - 16);   // the picker's BACK, in DESK's place
+            if (s_scanPickerOpen) {
+#if defined(M5_STOPWATCH)
+                const auto bar=Theme::computeButtonBar(w,h);return put(bar.x[2]+bar.w[2]/2,bar.y+bar.h/2);
+#else
+                return put(w * 5 / 6 - 4, h - 16);
+#endif
+            }   // the picker's BACK, in DESK's place
 #if defined(CARDPUTER_ADV)
             // Home has nowhere to go back to: ESC opens the menu instead.
             if (!s_fob) return put(13, 11);
@@ -3389,13 +3630,27 @@ static bool stickBackPoint(StickPt& at) {
         case AppState::SETTINGS:
             if (uiSettingsConfirmRow() != SettingsRow::NONE)
                 return sweep([&](int x, int y) { return uiSettingsConfirmButtonAt(x, y, w, h) == SettingsConfirmTap::CANCEL; });
-            return sweep([&](int x, int y) { return uiSettingsTapPinnedBack(*canvas, x, y, w, h); });
+            return sweep([&](int x, int y) { return uiSettingsTapPinnedBack(*canvas, x, y, w, h)
+#if defined(M5_STOPWATCH)
+                && !uiSettingsTapPinnedOk(x,y,w,h)
+#endif
+                ; });
+#if defined(M5_STOPWATCH)
+        case AppState::DEX:
+            if(uiDexCardOpen()) {const auto bar=Theme::computeButtonBar(w,h);return put(bar.x[1]+bar.w[1]/2,bar.y+bar.h/2);}
+            return sweep([&](int x,int y){return Theme::pinnedBackHit(x,y,w,h);});
+        case AppState::STATUS_LIGHT:
+#endif
         case AppState::POWER_SAVER:
         case AppState::SECURITY:
         case AppState::DETECTION_FILTER:
         case AppState::MESH_MENU:
         case AppState::IGNORE_LIST:
+#if defined(M5_STOPWATCH)
+            return sweep([&](int x,int y){return Theme::pinnedBackHit(x,y,w,h);});
+#else
             return put(w / 2, h - Theme::pinnedBackH(w) / 2);
+#endif
         case AppState::OUTFIT_UNLOCK:
             return put(w / 2, h / 2);                                  // the card closes on a tap anywhere
         case AppState::CRYPTID_GUIDE: {
@@ -3425,6 +3680,10 @@ static bool stickBackPoint(StickPt& at) {
             return sweep([&](int x, int y) { return uiUpdateHitTest(*canvas, x, y, nullptr) == UpdateHit::BACK; });
         case AppState::SQUAD_UPDATE:
             return sweep([&](int x, int y) { return uiSquadUpdateHit(*canvas, x, y) == SquadUpdateHit::BACK; });
+#if defined(M5_STOPWATCH) && SQUACH_MESH
+        case AppState::MESH_WARN:
+            return sweep([&](int x,int y){return uiMeshWarnHitTest(*canvas,x,y)==MeshWarnHit::NO;});
+#endif
         case AppState::INVITE:
             if (sweep([&](int x, int y) { return uiInviteHit(*canvas, x, y) == InviteHit::BACK; })) return true;
             return sweep([&](int x, int y) { return uiInviteHit(*canvas, x, y) == InviteHit::CANCEL; });
@@ -4075,6 +4334,10 @@ static void enterSysProps() {
 }
 
 static void enterWifiNets() {
+#if defined(M5_STOPWATCH)
+    if(state==AppState::SENSING) s_senseWifiPicker=true;
+    else if(state!=AppState::WIFI_ADD && state!=AppState::WIFI_PASS) s_senseWifiPicker=false;
+#endif
     state = AppState::WIFI_NETS;
     transitionStart = millis();
     uiWifiNetsInit(*canvas);
@@ -5833,7 +6096,9 @@ void setup() {
 #if !defined(AWOK) && !defined(RLPHANTOM) && !defined(RLPHANTOM_R) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(CYD32C) && !defined(CYD35C) && !defined(TAB5) && !defined(WAVESHARE_C5)
     pinMode(21, OUTPUT); digitalWrite(21, HIGH);
 #endif
-#if defined(SQW_S3)
+#if defined(M5_STOPWATCH)
+    // AMOLED brightness is a panel command. GPIO45 is QSPI data, not a backlight.
+#elif defined(SQW_S3)
     // GPIO27 and GPIO32 are the S3's PSRAM lines: touching either hangs the
     // chip until the watchdog reboots it. Both S3 boards' backlight is GPIO45.
     pinMode(BL_PIN_S3, OUTPUT); digitalWrite(BL_PIN_S3, HIGH);
@@ -5908,7 +6173,7 @@ void setup() {
     // Which version lives in this slot, and whether this boot is a fresh
     // update on probation or the aftermath of one that was rolled back.
     OtaCore::boot();
-#if !defined(AWOK) && !defined(SQW_SMALL)   // the StickS3 is landscape only, by its owner's choice
+#if !defined(AWOK) && !defined(SQW_SMALL) && !defined(M5_STOPWATCH)   // the StickS3 is landscape only, by its owner's choice
     // AWOK has no rotate button and stays fixed at its one physical
     // orientation (see screenRotation's own comment above) -- only
     // boards that can actually rotate restore a saved orientation.
@@ -5919,10 +6184,17 @@ void setup() {
     // ST7796U and will lock up an ST7789 panel; do not re-add it unless
     // we confirm the panel is actually ST7796.
     tft.setRotation(screenRotation);
+#if defined(M5_STOPWATCH)
+    Theme::setRotateIconVisible(false);
+#endif
     {
         // The short side decides it, so it holds in every rotation.
         const int sw = tft.width(), sh = tft.height();
+        #if defined(M5_STOPWATCH)
+        Theme::setLarge(false); // pixel density, not the square viewport size
+#else
         Theme::setLarge((sw < sh ? sw : sh) >= 320);
+#endif
     }
 #if defined(SQW_SMALL)
     Theme::setRotateIconVisible(false);
@@ -5962,6 +6234,8 @@ void setup() {
 #if defined(CROWPANEL7)
     // No LEDC at all: the backlight is an I2C command byte. Claiming channels
     // here would only take them away from something that has a pin.
+#elif defined(M5_STOPWATCH)
+    // M5GFX controls AMOLED brightness; do not attach LEDC to QSPI data.
 #elif defined(TAB5)
     // No LEDC here either: M5GFX set the backlight's PWM up with the panel.
 #elif defined(TDECK_PLUS)
@@ -6031,6 +6305,8 @@ void setup() {
         // browned the Phantom out into a second boot.
 #if defined(CROWPANEL7)
         CrowBL::set(24);
+#elif defined(M5_STOPWATCH)
+        StopWatch::brightness(96); // sparse AMOLED boot text remains readable
 #elif defined(TAB5)
         Tab5Panel::backlight(24);
 #elif defined(TDECK_PLUS)
@@ -6045,6 +6321,9 @@ void setup() {
         // The frame does not exist yet on the 3.5", so that board checks
         // without the message rather than with a garbled one.
         if (panelTextOk()) {
+#if defined(M5_STOPWATCH)
+            uiBootStatus(PANEL,"CHECKING UPDATES","Connecting to WiFi","Please wait...",Theme::CYAN);
+#else
             PANEL.fillRect(0, 0, tft.width(), tft.height(), Theme::BG);
             PANEL.setTextSize(1);
             PANEL.setTextWrap(false);
@@ -6052,6 +6331,7 @@ void setup() {
             const char* m = "CHECKING FOR UPDATES...";
             PANEL.setCursor((tft.width() - PANEL.textWidth(m)) / 2, tft.height() / 2 - 4);
             PANEL.print(m);
+#endif
             panelShow();
         }
         OtaWifi::bootCheck(9000);
@@ -6085,7 +6365,7 @@ void setup() {
     // 16-bit — the full 16-bit buffer didn't fit in the available
     // contiguous heap on this board.
     frame.setColorDepth(8);
-#if (defined(SQW_S3) && !defined(FREENOVE_S3_35) && !defined(FREENOVE_S3_40)) || SQW_FRAME_FORCE_INTERNAL
+#if (defined(SQW_S3) && !defined(FREENOVE_S3_35) && !defined(FREENOVE_S3_40) && !defined(M5_STOPWATCH)) || SQW_FRAME_FORCE_INTERNAL
     // 57.6 KB fits in internal RAM with room to spare (75 KB at 320x240), and a sprite in
     // PSRAM pushes slower and cannot go by DMA. Keep it inside. (Not the
     // Freenove 3.5": its 154 KB frame goes to PSRAM on purpose, and the QSPI
@@ -6195,6 +6475,9 @@ void setup() {
     // buzzer a crash may have left sounding -- the helper keeps its state
     // across our reset. Not a boot beep.
     CrowBuzzer::begin();
+#elif defined(M5_STOPWATCH)
+    usingCapTouch = StopWatch::hasTouch();
+    uiClearSetBatterySource(StopWatch::batteryState);
 #elif defined(TAB5)
     // The ST7123's own touch, through M5GFX, which brought it up with the
     // panel in tft.init().
@@ -6331,18 +6614,29 @@ void setup() {
     // make touch too inaccurate to reliably re-tap a "recalibrate"
     // button, so this needs no precision at all — just a hold anywhere
     // during the window right after boot.
+#if defined(M5_STOPWATCH)
+    StopWatch::brightness(96);
+    uiBootStatus(PANEL,"TOUCH CALIBRATION","Hold anywhere now","to reset calibration",Theme::AMBER);
+#else
     PANEL.fillRect(0, 0, tft.width(), tft.height(), Theme::BG);
     PANEL.setTextColor(Theme::AMBER, Theme::BG);
     PANEL.setTextSize(1);
     PANEL.setCursor(4, 4);
     PANEL.print("Hold anywhere now to reset touch calibration...");
+#endif
     panelShow();
     {
         uint32_t holdStart = 0;
         uint32_t windowStart = millis();
-        while (millis() - windowStart < 1200) {
+        const uint32_t recoveryWindowMs =
+#if defined(M5_STOPWATCH)
+            2000;
+#else
+            1200;
+#endif
+        while (millis() - windowStart < recoveryWindowMs) {
             int16_t a, b;
-#if defined(CROWPANEL7) || defined(CYD32C) || defined(CYD35C) || defined(SQW_SMALL) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(TAB5) || defined(WAVESHARE_C5)
+#if defined(CROWPANEL7) || defined(CYD32C) || defined(CYD35C) || defined(SQW_SMALL) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(TAB5) || defined(WAVESHARE_C5) || defined(M5_STOPWATCH)
             // The GT911 (and the ST77922's touch) is neither of the two
             // below; the two-way dispatch polled a capacitive controller that
             // is not on this bus, a hundred bus errors a boot.
@@ -6394,13 +6688,13 @@ void setup() {
     // injected against the compiled-in ranges -- a calibration screen would
     // just sit there waiting for a finger.
     initTouchFit();
-#if defined(ESP32) && !defined(CROWPANEL7) && !defined(SQW_SMALL) && !defined(FREENOVE_S3_35) && !defined(TAB5)   // nothing to calibrate on a stick with no touch
+#if defined(ESP32) && !defined(CROWPANEL7) && !defined(SQW_SMALL) && !defined(FREENOVE_S3_35) && !defined(TAB5) && !defined(M5_STOPWATCH)   // nothing to calibrate on a stick with no touch
     if (s_calSource != CalSource::SAVED) {
         Serial.println("Touch: no five-target calibration yet -- running it now.");
         runTouchCalibration();
     }
 #endif
-#if defined(CROWPANEL7) || defined(FREENOVE_S3_35) || defined(TAB5)
+#if defined(CROWPANEL7) || defined(FREENOVE_S3_35) || defined(TAB5) || defined(M5_STOPWATCH)
     // Never on first boot here. The GT911 (and the ST77922's own touch)
     // reports panel pixels, so the compiled-in fit is already the identity
     // and there is nothing to calibrate -- making someone tap five targets
@@ -6442,6 +6736,8 @@ void setup() {
     // is the one large load that nobody misses for a second at boot.
 #if defined(CROWPANEL7)
     CrowBL::set(24);
+#elif defined(M5_STOPWATCH)
+    StopWatch::brightness(24);
 #elif defined(TAB5)
     Tab5Panel::backlight(24);
 #elif defined(TDECK_PLUS)
@@ -6729,6 +7025,9 @@ static inline void pushFrame(int x, int y) {
     // Same shape: the framebuffer is memory and Tab5Blit writes the changed
     // columns into it, turned landscape and doubled on the way.
     Tab5Blit::push(frame.buf(), frame.bufW(), frame.bufH(), x, y);
+#elif defined(M5_STOPWATCH)
+    StopWatch::push(frame.buf(), frame.bufW(), frame.bufH(), x, y,
+        state == AppState::CLEAR && !Settings::boringMode() ? StopWatchRound::backdrop() : nullptr, Theme::BG);
 #else
 #if SQW_PUSH_ASYNC
     // The push task takes this frame and the loop draws the next into the
@@ -7620,6 +7919,8 @@ static uint32_t s_chargeAt = 0, s_chargeLitAt = 0, s_chargeLitUntil = 0, s_charg
 static void chargeBacklight(uint8_t duty) {
 #if defined(CROWPANEL7)
     CrowBL::set(duty);
+#elif defined(M5_STOPWATCH)
+    StopWatch::brightness(duty);
 #elif defined(TAB5)
     Tab5Panel::backlight(duty);
 #elif defined(WAVESHARE_C5)
@@ -7859,11 +8160,62 @@ static void bootButtonTick(uint32_t now) {
 #endif
 
 
+#if defined(M5_STOPWATCH)
+static bool stopwatchBackOverride() {
+    if (state==AppState::CLEAR && !s_scanPickerOpen) return true;
+    if(state==AppState::SENSING) {enterSettings();return true;}
+    if ((state==AppState::DIARY || state==AppState::OUTFIT || state==AppState::OUTFIT_UNLOCK) && s_watchParent==AppState::SETTINGS) {
+        enterSettings(); return true;
+    }
+    return false;
+}
+#endif
+
 void loop() {
     // Cheap and unconditional: available() is a register read, and this
     // is the only way in for the one serial command the firmware takes.
     Clock::pollSerial();
     runtimeTick(millis());
+#if defined(M5_STOPWATCH)
+    StopWatch::update();
+    const auto wifiState=OtaWifi::state(); const auto bleState=OtaBle::state();
+    const bool installing=wifiState==OtaWifi::State::DOWNLOADING || wifiState==OtaWifi::State::VERIFYING || wifiState==OtaWifi::State::DONE ||
+        bleState==OtaBle::State::RECEIVING || bleState==OtaBle::State::VERIFYING || bleState==OtaBle::State::DONE;
+    bool dimmed=s_screenDimmed;
+#if defined(SENSE_CYD_APP)
+    dimmed=dimmed || s_senseDark;
+#endif
+    const bool l=StopWatch::buttonADown(), r=StopWatch::buttonBDown();
+    const bool began=(l&&!s_watchInput.left.down)||(r&&!s_watchInput.right.down);
+    const uint8_t actions=s_watchInput.tick(l,r,millis(),dimmed,installing || state==AppState::BOOT || s_chargeMode);
+    if(began) lastTouch=millis();
+    if(actions&StopWatchInput::WAKE) {
+        s_screenDimmed=false;
+#if defined(SENSE_CYD_APP)
+        senseWake();
+#endif
+        applyBrightness();
+    }
+    if(installing) {s_watchActions=0;s_stickHoldUntil=0;s_stickDrag=0;}
+    else s_watchActions|=actions & (StopWatchInput::BACK|StopWatchInput::HOME|StopWatchInput::NEXT|StopWatchInput::SELECT);
+    if(actions & StopWatchInput::POWER_OFF) {
+        s_watchActions=0;s_stickHoldUntil=0;s_stickDrag=0;
+        StopWatch::powerOff();
+        return;
+    }
+    if((actions & StopWatchInput::MENU) && !Security::locked() &&
+       state!=AppState::LOCKED && state!=AppState::PIN_ENTRY &&
+       wifiState==OtaWifi::State::OFF && bleState==OtaBle::State::OFF) {
+        s_watchActions=0;s_stickHoldUntil=0;s_stickDrag=0;
+        s_infoPending=false;s_confirmPending=false;s_scanPickerOpen=false;
+        if(onRawScanScreen()) engine.stopRawScan();
+        if(state==AppState::DESK) s_backToDesk=true;
+        enterSettings();
+        uiSettingsOpenPage(SettingsPage::MAIN);
+    }
+    if(actions & (StopWatchInput::BACK|StopWatchInput::SELECT)) lastTouch=millis()-TOUCH_DEBOUNCE_MS-1;
+
+#endif
 #if defined(ESP32) && !defined(TWATCH_S3)
 #if SQW_BOOT_BTN
     bootButtonTick(millis());
@@ -8073,7 +8425,11 @@ void loop() {
         // HOME is the main screen. With desk mode on, home is the desk, so
         // HOME from the desk itself goes on to the main screen. Never out of
         // the lock screen: that would walk past the PIN.
-        if (state == AppState::LOCKED || state == AppState::BOOT) {}
+        if (state == AppState::LOCKED || state == AppState::BOOT
+#if defined(M5_STOPWATCH)
+            || Security::locked() || OtaWifi::state()!=OtaWifi::State::OFF || OtaBle::state()!=OtaBle::State::OFF
+#endif
+        ) {}
         else if (state == AppState::DESK || (state == AppState::CLEAR && s_fob)) enterClear();
         else if (state != AppState::CLEAR) goHome();
     }
@@ -8159,7 +8515,11 @@ void loop() {
             s_senseNoWifi = false;
             if (nSaved) {
                 const uint8_t use = OtaWifi::savedUse() < nSaved ? OtaWifi::savedUse() : 0;
+#if defined(M5_STOPWATCH)
+                int k = use; // honor the network explicitly selected with USE
+#else
                 int k = OtaWifi::savedResult(use) == OtaWifi::SavedResult::JOINED ? use : -1;
+#endif
                 for (uint8_t i = 0; i < nSaved && k < 0; i++)
                     if (OtaWifi::savedResult(i) == OtaWifi::SavedResult::JOINED) k = i;
                 if (k < 0) k = use;
@@ -8681,7 +9041,7 @@ void loop() {
                           (int)pick->rssi, pick->restored ? ", from before this boot" : "");
         }
     }
-#if defined(SQW_SMALL)
+#if defined(SQW_SMALL) || defined(M5_STOPWATCH)
     g_consoleRotate = false;
     if (false && (tp.valid && !Settings::rotationLocked() && !Squachy::isHeld() &&
 #else
@@ -8691,7 +9051,11 @@ void loop() {
                       state == AppState::SETTINGS || state == AppState::OUTFIT ||
                       state == AppState::RAWSCAN || state == AppState::DETECTION_FILTER ||
                       state == AppState::IGNORE_LIST || state == AppState::DESK ||
-                      state == AppState::CRYPTID_GUIDE) &&
+                      state == AppState::CRYPTID_GUIDE
+#if defined(M5_STOPWATCH)
+                      || stopwatchExtraMenu()
+#endif
+                      ) &&
         Theme::rotateButtonHit(tp.x, tp.y, tft.width()) &&
         (now - lastTouch) > TOUCH_DEBOUNCE_MS)) {
         if (g_consoleRotate) { g_consoleRotate = false; Serial.printf("[console] rotation -> %u\n", (unsigned)((screenRotation + 1) % 4)); }
@@ -8757,13 +9121,20 @@ void loop() {
     // screen, since OUTFIT's own taps are all claimed by the arrows and
     // DETECTION_FILTER's are all claimed by row toggles.
     if (tp.valid && !Squachy::isHeld() &&
+#if defined(M5_STOPWATCH)
+        touchJustDown &&
+#endif
         (state == AppState::CLEAR || state == AppState::LOG ||
                       state == AppState::SETTINGS || state == AppState::OUTFIT ||
                       state == AppState::RAWSCAN || state == AppState::DETECTION_FILTER ||
                       state == AppState::IGNORE_LIST || state == AppState::POWER_SAVER ||
                       state == AppState::SECURITY || state == AppState::STATUS_LIGHT ||
                       state == AppState::DESK || state == AppState::SENSING ||
-                      state == AppState::CRYPTID_GUIDE) &&
+                      state == AppState::CRYPTID_GUIDE
+#if defined(M5_STOPWATCH)
+                      || stopwatchExtraMenu()
+#endif
+                      ) &&
         Theme::settingsButtonHit(tp.x, tp.y) &&
         // ...but not where the watch/hunt pill is sitting. The gear's tap box
         // is 55x50, much larger than its 28px glyph, so it reaches into the
@@ -8772,6 +9143,15 @@ void loop() {
         !(state == AppState::CLEAR && uiClearWatchPillHit(tp.x, tp.y)) &&
         (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
         lastTouch = now;
+#if defined(M5_STOPWATCH)
+        if (state == AppState::WIFI_ADD) enterWifiNets();
+        else if(state==AppState::WIFI_NETS && s_senseWifiPicker) {s_senseWifiPicker=false;enterSensing();}
+        else if(state == AppState::WIFI_NETS || state == AppState::UPDATE) {
+            enterSettings();uiSettingsOpenPage(SettingsPage::SYSTEM);
+        }
+        else if(state == AppState::MY_ALERTS || state == AppState::BINGO || state == AppState::DEX) enterSettings();
+        else
+#endif
         if (state == AppState::STATUS_LIGHT) {
             // Back to the APPEARANCE page it was opened from, not the top.
             enterSettings();
@@ -8906,6 +9286,9 @@ void loop() {
 #endif
         }
     }
+#endif
+#if defined(M5_STOPWATCH)
+    StopWatchUI::beginFrame(stopwatchContext());
 #endif
     switch (state) {
         case AppState::BOOT: {
@@ -9460,7 +9843,11 @@ void loop() {
                     Theme::showToast("GONE", "It just left", Theme::CYAN);
                 }
             } else if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
+                       #if defined(M5_STOPWATCH)
+                       StopWatchRound::backgroundTap(tp.x, tp.y, now)) {
+#else
                        Theme::backgroundTap(tp.x, tp.y, now)) {
+#endif
                 // Something tappable in the background itself claimed
                 // this touch -- currently only the moon on the FIRE
                 // scene. Checked BEFORE the edge zone below on purpose:
@@ -10740,6 +11127,11 @@ void loop() {
                                          (OtaWifi::canTryAgain() ? 2u : 0u) | (OtaCore::restartPending() ? 1u : 0u);
                     if (key != lastKey) {
                         uiUpdateTick(*canvas, now, true);
+#if defined(M5_STOPWATCH)
+                        // OTA can release the sprite. Publish/draw its new controls
+                        // on each full direct-panel repaint, retaining them on live updates.
+                        StopWatchUI::endFrame(*canvas);
+#endif
                         lastKey  = key;
                         lastLive = now;
                     } else if (now - lastLive >= 250) {
@@ -10882,6 +11274,10 @@ void loop() {
                         const int s = uiWifiNetsSelected();
                         if (s >= 0 && s < OtaWifi::savedCount()) {
                             OtaWifi::useSaved((uint8_t)s);
+#if defined(M5_STOPWATCH)
+                            if(s_senseWifiPicker) {s_senseWifiPicker=false;enterSensing();}
+                            else
+#endif
                             Theme::showToast("TRIED FIRST", OtaWifi::savedSsidAt((uint8_t)s), Theme::CYAN);
                         }
                         break;
@@ -10901,7 +11297,12 @@ void loop() {
                         else
                             enterWifiAdd();
                         break;
-                    case WifiNetsHit::BACK: enterSettings(); break;
+                    case WifiNetsHit::BACK:
+#if defined(M5_STOPWATCH)
+                        if(s_senseWifiPicker) {s_senseWifiPicker=false;enterSensing();}
+                        else
+#endif
+                        enterSettings(); break;
                     default: break;
                 }
             }
@@ -11744,6 +12145,8 @@ void loop() {
             info.boardName = "CrowPanel 7";
 #elif defined(TAB5)
             info.boardName = "Tab5 LAB";
+#elif defined(M5_STOPWATCH)
+            info.boardName = "StopWatch LAB";
 #elif defined(TOUCH_ON_DISPLAY_BUS)
             info.boardName = "AWOK";
 #elif defined(STICKS3)
@@ -11945,11 +12348,21 @@ void loop() {
         if (now - transitionStart < TRANSITION_MS) {
             Theme::drawTransitionGlitch(frame, now - transitionStart, TRANSITION_MS);
         }
+#if defined(M5_STOPWATCH)
+        const bool watchFrameReady=StopWatchUI::endFrameIfCurrent(frame,stopwatchContext());
+#endif
 #if SQW_KEYCURSOR
         stickDrawCursor(frame, now);
 #endif
+#if defined(M5_STOPWATCH)
+        StopWatchUI::holdProgress(frame,s_watchInput.progress(false,now),s_watchInput.progress(true,now));
+#endif
         FrameProf::lap(FrameProf::POST);
+#if defined(M5_STOPWATCH)
+        if(watchFrameReady) pushFrame(0, 0);
+#else
         pushFrame(0, 0);
+#endif
         FrameProf::lap(FrameProf::PUSH);
     }
 #endif

@@ -46,7 +46,11 @@ const uint16_t STEEL    = Theme::W95_FACE;
 const uint16_t STEEL_SH = Theme::W95_SHADOW;
 const uint16_t STEEL_DK = Theme::W95_DKSHADOW;
 
+#if defined(M5_STOPWATCH)
+const int UY = 88, UW = 164, UH = 224;
+#else
 const int UY = 8, UW = 164, UH = 224;
+#endif
 // The handset's left edge. It was 78 -- (320 - 164) / 2, centred by hand for
 // a 320-wide panel and then fixed there, so on the 3.5"'s 480 it sat well
 // left of centre with the scene showing beside it. Centred from the panel's
@@ -205,7 +209,11 @@ void start(const char* text) {
 // The phone body occupies x 78..242, so the strip down the left of the screen
 // is free at any rotation. Bottom-left because that is where every other
 // screen in this firmware puts BACK.
+#if defined(M5_STOPWATCH)
+const int BX = 132;
+#else
 const int BX = 4;
+#endif
 // 68x26 was measured against size-1 labels on a 320-wide panel. "[ QWERTY ]"
 // is 126 px at size 2, so on a wide panel the box has to lead the label or
 // drawButton declines the step-up and these two stay small while every other
@@ -214,9 +222,21 @@ const int BX = 4;
 // it to the QWERTY band's bottom inset -- making it dynamic would move the
 // keyboard -- and 26 holds size-2 text at 16 px with room either side.
 // s_panelW rather than a TFT_eSPI&: the tap handlers have no display to ask.
-static inline int BW_() { return s_panelW >= 400 ? 132 : 68; }
+static inline int BW_() {
+#if defined(M5_STOPWATCH)
+    return 96;
+#else
+    return s_panelW >= 400 ? 132 : 68;
+#endif
+}
 const int BH = 26;
-static int backY(int screenH) { return screenH - BH - 6; }
+static int backY(int screenH) { return screenH - BH -
+#if defined(M5_STOPWATCH)
+30;
+#else
+6;
+#endif
+}
 static_assert(BH + 6 + 6 == Qwerty::BAND_BOTTOM_INSET,
               "the QWERTY band must end above the BACK row -- see qwerty.h");
 
@@ -229,6 +249,9 @@ static_assert(BH + 6 + 6 == Qwerty::BAND_BOTTOM_INSET,
 // full width, so it moves to the far end of BACK's own row.
 static int s_toggleX = 0, s_toggleY = 0;
 static void toggleRect(int w, int h, bool qwerty) {
+#if defined(M5_STOPWATCH)
+    s_toggleX = w - BX - BW_(); s_toggleY = backY(h); return;
+#endif
     if (qwerty) { s_toggleX = w - BX - BW_(); s_toggleY = backY(h); }
     else        { s_toggleX = BX;          s_toggleY = backY(h) - BH - 6; }
 }
@@ -589,8 +612,18 @@ void uiPhoneTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // On QWERTY the readout spans the width, less the preview box to its
     // right. Everything below -- the right-alignment and the caret -- is the
     // same code for both boards.
+    #if defined(M5_STOPWATCH)
+    const int dX = qw ? 76 : caseX() + 12, dY = qw ? 88 : UY + 10;
+#else
     const int dX = qw ? 10 : caseX() + 12, dY = qw ? 10 : UY + 10;
-    const int dW = qw ? w - 66 : UW - 24, dH = 26;
+#endif
+    const int dW = qw ? w -
+#if defined(M5_STOPWATCH)
+196
+#else
+66
+#endif
+: UW - 24, dH = 26;
     steel(t, dX - 3, dY - 3, dW + 6, dH + 6, true);
     t.fillRect(dX, dY, dW, dH, Theme::BLACK);
     t.drawRect(dX, dY, dW, dH, Theme::GREEN);
@@ -649,7 +682,11 @@ void uiPhoneTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         // is inside one glance. A fixed box also never runs off the top on
         // row one, which a floating one does on every press there. Idle, it
         // says how much of a message is left.
+#if defined(M5_STOPWATCH)
+        const int pw = 34, px = w - 76 - pw;
+#else
         const int pw = 34, px = w - 10 - pw;
+#endif
         steel(t, px - 3, dY - 3, pw + 6, dH + 6, true);
         t.fillRect(px, dY, pw, dH, Theme::BLACK);
         if (s_armed >= 0) {
@@ -736,3 +773,22 @@ bool uiPhoneBackRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
     x = BX; y = (int16_t)s_backY; w = (int16_t)BW_(); h = BH;
     return s_backY > 0;
 }
+
+#if defined(M5_STOPWATCH)
+uint8_t uiPhoneStopRects(int16_t* x,int16_t* y,int16_t* w,int16_t* h,uint8_t cap) {
+    uint8_t n=0;
+    auto add=[&](int a,int b,int c,int d) { if(n<cap){x[n]=a;y[n]=b;w[n]=c;h[n]=d;++n;} };
+    if (pin() && s_pinWaitMsg) return 0;
+    if (!pin() && Settings::phoneQwerty()) {
+        for(uint8_t i=0;i<s_keyN;++i) add(s_keys[i].x,s_keys[i].y,s_keys[i].w,s_keys[i].h);
+    } else {
+        for(int i=0;i<12;++i) {
+            if(pin() && i==11) continue;
+            add(keysX()+(i%3)*(KW+KGAP),KY+(i/3)*(KH+KGAP),KW,KH);
+        }
+    }
+    if(!pin() || s_pinBack || s_pinForgot) add(BX,s_backY,BW_(),BH);
+    if(!pin()) add(s_toggleX,s_toggleY,BW_(),BH);
+    return n;
+}
+#endif
