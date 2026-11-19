@@ -128,7 +128,7 @@ void uiHuntTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adva
     int w = t.width(), h = t.height();
 
     Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
-    int bodyTop = 16, bodyBottom = bar.y - 4;
+    int bodyTop = Theme::LIST_TOP, bodyBottom = bar.y - 4;
 
     // The top band from the background first, as every other screen with
     // this bar does: Squachy's bubble reaches up over it, and the body clear

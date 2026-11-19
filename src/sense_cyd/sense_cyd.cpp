@@ -319,6 +319,14 @@ static bool csiStart() {
   c.channel_filter_en = false; // keep neighbouring tones independent
   c.manu_scale = false;
   c.shift = 0;
+#if defined(M5_STOPWATCH)
+  // Match Espressif's router-CSI example for the S3's int8 capture path.
+  // Keep L-LTF only, with fixed scaling rather than per-packet auto scaling.
+  c.ltf_merge_en = true;
+  c.channel_filter_en = true;
+  c.manu_scale = true;
+  c.shift = 1;
+#endif
   esp_err_t e;
   if ((e = esp_wifi_set_csi_rx_cb(csiCb, nullptr)) != ESP_OK) { note("csi cb: %s", esp_err_to_name(e)); return false; }
   if ((e = esp_wifi_set_csi_config(&c)) != ESP_OK) { note("csi config: %s", esp_err_to_name(e)); return false; }
@@ -571,6 +579,11 @@ static void sendStatus(uint32_t now) {
   r.cal = s_mode == SENSE_MODE_STA ? s_model->calibrationPercent(now) : 0;
   r.mode = s_mode; r.rate = s_rate; r.chan = s_chan; r.live = s_live; r.rssi = s_rssi;
   r.drop = s_dropped; r.presence = s_presence;
+#if defined(M5_STOPWATCH)
+  r.variation = (uint16_t)fminf(65535, s_model->variation()*1000);
+  r.baseline = (uint16_t)fminf(65535, s_model->baselineVariation()*1000);
+  r.amplitude=s_model->amplitudeScore(); r.phase=s_model->phaseScore(); r.shape=s_model->correlationScore();
+#endif
   SenseStore::status(r, millis());
 }
 

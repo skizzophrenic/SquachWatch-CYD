@@ -4,6 +4,9 @@ Both boards have no touch screen. A cursor moves between the buttons on each
 screen, and the button it is on lights up whole and shimmers. Lists scroll
 under the cursor and loop, so you never page.
 
+The touch-capable StopWatch reuses this focus/list navigation, with its own
+500 ms two-button controls and round focus outlines; see [StopWatch controls](STOPWATCH.md#two-button-navigation). It does not change either board's controls below.
+
 ## M5Stack StickS3
 
 | Do | Press |

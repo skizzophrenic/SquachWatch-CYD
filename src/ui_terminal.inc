@@ -538,6 +538,69 @@ void tmDetails(TFT_eSPI& t, uint32_t now, const Detection* d, TmRect r, const Tm
 
 // The whole terminal, into rows top..bottom of the panel. Paints the desktop
 // over the whole screen first: the title bar and the buttons go on top.
+#if defined(M5_STOPWATCH)
+namespace {
+TmRect s_tmRoundRows[TM_ROWS_MAX];
+void tmRoundLog(TFT_eSPI& t,uint32_t now,const DetectionEngine& eng) {
+    // A circle-native list, with no rectangular window or bright grid.
+    t.fillScreen(Theme::BG);
+    for(auto& r:s_tmWin) r={0,0,0,0};
+    s_tmWin[0]={0,76,466,266};s_tmBody={0,114,466,200};
+    s_tmM={2,40,28,0};s_tmRowH=40;s_tmRowY0=115;s_tmVis=5;
+    s_tmTrack=s_tmThumb={0,0,0,0};s_tmDetOn=false;
+    const int n=eng.logCount()>TM_LOG_MAX ? TM_LOG_MAX : eng.logCount();
+    s_tmMax=n>5 ? n-5 : 0;
+    if(s_tmScroll>s_tmMax) s_tmScroll=s_tmMax;
+    if(!s_tmScroll) s_tmNew=0;
+    uint8_t order[TM_LOG_MAX];tmOrder(eng,n,order);
+    const int start=tmLive() ? (n>5+s_tmScroll ? n-5-s_tmScroll : 0) : s_tmScroll;
+    const int shown=n-start<5 ? n-start : 5;
+    const char* labels[]={"TIME","TYPE","NAME","RSSI"};
+    for(int i=0;i<5;++i)s_tmColX[i]=74+i*80;
+    for(int i=0;i<4;++i) {
+        Theme::drawButton(t,s_tmColX[i]+2,83,76,28,labels[i],s_tmSort==i);
+        if(s_tmSort==i) t.fillTriangle(s_tmColX[i]+34,78,s_tmColX[i]+42,78,
+            s_tmColX[i]+38,s_tmDir>0 ? 81 : 74,Theme::CYAN);
+    }
+    s_tmRowN=0;
+    for(int i=0;i<shown;++i) {
+        const Detection* d=eng.logAt(order[start+i]);if(!d)continue;
+        const int y=115+i*40, margin=RoundLayout::inset(y,38,466,20)+36, width=466-2*margin;
+        s_tmRoundRows[i]={(int16_t)margin,(int16_t)y,(int16_t)width,38};
+        memcpy(s_tmRowMac[s_tmRowN++],d->mac,6);
+        const bool selected=s_tmSelOn && !memcmp(s_tmSel,d->mac,6);
+        t.fillRoundRect(margin,y,width,38,13,selected ? Theme::PURPLE : Theme::BG);
+        t.drawRoundRect(margin,y,width,38,13,selected ? Theme::WHITE : Theme::PURPLE);
+        char name[24];tmName(*d,name,sizeof name);
+        t.setTextFont(1);t.setTextSize(2);
+        for(int len=strlen(name);len>1 && t.textWidth(name)>width-20;)name[--len]=0;
+        t.setTextColor(Theme::WHITE);t.setCursor(margin+10,y+3);t.print(name);
+        char stamp[16],details[64];tmStamp(*d,stamp,sizeof stamp);
+        snprintf(details,sizeof details,"%s   %d dBm   %s",Dex::shortName(d->type),(int)d->rssi,stamp);
+        t.setTextFont(2);t.setTextSize(1);
+        for(int len=strlen(details);len>1 && t.textWidth(details)>width-20;)details[--len]=0;
+        tmText(t,details,margin+10,y+20,Theme::CYAN,false,2);
+    }
+    if(!n) {
+        t.setTextFont(2);t.setTextSize(1);t.setTextColor(Theme::WHITE);
+        const char* label="Listening for devices";t.setCursor((466-t.textWidth(label))/2,210);t.print(label);
+    }
+    const bool canUp=tmLive() ? s_tmScroll<s_tmMax : s_tmScroll>0;
+    const bool canDown=tmLive() ? s_tmScroll>0 : s_tmScroll<s_tmMax;
+    s_tmUp=canUp ? TmRect{12,216,36,36} : TmRect{0,0,0,0};
+    s_tmDn=canDown ? TmRect{418,216,36,36} : TmRect{0,0,0,0};
+    // Arrows page the list; swiping and the original sort/tap handlers remain.
+    if(canUp) Theme::drawButton(t,s_tmUp.x,s_tmUp.y,36,36,"<",false);
+    if(canDown) Theme::drawButton(t,s_tmDn.x,s_tmDn.y,36,36,">",false);
+    s_tmPill={184,318,98,24};
+    Theme::drawButton(t,s_tmPill.x,s_tmPill.y,s_tmPill.w,s_tmPill.h,"LATEST",false);
+    char total[24];snprintf(total,sizeof total,"%d/%d",shown,n);
+    tmText(t,total,300,323,Theme::WHITE,false,2);
+    s_tmDrawn=true;
+}
+}
+#endif
+
 void uiTerminalDraw(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int top, int bottom) {
     const int w = t.width(), h = t.height();
     const TmTheme T = tmTheme();
@@ -556,6 +619,10 @@ void uiTerminalDraw(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int t
         s_tmNew    += (uint16_t)(total - s_tmLastTotal);
     }
     s_tmLastTotal = total;
+
+#if defined(M5_STOPWATCH)
+    tmRoundLog(t,now,eng);return;
+#endif
 
     // The desktop: faint graph paper.
     t.fillRect(0, 0, w, h, T.ZEB);
@@ -690,7 +757,11 @@ bool uiTerminalTouch(int x, int y, bool valid, bool justDown, uint32_t now) {
         s_tmOpenReq = true;
     } else if (!dragged && !done && inBody) {
         const int j = (lastY - s_tmRowY0 + 1) / s_tmRowH;
-        if (lastY >= s_tmRowY0 - 1 && j >= 0 && j < s_tmRowN) {
+        if (lastY >= s_tmRowY0 - 1 && j >= 0 && j < s_tmRowN
+#if defined(M5_STOPWATCH)
+            && s_tmRoundRows[j].in(lastX,lastY)
+#endif
+        ) {
             if (s_tmSelOn && !memcmp(s_tmSel, s_tmRowMac[j], 6)) {
                 memcpy(s_tmOpenMac, s_tmSel, 6);
                 s_tmOpenReq = true;
@@ -717,7 +788,16 @@ uint8_t uiTerminalStops(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint
     };
     const int hy = s_tmBody.y - s_tmM.bh - 3;
     for (int k = 0; k < 4; k++) add(s_tmColX[k] + 1, hy, s_tmColX[k + 1] - s_tmColX[k] - 2, s_tmM.bh);
-    for (int j = 0; j < s_tmRowN; j++) add(s_tmBody.x, s_tmRowY0 + j * s_tmRowH - 1, s_tmBody.w, s_tmRowH);
+    for (int j = 0; j < s_tmRowN; j++) {
+#if defined(M5_STOPWATCH)
+        const auto r=s_tmRoundRows[j];add(r.x,r.y,r.w,r.h);
+#else
+        add(s_tmBody.x, s_tmRowY0 + j * s_tmRowH - 1, s_tmBody.w, s_tmRowH);
+#endif
+    }
+#if defined(M5_STOPWATCH)
+    add(s_tmPill.x,s_tmPill.y,s_tmPill.w,s_tmPill.h);
+#endif
     add(s_tmUp.x, s_tmUp.y, s_tmUp.w, s_tmUp.h);
     add(s_tmDn.x, s_tmDn.y, s_tmDn.w, s_tmDn.h);
     if (s_tmDetOn) add(s_tmWin[3].x, s_tmWin[3].y, s_tmWin[3].w, s_tmWin[3].h);

@@ -91,7 +91,11 @@ void drawCard(TFT_eSPI& t, bool atTop) {
     t.setTextSize(1);
     t.setTextWrap(false);
     const int w = t.width(), h = t.height();
+#if defined(M5_STOPWATCH)
+    const int cw = 300;
+#else
     const int cw = w - 8;
+#endif
     // Theme::wrapText fills 48-character rows; cap the width at 47 of them.
     const int charW = t.textWidth("M");
     int maxW = cw - 16;
@@ -101,7 +105,11 @@ void drawCard(TFT_eSPI& t, bool atTop) {
     const char* hn = hint(s_step);
     const int lh = t.fontHeight() + 1;
     const int ch = 16 + n * lh + (hn ? lh + 2 : 0) + 4;
+#if defined(M5_STOPWATCH)
+    const int cx = (w - cw) / 2, cy = atTop ? 72 : h - ch - 96;
+#else
     const int cx = 4, cy = atTop ? 2 : h - ch - 2;
+#endif
 
     t.fillRect(cx, cy, cw, ch, Theme::BG);
     t.drawRect(cx, cy, cw, ch, Theme::VAPOR_PINK);

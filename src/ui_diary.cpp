@@ -29,6 +29,7 @@ static void formatDuration(uint32_t ms, char* buf, size_t n) {
 }
 
 static void drawStat(TFT_eSPI& t, int w, int y, int h, const char* label, const char* value) {
+    RoundRow roundRow(t, w, y, h);
     Theme::bodyFontOn(t);
     t.setTextColor(Theme::CYAN, Theme::BG);
     t.setCursor(8, y + (h - t.fontHeight()) / 2);
@@ -48,7 +49,7 @@ void uiDiaryTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     snprintf(title, sizeof(title), ">> %s'S DIARY <<", Squachy::nickname());
     Theme::drawTitleBar(t, title);
 
-    const int top  = 16;
+    const int top  = Theme::LIST_TOP;
     // 22 rather than 24: nine rows plus the hint is 226px, which fits a
     // 240px panel. At 24 the ninth row pushed the hint off the bottom.
     // Thirteen rows a stat on a compact screen (240x135): all nine fit, with

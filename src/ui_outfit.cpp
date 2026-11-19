@@ -20,8 +20,13 @@ void uiOutfitTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool ad
     int w = t.width();
     int h = t.height();
 
-    const int titleBottom = 16;
-    const int footerTop   = h - FOOTER_H;
+    const int titleBottom = Theme::LIST_TOP;
+    const int footerTop   = h -
+#if defined(M5_STOPWATCH)
+        166;
+#else
+        FOOTER_H;
+#endif
 
     // The player's own background, running live behind the preview. The
     // footer is opaque and drawn after, so the band stops at footerTop --
@@ -70,15 +75,29 @@ void uiOutfitTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool ad
     t.print(buf);
     Theme::bodyFontOff(t);
 
+#if defined(M5_STOPWATCH)
+    const auto bar=Theme::computeButtonBar(w,h);
+    Theme::drawButton(t,bar.x[0],bar.y,bar.w[0],bar.h,"PREV",false);
+    Theme::drawButton(t,bar.x[1],bar.y,bar.w[1],bar.h,"BACK",false);
+    Theme::drawButton(t,bar.x[2],bar.y,bar.w[2],bar.h,"NEXT",false);
+#else
     int ay = footerTop + 12;
     t.fillTriangle(24, ay, 10, ay + 10, 24, ay + 20, Theme::VAPOR_PINK);
     t.fillTriangle(w - 24, ay, w - 10, ay + 10, w - 24, ay + 20, Theme::CYAN);
+#endif
 }
 
 bool uiOutfitTapArrow(int x, int y, int screenW, int screenH) {
+#if defined(M5_STOPWATCH)
+    const ButtonId hit=Theme::hitTestButtonBar(x,y,screenW,screenH);
+    if(hit==ButtonId::SCAN) {Squachy::cyclePrevOutfit();return true;}
+    if(hit==ButtonId::CLR) {Squachy::cycleOutfit();return true;}
+    return false;
+#else
     int footerTop = screenH - FOOTER_H;
     if (y < footerTop) return false;
     if (x < ARROW_ZONE_W) { Squachy::cyclePrevOutfit(); return true; }
     if (x > screenW - ARROW_ZONE_W) { Squachy::cycleOutfit(); return true; }
     return false;
+#endif
 }

@@ -57,7 +57,13 @@ Rect s_showRow = { 0, 0, 0, 0 };   // the SHOW PHRASE row, when drawn
 bool s_win = false;
 const int WIN_M = 8;
 const uint16_t NAVY = 0x0010, DARK_RED = 0xA000, DARK_GREEN = 0x0400;
-int textX()   { return s_win ? WIN_M + 12 : 8; }
+int textX() {
+#if defined(M5_STOPWATCH)
+    return 92;
+#else
+    return s_win ? WIN_M + 12 : 8;
+#endif
+}
 uint16_t ground() { return s_win ? Theme::W95_FACE : Theme::BG; }
 // The screen's colours, as they read on the window's light grey.
 uint16_t ink(uint16_t c) {
@@ -83,6 +89,10 @@ void chrome(TFT_eSPI& t, const char* l, const char* m, const char* r) {
     s_btn[0] = { (int16_t)x0, (int16_t)y, bw, btnH() };
     s_btn[1] = { (int16_t)(x1 - 2 * bw - 6), (int16_t)y, bw, btnH() };
     s_btn[2] = { (int16_t)(x1 - bw), (int16_t)y, bw, btnH() };
+#if defined(M5_STOPWATCH)
+    const auto bar = Theme::computeButtonBar(w,h);
+    for (int i=0;i<3;++i) s_btn[i] = {(int16_t)bar.x[i],(int16_t)bar.y,(int16_t)bar.w[i],(int16_t)bar.h};
+#endif
     const char* labels[3] = { l, m, r };
     for (int i = 0; i < 3; i++) {
         s_btnOn[i] = labels[i] != nullptr;
@@ -110,7 +120,11 @@ void title(TFT_eSPI& t, const char* s) {
     t.setTextWrap(false);
     t.setTextSize(2);
     t.setTextColor(Theme::VAPOR_PINK, Theme::BG);
+#if defined(M5_STOPWATCH)
+    t.setCursor((t.width()-t.textWidth(s))/2, 48);
+#else
     t.setCursor(8, 6);
+#endif
     t.print(s);
 }
 
@@ -154,13 +168,22 @@ void status(TFT_eSPI& t) {
     if (!s_status) return;
     Theme::bodyFontOn(t);
     t.setTextColor(ink(s_statusCol), ground());
+#if defined(M5_STOPWATCH)
+    t.setCursor(textX(), 354);
+#else
     t.setCursor(textX(), t.height() - btnH() - (s_win ? WIN_M + 10 : 6) - t.fontHeight() - 4);
+#endif
     t.print(s_status);
     Theme::bodyFontOff(t);
 }
 
 void drawShow(TFT_eSPI& t) {
-    int y = 30;
+    int y =
+#if defined(M5_STOPWATCH)
+92;
+#else
+30;
+#endif
     if (s_win) y = window(t, "Phrase") + 2;
     else       title(t, "PHRASE");
     if (MeshTalk::havePhrase()) {
@@ -191,15 +214,18 @@ void drawShow(TFT_eSPI& t) {
                                    shown ? "SHOW PHRASE: ON" : "SHOW PHRASE: OFF", false);
         } else {
             const int rh = 22;
-            s_showRow = { 3, (int16_t)(y + 4), (int16_t)(t.width() - 10), rh };
-            Theme::drawListRowPanel(t, t.width(), s_showRow.y, rh + 2);
+            const int inset = RoundLayout::inset(y + 4, rh + 2, t.width());
+            s_showRow = { (int16_t)(inset + 3), (int16_t)(y + 4), (int16_t)(t.width() - 2 * inset - 10), rh };
+            int rowWidth = t.width();
+            RoundRow row(t, rowWidth, s_showRow.y, rh + 2);
+            Theme::drawListRowPanel(t, rowWidth, s_showRow.y, rh + 2);
             t.setTextSize(1);
             t.setTextColor(Theme::VAPOR_PINK, Theme::BG);
             t.setCursor(10, s_showRow.y + (rh - t.fontHeight()) / 2);
             t.print("SHOW PHRASE");
             const char* v = shown ? "ON" : "OFF";
             t.setTextColor(Theme::WHITE, Theme::BG);
-            t.setCursor(t.width() - 16 - t.textWidth(v), s_showRow.y + (rh - t.fontHeight()) / 2);
+            t.setCursor(rowWidth - 16 - t.textWidth(v), s_showRow.y + (rh - t.fontHeight()) / 2);
             t.print(v);
         }
     } else {
@@ -221,7 +247,12 @@ void drawShow(TFT_eSPI& t) {
 }
 
 void drawRolled(TFT_eSPI& t) {
-    int top = 30;
+    int top =
+#if defined(M5_STOPWATCH)
+92;
+#else
+30;
+#endif
     if (s_win) top = window(t, "New phrase") + 2;
     else       title(t, "NEW PHRASE");
     const char* words[MeshMsg::PHRASE_WORDS];
@@ -245,12 +276,15 @@ void countLetters() {
 // It is only there to say where you are, and every row it does not take goes
 // to the keys.
 void progress(TFT_eSPI& t, int y) {
+#if defined(M5_STOPWATCH)
+    if (y < 80) y = 80;
+#endif
     t.setTextSize(1);
     // One dark strip under the whole line. Each piece prints with the ground
     // colour behind it, and over a bright background those separate little
     // boxes read as blocks rather than as dashes.
     t.fillRect(4, y - 2, t.width() - 8, t.fontHeight() + 4, Theme::BG);
-    int x = 8;
+    int x = 8 + RoundLayout::inset(y, t.fontHeight(), t.width());
     for (int i = 0; i < MeshMsg::PHRASE_WORDS; i++) {
         char cur[3] = { s_letter ? s_letter : '_', s_letter ? '_' : '\0', '\0' };
         const char* s = i < s_pickN ? MeshMsg::WORDS[s_picked[i]]
@@ -271,13 +305,21 @@ void progress(TFT_eSPI& t, int y) {
 void drawPick(TFT_eSPI& t) {
     const int w = t.width(), h = t.height();
     const bool port = h > w;
+    #if defined(M5_STOPWATCH)
+    const int M = 76, G = 4, avail = w - 2 * M;
+#else
     const int M = 4, G = 4, avail = w - 2 * M;
+#endif
     char tb[20];
     snprintf(tb, sizeof tb, "WORD %u OF 5", (unsigned)(s_pickN + 1));
     title(t, tb);
     progress(t, 28);
 
+    #if defined(M5_STOPWATCH)
+    const int top = 102, bottom = h - 92, gridH = bottom - top;
+#else
     const int top = 42, bottom = h - btnH() - 6 - 6, gridH = bottom - top;
+#endif
     s_wordN = 0;
     for (bool& on : s_letterOn) on = false;
 

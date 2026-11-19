@@ -24,6 +24,9 @@ const uint8_t ROW_N = 8;     // BACK is pinned to the bottom edge now, not a row
 // codebase computes it rather than hard-coding it.
 void geom(TFT_eSPI& t, int& top, int& rowH) {
     top = topMargin();
+#if defined(M5_STOPWATCH)
+    t.setTextFont(1); // stable row metrics for drawing and touch dispatch
+#endif
     t.setTextSize(Theme::uiMenuTextSize(t));
     rowH = t.fontHeight() + Theme::listRowPad();
     // Eight rows at that height run under BACK on a landscape panel, so there
@@ -45,6 +48,7 @@ int visibleRows(TFT_eSPI& t, int top, int rowH) {
 
 void row(TFT_eSPI& t, int w, int y, int hgt, const char* label,
          const char* value, uint16_t valueCol) {
+    RoundRow roundRow(t, w, y, hgt);
     if (y < 0) return;      // scrolled out of sight
     // A solid panel under the row, as the settings screen has. Without it
     // the labels sat straight on the dimmed backdrop, and the synthwave sun

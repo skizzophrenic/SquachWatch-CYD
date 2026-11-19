@@ -203,6 +203,12 @@ static inline bool tinyAlert(int h) { return h < 200; }
 static inline int  stripHOf(int w, int h)  { return tinyAlert(h) ? 28 : (wideAlert(w) ? 56 : 42); }
 
 static void moreInfoBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, int& bh) {
+#if defined(M5_STOPWATCH)
+    const auto g = Theme::computeButtonBar(screenW, screenH);
+    bx = g.x[2]; by = g.y; bw = g.w[2]; bh = g.h;
+    return;
+#endif
+
     // Stacked "MORE"/"INFO" on two lines (see the draw call below)
     // instead of one wide "MORE INFO" row -- a size-2 attempt at a
     // bigger tap target that widened the button instead ate into the
@@ -230,6 +236,12 @@ static void moreInfoBtnRect(int screenW, int screenH, int& bx, int& by, int& bw,
 // "HUNT" is one short line and doesn't need the height -- matching the
 // neighbour matters more here than shrinking to fit the label.
 static void huntBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, int& bh) {
+#if defined(M5_STOPWATCH)
+    const auto g = Theme::computeButtonBar(screenW, screenH);
+    bx = g.x[0]; by = g.y; bw = g.w[0]; bh = g.h;
+    return;
+#endif
+
     bw = wideAlert(screenW) ? 104 : 70;
     bh = wideAlert(screenW) ?  64 : 48;
     if (tinyAlert(screenH)) { bw = 66; bh = 22; }
@@ -248,6 +260,11 @@ static void huntBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, int
 // where the detection type is named, so this is the remaining spot that
 // stays clear on the narrow rotations as well as the wide ones.
 static void ignoreBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, int& bh) {
+#if defined(M5_STOPWATCH)
+    bx = (screenW - 80) / 2; by = 24; bw = 80; bh = 32;
+    return;
+#endif
+
     // Deliberately smaller than HUNT and MORE INFO, which are 70x48 down
     // in the corners where nothing else goes. Up here it shares the header
     // strip with the target label, and the label's budget is measured off
@@ -306,6 +323,12 @@ bool uiAlertHitIgnore(int x, int y, int screenW, int screenH) {
 // above the bottom row, so between HUNT and MORE INFO is the one strip
 // left clear on every rotation: 92 px on the narrow one, 84 used.
 static void snoozeBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, int& bh) {
+#if defined(M5_STOPWATCH)
+    const auto g = Theme::computeButtonBar(screenW, screenH);
+    bx = g.x[1]; by = g.y; bw = g.w[1]; bh = g.h;
+    return;
+#endif
+
     bw = wideAlert(screenW) ? 124 : 84;
     bh = wideAlert(screenW) ?  40 : 28;
     if (tinyAlert(screenH)) { bw = 84; bh = 22; }
@@ -368,6 +391,44 @@ void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
     } else {
         t.fillRect(0, 0, w, h, Theme::BG);
     }
+
+#if defined(M5_STOPWATCH)
+    // Circular alert: radial signal gauge, centered identity, and three
+    // inward-set action pills. All four hit tests use the same rects.
+    {
+        const uint16_t col = Theme::colorFor(s_last.type);
+        auto line = [&](const char* text, int y, uint16_t color, int size) {
+            t.setTextFont(1); t.setTextSize(size); t.setTextColor(color, Theme::BG);
+            char clipped[48]; snprintf(clipped, sizeof clipped, "%.*s", size == 2 ? 28 : 46, text);
+            t.setCursor((w - t.textWidth(clipped)) / 2, y); t.print(clipped);
+        };
+        int bx, by, bw, bh;
+        ignoreBtnRect(w, h, bx, by, bw, bh);
+        Theme::drawButton(t, bx, by, bw, bh, IgnoreList::contains(s_last.mac) ? "IGNORED" : "IGNORE", false);
+        line(targetLabel(s_last.type), 72, col, 2);
+        const int cx = w / 2, cy = 172, radius = 62;
+        t.fillCircle(cx, cy, radius + 4, Theme::BG);
+        t.drawCircle(cx, cy, radius, Theme::PURPLE);
+        const int signal = s_last.rssi < -90 ? 0 : s_last.rssi > -40 ? 100 : (s_last.rssi + 90) * 2;
+        if (signal) t.drawArc(cx, cy, radius, radius - 5, 0, signal * 359 / 100, col, Theme::BG, true);
+        Theme::drawTypeIcon(t, s_last.type, cx, cy, 32);
+        char pv[48], info[48], mac[24];
+        line(s_redacted ? "LOCKED" : vendorText(s_last), 248, col, 2);
+        line(s_redacted ? "" : Privacy::name(s_last.name, pv, sizeof pv), 272, Theme::WHITE, 1);
+        if (s_redacted) snprintf(mac, sizeof mac, "-- LOCKED --");
+        else Privacy::mac(mac, sizeof mac, s_last.mac);
+        line(mac, 292, Theme::WHITE, 1);
+        snprintf(info, sizeof info, "%d dBm   CH %u   x%u", s_last.rssi, s_last.channel, (unsigned)s_last.hits);
+        line(info, 314, Theme::CYAN, 1);
+        line(s_last.conf == Confidence::HIGH_CONF ? "HIGH CONFIDENCE" :
+             s_last.conf == Confidence::MED_CONF ? "MEDIUM CONFIDENCE" : "LOW CONFIDENCE", 338, col, 1);
+        huntBtnRect(w, h, bx, by, bw, bh); Theme::drawButton(t, bx, by, bw, bh, "HUNT", false);
+        snoozeBtnRect(w, h, bx, by, bw, bh); Theme::drawButton(t, bx, by, bw, bh, s_snzLabel ? s_snzLabel : "SNOOZE", s_snzLabel != nullptr);
+        moreInfoBtnRect(w, h, bx, by, bw, bh); Theme::drawButton(t, bx, by, bw, bh, "INFO", false);
+        if (infoPending) Theme::drawInfoPanel(t, w, h, now, infoTypeName, infoText);
+        return;
+    }
+#endif
 
     // ---- header strip ------------------------------------------------
     // Replaces the pulsing border and the "!! DETECTION !!" headline with

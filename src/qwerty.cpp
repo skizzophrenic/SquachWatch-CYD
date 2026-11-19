@@ -1,5 +1,6 @@
 // SquachWatch-CYD — QWERTY geometry. See include/qwerty.h.
 #include "qwerty.h"
+#include "round_layout.h"
 
 #if SQUACH_MESH
 
@@ -22,6 +23,10 @@ void put(Key* out, uint8_t& n, int x, int y, int w, int h, char ch) {
 } // namespace
 
 uint8_t layout(int w, int bandTop, int bandBottom, Key out[KEY_N], bool message) {
+#if defined(M5_STOPWATCH)
+    if (bandBottom > RoundLayout::SIZE - 132) bandBottom = RoundLayout::SIZE - 132;
+    if (bandTop < 138) bandTop = 138;
+#endif
     const int avail = w - 2 * MARGIN;
 
     // A message needs digits and punctuation that a name does not, so its
@@ -109,6 +114,7 @@ uint8_t layout(int w, int bandTop, int bandBottom, Key out[KEY_N], bool message)
         put(out, n, x, y4, ow, rh, OK);
     }
 
+    RoundLayout::keys(out, n, w);
     return n;
 }
 

@@ -369,6 +369,11 @@ Outcome runInteractive(TFT_eSPI& t, RawReader readRaw, uint8_t rot,
         for (int i = 0; i < TouchFit::TARGETS; i++) {
             float fx, fy;
             TouchFit::targetFrac(i, fx, fy);
+#if defined(M5_STOPWATCH)
+            // Calibration crosshairs need clearance too, not just their center.
+            fx = 0.5f + (fx - 0.5f) * 0.8f;
+            fy = 0.5f + (fy - 0.5f) * 0.8f;
+#endif
             sxs[i] = fx * w;
             sys[i] = fy * h;
             char line[32];

@@ -4,6 +4,9 @@
 #include "ota_ble.h"
 #include "ota_wifi.h"
 #include "theme.h"
+#if defined(M5_STOPWATCH)
+#include "stopwatch_ui.h"
+#endif
 #include "privacy.h"
 #include <Arduino.h>
 #include <stdio.h>
@@ -17,7 +20,13 @@ const int SLOP    = 6;
 const int ROW_GAP = 3;
 // A size up on the large panels, where the text is the 16-row body font.
 int btnH()  { return Theme::dialogBtnH(28); }
-int rowY0() { return Theme::large() ? 44 : 36; }
+int rowY0() {
+#if defined(M5_STOPWATCH)
+    return Theme::LIST_TOP + 20;
+#else
+    return Theme::large() ? 44 : 36;
+#endif
+}
 int rowH()  { return Theme::large() ? 30 : 24; }
 
 // One place for every button position, shared by drawing and hit testing so
@@ -36,8 +45,18 @@ Geom geom(TFT_eSPI& t) {
     g.x     = (w - g.w) / 2;
     g.backW = Theme::large() ? 140 : 110;
     g.backX = (w - g.backW) / 2;
-    g.backY = h - btnH() - 6;
-    g.switchY = g.backY - btnH() - 8;
+    g.backY = h - btnH() -
+#if defined(M5_STOPWATCH)
+        36;
+#else
+        6;
+#endif
+    g.switchY =
+#if defined(M5_STOPWATCH)
+        h - 148;
+#else
+        g.backY - btnH() - 8;
+#endif
     g.squadY  = OtaCore::otherVersion() ? g.switchY - btnH() - 8 : g.switchY;
     // Stacked upward from SQUAD: Bluetooth only where the board has it (the
     // CYDs dropped it; see nimble_flags_cyd), and WiFi takes its place.
@@ -64,6 +83,12 @@ Row bottomRow(TFT_eSPI& t, int n) {
     const int span = n * r.w + (n - 1) * gap;
     for (int i = 0; i < n; i++) r.x[i] = (t.width() - span) / 2 + i * (r.w + gap);
     r.y = t.height() - btnH() - 6;
+#if defined(M5_STOPWATCH)
+    r.y = t.height() - 78;
+    const int margin = RoundLayout::inset(r.y, btnH(), t.width());
+    r.w = (t.width() - 2 * margin - (n - 1) * gap) / n;
+    for (int i=0;i<n;++i) r.x[i] = margin + i * (r.w + gap);
+#endif
     return r;
 }
 
@@ -93,7 +118,7 @@ int lineH(TFT_eSPI& t) { return t.fontHeight() + 2; }
 
 void label(TFT_eSPI& t, int y, uint16_t c, const char* s) {
     t.setTextColor(c, Theme::BG);
-    t.setCursor(8, y);
+    t.setCursor(8 + RoundLayout::inset(y, t.fontHeight(), t.width()), y);
     t.print(s);
 }
 
@@ -112,7 +137,7 @@ int para(TFT_eSPI& t, int y, uint16_t c, const char* s) {
     const uint8_t n = Theme::wrapText(t, s, maxW, lines, 6);
     t.setTextColor(c, Theme::BG);
     for (uint8_t i = 0; i < n; i++) {
-        t.setCursor(8, y);
+        t.setCursor(8 + RoundLayout::inset(y, t.fontHeight(), t.width()), y);
         t.print(lines[i]);
         y += lineH(t);
     }
@@ -121,10 +146,10 @@ int para(TFT_eSPI& t, int y, uint16_t c, const char* s) {
 
 void pair(TFT_eSPI& t, int y, const char* k, const char* v) {
     t.setTextColor(Theme::CYAN, Theme::BG);
-    t.setCursor(8, y);
+    t.setCursor(8 + RoundLayout::inset(y, t.fontHeight(), t.width()), y);
     t.print(k);
     t.setTextColor(Theme::WHITE, Theme::BG);
-    t.setCursor(8 + t.textWidth("OTHER SLOT ") + 4, y);
+    t.setCursor(8 + RoundLayout::inset(y, t.fontHeight(), t.width()) + t.textWidth("OTHER SLOT ") + 4, y);
     t.print(v);
 }
 
@@ -145,7 +170,12 @@ void drawBar(TFT_eSPI& t, int y, uint8_t pct) {
 
 void drawMenu(TFT_eSPI& t) {
     const Geom g = geom(t);
-    int y = 22;
+    int y =
+#if defined(M5_STOPWATCH)
+72;
+#else
+22;
+#endif
     label(t, y, Theme::VAPOR_PINK, "UPDATE FIRMWARE");
     y += lineH(t) + 4;
     pair(t, y, "RUNNING", OtaCore::runningVersion());
@@ -157,7 +187,13 @@ void drawMenu(TFT_eSPI& t) {
     Theme::drawWin95Button(t, g.x, g.wifiY, g.w, btnH(), "UPDATE OVER WIFI", false);
 #endif
     if (OtaBle::available())
-        Theme::drawWin95Button(t, g.x, g.btY,   g.w, btnH(), "UPDATE OVER BLUETOOTH (BETA)", false);
+        Theme::drawWin95Button(t, g.x, g.btY,   g.w, btnH(),
+#if defined(M5_STOPWATCH)
+        "BLUETOOTH (BETA)"
+#else
+        "UPDATE OVER BLUETOOTH (BETA)"
+#endif
+        , false);
 #if SQUACH_MESH
     Theme::drawWin95Button(t, g.x, g.squadY, g.w, btnH(), "UPDATE SQUAD", false);
 #endif
@@ -170,6 +206,9 @@ void drawMenu(TFT_eSPI& t) {
 }
 
 void drawSwitchPanel(TFT_eSPI& t) {
+#if defined(M5_STOPWATCH)
+    StopWatchUI::modal();
+#endif
     const Panel p = panel(t);
     Theme::dimRegion(t, 0, 0, t.width(), t.height(), 140);
     t.fillRect(p.x, p.y, p.w, p.h, Theme::BG);
@@ -240,7 +279,12 @@ void drawFinishing(TFT_eSPI& t, const char* head, uint16_t c, bool restarting) {
 
 void drawBtWaiting(TFT_eSPI& t, bool connected) {
     const Geom g = geom(t);
-    int y = 22;
+    int y =
+#if defined(M5_STOPWATCH)
+72;
+#else
+22;
+#endif
     if (!connected)                  label(t, y, Theme::AMBER, "WAITING FOR YOUR BROWSER");
     else if (OtaBle::codeAccepted()) label(t, y, Theme::CYAN,  "CODE ACCEPTED - GETTING READY");
     else                             label(t, y, Theme::CYAN,  "CONNECTED - TYPE THE CODE");
@@ -301,7 +345,12 @@ void drawBt(TFT_eSPI& t) {
 // ---- WiFi ---------------------------------------------------------------------
 
 int pickRowCount(TFT_eSPI& t) {
-    const int bottom = bottomRow(t, 1).y - 6;
+    const int bottom =
+#if defined(M5_STOPWATCH)
+        t.height() - RoundLayout::FOOTER - 6;
+#else
+        bottomRow(t, 1).y - 6;
+#endif
     int n = (bottom - rowY0()) / (rowH() + ROW_GAP);
     if (n > OtaWifi::netCount()) n = OtaWifi::netCount();
     return n < 0 ? 0 : n;
@@ -352,7 +401,12 @@ void drawPick(TFT_eSPI& t) {
 void drawReady(TFT_eSPI& t) {
     const Geom g = geom(t);
     const bool same = OtaWifi::upToDate();
-    int y = 22;
+    int y =
+#if defined(M5_STOPWATCH)
+72;
+#else
+22;
+#endif
     label(t, y, same ? Theme::CYAN : Theme::VAPOR_PINK, same ? "YOU'RE UP TO DATE" : "UPDATE AVAILABLE");
     y += lineH(t) + 6;
     pair(t, y, "LATEST", OtaWifi::latestVersion());
@@ -433,6 +487,9 @@ static void tickBody(TFT_eSPI& t, bool full) {
         return;
     }
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
+#if defined(M5_STOPWATCH)
+    if(OtaWifi::state()==OtaWifi::State::OFF && OtaBle::state()==OtaBle::State::OFF && !OtaCore::restartPending())
+#endif
     Theme::drawTitleBar(t, ">> UPDATE FIRMWARE <<");
     Theme::bodyFontOn(t);   // the title bar leaves the system font behind
     t.setTextWrap(false);

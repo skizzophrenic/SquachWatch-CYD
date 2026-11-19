@@ -23,12 +23,15 @@ CXX      ?= g++
 CXXFLAGS := -std=c++17 -O1 -g -Wall -Wextra -Wno-unused-parameter \
             -I$(SIM) -I$(INC)
 
-TESTS := remote_id_test ibeacon_test signatures_test emitter_roundtrip_test ignore_list_test hacker_test pwnagotchi_test shim_fidelity_test squachmesh_test qwerty_test meshmsg_test device_info_test security_test emote_script_test blackbox_test bingo_test hunt_test bgretire_test autoquiet_test framepush_test touchfit_test logindex_test dex_test regulars_test spam_test gnss_test sd_row_test wigle_test wardrive_test wardrive_seen_test privacy_test lora_survey_test lora_msgs_test lora_json_test lora_feed_test lora_airtime_test lora_ident_test lora_enrich_test lora_channels_test lora_nodes_test lora_crypto_test lora_meshtastic_test lora_dm_test lora_mcdm_test lora_meshcore_test lora_lorawan_test lora_opalert_test lora_ham_test lora_names_test lora_myname_test mesh_airtime_test mesh_tx_policy_test mesh_appearance_test mesh_primary_transport_test mesh_visit_appearance_test rawkind_test huntswap_test adfields_test myalerts_test
+TESTS := stopwatch_controls_test remote_id_test ibeacon_test signatures_test emitter_roundtrip_test ignore_list_test hacker_test pwnagotchi_test shim_fidelity_test squachmesh_test qwerty_test meshmsg_test device_info_test security_test emote_script_test blackbox_test bingo_test hunt_test bgretire_test autoquiet_test framepush_test touchfit_test logindex_test dex_test regulars_test spam_test gnss_test sd_row_test wigle_test wardrive_test wardrive_seen_test privacy_test lora_survey_test lora_msgs_test lora_json_test lora_feed_test lora_airtime_test lora_ident_test lora_enrich_test lora_channels_test lora_nodes_test lora_crypto_test lora_meshtastic_test lora_dm_test lora_mcdm_test lora_meshcore_test lora_lorawan_test lora_opalert_test lora_ham_test lora_names_test lora_myname_test mesh_airtime_test mesh_tx_policy_test mesh_appearance_test mesh_primary_transport_test mesh_visit_appearance_test rawkind_test huntswap_test adfields_test myalerts_test
 
 # Only the units under test get linked in. Pulling the whole firmware
 # would drag in TFT_eSPI, NimBLE and the UI, and a test that needs a
 # display driver to check a coordinate is not a test anybody runs.
 remote_id_test_SRCS          := $(SRC)/remote_id.cpp
+TESTS += stopwatch_sensing_test
+stopwatch_sensing_test_SRCS := $(SRC)/sense_cyd/csi_motion_model.cpp
+stopwatch_sensing_test_FLAGS := -DSENSE_CYD_APP=1 -DM5_STOPWATCH=1
 ibeacon_test_SRCS            := $(SRC)/signatures.cpp
 signatures_test_SRCS         := $(SRC)/signatures.cpp
 emitter_roundtrip_test_SRCS  := $(SRC)/remote_id.cpp
@@ -161,6 +164,10 @@ TESTS += chestsig_test
 chestsig_test_SRCS  := $(SRC)/sense_cyd/csi_vitals.cpp
 chestsig_test_FLAGS := -DSENSE_MODEL_HOST=1
 
+TESTS += stopwatch_test
+stopwatch_test_SRCS := $(SRC)/qwerty.cpp
+stopwatch_test_FLAGS := -DM5_STOPWATCH=1 -DSQUACH_MESH=1
+
 .PHONY: all clean
 all: $(addprefix run-,$(TESTS))
 
@@ -234,3 +241,17 @@ mesh_primary_transport_test_SRCS  := $(SRC)/meshmsg.cpp $(SRC)/meshwords.cpp $(S
 mesh_primary_transport_test_FLAGS := -DSQUACH_MESH=1
 mesh_visit_appearance_test_SRCS :=
 mesh_visit_appearance_test_FLAGS := -DSQUACH_MESH=1
+
+# This header contains the production touch mapping.
+$(OUT)/stopwatch_test: $(INC)/stopwatch_geometry.h $(INC)/round_layout.h $(INC)/qwerty.h
+
+$(OUT)/stopwatch_controls_test: $(INC)/stopwatch_input.h $(INC)/stopwatch_arc.h
+
+# Optional check against the installed display library (`pio pkg install -e stopwatch`).
+M5GFX_SRC := ../.pio/libdeps/stopwatch/M5GFX/src
+.PHONY: stopwatch-color
+stopwatch-color: $(OUT)/stopwatch_color_test
+	@$(OUT)/stopwatch_color_test
+
+$(OUT)/stopwatch_color_test: stopwatch_color_test.cpp $(INC)/frame_push.h $(INC)/theme.h $(wildcard $(M5GFX_SRC)/lgfx/v1/misc/*.hpp) | $(OUT)
+	$(CXX) $(CXXFLAGS) -I$(M5GFX_SRC) -o $@ $<

@@ -3,6 +3,9 @@
 #include "theme.h"
 #include "squachy.h"
 #include "settings.h"
+#if defined(M5_STOPWATCH)
+#include "stopwatch_ui.h"
+#endif
 
 // Stamped in by extra_script.py from `git describe` at build time --
 // same macro the Diary screen already reads (see its own guard
@@ -51,6 +54,22 @@ void uiBootInit(TFT_eSPI& t) {
     s_glitchStage = 0;
 }
 
+#if defined(M5_STOPWATCH)
+void uiBootStatus(TFT_eSPI& t,const char* title,const char* line1,
+                  const char* line2,uint16_t color) {
+    t.fillRect(0,0,t.width(),t.height(),Theme::BLACK);
+    t.setTextFont(1);t.setTextWrap(false);
+    auto line=[&](const char* text,int y,int size) {
+        t.setTextSize(size);t.setTextColor(color,Theme::BLACK);
+        t.setCursor((t.width()-t.textWidth(text))/2,y);t.print(text);
+    };
+    line(title,180,3);
+    line(line1,232,2);
+    line(line2,258,2);
+    t.setTextSize(1);
+}
+#endif
+
 void uiBootTick(TFT_eSPI& t, uint32_t now) {
     if (s_bootAt == 0) s_bootAt = now ? now : 1;
     const uint32_t bootEl = now - s_bootAt;
@@ -84,6 +103,11 @@ void uiBootTick(TFT_eSPI& t, uint32_t now) {
     const char* title = "SQUACHWATCH";
     int tw = Theme::bangersTextWidth(title, Theme::BangersSize::LG);
     int tx = (w - tw) / 2;
+#if defined(M5_STOPWATCH)
+    const int titleY = 48, footY = h - 65;
+#else
+    const int titleY = 8, footY = h - 21;
+#endif
     // 3px black outline. The title sits over a bright sunset now, and
     // pink-on-orange had almost no separation where the sun passed
     // behind it. Drawn as a dilation -- the same glyphs at every offset
@@ -92,16 +116,18 @@ void uiBootTick(TFT_eSPI& t, uint32_t now) {
     for (int dy = -3; dy <= 3; dy++) {
         for (int dx = -3; dx <= 3; dx++) {
             if (dx * dx + dy * dy > 9 || (dx == 0 && dy == 0)) continue;
-            Theme::drawBangersText(t, tx + dx, 8 + dy, title, Theme::BLACK, Theme::BangersSize::LG);
+            Theme::drawBangersText(t, tx + dx, titleY + dy, title, Theme::BLACK, Theme::BangersSize::LG);
         }
     }
-    Theme::drawBangersText(t, tx, 8, title, Theme::VAPOR_PINK, Theme::BangersSize::LG);
+    Theme::drawBangersText(t, tx, titleY, title, Theme::VAPOR_PINK, Theme::BangersSize::LG);
 
     // gradient line — moved up right under the title (the v1.0 line
     // used to sit here; removed so Squachy below gets that room too).
+#if !defined(M5_STOPWATCH)
     for (int x = 0; x < w; x++) {
-        t.drawFastHLine(x, 46, 1, Theme::titlebarColor(x, w));
+        t.drawFastHLine(x, titleY + 38, 1, Theme::titlebarColor(x, w));
     }
+#endif
 
     // TALKING SASQUACH subtitle -- the brand line under the product
     // name, not just the product name again.
@@ -129,7 +155,7 @@ void uiBootTick(TFT_eSPI& t, uint32_t now) {
     const char* sub = "TALKING SASQUACH";
     const int sw = t.textWidth(sub);
     const int sx = (w - sw) / 2;
-    const int sy = 54;
+    const int sy = titleY + 46;
 
     const bool glitch = Theme::glitchActive();
     const int  split  = glitch ? 3 + (int)random(0, 3) : 1;
@@ -226,7 +252,7 @@ void uiBootTick(TFT_eSPI& t, uint32_t now) {
             // ten more above it, so he is 68 units tall for this, and the
             // bubble sits that hair's height higher again.
             const int bh   = Squachy::bubbleHeight(t, BOOT_LINES[s_bootLineIdx]);
-            const int band = (h - 21) - (bh + 8) - (sy + 16);   // feet, bubble, subtitle
+            const int band = footY - (bh + 8) - (sy + 16);   // feet, bubble, subtitle
             bootScale = (float)(band - 6) / 68.0f;
             // The cap is the width, not a constant: about 70 units across with
             // his wave, so a tall portrait screen grows him into its sky
@@ -236,12 +262,12 @@ void uiBootTick(TFT_eSPI& t, uint32_t now) {
             if (bootScale > widest) bootScale = widest;
             gap = bh + 8 + (int)(10.0f * bootScale);
         } else if (w >= 400) {
-            const int band = (h - 21) - 34 - (sy + 16);   // feet, bubble, subtitle
+            const int band = footY - 34 - (sy + 16);   // feet, bubble, subtitle
             bootScale = (float)(band - 10) / 58.0f;       // 10 rows of air at the top
             if (bootScale < 1.95f) bootScale = 1.95f;
             if (bootScale > 3.2f)  bootScale = 3.2f;
         }
-        Squachy::drawWaving(t, w / 2, h - 21, now, bootScale, BOOT_LINES[s_bootLineIdx],
+        Squachy::drawWaving(t, w / 2, footY, now, bootScale, BOOT_LINES[s_bootLineIdx],
                             false, 0, true, gap);
         Squachy::setBubbleSmall(false);
     }
@@ -267,14 +293,24 @@ void uiBootTick(TFT_eSPI& t, uint32_t now) {
 #else
     snprintf(init, sizeof(init), "INITIALIZING...  %s", FIRMWARE_VERSION);
 #endif
+#if defined(M5_STOPWATCH)
+    StopWatchUI::arcText(t,{195,-65,65,12},init,Theme::AMBER);
+#else
     Theme::bodyFontOn(t);
     int iw = t.textWidth(init);
-    t.setCursor((w - iw) / 2, h - t.fontHeight() - 8);
+    t.setCursor((w - iw) / 2, h - t.fontHeight() -
+#if defined(M5_STOPWATCH)
+        32
+#else
+        8
+#endif
+);
 #if defined(CYD35)
     t.setTextColor(Theme::AMBER);   // not the cyan the rest of the line uses
 #endif
     t.print(init);
     Theme::bodyFontOff(t);
+#endif
 
     // animated scanline sweeping top to bottom every 600 ms
     int phase = (int)((now / 600) % (uint32_t)h);

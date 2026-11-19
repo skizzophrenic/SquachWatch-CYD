@@ -12,6 +12,10 @@
 // control on the screen, so there is nothing for it to crowd.
 static const int REMOVE_H = 26;
 static void removeRect(TFT_eSPI& t, int& x, int& y, int& w, int& h) {
+#if defined(M5_STOPWATCH)
+    w = 220; h = 38; x = (t.width() - w) / 2; y = t.height() - 72;
+    return;
+#endif
     const int margin = 10;
     w = t.width() - 2 * margin;
     if (w > 240) w = 240;
@@ -335,6 +339,26 @@ void uiWatchAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, boo
         s_lineAt = now;
         s_lineFirst = false;
     }
+#if defined(M5_STOPWATCH)
+    {
+    const WatchView target = gather(eng);
+    t.fillRect(0, 0, w, h, Theme::BLACK);
+    for (int gy = 0; gy < h; gy += 20) t.drawFastHLine(0, gy, w, 0x0120);
+    for (int gx = 0; gx < w; gx += 20) t.drawFastVLine(gx, 0, h, 0x0120);
+    t.setTextSize(2); t.setTextColor(Theme::GREEN);
+    t.setCursor((w - t.textWidth("LOCKED ON")) / 2, 52); t.print("LOCKED ON");
+    fitPrint(t, 96, 84, target.label, w - 192, 1, Theme::WHITE, false);
+    scope(t, now, eng, target, w / 2, 222, 116, true);
+    t.setTextSize(1); t.setTextColor(Theme::CYAN);
+    const char* trend = target.trend > 0 ? "GETTING CLOSER" : target.trend < 0 ? "MOVING AWAY" : "HOLDING";
+    t.setCursor((w - t.textWidth(trend)) / 2, 350); t.print(trend);
+    const char* hint = "Tap elsewhere to dismiss";
+    t.setCursor((w - t.textWidth(hint)) / 2, 372); t.print(hint);
+    int bx, by, bw, bh; removeRect(t, bx, by, bw, bh);
+    Theme::drawButton(t, bx, by, bw, bh, removeLabel(t, bw), false);
+    return;
+    }
+#endif
     drawOperator(t, now, eng, hintY, advance);
     if (Theme::compact()) {
         int bx, by, bw, bh;

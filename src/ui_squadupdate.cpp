@@ -50,7 +50,7 @@ bool in(int x, int y, int bx, int by, int bw, int bh) {
 
 void line(TFT_eSPI& t, int y, uint16_t c, const char* s) {
     t.setTextColor(c, Theme::BG);
-    t.setCursor(8, y);
+    t.setCursor(8 + RoundLayout::inset(y, t.fontHeight(), t.width()), y);
     t.print(s);
 }
 } // namespace
@@ -132,16 +132,20 @@ void uiSquadUpdateTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
         line(t, y, Theme::WHITE, "the version this one runs.");
 
         // The SHARE WIFI row, a settings row in shape.
-        Theme::drawListRowPanel(t, w, g.shareY, g.shareH);
-        t.setTextFont(1); t.setTextSize(Theme::upSize(2));
         const bool can = s_shareIdx >= 0;
+        {
+        int rowWidth = w;
+        RoundRow roundRow(t, rowWidth, g.shareY, g.shareH);
+        Theme::drawListRowPanel(t, rowWidth, g.shareY, g.shareH);
+        t.setTextFont(1); t.setTextSize(Theme::upSize(2));
         t.setTextColor(can ? Theme::VAPOR_PINK : Theme::blend(Theme::BG, Theme::VAPOR_PINK, 110), Theme::BG);
         t.setCursor(8, g.shareY + (g.shareH - t.fontHeight()) / 2);
         t.print("SHARE WIFI");
         const char* v = can ? (s_share ? "ON" : "OFF") : "--";
         t.setTextColor(can ? Theme::WHITE : Theme::blend(Theme::BG, Theme::WHITE, 110), Theme::BG);
-        t.setCursor(w - 18 - t.textWidth(v), g.shareY + (g.shareH - t.fontHeight()) / 2);
+        t.setCursor(rowWidth - 18 - t.textWidth(v), g.shareY + (g.shareH - t.fontHeight()) / 2);
         t.print(v);
+        }
         Theme::bodyFontOn(t);
         y = g.shareY + g.shareH + 4;
         if (can)

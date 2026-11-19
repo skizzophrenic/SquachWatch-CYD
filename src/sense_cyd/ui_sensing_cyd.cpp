@@ -24,6 +24,9 @@
 #include "settings.h"
 #include "theme.h"
 #include "squachy.h"
+#if defined(M5_STOPWATCH)
+#include "stopwatch_ui.h"
+#endif
 #if SENSE_RICH
 #include "sense_vitals.h"
 #if defined(TAB5)
@@ -231,6 +234,10 @@ const Lay LAYS[] = {
        71, 45, 167,  64, true,   2, 111, 236, 22, HEAD_SM, false, false, 0.30f,  false, 16, 1 },
     { 640, 360,   2, 22, 196, 264, 34, 2,  202, 22, 436, 50, 4, 1, 4, 2, 3, 4, { TL_NOW, TL_FLOOR, TL_PEAK, TL_MARGIN },
       202, 76, 436, 210, true,   2, 290, 636, 40, HEAD_LG, true,  true,  0.60f,  true,  22, 2 },
+#if defined(M5_STOPWATCH)
+    { 466, 466,  36, 144, 122, 140, 26, 1,  90, 94, 286, 38, 4, 1, 3, 1, 2, 4, { TL_NOW, TL_FLOOR, TL_PEAK, TL_MARGIN },
+      164, 144, 266, 140, true,  86, 292, 294, 42, HEAD_MD, true, true, 0.42f, true, 38, 1 },
+#endif
     // Upright 2.4/2.8in (#133). The AWOK has no rotate button and its touch is
     // calibrated upright only, so "turn the board sideways" left it stuck. The
     // 240x240 row with the extra 80 px given to the spectrum, all four tiles
@@ -259,6 +266,10 @@ const Lay* s_L = &LAYS[0];
 // off the bottom), at this layout's height.
 struct Bar { int x[3], y, w, h; };
 Bar barGeom(int W, int H) {
+#if defined(M5_STOPWATCH)
+    const Theme::ButtonBarGeom native = Theme::computeButtonBar(W, H);
+    return {{native.x[0], native.x[1], native.x[2]}, native.y, native.w[0], native.h};
+#endif
     Bar b; b.h = s_L->btH; b.y = H - b.h - 6;
     b.w = (W - 2 * 8 - 2 * 8) / 3;
     b.x[0] = 8; b.x[1] = 8 + b.w + 8; b.x[2] = b.x[1] + b.w + 8;
@@ -282,6 +293,13 @@ void statusLine(TFT_eSPI& t, uint32_t now) {
     const SenseReport& s = SenseStore::last();
     const bool fresh = SenseStore::fresh(now) && senseModeLive(s.mode);
     char b[40];
+#if defined(M5_STOPWATCH)
+    snprintf(b, sizeof b, "%s CH%u  %u/s  Q%u%%", fresh ? "LIVE" : "WAIT", (unsigned)s.chan, (unsigned)s.rate, (unsigned)s.rel);
+    textT(t, t.width() / 2, 82, b, fresh ? Theme::CYAN : Theme::AMBER, 1, 1);
+    snprintf(b,sizeof b,"VAR %u BASE %u  A%u P%u C%u",(unsigned)s.variation,(unsigned)s.baseline,(unsigned)s.amplitude,(unsigned)s.phase,(unsigned)s.shape);
+    textT(t,t.width()/2,134,b,Theme::CYAN,1,1);
+    return;
+#endif
     if (fresh && (now % 1000) < 600) t.fillCircle(36, 9, 3, Theme::GREEN);
 #if defined(__EMSCRIPTEN__)
     // The web emulator plays a made-up room (sim/sense_cyd_sim.cpp): it says
@@ -511,6 +529,19 @@ void banner(TFT_eSPI& t, uint32_t now) {
     const Lay& L = *s_L;
     const Word w = stateWord(now);
     const int bx = L.bnX, bw = L.bnW, by = L.bnY, bh = L.bnH;
+#if defined(M5_STOPWATCH)
+    StopWatchUI::button(bx,by,bw,bh,"SELECT WIFI",false);
+    t.fillRoundRect(bx,by,bw,bh,12,Theme::BG);
+    t.drawRoundRect(bx,by,bw,bh,12,w.c);
+    textT(t,bx+bw/2,by+4,w.w,w.c,2,1);
+    const SenseReport& report=SenseStore::last();
+    char hint[40];
+    if(report.state==SENSE_STATE_CAL && senseModeLive(report.mode))
+        snprintf(hint,sizeof hint,"KEEP WATCH / ROOM STILL  %u%%",(unsigned)report.cal);
+    else snprintf(hint,sizeof hint,"TAP TO SELECT WIFI");
+    textT(t,bx+bw/2,by+27,hint,Theme::CYAN,1,1);
+    return;
+#endif
     const uint16_t base = mixc(Theme::BG, w.c, 30);
     t.fillRect(bx, by, bw, bh, base);
     const int sxp = (int)((now / 6) % (uint32_t)(bw + 164)) - 80;   // a light sweeping across, scanlines through it
@@ -658,7 +689,11 @@ SensingTap uiSensingTap(int x, int y, int screenW, int screenH, uint32_t now) {
     // No saved network: the banner is the way to add one. With no button bar
     // (the boards with no touch screen), a press on the banner is RECAL.
     if (y >= s_L->bnY && y < s_L->bnY + s_L->bnH) {
+#if defined(M5_STOPWATCH)
+        if(x>=s_L->bnX && x<s_L->bnX+s_L->bnW) return SensingTap::ADD_WIFI;
+#else
         if (!senseCydNetwork()[0]) return SensingTap::ADD_WIFI;
+#endif
         if (!s_L->btOn) return SensingTap::RECAL;
     }
     return SensingTap::NONE;
