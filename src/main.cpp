@@ -38,6 +38,29 @@
 #include "sense_store.h"
 #include "ui_sensing_cyd.h"
 #include "sense_cyd.h"
+#include "sense_ragnar.h"
+// The Ragnar link (include/sense_ragnar.h) needs ~30 KB more heap than a board
+// with no PSRAM has left while Bluetooth is up. There, HUMAN SENSING with the
+// link set runs on a boot without the Bluetooth stack: opening the screen
+// restarts into it (Settings::sensing() brings the screen back), and leaving
+// restarts with Bluetooth on again. Never tearing the stack down live keeps
+// clear of a NimBLE re-init failing for want of heap, which aborts.
+static bool senseNeedsNoBle() {
+#if defined(TAB5)
+    return false;
+#else
+    return !psramFound() && SenseRagnar::configured();
+#endif
+}
+static bool s_senseNoBleBoot = false;   // this boot skipped Bluetooth for it
+// The one way out for all three restarts below: say why, let the UART drain.
+[[noreturn]] static void senseRestart(const char* why) {
+    Serial.printf("[sense] restarting %s\n", why);
+    serialFlush();
+    delay(200);
+    ESP.restart();
+    for (;;) {}
+}
 #endif
 // The frame buffer forced into INTERNAL RAM on the boards whose blit reads it
 // scattered (the CrowPanel's twitch, the Tab5's column-wise walk): plain
@@ -6503,6 +6526,12 @@ void setup() {
         Serial.printf("[boot] %s\n", g_bootRadioLine);
     }
 #endif
+#if defined(SENSE_CYD_APP)
+    if (Settings::sensing() && senseNeedsNoBle()) {
+        s_senseNoBleBoot = true;
+        DetectionEngine::skipBleThisBoot();
+    }
+#endif
     engine.init();
 #if defined(TAB5)
     tab5RadioUpdatePrompt();   // only when the C6 linked but has no sniff extension
@@ -8143,7 +8172,22 @@ void loop() {
         }
 #endif
         const bool want = state == AppState::SENSING && millis() > 8000;
+        // A boot without Bluetooth that is not (or no longer) in HUMAN SENSING,
+        // say one that came up locked: give Bluetooth back after a minute.
+        if (s_senseNoBleBoot && state != AppState::SENSING && !senseCydRunning() && millis() > 60000) {
+            Settings::setSensing(false);
+            senseRestart("with Bluetooth: not sensing");
+        }
         if (want && !senseCydRunning()) {
+            // Opening on a boot that has Bluetooth, on a board that needs it
+            // gone for the Ragnar link: remember the screen and restart
+            // without it. Only here, as the screen starts: a link set from the
+            // console while the screen is up waits for the next opening, as
+            // the console says, instead of restarting under the user.
+            if (!s_senseNoBleBoot && senseNeedsNoBle() && DetectionEngine::bleUp()) {
+                Settings::setSensing(true);
+                senseRestart("without Bluetooth: the Ragnar link needs the heap");
+            }
             // Remembered (NVS), so a board switched off in SENSING boots back
             // into it (the boot screen's exit). Cleared below
             // when the screen is left any way but a power cut.
@@ -8182,6 +8226,8 @@ void loop() {
             if (Settings::sensing()) Settings::setSensing(false);
             senseCydStop();
             SenseStore::end();
+            // Bluetooth was never started this boot: the detector needs it back.
+            if (s_senseNoBleBoot) senseRestart("with Bluetooth");
             engine.stopUpdateRadio();
             Serial.println("[sense] detector back on");
         }

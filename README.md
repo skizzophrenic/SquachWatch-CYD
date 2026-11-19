@@ -396,6 +396,26 @@ ESP32 and ESP32-S3 board has it, and so does the Tab5, which senses with
 its own ESP32-C6 radio (it joins your network over the C6, so add one in
 **SETTINGS > WIFI NETWORKS** first). The ESP32-C5 boards do not yet.
 
+### Linking to Ragnar RuSense
+
+If you run [Ragnar](https://github.com/PierreGode/Ragnar)'s RuSense (a mesh of ESP32
+CSI sensors), HUMAN SENSING can link to it over the network it already joined. It
+shows the mesh's verdict (a **MESH** tag in the title bar, the banner says PRESENCE
+when the mesh sees someone your one router path misses, and a **MESH** page on the
+boards with SCOPE, SNEAK and VITALS) and sends its own verdict back to Ragnar. Make a
+token on Ragnar under **Mesh > CYD Nodes**, then on the serial console:
+
+| Command | What it does |
+|---|---|
+| `SENSE RAGNAR <ip[:port]> <token>` | Save Ragnar (port 8000 if none) and the token |
+| `SENSE RAGNAR LINK off\|pull\|push\|both` | Which way it runs (both by default) |
+| `SENSE RAGNAR STAT` | What the link is doing |
+| `SENSE RAGNAR OFF` | Forget the host and token |
+
+It starts when HUMAN SENSING opens and runs on its own small task, so the 50 pings a
+second never wait for it. A Ragnar that doesn't answer is retried every 30 s. Privacy
+Mode keeps the host off the screen and the console. Not on the Tab5 yet.
+
 ## Alert controls
 
 A detector that cries wolf gets switched off, so there are a few ways to

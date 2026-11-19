@@ -21,6 +21,7 @@
 #include "ui_sensing_cyd.h"
 #include "sense_store.h"
 #include "sense_cyd.h"
+#include "sense_ragnar.h"
 #include "settings.h"
 #include "theme.h"
 #include "squachy.h"
@@ -32,6 +33,7 @@
 #endif
 #include <Arduino.h>
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -43,7 +45,8 @@ const int      STRIP_SPAN  = 300;     // 30 s at 10 statuses a second
 
 uint32_t s_enterMs = 0, s_lastMs = 0;
 #if SENSE_RICH
-uint8_t s_page = 0;   // 0 SENSING, 1 SCOPE, 2 SNEAK, 3 VITALS
+uint8_t s_page = 0;   // 0 SENSING, 1 SCOPE, 2 SNEAK, 3 VITALS, 4 MESH
+const uint8_t PAGES = 5;
 #endif
 const char* s_lastWord = nullptr;
 uint32_t s_wordAt = 0;
@@ -175,7 +178,19 @@ Word stateWord(uint32_t now) {
         if (s.state == SENSE_STATE_MOTION || since < 1500) snprintf(r.sub, sizeof r.sub, "something is moving");
         else if (since != UINT32_MAX) snprintf(r.sub, sizeof r.sub, "last movement %lu s ago", (unsigned long)(since / 1000));
         else snprintf(r.sub, sizeof r.sub, "holding after movement");
-    } else { r.w = "CLEAR"; r.c = Theme::GREEN; snprintf(r.sub, sizeof r.sub, "the room is still"); }
+    } else {
+        // The RuSense mesh (Ragnar) can see what one router path misses.
+        SenseRagnar::View mv;
+        const bool mesh = SenseRagnar::pulling() && SenseRagnar::view(mv, now) && mv.ok;
+        if (mesh && mv.present) {
+            r.w = "PRESENCE"; r.c = Theme::VAPOR_PINK;
+            if (mv.people > 1) snprintf(r.sub, sizeof r.sub, "the RuSense mesh sees %u", (unsigned)mv.people);
+            else snprintf(r.sub, sizeof r.sub, "the RuSense mesh sees someone");
+        } else {
+            r.w = "CLEAR"; r.c = Theme::GREEN;
+            snprintf(r.sub, sizeof r.sub, mesh ? "still here and on the mesh" : "the room is still");
+        }
+    }
     return r;
 }
 int glitchFor(const Word& w, uint32_t now) {
@@ -278,6 +293,9 @@ void backdrop(TFT_eSPI& t, uint32_t now) {
     }
 }
 
+#if SENSE_RICH
+int dotsX(int W);
+#endif
 void statusLine(TFT_eSPI& t, uint32_t now) {
     const SenseReport& s = SenseStore::last();
     const bool fresh = SenseStore::fresh(now) && senseModeLive(s.mode);
@@ -303,12 +321,41 @@ void statusLine(TFT_eSPI& t, uint32_t now) {
 #endif
     if (SenseStore::heard() && s.chan) {
         const int W = t.width();
-        // With the tag it has to clear the page dots, not just the dBm.
-        const int lim = cx == 84 ? W - 52 : (192 + (W - 74)) / 2 - 15 - 8;
+#if SENSE_RICH
+        int lim = dotsX(W) - 8;   // the page dots, on every page
+#else
+        int lim = W - 52;
+#endif
+        // The dBm, right-aligned, and before it (the main page only: the
+        // others carry the EXPERIMENTAL tag and the dots) the RuSense mesh's
+        // word; the channel reading shortens to clear them.
+        int dbmX = W - 32;
+        if (s.rssi > -127) { snprintf(b, sizeof b, "%d dBm", (int)s.rssi); textT(t, W - 32, 6, b, Theme::VAPOR_PURPLE, 1, 2); dbmX -= (int)strlen(b) * 6; }
+        if (cx == 84 && SenseRagnar::pulling()) {
+            char m[20];
+            SenseRagnar::View mv;
+            const char* bad = SenseRagnar::trouble();
+            uint16_t c = Theme::GREEN;
+            if (bad[0]) { snprintf(m, sizeof m, "MESH %s", bad); c = Theme::AMBER; }
+            else if (!SenseRagnar::view(mv, now) || !mv.ok) { snprintf(m, sizeof m, "MESH --"); c = mixc(Theme::BG, Theme::WHITE, 120); }
+            else if (mv.present) { snprintf(m, sizeof m, "MESH %up", (unsigned)(mv.people ? mv.people : 1)); c = Theme::VAPOR_PINK; }
+            else snprintf(m, sizeof m, "MESH OK");
+            const int tx = dbmX - 8, tw = (int)strlen(m) * 6;
+#if SENSE_RICH
+            // Clear of the page dots. On a 320 px panel that leaves no room:
+            // there the banner carries the mesh's word and MESH has the rest.
+            const int floorX = dotsX(W) + PAGES * 10;
+#else
+            const int floorX = cx + 9 * 6 + 8;          // room for "ch 6 46/s" before it
+#endif
+            if (tx - tw >= floorX) {
+                textT(t, tx, 6, m, c, 1, 2);
+                if (tx - tw - 8 < lim) lim = tx - tw - 8;   // the dots still bound it too
+            }
+        }
         snprintf(b, sizeof b, "2.4 GHz ch %u  %u/s", (unsigned)s.chan, (unsigned)s.rate);
         if (cx + (int)strlen(b) * 6 > lim) snprintf(b, sizeof b, "ch %u %u/s", (unsigned)s.chan, (unsigned)s.rate);
         if (cx + (int)strlen(b) * 6 <= lim || cx == 84) textT(t, cx, 6, b, Theme::CYAN, 1);
-        if (s.rssi > -127) { snprintf(b, sizeof b, "%d dBm", (int)s.rssi); textT(t, W - 32, 6, b, Theme::VAPOR_PURPLE, 1, 2); }
     }
 }
 
@@ -549,10 +596,11 @@ void banner(TFT_eSPI& t, uint32_t now) {
 
 void buttons(TFT_eSPI& t) {
 #if SENSE_RICH
-    static const char* const PAGES[4][3] = {
+    static const char* const LBS[PAGES][3] = {
         { "[ BACK ]", "[ RECAL ]", "[ SLEEP ]" }, { "[ BACK ]", "[ RECAL ]", "[ SLEEP ]" },
-        { "[ BACK ]", "[ START RUN ]", "[ LEVEL ]" }, { "[ BACK ]", "[ NEW SESSION ]", "[ SLEEP ]" } };
-    const char* const* LB = PAGES[s_page & 3];
+        { "[ BACK ]", "[ START RUN ]", "[ LEVEL ]" }, { "[ BACK ]", "[ NEW SESSION ]", "[ SLEEP ]" },
+        { "[ BACK ]", "[ RECAL ]", "[ SLEEP ]" } };
+    const char* const* LB = LBS[s_page % PAGES];
 #else
     static const char* const LB[3] = { "[ BACK ]", "[ RECAL ]", "[ SLEEP ]" };
 #endif
@@ -569,10 +617,10 @@ void buttons(TFT_eSPI& t) {
 #include "ui_sensing_more.inc"
 
 // The four page dots, in the title bar between the readings and the dBm.
-int dotsX(int W) { return (192 + (W - 74)) / 2 - 15; }
+int dotsX(int W) { return (192 + (W - 74)) / 2 - 20; }   // five dots, 10 px apart
 void pageDots(TFT_eSPI& t) {
     const int x0 = dotsX(t.width());
-    for (int k = 0; k < 4; k++) {
+    for (int k = 0; k < PAGES; k++) {
         if (k == s_page) t.fillCircle(x0 + k * 10, 9, 3, Theme::VAPOR_PINK);
         else t.fillCircle(x0 + k * 10, 9, 2, mixc(Theme::BG, Theme::VAPOR_PURPLE, 150));
     }
@@ -584,7 +632,7 @@ void uiSensingInit(TFT_eSPI& t) {
     s_L = &layFor(t.width(), t.height());
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
 #if SENSE_RICH
-    s_page = (uint8_t)(Settings::sensePage() & 3);   // the last page, across a restart too
+    s_page = (uint8_t)(Settings::sensePage() % PAGES);   // the last page, across a restart too
 #endif
     s_enterMs = s_lastMs = millis();
     s_lastWord = nullptr;
@@ -609,7 +657,8 @@ void uiSensingTick(TFT_eSPI& t, uint32_t now, bool advance) {
     if (s_page) {
         if (s_page == 1) scopeScreen(t, now);
         else if (s_page == 2) sneakScreen(t, now);
-        else vitalsScreen(t, now);
+        else if (s_page == 3) vitalsScreen(t, now);
+        else meshScreen(t, now);
         Theme::drawTitleBar(t, ">> HUMAN SENSING <<");
         statusLine(t, now);
         pageDots(t);
@@ -637,9 +686,9 @@ SensingTap uiSensingTap(int x, int y, int screenW, int screenH, uint32_t now) {
     // The page dots: a tap on them turns the page (left half back, right half on).
     {
         const int x0 = dotsX(screenW);
-        if (y < 20 && x >= x0 - 10 && x <= x0 + 40) { uiSensingSwipe(x < x0 + 15 ? -1 : 1); return SensingTap::NONE; }
+        if (y < 20 && x >= x0 - 10 && x <= x0 + 50) { uiSensingSwipe(x < x0 + 20 ? -1 : 1); return SensingTap::NONE; }
     }
-    if (s_L->btOn && y >= g.y - 2 && y <= g.y + g.h + 4 && s_page >= 2) {
+    if (s_L->btOn && y >= g.y - 2 && y <= g.y + g.h + 4 && (s_page == 2 || s_page == 3)) {
         // SNEAK's START RUN and LEVEL, VITALS' NEW SESSION: this screen's own.
         for (int i = 1; i < 3; i++) if (x >= g.x[i] && x <= g.x[i] + g.w) {
             if (s_page == 2) { if (i == 1) sneakStart(now); else sneakLevel(); return SensingTap::NONE; }
@@ -665,7 +714,7 @@ SensingTap uiSensingTap(int x, int y, int screenW, int screenH, uint32_t now) {
 }
 #if SENSE_RICH
 void uiSensingSwipe(int dir) {
-    s_page = (uint8_t)((s_page + 4 + (dir < 0 ? -1 : 1)) % 4);
+    s_page = (uint8_t)((s_page + PAGES + (dir < 0 ? -1 : 1)) % PAGES);
     Settings::setSensePage(s_page);
     s_lastWord = nullptr;
 }
@@ -682,7 +731,7 @@ uint8_t uiSensingStops(int screenW, int screenH, int16_t* xs, int16_t* ys, uint8
     s_L = &layFor(screenW, screenH);
     uint8_t n = 0;
     const int x0 = dotsX(screenW);
-    if (n < cap) { xs[n] = (int16_t)(x0 + 25); ys[n] = 9; n++; }   // the dots: on to the next screen
+    if (n < cap) { xs[n] = (int16_t)(x0 + 30); ys[n] = 9; n++; }   // the dots: on to the next screen
     const Bar g = barGeom(screenW, screenH);
     for (int i = 0; i < 3 && n < cap; i++) { xs[n] = (int16_t)(g.x[i] + g.w / 2); ys[n] = (int16_t)(g.y + g.h / 2); n++; }
     return n;

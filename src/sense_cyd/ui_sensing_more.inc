@@ -649,3 +649,99 @@ void vitalsScreen(TFT_eSPI& t, uint32_t now) {
         headline(t, cxw - hw / 2, cyw, wd, c, 0, 1);
     }
 }
+
+// ---- MESH: Ragnar's RuSense, beside this board's own reading -----------------
+// The verdict of the RuSense CSI mesh (include/sense_ragnar.h): presence,
+// people, confidence, breathing and heart rate, the nodes streaming, the last
+// sighting, and whether this board's own vote is counting on Ragnar. Left of
+// the line is the mesh, right is this board, so the two can be compared.
+void meshScreen(TFT_eSPI& t, uint32_t now) {
+    const int W = t.width();
+    const bool big = W >= 460;
+    const int T = 21;
+    const Bar g = barGeom(W, t.height());
+    const int B = g.y - 4;
+    char b[48];
+    headline(t, 6, T + 2, "RUSENSE MESH", Theme::CYAN, 0, 1);
+    const char* host = Settings::privacyMode() ? "ragnar" : Settings::ragnarHost();
+    if (!SenseRagnar::configured()) {
+        int y = T + 44;
+        const char* L[] = { "Not linked to a Ragnar yet.", "",
+            "On Ragnar: Mesh > CYD Nodes > generate a token.",
+            "Then on this board's console:",
+            "  SENSE RAGNAR <ragnar-ip> <token>",
+            "and open HUMAN SENSING again.", "",
+            "SENSE RAGNAR LINK pull|push|both picks the way." };
+        for (const char* l : L) { textT(t, 8, y, l, l[0] == ' ' ? Theme::VAPOR_YELLOW : Theme::WHITE, 1); y += big ? 14 : 12; }
+        return;
+    }
+    snprintf(b, sizeof b, "%.28s", host);
+    textT(t, W - 6, T + 6, b, slate(), 1, 2);
+
+    SenseRagnar::View v;
+    const bool have = SenseRagnar::view(v, now);
+    const char* bad = SenseRagnar::trouble();
+    const bool pull = SenseRagnar::pulling();
+    // the mesh's word
+    const char* word; uint16_t wc;
+    if (!pull)               { word = "PUSH ONLY"; wc = slate(); }
+    else if (bad[0])         { word = bad;         wc = Theme::AMBER; }
+    else if (!have)          { word = "WAITING";   wc = Theme::AMBER; }
+    else if (!v.ok)          { word = "NO RUSENSE"; wc = Theme::AMBER; }
+    else if (v.present)      { word = "PRESENT";   wc = Theme::VAPOR_PINK; }
+    else                     { word = "CLEAR";     wc = Theme::GREEN; }
+    const int colW = big ? W * 3 / 5 : W * 11 / 20;
+    const int wy = T + (big ? 34 : 28);
+    headline(t, 8, wy, word, wc, 0, big ? 0 : 1);
+    if (have && v.ok && v.present) {
+        snprintf(b, sizeof b, "%u %s", (unsigned)(v.people ? v.people : 1), v.people > 1 ? "people" : "person");
+        textT(t, 8 + headlineWidth(word, big ? 0 : 1) + 10, wy + (big ? 14 : 10), b, Theme::WHITE, big ? 2 : 1);
+    }
+    // the mesh's numbers
+    struct Row { const char* k; char v[24]; uint16_t c; };
+    Row R[6];
+    uint8_t n = 0;
+    auto row = [&](const char* k, uint16_t c, const char* fmt, ...) {
+        Row& r = R[n++]; r.k = k; r.c = c;
+        va_list ap; va_start(ap, fmt); vsnprintf(r.v, sizeof r.v, fmt, ap); va_end(ap);
+    };
+    const bool live = pull && have && v.ok;
+    if (live && v.conf >= 0) row("CONFIDENCE", v.model ? Theme::WHITE : slate(), "%d%%%s", (int)v.conf, v.model ? "" : " (no model)");
+    else row("CONFIDENCE", slate(), "--");
+    if (live && v.br10 >= 0) row("BREATHING", Theme::CYAN, "%d.%d /min", v.br10 / 10, v.br10 % 10); else row("BREATHING", slate(), "--");
+    if (live && v.hr >= 0) row("HEART", Theme::VAPOR_PINK, "%d bpm", (int)v.hr); else row("HEART", slate(), "--");
+    if (live && v.nodes >= 0) row("NODES", v.up == v.nodes ? Theme::GREEN : Theme::AMBER, "%d/%d up", (int)v.up, (int)v.nodes); else row("NODES", slate(), "--");
+    if (live && v.sightAgo == 0) row("SIGHTING", Theme::VAPOR_PINK, "now, %lds", (long)v.sightS);
+    else if (live && v.sightAgo > 0) {
+        const long a = v.sightAgo;
+        if (a < 3600) row("SIGHTING", Theme::WHITE, "%ldm ago, %lds", a / 60, (long)v.sightS);
+        else row("SIGHTING", Theme::WHITE, "%ldh ago, %lds", a / 3600, (long)v.sightS);
+    } else row("SIGHTING", slate(), "--");
+    row("YOUR VOTE", live && v.vote ? Theme::GREEN : slate(), (SenseRagnar::linkMode() & SenseRagnar::LINK_PUSH) ? (live && v.vote ? "counting" : "sent") : "off");
+    int y = wy + (big ? 46 : 34);
+    const int step = big ? 18 : 13;
+    for (uint8_t i = 0; i < n && y + 8 < B; i++, y += step) {
+        textT(t, 10, y, R[i].k, slate(), 1);
+        textT(t, colW - 10, y, R[i].v, R[i].c, big ? 2 : 1, 2);
+    }
+    // this board, on the right
+    const int rx = colW + 4, rw = W - rx - 6, ry = wy, rh = B - ry;
+    t.drawRect(rx, ry, rw, rh, Theme::PURPLE);
+    textT(t, rx + 6, ry + 6, "THIS BOARD", Theme::CYAN, 1);
+    const SenseReport& s = SenseStore::last();
+    const bool fresh = SenseStore::fresh(now) && senseModeLive(s.mode);
+    const char* mine = !fresh ? "WAIT" : s.state == SENSE_STATE_CAL ? "CAL" : s.state == SENSE_STATE_LOWDATA ? "LOW"
+                     : s.state == SENSE_STATE_MOTION ? "MOTION" : s.presence ? "PRESENCE" : s.state == SENSE_STATE_POSSIBLE ? "MAYBE" : "STILL";
+    const uint16_t mc = !fresh || s.state <= SENSE_STATE_LOWDATA ? Theme::AMBER : (s.state == SENSE_STATE_MOTION || s.presence) ? Theme::VAPOR_PINK : Theme::GREEN;
+    headline(t, rx + 6, ry + 20, mine, mc, 0, 1);
+    if (fresh) {
+        snprintf(b, sizeof b, "score %u  trust %u%%", (unsigned)s.score, (unsigned)s.rel);
+        textT(t, rx + 6, ry + 54, b, Theme::WHITE, 1);
+        // agree / disagree with the mesh
+        if (live && s.state >= SENSE_STATE_STILL) {
+            const bool me = s.presence || s.state == SENSE_STATE_MOTION;
+            const char* ag = me == v.present ? "agrees with mesh" : (me ? "mesh misses it" : "mesh sees more");
+            textT(t, rx + 6, ry + 68, ag, me == v.present ? Theme::GREEN : Theme::AMBER, 1);
+        }
+    }
+}

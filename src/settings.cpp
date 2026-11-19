@@ -182,6 +182,9 @@ static bool     s_quietTrack   = true;
 static bool     s_privacy      = false;
 static bool     s_sensing      = false;
 static uint8_t  s_sensePage    = 0;
+static char     s_rgHost[64]   = { 0 };   // the Ragnar RuSense link: see settings.h
+static char     s_rgTok[48]    = { 0 };
+static uint8_t  s_rgLink       = 3;       // BOTH, once a host and token are set
 static bool     s_extScreen    = false;
 struct __attribute__((packed)) RunEntry { uint16_t boot, minutes; };
 static const uint8_t RUNS_N = 8;
@@ -404,6 +407,19 @@ void setSensePage(uint8_t p) {
     if (p == s_sensePage) return;
     s_sensePage = p;
     s_prefs.putUChar("sensePg", p);
+}
+const char* ragnarHost()  { return s_rgHost; }
+const char* ragnarToken() { return s_rgTok; }
+uint8_t     ragnarLink()  { return s_rgLink; }
+void setRagnar(const char* host, const char* token) {
+    snprintf(s_rgHost, sizeof s_rgHost, "%s", host ? host : "");
+    snprintf(s_rgTok, sizeof s_rgTok, "%s", token ? token : "");
+    if (s_rgHost[0]) s_prefs.putString("rgHost", s_rgHost); else s_prefs.remove("rgHost");
+    if (s_rgTok[0])  s_prefs.putString("rgTok", s_rgTok);   else s_prefs.remove("rgTok");
+}
+void setRagnarLink(uint8_t mode) {
+    s_rgLink = mode > 3 ? 0 : mode;
+    s_prefs.putUChar("rgLink", s_rgLink);
 }
 void toggleQuietTrackers() {
     s_quietTrack = !s_quietTrack;
@@ -688,6 +704,11 @@ void load() {
     s_privacy      = s_prefs.getBool("privacy", false);
     s_sensing      = s_prefs.getBool("sensing", false);
     s_sensePage    = s_prefs.getUChar("sensePg", 0);
+    s_rgHost[0] = s_rgTok[0] = '\0';
+    if (s_prefs.isKey("rgHost")) s_prefs.getString("rgHost", s_rgHost, sizeof s_rgHost);
+    if (s_prefs.isKey("rgTok"))  s_prefs.getString("rgTok", s_rgTok, sizeof s_rgTok);
+    s_rgLink = s_prefs.getUChar("rgLink", 3);   // BOTH when never set
+    if (s_rgLink > 3) s_rgLink = 0;            // a bad byte is OFF, as setRagnarLink() makes it
     s_extScreen    = s_prefs.getBool("extscr", false);
     if (s_prefs.getBytesLength("runs") == sizeof s_runs) s_prefs.getBytes("runs", s_runs, sizeof s_runs);
     s_watchPlus    = s_prefs.getBool("wPlus", false);

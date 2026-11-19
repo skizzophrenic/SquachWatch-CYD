@@ -367,6 +367,11 @@ public:
     // Bluetooth update mode (see ota_ble.h) gets the radio to itself: BLE
     // scanning, WiFi capture and mesh advertising all stop until
     // stopUpdateRadio(). Call startUpdateRadio() BEFORE OtaBle::begin().
+    // A boot without the Bluetooth stack (call before init()): HUMAN SENSING
+    // with the Ragnar link on a board with no PSRAM needs its heap. bleUp()
+    // says whether this boot has the stack.
+    static void skipBleThisBoot();
+    static bool bleUp();
     void     startUpdateRadio();
     void     stopUpdateRadio();
     // The watch's duty cycle: WiFi off (and BLE scanning too, if asked)
