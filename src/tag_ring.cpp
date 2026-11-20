@@ -77,39 +77,56 @@ static volatile bool   s_heard    = false;   // an indication came back (DULT / 
 
 static void onIndicate(NimBLERemoteCharacteristic*, uint8_t*, size_t, bool) { s_heard = true; }
 
+// Writes the command the way the characteristic says it takes writes: with a
+// reply when it offers that, else without one -- a phone app picks the same
+// way on its own, and a write-with-reply to a no-reply characteristic is
+// refused. Logs what the tracker said.
+static bool sendCommand(NimBLEClient* c, NimBLERemoteCharacteristic* ch, const char* what,
+                        const uint8_t* cmd, size_t n) {
+    const bool reply = ch->canWrite() || !ch->canWriteNoResponse();
+    Serial.printf("[ring] %s: write%s%s%s%s, sending %s a reply\n", what,
+                  ch->canWrite() ? " +reply" : "", ch->canWriteNoResponse() ? " +noreply" : "",
+                  ch->canIndicate() ? " +indicate" : "", ch->canNotify() ? " +notify" : "",
+                  reply ? "with" : "without");
+    const bool ok = ch->writeValue(cmd, n, reply);
+    if (!ok) Serial.printf("[ring] %s: refused, error %d (0x%x)\n", what, c->getLastError(), c->getLastError());
+    else     Serial.printf("[ring] %s: taken\n", what);
+    return ok;
+}
+
 // Indications on (both standards send one when the sound ends), then the
 // start command. True when the command was taken.
-static bool ringControlPoint(NimBLEClient* c, const char* svc, const char* chr,
+static bool ringControlPoint(NimBLEClient* c, const char* svc, const char* chr, const char* what,
                              const uint8_t* cmd, size_t n, bool& found) {
     NimBLERemoteService* s = c->getService(svc);
-    if (!s) return false;
+    if (!s) { Serial.printf("[ring] %s: no such service\n", what); return false; }
     NimBLERemoteCharacteristic* ch = s->getCharacteristic(chr);
-    if (!ch) return false;
+    if (!ch) { Serial.printf("[ring] %s: service, but no control point\n", what); return false; }
     found = true;
-    if (ch->canIndicate())      ch->subscribe(false, onIndicate, true);
-    else if (ch->canNotify())   ch->subscribe(true,  onIndicate, true);
+    bool sub = true;
+    if (ch->canIndicate())      sub = ch->subscribe(false, onIndicate, true);
+    else if (ch->canNotify())   sub = ch->subscribe(true,  onIndicate, true);
+    if (!sub) Serial.printf("[ring] %s: indications refused, error %d\n", what, c->getLastError());
     s_heard = false;
-    return ch->writeValue(cmd, n, true);
+    return sendCommand(c, ch, what, cmd, n);
 }
 
 static Result ringOnce(NimBLEClient* c) {
     bool found = false;
-    Serial.println("[ring] asking for the AirTag sound service");
     // AirTag's own sound: one byte, and the tag drops the link when done.
     if (NimBLERemoteService* s = c->getService(AIRTAG_SVC)) {
         if (NimBLERemoteCharacteristic* ch = s->getCharacteristic(AIRTAG_CHR)) {
             found = true;
             const uint8_t play = 0xAF;
-            if (ch->writeValue(&play, 1, true)) return Result::RANG;
-        }
-    }
+            if (sendCommand(c, ch, "AirTag", &play, 1)) return Result::RANG;
+        } else Serial.println("[ring] AirTag: service, but no sound characteristic");
+    } else Serial.println("[ring] AirTag: no such service");
     if (!c->isConnected()) return found ? Result::REFUSED : Result::NO_ANSWER;
-    Serial.println("[ring] asking for the DULT sound service");
     static const uint8_t DULT_PLAY[]   = { 0x00, 0x03 };
-    if (ringControlPoint(c, DULT_SVC, DULT_CHR, DULT_PLAY, sizeof DULT_PLAY, found)) return Result::RANG;
+    if (ringControlPoint(c, DULT_SVC, DULT_CHR, "DULT", DULT_PLAY, sizeof DULT_PLAY, found)) return Result::RANG;
     if (!c->isConnected()) return found ? Result::REFUSED : Result::NO_ANSWER;
     static const uint8_t FINDMY_PLAY[] = { 0x01, 0x00, 0x03 };
-    if (ringControlPoint(c, FINDMY_SVC, FINDMY_CHR, FINDMY_PLAY, sizeof FINDMY_PLAY, found)) return Result::RANG;
+    if (ringControlPoint(c, FINDMY_SVC, FINDMY_CHR, "Find My", FINDMY_PLAY, sizeof FINDMY_PLAY, found)) return Result::RANG;
     return found ? Result::REFUSED : Result::NO_SOUND;
 }
 
