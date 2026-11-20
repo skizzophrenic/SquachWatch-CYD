@@ -4770,9 +4770,6 @@ static bool e32r28tBattery(uint8_t& pct, bool& charging) {
 
     const uint16_t batteryMv = (uint16_t)((sumMv / 8) * 2);
 
-    // Match the existing battery code's no-cell check.
-    if (batteryMv < 2500) return false;
-
     pct = boardBatteryPct(batteryMv);
     charging = false;  // GPIO34 reports voltage, not charger status
     return true;
