@@ -8728,13 +8728,18 @@ void loop() {
     }
 #endif
 #if SQW_RING
+    {
+        uint8_t fm[6];
+        if (!TagRing::busy() && TagRing::takeFound(fm) && !TagRing::start(engine, fm))
+            Serial.println("[ring] busy");
+    }
     if (g_consoleRing) {
         g_consoleRing = false;
         uint8_t mac[6];
         if (!TagRing::latest(mac))              Serial.println("[ring] no tracker heard since boot");
         else if (!TagRing::start(engine, mac))  Serial.println("[ring] busy");
         else Serial.printf("[ring] ringing %02X:%02X:%02X:%02X:%02X:%02X\n",
-                           mac[5], mac[4], mac[3], mac[2], mac[1], mac[0]);
+                           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     }
     {
         // A ring has finished: the radio is back, the button comes up, and

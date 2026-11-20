@@ -29,6 +29,7 @@ void consoleFrameShot();     // main.cpp: SENSE SHOT
 #include "meshtalk.h"    // SQUAD JOIN / SAY / TEXT / EMOTE, for testing the phone app
 #endif
 #include "lora_sniffer.h" // LORA ..., the radio (a no-op on a board without one)
+#include "tag_ring.h"     // RING NAME <text>, for the bench
 
 // RUNTIME: main.cpp lists how long the last few boots ran.
 volatile bool g_consoleRuntime = false;
@@ -752,6 +753,13 @@ void pollSerial() {
         }
         if (strcasecmp(line, "BALL") == 0)    { g_consoleBall = true; continue; }
         if (strcasecmp(line, "RING") == 0)    { g_consoleRing = true; continue; }
+#if SQW_RING
+        if (strncasecmp(line, "RING NAME ", 10) == 0) {
+            TagRing::armFind(line + 10);
+            Serial.printf("[ring] waiting for a device named *%s* that takes connections\n", line + 10);
+            continue;
+        }
+#endif
         if (strcasecmp(line, "PET") == 0)     { g_consolePet = true; continue; }
         if (strcasecmp(line, "JAIL") == 0)    { g_consoleJail = true; continue; }
         if (strcasecmp(line, "FREE") == 0)    { g_consoleFree = true; continue; }

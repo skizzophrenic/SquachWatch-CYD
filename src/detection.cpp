@@ -569,6 +569,12 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
         // (#22). Read from the advert's bytes now, with no string at all.
         const std::vector<uint8_t>& advPl = adv->getPayload();
         AdFields::copyName(advPl.data(), advPl.size(), det.name, sizeof(det.name));
+#if SQW_RING
+        // RING NAME, for the bench: any device by its advertised name.
+        if (TagRing::findWanted())
+            TagRing::noteNamed(mac, adv->getAddress().getType(), det.name, adv->isConnectable(),
+                               advPl.data(), advPl.size());
+#endif
         // The matched row's own label, for the types that cover several
         // devices -- see where the vendor is written, below.
         const char* label = nullptr;

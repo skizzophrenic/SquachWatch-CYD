@@ -94,6 +94,7 @@ static bool ringControlPoint(NimBLEClient* c, const char* svc, const char* chr,
 
 static Result ringOnce(NimBLEClient* c) {
     bool found = false;
+    Serial.println("[ring] asking for the AirTag sound service");
     // AirTag's own sound: one byte, and the tag drops the link when done.
     if (NimBLERemoteService* s = c->getService(AIRTAG_SVC)) {
         if (NimBLERemoteCharacteristic* ch = s->getCharacteristic(AIRTAG_CHR)) {
@@ -103,6 +104,7 @@ static Result ringOnce(NimBLEClient* c) {
         }
     }
     if (!c->isConnected()) return found ? Result::REFUSED : Result::NO_ANSWER;
+    Serial.println("[ring] asking for the DULT sound service");
     static const uint8_t DULT_PLAY[]   = { 0x00, 0x03 };
     if (ringControlPoint(c, DULT_SVC, DULT_CHR, DULT_PLAY, sizeof DULT_PLAY, found)) return Result::RANG;
     if (!c->isConnected()) return found ? Result::REFUSED : Result::NO_ANSWER;
@@ -111,27 +113,77 @@ static Result ringOnce(NimBLEClient* c) {
     return found ? Result::REFUSED : Result::NO_SOUND;
 }
 
+// What the radio said at each step, for the console. The connect itself
+// only returns "timed out"; these carry the controller's own reasons.
+class RingCallbacks : public NimBLEClientCallbacks {
+    void onConnect(NimBLEClient* c) override { Serial.printf("[ring] link up, handle %u\n", c->getConnHandle()); }
+    void onConnectFail(NimBLEClient*, int reason) override {
+        Serial.printf("[ring] link failed, reason %d (0x%x)\n", reason, reason);
+    }
+    void onDisconnect(NimBLEClient*, int reason) override {
+        Serial.printf("[ring] hung up, reason %d (0x%x)\n", reason, reason);
+    }
+};
+static RingCallbacks s_cb;
+
+// The reason, on the console, if the Bluetooth host ever resets itself.
+static void (*s_oldReset)(int) = nullptr;
+static void onHostReset(int reason) {
+    Serial.printf("[ring] Bluetooth host reset, reason %d (0x%x)\n", reason, reason);
+    if (s_oldReset) s_oldReset(reason);
+}
+static void hookOnce() {
+    static bool done = false;
+    if (done) return;
+    done = true;
+    s_oldReset = ble_hs_cfg.reset_cb;
+    ble_hs_cfg.reset_cb = onHostReset;
+}
+
+static void radioState(const char* when) {
+    Serial.printf("[ring] %s: scanning %d, advertising %d, connecting %d\n", when,
+                  ble_gap_disc_active(), ble_gap_adv_active(), ble_gap_conn_active());
+}
+
 static void ringTask(void*) {
     Result r = Result::NO_ANSWER;
     // startUpdateRadio() asks the host to stop the scan; a connect while the
     // scan still runs is refused, so wait for it (up to 2 s).
     NimBLEScan* scan = NimBLEDevice::getScan();
     for (int i = 0; i < 40 && scan && scan->isScanning(); i++) vTaskDelay(pdMS_TO_TICKS(50));
+    radioState("before");
 
     NimBLEClient* c = NimBLEDevice::createClient();
     if (c) {
-        c->setConnectTimeout(5000);
+        c->setClientCallbacks(&s_cb, false);
+        c->setConnectTimeout(6000);
+        // 0x3e, "connection failed to be established": the tracker heard the
+        // request but the link never settled. Common at a distance; NimBLE
+        // retries it itself, two times by default.
+        c->setConnectRetries(5);
         const uint8_t order[2] = { (uint8_t)s_firstType,
                                    (uint8_t)(s_firstType == BLE_ADDR_RANDOM ? BLE_ADDR_PUBLIC : BLE_ADDR_RANDOM) };
         for (int k = 0; k < 2; k++) {
             ble_addr_t a;
             a.type = order[k];
-            memcpy(a.val, s_mac, 6);
-            Serial.printf("[ring] connecting (%s address)\n", a.type == BLE_ADDR_RANDOM ? "random" : "public");
+            // s_mac is in PRINTED order, most significant byte first: the scan
+            // flips every address that way for display (detection.cpp, issue
+            // #22). The radio wants NimBLE's own order, least significant
+            // first. Handing it the printed bytes dialed an address nobody
+            // had, and every ring timed out (2026-11-19, found on the bench
+            // against a C5 on its Bluetooth update screen).
+            for (int i = 0; i < 6; i++) a.val[i] = s_mac[5 - i];
+            Serial.printf("[ring] try %d: connecting to %02x:%02x:%02x:%02x:%02x:%02x (%s address)\n", k + 1,
+                          s_mac[0], s_mac[1], s_mac[2], s_mac[3], s_mac[4], s_mac[5],
+                          a.type == BLE_ADDR_RANDOM ? "random" : "public");
+            const uint32_t t0 = millis();
             if (!c->connect(NimBLEAddress(a), true)) {
-                Serial.printf("[ring] no connection (error %d)\n", c->getLastError());
+                Serial.printf("[ring] no connection (error %d) after %lu ms\n", c->getLastError(),
+                              (unsigned long)(millis() - t0));
+                radioState("after");
                 continue;
             }
+            Serial.printf("[ring] connected in %lu ms\n", (unsigned long)(millis() - t0));
             r = ringOnce(c);
             Serial.printf("[ring] %s\n", title(r));
             if (r == Result::RANG && c->isConnected()) {
@@ -151,6 +203,78 @@ static void ringTask(void*) {
     vTaskDelete(nullptr);
 }
 
+// ---- RING NAME, for the bench ----
+static char          s_findText[24];
+static volatile bool s_findArmed = false;
+static volatile bool s_found     = false;
+static uint8_t       s_foundMac[6];
+static volatile uint32_t s_findAll = 0, s_findConn = 0;   // adverts heard while armed
+static volatile bool     s_findNoConn = false;
+
+void armFind(const char* text) {
+    strncpy(s_findText, text, sizeof s_findText - 1);
+    s_findText[sizeof s_findText - 1] = 0;
+    s_found = false;
+    s_findAll = s_findConn = 0;
+    s_findNoConn = false;
+    s_findArmed = s_findText[0] != 0;
+}
+
+bool findWanted() { return s_findArmed; }
+
+
+// Meshtastic's service UUID 6ba1b218-15a8-461f-9fa8-5dcae273eafd, as it sits
+// in an advert (least significant byte first). Its name is often only in the
+// scan response, which a passive scan never asks for.
+static const uint8_t MESHTASTIC_UUID[16] = { 0xfd, 0xea, 0x73, 0xe2, 0xca, 0x5d, 0xa8, 0x9f,
+                                             0x1f, 0x46, 0xa8, 0x15, 0x18, 0xb2, 0xa1, 0x6b };
+
+void noteNamed(const uint8_t mac[6], uint8_t addrType, const char* name, bool connectable,
+               const uint8_t* pl, size_t plLen) {
+    if (!s_findArmed) return;
+    s_findAll++;
+    if (connectable) s_findConn++;
+    bool hit = false;
+    if (name && name[0]) {
+        // Case-blind "contains".
+        const size_t n = strlen(s_findText), m = strlen(name);
+        for (size_t i = 0; !hit && i + n <= m; i++) hit = strncasecmp(name + i, s_findText, n) == 0;
+    }
+    if (!hit && pl && strcasecmp(s_findText, "meshtastic") == 0)
+        for (size_t i = 0; !hit && i + 16 <= plLen; i++) hit = memcmp(pl + i, MESHTASTIC_UUID, 16) == 0;
+    // Another SquachWatch on its Bluetooth update screen (ota_ble.cpp's
+    // service, 9d1f0001-2a4b-4c8e-9b1e-5357574f5441).
+    static const uint8_t SQW_OTA_UUID[16] = { 0x41, 0x54, 0x4f, 0x57, 0x57, 0x53, 0x1e, 0x9b,
+                                              0x8e, 0x4c, 0x4b, 0x2a, 0x01, 0x00, 0x1f, 0x9d };
+    if (!hit && pl && strcasecmp(s_findText, "squachwatch") == 0)
+        for (size_t i = 0; !hit && i + 16 <= plLen; i++) hit = memcmp(pl + i, SQW_OTA_UUID, 16) == 0;
+    if (!hit) return;
+    if (!connectable) {
+        if (!s_findNoConn) Serial.println("[ring] heard it, but its adverts say it takes no connections");
+        s_findNoConn = true;
+        return;
+    }
+    if (!name || !name[0]) name = "(found by its service)";
+    noteSeen(mac, addrType, true);
+    memcpy(s_foundMac, mac, 6);
+    s_findArmed = false;
+    s_found = true;
+    Serial.printf("[ring] found \"%s\" (%s address)\n", name, addrType == BLE_ADDR_RANDOM ? "random" : "public");
+}
+
+bool takeFound(uint8_t mac[6]) {
+    static uint32_t lastNote = 0;
+    if (s_findArmed && millis() - lastNote > 5000) {
+        lastNote = millis();
+        Serial.printf("[ring] still looking: %lu adverts heard, %lu of them take connections\n",
+                      (unsigned long)s_findAll, (unsigned long)s_findConn);
+    }
+    if (!s_found) return false;
+    s_found = false;
+    memcpy(mac, s_foundMac, 6);
+    return true;
+}
+
 bool busy() { return s_busy; }
 
 bool start(DetectionEngine& eng, const uint8_t mac[6]) {
@@ -164,6 +288,7 @@ bool start(DetectionEngine& eng, const uint8_t mac[6]) {
     else Serial.printf("[ring] last heard %lu s ago, %s address, %s\n", (unsigned long)(age / 1000),
                        t == BLE_ADDR_RANDOM ? "random" : "public",
                        conn ? "taking connections" : "NOT taking connections (adverts only)");
+    hookOnce();
     s_done   = false;
     s_result = Result::NONE;
     s_busy   = true;

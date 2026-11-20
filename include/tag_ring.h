@@ -21,6 +21,7 @@
 // has neither to spare.
 #pragma once
 #include <stdint.h>
+#include <stddef.h>
 #include "state.h"
 
 #ifndef SQW_RING
@@ -64,6 +65,15 @@ bool busy();
 // From the main loop, every pass: gives the radio back once the task is done
 // and returns its result once (NONE otherwise).
 Result poll(DetectionEngine& eng);
+// RING NAME <text>, for the bench: the next device that takes connections
+// and has <text> in its advertised name gets rung, so a connect can be tested
+// against something known to answer. findWanted() is cheap: the scan callback
+// asks it for every advert.
+void armFind(const char* text);
+bool findWanted();
+void noteNamed(const uint8_t mac[6], uint8_t addrType, const char* name, bool connectable,
+               const uint8_t* payload, size_t payloadLen);
+bool takeFound(uint8_t mac[6]);
 // Two short lines for a toast.
 const char* title(Result r);
 const char* detail(Result r);
