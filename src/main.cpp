@@ -4655,7 +4655,7 @@ static void sticksPowerUp() {
 }
 #endif
 
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(E32R28T)
 // The Freenove S3's battery: a 1-cell LiPo on its JST, a TP4054 charging it
 // from USB, and a 200K/200K divider from the cell to GPIO9 (ADC1, so WiFi does
 // not take it away) -- GPIO8 on the 3.5", per Freenove's battery sketch. The
@@ -4665,6 +4665,8 @@ static void sticksPowerUp() {
 #define BOARD_BAT_ADC 8
 #elif defined(TDECK_PLUS)
 #define BOARD_BAT_ADC 4
+#elif defined(E32R28T)
+#define BOARD_BAT_ADC 34
 #else
 #define BOARD_BAT_ADC 9
 #endif
@@ -4757,6 +4759,20 @@ static void boardBatteryPrintLog() {
         const LampSample& r = s_lampLog[(s_lampLogAt + LAMP_LOG_N - s_lampLogN + i) % LAMP_LOG_N];
         Serial.printf("[batt] %lu %u %u %s\n", (unsigned long)r.sec, (unsigned)r.mv, (unsigned)r.pct, r.chg ? "CABLE" : "-");
     }
+}
+#endif
+
+#if defined(E32R28T)
+static bool e32r28tBattery(uint8_t& pct, bool& charging) {
+    uint32_t sumMv = 0;
+    for (int i = 0; i < 8; ++i)
+        sumMv += analogReadMilliVolts(BOARD_BAT_ADC);
+
+    const uint16_t batteryMv = (uint16_t)((sumMv / 8) * 2);
+
+    pct = boardBatteryPct(batteryMv);
+    charging = false;  // GPIO34 reports voltage, not charger status
+    return true;
 }
 #endif
 
@@ -5786,6 +5802,9 @@ void setup() {
 #if defined(TWATCH_S3)
     twatchPowerUp();
     uiClearSetBatterySource(twatchBatteryState);
+#endif
+#if defined(E32R28T)
+    uiClearSetBatterySource(e32r28tBattery);
 #endif
 #if defined(STICKS3)
     sticksPowerUp();
