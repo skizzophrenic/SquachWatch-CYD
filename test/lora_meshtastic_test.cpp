@@ -11,6 +11,7 @@
 #include "test_util.h"
 #include <cstring>
 #include <cstdio>
+#include "lora_broadcast.h"
 
 using namespace Meshtastic;
 
@@ -166,6 +167,52 @@ int main() {
         ck("battery 87", d.tel.batteryLevel == 87);
         ckf("voltage", d.tel.voltage, 3.9f, 0.001f);
         ckf("channel utilisation", d.tel.channelUtil, 12.5f, 0.001f);
+    }
+
+    suite("Neighbor info we send");
+    {
+        const uint32_t ids[3] = { 0x11223344u, 0xA1B2C3D4u, 0x5A5A0001u };
+        const float snr[3] = { 6.25f, -3.5f, 0.0f };
+        uint8_t b[160];
+        const size_t n = encodeNeighborInfo(0x5A5A1234u, 0x5A5A1234u, 21600, ids, snr, 3, b);
+        NeighborInfo ni;
+        ck("it parses back", n > 0 && parseNeighborInfo(b, (uint8_t)n, ni));
+        ck("our node, last sender and interval", ni.nodeId == 0x5A5A1234u && ni.lastSentBy == 0x5A5A1234u && ni.interval == 21600);
+        ck("three neighbors in order", ni.n == 3 && ni.nb[0].id == 0x11223344u && ni.nb[1].id == 0xA1B2C3D4u && ni.nb[2].id == 0x5A5A0001u);
+        ck("their SNR, to a quarter dB", ni.nb[0].snr4 == 25 && ni.nb[1].snr4 == -14 && ni.nb[2].snr4 == 0);
+        uint32_t many[12]; float sn[12];
+        for (int k = 0; k < 12; k++) { many[k] = 0xF0000000u + (uint32_t)k; sn[k] = 1.0f; }
+        const size_t m = encodeNeighborInfo(1, 1, 14400, many, sn, 12, b);
+        ck("capped at ten, and it fits 160 bytes", m > 0 && m <= 160 && parseNeighborInfo(b, (uint8_t)m, ni) && ni.n == 10);
+        ck("no neighbors is a header only", encodeNeighborInfo(1, 1, 14400, ids, snr, 0, b) > 0 && parseNeighborInfo(b, 9, ni) && ni.n == 0);
+    }
+
+
+    suite("Position we send: precision");
+    {
+        uint8_t b[40];
+        const size_t ex = encodePosition(515000000, 74600000, 120, true, 1790000000u, 9, 32, b);
+        Position pos;
+        ck("an exact position keeps every bit", ex > 0 && parsePosition(b, (uint8_t)ex, pos) &&
+           pos.latI == 515000000 && pos.lonI == 74600000 && pos.precisionBits == 32);
+        const size_t rough = encodePosition(515000000, 74600000, 120, true, 1790000000u, 9, 13, b);
+        ck("13 bits keep 13, centred in their cell", rough > 0 && parsePosition(b, (uint8_t)rough, pos) &&
+           pos.precisionBits == 13 && pos.latI != 515000000 &&
+           ((uint32_t)pos.latI & 0xFFF80000u) == ((uint32_t)515000000 & 0xFFF80000u));
+        ck("0 bits sends nothing", encodePosition(1, 1, 0, false, 0, 0, 0, b) == 0);
+    }
+
+    suite("What goes out on the public channel");
+    {
+        namespace B = Lora::Broadcast;
+        ck("an exact position is refused on the public key", !B::positionAllowed(32, true));
+        ck("but sent on a private one", B::positionAllowed(32, false));
+        ck("a rounded position is sent on either", B::positionAllowed(13, true) && B::positionAllowed(19, true));
+        ck("Neighbor Info is refused on the public key", !B::neighborInfoAllowed(true) && B::neighborInfoAllowed(false));
+        ck("position at most hourly on the public key", B::positionSecs(900, true) == 3600 && B::positionSecs(7200, true) == 7200);
+        ck("but as set on a private one", B::positionSecs(30, false) == 30);
+        ck("smart position not sooner than 5 min on it", B::smartMinSecs(30, true) == 300 && B::smartMinSecs(30, false) == 30);
+        ck("telemetry at most every 30 min on it", B::telemetrySecs(900, true) == 1800 && B::telemetrySecs(3600, true) == 3600);
     }
 
     suite("Traceroute");

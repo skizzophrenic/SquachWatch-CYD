@@ -190,6 +190,83 @@ bool canSend(const Channel& c) {
     return c.enabled && c.name[0] && (c.keyLen == 16 || c.keyLen == 0);
 }
 
+static size_t putVar(uint8_t* o, uint64_t v) {
+    size_t n = 0;
+    while (v >= 0x80) { o[n++] = (uint8_t)(v | 0x80); v >>= 7; }
+    o[n++] = (uint8_t)v;
+    return n;
+}
+
+// Position{latitude_i 1, longitude_i 2 (sfixed32), altitude 3, time 4 (fixed32),
+// location_source 5 = LOC_INTERNAL, sats_in_view 19, precision_bits 23}. With
+// fewer than 32 precision bits the coordinates keep only that many, set to the
+// middle of the cell they name, and the altitude is left out -- as the
+// firmware does for a channel with a position precision.
+size_t encodePosition(int32_t lat7, int32_t lon7, int32_t altM, bool hasAlt, uint32_t epoch, uint8_t sats,
+                      uint8_t precisionBits, uint8_t* out) {
+    if (!out || precisionBits == 0) return 0;
+    if (precisionBits > 32) precisionBits = 32;
+    if (precisionBits < 32) {
+        const uint32_t mask = 0xFFFFFFFFu << (32 - precisionBits);
+        const uint32_t mid  = 1u << (31 - precisionBits);
+        lat7 = (int32_t)(((uint32_t)lat7 & mask) | mid);
+        lon7 = (int32_t)(((uint32_t)lon7 & mask) | mid);
+        hasAlt = false;
+    }
+    uint8_t* q = out;
+    *q++ = 0x0D; wr32le(q, (uint32_t)lat7); q += 4;
+    *q++ = 0x15; wr32le(q, (uint32_t)lon7); q += 4;
+    if (hasAlt) { *q++ = 0x18; q += putVar(q, (uint64_t)(int64_t)altM); }
+    if (epoch)  { *q++ = 0x25; wr32le(q, epoch); q += 4; }
+    *q++ = 0x28; *q++ = 0x01;                                   // location_source: LOC_INTERNAL
+    if (sats)   { *q++ = 0x98; *q++ = 0x01; q += putVar(q, sats); }
+    *q++ = 0xB8; *q++ = 0x01; q += putVar(q, precisionBits);
+    return (size_t)(q - out);
+}
+
+// Telemetry{time 1 (fixed32), device_metrics 2 {battery_level 1, voltage 2,
+// channel_utilization 3, air_util_tx 4 (floats), uptime_seconds 5}}.
+size_t encodeDeviceTelemetry(uint32_t epoch, uint8_t batteryPct, float volts, float chanUtil, float airUtilTx,
+                             uint32_t uptimeSecs, uint8_t* out) {
+    if (!out) return 0;
+    uint8_t m[40];
+    size_t p = 0;
+    m[p++] = 0x08; p += putVar(m + p, batteryPct);
+    uint32_t b;
+    memcpy(&b, &volts, 4);      m[p++] = 0x15; wr32le(m + p, b); p += 4;
+    memcpy(&b, &chanUtil, 4);   m[p++] = 0x1D; wr32le(m + p, b); p += 4;
+    memcpy(&b, &airUtilTx, 4);  m[p++] = 0x25; wr32le(m + p, b); p += 4;
+    m[p++] = 0x28; p += putVar(m + p, uptimeSecs);
+    uint8_t* q = out;
+    if (epoch) { *q++ = 0x0D; wr32le(q, epoch); q += 4; }
+    *q++ = 0x12; *q++ = (uint8_t)p; memcpy(q, m, p); q += p;
+    return (size_t)(q - out);
+}
+
+size_t encodeNeighborInfo(uint32_t self, uint32_t lastSentBy, uint32_t intervalSecs,
+                          const uint32_t* ids, const float* snr, uint8_t n, uint8_t* out) {
+    if (!out) return 0;
+    if (n > 10) n = 10;
+    uint8_t* q = out;
+    *q++ = 0x08; q += putVar(q, self);                 // node_id
+    *q++ = 0x10; q += putVar(q, lastSentBy);           // last_sent_by_id
+    *q++ = 0x18; q += putVar(q, intervalSecs);         // node_broadcast_interval_secs
+    for (uint8_t i = 0; i < n; i++) {
+        uint8_t m[12];
+        size_t p = 0;
+        m[p++] = 0x08; p += putVar(m + p, ids[i]);     // Neighbor.node_id
+        uint32_t b;
+        memcpy(&b, &snr[i], 4);
+        m[p++] = 0x15; wr32le(m + p, b); p += 4;       // Neighbor.snr
+        *q++ = 0x22; *q++ = (uint8_t)p;                // neighbors
+        memcpy(q, m, p); q += p;
+    }
+    return (size_t)(q - out);
+}
+
+static bool s_okToMqtt = false;
+void setOkToMqtt(bool on) { s_okToMqtt = on; }
+
 size_t encodeData(uint8_t port, const uint8_t* payload, size_t plen, bool wantResponse, uint32_t requestId,
                   uint8_t* out) {
     if (!out) return 0;
@@ -206,6 +283,7 @@ size_t encodeData(uint8_t port, const uint8_t* payload, size_t plen, bool wantRe
     q += plen;
     if (wantResponse) { *q++ = 0x18; *q++ = 0x01; }          // want_response = true
     if (requestId)    { *q++ = 0x35; wr32le(q, requestId); q += 4; }   // request_id, fixed32
+    if (s_okToMqtt)   { *q++ = 0x48; *q++ = 0x01; }          // bitfield (9): bit 0, OK to MQTT
     return (size_t)(q - out);
 }
 

@@ -13,6 +13,9 @@
 #include "settings.h"
 #include "theme.h"
 #include "squachy.h"
+#include "lora_meshtastic.h"
+#include "gnss.h"
+#include "lora_broadcast.h"
 #include <Arduino.h>
 #include <string.h>
 #include <stdio.h>
@@ -32,6 +35,8 @@ enum Id : uint8_t {
     LISTEN, PRESET, TX, HOPS, REGION, CHANNELS,
     NAME, SHORTNAME, ANNOUNCE,
     MSGSOUND,
+    ROLE, OKMQTT,
+    P_ON, P_INT, P_SMART, P_DIST, P_MIN, P_PREC, T_ON, T_INT, N_ON, N_INT,
     DETECT, ONSCREEN,
     LOOKUPS, LK_CALL, LK_OGN, LK_FEED,
     CLEARCHATS, FORGETNAMES,
@@ -121,6 +126,12 @@ Row& add(Id id, const char* label, uint8_t arg = 0) {
     return r;
 }
 void section(const char* title) { Row& r = add(NONE, title); r.section = true; }
+// 30 -> "30 s", 900 -> "15 min", 7200 -> "2 h".
+void spanText(char* out, size_t cap, uint32_t secs) {
+    if (secs < 60)        snprintf(out, cap, "%lu s", (unsigned long)secs);
+    else if (secs < 3600) snprintf(out, cap, "%lu min", (unsigned long)(secs / 60));
+    else                  snprintf(out, cap, "%lu h", (unsigned long)(secs / 3600));
+}
 void onOff(Row& r, bool on) {
     snprintf(r.value, sizeof r.value, "%s", on ? "ON" : "OFF");
     r.valCol = on ? Theme::GREEN : dim(Theme::WHITE, 150);
@@ -203,6 +214,115 @@ void buildMain() {
         Row& r = add(ANNOUNCE, "ANNOUNCE NAME");
         onOff(r, Settings::loraAnnounce());
         snprintf(r.hint, sizeof r.hint, Settings::loraAnnounce() ? "NODEINFO BEFORE THE FIRST TEXT" : "MESHTASTIC SEES A NUMBER");
+    }
+    {
+        // Only the two a handheld can honestly be. The routing roles are not here.
+        Row& r = add(ROLE, "ROLE");
+        const bool mute = Settings::loraRole() != 0;
+        snprintf(r.value, sizeof r.value, "%s", mute ? "CLIENT_MUTE" : "CLIENT");
+        r.valCol = mute ? Theme::AMBER : Theme::CYAN;
+        snprintf(r.hint, sizeof r.hint, mute ? "TELLS THE MESH NOT TO RELAY FOR US" : "A NORMAL MESHTASTIC CLIENT");
+    }
+    {
+        Row& r = add(OKMQTT, "OK TO MQTT");
+        onOff(r, Settings::loraOkMqtt());
+        snprintf(r.hint, sizeof r.hint, Settings::loraOkMqtt() ? "GATEWAYS MAY SHARE OUR PACKETS ONLINE" : "ASKS GATEWAYS NOT TO UPLOAD US");
+    }
+
+
+    // On the public channel (the default key) the rules of include/lora_broadcast.h
+    // apply, and the rows say so rather than show a setting that is not kept.
+    const bool pub = Lora::Chan::primaryIsPublic();
+    section("POSITION");
+    {
+        Row& r = add(P_ON, "SHARE POSITION");
+        onOff(r, Settings::posShare());
+        const bool fix = Gnss::fresh(millis());
+        snprintf(r.hint, sizeof r.hint, fix ? "GPS HAS A FIX. SENT ON THE PRIMARY" : "NO GPS FIX YET: NOTHING SENDS");
+        if (Settings::posShare() && !fix) r.valCol = Theme::AMBER;
+    }
+    {
+        Row& r = add(P_INT, "INTERVAL");
+        r.dim = !Settings::posShare();
+        spanText(r.value, sizeof r.value, Settings::posIntervalSecs());
+        if (pub && Lora::Broadcast::positionSecs(Settings::posIntervalSecs(), true) != Settings::posIntervalSecs())
+            snprintf(r.hint, sizeof r.hint, "PUBLIC KEY: HOURLY AT MOST");
+        else
+            snprintf(r.hint, sizeof r.hint, "AT LEAST THIS OFTEN (15 MIN = STOCK)");
+    }
+    {
+        Row& r = add(P_SMART, "SMART POSITION");
+        r.dim = !Settings::posShare();
+        onOff(r, Settings::posSmart());
+        snprintf(r.hint, sizeof r.hint, "ALSO SEND WHEN YOU HAVE MOVED");
+    }
+    {
+        Row& r = add(P_DIST, "  MOVED FURTHER THAN");
+        r.dim = !Settings::posShare() || !Settings::posSmart();
+        const uint16_t m = Settings::posSmartMeters();
+        if (m >= 1000) snprintf(r.value, sizeof r.value, "%u km", (unsigned)(m / 1000));
+        else           snprintf(r.value, sizeof r.value, "%u m", (unsigned)m);
+        snprintf(r.hint, sizeof r.hint, "100 M = STOCK");
+    }
+    {
+        Row& r = add(P_MIN, "  BUT NOT SOONER THAN");
+        r.dim = !Settings::posShare() || !Settings::posSmart();
+        spanText(r.value, sizeof r.value, Settings::posSmartMinSecs());
+        if (pub && Lora::Broadcast::smartMinSecs(Settings::posSmartMinSecs(), true) != Settings::posSmartMinSecs())
+            snprintf(r.hint, sizeof r.hint, "PUBLIC KEY: 5 MIN AT LEAST");
+        else
+            snprintf(r.hint, sizeof r.hint, "30 S = STOCK");
+    }
+    {
+        Row& r = add(P_PREC, "PRECISION");
+        r.dim = !Settings::posShare();
+        switch (Settings::posPrecision()) {
+            case 32: snprintf(r.value, sizeof r.value, "EXACT"); r.valCol = Theme::AMBER; break;
+            case 19: snprintf(r.value, sizeof r.value, "~45 m"); break;
+            case 16: snprintf(r.value, sizeof r.value, "~364 m"); break;
+            case 13: snprintf(r.value, sizeof r.value, "~2.9 km"); break;
+            default: snprintf(r.value, sizeof r.value, "~23 km"); break;
+        }
+        if (!Lora::Broadcast::positionAllowed(Settings::posPrecision(), pub)) {
+            snprintf(r.hint, sizeof r.hint, "EXACT IS NOT SENT ON THE PUBLIC KEY");
+            r.valCol = Theme::RED;
+        } else {
+            snprintf(r.hint, sizeof r.hint, "HOW CLOSELY THE MESH SEES YOU");
+        }
+    }
+
+    section("TELEMETRY");
+    {
+        Row& r = add(T_ON, "SHARE TELEMETRY");
+        onOff(r, Settings::telShare());
+        snprintf(r.hint, sizeof r.hint, "BATTERY, UPTIME, AIRTIME. PRIMARY");
+    }
+    {
+        Row& r = add(T_INT, "INTERVAL");
+        r.dim = !Settings::telShare();
+        spanText(r.value, sizeof r.value, Settings::telIntervalSecs());
+        if (pub && Lora::Broadcast::telemetrySecs(Settings::telIntervalSecs(), true) != Settings::telIntervalSecs())
+            snprintf(r.hint, sizeof r.hint, "PUBLIC KEY: 30 MIN AT LEAST");
+        else
+            snprintf(r.hint, sizeof r.hint, "30 MIN = STOCK");
+    }
+
+    section("NEIGHBOR INFO");
+    {
+        Row& r = add(N_ON, "SHARE NEIGHBORS");
+        onOff(r, Settings::nbrShare());
+        if (!Lora::Broadcast::neighborInfoAllowed(pub)) {
+            snprintf(r.hint, sizeof r.hint, "NOT SENT ON THE PUBLIC KEY");
+            if (Settings::nbrShare()) r.valCol = Theme::AMBER;
+        } else {
+            snprintf(r.hint, sizeof r.hint, "NODES WE HEAR DIRECTLY. PRIMARY");
+        }
+    }
+    {
+        Row& r = add(N_INT, "INTERVAL");
+        r.dim = !Settings::nbrShare();
+        spanText(r.value, sizeof r.value, Settings::nbrIntervalSecs());
+        snprintf(r.hint, sizeof r.hint, "6 H = STOCK, 4 H IS THE MINIMUM");
     }
 
     section("CHATS");
@@ -553,6 +673,18 @@ void tapRow(const Row& r) {
             Settings::toggleLoraAnnounce();
             if (Settings::loraAnnounce()) Lora::identityChanged();
             break;
+        case P_ON:     Settings::togglePosShare(); break;
+        case P_INT:    Settings::cyclePosInterval(); break;
+        case P_SMART:  Settings::togglePosSmart(); break;
+        case P_DIST:   Settings::cyclePosSmartMeters(); break;
+        case P_MIN:    Settings::cyclePosSmartMinSecs(); break;
+        case P_PREC:   Settings::cyclePosPrecision(); break;
+        case T_ON:     Settings::toggleTelShare(); break;
+        case T_INT:    Settings::cycleTelInterval(); break;
+        case N_ON:     Settings::toggleNbrShare(); break;
+        case N_INT:    Settings::cycleNbrInterval(); break;
+        case ROLE:     Settings::toggleLoraRole(); Lora::identityChanged(); break;
+        case OKMQTT:   Settings::toggleLoraOkMqtt(); Meshtastic::setOkToMqtt(Settings::loraOkMqtt()); break;
         case MSGSOUND: Settings::toggleLoraMsgSound(); break;
         case DETECT:   Settings::cycleLoraDetect(); break;
         case ONSCREEN: Settings::toggleLoraAlerts(); break;

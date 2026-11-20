@@ -107,6 +107,11 @@ void        txPrune();
 // with it filled in -- what the screens use.
 const char* mtPrimary();
 uint8_t     txPick(Proto p);
+// Whether Meshtastic's primary channel -- the preset's own -- is public: on the
+// published default key, or on none. On it this board keeps to what a stock node
+// does on the default channel: no Neighbor Info, no exact position, and the
+// firmware's minimum intervals (include/lora_broadcast.h).
+bool        primaryIsPublic();
 uint8_t     txStep(Proto p);
 bool        txIsDefault(Proto p);
 void        txName(Proto p, uint8_t idx, char* out, size_t cap);
