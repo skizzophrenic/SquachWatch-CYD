@@ -10,6 +10,7 @@ hardware. Outside size is 91.6 × 55 × 24 mm.
 | `squachwatch_freenove_s3_28_print_plate.stl` | Tub and lid side by side as separate pieces, ready to slice |
 | `squachwatch_freenove_s3_28_back.stl` | Just the tub. Print floor-down, no supports |
 | `squachwatch_freenove_s3_28_lid.stl` | Just the lid (front frame). Print face-down, no supports |
+| `squachwatch_freenove_s3_28_gps_bay_*.stl` | The same three, deeper, with an M5Stack Unit GPS standing in the far end (see below) |
 
 ![assembly](preview_assembly.png)
 
@@ -57,3 +58,27 @@ The default part, `print`, renders the tub and the lid as two separate bodies, s
 3. Press the lid straight down until it sits flush. To open it, put a fingernail or a flat tool in the pry notch and lift.
 
 Print in PLA or PETG, with 0.2 mm layers and 3 walls.
+
+## GPS bay version
+
+For the GPS build (`freenove-s3-gps`) with an **M5Stack Unit GPS v1.1**
+inside instead of on a cable:
+
+- The unit **stands on its long edge across the end opposite the USB-C**,
+  its face against the end wall. A low rail keeps it upright and a bar under
+  the lid holds its top edge.
+- Standing, it's about 24 mm tall, so the case is made just deep enough for
+  it (4.7 mm deeper), and the posts and button guides grow to match. It adds
+  only its thickness to the length: 101.2 x 55 x 28.8 mm.
+- **Wiring:** plug the GPS cable into the **UART** connector through its
+  opening, loop it round outside, and feed it back in through the **port just
+  below**. Run it along the wall to the GPS's plug. The UART plug's order is
+  5V, GND, TXD, RXD, not the Grove order: the GPS's TX goes to **RXD**.
+- Sizes are parameters (`gps_l`, `gps_h`, `gps_t`, `gps_room`), set for a
+  unit measured at about 48 x 24 x 8.5 mm; the depth is worked out from them.
+
+```bash
+openscad -D gps_bay=true -o squachwatch_freenove_s3_28_gps_bay_print_plate.stl squachwatch_freenove_s3_28_case.scad
+```
+
+![GPS bay](preview_gps_bay_assembly.png)
