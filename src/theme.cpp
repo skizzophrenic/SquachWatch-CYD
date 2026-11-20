@@ -5082,8 +5082,10 @@ void dimRegion(TFT_eSPI& t, int x, int y, int w, int h, uint8_t amount) {
         t.drawFastHLine(x, yy, w, BG);
 }
 
-static char     s_toastHead[18] = {0};
-static char     s_toastSub[22]  = {0};
+// 18 and 22 used to cut lines short ("Press the trackball to wake" showed
+// as "Press the trackball t"); drawToast() keeps the box on the screen.
+static char     s_toastHead[24] = {0};
+static char     s_toastSub[40]  = {0};
 static uint16_t s_toastAccent   = 0;
 static uint32_t s_toastUntil    = 0;
 
@@ -5126,8 +5128,13 @@ void drawToast(TFT_eSPI& t, uint32_t now) {
     if (s_toastSub[0]) {
         bodyFontOn(t);
         t.setTextColor(WHITE, BG);
-        t.setCursor(bx + (bw - t.textWidth(s_toastSub)) / 2, by + 31);
-        t.print(s_toastSub);
+        // A narrow panel (the StickS3, the watch) can't fit the longest
+        // lines: drop letters off the end rather than spill past the box.
+        char sub[sizeof(s_toastSub)];
+        strcpy(sub, s_toastSub);
+        for (size_t n = strlen(sub); n > 1 && t.textWidth(sub) > bw - 8; ) sub[--n] = 0;
+        t.setCursor(bx + (bw - t.textWidth(sub)) / 2, by + 31);
+        t.print(sub);
         bodyFontOff(t);
     }
 }
