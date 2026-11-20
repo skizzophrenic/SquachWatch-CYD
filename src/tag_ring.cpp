@@ -1,7 +1,7 @@
 // SquachWatch-CYD — RING. See include/tag_ring.h.
 #include "tag_ring.h"
 
-#if SQW_RING
+#if SQW_RING && defined(ESP_PLATFORM)
 #include <Arduino.h>
 #include <NimBLEDevice.h>
 #include <string.h>
@@ -327,6 +327,45 @@ Result poll(DetectionEngine& eng) {
     s_done = false;
     return s_result;
 }
+
+}  // namespace TagRing
+#endif  // SQW_RING on a board
+
+// ---- the emulator's RING: no radio to connect with, so the tracker always
+// answers. A tap shows the same toast the board does, a moment later.
+#if SQW_RING && !defined(ESP_PLATFORM)
+#include <Arduino.h>
+#include <string.h>
+
+namespace TagRing {
+
+static bool     s_busy = false;
+static uint32_t s_at   = 0;
+
+void noteSeen(const uint8_t*, uint8_t, bool) {}
+bool latest(uint8_t*) { return false; }
+bool busy() { return s_busy; }
+bool start(DetectionEngine&, const uint8_t*) {
+    if (s_busy) return false;
+    s_busy = true;
+    s_at   = millis();
+    return true;
+}
+Result poll(DetectionEngine&) {
+    if (!s_busy || millis() - s_at < 900) return Result::NONE;
+    s_busy = false;
+    return Result::RANG;
+}
+void armFind(const char*) {}
+bool findWanted() { return false; }
+void noteNamed(const uint8_t*, uint8_t, const char*, bool, const uint8_t*, size_t) {}
+bool takeFound(uint8_t*) { return false; }
+
+}  // namespace TagRing
+#endif  // SQW_RING in the emulator
+
+#if SQW_RING
+namespace TagRing {
 
 const char* title(Result r) {
     switch (r) {

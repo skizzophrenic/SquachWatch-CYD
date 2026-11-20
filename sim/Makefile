@@ -105,6 +105,7 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/pet.cpp \
             $(SRC)/ui_log.cpp \
             $(SRC)/ui_alert.cpp \
+            $(SRC)/tag_ring.cpp \
             $(SRC)/ui_settings.cpp \
             $(SRC)/ui_boot.cpp \
             $(SRC)/ui_colorcheck.cpp \
@@ -293,7 +294,7 @@ WASM_TDECK_SRCS := $(UI_SRCS) $(SRC)/main.cpp $(SRC)/cap_touch.cpp $(SRC)/touch_
              $(SIM_DIR)/lora_sim.cpp $(SIM_DIR)/gt911_sim.cpp $(SIM_DIR)/main_wasm.cpp $(SIM_DIR)/detection_sim.cpp \
              $(SENSE_SRCS)
 WASM_TDECK_FLAGS := $(filter-out -DSQUACHSIM_BOOT=1,$(WASM_FLAGS)) \
-             -DTDECK_PLUS=1 -DSQUACH_LORA=1 -DCYD_GPS=1 -DSQUACHSIM=1
+             -DTDECK_PLUS=1 -DSQUACH_LORA=1 -DCYD_GPS=1 -DSQW_RING=1 -DSQUACHSIM=1
 
 wasm-tdeck: $(WASM_TDECK_OUT)
 
@@ -316,7 +317,7 @@ WASM_TWATCH_SRCS := $(UI_SRCS) $(SRC)/main.cpp $(SRC)/cap_touch.cpp $(SRC)/touch
              $(SRC)/wardrive.cpp $(SIM_DIR)/lora_sim.cpp $(SIM_DIR)/main_wasm.cpp $(SIM_DIR)/detection_sim.cpp \
              $(SENSE_SRCS)
 WASM_TWATCH_FLAGS := $(filter-out -DSQUACHSIM_BOOT=1,$(WASM_FLAGS)) \
-             -DTWATCH_S3=1 -DSQUACH_LORA=1 -DSQUACHSIM=1
+             -DTWATCH_S3=1 -DSQUACH_LORA=1 -DSQW_RING=1 -DSQUACHSIM=1
 
 wasm-twatch: $(WASM_TWATCH_OUT)
 
@@ -328,7 +329,7 @@ $(WASM_TWATCH_OUT): $(WASM_TWATCH_SRCS) $(wildcard $(SIM_DIR)/*.h) $(wildcard $(
 WASM_CARD_OUT  := $(WASM_DIR)/squachsim-cardputer.js
 WASM_CARD_SRCS := $(WASM_SRCS)
 WASM_CARD_FLAGS := $(filter-out -DSQUACHSIM_BOOT=1,$(WASM_FLAGS)) \
-             -DCARDPUTER_ADV=1 -DSQW_SMALL=1 -DSQUACHSIM=1
+             -DCARDPUTER_ADV=1 -DSQW_SMALL=1 -DSQW_RING=1 -DSQUACHSIM=1
 
 wasm-cardputer: $(WASM_CARD_OUT)
 
