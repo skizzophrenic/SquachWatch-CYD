@@ -1375,6 +1375,9 @@ static bool     s_tdeckBackKey = false;    // Backspace off a text screen
 static const uint32_t TB_ROLL_GAP_MS = 400;   // a pause this long starts a new roll
 static bool stickCursorShown(uint32_t now);
 static bool stickListBusy();
+#if defined(TDECK_PLUS)
+static bool tdeckPocketBall(bool pressed, uint32_t pressAt, uint32_t now);
+#endif
 static void tdeckBallBegin() {
     static const int pins[4] = { TB_UP, TB_DOWN, TB_LEFT, TB_RIGHT };
     static void (*const isr[4])() = { tbIsrUp, tbIsrDown, tbIsrLeft, tbIsrRight };
@@ -1449,6 +1452,11 @@ static SmallKeys smallKeysRead() {
             if (g_ballTrace) Serial.printf("[ball] press%s\n", s_tbPressShowOnly ? " (shows the cursor)" : "");
         }
     }
+#if defined(TDECK_PLUS)
+    // POCKET MODE: the press may be its own (held 2 s, or waking a dark
+    // screen); then nothing else sees it, nor the ball rolled in the dark.
+    if (tdeckPocketBall(s_tbPress, s_tbPressAt, now)) { s_tbAcc = 0; return SmallKeys{}; }
+#endif
     k.press = s_tbPress && !s_tbPressShowOnly;
     return k;
 }
@@ -2874,6 +2882,13 @@ static bool s_screenDimmed = false;
 #else
 #define SQW_BOOT_BTN 0
 #endif
+// POCKET MODE: the boards with a button for it. The T-Deck uses its
+// trackball, held 2 s (tdeckPocketBall).
+#if defined(TWATCH_S3) || SQW_BOOT_BTN || defined(TDECK_PLUS)
+#define SQW_POCKET 1
+#else
+#define SQW_POCKET 0
+#endif
 #if defined(TWATCH_S3)
 // A watch goes dark, not dim. When the screen timeout lands, the backlight
 // goes off and the ST7789 is put to sleep (DISPOFF, SLPIN: about a milliamp
@@ -2886,7 +2901,7 @@ static bool s_panelAsleep = false;
 static bool     s_onUsb = true;
 static bool s_radiosResting = false;   // the duty cycle's state; see twatchRadioTick()
 #endif
-#if defined(TWATCH_S3) || SQW_BOOT_BTN
+#if SQW_POCKET
 // POCKET MODE. A crown press (or the CYDs' BOOT button) with the screen on
 // turns it off at once, cable or not, and only another press turns it back
 // on: a touch does not, so a board in a pocket or a bag cannot be woken by
@@ -2901,6 +2916,8 @@ static uint32_t s_pocketNoteUntil = 0;
 static const uint32_t POCKET_NOTE_MS = 4000;
 #if defined(TWATCH_S3)
 static const char* const POCKET_HOW = "Press the crown to wake";
+#elif defined(TDECK_PLUS)
+static const char* const POCKET_HOW = "Press the trackball to wake";
 #else
 static const char* const POCKET_HOW = "Press BOOT again to wake";
 #endif
@@ -2927,6 +2944,30 @@ static void pocketPress(uint32_t now) {
         Serial.println("[pocket] on");
     }
 }
+#if defined(TDECK_PLUS)
+// The T-Deck has no free button (its BOOT is the trackball's press), so the
+// ball held 2 s is the press that turns the screen off, and while it is off
+// any press of the ball turns it back on. A press that did either is spent:
+// the UI never sees it, nor anything until the ball comes back up. The press
+// that starts a hold is still a normal press at first -- on the main screen,
+// where the cursor is usually hidden, that only shows the cursor.
+static const uint32_t TB_POCKET_HOLD_MS = 2000;
+static bool s_tbPocketSpent = false;
+static bool tdeckPocketBall(bool pressed, uint32_t pressAt, uint32_t now) {
+    if (!pressed) {
+        const bool spent = s_tbPocketSpent;
+        s_tbPocketSpent = false;
+        return spent || s_crownDark;
+    }
+    if (s_tbPocketSpent) return true;
+    if (s_crownDark || now - pressAt >= TB_POCKET_HOLD_MS) {
+        s_tbPocketSpent = true;
+        pocketPress(now);
+        return true;
+    }
+    return false;
+}
+#endif
 #if defined(SQUACHSIM_BOOT)
 // The browser emulator's BOOT button (sw_boot in sim/main_wasm.cpp): the
 // short press bootButtonTick() hands over on a board. That code reads GPIO0,
@@ -2982,6 +3023,7 @@ static void applyBrightness() {
     // select. Three shots in the foot from what looks like dead code.
     ledcWrite(TFT_BL, duty);
 #elif defined(TDECK_PLUS)
+    if (s_crownDark && s_screenDimmed) duty = 0;   // POCKET MODE is OFF, whatever DIM LEVEL says
     tdeckBacklight(duty);   // a stepped driver chip, not a PWM pin
 #else
 #if SQW_BOOT_BTN
@@ -6697,7 +6739,7 @@ static inline void pushFrame(int x, int y) {
     {
         static bool skipped = false;
         bool dark = s_screenDimmed && Settings::dimLevel() == 0;
-#if SQW_BOOT_BTN
+#if SQW_POCKET
         if (s_crownDark && s_screenDimmed) dark = true;
 #endif
         if (dark) { skipped = true; return; }
@@ -12161,7 +12203,7 @@ void loop() {
         // (see Settings::screenTimeoutSec), unless it is set to NEVER.
         if (s_onUsb) wantDim = false;
 #endif
-#if defined(TWATCH_S3) || SQW_BOOT_BTN
+#if SQW_POCKET
         // POCKET MODE, which beats the cable, the desk and a timeout of NEVER.
         // Only the button ends it (pocketPress); a touch never does.
         //
@@ -12184,7 +12226,7 @@ void loop() {
         if (wantDim != s_screenDimmed) {
             s_screenDimmed = wantDim;
             applyBrightness();
-#if defined(TWATCH_S3) || SQW_BOOT_BTN
+#if SQW_POCKET
             if (s_crownDark) Serial.println(wantDim ? "[pocket] screen dark" : "[pocket] screen lit for an alert");
 #endif
         }
