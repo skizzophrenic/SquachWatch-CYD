@@ -93,6 +93,9 @@ bool sendText(Proto p, const char* name, const char* text, int8_t dbm, int16_t c
 // FORGET NAMES empties the remembered Meshtastic names and their stored copy
 // (the 'loranames' NVS namespace).
 void identityChanged();
+// BEACON changed (LORA SETTINGS or the console): the next one goes out within
+// seconds rather than a whole interval from the last.
+void beaconChanged();
 void clearChats();
 void forgetNames();
 // A Meshtastic direct message to node `to` (include/lora_dm.h): queued, its
@@ -285,6 +288,7 @@ inline void setMode(Mode) {}
 inline void applyListen(uint8_t) {}
 inline bool sendText(Proto, const char*, const char*, int8_t, int16_t = -1) { return false; }
 inline void identityChanged() {}
+inline void beaconChanged() {}
 inline void clearChats() {}
 inline void forgetNames() {}
 inline uint32_t sendDm(Proto, uint32_t, const char*) { return 0; }

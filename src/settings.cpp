@@ -233,6 +233,10 @@ static bool     s_loraAnnounce = true;
 static uint8_t  s_loraDetect   = 0;   // ON
 static bool     s_loraAlerts   = true;
 static uint8_t  s_loraHops     = 3;
+#ifndef LORA_BEACON_DEFAULT_MIN
+#define LORA_BEACON_DEFAULT_MIN 0
+#endif
+static uint16_t s_loraBeacon   = LORA_BEACON_DEFAULT_MIN;
 static bool     s_loraMsgSnd   = true;
 static char     s_loraMtPre[16] = { 0 };   // "" = LongFast
 static char     s_loraTxCh[2][24] = { { 0 }, { 0 } };   // [0] Meshtastic, [1] MeshCore; "" = default
@@ -502,6 +506,13 @@ bool loraAlerts()       { return s_loraAlerts; }
 void toggleLoraAlerts() { s_loraAlerts = !s_loraAlerts; s_prefs.putBool("loraAlrt", s_loraAlerts); }
 uint8_t loraHops() { return s_loraHops; }
 void cycleLoraHops() { s_loraHops = (uint8_t)(s_loraHops >= 7 ? 1 : s_loraHops + 1); s_prefs.putUChar("loraHops", s_loraHops); }
+static uint16_t clampBeacon(uint32_t m) {
+    if (!m) return 0;
+    if (m < LORA_BEACON_MIN_MIN) return LORA_BEACON_MIN_MIN;
+    return (uint16_t)(m > LORA_BEACON_MAX_MIN ? LORA_BEACON_MAX_MIN : m);
+}
+uint16_t loraBeaconMin() { return s_loraBeacon; }
+void setLoraBeaconMin(uint16_t minutes) { s_loraBeacon = clampBeacon(minutes); s_prefs.putUShort("loraBcn", s_loraBeacon); }
 bool loraMsgSound()       { return s_loraMsgSnd; }
 void toggleLoraMsgSound() { s_loraMsgSnd = !s_loraMsgSnd; s_prefs.putBool("loraMsgSnd", s_loraMsgSnd); }
 const char* loraMtPreset() { return s_loraMtPre; }
@@ -728,6 +739,7 @@ void load() {
     s_loraAlerts   = s_prefs.getBool("loraAlrt", true);
     s_loraHops     = s_prefs.getUChar("loraHops", 3);
     if (s_loraHops < 1 || s_loraHops > 7) s_loraHops = 3;
+    s_loraBeacon   = clampBeacon(s_prefs.getUShort("loraBcn", LORA_BEACON_DEFAULT_MIN));
     s_loraMsgSnd   = s_prefs.getBool("loraMsgSnd", true);
     s_loraMtPre[0] = '\0';
     if (s_prefs.isKey("loraMtPre")) s_prefs.getString("loraMtPre", s_loraMtPre, sizeof s_loraMtPre);
