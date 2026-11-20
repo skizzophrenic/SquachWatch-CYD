@@ -32,6 +32,19 @@ CYAN  = (0, 214, 214)
 # ---- the clips ----
 
 CLIPS = {
+    # v1.49.0 "Ring Ding Dong", 320x240 doubled: a Blender opener (3D
+    # Squachy, a T-Deck showing the emulator's real alert, an AirTag going
+    # ding dong; sim/out/ring-3d holds its frames), then RING on the AirTag
+    # alert (squachsim-ring from build_ring_sim.sh: SQW_RING=1, as the S3 and
+    # C5 boards), the RINGING toast, the T-Deck's POCKET MODE note, and
+    # TERMINAL MODE, which now rests between catches.
+    "ring-ding-dong": [
+        ("_png", 0, 0, [], {"_DIR": "out/ring-3d"}, 900, "DING DONG! WHO'S FOLLOWING WHO?"),
+        ("alert", 40, 30, ["--alert", "6"], {"_SIM": "squachsim-ring"}, 1400, "A TRACKER TAGGING ALONG? HIT RING."),
+        ("clear", 60, 30, ["--bg", "5"], {"_SIM": "squachsim-ring", "SQUACHSIM_BATT": "80", "SQUACHSIM_TOAST": "RINGING|Listen for a beep"}, 1400, "IT BEEPS. NOW GO FIND IT."),
+        ("clear", 60, 30, ["--bg", "10"], {"SQUACHSIM_BATT": "80", "SQUACHSIM_TOAST": "POCKET MODE|Press the trackball to wake"}, 1400, "T-DECK: HOLD THE BALL 2 SECONDS. LIGHTS OUT."),
+        ("clear", 60, 40, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_BATT": "80"}, 1600, "TERMINAL MODE NAPS WHEN YOU DO."),
+    ],
     # v1.48.0 "Every Breath You Take", on the Tab5's 640x360 (its own screens,
     # squachsim-tab5 from build_tab5_sim.sh: "_SIM" picks the binary): the
     # four HUMAN SENSING pages, then VITALS on the Freenove S3 3.5in (480x320)
@@ -527,6 +540,16 @@ def render(clip):
     os.makedirs(out)
     man = []
     for i, (screen, warm, n, extra, env, hold, caption) in enumerate(CLIPS[clip]):
+        if screen == "_png":
+            # Frames made elsewhere (a Blender opener): every PNG in "_DIR",
+            # a folder under sim/out, in name order, scaled to the clip.
+            src = env["_DIR"]
+            files = sorted(f for f in os.listdir(os.path.join(HERE, src)) if f.endswith(".png"))
+            if not files:
+                sys.exit("scene %d: no PNG frames in %s" % (i, src))
+            for k, fn in enumerate(files):
+                man.append({"png": src + "/" + fn, "ms": MS if k < len(files) - 1 else MS + hold, "caption": caption})
+            continue
         if isinstance(n, list):
             # A scroll sweep: one frame per value.
             for k, sc in enumerate(n):
@@ -599,6 +622,17 @@ def encode(clip):
     raws, ims = {}, []
     bands = {}
     for f in man:
+        if "png" in f:
+            im = Image.open(os.path.join(HERE, f["png"])).convert("RGB")
+            if im.size != (cw * zoom, ch * zoom):
+                im = im.resize((cw * zoom, ch * zoom), Image.LANCZOS)
+            if f["caption"] not in bands:
+                bands[f["caption"]] = caption_band(f["caption"], im.width)
+            page = Image.new("RGB", (im.width, im.height + BAND), (0, 0, 0))
+            page.paste(im, (0, 0))
+            page.paste(bands[f["caption"]], (0, im.height))
+            ims.append(page)
+            continue
         if f["raw"] not in raws:
             raws[f["raw"]] = open(os.path.join(out, f["raw"]), "rb").read()
         b = raws[f["raw"]]
@@ -622,12 +656,22 @@ def encode(clip):
         page.paste(im, (0, 0))
         page.paste(bands[f["caption"]], (0, im.height))
         ims.append(page)
-    # One palette for the whole clip, so nothing shimmers between scenes.
-    sheet = Image.new("RGB", (ims[0].width, ims[0].height * len(ims)))
-    for i, im in enumerate(ims):
-        sheet.paste(im, (0, ims[0].height * i))
-    ref = sheet.quantize(colors=256, dither=Image.NONE)
-    frames = [im.quantize(palette=ref, dither=Image.NONE) for im in ims]
+    # One palette for the emulator's frames, so nothing shimmers between
+    # scenes; rendered PNG frames (3D, all gradients) get one of their own.
+    # 128 colours for those: every pixel of a moving 3D shot changes each
+    # frame, and at 256 the v1.49.0 opener alone was 5.9 MB.
+    def palette(group, colors):
+        sheet = Image.new("RGB", (group[0].width, group[0].height * len(group)))
+        for i, im in enumerate(group):
+            sheet.paste(im, (0, group[0].height * i))
+        return sheet.quantize(colors=colors, dither=Image.NONE)
+    is_png = ["png" in f for f in man]
+    refs = {}
+    for kind in (False, True):
+        group = [im for im, p in zip(ims, is_png) if p == kind]
+        if group:
+            refs[kind] = palette(group, 128 if kind else 256)
+    frames = [im.quantize(palette=refs[p], dither=Image.NONE) for im, p in zip(ims, is_png)]
     gif = gif_path(clip)
     os.makedirs(os.path.dirname(gif), exist_ok=True)
     frames[0].save(gif, save_all=True, append_images=frames[1:],

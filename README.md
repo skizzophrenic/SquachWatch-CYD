@@ -47,6 +47,10 @@ detector. Detection never changes between them; only the screen does.
   graph of how busy the airwaves are, **COUNTS** by kind, and the **LATEST**
   catch. Tap a line (or LATEST) for WATCH, HUNT, INFO or IGNORE. Alerts still
   take the full screen. It stays on through restarts until you change it.
+  Left alone for 3 seconds it rests: 4 redraws a second, then 2 after 30
+  seconds with the processor slowed down. Scanning carries on at full speed,
+  and a touch, a key or a new catch wakes it at once. (Not on the Tab5 or
+  the 7" CrowPanel.)
 
 From the main screen MODE opens the desk; MODE on the desk goes to TERMINAL
 MODE; MODE there brings Squachy back. (On the StickS3 that button is FOB, its
@@ -412,6 +416,7 @@ the screen.
 | **TYPE FILTER** | Settings | Whole detection types on or off. An off type is dropped, not logged |
 | **MY ALERTS** | Settings | Up to eight WiFi names of your own to alert on, each with an optional label for the alert card. Plain text catches names that start with it; `*` stands for anything and `?` for one character, so `veh*` catches `veh912` and `veh9??` catches `veh901`. Patterns need at least two fixed characters. A duress wipe clears the list |
 | **Watch list** | Hold a LOG row, then WATCH | When that device turns up you get **LOCKED ON**: a radar scope with its signal and whether it is getting closer, which stays until you tap it. A watched device always gets through AUTO SNOOZE and spam floods. While one is set, Settings shows a **WATCHING** row with its name; tap it to stop watching |
+| **RING** | RING on a tracker's alert card, or hold its LOG row → RING IT | On the S3 and C5 boards, for an AirTag, Samsung, Google or Tile tracker: the board connects for a few seconds and asks it to play its sound, then says how it went (RINGING, NO ANSWER, NO SOUND or IT SAID NO). Trackers only beep for strangers while they are away from their owner's phone, so one sitting next to its owner will usually say no. The idea came from JBoHack and Hedge |
 | **HUNT MODE** | HUNT on the alert card, or hold a LOG row or a SCAN result | A signal gauge to walk the device down. While a hunt runs, the HUNTING pill on the main screen takes you back to it; STOP HUNT ends it, and so does a tap on the **HUNTING** row in Settings. A phone changes its Bluetooth address every 15 minutes or so: hunting one picked from SCAN, the board notices when it goes quiet and a new one of its kind turns up, and asks whether to follow it |
 | **Phone labels** | SCAN → BLE | Devices that give no name are labelled from their broadcast when it says what they are: (iPhone?), (Android?), (Samsung?), (AirPods?), (Apple). Best guesses, hence the question marks. iPhones never broadcast their own name over Bluetooth |
 | **Spam floods** | Automatic | A storm of fake tags (piles of addresses heard for a moment and never again) gets one alert with a SPAM: N FAKE TAGS banner, then quiet logging until it dies down |
@@ -449,7 +454,8 @@ to three characters. It changes the screen only; nothing stored changes.
 - **BOOT** on the CYD boards: a short press turns the screen off, and
   only another press turns it on (**POCKET MODE**: a touch won't, so a
   board in a pocket stays dark). Alerts still light it for their card,
-  then it goes dark again.
+  then it goes dark again. On the T-Deck Plus, hold the **trackball** down
+  for 2 seconds instead; a press of it wakes the screen.
 - **The battery lamp** on the Freenove ESP32-S3 2.8" and 3.5" and the
   T-Watch: a lava lamp under the menu button, filled to the charge.
   Bubbles and a rainbow on the cable, a flicker under 10%. Boards with no
@@ -842,6 +848,9 @@ SquachWatch-CYD/
 - AirTag manufacturer-data format: public Apple FindMy spec. The AirTag
   payload check is ported from [nyanBOX](https://github.com/jbohack/nyanBOX)
   by **jbohack** (MIT).
+- RING, making a tracker play its sound: the idea came from **JBoHack**
+  and **Hedge**. The sound commands are the ones
+  [AirGuard](https://github.com/seemoo-lab/AirGuard) (seemoo-lab) documents.
 - AWOK 2.4" board port (ESP32-Marauder V6.1 hardware): **bkbroiler**,
   who did the actual pin-mapping and shared-bus touch-calibration work
   that made this board possible.
