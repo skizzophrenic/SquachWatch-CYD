@@ -14,7 +14,8 @@
 //     numbers once a second (SenseStore, include/sense_store.h).
 // Notes go to the console as "[sense] ..."; nothing is saved.
 //
-// Console (SENSE <cmd>): cal | win <ms> | caltime <ms> | hold <ms> | pingms <ms> | rates | stat | help
+// Console (SENSE <cmd>): cal | win <ms> | caltime <ms> | hold <ms> | pingms <ms> | rates | stat | ragnar ... | help
+// The Ragnar RuSense link (SENSE RAGNAR ...) is sense_ragnar.cpp.
 // The Tab5 has its own engine (sense_tab5.cpp): its radio is the C6, over ESP-Hosted.
 #if defined(SENSE_CYD_APP) && !defined(TAB5)
 #include <Arduino.h>
@@ -27,6 +28,7 @@
 #include "sense_store.h"
 #include "settings.h"
 #include "csi_motion_model.h"
+#include "sense_ragnar.h"
 #include "detection.h"   // g_sniffMuted
 #if SENSE_RICH
 #include "csi_vitals.h"
@@ -572,6 +574,7 @@ static void sendStatus(uint32_t now) {
   r.mode = s_mode; r.rate = s_rate; r.chan = s_chan; r.live = s_live; r.rssi = s_rssi;
   r.drop = s_dropped; r.presence = s_presence;
   SenseStore::status(r, millis());
+  SenseRagnar::report(r);
 }
 
 static void sendRouter(uint32_t now) {
@@ -599,7 +602,7 @@ static void sendStat(uint32_t now) {
 }
 
 static void help() {
-  note("SENSE <cmd>: cal | win <ms> | caltime <ms> | hold <ms> | pingms <ms> | rates | stat | joins | wrongpass | help");
+  note("SENSE <cmd>: cal | win <ms> | caltime <ms> | hold <ms> | pingms <ms> | rates | stat | joins | wrongpass | ragnar ... | help");
 }
 
 static void command(char* line) {
@@ -644,6 +647,9 @@ static void command(char* line) {
     strncpy(s_pass, "squachwatch-wrong-password", sizeof s_pass - 1);
     note("bench: joining with a wrong password");
     startJoin();
+  } else if (!strcasecmp(line, "ragnar")) {
+    static char empty[1] = "";
+    SenseRagnar::command(arg ? arg : empty);
   } else if (!strcasecmp(line, "help") || !strcmp(line, "?")) {
     help();
   } else {
@@ -734,6 +740,7 @@ void senseCydCommand(const char* cmd) {
   char b[160];
   strncpy(b, cmd, sizeof b - 1); b[sizeof b - 1] = 0;
   command(b);
+  memset(b, 0, sizeof b);   // SENSE RAGNAR's token goes no further than Settings
 }
 
 // The detector has already let go of the radio (startUpdateRadio). ssid
@@ -766,7 +773,7 @@ void senseCydStart(const char* ssid, const char* pass) {
   resetModels();
   note("HUMAN SENSING on: heap %lu, largest block %lu", (unsigned long)ESP.getFreeHeap(),
        (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-  if (s_ssid[0]) startJoin();
+  if (s_ssid[0]) { startJoin(); SenseRagnar::start(); }
   else note("no saved WiFi network: add one in SETTINGS > WIFI NETWORKS");
 }
 
@@ -774,6 +781,7 @@ void senseCydStart(const char* ssid, const char* pass) {
 // no ping. The caller hands it back to the detector (stopUpdateRadio).
 void senseCydStop() {
   if (!s_running) return;
+  SenseRagnar::stop();   // before the disconnect: its request in flight fails fast
   stopPing(); csiStop(); s_haveAp = false;
 #if SENSE_RICH
   promiscOff();

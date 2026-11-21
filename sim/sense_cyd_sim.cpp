@@ -21,6 +21,8 @@
 #include <string.h>
 #include "sense_cyd.h"
 #include "sense_store.h"
+#include "sense_ragnar.h"
+#include "settings.h"
 #if SENSE_RICH
 #include "sense_vitals.h"
 #include "ui_sensing_cyd.h"
@@ -110,7 +112,7 @@ void simSenseBegin(uint32_t now) {
     s_head = s_count = 0;
 #if SENSE_RICH
     // SQUACHSIM_PAGE=1..3: SCOPE, SNEAK or VITALS instead of SENSING.
-    if (const char* pg = getenv("SQUACHSIM_PAGE")) for (int k = atoi(pg) & 3; k > 0; k--) uiSensingSwipe(1);
+    if (const char* pg = getenv("SQUACHSIM_PAGE")) for (int k = atoi(pg) % 5; k > 0; k--) uiSensingSwipe(1);
 #endif
     if (s_room == R_NOWIFI) { s_next = now; return; }
     const Room keep = s_room;
@@ -183,3 +185,31 @@ static void vitStep(uint32_t now) {
 void senseCydStop()    { s_running = false; }
 bool senseCydRunning() { return s_running; }
 void senseCydTick()    { if (s_running) simSenseStep(millis()); }
+
+// The Ragnar RuSense link (include/sense_ragnar.h), DEMO: a mesh that agrees
+// with the room this file plays. SQUACHSIM_MESH=off shows the unlinked page,
+// SQUACHSIM_MESH=offline a Ragnar that does not answer.
+namespace SenseRagnar {
+static const char* meshEnv() { const char* e = getenv("SQUACHSIM_MESH"); return e ? e : "on"; }
+void start() {}
+void stop() {}
+void report(const SenseReport&) {}
+void command(char*) {}
+uint8_t linkMode()   { return strcmp(meshEnv(), "off") ? LINK_BOTH : LINK_OFF; }
+bool    configured() { return linkMode() != LINK_OFF; }
+bool    pulling()    { return configured(); }
+const char* trouble() { return strcmp(meshEnv(), "offline") ? "" : "OFFLINE"; }
+bool view(View& v, uint32_t) {
+    // The MESH page prints the saved host: give the DEMO one.
+    if (configured() && !Settings::ragnarHost()[0]) Settings::setRagnar("ragnar.local", "demo");
+    if (!configured() || trouble()[0]) return false;
+    const SenseReport& s = SenseStore::last();
+    v = View{};
+    v.ok = true; v.present = s.presence || s.state == SENSE_STATE_MOTION;
+    v.people = v.present ? 1 : 0; v.conf = v.present ? 97 : 12; v.model = true; v.vote = v.present;
+    v.hr = v.present ? 64 : -1; v.br10 = v.present ? 142 : -1; v.up = 3; v.nodes = 3;
+    v.sightAgo = v.present ? 0 : 420; v.sightS = v.present ? 38 : 95;
+    strcpy(v.motion, v.present ? "present_still" : "absent");
+    return true;
+}
+}  // namespace SenseRagnar

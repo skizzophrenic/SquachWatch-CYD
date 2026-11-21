@@ -553,12 +553,15 @@ void pollSerial() {
     // A line buffer rather than a parser. Anything that is not the one
     // command is answered and dropped -- this is a debug port, and silence
     // in response to a typo is worse than a line of help.
-#if defined(TAB5) && defined(SENSE_CYD_APP)
-    static char line[112];   // WIFISAVE <32-byte name><TAB><64-byte password>
+#if defined(SENSE_CYD_APP)
+    // WIFISAVE <32-byte name><TAB><64-byte password>, and SENSE RAGNAR <host>
+    // <token>, whose 32-character token alone overflows the 48 below.
+    static char line[112];
 #else
     static char line[48];
 #endif
     static uint8_t len = 0;
+    static bool    over = false;   // this line ran past the buffer
 
     while (Serial.available() > 0) {
         const int c = Serial.read();
@@ -566,11 +569,22 @@ void pollSerial() {
         if (c == '\r') continue;
         if (c != '\n') {
             if (len < sizeof(line) - 1) line[len++] = (char)c;
+            else over = true;
             continue;   // keep reading; an over-long line is truncated, not split
         }
         line[len] = '\0';
         len = 0;
+        const bool wasOver = over;
+        over = false;
         if (line[0] == '\0') continue;
+        // A secret cut short is worse than none: a truncated password or
+        // token saves without complaint and then fails every time. Refuse
+        // those two whole instead of running them truncated.
+        if (wasOver && (strncasecmp(line, "WIFISAVE ", 9) == 0 || strncasecmp(line, "SENSE RAGNAR ", 13) == 0)) {
+            memset(line, 0, sizeof line);
+            Serial.printf("[console] line too long (over %u characters): not saved\n", (unsigned)(sizeof(line) - 1));
+            continue;
+        }
         // Locked means locked here too -- otherwise the lock screen is a door
         // with a USB cable propped against it.
         if (Security::locked()) {
@@ -578,10 +592,14 @@ void pollSerial() {
             continue;
         }
 #if defined(TAB5) && defined(SENSE_CYD_APP)
+        if (strcasecmp(line, "C6UPDATE") == 0) { Tab5Radio::g_c6UpdateConsole = true; continue; }   // bench
+#endif
+#if defined(SENSE_CYD_APP)
         // WIFISAVE <name><TAB><password>: the Tab5 has no WIFI NETWORKS screen
         // yet, so tools/tab5_wifi.py sends this (asking for the password
-        // without showing it). Never echoed; the buffer is wiped after.
-        if (strcasecmp(line, "C6UPDATE") == 0) { Tab5Radio::g_c6UpdateConsole = true; continue; }   // bench
+        // without showing it); on the other boards it saves a network for
+        // HUMAN SENSING without the on-screen keyboard. Never echoed; the
+        // buffer is wiped after.
         if (strcasecmp(line, "WIFI FORGET") == 0) {   // the USE network out of the list
             const uint8_t before = OtaWifi::savedCount();
             OtaWifi::forget();
@@ -663,7 +681,11 @@ void pollSerial() {
         if (strcasecmp(line, "SENSE SLEEP") == 0) { g_senseConsole = 6; continue; }   // the SLEEP button
         if (strcasecmp(line, "SENSE WAKE") == 0)  { g_senseConsole = 7; continue; }
         if (strcasecmp(line, "WIFI ADD") == 0)    { g_senseConsole = 8; continue; }   // the add-a-network screen (its scan), for the bench
-        if (strncasecmp(line, "SENSE ", 6) == 0) { ::senseCydCommand(line + 6); continue; }
+        if (strncasecmp(line, "SENSE ", 6) == 0) {
+            ::senseCydCommand(line + 6);
+            memset(line, 0, sizeof line);   // SENSE RAGNAR carries the token
+            continue;
+        }
 #endif
         if (strcasecmp(line, "INVERT") == 0) { g_consoleInvert = true; continue; }
         if (strcasecmp(line, "ADC") == 0)    { g_consoleAdc = true; continue; }

@@ -285,6 +285,15 @@ namespace Settings {
     // restart comes back to it. Saved when the page is turned.
     uint8_t    sensePage();
     void       setSensePage(uint8_t p);
+    // The Ragnar RuSense link (include/sense_ragnar.h): Ragnar's host[:port],
+    // a CYD device token from Ragnar, and which way it runs (0 OFF, 1 PULL,
+    // 2 PUSH, 3 BOTH). Set over the console (SENSE RAGNAR). Keys "rgHost",
+    // "rgTok" and "rgLink"; an empty host or token removes its key.
+    const char* ragnarHost();
+    const char* ragnarToken();
+    uint8_t     ragnarLink();
+    void        setRagnar(const char* host, const char* token);
+    void        setRagnarLink(uint8_t mode);
     // EXT SCREEN (the Cardputer ADV): a second panel on the EXT header shows
     // the main scene, and the built-in screen is left for the menus.
     bool       extScreen();

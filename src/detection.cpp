@@ -147,16 +147,17 @@ static inline void setSniffChannel(uint8_t ch) { esp_wifi_set_channel(ch, WIFI_S
 static inline void rawScanDelete()             { WiFi.scanDelete(); }
 #endif
 
-// Whether the Bluetooth stack is up. Always, once init() has run, on a board
-// with its own controller. On the Tab5 the controller is the C6's, and a boot
-// whose link did not come up has no stack at all: everything that would post
-// to NimBLE's host task or touch the advertiser checks this first.
-#if defined(TAB5)
+// Whether the Bluetooth stack is up. On the Tab5 the controller is the C6's,
+// and a boot whose link did not come up has no stack at all. Any board can
+// also boot without it on purpose (DetectionEngine::skipBleThisBoot: HUMAN
+// SENSING with the Ragnar link on a board with no PSRAM, which needs the ~40 KB
+// the stack holds). Everything that would post to NimBLE's host task or touch
+// the advertiser checks this first.
 static bool s_bleLive = false;
+static bool s_skipBle = false;
 static inline bool bleLive() { return s_bleLive; }
-#else
-static inline bool bleLive() { return true; }
-#endif
+void DetectionEngine::skipBleThisBoot() { s_skipBle = true; }
+bool DetectionEngine::bleUp() { return s_bleLive; }
 
 // -------- manual raw scanner state (see startRawBleScan/startRawWifiScan) --------
 // NONE = normal continuous signature-matched scanning (the default).
@@ -298,10 +299,15 @@ void radioReport(bool withScan) {
                   (unsigned)cc.schan, (unsigned)(cc.schan + cc.nchan - 1), (unsigned long)s_wifiRaw);
 #endif
 #if SQW_BLE
-    NimBLEScan* sc = NimBLEDevice::getScan();
-    Serial.printf("[radio] ble: init %d, scanning %d, adverts %lu, raw mode %d, chip %.1f C, up %lu s\n",
-                  (int)NimBLEDevice::isInitialized(), sc ? (int)sc->isScanning() : -1,
-                  (unsigned long)s_advRaw, (int)g_rawMode, temperatureRead(), (unsigned long)(millis() / 1000));
+    if (!bleLive()) {
+        Serial.printf("[radio] ble: off this boot, raw mode %d, chip %.1f C, up %lu s\n",
+                      (int)g_rawMode, temperatureRead(), (unsigned long)(millis() / 1000));
+    } else {
+        NimBLEScan* sc = NimBLEDevice::getScan();
+        Serial.printf("[radio] ble: init %d, scanning %d, adverts %lu, raw mode %d, chip %.1f C, up %lu s\n",
+                      (int)NimBLEDevice::isInitialized(), sc ? (int)sc->isScanning() : -1,
+                      (unsigned long)s_advRaw, (int)g_rawMode, temperatureRead(), (unsigned long)(millis() / 1000));
+    }
 #else
     Serial.printf("[radio] ble: not driven on this board yet, raw mode %d, chip %.1f C, up %lu s\n",
                   (int)g_rawMode, temperatureRead(), (unsigned long)(millis() / 1000));
@@ -1124,10 +1130,19 @@ bool DetectionEngine::init() {
         return true;
     }
 #endif
+    if (s_skipBle) {
+        // HUMAN SENSING's Ragnar link wants the heap the stack would take.
+        // Leaving the screen restarts the board with Bluetooth back on.
+        Serial.println("[boot] Bluetooth off this boot: HUMAN SENSING has the heap");
+        BOOT_STAGE(7);
+        s_bootHeap.bleFree    = ESP.getFreeHeap();
+        s_bootHeap.bleLargest = heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS);
+        _sd.begin();
+        BOOT_STAGE(8);
+        return true;
+    }
     NimBLEDevice::init("");
-#if defined(TAB5)
     s_bleLive = true;
-#endif
     BOOT_STAGE(6);
     NimBLEScan* scan = NimBLEDevice::getScan();
     // Passive to start, whatever the room: the first second of an active

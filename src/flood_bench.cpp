@@ -10,6 +10,7 @@
 #include "nimble/porting/nimble/include/nimble/nimble_port.h"
 #endif
 #include <string.h>
+#include "detection.h"   // DetectionEngine::bleUp
 
 // The host's own entry for an advertising report, the one the HCI parser
 // calls: it sanity-checks the payload and hands the report to whatever
@@ -75,6 +76,7 @@ void floodTick() {
     if (!owed) return;
     last += owed * 50;
     s_slotsDue += owed;
+    if (!DetectionEngine::bleUp()) return;   // a boot without the stack
     NimBLEScan* scan = NimBLEDevice::getScan();
     if (!scan || !scan->isScanning()) return;   // nothing to hand them to; the host drops the backlog
     // A post while the last one is still queued is ignored by NimBLE's port;

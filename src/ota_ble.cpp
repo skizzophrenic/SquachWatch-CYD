@@ -4,6 +4,7 @@
 #include <NimBLEDevice.h>
 #include <string.h>
 #include "security.h"
+#include "detection.h"   // DetectionEngine::bleUp
 
 #ifndef FIRMWARE_VERSION
 #define FIRMWARE_VERSION "unknown"
@@ -274,6 +275,7 @@ bool begin() {
     s_fail = Fail::NONE;
     if (!available())       { s_fail = Fail::WRITE_ERROR; return false; }
     if (Security::locked()) { s_fail = Fail::LOCKED;      return false; }
+    if (!DetectionEngine::bleUp()) { s_fail = Fail::RADIO_BUSY; return false; }   // a boot without the stack
 
     // Detection asked the host task to stop scanning. NimBLE will not register
     // a GATT server while a scan runs, so wait for that to land.
