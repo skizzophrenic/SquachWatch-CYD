@@ -700,11 +700,17 @@ void scanFinish() {
     s_scanDone = true;
 }
 
-// Tune for the sweep. Same path as the hop, but failures are not
-// remembered: a refused channel is simply skipped this sweep.
+// Tune for the sweep. Same path as the hop, but a refused channel is not
+// skipped: the sweep RETRIES the tune. The hop's remembered refusals
+// (s_setFailed) are a different bookkeeping -- on the device the driver has
+// refused every set for a while right after a reboot (2026-11-22), the hop
+// then marks each channel failed and stays on one, and a sweep that
+// inherited that list silently visited no channel at all: three "0
+// network(s)" sweeps in a room with a dozen APs. A transient refusal must
+// not poison a fresh attempt.
 bool scanTune(uint8_t ch) {
     const uint32_t mhz = chanToMHz(ch);
-    if (!mhz || s_setFailed[ch]) return false;
+    if (!mhz) return false;
     return netlinkSetFreq(mhz) || iwSetFreq(s_mon.monIf, mhz);
 }
 
@@ -718,9 +724,11 @@ void scanRun(uint8_t* readBuf, size_t bufLen) {
         plan = s_scanPlan;
     }
     const long dwellNs = (long)s_scanDwellMs * 1000000L;
+    unsigned tuned = 0;
     for (uint8_t ch : plan) {
         if (!s_running.load() || !s_scanActive.load()) break;
         if (!scanTune(ch)) continue;
+        tuned++;
         struct timespec t0, now;
         clock_gettime(CLOCK_MONOTONIC, &t0);
         for (;;) {
@@ -740,7 +748,11 @@ void scanRun(uint8_t* readBuf, size_t bufLen) {
         }
     }
     // The hop picks up again from whatever the firmware asks next: force a
-    // retune by forgetting the applied channel.
+    // retune by forgetting the applied channel. The count is the diagnostic:
+    // tuned < plan means the driver refused sets this sweep (0 networks with
+    // a tuned short of the plan is a radio state, not an empty room).
+    std::fprintf(stderr, "[wifi_scan] sweep: tuned %u of %zu channel(s)\n",
+                 tuned, (size_t)plan.size());
     s_appliedChan = 0;
     scanFinish();
 }
