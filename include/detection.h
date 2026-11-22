@@ -218,7 +218,8 @@ public:
     // it came from is in the frame, and the frame is gone by then.
     void IRAM_ATTR postWiFi(const uint8_t* mac, int8_t rssi, uint8_t channel,
                             const char* ssid = nullptr, bool encrypted = false,
-                            bool pwnagotchi = false, bool drone = false);
+                            bool pwnagotchi = false, bool drone = false,
+                            bool probeResp = false);
 
     // Called from the promiscuous WiFi Rx callback (IRAM_ATTR context)
     // when a deauthentication management frame is seen. A single
@@ -501,6 +502,7 @@ private:
         bool    encrypted; // beacon Privacy bit; meaningless without an ssid
         bool    pwnagotchi;// ssid holds a pwnagotchi's name, not a network's
         bool    drone;     // a Remote ID beacon; ssid holds its serial, or nothing
+        bool    probeResp; // a probe response, not a beacon: kept out of the AP table
     };
 
     // WiFi mailbox (filled in IRAM, drained in loop)
@@ -577,6 +579,31 @@ private:
     // Returns true if this beacon looks like an evil twin of an SSID
     // already on file. Records the SSID on first sighting.
     bool noteApBeacon(const uint8_t* bssid, const char* ssid, bool encrypted);
+
+    // KARMA: one radio going by many network names. That is what a WiFi
+    // Pineapple's PineAP does -- it answers every name a phone asks for,
+    // and beacons a pool of names, from its one address -- and what an
+    // honest access point never does: 802.11 gives each network its own
+    // BSSID, so a multi-SSID router shows one address per name. Four
+    // distinct names from one address inside two minutes is the trip.
+    // Fixed table, like the AP table above. Eviction takes the oldest
+    // address seen with one name before any with two or more, so a crowd of
+    // ordinary routers cannot push out the one that has started to vary.
+    static const uint8_t  KARMA_CAP   = 24;
+    static const uint8_t  KARMA_NAMES = 4;
+    static const uint32_t KARMA_WINDOW_MS = 120000;
+    struct KarmaEntry {
+        uint8_t  bssid[6];
+        uint8_t  n;                    // distinct names this window
+        bool     flagged;
+        uint32_t since;                // window start; 0 marks an empty slot
+        uint32_t seen;                 // last frame
+        uint32_t names[KARMA_NAMES];   // FNV-1a of each name
+    };
+    KarmaEntry _karma[KARMA_CAP] = {};
+    // True once this address has gone by KARMA_NAMES names, and on every
+    // frame from it after, while it keeps transmitting.
+    bool noteKarma(const uint8_t* bssid, const char* ssid);
 
     volatile DeauthQEntry _deauthQ[DEAUTH_Q_CAP];
     volatile uint8_t      _deauthQHead = 0;

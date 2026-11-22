@@ -491,6 +491,21 @@ as a network somebody might be impersonating would be wrong twice over.
 | Pineapple management AP | SSID prefix `Pineapple_` | **Medium** |
 | Deauther control AP | SSID prefix `pwned` | **Medium** |
 | Hak5 MACs | `02:C0:CA`, `02:13:37` | **Low** |
+| Karma (vendor `Karma`) | one BSSID using 4+ SSIDs in 2 minutes | **Medium** |
+
+**Karma** is the Pineapple seen by what it does rather than what it is
+called, so it still works on one somebody has renamed. PineAP answers every
+network name a phone asks for, and beacons a pool of them, from its own
+address. An honest access point never does that: 802.11 gives each network
+its own BSSID, and a multi-SSID router shows one address per name. Beacons
+and probe responses both count (probe responses are how karma answers, and
+are read for this alone: they stay out of the evil-twin table). A hidden
+network's empty name doesn't count, so an AP that beacons hidden and answers
+by name is one name, not two. The row's name is the network it was
+answering to when it tripped.
+
+What gets past it: a Pineapple set to use a fresh address per name, and
+karma on 5 GHz on a board that only hears 2.4 GHz.
 
 **Hak5 hold no IEEE registration.** The whole 40,000-row registry has no
 entry for them, because their hardware is OpenWRT on ODM boards — anything
