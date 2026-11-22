@@ -32,6 +32,21 @@ CYAN  = (0, 214, 214)
 # ---- the clips ----
 
 CLIPS = {
+    # v1.50.0 "Roll With It", 320x240 doubled, every second frame at real
+    # time ("_EVERY"), each scene on a settings store of its own ("_NVS", so a
+    # waiting free roll never turns up in a scene it was not asked into): the
+    # FREE ROLL's die tapped and thrown, a natural 20 bringing a shiny
+    # visitor through the hole in the sky, a natural 1 off his head, the
+    # mimic, then the Trail card (SYSTEM 7, the CYDs' default) and two more skins.
+    "roll-with-it": [
+        ("clear", 90, 210, ["--bg", "5", "--tap", "124:294:200"], {"_EVERY": 2, "_NVS": 1, "SQUACHSIM_FREEROLL": "1", "SQUACHSIM_T0": "9000", "SQUACHSIM_BATT": "80"}, 900, "A DIE TURNED UP. TAP IT. ROLL WITH IT."),
+        ("clear", 20, 230, ["--bg", "5"], {"_EVERY": 2, "_NVS": 1, "SQUACHSIM_FREEROLL": "0", "SQUACHSIM_T0": "9000", "SQUACHSIM_BATT": "80", "SQUACHSIM_SAYAT": "4:@ENC 0 SHINY"}, 900, "NATURAL 20! SHINIES SPARKLE NOW."),
+        ("clear", 20, 170, ["--bg", "5"], {"_EVERY": 2, "_NVS": 1, "SQUACHSIM_FREEROLL": "0", "SQUACHSIM_T0": "9000", "SQUACHSIM_BATT": "80", "SQUACHSIM_SAYAT": "4:@MISS 1"}, 700, "NATURAL 1. IT BOUNCES OFF HIS HEAD."),
+        ("clear", 20, 190, ["--bg", "5"], {"_EVERY": 2, "_NVS": 1, "SQUACHSIM_FREEROLL": "0", "SQUACHSIM_T0": "9000", "SQUACHSIM_BATT": "80", "SQUACHSIM_SAYAT": "4:@ENC 9"}, 900, "SOMETIMES IT ISN'T A DIE."),
+        ("alert", 40, 40, ["--alert", "6"], {"_EVERY": 2, "_NVS": 1}, 1500, "WHO'S FOLLOWING YOU? THE TRAIL CARD KNOWS."),
+        ("alert", 40, 40, ["--alert", "6", "--skin", "9"], {"_EVERY": 2, "_NVS": 1}, 1100, "DRESS IT UP: XP..."),
+        ("alert", 40, 40, ["--alert", "6", "--skin", "10"], {"_EVERY": 2, "_NVS": 1}, 1300, "...AQUA, GLASS, AMIGA AND MORE."),
+    ],
     # v1.49.0 "Ring Ding Dong", 320x240 doubled: a Blender opener (3D
     # Squachy, a T-Deck showing the emulator's real alert, an AirTag going
     # ding dong; sim/out/ring-3d holds its frames), then RING on the AirTag
@@ -568,6 +583,15 @@ def render(clip):
         # env, for the StickS3); encode() letterboxes it into the clip.
         env = dict(env)
         sw, sh = cw, ch
+        # "_EVERY": keep every Nth captured frame -- 2 plays a long scene at
+        # about real time. "_NVS": the scene gets a settings store of its
+        # own, fresh, under out/ (the emulator's own store is left alone).
+        every = int(env.pop("_EVERY", 1))
+        if env.pop("_NVS", None):
+            nvs = os.path.join(out, "nvs%d" % i)
+            shutil.rmtree(nvs, ignore_errors=True)
+            os.makedirs(nvs)
+            env["SQUACHSIM_NVS"] = nvs
         # "_SIM": another emulator binary beside this one (squachsim-tab5).
         ssim = os.path.join(HERE, env.pop("_SIM")) if "_SIM" in env else sim
         if "_SIZE" in env:
@@ -577,9 +601,10 @@ def render(clip):
              "--size", "%dx%d" % (sw, sh)] + extra, env)
         if os.path.getsize(raw) != sw * sh * 3 * n:
             sys.exit("scene %d: %d bytes, expected %d" % (i, os.path.getsize(raw), sw * sh * 3 * n))
-        for k in range(n):
+        keep = list(range(0, n, every))
+        for j, k in enumerate(keep):
             man.append({"raw": os.path.basename(raw), "index": k, "w": sw, "h": sh,
-                        "ms": MS if k < n - 1 else MS + hold, "caption": caption})
+                        "ms": MS if j < len(keep) - 1 else MS + hold, "caption": caption})
     json.dump(man, open(os.path.join(out, "manifest.json"), "w"))
     print("%d frames rendered into %s" % (len(man), out))
 
