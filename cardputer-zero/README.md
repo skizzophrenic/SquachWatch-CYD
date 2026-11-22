@@ -38,6 +38,13 @@ that let the ESP32 firmware build on Linux.
   built-in Wi-Fi (BCM43439, brcmfmac) cannot sniff. Tested: **EDUP
   EP-AX1672** (MediaTek MT7921AU, `mt7921u` driver; 2.4 and 5 GHz). Without
   an adapter the app still runs, with Bluetooth detection only.
+  If the adapter drops off the USB bus mid-run (seen on the Cardputer Zero:
+  `USB disconnect` / `error -71` in `dmesg`, also with the app closed), the
+  app logs `[wifi_mon] adapter lost`, pauses Wi-Fi detection (a SCAN then
+  says `sweep skipped: no Wi-Fi adapter`) and rebuilds its monitor
+  interface by itself once the adapter is back (`[wifi_mon] adapter back`).
+  Frequent drops point at power or the connector: try a short cable or a
+  powered hub.
 - Optional: a GPS module on the Grove port (UART, `/dev/serial0`; M5's Unit
   GPS at 115200, 9600 or 38400 baud is found automatically) for wardriving.
 - SSH access (for copying the package over), and `sudo`.

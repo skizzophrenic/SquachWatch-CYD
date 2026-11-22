@@ -242,6 +242,34 @@ std::string findAdapter() {
     return found;
 }
 
+// IFF_UP from /sys/class/net/<if>/flags (false when the interface is gone).
+bool ifUp(const std::string& ifname) {
+    bool up = false;
+    if (FILE* f = std::fopen(("/sys/class/net/" + ifname + "/flags").c_str(), "r")) {
+        unsigned flags = 0;
+        if (std::fscanf(f, "%x", &flags) == 1) up = (flags & 0x1) != 0;
+        std::fclose(f);
+    }
+    return up;
+}
+
+// ---- adapter loss (2026-11-22) ----
+//
+// The USB adapter can drop off the bus mid-run (seen on the CM0: a USB
+// disconnect + re-enumeration, "Cannot enable. Maybe the USB cable is bad?",
+// and an mt7921u oops). The monitor vif dies with the device; the adapter
+// comes back as a fresh netdev. The bound packet socket then reports
+// ENETDOWN at most once and goes quiet for good, so the feed thread checks
+// the vif itself: alive = the name still resolves to the index the socket
+// was bound to (a vif re-created under the same name has a new index).
+bool linkAlive(const std::string& ifname, int ifindex) {
+    if (ifname.empty() || ifindex <= 0) return false;
+    return (int)if_nametoindex(ifname.c_str()) == ifindex;
+}
+
+// recv/poll errors that mean "look at the link now" (not a normal empty read).
+bool lossErrno(int e) { return e == ENETDOWN || e == ENODEV || e == ENXIO; }
+
 // Non-root runs: with `setcap cap_net_admin,cap_net_raw+ep squachd` the
 // process has both caps permitted, but the `iw`/`ip` children it popen()s
 // would not -- file caps do not cross exec. Moving them into the
@@ -436,6 +464,16 @@ void parsePhyInfo(const char* text, bool usable[256]) {
 
 bool s_phyProbed = false;
 bool s_phyUsable[256] = {false};
+// Set (release) once s_phyUsable holds a parsed answer, so the feed thread
+// can read the table (acquire) without racing the UI thread's probe.
+std::atomic<bool> s_phyReady{false};
+
+// A channel the wiphy does not list as usable is blocked by the regulatory
+// domain (US: 2.4 GHz 12/13 are "(disabled)"), not refused by the driver.
+// Unknown until the phy has been probed.
+bool regulatoryBlocked(uint8_t ch, bool phyKnown, const bool usable[256]) {
+    return phyKnown && !usable[ch];
+}
 
 void probePhy() {
     if (s_phyProbed) return;
@@ -452,6 +490,10 @@ void probePhy() {
     std::string info;
     runTool({"iw", "phy", base + 1, "info"}, &info);
     parsePhyInfo(info.c_str(), s_phyUsable);
+    // An empty answer (iw failed) must not read as "every channel blocked".
+    bool any = false;
+    for (int c = 0; c < 256 && !any; c++) any = s_phyUsable[c];
+    if (any) s_phyReady.store(true, std::memory_order_release);
 }
 
 // ---------------------------------------------------------------- radiotap
@@ -634,6 +676,10 @@ int enqueueParsed(const uint8_t* raw, size_t rawLen, uint8_t applied) {
 // reads; the feed thread runs the sweep. The firmware's own scan results
 // are read through the WiFi stub only after done (a snapshot copy).
 
+// Defined with the thread below.
+void teardown();
+void markLost(const char* when);
+
 const size_t SCAN_CAP = 64;
 std::mutex                s_scanMu;
 std::vector<uint8_t>      s_scanPlan;        // channels to visit
@@ -700,14 +746,12 @@ void scanFinish() {
     s_scanDone = true;
 }
 
-// Tune for the sweep. Same path as the hop, but a refused channel is not
-// skipped: the sweep RETRIES the tune. The hop's remembered refusals
-// (s_setFailed) are a different bookkeeping -- on the device the driver has
-// refused every set for a while right after a reboot (2026-11-22), the hop
-// then marks each channel failed and stays on one, and a sweep that
-// inherited that list silently visited no channel at all: three "0
-// network(s)" sweeps in a room with a dozen APs. A transient refusal must
-// not poison a fresh attempt.
+// Tune for the sweep. Same path as the hop, but the hop's remembered
+// refusals (s_setFailed) are not inherited: the sweep tries every channel
+// of its plan afresh, so a transient refusal cannot empty a sweep. (The
+// "0 network(s)" sweeps of 2026-11-22 that this was first written for were
+// in fact the adapter dropping off the USB bus -- see linkAlive; the
+// startup "refused" line was only the regulatory ch 12/13.)
 bool scanTune(uint8_t ch) {
     const uint32_t mhz = chanToMHz(ch);
     if (!mhz) return false;
@@ -727,7 +771,19 @@ void scanRun(uint8_t* readBuf, size_t bufLen) {
     unsigned tuned = 0;
     for (uint8_t ch : plan) {
         if (!s_running.load() || !s_scanActive.load()) break;
-        if (!scanTune(ch)) continue;
+        if (!scanTune(ch)) {
+            // A dead vif refuses every set: stop here and say so, rather
+            // than report an empty room.
+            if (!linkAlive(s_mon.monIf, s_mon.ifindex)) {
+                std::fprintf(stderr, "[wifi_scan] sweep stopped: the Wi-Fi adapter is gone "
+                             "(tuned %u of %zu channel(s))\n", tuned, (size_t)plan.size());
+                s_appliedChan = 0;
+                scanFinish();
+                markLost("during a sweep");
+                return;
+            }
+            continue;
+        }
         tuned++;
         struct timespec t0, now;
         clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -759,21 +815,160 @@ void scanRun(uint8_t* readBuf, size_t bufLen) {
 
 // ------------------------------------------------------------- the thread
 
+// Loss / recovery bookkeeping (feed thread only).
+bool     s_lost = false;
+bool     s_regLogged = false;          // the regulatory skip is logged once per start
+bool     s_reupLogged = false;         // "adapter came back up" logged once per attach
+bool     s_seenAdapter = false;        // recovery: an adapter was there last try
+unsigned s_retryFailLogged = 0;        // recovery: attach failures logged (capped)
+struct timespec s_lostAt = {0, 0};
+struct timespec s_nextTry = {0, 0};
+struct timespec s_nextCheck = {0, 0};
+unsigned s_losses = 0;
+
+long msSince(const struct timespec& t) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    return (now.tv_sec - t.tv_sec) * 1000L + (now.tv_nsec - t.tv_nsec) / 1000000L;
+}
+
+void afterMs(struct timespec& t, long ms) {
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    t.tv_sec  += ms / 1000;
+    t.tv_nsec += (ms % 1000) * 1000000L;
+    if (t.tv_nsec >= 1000000000L) { t.tv_sec++; t.tv_nsec -= 1000000000L; }
+}
+
+bool reached(const struct timespec& t) { return msSince(t) >= 0; }
+
+bool attachMonitor(bool quiet);   // below, shared with wifiMonStart
+
+// Reset the per-attach channel state: the vif's channel is unknown and
+// every refusal belongs to the old attach.
+void freshChannelState() {
+    s_appliedChan = 0;
+    memset(s_setFailed, 0, sizeof s_setFailed);
+    s_setRefusedLogged = false;
+    s_reupLogged = false;
+}
+
+// The vif is gone. Undo what is still there (teardown is safe on a vanished
+// interface: the iw/ip calls just fail), so the adapter, if it is still
+// present, is back in its original state before a re-attach reads that
+// state again. Frames already queued are dropped with it.
+void markLost(const char* when) {
+    std::fprintf(stderr,
+        "[wifi_mon] adapter lost %s: %s is gone (adapter %s; %llu frames so far). "
+        "Wi-Fi detection is paused until a USB adapter is back -- check the "
+        "kernel log for a USB disconnect\n",
+        when, s_mon.monIf.empty() ? "the monitor interface" : s_mon.monIf.c_str(),
+        s_mon.adapter.empty() ? "?" : s_mon.adapter.c_str(), s_mon.framesQueued);
+    teardown();
+    s_mon.adapter.clear();
+    s_mon.ifindex = -1;
+    s_lost = true;
+    s_seenAdapter = false;
+    s_retryFailLogged = 0;
+    s_losses++;
+    clock_gettime(CLOCK_MONOTONIC, &s_lostAt);
+    afterMs(s_nextTry, 2000);
+}
+
+// One recovery step while lost: finish any sweep at once (there is no radio
+// to sweep with), then every 2 s look for a USB adapter. One must be seen on
+// two tries in a row (the driver loads its firmware and NetworkManager
+// raises the new interface in the first seconds) before the vif is rebuilt.
+void recoverStep() {
+    if (s_scanActive.load()) {
+        std::fprintf(stderr, "[wifi_scan] sweep skipped: no Wi-Fi adapter "
+                     "(lost %ld s ago)\n", msSince(s_lostAt) / 1000);
+        scanFinish();
+    }
+    struct timespec ts = {0, 200 * 1000 * 1000};
+    nanosleep(&ts, nullptr);
+    if (!reached(s_nextTry)) return;
+    afterMs(s_nextTry, 2000);
+    const bool present = !findAdapter().empty();
+    const bool settled = present && s_seenAdapter;
+    s_seenAdapter = present;
+    if (!settled) return;
+    if (!attachMonitor(true)) {
+        if (s_retryFailLogged < 3) {
+            s_retryFailLogged++;
+            std::fprintf(stderr, "[wifi_mon] an adapter is back but the monitor "
+                         "interface could not be rebuilt yet; retrying\n");
+        }
+        return;
+    }
+    freshChannelState();
+    s_lost = false;
+    afterMs(s_nextCheck, 1000);
+    std::fprintf(stderr, "[wifi_mon] adapter back after %ld s: sniffer up on %s "
+                 "(adapter %s); losses this run: %u\n",
+                 msSince(s_lostAt) / 1000, s_mon.monIf.c_str(), s_mon.adapter.c_str(),
+                 s_losses);
+}
+
+// Once a second while attached: the vif still alive, and the adapter's own
+// managed interface still down (vif path). NetworkManager raises a freshly
+// plugged adapter on its own; an up managed interface makes mac80211 refuse
+// every retune (EBUSY), so it is taken down again.
+// Returns false when the vif is gone (markLost has run).
+bool healthCheck(bool force) {
+    if (!force && !reached(s_nextCheck)) return true;
+    afterMs(s_nextCheck, 1000);
+    if (!linkAlive(s_mon.monIf, s_mon.ifindex)) {
+        markLost("mid-run");
+        return false;
+    }
+    if (s_mon.adapterDowned && ifUp(s_mon.adapter)) {
+        if (!s_reupLogged) {
+            s_reupLogged = true;
+            std::fprintf(stderr, "[wifi_mon] %s came back up (NetworkManager?); "
+                         "taking it down again so channel sets work\n",
+                         s_mon.adapter.c_str());
+        }
+        // Refusals recorded while it was up were EBUSY from it, not the
+        // channel (seen on the device right after a re-attach): forget them.
+        if (runTool({"ip", "link", "set", s_mon.adapter, "down"}) == 0) {
+            memset(s_setFailed, 0, sizeof s_setFailed);
+            s_setRefusedLogged = false;
+            s_appliedChan = 0;
+        }
+    }
+    return true;
+}
+
 void* feedThread(void*) {
     static uint8_t readBuf[8192];
+    afterMs(s_nextCheck, 1000);
     while (s_running.load()) {
+        if (s_lost) { recoverStep(); continue; }
+        if (!healthCheck(false)) continue;
         if (s_scanActive.load()) { scanRun(readBuf, sizeof readBuf); continue; }
         // Channel set: the firmware's hop clock writes s_wantChan through
         // the stub; apply on change. The poll below bounds the latency to
         // 100 ms, inside the firmware's 120 ms minimum dwell. A channel the
         // driver refuses (netlink and iw both) is remembered so it is not
         // retried every poll; the channel then simply stays where it was,
-        // and frames keep their radiotap channel.
+        // and frames keep their radiotap channel. A channel the regulatory
+        // domain disables (the firmware's 2.4 GHz hop includes 12/13; the US
+        // does not) is skipped without asking the driver.
         const uint8_t want = s_wantChan.load();
+        if (want != s_appliedChan.load() && chanToMHz(want) && !s_setFailed[want] &&
+            regulatoryBlocked(want, s_phyReady.load(std::memory_order_acquire), s_phyUsable)) {
+            s_setFailed[want] = true;
+            if (!s_regLogged) {
+                s_regLogged = true;
+                std::fprintf(stderr, "[wifi_mon] channel %u is disabled by the regulatory "
+                             "domain; the hop skips such channels\n", (unsigned)want);
+            }
+        }
         if (want != s_appliedChan.load() && chanToMHz(want) && !s_setFailed[want]) {
             const uint32_t mhz = chanToMHz(want);
             const bool ok = netlinkSetFreq(mhz) || iwSetFreq(s_mon.monIf, mhz);
             if (ok) s_appliedChan = want;
+            else if (!healthCheck(true)) continue;   // the vif died: not a refusal
             else {
                 s_setFailed[want] = true;
                 if (!s_setRefusedLogged) {
@@ -798,12 +993,14 @@ void* feedThread(void*) {
         const int pr = poll(&pfd, 1, 100);
         if (!s_running.load()) break;
         if (pr <= 0) continue;
+        bool suspect = (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0;
         // Drain what is there, then go round to the channel check again.
         for (int i = 0; i < 64; i++) {
             const ssize_t n = recv(s_mon.sock, readBuf, sizeof readBuf, MSG_DONTWAIT);
-            if (n < 0) break;
+            if (n < 0) { suspect = suspect || lossErrno(errno); break; }
             if (n >= 8) (void)enqueueParsed(readBuf, (size_t)n, s_appliedChan.load());
         }
+        if (suspect) (void)healthCheck(true);
     }
     return nullptr;
 }
@@ -839,21 +1036,18 @@ bool failStart(const char* what) {
     return false;
 }
 
-}   // namespace
-
-namespace cm0 {
-
-// -------------------------------------------------------------- lifecycle
-
-bool wifiMonStart() {
-    if (s_mon.threadStarted) return true;
-    raiseAmbientNetCaps();
+// Find the adapter, build the monitor interface, open and bind the sockets.
+// On failure everything done so far is undone. Shared by wifiMonStart and
+// the feed thread's recovery after an adapter loss (`quiet`: no "no adapter"
+// line every retry).
+bool attachMonitor(bool quiet) {
     s_mon.adapter = findAdapter();
     if (s_mon.adapter.empty()) {
-        std::fprintf(stderr,
-            "[wifi_mon] no USB Wi-Fi adapter found "
-            "(SQUACH_WIFI_IF=<if> to override); running on the empty "
-            "stub radio\n");
+        if (!quiet)
+            std::fprintf(stderr,
+                "[wifi_mon] no USB Wi-Fi adapter found "
+                "(SQUACH_WIFI_IF=<if> to override); running on the empty "
+                "stub radio\n");
         return false;
     }
     // Our own vif left behind by a crashed run must go first, or the add
@@ -868,12 +1062,7 @@ bool wifiMonStart() {
         return false;
     }
     // The adapter's link state, restored on stop (both paths).
-    s_mon.origUp = false;
-    if (FILE* up = std::fopen(("/sys/class/net/" + s_mon.adapter + "/flags").c_str(), "r")) {
-        unsigned flags = 0;
-        if (std::fscanf(up, "%x", &flags) == 1) s_mon.origUp = (flags & 0x1) != 0;   // IFF_UP
-        std::fclose(up);
-    }
+    s_mon.origUp = ifUp(s_mon.adapter);
     if (runTool({"iw", "dev", s_mon.adapter, "interface", "add", MON_IF,
                  "type", "monitor"}) == 0) {
         s_mon.createdVif = true;
@@ -912,7 +1101,7 @@ bool wifiMonStart() {
         if (runTool({"ip", "link", "set", s_mon.adapter, "down"}) != 0 ||
             runTool({"iw", "dev", s_mon.adapter, "set", "type", "monitor"}) != 0) {
             if (s_mon.origUp) runTool({"ip", "link", "set", s_mon.adapter, "up"});
-            std::fprintf(stderr,
+            if (!quiet) std::fprintf(stderr,
                 "[wifi_mon] %s will not take monitor mode%s; running on the "
                 "empty stub radio\n", s_mon.adapter.c_str(),
                 geteuid() == 0 ? "" : " (not root: run with sudo, or `make caps`)");
@@ -954,11 +1143,24 @@ bool wifiMonStart() {
         if (!s_mon.nlFamily)
             std::fprintf(stderr, "[wifi_mon] nl80211 family not resolved; channel sets go through iw\n");
     }
+    return true;
+}
 
+}   // namespace
+
+namespace cm0 {
+
+// -------------------------------------------------------------- lifecycle
+
+bool wifiMonStart() {
+    if (s_mon.threadStarted) return true;
+    raiseAmbientNetCaps();
+    if (!attachMonitor(false)) return false;
     s_running = true;
-    s_appliedChan = 0;   // force the first set: the vif's channel is unknown
-    memset(s_setFailed, 0, sizeof s_setFailed);
-    s_setRefusedLogged = false;
+    freshChannelState();   // force the first set: the vif's channel is unknown
+    s_regLogged = false;
+    s_lost = false;
+    s_losses = 0;
     if (pthread_create(&s_mon.thread, nullptr, feedThread, nullptr) != 0) {
         s_running = false;
         return failStart("[wifi_mon] pthread_create");
@@ -975,8 +1177,10 @@ void wifiMonStop() {
     pthread_join(s_mon.thread, nullptr);
     s_mon.threadStarted = false;
     teardown();
-    std::fprintf(stderr, "[wifi_mon] down (%llu frames queued, %llu delivered, %llu dropped)\n",
-                 s_mon.framesQueued, s_mon.framesDelivered, s_mon.framesDropped);
+    std::fprintf(stderr, "[wifi_mon] down (%llu frames queued, %llu delivered, %llu dropped; "
+                 "adapter lost %u time(s)%s)\n",
+                 s_mon.framesQueued, s_mon.framesDelivered, s_mon.framesDropped,
+                 s_losses, s_lost ? ", still gone at exit" : "");
 }
 
 size_t wifiMonPump(size_t maxFrames) {
@@ -1082,6 +1286,16 @@ int wifiMonTestScanAbsorb(const uint8_t* raw, size_t rawLen) {
 }
 
 void wifiMonTestScanFinish() { scanFinish(); }
+
+bool wifiMonTestLinkAlive(const char* ifname, int ifindex) {
+    return linkAlive(ifname ? ifname : "", ifindex);
+}
+
+bool wifiMonTestLossErrno(int e) { return lossErrno(e); }
+
+bool wifiMonTestRegulatoryBlocked(uint8_t ch, bool phyKnown, const bool usable[256]) {
+    return regulatoryBlocked(ch, phyKnown, usable);
+}
 
 int wifiMonTestInject(const uint8_t* raw, size_t rawLen, uint8_t appliedChan) {
     const int t = enqueueParsed(raw, rawLen, appliedChan ? appliedChan : s_appliedChan.load());

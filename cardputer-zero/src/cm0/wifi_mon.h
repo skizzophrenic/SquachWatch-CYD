@@ -44,6 +44,11 @@ namespace cm0 {
 // twice (the second call is a no-op).
 bool wifiMonStart();
 
+// Adapter loss: if the monitor interface disappears mid-run (the USB
+// adapter dropped off the bus and re-enumerated), the feed thread notices
+// within ~1 s, logs `[wifi_mon] adapter lost`, ends any sweep at once, and
+// rebuilds the vif when a USB adapter is back (`[wifi_mon] adapter back`).
+//
 // Stop the feed thread, close the sockets, delete the monitor vif (or
 // restore the converted interface). Idempotent.
 void wifiMonStop();
@@ -115,5 +120,15 @@ void wifiMonTestParsePhyInfo(const char* text, bool usable[256]);
 // test can pin the wire format. Returns the message length.
 size_t wifiMonTestBuildSetFreq(uint8_t* out, size_t cap, uint16_t family,
                                int ifindex, uint32_t mhz);
+
+// Adapter-loss detection: whether `ifname` still resolves to `ifindex`
+// (the vif the packet socket was bound to), and which recv errno values
+// mean "check the link now".
+bool wifiMonTestLinkAlive(const char* ifname, int ifindex);
+bool wifiMonTestLossErrno(int e);
+
+// Whether a channel is blocked by the regulatory domain (not listed as
+// usable by a probed wiphy) rather than refused by the driver.
+bool wifiMonTestRegulatoryBlocked(uint8_t ch, bool phyKnown, const bool usable[256]);
 
 }   // namespace cm0

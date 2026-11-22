@@ -14,6 +14,8 @@
 // TSFT, flags with the FCS bit, rate, channel, combined antenna signal, RX
 // flags, then one extra radiotap-namespace word per antenna chain.
 #include "wifi_mon.h"
+#include <net/if.h>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -406,6 +408,34 @@ int main() {
         cm0::wifiMonScanClear();
         CHECK(cm0::wifiMonScanState() == -2, "scan: clear -> not started (-2)");
         CHECK(!cm0::wifiMonScanStart(150), "scan: start without a sniffer is refused");
+    }
+    // -- 14: adapter loss (2026-11-22). The USB adapter dropped off the bus
+    //        mid-run; sqwmon0 died with it and the feed thread kept polling
+    //        a dead socket for the rest of the session. Liveness = the
+    //        bound name still resolves to the bound ifindex (a re-created
+    //        vif gets a new index, so a stale bind counts as lost).
+    {
+        const int lo = (int)if_nametoindex("lo");
+        CHECK(lo > 0 && cm0::wifiMonTestLinkAlive("lo", lo), "link: lo at its own index is alive");
+        CHECK(!cm0::wifiMonTestLinkAlive("lo", lo + 1000), "link: same name, other index = lost (re-created)");
+        CHECK(!cm0::wifiMonTestLinkAlive("sqwgone9", 5), "link: vanished interface = lost");
+        CHECK(!cm0::wifiMonTestLinkAlive("", 5), "link: no interface = lost");
+        CHECK(cm0::wifiMonTestLossErrno(ENETDOWN) && cm0::wifiMonTestLossErrno(ENODEV) &&
+              cm0::wifiMonTestLossErrno(ENXIO), "link: ENETDOWN/ENODEV/ENXIO from recv mean check now");
+        CHECK(!cm0::wifiMonTestLossErrno(EAGAIN) && !cm0::wifiMonTestLossErrno(EINTR),
+              "link: EAGAIN/EINTR are normal");
+    }
+    // -- 15: a refused channel the wiphy lists as (disabled) is the
+    //        regulatory domain (US: 12/13), not the driver. The old log
+    //        called it a driver refusal and sent a diagnosis the wrong way.
+    {
+        bool u[256];
+        std::memset(u, 0, sizeof u);
+        for (int c = 1; c <= 11; c++) u[c] = true;
+        u[36] = true;
+        CHECK(cm0::wifiMonTestRegulatoryBlocked(12, true, u), "reg: ch 12 not in the phy list = regulatory");
+        CHECK(!cm0::wifiMonTestRegulatoryBlocked(6, true, u), "reg: ch 6 listed = a real driver refusal");
+        CHECK(!cm0::wifiMonTestRegulatoryBlocked(12, false, u), "reg: phy not probed yet = cannot say");
     }
 
     std::printf("\n%d checks, %d failures\n", g_checks, g_failures);
