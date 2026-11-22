@@ -372,6 +372,7 @@ static void drawCrashCard(TFT_eSPI& t) {
 #include "ui_clear.h"
 #include "crowd_bench.h"
 #include "ui_alert.h"
+#include "tag_ring.h"
 #include "ui_log.h"
 #include "ui_rawscan.h"
 #include "ui_watchalert.h"
@@ -1387,6 +1388,9 @@ static bool     s_tdeckBackKey = false;    // Backspace off a text screen
 static const uint32_t TB_ROLL_GAP_MS = 400;   // a pause this long starts a new roll
 static bool stickCursorShown(uint32_t now);
 static bool stickListBusy();
+#if defined(TDECK_PLUS)
+static bool tdeckPocketBall(bool pressed, uint32_t pressAt, uint32_t now);
+#endif
 static void tdeckBallBegin() {
     static const int pins[4] = { TB_UP, TB_DOWN, TB_LEFT, TB_RIGHT };
     static void (*const isr[4])() = { tbIsrUp, tbIsrDown, tbIsrLeft, tbIsrRight };
@@ -1461,6 +1465,11 @@ static SmallKeys smallKeysRead() {
             if (g_ballTrace) Serial.printf("[ball] press%s\n", s_tbPressShowOnly ? " (shows the cursor)" : "");
         }
     }
+#if defined(TDECK_PLUS)
+    // POCKET MODE: the press may be its own (held 2 s, or waking a dark
+    // screen); then nothing else sees it, nor the ball rolled in the dark.
+    if (tdeckPocketBall(s_tbPress, s_tbPressAt, now)) { s_tbAcc = 0; return SmallKeys{}; }
+#endif
     k.press = s_tbPress && !s_tbPressShowOnly;
     return k;
 }
@@ -1874,6 +1883,9 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         add(w - 37, h - 15);            // INFO
         add(w - 35, 14);                // IGNORE
 #endif
+        int rx, ry;
+        if (uiAlertRingCentre(w, h, rx, ry)) add(rx, ry);   // RING, on trackers
+
         return n;
     }
     if (state == AppState::OUTFIT_UNLOCK) return 0;   // a card: SELECT or BACK closes it
@@ -2588,6 +2600,7 @@ static int stickRegionId(int x, int y) {
             if (uiAlertHitSnooze(x, y, w, h))   return 9400;
             if (uiAlertHitHunt(x, y, w, h))     return 9401;
             if (uiAlertHitMoreInfo(x, y, w, h)) return 9402;
+            if (uiAlertHitRing(x, y, w, h))     return 9404;
             if (uiAlertHitIgnore(x, y, w, h))   return 9403;
             return -1;
         case AppState::HUNT:
@@ -3095,6 +3108,13 @@ static bool s_screenDimmed = false;
 #else
 #define SQW_BOOT_BTN 0
 #endif
+// POCKET MODE: the boards with a button for it. The T-Deck uses its
+// trackball, held 2 s (tdeckPocketBall).
+#if defined(TWATCH_S3) || SQW_BOOT_BTN || defined(TDECK_PLUS)
+#define SQW_POCKET 1
+#else
+#define SQW_POCKET 0
+#endif
 #if defined(TWATCH_S3)
 // A watch goes dark, not dim. When the screen timeout lands, the backlight
 // goes off and the ST7789 is put to sleep (DISPOFF, SLPIN: about a milliamp
@@ -3107,7 +3127,7 @@ static bool s_panelAsleep = false;
 static bool     s_onUsb = true;
 static bool s_radiosResting = false;   // the duty cycle's state; see twatchRadioTick()
 #endif
-#if defined(TWATCH_S3) || SQW_BOOT_BTN
+#if SQW_POCKET
 // POCKET MODE. A crown press (or the CYDs' BOOT button) with the screen on
 // turns it off at once, cable or not, and only another press turns it back
 // on: a touch does not, so a board in a pocket or a bag cannot be woken by
@@ -3122,6 +3142,8 @@ static uint32_t s_pocketNoteUntil = 0;
 static const uint32_t POCKET_NOTE_MS = 4000;
 #if defined(TWATCH_S3)
 static const char* const POCKET_HOW = "Press the crown to wake";
+#elif defined(TDECK_PLUS)
+static const char* const POCKET_HOW = "Press the trackball to wake";
 #else
 static const char* const POCKET_HOW = "Press BOOT again to wake";
 #endif
@@ -3148,6 +3170,30 @@ static void pocketPress(uint32_t now) {
         Serial.println("[pocket] on");
     }
 }
+#if defined(TDECK_PLUS)
+// The T-Deck has no free button (its BOOT is the trackball's press), so the
+// ball held 2 s is the press that turns the screen off, and while it is off
+// any press of the ball turns it back on. A press that did either is spent:
+// the UI never sees it, nor anything until the ball comes back up. The press
+// that starts a hold is still a normal press at first -- on the main screen,
+// where the cursor is usually hidden, that only shows the cursor.
+static const uint32_t TB_POCKET_HOLD_MS = 2000;
+static bool s_tbPocketSpent = false;
+static bool tdeckPocketBall(bool pressed, uint32_t pressAt, uint32_t now) {
+    if (!pressed) {
+        const bool spent = s_tbPocketSpent;
+        s_tbPocketSpent = false;
+        return spent || s_crownDark;
+    }
+    if (s_tbPocketSpent) return true;
+    if (s_crownDark || now - pressAt >= TB_POCKET_HOLD_MS) {
+        s_tbPocketSpent = true;
+        pocketPress(now);
+        return true;
+    }
+    return false;
+}
+#endif
 #if defined(SQUACHSIM_BOOT)
 // The browser emulator's BOOT button (sw_boot in sim/main_wasm.cpp): the
 // short press bootButtonTick() hands over on a board. That code reads GPIO0,
@@ -3205,6 +3251,7 @@ static void applyBrightness() {
     // select. Three shots in the foot from what looks like dead code.
     ledcWrite(TFT_BL, duty);
 #elif defined(TDECK_PLUS)
+    if (s_crownDark && s_screenDimmed) duty = 0;   // POCKET MODE is OFF, whatever DIM LEVEL says
     tdeckBacklight(duty);   // a stepped driver chip, not a PWM pin
 #else
 #if SQW_BOOT_BTN
@@ -3223,8 +3270,14 @@ static void applyBrightness() {
 // setCpuFrequencyMhz() reconfigures peripherals, so calling it every frame
 // would be both wasteful and a good way to find a driver's re-entrancy bug.
 static uint16_t s_cpuMhzApplied = 240;
+// TERMINAL MODE at rest (see terminalRestBudgetUs): 80 MHz. Not on the Tab5
+// (a P4: other clocks) or the CrowPanel 7 (its RGB panel is fed by the CPU).
+static bool s_termRest = false;
 static void applyCpuClock() {
     uint16_t want = Settings::cpuMhz();
+#if !defined(TAB5) && !defined(CROWPANEL7)
+    if (s_termRest && want > 80) want = 80;
+#endif
 #if defined(TWATCH_S3)
     // Asleep, the watch only listens and waits for a tap: SLEEP CPU, which
     // never goes above the screen-on clock. About 25 mA at 80 instead of 240.
@@ -3998,6 +4051,7 @@ static void armLogConfirm(const Detection& d) {
         const bool has = BlackBox::lastPosition(d.mac, (uint8_t)d.type, la, lo);
         uiLogSetConfirmWhere(has, la, lo);
     }
+    uiLogSetConfirmRing(s_confirmIsBle && TagRing::canRing(d.type));
     s_confirmPending = true;
     s_confirmArmed   = false;
 }
@@ -4135,6 +4189,7 @@ volatile bool g_consoleAdc = false;     // ADC: the spare analog inputs, for fin
 volatile bool g_consoleXyzzy = false;   // XYZZY: the TERMINAL background types the magic word now
 volatile bool g_consoleClippy = false;    // CLIPPY: unlock C1iPPY, for the bench
 volatile bool g_consoleToaster = false;   // TOASTER: unlock T0@$TY, for the bench
+volatile bool g_consoleRing    = false;   // RING: ring the tracker heard most recently, for the bench
 volatile bool g_consoleBall    = false;   // BALL: unlock the ball and chain as a pet, for the bench
 volatile bool g_consoleMeaty = false;   // MEATY: unlock him, for the bench
 volatile bool g_consolePet     = false;   // PET: the next earned pet, as the Settings row would
@@ -6981,7 +7036,7 @@ static inline void pushFrame(int x, int y) {
     {
         static bool skipped = false;
         bool dark = s_screenDimmed && Settings::dimLevel() == 0;
-#if SQW_BOOT_BTN
+#if SQW_POCKET
         if (s_crownDark && s_screenDimmed) dark = true;
 #endif
         if (dark) { skipped = true; return; }
@@ -8159,6 +8214,75 @@ static void bootButtonTick(uint32_t now) {
 #endif
 #endif
 
+// ---- TERMINAL MODE at rest ---------------------------------------------------
+// TERMINAL MODE is text and numbers: once nobody has touched it for a few
+// seconds it redraws four times a second, and twice after half a minute, with
+// the CPU at 80 MHz. The radios lose nothing: the loop's radio work runs every
+// 20 ms through the wait (terminalRestWait), as it does at full speed. A
+// touch, a key, the ball or a new catch ends the rest at once.
+static const uint32_t TERM_REST_AFTER_MS = 3000;
+static const uint32_t TERM_SLOWER_AFTER_MS = 30000;
+static uint32_t       s_termWokeAt = 0;   // an input ended the last rest
+
+static void terminalRestSet(bool on) {
+    if (on == s_termRest) return;
+    s_termRest = on;
+    applyCpuClock();
+    Serial.printf("[term] %s (CPU %u MHz)\n", on ? "resting" : "awake", (unsigned)s_cpuMhzApplied);
+}
+
+// The frame budget at rest, in microseconds; 0 while TERMINAL MODE is not
+// resting (or not up).
+static uint32_t terminalRestBudgetUs(uint32_t now, uint32_t idleMs) {
+#if defined(SQUACHSIM)
+    (void)now; (void)idleMs;
+    return 0;   // the emulator draws in the browser's own frames
+#else
+    const bool rest = state == AppState::CLEAR && Settings::boringMode() &&
+                      idleMs > TERM_REST_AFTER_MS &&
+                      now - transitionStart > TERM_REST_AFTER_MS &&
+                      now - s_termWokeAt > 1000 &&
+                      !Theme::toastUp(now);
+    terminalRestSet(rest);
+    if (!rest) return 0;
+    return idleMs > TERM_SLOWER_AFTER_MS ? 500000UL : 250000UL;
+#endif
+}
+
+static void terminalRestWait(uint32_t ms) {
+    const uint32_t until = millis() + ms;
+    const uint32_t seq = engine.latestSeq();
+    for (;;) {
+        const int32_t left = (int32_t)(until - millis());
+        if (left <= 0) return;
+        delay(left > 20 ? 20 : (uint32_t)left);
+        engine.loop();   // the WiFi queue holds 8 frames; the hop keeps its own clock
+        // A catch: draw it now. The clock stays where it is -- in a busy room
+        // catches come every second, and the clock is not switched that often.
+        if (engine.latestSeq() != seq) return;
+        bool input = false;
+#if !defined(SQW_SMALL)
+        int16_t a, b;
+        if (sampleTouchRaw(a, b)) input = true;
+#endif
+#if SQW_TRACKBALL
+        if (tdeckBallPending()) input = true;
+#endif
+#if defined(STICKS3)
+        if (digitalRead(STICK_KEY1) == LOW || digitalRead(STICK_KEY2) == LOW) input = true;
+#endif
+#if defined(CARDPUTER_ADV)
+        if (s_cardKeysOk) { const int cnt = cardRead(0x03); if (cnt > 0 && (cnt & 0x0F)) input = true; }
+#endif
+        if (input) break;
+    }
+    // A finger, a key or the ball: full speed for it, and no rest again for a
+    // second even if the loop never counts it as a touch (a light brush), so
+    // the clock is not switched every frame.
+    s_termWokeAt = millis();
+    terminalRestSet(false);
+}
+
 
 #if defined(M5_STOPWATCH)
 static bool stopwatchBackOverride() {
@@ -9004,6 +9128,32 @@ void loop() {
             if (Wire.endTransmission() == 0 && n < (int)sizeof line - 8) n += snprintf(line + n, sizeof line - n, " 0x%02X", a);
         }
         Serial.println(line);
+    }
+#endif
+#if SQW_RING
+    {
+        uint8_t fm[6];
+        if (!TagRing::busy() && TagRing::takeFound(fm) && !TagRing::start(engine, fm))
+            Serial.println("[ring] busy");
+    }
+    if (g_consoleRing) {
+        g_consoleRing = false;
+        uint8_t mac[6];
+        if (!TagRing::latest(mac))              Serial.println("[ring] no tracker heard since boot");
+        else if (!TagRing::start(engine, mac))  Serial.println("[ring] busy");
+        else Serial.printf("[ring] ringing %02X:%02X:%02X:%02X:%02X:%02X\n",
+                           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    }
+    {
+        // A ring has finished: the radio is back, the button comes up, and
+        // the answer is a toast on whatever screen is showing.
+        const TagRing::Result r = TagRing::poll(engine);
+        if (r != TagRing::Result::NONE) {
+            uiAlertSetRinging(false);
+            uiLogSetRinging(false);
+            Theme::showToast(TagRing::title(r), TagRing::detail(r),
+                             r == TagRing::Result::RANG ? Theme::GREEN : Theme::AMBER);
+        }
     }
 #endif
     if (g_consoleInvert) {
@@ -10120,6 +10270,22 @@ void loop() {
                     s_infoShowingPrimer  = !Settings::infoPrimerShown();
                     s_infoPending        = true;
                     s_infoArmed          = false;
+#if SQW_RING
+                } else if (uiAlertHitRing(tp.x, tp.y, tft.width(), tft.height())) {
+                    // The card stays up while the tracker is asked to beep,
+                    // and its timer starts again so it does not close
+                    // mid-ring. The answer arrives as a toast (see loop()).
+                    alertStart = now;
+                    if (TagRing::busy()) {
+                        Theme::showToast("RINGING...", "Still asking it", Theme::AMBER);
+                    } else if (TagRing::start(engine, s_alertMac)) {
+                        uiAlertSetRinging(true);
+                        Theme::showToast("RINGING...", "Asking it to beep", Theme::AMBER);
+                        Serial.println("[ring] from the alert");
+                    } else {
+                        Theme::showToast("CAN'T RING", "Bluetooth is busy", Theme::RED);
+                    }
+#endif
                 } else if (uiAlertHitIgnore(tp.x, tp.y, tft.width(), tft.height())) {
                     // Toggle, not just add: the button reads MUTED once the
                     // device is on the list, so tapping it again has to be
@@ -10358,6 +10524,22 @@ void loop() {
                     } else if (ctap == LogConfirmTap::CANCEL) {
                         lastTouch = now;
                         s_confirmPending = false;
+#if SQW_RING
+                    } else if (ctap == LogConfirmTap::RING) {
+                        // The panel closes; the answer comes as a toast over
+                        // the LOG when the tracker has been asked (loop()).
+                        lastTouch = now;
+                        s_confirmPending = false;
+                        if (TagRing::busy()) {
+                            Theme::showToast("RINGING...", "Still asking it", Theme::AMBER);
+                        } else if (TagRing::start(engine, s_confirmMac)) {
+                            uiLogSetRinging(true);
+                            Theme::showToast("RINGING...", "Asking it to beep", Theme::AMBER);
+                            Serial.println("[ring] from the LOG");
+                        } else {
+                            Theme::showToast("CAN'T RING", "Bluetooth is busy", Theme::RED);
+                        }
+#endif
                     }
                 }
                 break;
@@ -12435,7 +12617,7 @@ void loop() {
         // (see Settings::screenTimeoutSec), unless it is set to NEVER.
         if (s_onUsb) wantDim = false;
 #endif
-#if defined(TWATCH_S3) || SQW_BOOT_BTN
+#if SQW_POCKET
         // POCKET MODE, which beats the cable, the desk and a timeout of NEVER.
         // Only the button ends it (pocketPress); a touch never does.
         //
@@ -12458,7 +12640,7 @@ void loop() {
         if (wantDim != s_screenDimmed) {
             s_screenDimmed = wantDim;
             applyBrightness();
-#if defined(TWATCH_S3) || SQW_BOOT_BTN
+#if SQW_POCKET
             if (s_crownDark) Serial.println(wantDim ? "[pocket] screen dark" : "[pocket] screen lit for an alert");
 #endif
         }
@@ -12495,10 +12677,17 @@ void loop() {
         }
 #endif
         const uint8_t fps = Settings::idleFps();
-        if (fps && idleMs > (uint32_t)Settings::idleAfterSec() * 1000UL) {
-            const uint32_t budgetUs = 1000000UL / fps;
-            const uint32_t spentUs  = micros() - frameStartUs;
-            if (spentUs < budgetUs) idleWait((budgetUs - spentUs) / 1000UL);
+        uint32_t budgetUs = 0;
+        if (fps && idleMs > (uint32_t)Settings::idleAfterSec() * 1000UL) budgetUs = 1000000UL / fps;
+        // TERMINAL MODE at rest: whichever is slower, its pace or the saver's.
+        const uint32_t restUs = terminalRestBudgetUs(now, idleMs);
+        if (restUs > budgetUs) budgetUs = restUs;
+        if (budgetUs) {
+            const uint32_t spentUs = micros() - frameStartUs;
+            if (spentUs < budgetUs) {
+                if (restUs) terminalRestWait((budgetUs - spentUs) / 1000UL);
+                else        idleWait((budgetUs - spentUs) / 1000UL);
+            }
         }
     }
 

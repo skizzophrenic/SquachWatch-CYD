@@ -149,6 +149,8 @@ Be honest with yourself about what the PIN does: it stops a snoop who picks the 
 
 **The BOOT button** on the CYD-style boards: a short press turns the screen off, and only another press turns it back on. That's **POCKET MODE**: a touch won't wake it, so a board in a pocket or a bag stays dark. Alerts still light it for their card and then it goes dark again. Hold BOOT for about a second to start CHARGE MODE. On the Freenove ESP32-S3 3.5", which has a battery connector, holding BOOT is the power switch instead: at about a second it says KEEP HOLDING, at three it powers off, and a press of BOOT turns it back on. CHARGE MODE is on the Settings list there.
 
+**The T-Deck Plus** does POCKET MODE on its trackball: hold it down for 2 seconds and the screen goes dark; press it to wake.
+
 **The speaker.** The Freenove ESP32-S3 2.8" and 3.5", the T-Deck Plus, the StickS3 and the Cardputer ADV have one (on the Cardputer it plays short tones). SOUND in Settings is OFF (the default), ALERTS (a device you've never seen, a watch-list hit, a low battery) or ALL (those plus a squad message, a visitor, throws and landings, C1iPPY, the toaster and the lamp noticing the cable). VOLUME is 0-100% on its - and + buttons; each press plays a sample. Nothing plays while the screen is dimmed or at night (11 pm to 5 am), except a watch-list hit.
 
 **The battery lamp.** On the Freenove ESP32-S3 2.8" and 3.5" and the T-Watch, a little lava lamp under the menu button is the battery: the lava is the charge. On the cable, bubbles stream up and a rainbow runs through the cap and base; under 10% it flickers. The Freenove boards work out the cable from the battery voltage jumping when you plug in, so it can take a few seconds to notice. Boards with no battery don't show a lamp. Rather not have it? **Settings → APPEARANCE → LAVA LAMP: OFF**.
@@ -204,6 +206,7 @@ They happen, and the confidence grade is there so you can tell a solid match fro
 - **Why isn't my phone flagged?** Because phones aren't on the list. It matches specific signatures (a Flock prefix, an AirTag's Find My payload, a body cam's network name), not "anything Apple" or "anything nearby". An ordinary phone doesn't match any of them.
 - **AirPods showing up as AIRTAG?** Known and accepted. A freshly powered AirTag sends the same kind of advert AirPods do, and catching the tag mattered more. [DETECTIONS.md](DETECTIONS.md) has the details.
 - **Your own AirTag or doorbell** is a true positive every single time. IGNORE it.
+- **Can I make a tracker beep?** On the S3 and C5 boards, yes: RING on a tracker's alert card, or RING IT on its LOG row. The board connects for a few seconds and asks it to play its sound. Trackers only beep for strangers while they're away from their owner's phone (that's the anti-stalking design), so a tracker next to its owner will usually answer IT SAID NO or NO ANSWER. The CYDs don't have RING; it needs memory they haven't got.
 - Another SquachWatch, an ESP32 Marauder or a nyanBOX is the same chip, and none of them is flagged as hacking hardware on that alone.
 
 **Found a real false positive?** [Open an issue](https://github.com/skizzophrenic/SquachWatch-CYD/issues) with the type, the confidence, the first half of the address, the name if it had one, and what the thing actually was. Turn on PRIVACY MODE before you take a photo of the screen.

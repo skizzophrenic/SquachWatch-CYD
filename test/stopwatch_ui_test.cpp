@@ -300,5 +300,23 @@ int main() {
     ck("desktop notification focus stays inside glass",StopWatchGeometry::visible(80,269)&&StopWatchGeometry::visible(386,339));
     StopWatchUI::beginFrame(700);uiDeskTick(t,110000,eng,false);StopWatchUI::endFrame(t);
     ck("expired desktop notification loses tap and focus",!uiDeskHitAlert(233,304,110000)&&!StopWatchUI::focus(t,233,304));
+    uiClearSetBatterySource([](uint8_t& pct,bool& charging){pct=100;charging=true;return true;});
+    t.fillRect(0,0,466,466,Theme::BLACK);
+    uiClearDrawStopWatchBattery(t,200000,290,150);
+    bool batterySafe=true;int batteryInk=0;
+    for(int yy=0;yy<466;++yy)for(int xx=0;xx<466;++xx)if(t.readPixel(xx,yy)!=Theme::BLACK){
+        ++batteryInk;batterySafe &= xx>=290 && xx<382 && yy>=150 && yy<180 && StopWatchGeometry::visible(xx,yy);
+    }
+    ck("full charging battery fits reserved home space",batterySafe && batteryInk>100);
+    uiClearSetBatterySource([](uint8_t&,bool&){return false;});
+    t.fillRect(0,0,466,466,Theme::BLACK);uiClearDrawStopWatchBattery(t,202000,187,86);
+    ck("unavailable battery leaves the icon empty",t.readPixel(200,99)==Theme::BLACK);
+    for(int size=0;size<4;++size){
+        while(Settings::clockSize()!=size)Settings::cycleClockSize();
+        uiDeskInit(t);StopWatchUI::beginFrame(700);uiDeskTick(t,204000+size*2000,eng,false);StopWatchUI::endFrame(t);
+        bool clear=true;
+        for(int yy=86;yy<116;++yy)for(int xx=187;xx<279;++xx)clear &= uiDeskHitClockEdge(xx,yy)==0;
+        ck("desktop clock never occupies battery band",clear);
+    }
     printf("%d UI checks, %d failures\n",checks,failures);return failures?1:0;
 }

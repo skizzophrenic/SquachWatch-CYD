@@ -155,6 +155,15 @@ void uiLogScroll(int delta) {
     if (g_scroll < 0) g_scroll = 0;
 }
 
+// RING (tag_ring.h): on a tracker's panel, on the boards built with it, a
+// full-width row of its own between IGNORE/MORE INFO and CANCEL. The panel
+// grows by that row; nothing else moves.
+static bool s_ringRow = false;
+static bool s_ringing = false;
+static int  s_rgX, s_rgY, s_rgW, s_rgH;
+void uiLogSetConfirmRing(bool show) { s_ringRow = show; }
+void uiLogSetRinging(bool on)       { s_ringing = on; }
+
 // Confirm panel geometry/drawing/hit-test. A 2x2 grid (WATCH/HUNT on
 // top, INFO/CANCEL below) rather than the single row of three
 // ui_rawscan.cpp's identical-minus-INFO panel uses (see that module's
@@ -174,13 +183,14 @@ static void confirmRects(int screenW, int screenH,
         // 135 rows: no question line, the name in the built-in face, and
         // shorter buttons closer together. Same five, same places.
         pw = screenW - 16;
-        ph = 104;
+        const int margin = 6, gap = 4, btnH = 20;
+        ph = 104 + (s_ringRow ? btnH + gap : 0);
         px = (screenW - pw) / 2;
         py = (screenH - ph) / 2;
-        const int margin = 6, gap = 4, btnH = 20;
         const int btnW = (pw - 2 * margin - gap) / 2;
         cnY = py + ph - btnH - margin; cnH = btnH; cnX = px + margin; cnW = pw - 2 * margin;
-        igY = infY = cnY - gap - btnH; igH = infH = btnH;
+        s_rgX = cnX; s_rgW = cnW; s_rgH = btnH; s_rgY = cnY - gap - btnH;
+        igY = infY = (s_ringRow ? s_rgY : cnY) - gap - btnH; igH = infH = btnH;
         igX = px + margin; igW = btnW; infX = igX + btnW + gap; infW = btnW;
         wY = huY = igY - gap - btnH; wH = huH = btnH;
         wX = px + margin; wW = btnW; huX = wX + btnW + gap; huW = btnW;
@@ -190,18 +200,19 @@ static void confirmRects(int screenW, int screenH,
     // IGNORE/MORE INFO, then CANCEL alone across the bottom. CANCEL gets
     // the full width because it is the one button you hit by reflex and
     // the one that must never be mistaken for its neighbour.
-    ph = 164;
+    const int margin = 10, gap = 8, btnH = 24;
+    ph = 164 + (s_ringRow ? btnH + gap : 0);
     px = (screenW - pw) / 2;
     py = (screenH - ph) / 2;
-    const int margin = 10, gap = 8, btnH = 24;
     int btnW = (pw - 2 * margin - gap) / 2;
 
     cnY = py + ph - btnH - margin;
     cnH = btnH;
     cnX = px + margin;
     cnW = pw - 2 * margin;
+    s_rgX = cnX; s_rgW = cnW; s_rgH = btnH; s_rgY = cnY - gap - btnH;
 
-    igY = infY = cnY - gap - btnH;
+    igY = infY = (s_ringRow ? s_rgY : cnY) - gap - btnH;
     igH = infH = btnH;
     igX  = px + margin;       igW  = btnW;
     infX = igX + btnW + gap;  infW = btnW;
@@ -222,6 +233,7 @@ LogConfirmTap uiLogHitConfirm(int x, int y, int screenW, int screenH) {
     if (x >= igX && x <= igX + igW && y >= igY && y <= igY + igH) return LogConfirmTap::IGNORE;
     if (x >= infX && x <= infX + infW && y >= infY && y <= infY + infH) return LogConfirmTap::INFO;
     if (x >= cnX && x <= cnX + cnW && y >= cnY && y <= cnY + cnH) return LogConfirmTap::CANCEL;
+    if (s_ringRow && x >= s_rgX && x <= s_rgX + s_rgW && y >= s_rgY && y <= s_rgY + s_rgH) return LogConfirmTap::RING;
     return LogConfirmTap::NONE;
 }
 
@@ -266,6 +278,7 @@ static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label, bool 
         Theme::drawButton(t, huX, huY, huW, huH, hunted ? "STOP HUNT" : "HUNT", hunted, 1);
         Theme::drawButton(t, igX, igY, igW, igH, ignored ? "UN-IGNORE" : "IGNORE", ignored, 1);
         Theme::drawButton(t, infX, infY, infW, infH, "MORE INFO", false, 1);
+        if (s_ringRow) Theme::drawButton(t, s_rgX, s_rgY, s_rgW, s_rgH, s_ringing ? "RINGING..." : "RING IT", s_ringing, 1);
         Theme::drawButton(t, cnX, cnY, cnW, cnH, "CANCEL", false, 1);
         return;
     }
@@ -305,6 +318,8 @@ static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label, bool 
     // to be tapping IGNORE again and reading which toast came back.
     Theme::drawButton(t, igX, igY, igW, igH, ignored ? "UN-IGNORE" : "IGNORE", ignored);
     Theme::drawButton(t, infX, infY, infW, infH, "MORE INFO", false);
+    // RING: asks the tracker to beep (tag_ring.h). Held down while it does.
+    if (s_ringRow) Theme::drawButton(t, s_rgX, s_rgY, s_rgW, s_rgH, s_ringing ? "RINGING..." : "RING IT", s_ringing);
     Theme::drawButton(t, cnX, cnY, cnW, cnH, "CANCEL", false);
 }
 

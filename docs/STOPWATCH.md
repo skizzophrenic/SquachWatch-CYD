@@ -445,3 +445,17 @@ The small device notification is centered above the curved footer, with size-2
 text and an inset rounded card. The complete card is registered for touch and
 physical-button focus; its target disappears when the notification expires.
 StopWatch UI checks cover placement, taps, focus, and expiry (82 checks).
+
+### Battery status and unlock cards
+
+StopWatch Home now shows a battery icon and percentage at (290,150), below the
+menu/counter rim and above the speech band beginning at y=212. Desktop reserves
+y=86..115 for the battery and starts the clock plate at y=121 for every clock
+size. The badge is not overlaid on dialogs or other screens; terminal mode
+keeps its existing title-bar gauge. Charging adds a white plus to the icon,
+15% or less uses amber, and an unavailable reading shows --% instead of zero.
+The old lava-lamp toggle does not hide this status indicator on StopWatch.
+Costume and pet unlock cards no longer draw the decorative perimeter ring.
+
+Upstream v1.49.0 is merged, retaining the tracker RING navigation action alongside
+the StopWatch alert controls. No release manifest is added.
