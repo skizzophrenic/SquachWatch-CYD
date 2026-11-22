@@ -48,7 +48,12 @@ void buttonGeom(TFT_eSPI& t, int& yesX, int& noX, int& y) {
     yesX = (w - total) / 2;
     noX  = yesX + btnW() + BTN_GAP;
     // Inside the dialog window's bottom edge on the large panels (WIN_M).
-    y    = h - btnH() - (Theme::large() ? 18 : 10);
+    y = h - btnH() -
+#if defined(M5_STOPWATCH)
+        48;
+#else
+        (Theme::large() ? 18 : 10);
+#endif
 }
 
 // The large panels: the same words in a Win95 dialog, black on grey, in
@@ -123,12 +128,20 @@ void uiMeshWarnTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool 
     t.setTextWrap(false);
     t.setTextSize(2);
     t.setTextColor(Theme::VAPOR_PINK, Theme::BG);
+#if defined(M5_STOPWATCH)
+    t.setCursor((w - t.textWidth("SQUACHMESH")) / 2, 54);
+#else
     t.setCursor(8, 6);
+#endif
     t.print("SQUACHMESH");
 
     t.setTextSize(1);
     t.setTextColor(Theme::AMBER, Theme::BG);
+#if defined(M5_STOPWATCH)
+    t.setCursor(92, 84);
+#else
     t.setCursor(8, 26);
+#endif
     t.print("THIS MAKES YOU TRACKABLE");
 
     // Theme::wrapText fills fixed 48-char rows, so the wrap width is capped
@@ -140,13 +153,21 @@ void uiMeshWarnTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool 
     if (maxW > 47 * charW) maxW = 47 * charW;
 
     const int lineH = t.fontHeight() + 1;
+#if defined(M5_STOPWATCH)
+    int y = 108;
+#else
     int y = 40;
+#endif
     t.setTextColor(Theme::WHITE, Theme::BG);
     for (uint8_t p = 0; p < PARA_N; p++) {
         char lines[8][48];
         const uint8_t n = Theme::wrapText(t, PARAS[p], maxW, lines, 8);
         for (uint8_t i = 0; i < n; i++) {
+#if defined(M5_STOPWATCH)
+            t.setCursor((w - maxW) / 2, y);
+#else
             t.setCursor(8, y);
+#endif
             t.print(lines[i]);
             y += lineH;
         }
@@ -160,7 +181,13 @@ void uiMeshWarnTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool 
     // is being answered is the last thing read before answering it.
     t.setTextColor(Theme::CYAN, Theme::BG);
     const char* q = "Turn on SquachMesh?";
-    t.setCursor((w - t.textWidth(q)) / 2, by - 14);
+    t.setCursor((w - t.textWidth(q)) / 2,
+#if defined(M5_STOPWATCH)
+        322
+#else
+        by - 14
+#endif
+    );
     t.print(q);
 
     // NO is not the quiet one. A consent dialog whose decline is styled as

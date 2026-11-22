@@ -9,7 +9,7 @@
 
 namespace {
 
-const int TOP = 16;
+const int TOP = Theme::LIST_TOP;
 int8_t s_card = -1;   // the entry whose card is up, or -1 for the index
 
 bool caught(const DetectionEngine& eng, DetectionType t) { return eng.lifetimeTypeCount(t) > 0; }
@@ -31,7 +31,7 @@ void grid(int w, int h, int& cols, int& rows, int& gx, int& gy, int& cw, int& ch
     rows = (Dex::ENTRIES + cols - 1) / cols;
     const int top = TOP + Theme::listHeadingH() + (Theme::large() ? 4 : 2);
     const int bottom = h - Theme::pinnedBackH(w) - 4;
-    const int pad = 4, gap = 3;
+    const int pad = 4 + RoundLayout::inset(top, bottom - top, w), gap = 3;
     cw = (w - 2 * pad - (cols - 1) * gap) / cols;
     ch = (bottom - top - (rows - 1) * gap) / rows;
     gx = (w - (cols * cw + (cols - 1) * gap)) / 2;
@@ -139,13 +139,18 @@ void drawCard(TFT_eSPI& t, int w, int h, const DetectionEngine& eng) {
     // Left (or top): the icon in a box, and the record under it.
     // A third of the width and a bit under a third of the height: 104x74 on
     // the 2.8", 160x99 on the 3.5", so the icon grows with the panel.
-    const int boxW = wide ? w / 3 : w - 12;
+#if defined(M5_STOPWATCH)
+    const int cardMargin = 76;
+#else
+    const int cardMargin = 6;
+#endif
+    const int boxW = wide ? w / 3 : w - 2 * cardMargin;
     // A compact screen (240x135) has 71 rows between the heading and the
     // buttons: a shorter icon box, three of the five records, and the lore
     // cut to what fits beside them.
     const bool tiny = Theme::compact();
     const int boxH = tiny ? 26 : wide ? (h * 31) / 100 : 60;
-    const int bx = 6, by = top;
+    const int bx = cardMargin, by = top;
     panel(t, bx, by, boxW, boxH, col);
     const int s = (boxW < boxH ? boxW : boxH) / 2 - 8;
     Theme::drawTypeIcon(t, type, bx + boxW / 2, by + boxH / 2, s);
@@ -187,8 +192,8 @@ void drawCard(TFT_eSPI& t, int w, int h, const DetectionEngine& eng) {
     // Right (or below): two panels. The lore (or, uncaught, its blanked
     // shape) in one sized to its lines; where it lives and what Squachy says
     // in a second that takes the rest of the height.
-    const int px = wide ? bx + boxW + 4 : 6;
-    const int pw = wide ? w - px - 6 : w - 12;
+    const int px = wide ? bx + boxW + 4 : cardMargin;
+    const int pw = wide ? w - px - 6 : w - 2 * cardMargin;
     const int py = wide ? top : ry + 4;
     const int tx = px + 4, tw = pw - 8;
     char lines[8][48];
@@ -316,3 +321,7 @@ DexTap uiDexHitTest(TFT_eSPI& t, int x, int y, int screenW, int screenH) {
         default: return DexTap::NONE;
     }
 }
+
+#if defined(M5_STOPWATCH)
+bool uiDexCardOpen() {return s_card>=0;}
+#endif

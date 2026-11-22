@@ -31,7 +31,12 @@ void buttonGeom(TFT_eSPI& t, int& enX, int& offX, int& y) {
     const int total = BTN_W * 2 + BTN_GAP;
     enX  = (w - total) / 2;
     offX = enX + BTN_W + BTN_GAP;
-    y    = h - BTN_H - 10;
+    y = h - BTN_H -
+#if defined(M5_STOPWATCH)
+        48;
+#else
+        10;
+#endif
 }
 
 } // namespace
@@ -52,12 +57,20 @@ void uiBeaconWarnTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, boo
     t.setTextWrap(false);
     t.setTextSize(2);
     t.setTextColor(Theme::VAPOR_PINK, Theme::BG);
+#if defined(M5_STOPWATCH)
+    t.setCursor((w - t.textWidth("IBEACONS")) / 2, 54);
+#else
     t.setCursor(8, 6);
+#endif
     t.print("IBEACONS");
 
     t.setTextSize(1);
     t.setTextColor(Theme::AMBER, Theme::BG);
+#if defined(M5_STOPWATCH)
+    t.setCursor(92, 84);
+#else
     t.setCursor(8, 26);
+#endif
     t.print("THIS CAN BE A LOT OF ALERTS");
 
     // wrapText fills fixed 48-character rows, so the width is capped at what
@@ -67,13 +80,21 @@ void uiBeaconWarnTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, boo
     if (maxW > 47 * charW) maxW = 47 * charW;
 
     const int lineH = t.fontHeight() + 1;
+#if defined(M5_STOPWATCH)
+    int y = 108;
+#else
     int y = 40;
+#endif
     t.setTextColor(Theme::WHITE, Theme::BG);
     for (uint8_t p = 0; p < PARA_N; p++) {
         char lines[8][48];
         const uint8_t n = Theme::wrapText(t, PARAS[p], maxW, lines, 8);
         for (uint8_t i = 0; i < n; i++) {
+#if defined(M5_STOPWATCH)
+            t.setCursor((w - maxW) / 2, y);
+#else
             t.setCursor(8, y);
+#endif
             t.print(lines[i]);
             y += lineH;
         }

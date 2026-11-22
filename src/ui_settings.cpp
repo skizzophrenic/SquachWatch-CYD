@@ -1,3 +1,6 @@
+#if defined(M5_STOPWATCH)
+#include "stopwatch_ui.h"
+#endif
 // SquachWatch-CYD — settings screen implementation
 #include "ui_settings.h"
 #include "gnss.h"
@@ -31,7 +34,11 @@
 // 32 leaves 12px of clear space under the icons. Shared by computeGeom()
 // for both drawing and hit-testing, so the rows and their tap targets
 // move together.
+#if defined(M5_STOPWATCH)
+static const int TOP_MARGIN = RoundLayout::HEADER;
+#else
 static const int TOP_MARGIN = 32;
+#endif
 
 // One scroll position per page, not one shared: see SettingsPage in the header.
 static SettingsPage s_page = SettingsPage::MAIN;
@@ -170,7 +177,10 @@ static const SettingsRow APPEARANCE_ROWS[] = {
     // Then how the SCREEN looks.
     SettingsRow::THEME, SettingsRow::BACKGROUND, SettingsRow::BACKGROUND_LOCK, SettingsRow::DET_STYLE,
     SettingsRow::LAVA_LAMP, SettingsRow::BRIGHTNESS,
-    SettingsRow::INVERT, SettingsRow::RGB_SWAP, SettingsRow::ROTATION_LOCK,
+    SettingsRow::INVERT, SettingsRow::RGB_SWAP,
+#if !defined(M5_STOPWATCH)   // the circular viewport has one orientation
+    SettingsRow::ROTATION_LOCK,
+#endif
     // And the one light that is not on the screen at all.
     SettingsRow::STATUS_LIGHT,
     // How big the words are, on a page of its own.
@@ -729,6 +739,7 @@ static SliderGeom sliderGeom(TFT_eSPI& t, int w, int y, int hgt) {
 }
 static void drawFontRow(TFT_eSPI& t, int w, int y, int hgt, const char* label,
                         Settings::FontKind k, uint16_t labelColor) {
+    RoundRow roundRow(t, w, y, hgt);
     rowPanel(t, w, y, hgt);
     int8_t lo, hi;
     Theme::fontRange(t, k, lo, hi);
@@ -767,6 +778,9 @@ static void drawFontRow(TFT_eSPI& t, int w, int y, int hgt, const char* label,
 static void computeGeom(TFT_eSPI& t, int screenH, int& top, int& bodyBottom,
                         int& rowH, int& headerH, int& tallH) {
     top = TOP_MARGIN;
+#if defined(M5_STOPWATCH)
+    t.setTextFont(1); // geometry must not depend on the last rendered font
+#endif
     // The pinned BACK strip owns the bottom of the screen, so the list stops
     // above it -- otherwise the last row draws underneath and cannot be tapped.
     bodyBottom = screenH - Theme::pinnedBackH(t.width()) - 2;
@@ -777,6 +791,9 @@ static void computeGeom(TFT_eSPI& t, int screenH, int& top, int& bodyBottom,
     // size bigger, and this carries it: taller letters, taller row, bigger
     // thumb target, all off the one number.
     rowH = t.fontHeight() + Theme::listRowPad();
+#if defined(M5_STOPWATCH)
+    if(rowH<44) rowH=44;
+#endif
     const int big = t.fontHeight();
     t.setTextSize(Theme::uiTextSize(t, 1));
     headerH = t.fontHeight() + 6;
@@ -802,8 +819,10 @@ void uiSettingsInit(TFT_eSPI& t) {
     // Arriving at Settings is arriving at its main page, at the top. Scroll memory is for moving BETWEEN pages inside one
     // visit -- carrying it across a fresh entry would drop you mid-list with
     // no idea why.
+#if !defined(M5_STOPWATCH)
     s_page = SettingsPage::MAIN;
     for (uint8_t i = 0; i < 6; i++) g_scrollFor[i] = 0;
+#endif
     // Any pending question dies with the screen. Coming back to Settings and
     // finding a confirm panel still up from last time would be answering
     // something you no longer remember asking.
@@ -910,6 +929,9 @@ SettingsConfirmTap uiSettingsConfirmButtonAt(int x, int y, int screenW, int scre
 static void drawSettingsConfirm(TFT_eSPI& t, int w, int h) {
     const ConfirmText* ct = confirmTextFor(s_confirmRow);
     if (!ct) return;
+#if defined(M5_STOPWATCH)
+    StopWatchUI::modal();
+#endif
     int px, py, pw, ph, okX, okY, okW, okH, cnX, cnY, cnW, cnH;
     settingsConfirmRects(w, h, px, py, pw, ph, okX, okY, okW, okH, cnX, cnY, cnW, cnH);
 
@@ -969,13 +991,25 @@ static void pinnedBackRect(int screenW, int screenH, int& x, int& y, int& w, int
     w = screenW;
     h = Theme::pinnedBackH(screenW);
     y = screenH - h;
+#if defined(M5_STOPWATCH)
+    w = 220; h = 38; x = (screenW - w) / 2; y = screenH - 68;
+#endif
 }
 
 static void drawPinnedBack(TFT_eSPI& t, int screenW, int screenH) {
     int x, y, w, h;
     pinnedBackRect(screenW, screenH, x, y, w, h);
+#if defined(M5_STOPWATCH)
+    t.fillRect(0,screenH-RoundLayout::FOOTER,screenW,RoundLayout::FOOTER,Theme::BG);
+    if(s_page==SettingsPage::DESK) {
+        Theme::drawButton(t,x,y,w/2,h,"OK",false);
+        Theme::drawButton(t,x+w/2,y,w/2,h,"UP",false);
+    } else Theme::drawButton(t,x,y,w,h,s_page==SettingsPage::MAIN ? "BACK" : "UP",false);
+    return;
+#else
     t.fillRect(x, y, w, h, Theme::BG);
     t.drawFastHLine(x, y, w, Theme::PURPLE);
+#endif
     t.setTextFont(1);
     t.setTextSize(Theme::compact() ? 1 : Theme::uiMenuTextSize(t));
     t.setTextColor(Theme::CYAN, Theme::BG);
@@ -1011,6 +1045,7 @@ bool uiSettingsTapPinnedBack(TFT_eSPI& t, int x, int y, int screenW, int screenH
 }
 
 static void drawHeader(TFT_eSPI& t, int w, int y, int hgt, RowGroupId g) {
+    RoundRow roundRow(t, w, y, hgt);
     // One short word, alone on its row: the easiest thing on the screen to
     // step up, and the thing that vanished most on a 480-wide panel.
     t.setTextSize(Theme::uiTextSize(t, 1));
@@ -1061,15 +1096,11 @@ static void drawHeader(TFT_eSPI& t, int w, int y, int hgt, RowGroupId g) {
 // right inset clears the scrollbar at w-4, which draws later and would
 // otherwise sit on top of the border.
 static void rowPanel(TFT_eSPI& t, int w, int y, int hgt) {
-    // The same tile Theme::drawListRowPanel draws: four rows of backdrop
-    // between neighbours, inset a row from the top so the text stays centred.
-    const int x0 = 3, ww = w - 10, hh = hgt - 4;
-    if (ww <= 0 || hh <= 0) return;
-    t.fillRect(x0, y + 1, ww, hh, Theme::BG);
-    t.drawRect(x0, y + 1, ww, hh, Theme::PURPLE);
+    Theme::drawListRowPanel(t, w, y, hgt);
 }
 static void drawTwoLineRow(TFT_eSPI& t, int w, int y, int hgt, const char* label,
                            const char* value, uint16_t labelColor, bool cycles) {
+    RoundRow roundRow(t, w, y, hgt);
     rowPanel(t, w, y, hgt);
     Theme::bodyFontOn(t);
     t.setTextColor(labelColor, Theme::BG);
@@ -1110,6 +1141,7 @@ static void drawTwoLineRow(TFT_eSPI& t, int w, int y, int hgt, const char* label
 static void drawRow(TFT_eSPI& t, int w, int y, int hgt, const char* label,
                     const char* value, bool danger, uint16_t labelColor,
                     bool compact) {
+    RoundRow roundRow(t, w, y, hgt);
     // The full-row fill is back, as a card -- see rowPanel. The glyph-cell
     // backing below stays anyway: it costs nothing now and it is what keeps
     // text crisp if a row is ever drawn without a panel behind it.
@@ -1177,6 +1209,7 @@ static void stepperLayout(TFT_eSPI& t, int w, int y, int hgt, bool compact, cons
 }
 static void drawStepperRow(TFT_eSPI& t, int w, int y, int hgt, const char* label, const char* value,
                            uint16_t labelColor, bool compact) {
+    RoundRow roundRow(t, w, y, hgt);
     drawRow(t, w, y, hgt, label, nullptr, false, labelColor, compact);
     int mx, px, vx, bw, bh, by;
     stepperLayout(t, w, y, hgt, compact, value, mx, px, vx, bw, bh, by);
@@ -1753,7 +1786,9 @@ void uiSettingsFontTap(TFT_eSPI& t, int x, int y, int screenW, int screenH) {
             int cur = Theme::fontDelta(k);
             if (cur < lo) cur = lo;
             if (cur > hi) cur = hi;
-            const SliderGeom g = sliderGeom(t, screenW, cy, itemH);
+            const int margin = RoundLayout::inset(cy, itemH, screenW);
+            x -= margin;
+            const SliderGeom g = sliderGeom(t, screenW - 2 * margin, cy, itemH);
             // The buttons step; anywhere along the track jumps to the
             // nearest stop -- a few pixels of slack either way.
             if (x < g.minusX - 4) {                     // the label: the face, where it has one
@@ -1794,7 +1829,9 @@ int uiSettingsStepHit(TFT_eSPI& t, int x, int y, int screenW, int screenH) {
             char valBuf[24];
             const char* value = stepperValue(items[idx].row, valBuf, sizeof valBuf);
             int mx, px, vx, bw, bh, by;
-            stepperLayout(t, screenW, cy, itemH, screenH > screenW, value, mx, px, vx, bw, bh, by);
+            const int margin = RoundLayout::inset(cy, itemH, screenW);
+            x -= margin;
+            stepperLayout(t, screenW - 2 * margin, cy, itemH, screenH > screenW, value, mx, px, vx, bw, bh, by);
             // A few pixels of slack either side: the buttons are the row's
             // height already, and a near miss should count, not do nothing.
             if (x >= mx - 4 && x < mx + bw + 4) return -1;
@@ -1806,3 +1843,30 @@ int uiSettingsStepHit(TFT_eSPI& t, int x, int y, int screenW, int screenH) {
     }
     return 0;
 }
+
+#if defined(M5_STOPWATCH)
+int uiSettingsFontFocusPart(TFT_eSPI& t,int x,int y,int screenW,int screenH) {
+    int top,bottom,rowH,headerH,tallH;
+    computeGeom(t,screenH,top,bottom,rowH,headerH,tallH);
+    DisplayItem items[LIST_MAX_N+7];const uint8_t n=buildDisplayList(items);
+    int cy=top;
+    for(int i=g_scroll;i<n;++i) {
+        const int h=itemHeight(items[i],rowH,headerH,tallH);
+        if(cy+h>bottom) break;
+        if(y>=cy && y<cy+h) {
+            if(items[i].isHeader || !isFontRow(items[i].row)) return 0;
+            const auto k=fontKindFor(items[i].row);
+            int8_t lo,hi;Theme::fontRange(t,k,lo,hi);const int cur=Theme::fontDelta(k);
+            const int margin=RoundLayout::inset(cy,h,screenW);x-=margin;
+            const auto g=sliderGeom(t,screenW-2*margin,cy,h);
+            if(y<g.by || y>=g.by+g.bh) return -1;
+            if(x>=g.minusX && x<g.minusX+g.bw && cur>lo) return 2;
+            if(x>=g.plusX && x<g.plusX+g.bw && cur<hi) return 3;
+            if(x>=5 && x<g.minusX-5 && Theme::fontHasFace(k)) return 1;
+            return -1;
+        }
+        cy+=h;
+    }
+    return 0;
+}
+#endif

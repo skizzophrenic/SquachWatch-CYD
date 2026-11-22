@@ -59,6 +59,8 @@ CXXFLAGS := -std=c++17 -O1 -g -Wall -Wno-unused-parameter $(EXTRA_CXXFLAGS) \
             -I$(SIM_DIR) -I$(INC) -DSQUACH_MESH=1 -DCYD_GPS=1
 
 UI_SRCS  := $(SRC)/theme.cpp \
+            $(SRC)/stopwatch_round.cpp \
+            $(SRC)/stopwatch_ui.cpp \
             $(SRC)/gnss.cpp \
             $(SRC)/squachy.cpp \
             $(SRC)/squachmesh.cpp \
@@ -386,3 +388,14 @@ clean:
 	rm -rf out .nvs $(WASM_DIR)/squachsim.js $(WASM_DIR)/squachsim.wasm $(WASM_DIR)/squachsim-*.js $(WASM_DIR)/squachsim-*.wasm
 
 .PHONY: all live wasm shots clean
+
+# StopWatch UI integration tests use a separate object directory.
+.PHONY: stopwatch-check stopwatch-ui-check-run
+stopwatch-check:
+	$(MAKE) OBJ_DIR=build-stopwatch EXTRA_CXXFLAGS="$(EXTRA_CXXFLAGS) -DM5_STOPWATCH=1" stopwatch-ui-check-run
+
+stopwatch-ui-check-run: $(OBJ_DIR)/stopwatch_ui_test
+	./$(OBJ_DIR)/stopwatch_ui_test
+
+$(OBJ_DIR)/stopwatch_ui_test: $(UI_OBJS) $(filter-out $(OBJ_DIR)/sim/main_sim.o,$(SIM_OBJS)) $(SENSE_OBJS) $(SQUACHWATCH)/test/stopwatch_ui_test.cpp
+	$(CXX) $(CXXFLAGS) -o $@ $^ -lm

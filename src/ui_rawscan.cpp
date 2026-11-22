@@ -1,3 +1,6 @@
+#if defined(M5_STOPWATCH)
+#include "stopwatch_ui.h"
+#endif
 // SquachWatch-CYD — manual raw BLE/WiFi scanner screen implementation
 #include "ui_rawscan.h"
 #include "ui_scroll.h"
@@ -28,7 +31,7 @@ static void printName(TFT_eSPI& t, const char* s, int x, int y, int maxW) {
 
 // Shared by rowLayout() and uiRawScanTick() so the two can never
 // drift apart -- see rowLayout()'s own comment.
-static const int RS_TITLE_BOTTOM = 16;
+static const int RS_TITLE_BOTTOM = Theme::LIST_TOP;
 #if defined(SQW_SMALL)
 // No mini Squachy on the small boards: a 70 px strip on a 135 px screen left
 // 19 px for a list whose rows are 27, so no result ever showed.
@@ -45,7 +48,7 @@ static void bottomButtonRects(int screenW, int screenH,
                                int& backX, int& backY, int& backW, int& backH,
                                int& altX, int& altY, int& altW, int& altH) {
     Theme::ButtonBarGeom g = Theme::computeButtonBar(screenW, screenH);
-    const int margin = 8, gap = 8;
+    const int margin = 8 + RoundLayout::inset(g.y, g.h, screenW), gap = 8;
     int bw = (screenW - 2 * margin - gap) / 2;
     backX = margin;              backY = g.y; backW = bw; backH = g.h;
     altX  = backX + bw + gap;    altY  = g.y; altW  = bw; altH  = g.h;
@@ -132,6 +135,10 @@ RawScanConfirmTap uiRawScanHitConfirm(int x, int y, int screenW, int screenH) {
 // right before every return point in uiRawScanTick() rather than
 // restructuring those into a single shared tail.
 static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label, bool watched, bool hunted, bool ignored) {
+#if defined(M5_STOPWATCH)
+    StopWatchUI::modal();
+#endif
+
     int px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, igX, igY, igW, igH, cnX, cnY, cnW, cnH;
     confirmRects(w, h, px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH,
                  igX, igY, igW, igH, cnX, cnY, cnW, cnH);
@@ -365,6 +372,7 @@ if (!Theme::stillBackdrop(t)) switch (Settings::background()) {
     int max = (bodyH / rowH);
 
     for (int i = 0; i < max && idx < count; i++, idx++) {
+        RoundRow roundRow(t, w, y, rowH);
         t.drawFastHLine(0, y + rowH - 1, w, Theme::PURPLE);
 
         if (isBle) {

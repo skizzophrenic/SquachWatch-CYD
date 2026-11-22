@@ -24,7 +24,12 @@ Btns btns(TFT_eSPI& t) {
     const int gap = 14;
     b.nowX  = (t.width() - (b.w * 2 + gap)) / 2;
     b.skipX = b.nowX + b.w + gap;
-    b.y     = t.height() - btnH() - 8;
+    b.y     = t.height() - btnH() -
+#if defined(M5_STOPWATCH)
+48;
+#else
+8;
+#endif
     return b;
 }
 

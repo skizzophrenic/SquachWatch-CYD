@@ -185,3 +185,8 @@ SettingsRow        uiSettingsConfirmRow();
 SettingsConfirmTap uiSettingsHitConfirm(int x, int y, int screenW, int screenH);
 // The same, but only on the two drawn buttons (NONE everywhere else).
 SettingsConfirmTap uiSettingsConfirmButtonAt(int x, int y, int screenW, int screenH);
+
+#if defined(M5_STOPWATCH)
+// 0: ordinary row; -1: inert slider area; positive: enabled slider control.
+int uiSettingsFontFocusPart(TFT_eSPI&, int x, int y, int screenW, int screenH);
+#endif

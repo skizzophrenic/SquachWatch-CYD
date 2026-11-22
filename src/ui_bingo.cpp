@@ -2,13 +2,16 @@
 #include "ui_bingo.h"
 #include "bingo.h"
 #include "theme.h"
+#if defined(M5_STOPWATCH)
+#include "stopwatch_ui.h"
+#endif
 #include "detection_info.h"
 #include "clock.h"
 #include <Arduino.h>
 
 namespace {
 
-const int TOP = 16;
+const int TOP = Theme::LIST_TOP;
 bool    s_stats    = false;
 bool    s_confirm  = false;   // the "throw this card away?" panel is up
 int8_t  s_openCell = -1;      // the square whose paragraph is up, or -1
@@ -20,7 +23,7 @@ void geom(TFT_eSPI& t, int w, int h, int& gx, int& gy, int& cw, int& ch) {
     const Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
     const int top    = TOP + Theme::listHeadingH() + (Theme::large() ? 3 : 0);
     const int bottom = bar.y - 6;
-    const int pad    = 6, gap = 4;
+    const int pad = 6 + RoundLayout::inset(top, bottom - top, w), gap = 4;
     cw = (w - 2 * pad - 3 * gap) / 4;
     ch = (bottom - top - 3 * gap) / 4;
     gx = (w - (4 * cw + 3 * gap)) / 2;
@@ -179,6 +182,9 @@ void confirmRects(int screenW, int screenH, int& px, int& py, int& pw, int& ph,
 }
 
 void drawConfirm(TFT_eSPI& t, int w, int h) {
+#if defined(M5_STOPWATCH)
+    StopWatchUI::modal();
+#endif
     int px, py, pw, ph, yesX, yesY, yesW, yesH, noX, noY, noW, noH;
     confirmRects(w, h, px, py, pw, ph, yesX, yesY, yesW, yesH, noX, noY, noW, noH);
     t.fillRoundRect(px, py, pw, ph, 6, Theme::BG);

@@ -21,6 +21,7 @@
 
 #include <TFT_eSPI.h>
 #include "theme.h"
+#include "stopwatch_ui.h"
 #include "settings.h"
 #include "squachy.h"
 #include "pet.h"
@@ -481,6 +482,9 @@ int main(int argc, char** argv) {
         else { fprintf(stderr, "--size wants WxH, e.g. 480x320" "\n"); return 2; }
     }
 
+#if defined(M5_STOPWATCH)
+    Theme::setLarge(false);
+#endif
     TFT_eSPI tft(W, H);
     tft.init();
     tft.setRotation(portrait ? 0 : 1);
@@ -495,6 +499,9 @@ int main(int argc, char** argv) {
 
     Settings::load();
     Clock::begin();
+#if defined(M5_STOPWATCH)
+    uiClearSetBatterySource([](uint8_t& pct, bool& charging) { pct=78; charging=false; return true; });
+#endif
     Regulars::begin();
     // Settings' own cycle* mutators are the only public way in, so walk
     // them to the requested index rather than reaching past the API.
@@ -792,8 +799,12 @@ int main(int argc, char** argv) {
     // opens an edit line, so the capture shows the line typed.
     // LORA CHATS from frame 10, so the capture shows forty keys of it typed.
     const uint32_t loraTypeAt = now + (uint32_t)(screen == "lorasettings" ? 30 : screen == "lorachat" ? 10 : frames) * STEP_MS;
+    if(screen=="clear" && getenv("SQUACHSIM_SAY")) Squachy::announce(getenv("SQUACHSIM_SAY"));
     size_t loraTyped = 0;
     auto tick = [&](uint32_t t) {
+#if defined(M5_STOPWATCH)
+        StopWatchUI::beginFrame((uint16_t)(screen == "clear" ? AppState::CLEAR : AppState::SETTINGS)*64);
+#endif
         SimClock::nowMs = t;
         if      (screen == "clear")    { Theme::setRedGlyph(!Squachy::th3Unlocked()); uiClearEmoteTick(t); uiClearTick(frame, t, engine, true, false);
                                          if (headsUp || simToast || getenv("SQUACHSIM_POWEROFF")) Theme::drawToast(frame, t); }
@@ -893,6 +904,7 @@ int main(int argc, char** argv) {
             info.resetReason = "POWERON_RESET";
             info.boardName = "cyd";
             info.usingCapTouch = false;
+#if defined(CYD_GPS)
             if (gps) {
                 const Gnss::Fix& f = Gnss::fix();
                 const Gnss::Sky k = Gnss::sky();
@@ -907,9 +919,20 @@ int main(int argc, char** argv) {
                 info.wdWritten = 42; info.wdSkipped = 310; info.wdDropped = 0;
                 info.wdFile = "/wigle-20261006-1200.csv";
             }
+#endif
             uiDiagnosticsTick(frame, t, engine, info);
         }
-        else if (screen == "boot")     uiBootTick(frame, t);
+        else if (screen == "boot") {
+#if defined(M5_STOPWATCH)
+            const char* stage=getenv("SQUACHSIM_BOOT_STAGE");
+            if(stage && strcmp(stage,"updates")==0)
+                uiBootStatus(frame,"CHECKING UPDATES","Connecting to WiFi","Please wait...",Theme::CYAN);
+            else if(stage && strcmp(stage,"touch")==0)
+                uiBootStatus(frame,"TOUCH CALIBRATION","Hold anywhere now","to reset calibration",Theme::AMBER);
+            else
+#endif
+                uiBootTick(frame,t);
+        }
         else if (screen == "update")   uiUpdateTick(frame, t);
         else if (screen == "nudge")    uiNudgeTick(frame, t, engine);
         else if (screen == "squadupdate") uiSquadUpdateTick(frame, t, engine);
@@ -1012,6 +1035,9 @@ int main(int argc, char** argv) {
                                 /*waving*/ pi == 1, 34, false, false, false, kP[pi]);
         }
         else return false;
+        #if defined(M5_STOPWATCH)
+        StopWatchUI::endFrame(frame);
+#endif
         return true;
     };
 
@@ -1349,7 +1375,9 @@ int main(int argc, char** argv) {
         uiAlertInit(frame, *d);
         if (gps) {
             gpsFeed(now);
+#if defined(CYD_GPS)
             uiAlertSetPlace(true, Gnss::fix().lat7, Gnss::fix().lon7, false);
+#endif
         }
         // The banners, the way main.cpp sets them: after init, which clears them.
         if (alertFirst)    uiAlertSetFirst(true);

@@ -58,3 +58,7 @@ void        uiPhonePinPrompt(const char* prompt);
 void        uiPhonePinAllowForgot(bool allow);
 bool        uiPhonePinForgot();
 #endif
+
+#if defined(M5_STOPWATCH)
+uint8_t uiPhoneStopRects(int16_t*,int16_t*,int16_t*,int16_t*,uint8_t);
+#endif

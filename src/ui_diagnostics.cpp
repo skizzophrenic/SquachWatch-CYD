@@ -41,6 +41,8 @@ static int drawLine(TFT_eSPI& t, int y, uint16_t labelColor, const char* label, 
     const int sy = y - s_off;
     if (sy < s_clipTop || sy + fh > s_clipBottom) return y + fh + 2;
     y = sy;
+    int rowWidth = t.width();
+    RoundRow roundRow(t, rowWidth, y, fh + 2);
     t.setTextColor(labelColor, Theme::BG);
     t.setCursor(6, y);
     t.print(label);
@@ -64,7 +66,7 @@ void uiDiagnosticsTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, co
     Theme::drawTitleBar(t, ">> DIAGNOSTICS <<");
 
     Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
-    int bodyTop = 16, bodyBottom = bar.y - 4;
+    int bodyTop = Theme::LIST_TOP, bodyBottom = bar.y - 4;
     t.fillRect(0, bodyTop, w, bodyBottom - bodyTop, Theme::BG);
 
     t.setTextSize(1);

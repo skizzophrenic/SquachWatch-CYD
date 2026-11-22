@@ -7,7 +7,7 @@
 #include <Arduino.h>
 #include <stdio.h>
 
-static const int TOP_MARGIN = 16;
+static const int TOP_MARGIN = Theme::LIST_TOP;
 static const int REMOVE_W   = 74;     // width of the tappable REMOVE zone
 static int g_scroll = 0;
 
@@ -37,6 +37,7 @@ void uiIgnoreListScroll(int delta) {
 }
 
 static void drawRow(TFT_eSPI& t, int w, int y, int hgt, uint8_t idx) {
+    RoundRow roundRow(t, w, y, hgt);
     const uint8_t* mac = IgnoreList::macAt(idx);
     if (!mac) return;
 
@@ -130,13 +131,23 @@ void uiIgnoreListTick(TFT_eSPI& t, uint32_t now) {
 uint8_t uiIgnoreListHitRemove(TFT_eSPI& t, int x, int y, int screenW, int screenH) {
     int top, bodyBottom, rowH;
     computeGeom(t, screenH, top, bodyBottom, rowH);
-    if (x < screenW - REMOVE_W) return 0xFF;      // not in the REMOVE column
+#if !defined(M5_STOPWATCH)
+    if (x < screenW - REMOVE_W) return 0xFF;
+#endif
 
     const uint8_t n = IgnoreList::count();
     uiClampScroll(g_scroll, (int)n, bodyBottom - top, rowH);
     int ry = top;
     for (uint8_t i = (uint8_t)g_scroll; i < n && ry + rowH <= bodyBottom; i++) {
-        if (y >= ry && y < ry + rowH) return i;
+        if (y >= ry && y < ry + rowH) {
+#if defined(M5_STOPWATCH)
+            const int margin=RoundLayout::inset(ry,rowH,screenW);
+            const int bx=screenW-margin-REMOVE_W+4, by=ry+(rowH-20)/2;
+            return x>=bx && x<bx+REMOVE_W-12 && y>=by && y<by+20 ? i : 0xFF;
+#else
+            return i;
+#endif
+        }
         ry += rowH;
     }
     return 0xFF;

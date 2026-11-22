@@ -1,5 +1,6 @@
 // SquachWatch-CYD — clear (idle) screen implementation
 #include "ui_clear.h"
+#include "stopwatch_round.h"
 #if SQUACH_LORA && defined(TDECK_PLUS)
 #include "ui_lorachat.h"   // the LORA n NEW pill: the tiles drop under it while it is up
 #endif
@@ -10,6 +11,7 @@
 // Needed this early: the message helpers sit up with the visit machine,
 // above where the rest of this file pulls these in.
 #include "theme.h"
+#include "stopwatch_ui.h"
 #include "security.h"   // the lock icon the counter tiles keep clear of
 #include "settings.h"
 #include "meshtalk.h"
@@ -1920,7 +1922,33 @@ static bool battRead(uint32_t now, uint8_t& pctOut, bool& chgOut) {
     return has;
 }
 
+#if defined(M5_STOPWATCH)
+void uiClearDrawStopWatchBattery(TFT_eSPI& t, uint32_t now, int x, int y) {
+    uint8_t pct=0; bool charging=false;
+    const bool valid=battRead(now,pct,charging);
+    const uint16_t color=valid && pct<=15 ? Theme::AMBER : Theme::CYAN;
+    t.fillRoundRect(x,y,92,30,10,Theme::BLACK);
+    t.drawRoundRect(x+8,y+8,22,14,3,color);
+    t.fillRect(x+30,y+12,3,6,color);
+    if(valid && pct) t.fillRect(x+11,y+11,(16*pct+99)/100,8,color);
+    if(charging) { // White plus marks charging, including at full charge.
+        t.drawFastHLine(x+14,y+14,9,Theme::WHITE);
+        t.drawFastVLine(x+18,y+10,9,Theme::WHITE);
+    }
+    char label[8];
+    if(valid) snprintf(label,sizeof label,"%u%%",(unsigned)pct);
+    else snprintf(label,sizeof label,"--%%");
+    t.setTextFont(1);t.setTextSize(2);t.setTextColor(Theme::WHITE,Theme::BLACK);
+    t.setCursor(x+39,y+7);t.print(label);t.setTextSize(1);
+}
+#endif
+
 static void drawBatteryGauge(TFT_eSPI& t, uint32_t now) {
+#if defined(M5_STOPWATCH)
+    // Reserved between the menu/counter rim and the speech band (y >= 212).
+    if(!Settings::boringMode()) uiClearDrawStopWatchBattery(t,now,290,150);
+    return;
+#endif
     // TERMINAL MODE has its own battery, in the LOG's title bar: the lamp
     // stood on the LOG's title and its TIME heading.
     if (Settings::boringMode() || !Settings::lavaLamp()) return;   // LAVA LAMP OFF (#132)
@@ -2046,6 +2074,9 @@ static void drawWatchPill(TFT_eSPI& t, int screenW, bool watching, bool hunting,
 struct CounterTile { int16_t x, y, w, h; DetectionType type; };
 static const uint8_t TILE_MAX = 12;
 static CounterTile s_tiles[TILE_MAX];
+#if defined(M5_STOPWATCH)
+static StopWatchArc::Arc s_counterArcs[TILE_MAX];
+#endif
 static uint8_t     s_tileN = 0;
 
 // The NEARBY headline's last drawn rectangle, grown to a finger-sized target.
@@ -2062,7 +2093,13 @@ bool uiClearCounterHit(int x, int y, DetectionType& column) {
     // A few pixels past the tile each way: they are only 12 rows tall.
     for (uint8_t i = 0; i < s_tileN; i++) {
         const CounterTile& c = s_tiles[i];
-        if (x >= c.x - 3 && x < c.x + c.w + 3 && y >= c.y - 3 && y < c.y + c.h + 3) {
+        if (
+#if defined(M5_STOPWATCH)
+            StopWatchArc::contains(s_counterArcs[i],x,y)
+#else
+            x >= c.x - 3 && x < c.x + c.w + 3 && y >= c.y - 3 && y < c.y + c.h + 3
+#endif
+        ) {
             column = c.type;
             return true;
         }
@@ -3432,7 +3469,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // when he moved down onto the buttons (asked for 2026-10-04).
     const int petFloor = counterTextTop - 2;
 
-    const int titleBottom  = 16;
+    const int titleBottom = Theme::LIST_TOP;
 
     // The counter tiles moved to a strip under the title bar, as many rows
     // tall as the most there can ever be, so Squachy's size never changes
@@ -3440,7 +3477,12 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // CLASSIC keeps it all where it was before v1.31.0: his band from the
     // title bar to the counters, which are at the bottom, with NEARBY over
     // his feet.
-    const bool xp = Settings::detXp();
+    const bool xp =
+#if defined(M5_STOPWATCH)
+        true;
+#else
+        Settings::detXp();
+#endif
     // XP's tiles start a couple of rows from the very top, in the title
     // bar between its corner icons, the way a taskbar sits. Not when the
     // WATCHING / HUNTING pill is up -- that lives in the same middle of the
@@ -3449,7 +3491,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // The T-Deck's LORA pill lives in that middle too, whenever the radio is
     // on, so the tiles sit under it then (asked for 2026-10-13, always-on
     // 2026-10-15).
-#if defined(TWATCH_S3)
+#if defined(TWATCH_S3) || defined(M5_STOPWATCH)
     const bool tilesLow = true;
 #else
     const bool tilesLow = eng.watchKind() != DetectionEngine::WatchKind::NONE ||
@@ -3486,7 +3528,12 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     const uint8_t rowsKept  = miniTiles ? 1
                             : (extraRows && s_tileRowsLast > counterRows) ? s_tileRowsLast : counterRows;
     const int tileLineH     = lineH * tileK;
-    const int bandTop       = xp ? tilesTop + rowsKept * tileLineH : titleBottom;
+    const int bandTop       =
+#if defined(M5_STOPWATCH)
+        xp ? 212 : titleBottom;
+#else
+        xp ? tilesTop + rowsKept * tileLineH : titleBottom;
+#endif
     const int squachyBottom = xp ? bar.y - 1 : counterTextTop - 2;
     // A panel far taller than it is wide -- the phone app's emulator, shaped
     // like the phone; no board is -- would hand him a band twice his usual
@@ -3533,7 +3580,13 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // The Cardputer's built-in screen with the EXT screen on shows neither.
     if (s_infoOnly)                   t.fillRect(0, 0, w, h, Theme::BG);
     else if (Settings::boringMode())  uiTerminalDraw(t, now, eng, titleBottom + 2, bar.y - 2);
-    else                              Theme::drawActiveBackground(t, now, 0, h, eng, advance);
+    else {
+#if defined(M5_STOPWATCH)
+        StopWatchRound::background(t, now, eng, advance, squachyBottom, xp ? bar.y : counterTextTop);
+#else
+        Theme::drawActiveBackground(t, now, 0, h, eng, advance);
+#endif
+    }
     Theme::clearBackgroundFloor();
     FrameProf::lap(FrameProf::BG);
     // The battery lamp, under everything that moves for the same reason as
@@ -3563,7 +3616,11 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // panel (asked for 2026-10-13; the large panels used to rise over the
     // tiles and hide the ones underneath). The pets' balloons keep under the
     // same edge (Pet::tick's band top).
-    if (xp) Squachy::setBubbleRiseTo(s_tileRowsLast ? tilesTop + s_tileRowsLast * tileLineH + 1 : 1);
+#if defined(M5_STOPWATCH)
+    if(xp) Squachy::setBubbleRiseTo(bandTop);
+#else
+    if (xp) Squachy::setBubbleRiseTo(s_tileRowsLast ? tilesTop + s_tileRowsLast * tileLineH + 1 : Theme::LIST_TOP);
+#endif
 
     // Squachy: main character, reacts to events, cracks jokes when idle.
     // His available region runs all the way to countersTop (not
@@ -3693,7 +3750,11 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     // before Squachy and the bubble was ending up behind him. Same
     // reasoning as ALL CLEAR below -- text is the one thing here that
     // cannot afford to be half-covered.
+#if defined(M5_STOPWATCH)
+    if (!Settings::boringMode()) StopWatchRound::overlay(t, now);
+#else
     Theme::drawBackgroundOverlay(t, now);
+#endif
 
     // Title bar at the top
     if (DrawBand::has(0, titleBottom) && !s_fob) Theme::drawTitleBar(t, ">> SQUACHWATCH <<  SCANNING");
@@ -3947,6 +4008,31 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         // As few rows as they fit in, sitting on the buttons; the space for the
         // most rows is still kept, so Squachy never changes size as things come
         // and go.
+#if defined(M5_STOPWATCH)
+        s_tileN=0;
+        const uint8_t shown=counterN>TILE_MAX ? TILE_MAX : counterN;
+        const int cols=6;
+        for(uint8_t i=0;i<shown;++i) {
+            const int row=i/cols, slot=i%cols;
+            const int inRow=(shown-row*cols)>cols ? cols : shown-row*cols;
+            const float spacing=26.0f;
+            const float mid=180+(inRow-1)*spacing*.5f-slot*spacing;
+            const float halfAngle=row ? 8.0f : 9.0f;
+            const StopWatchArc::Arc arc={212.0f-row*35.0f,mid-halfAngle,mid+halfAngle,13};
+            const DetectionType ty=counterTypes[i];
+            char text[24];
+            const char* name=detectionTypeName(ty);
+            if(ty==DetectionType::AIRTAG || ty==DetectionType::SAMSUNG_TAG || ty==DetectionType::GOOGLE_TAG || ty==DetectionType::TILE) name="TAG";
+            snprintf(text,sizeof text,"%.4s %u",name,(unsigned)counterCount(eng,ty));
+            const auto pt=StopWatchArc::point(arc.radius,mid);
+            StopWatchUI::outlineArc(t,arc,Theme::colorFor(ty));
+            StopWatchUI::arcControl(arc,text);
+            StopWatchUI::arcText(t,arc,text,Theme::WHITE,true,true);
+            s_counterArcs[s_tileN]=arc;
+            s_tiles[s_tileN++]={(int16_t)(pt.x-12),(int16_t)(pt.y-12),24,24,ty};
+        }
+        s_tileRowsLast=(shown+2)/3;
+#else
         const uint8_t perRowCap = landscape ? MAX_COUNTER_TYPES : MAX_PER_ROW_PORTRAIT;
         uint16_t tileW[MAX_COUNTER_TYPES];
         char     tileTxt[MAX_COUNTER_TYPES][14];
@@ -3970,7 +4056,11 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
                                ;
         auto rowRoom = [&](uint8_t row) {
             const int top = tilesTop + row * tileLineH;
+#if defined(M5_STOPWATCH)
+            return w - 2 * RoundLayout::inset(top, tileLineH, w) - 8;
+#else
             return top < Theme::TITLE_ICON_BAND_H ? w - 2 * iconMargin : w - 8;
+#endif
         };
         // Tighter tiles, once, if a crowded day will not fit the rows there are.
         for (uint8_t pass = 0; pass < 2 && counterN && !rowsUsed; pass++) {
@@ -4069,6 +4159,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
                 st += n;
             }
         }
+#endif
     }
 
     // The pet, last of the scene: over the counters, under the buttons.

@@ -143,3 +143,7 @@ void uiClearEmoteTick(uint32_t now);
 // One XP counter tile, lit, at the main screen's scale: the FONTS page's
 // preview of XP TILES. Returns its width.
 int uiClearSampleTile(TFT_eSPI& t, int x, int y, const char* txt, uint16_t iconCol);
+
+#if defined(M5_STOPWATCH)
+void uiClearDrawStopWatchBattery(TFT_eSPI& t, uint32_t now, int x, int y);
+#endif

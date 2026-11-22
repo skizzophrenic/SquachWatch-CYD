@@ -68,6 +68,10 @@ class CsiMotionModel {
   // a few samples of a person moving; the windowed score follows a second
   // later. For the live graph, not for the PRESENCE decision.
   float live() const { return live_; }
+#if defined(M5_STOPWATCH)
+  float variation() const { return variation_; }
+  float baselineVariation() const { return feature_median_[0]; }
+#endif
 
  private:
   static constexpr size_t kFeatureCount = 4;
@@ -124,5 +128,11 @@ class CsiMotionModel {
   uint8_t motion_votes_ = 0;
   uint8_t still_votes_ = 0;
   bool calibrated_ = false;
+#if defined(M5_STOPWATCH)
+  uint32_t usable_samples_ = 0, previous_usable_ = 0, last_feature_ms_ = 0;
+  bool have_feature_ = false;
+  float variation_ = 0;
+  int8_t power_reference_rssi_ = -127;
+#endif
   State state_ = State::CALIBRATING;
 };

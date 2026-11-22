@@ -1,3 +1,6 @@
+#if defined(M5_STOPWATCH)
+#include "stopwatch_ui.h"
+#endif
 // SquachWatch-CYD — log screen implementation
 #include "ui_log.h"
 #include "ui_scroll.h"
@@ -251,6 +254,10 @@ static void whereText(char* out, size_t n) {
 }
 
 static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label, bool watched, bool hunted, bool ignored) {
+#if defined(M5_STOPWATCH)
+    StopWatchUI::modal();
+#endif
+
     int px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH, infX, infY, infW, infH,
         igX, igY, igW, igH, cnX, cnY, cnW, cnH;
     confirmRects(w, h, px, py, pw, ph, wX, wY, wW, wH, huX, huY, huW, huH,
@@ -347,7 +354,7 @@ static void rowLayout(TFT_eSPI& t, int bodyTop, int& detailY, int& rowH) {
 
 int uiLogRowAt(TFT_eSPI& t, int x, int y, int screenW, int screenH) {
     Theme::ButtonBarGeom bar = Theme::computeButtonBar(screenW, screenH);
-    const int bodyTop = 16, bodyBottom = bar.y - 4;
+    const int bodyTop = Theme::LIST_TOP, bodyBottom = bar.y - 4;
     if (y < bodyTop || y >= bodyBottom) return -1;
     int detailY, rowH;
     rowLayout(t, bodyTop, detailY, rowH);
@@ -362,7 +369,7 @@ void uiLogTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int scroll
     int h = t.height();
 
     Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
-    const int bodyTop    = 16;
+    const int bodyTop    = Theme::LIST_TOP;
     const int bodyBottom = bar.y - 4;
     const int bodyH      = bodyBottom - bodyTop;
 
@@ -461,6 +468,7 @@ if (!Theme::stillBackdrop(t)) switch (Settings::background()) {
         // The card: Settings' row panel, so the two screens are one family.
         // It also puts a solid ground under the text, which the synthwave
         // sun used to shine through.
+        RoundRow roundRow(t, w, y, rowH);
         Theme::drawListRowPanel(t, w, y, rowH);
         if (Theme::compact()) {
             const bool kept = d->restored;

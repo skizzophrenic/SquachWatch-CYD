@@ -147,8 +147,10 @@ void uiOutfitUnlockTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     const int panelY = h / 2 - panelH / 2;
     if (panelH < 8) return;
 
+#if !defined(M5_STOPWATCH)
     t.drawRect(4, panelY, w - 8, panelH, Theme::VAPOR_PURPLE);
     t.drawRect(5, panelY + 1, w - 10, panelH - 2, Theme::PURPLE);
+#endif
     Theme::drawPulsingBorder(t, now, Theme::VAPOR_PINK, Theme::CYAN, 3);
     if (rise < 1.0f) return;               // still opening; nothing inside yet
 
@@ -166,7 +168,11 @@ void uiOutfitUnlockTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     const char* headTwo = s_petCard ? "PET"          : "OUTFIT";
     const int oneLineW = Theme::bangersTextWidth(headOne, Theme::BangersSize::MD);
     const bool stacked = oneLineW > (w - 16);
-    const int  headTop = panelY + 10;
+#if defined(M5_STOPWATCH)
+    const int headTop = 64;
+#else
+    const int headTop = panelY + 10;
+#endif
     const int  lineH   = 30;
     // Opaque plate behind the type. The tunnel and the fire both put
     // high-contrast detail exactly where the headline sits, and rainbow
@@ -192,7 +198,11 @@ void uiOutfitUnlockTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     // ---- the costume itself ----------------------------------------------
     // Footer holds the outfit name and the dismiss hint.
     const int footerH   = Theme::large() ? 42 : 34;   // the hint is the body font
+#if defined(M5_STOPWATCH)
+    const int footerTop = 394;
+#else
     const int footerTop = panelY + panelH - footerH;
+#endif
     const int stageH    = footerTop - headBottom;
 
     if (stageH > 40 && s_petCard) {

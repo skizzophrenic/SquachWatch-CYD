@@ -39,7 +39,7 @@ static bool        s_pocketNoteShown = false;
 // And on the T-Deck: a keyboard under the screen has exactly one way up.
 // And on the Tab5 for now: the blit turns the frame landscape and has no
 // portrait mapping yet (tab5_board.h).
-#if defined(TWATCH_S3) || defined(CROWPANEL7) || defined(TDECK_PLUS) || defined(TAB5)
+#if defined(M5_STOPWATCH) || defined(TWATCH_S3) || defined(CROWPANEL7) || defined(TDECK_PLUS) || defined(TAB5)
 static const bool DEFAULT_ROTATION_LOCK = true;
 #else
 static const bool DEFAULT_ROTATION_LOCK = false;
@@ -61,7 +61,7 @@ static bool        s_deskFullVisit = false;   // one visitor: the whole visit, n
 // one step round from that with its crown on the right (LilyGo's default).
 #if defined(TWATCH_S3)
 static const uint8_t DEFAULT_ROTATION = 2;
-#elif defined(CROWPANEL7) || defined(TAB5)
+#elif defined(M5_STOPWATCH) || defined(CROWPANEL7) || defined(TAB5)
 static const uint8_t DEFAULT_ROTATION = 0;   // the panel is landscape as wired (the Tab5: as blitted)
 #else
 static const uint8_t DEFAULT_ROTATION = 1;
@@ -140,7 +140,7 @@ static const uint8_t  CPU_MHZ_N         = sizeof(CPU_MHZ) / sizeof(CPU_MHZ[0]);
 // On by default on the watch: a screen timeout is what makes a watch a
 // watch, and the rest of the saver's rows stay at their stock values until
 // someone changes them.
-#if defined(TWATCH_S3)
+#if defined(TWATCH_S3) || defined(M5_STOPWATCH)
 static const bool DEFAULT_POWER_SAVER = true;
 #elif defined(STICKS3)
 // The StickS3 is a keychain on a small cell: a screen and a scan left on
@@ -150,7 +150,7 @@ static const bool DEFAULT_POWER_SAVER = true;
 #else
 static const bool DEFAULT_POWER_SAVER = false;
 #endif
-#if defined(STICKS3)
+#if defined(STICKS3) || defined(M5_STOPWATCH)
 static const uint8_t DEFAULT_SCR_TIMEOUT_IX = 3;   // 60 s
 static const uint8_t DEFAULT_DIM_LEVEL      = 0;   // dark: the backlight is the fob's biggest draw
 #else

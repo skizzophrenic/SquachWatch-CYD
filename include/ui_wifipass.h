@@ -36,3 +36,7 @@ WifiPassResult uiWifiPassResult();
 const char*    uiWifiPassText();
 const char*    uiWifiPassSsid();
 void           uiWifiPassClear();
+
+#if defined(M5_STOPWATCH)
+uint8_t uiWifiPassStopRects(int16_t*,int16_t*,int16_t*,int16_t*,uint8_t);
+#endif

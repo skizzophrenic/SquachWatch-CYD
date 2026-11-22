@@ -14,6 +14,9 @@ import os, subprocess, sys
 
 # MAC -> (env, what it is). Ports are not in this table on purpose.
 BOARDS = {
+    # Owner's StopWatch C152, identified on 2026-11-18: ESP32-S3R8,
+    # 8 MB embedded PSRAM and 16 MB flash. Original image in .pio/backups/.
+    "c4:9e:7e:12:9e:00": ("stopwatch", "M5Stack StopWatch C152, native USB"),
     "d4:8a:fc:c8:e5:e4": ("cyd-fast",    "soak, 2.8in ST7789"),
     "8c:94:df:4e:84:10": ("cyd-fast",    "2.8in ST7789, the newer one"),
     "8c:94:df:4e:ec:ec": ("cyd-ili9341", "2.8in ILI9341, no 80 MHz (the fast build showed a wrong picture, 2026-10-14)"),

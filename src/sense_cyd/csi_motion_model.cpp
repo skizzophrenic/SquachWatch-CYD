@@ -93,6 +93,11 @@ void CsiMotionModel::reset(uint32_t now_ms, uint32_t calibration_ms, uint32_t wi
   motion_score_ = amplitude_score_ = phase_score_ = correlation_score_ = 0;
   reliability_ = motion_votes_ = still_votes_ = 0;
   calibrated_ = false;
+#if defined(M5_STOPWATCH)
+  usable_samples_ = previous_usable_ = last_feature_ms_ = 0;
+  have_feature_ = false; variation_ = 0;
+  power_reference_rssi_ = -127;
+#endif
   state_ = State::CALIBRATING;
   clearWindow(now_ms);
 }
@@ -133,13 +138,25 @@ void CsiMotionModel::addSample(const int8_t* bytes, size_t length, int8_t rssi,
     total += magnitude[i];
   }
   if (total < 1.0f) return;
+#if defined(M5_STOPWATCH)
+  ++usable_samples_;
+#endif
 
   carrier_count_ = carriers;
   last_rssi_ = rssi;
   const float rssi_delta = static_cast<float>(rssi) - rssi_mean_;
   rssi_mean_ += rssi_delta * 0.03f;
   rssi_deviation_ += (fabsf(rssi_delta) - rssi_deviation_) * 0.03f;
-  const float scale = static_cast<float>(carriers) / total;
+  float scale = static_cast<float>(carriers) / total;
+#if defined(M5_STOPWATCH)
+  // Remove receiver gain, but retain channel-wide fading. Unit-mean CSI
+  // alone erases uniform attenuation even when the received power changes.
+  // RSSI is in power dB: convert its difference to an amplitude ratio.
+  // Calibration sees the same representation, including ordinary RSSI noise.
+  if (power_reference_rssi_ == -127) power_reference_rssi_ = rssi;
+  const float db = clampf((float)rssi-power_reference_rssi_, -40.0f, 40.0f);
+  scale *= powf(10.0f, db/20.0f);
+#endif
   float norm[kMaxCarriers];
   for (size_t i = 0; i < carriers; ++i) {
     norm[i] = magnitude[i] * scale;
@@ -258,6 +275,9 @@ void CsiMotionModel::finishWindow(uint32_t now_ms) {
       featureStd(feature_sum_[1], feature_sq_sum_[1], pair_samples_),
       featureStd(feature_sum_[2], feature_sq_sum_[2], pair_samples_),
     };
+#if defined(M5_STOPWATCH)
+    variation_ = features[0]; last_feature_ms_ = now_ms; have_feature_ = true;
+#endif
     if (!calibrated_ && calibration_window_count_ < kMaxCalibrationWindows) {
       memcpy(calibration_features_[calibration_window_count_], features,
              sizeof(features));
@@ -292,7 +312,13 @@ void CsiMotionModel::tick(uint32_t now_ms, uint32_t accepted, uint32_t dropped) 
 
   const uint32_t elapsed = now_ms - last_tick_ms_;
   if (elapsed >= 1000) {
-    const uint32_t new_samples = accepted - previous_accepted_;
+    const uint32_t new_samples =
+#if defined(M5_STOPWATCH)
+        usable_samples_ - previous_usable_;
+    previous_usable_ = usable_samples_;
+#else
+        accepted - previous_accepted_;
+#endif
     const uint32_t new_drops = dropped - previous_dropped_;
     samples_per_second_ = static_cast<uint16_t>(new_samples > 65535 ? 65535 :
         (new_samples * 1000U) / elapsed);
@@ -309,6 +335,11 @@ void CsiMotionModel::tick(uint32_t now_ms, uint32_t accepted, uint32_t dropped) 
       quality -= static_cast<int>((new_drops * 60U) / received);
     }
     if (samples_per_second_ < 2 && quality > 20) quality = 20;
+#if defined(M5_STOPWATCH)
+    // Packet arrival alone is not evidence of usable motion measurements.
+    // Reject stale windows as well as all-zero/short CSI payloads.
+    if ((!have_feature_ || now_ms-last_feature_ms_>2000) && quality>20) quality=20;
+#endif
     reliability_ = calibrated_ ? static_cast<uint8_t>(clampf(quality, 0, 100)) :
                                  calibrationPercent(now_ms) / 4;
     if (!calibrated_) state_ = State::CALIBRATING;

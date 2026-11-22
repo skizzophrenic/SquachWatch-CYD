@@ -3,6 +3,7 @@
 // (see docs/SQUACHWARE-AESTHETIC.md for the full mapping).
 #pragma once
 #include <TFT_eSPI.h>
+#include "round_row.h"
 #include "state.h"
 
 namespace Settings { enum class FontKind : uint8_t; }
@@ -139,7 +140,11 @@ namespace Theme {
     // high at its end of the top edge, painted after the screen below.
     static const int TITLE_ICON_W      = 28;
     static const int TITLE_ICON_BAND_H = 20;
-    static const int LIST_TOP       = 16;   // under the corner icons
+    #if defined(M5_STOPWATCH)
+    static const int LIST_TOP = RoundLayout::HEADER;
+#else
+    static const int LIST_TOP       = 16;
+#endif   // under the corner icons
     // The Settings group header's height: 14, or 20 on the large panels,
     // whose heading is set at size 2 (drawListHeading).
     int listHeadingH();
