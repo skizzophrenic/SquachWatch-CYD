@@ -126,6 +126,8 @@ UI_SRCS := $(SRC)/theme.cpp \
             $(SRC)/squachy.cpp \
             $(SRC)/squachmesh.cpp \
             $(SRC)/mesh.cpp \
+            $(SRC)/goblin.cpp \
+            $(SRC)/encounters.cpp \
             $(SRC)/meshmsg.cpp \
             $(SRC)/emote_script.cpp \
             $(SRC)/crowd_bench.cpp \
@@ -154,6 +156,7 @@ UI_SRCS := $(SRC)/theme.cpp \
             $(SRC)/ui_bingo.cpp \
             $(SRC)/dex.cpp \
             $(SRC)/regulars.cpp \
+            $(SRC)/places.cpp \
             $(SRC)/notices.cpp \
             $(SRC)/ui_dex.cpp \
             $(SRC)/detection_info.cpp \
@@ -166,6 +169,8 @@ UI_SRCS := $(SRC)/theme.cpp \
             $(SRC)/pet.cpp \
             $(SRC)/ui_log.cpp \
             $(SRC)/ui_alert.cpp \
+            $(SRC)/alert_skin.cpp \
+            $(SRC)/alert_skin_roles.cpp \
             $(SRC)/ui_settings.cpp \
             $(SRC)/ui_boot.cpp \
             $(SRC)/ui_colorcheck.cpp \
