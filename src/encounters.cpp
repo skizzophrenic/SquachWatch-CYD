@@ -170,12 +170,14 @@ void tick(uint32_t nowMs, bool eligible, const Context& c) {
     force(k, random(0, 64) == 0);
 }
 
-void force(Kind k, bool shiny) {
+void force(Kind k, bool shiny, bool count) {
     begin();
     if (k >= Kind::COUNT) return;
     s_active = k; s_shiny = shiny; s_since = millis();
-    s_misses = 0;
-    record(k, shiny);
+    if (count) {
+        s_misses = 0;
+        record(k, shiny);
+    }
     Serial.printf("[encounter] %s%s (%s)\n", name(k), shiny ? ", SHINY" : "", tierName(tierOf(k)));
 }
 

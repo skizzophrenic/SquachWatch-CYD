@@ -92,6 +92,8 @@ const Device kDevices[] = {
     // ---- CAMERA -------------------------------------------------------------
     { DetectionType::CAMERA, "WYZE", "Wyze", nullptr,
       "A Wyze camera or smart-home device, on Wyze's own registered block. Cheap, popular home cameras, often pointed at front doors and driveways." },
+    { DetectionType::CAMERA, "SIMPLISAFE", "SimpliSafe", nullptr,
+      "A SimpliSafe home-security device, on SimpliSafe's own registered block. It may be one of their cameras or their video doorbell, or the alarm's base station or keypad: they all share the block." },
     { DetectionType::CAMERA, "WYZE MODULE", "Wyze-Mod", nullptr,
       "A wireless module of the kind Wyze builds its cameras around. Other gadgets use it too, so this one is a maybe." },
     { DetectionType::CAMERA, "AMAZON", "Amazon", nullptr,

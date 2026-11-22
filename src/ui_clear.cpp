@@ -4009,13 +4009,16 @@ void dieTick(uint32_t now, int floorY, int u) {
             static const char* const WHAT[] = { "Huh?", "What's this?", "Uh. Hello?" };
             static const char* const NOPE[] = { "Nothing? Weird.", "Guess not.", "Okay then." };
             if (dieCue(0, ms, rest))        Squachy::visitPose(now, 900, Squachy::VisitPose::STARTLED);
-            if (dieCue(1, ms, rest + 1150)) Squachy::announce(WHAT[s_dieNum % 3]);
-            if (dieCue(2, ms, rest + 1800)) Squachy::visitPose(now, 1500, Squachy::VisitPose::CROUCH);
-            if (dieCue(3, ms, rest + 4400)) {
-                Squachy::announce(NOPE[s_dieNum % 3]);
-                Squachy::visitPose(now, 1500, Squachy::VisitPose::LOOK_AROUND);
+            if (dieCue(1, ms, rest + 1150)) {
+                Squachy::announce(WHAT[s_dieNum % 3]);
+                Squachy::visitPose(now, 1700, Squachy::VisitPose::SCRATCH);
             }
-            if (ms >= rest + 6000) { s_die = Die::AWAY; s_dieAt = now; }
+            if (dieCue(2, ms, rest + 3000)) Squachy::visitPose(now, 1500, Squachy::VisitPose::CROUCH);
+            if (dieCue(3, ms, rest + 4700)) {
+                Squachy::announce(NOPE[s_dieNum % 3]);
+                Squachy::visitPose(now, 1300, Squachy::VisitPose::LOOK_AROUND);
+            }
+            if (ms >= rest + 6200) { s_die = Die::AWAY; s_dieAt = now; }
             break;
         }
         case Die::AWAY:

@@ -740,6 +740,22 @@ const uint16_t      TOUCH_DEBOUNCE_MS = 200;
 // LOG row's WATCH/HUNT) are timed separately and unaffected.
 static const uint32_t TAP_MAX_MS = 500;
 
+#if SQUACH_MESH
+// The P key on the boards with a keyboard, for anybody who has done the
+// unlock-everything hold: the next dice scene, now -- a roll that misses, then
+// each of the nine encounters in turn. They are only played: the FIELD JOURNAL
+// does not count them. Not in TERMINAL MODE, where nothing could play one and
+// it would sit waiting, holding up the real dice.
+__attribute__((unused)) static void diceSceneKey() {
+    if (!Squachy::superUnlocked() || Settings::boringMode()) return;
+    static uint8_t n = 0;
+    if (n == 0) Encounters::forceMiss();
+    else Encounters::force((Encounters::Kind)(n - 1), false, false);
+    Serial.printf("[keys] P: dice scene %u of 10\n", (unsigned)n + 1);
+    n = (uint8_t)((n + 1) % 10);
+}
+#endif
+
 // Hidden "unlock every Squachy outfit" gesture: hold the third button (DESK)
 // for CLR_UNLOCK_HOLD_MS on the CLEAR screen (see the CLEAR case's touch
 // handling in loop()) -- replaces a fragile 11-tap sequence that broke once
@@ -2840,16 +2856,9 @@ static void tdeckKey(char c, uint32_t now) {
     // keyboard is the reason to own a T-Deck (asked for 2026-10-15).
     else if (state == AppState::CLEAR && c == '\n' && Settings::loraListen() != 0) enterLoraHome();
 #endif
-#if defined(SQW_DICE_BENCH) && SQUACH_MESH
-    // A bench build only (-DSQW_DICE_BENCH=1): P on the main screen plays the
-    // next dice scene -- a miss, then each of the nine encounters in turn.
-    else if (state == AppState::CLEAR && (c == 'p' || c == 'P')) {
-        static uint8_t s_benchN = 0;
-        if (s_benchN == 0) Encounters::forceMiss();
-        else Encounters::force((Encounters::Kind)(s_benchN - 1));
-        Serial.printf("[bench] dice scene %u of 10\n", (unsigned)s_benchN + 1);
-        s_benchN = (uint8_t)((s_benchN + 1) % 10);
-    }
+#if SQUACH_MESH
+    // P on the main screen, once the unlock-everything hold has been done.
+    else if (state == AppState::CLEAR && (c == 'p' || c == 'P')) diceSceneKey();
 #endif
 #if defined(SENSE_CYD_APP)
     // HUMAN SENSING's three buttons from the keyboard: Backspace is BACK, R
@@ -8297,6 +8306,9 @@ void loop() {
                     if (state != AppState::CLEAR) Theme::showToast("BACKGROUND", Settings::backgroundName(Settings::background()), Theme::CYAN);
                 }
             }
+#if SQUACH_MESH
+            else if (c == 'p' && state == AppState::CLEAR) diceSceneKey();
+#endif
             else if (c == 'e') {
                 Serial.println("[keys] hotkey EXT");
                 Settings::toggleExtScreen();

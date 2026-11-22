@@ -137,6 +137,13 @@ const OuiEntry kOuiTable[] = {
     {{0x2C, 0xAA, 0x8E}, "Wyze",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
     {{0xD0, 0x3F, 0x27}, "Wyze",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
     {{0x7C, 0x78, 0xB2}, "Wyze",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    // Wyze's two newer blocks (IEEE MA-L, read 2026-11-20): without them a
+    // recent Wyze camera matched nothing at all.
+    {{0xF0, 0xC8, 0x8B}, "Wyze",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    {{0x80, 0x48, 0x2C}, "Wyze",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    // SimpliSafe's one block. MED, not HIGH: it is their cameras and their
+    // doorbell, and their base station and keypads as well.
+    {{0xF8, 0x51, 0x28}, "SimpliSafe",   DetectionType::CAMERA,     Confidence::MED_CONF},
     {{0xB8, 0xD7, 0xAF}, "Wyze-Mod",     DetectionType::CAMERA,     Confidence::LOW_CONF},
     {{0x34, 0xD2, 0x70}, "Amazon",       DetectionType::CAMERA,     Confidence::MED_CONF},
     // Labelled Hikvision for a long time. The registry says AMAZON

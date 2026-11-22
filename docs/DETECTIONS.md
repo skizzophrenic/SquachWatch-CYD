@@ -285,8 +285,8 @@ really is registered to the vendor named.
 ## Generic / covert IP cameras — `CAMERA` — **graded per row**
 
 **Why it works:** Most consumer IP cameras use WiFi modules from a
-small set of manufacturers. We match OUIs from Wyze, Arlo, Blink,
-Hikvision, Amazon, Realtek, and Tuya on the consumer side (Ring has
+small set of manufacturers. We match OUIs from Wyze, SimpliSafe, Arlo,
+Blink, Hikvision, Amazon, Realtek, and Tuya on the consumer side (Ring has
 its own type, below), plus Verkada, Avigilon (Alta), and Axis
 Communications on the
 commercial/institutional side — the brands actually installed in

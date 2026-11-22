@@ -69,8 +69,10 @@ Kind     active();              // the one playing, or NONE
 bool     activeShiny();
 uint32_t activeSince();
 void     finish();              // the player is done with it
-// The console's ENCOUNTER <n>, for the bench: that one, now.
-void     force(Kind k, bool shiny = false);
+// The console's ENCOUNTER <n>, for the bench: that one, now. With `count`
+// false it is only played: the FIELD JOURNAL does not hear of it and the run
+// of misses is left as it was (the P key's scenes).
+void     force(Kind k, bool shiny = false, bool count = true);
 // A roll that came to nothing, and that the board chose to show: about one
 // miss in four. True once; the main screen then drops the die for nothing and
 // Squachy wonders what it was. forceMiss() is the console's ENCOUNTER MISS.

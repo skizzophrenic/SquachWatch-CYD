@@ -89,6 +89,7 @@ inline const SimDetectionProfile kSimProfiles[] = {
     // CAMERA -- each maker's own prefix from the OUI table
     { DetectionType::CAMERA,      {0x2C, 0xAA, 0x8E}, "Wyze",        "",               -63, true,  "Wyze camera" },
     { DetectionType::CAMERA,      {0xB8, 0xD7, 0xAF}, "Wyze-Mod",    "",               -66, true,  "Wyze module" },
+    { DetectionType::CAMERA,      {0xF8, 0x51, 0x28}, "SimpliSafe",  "",               -64, true,  "SimpliSafe" },
     { DetectionType::CAMERA,      {0xF0, 0x27, 0x2D}, "Amazon",      "",               -62, true,  "Amazon device" },
     { DetectionType::CAMERA,      {0xC0, 0x56, 0xE3}, "Hikvision",   "",               -64, true,  "Hikvision camera" },
     { DetectionType::CAMERA,      {0x00, 0xE0, 0x4C}, "Realtek",     "",               -67, true,  "Realtek chip" },

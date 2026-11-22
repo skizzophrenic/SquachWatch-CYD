@@ -3206,6 +3206,8 @@ void unlockChromeWing() {
     say("caught one!", 3400);
 }
 
+bool superUnlocked() { ensurePrefsLoaded(); return s_allOutfitsUnlocked; }
+
 void unlockAllOutfits() {
     ensurePrefsLoaded();
     s_allOutfitsUnlocked = true;
@@ -7258,6 +7260,17 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
             hang(-sd);
             limbTo(cx2 + sd * S(11), hy + S(26), cx2 + sd * S(27), hy - S(4));
             break;
+        case VisitPose::SCRATCH: {              // puzzled: scratching his head
+            // He has no elbows and no hands anywhere else, so he has none
+            // here: one arm, its usual length, straight up the side of his
+            // head -- which is drawn over it -- with its end showing at the
+            // top corner and sliding along the edge as it rubs. The question
+            // mark that goes with it is drawn after his head, further down.
+            const int rub = (int)(sinf((float)(now % 260) / 260.0f * 6.2831853f) * S(2));
+            hang(-sd);
+            limbTo(cx2 + sd * S(11), hy + S(26), cx2 + sd * (S(18) - rub / 2), hy + S(3) - rub);
+            break;
+        }
         case VisitPose::STRAIN: {               // an arm locked out, trembling
             hang(-sd);
             const int sh = (int)(sinf((float)(now % 120) / 120.0f * 6.2831853f) * S(1));
@@ -7883,6 +7896,21 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
             t.fillRect(px - S(3) - kb, py - S(3) - kb, S(6) + 2 * kb, S(6) + 2 * kb, keyCol);
             t.fillRect(px - S(3), py - S(3), S(6), S(6), Theme::colorFor(s_recentTypes[i]));
         }
+    }
+
+    if (act == VisitPose::SCRATCH) {
+        // The head scratch's question mark, over his other shoulder: keyed, so
+        // it reads on any sky, and bobbing.
+        const uint8_t callerFont = t.textfont;
+        const int qs = scale >= 2.6f ? 3 : 2;
+        const int qx = cx2 - s_reachDir * S(20) - 3 * qs;
+        const int qy = hy - S(9) - (int)(sinf((float)(now % 900) / 900.0f * 6.2831853f) * S(2));
+        t.setTextFont(1); t.setTextSize(qs);
+        t.setTextColor(keyCol);
+        for (int o = 0; o < 4; o++) { t.setCursor(qx + (o == 0) - (o == 1), qy + (o == 2) - (o == 3)); t.print("?"); }
+        t.setTextColor(AMBER);
+        t.setCursor(qx, qy); t.print("?");
+        t.setTextSize(1); t.setTextFont(callerFont);
     }
 
     // The aura's lightning, in front of him and his costume.

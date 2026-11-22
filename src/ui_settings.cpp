@@ -171,6 +171,11 @@ static const SettingsRow APPEARANCE_ROWS[] = {
     SettingsRow::PET,
 #endif
     SettingsRow::SHADES_COLOR, SettingsRow::BANTER, SettingsRow::AURA,
+#if SQUACH_MESH
+    // Who turns up on his screen: the dice, here as well as on the FIELD
+    // JOURNAL page, because this is where people look to switch them off.
+    SettingsRow::ENCOUNTERS,
+#endif
     // Then how the SCREEN looks.
     SettingsRow::THEME, SettingsRow::BACKGROUND, SettingsRow::BACKGROUND_LOCK, SettingsRow::DET_STYLE,
     SettingsRow::LAVA_LAMP, SettingsRow::BRIGHTNESS,
@@ -362,7 +367,7 @@ static RowGroupId groupFor(SettingsRow r) {
             if (s_page == SettingsPage::WARDRIVE) return RowGroupId::WARDRIVE;
             break;
         case SettingsRow::ENCOUNTERS:
-            return RowGroupId::JOURNAL;
+            return s_page == SettingsPage::JOURNAL ? RowGroupId::JOURNAL : RowGroupId::APPEARANCE;
         case SettingsRow::JOURNAL:
             return groupFor(SettingsRow::DEX);
         default:
@@ -1505,7 +1510,8 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             value = valBuf;
             break;
         case SettingsRow::ENCOUNTERS:
-            label = "ENCOUNTERS"; value = Encounters::levelName();
+            // Named in full where it sits among other things.
+            label = s_page == SettingsPage::JOURNAL ? "ENCOUNTERS" : "RANDOM ENCOUNTERS"; value = Encounters::levelName();
             break;
         case SettingsRow::JOURNAL_0: case SettingsRow::JOURNAL_1: case SettingsRow::JOURNAL_2:
         case SettingsRow::JOURNAL_3: case SettingsRow::JOURNAL_4: case SettingsRow::JOURNAL_5:

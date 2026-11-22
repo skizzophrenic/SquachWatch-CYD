@@ -199,6 +199,9 @@ namespace Squachy {
     // sequence (9x CLR, 1x SCAN, 1x CLR) and calls this when it
     // completes. Persists immediately, same as any other cosmetic.
     void unlockAllOutfits();
+    // Has it been done on this board? It opens the P key's dice scenes on
+    // the boards with a keyboard (main.cpp).
+    bool superUnlocked();
 
     // ---- the pet -------------------------------------------------------
     // VAPOR SHAGGY, who turns up on CLEAR and climbs him. The unlock lives
@@ -722,7 +725,10 @@ namespace Squachy {
                                      // three borrow his detection reactions.
                                      LAUGH, SALUTE, BOW, HUG, SAD, GRR, CROUCH, PULL,
                                      WIGGLE, CHEER, SELFIE, HOWL, POINT, STRAIN,
-                                     COVER, LOOK_AROUND, HANDS_UP };
+                                     COVER, LOOK_AROUND, HANDS_UP,
+                                     // Puzzled: a hand scratching the top of
+                                     // his head (the die that rolled nothing).
+                                     SCRATCH };
 #if SQUACH_MESH
     // The host's half of an emote's beat: any VisitPose, held for `ms`. The
     // older ones go through the same moods visitReach() and friends use.
