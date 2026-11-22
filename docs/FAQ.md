@@ -128,13 +128,14 @@ LoRa on the watches only listens; only the T-Deck Plus can send, as above. Nothi
 - **A microSD card, if you put one in.** Every detection is also appended to a daily CSV file on the card. No card, no file; the black box still works.
 - **Your settings**, the ignore list, saved WiFi passwords (up to six networks) and, if you use SquachMesh, your squad phrase and key.
 - **With WARDRIVE on** (boards with GPS), a log of every network and device it heard with where it heard them: in the watch's flash, or as a WiGLE file on the SD card on the other boards. See [GPS and LoRa](#gps-and-lora).
+- **With a WiGLE key sent to it** (T-Deck Plus, T-Watch S3 Plus, Freenove S3 GPS builds), your WiGLE API name and token, so UPLOAD NOW can send the log. It only ever goes to api.wigle.net, over HTTPS, over your saved WiFi. A duress wipe forgets it.
 
 None of this leaves the board unless you plug it in and ask for it.
 
 **Who can read it:** anyone holding the board, unless you lock it. **Settings > SECURITY** has:
 
 - **PIN LOCK** with a 4, 6 or 8 digit PIN, **AUTO-LOCK** (on sleep, or after 1 to 30 idle minutes) and **LOCK AT BOOT** (on by default once you set a PIN, so a reset does not unlock it). Detection keeps running while locked; **ALERTS LOCKED** decides how much an alert shows to a stranger (FULL, TYPE ONLY or NONE).
-- **DURESS PIN.** A second PIN that looks like it unlocks the board, but first wipes it: the squad phrase and key, saved WiFi passwords, the ignore list, MY ALERTS, the devices seen on several days, the LoRa DM keys and names, the black box log and crash history, the SD card's log files and the watch's wardrive log. Then it restarts quietly and comes up looking like an ordinary, empty SquachWatch. Your other settings survive the wipe.
+- **DURESS PIN.** A second PIN that looks like it unlocks the board, but first wipes it: the squad phrase and key, saved WiFi passwords, the ignore list, MY ALERTS, the devices seen on several days, the LoRa DM keys and names, the black box log and crash history, the SD card's log files (uploaded ones too), the watch's wardrive log, the WiGLE key and the FIELD JOURNAL. Then it restarts quietly and comes up looking like an ordinary, empty SquachWatch. Your other settings survive the wipe.
 - **WIPE AFTER 10.** The same wipe after ten wrong guesses.
 
 Be honest with yourself about what the PIN does: it stops a snoop who picks the board up. It does not stop someone with a USB cable and some time, because the flash can be read directly. The board tells you this when you set the PIN, too.
@@ -176,14 +177,19 @@ Nothing else makes a sound. On the classic CYDs the RGB status light is the loud
 
 ## An alert popped up. Now what?
 
-A full-screen alert means one detection matched one signature. It tells you what it thinks it saw, how confident that match is, the signal strength, and the address. FIRST OF ITS KIND means this board has never caught that type before; AT NIGHT means what it sounds like. The card closes when you tap it, or by itself after ten seconds.
+A full-screen alert means one detection matched one signature. The top of the card is the verdict (NEW, MET BEFORE with the regular's name, FOLLOWING, or SPAM FLOOD) next to the type, with chips beside them: AWAY or WITH OWNER for a tracker, how many days you have met a regular, AT NIGHT, and +N MORE when other catches are waiting behind this one. Under that is the trail: the stops you have made since the device was first heard, with the time at each and the distance between them when the board knows it, and a YOU pin at HERE. A row of ticks says why (AWAY, EVERY STOP, how many MIN, CLOSER), the ladder on the right is the last minute of signal, and the four rows under it are who it is, its address, first and last seen, and the confidence. The card closes when you tap it, or by itself after ten seconds, and the next waiting catch takes its place.
+
+**Can the card look different?** Yes: Settings > APPEARANCE > ALERT CARD has eleven skins (SUNSET 95, NEON DESKTOP, SYSTEM 7, GLASS, TILING, BEOS, AMIGA, NEXTSTEP, XP LUNA, AQUA, TERMINAL) as well as the TRAIL card itself. STYLE shows a made-up card with arrows to step through them, like OUTFIT; OPEN WITH ANIMATION and SUNSET BEHIND are the other two rows. Every skin takes its colours from your theme. Small screens always show TRAIL.
+
+**FOLLOWING** is the one to take seriously: heard at three or more of your stops over at least fifteen minutes, and at every stop in between. One stop is where the WiFi around you changes wholesale, or 300 m on a board with a GPS fix, so it works on every board. A phone never earns it (its Bluetooth address changes every quarter hour); a tag away from its owner does, because it keeps its address for most of a day.
 
 The buttons:
 
-- **MORE INFO**: what this thing is and why it matched.
+- **RING** (trackers, on the S3 and C5 boards) or **HUNT**: make the tag beep, or a hot/cold fox hunt for the device, GETTING WARMER or GETTING COLDER as you move.
+- **WATCH**: keep an eye on this device. You get LOCKED ON when it turns up again; tap WATCHING to stop.
+- **SNOOZE**: quiet about this device for a while. Four chips come up: 10 MIN, 30 MIN, 1 HOUR, 4 HOURS. For good, use IGNORE.
 - **IGNORE**: never alert on this exact device again. It's still logged and counted, with an IGNORED tag on its LOG row. Tap it again (it reads MUTED) or use Settings > IGNORED to undo it.
-- **SNOOZE**: quiet about this device for a while. Tap once for 10 minutes, twice for 30, three times for an hour, four times for 4 hours. The button shows the time, and it locks in three seconds after your last tap. After the first tap the card says TAP AGAIN: LONGER. For good, use IGNORE.
-- **HUNT**: a hot/cold fox hunt for that device, GETTING WARMER or GETTING COLDER as you move. STOP HUNT ends it.
+- **INFO**: what this thing is and why it matched.
 
 **Too many alerts?**
 
@@ -250,7 +256,9 @@ A squad gets you:
 
 **WARDRIVE** turns the GPS and the log on together: every WiFi network and Bluetooth device it hears, with position, logged only while it has a fresh fix. On the watch it is in WATCH SETTINGS, and the log lives in the watch's own flash: up to 125,000 sightings across restarts, saved as a file by **DOWNLOAD WIGLE FILE** on the web flasher (desktop Chrome or Edge), ready for [wigle.net](https://wigle.net/uploads). The log stays on the watch until you clear it, and a duress wipe takes it with everything else. On the other boards WARDRIVE is in Settings and writes a WiGLE file straight to the SD card (`/wigle-YYYYMMDD-HHMM.csv`), so those need a card in. Wardriving was marked not road-tested when it shipped in v1.25.0, so treat it as new.
 
-**SEEN AT.** Anything the LOG kept with a GPS position shows it: long-press the device in the LOG and it says SEEN AT and where.
+**Uploading to WiGLE.** WARDRIVE opens a page with the GPS, this drive's counts and the file. Every board can upload through the web flasher's **UPLOAD TO WIGLE**, which sends the files straight from your browser to WiGLE with your API name and token. The T-Deck Plus, T-Watch S3 Plus and Freenove S3 GPS builds can also do it themselves: **SEND KEY TO MY BOARD** gives them the key over the cable, then **UPLOAD NOW** sends what is new over your saved WiFi, and **AUTO UPLOAD** does it on the charger. The CYDs and the Cardputer have no room for the HTTPS it needs.
+
+**SEEN AT.** Anything the LOG kept with a GPS position shows it: hold the device in the LOG to open its card, tap INFO, and it starts with SEEN AT and where.
 
 **LoRa** is on the T-Watch S3, the S3 Plus and the T-Deck Plus. It decodes the public channels of Meshtastic and MeshCore, using the EU 868, US 915 or AU 915 band depending on your time zone. **LORA** (WATCH SETTINGS on the watch, Settings > SYSTEM on the T-Deck) picks BOTH, MESHTASTIC, MESHCORE, LORAWAN (alerts for LoRaWAN networks in range, no mesh chats) or OFF, and **LORA CHATS** shows what was said, one tab per network. The watches only listen. The T-Deck can also send, from its keyboard, once you turn on LORA TX; that and the rest of its LoRa page are in [LORA.md](LORA.md#on-the-lilygo-t-deck-plus).
 

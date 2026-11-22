@@ -80,7 +80,11 @@ namespace Theme {
                  vaporPink, vaporPurple, vaporBlue, vaporYellow,
                  green, amber, red;
     };
-    static const uint8_t PALETTE_COUNT = 6;
+    static const uint8_t PALETTE_COUNT = 7;
+    // DU5K: the dusk palette off the Ring Ding Dong opener (indigo night, a
+    // peach and rose sun, teal grid). The alert card's skins take their
+    // colours straight from it rather than working them out (alert_skin.h).
+    static const uint8_t PALETTE_DUSK = 6;
     extern const Palette kPalettes[PALETTE_COUNT];
 
     // Overwrites BG/PURPLE/etc. from kPalettes[idx] (clamped). Call

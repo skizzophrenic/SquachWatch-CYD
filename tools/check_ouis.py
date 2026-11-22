@@ -70,6 +70,11 @@ ALLOW = {
     "Realtek":     ["realtek"],
     "Hak5-LA":     [None],
     "Tuya":        ["tuya", "telink"],   # see the note in the PR; Low either way
+    # 2026-11-20: product lines and old or legal names.
+    "AirLink":     ["sierra wireless"],  # Sierra's in-vehicle router line
+    "BlackVue":    ["pittasoft"],        # BlackVue's maker
+    "Lytx":        ["lytx", "drivecam"], # DriveCam was Lytx's old name
+    "Rokid":       ["lingban"],          # Rokid's legal name
 }
 
 # Blocks belonging to the chip this project runs on. DETECTIONS.md says a

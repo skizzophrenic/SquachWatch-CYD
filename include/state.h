@@ -30,7 +30,7 @@ enum class DetectionType : uint8_t {
     //
     // Deliberately NOT in this bucket: bare Espressif and other generic
     // silicon. A nyanBOX, an ESP32 Marauder and a SquachWatch are the same
-    // chip, and sixteen Espressif prefixes already sit under FLOCK. HACKER
+    // chip, which is why the Espressif prefixes came out of FLOCK. HACKER
     // takes exact signatures only, which is what keeps it worth alerting on.
     HACKER  = 17,
     // A LoRaWAN operator's network within earshot: a utility's meters, a
@@ -46,7 +46,14 @@ enum class DetectionType : uint8_t {
     // (they loop to MINE, not COUNT): it is not a kind of device anybody
     // could collect, and its on/off switch is the list itself.
     MINE    = 19,
-    COUNT   = 20
+    // A smart speaker with microphones: Sonos, Apple's HomePod, and an Echo or
+    // a Google speaker while it is in setup. The room check -- a hotel, a
+    // rental -- next to the hidden cameras. Ships OFF, like IBEACON: a kitchen
+    // counter is not a threat. AFTER MINE, not before it: MINE's number is
+    // saved in LOG rows and IGNORE lists since v1.49.0, so it keeps 19, and the
+    // lists that walk the catalogue use catalogueAt() below to skip MINE.
+    LISTENER = 20,
+    COUNT   = 21
 };
 
 inline const char* detectionTypeName(DetectionType t) {
@@ -70,8 +77,25 @@ inline const char* detectionTypeName(DetectionType t) {
         case DetectionType::HACKER:      return "HACKER";
         case DetectionType::LORAWAN:     return "LORAWAN";
         case DetectionType::MINE:        return "MY ALERT";
+        case DetectionType::LISTENER:    return "LISTENER";
         default:                         return "UNKNOWN";
     }
+}
+
+// The catalogue of kit: every real type but MY ALERTS, which is the owner's
+// own list rather than a kind of device. The DEX, BINGO and the TYPE FILTER
+// walk this. MINE sits between LORAWAN and LISTENER in the numbering, so the
+// walk steps over it instead of stopping at it.
+static const uint8_t CATALOGUE_N = (uint8_t)DetectionType::COUNT - 2;
+inline DetectionType catalogueAt(uint8_t i) {
+    uint8_t v = (uint8_t)(i + 1);
+    if (v >= (uint8_t)DetectionType::MINE) v++;
+    return (DetectionType)v;
+}
+inline uint8_t catalogueIndex(DetectionType t) {
+    const uint8_t v = (uint8_t)t;
+    if (v == 0 || v == (uint8_t)DetectionType::MINE || v >= (uint8_t)DetectionType::COUNT) return CATALOGUE_N;
+    return v < (uint8_t)DetectionType::MINE ? (uint8_t)(v - 1) : (uint8_t)(v - 2);
 }
 
 // How sure we are that a match is what it claims to be.
@@ -141,7 +165,31 @@ struct Detection {
     // so the gap since the last ask is how long it was really gone. Sits in
     // what was padding.
     uint16_t       askedMin;
+
+    // ---- the trail (see trail.h) -------------------------------------
+    // The last minute of signal: one reading every four seconds or so,
+    // oldest first from sparkHead. The alert card draws it as a ladder.
+    static const uint8_t SPARK_N = 12;
+    int8_t         spark[SPARK_N];
+    uint8_t        sparkHead;       // next slot to write
+    uint8_t        sparkCount;      // readings held, <= SPARK_N
+    uint8_t        sparkAt;         // millis() >> 12 of the last reading
+    // The places (see places.h) this device was heard at, oldest first,
+    // with the minutes of uptime it was first and last heard there. Three
+    // is what the card draws; an older stop drops off the front.
+    static const uint8_t STOPS_N = 3;
+    uint8_t        stopPlace[STOPS_N];
+    uint16_t       stopFirstMin[STOPS_N];
+    uint16_t       stopLastMin[STOPS_N];
+    uint8_t        stops;
+    // Whether its owner is about: 0 unknown, 1 with its owner, 2 away from
+    // its owner, as the tracker's own advert says (trackers only). ownerMin
+    // is the minute of uptime the state was first seen.
+    uint8_t        owner;
+    uint16_t       ownerMin;
 };
+
+enum : uint8_t { OWNER_UNKNOWN = 0, OWNER_WITH = 1, OWNER_AWAY = 2 };
 
 // A detection's vendor, safe to print. A record is zeroed before it is
 // filled, so "no vendor" arrives here as a null pointer.

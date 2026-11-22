@@ -79,6 +79,25 @@ const char* mfgIdName(uint16_t mfgId);
 // that costs; the short version is that this deliberately trades some
 // precision for actually catching a tag that has just been powered on.
 bool isAirTagPayload(const uint8_t* payload, uint8_t len);
+// A HomePod's "Hey Siri" block: Apple's Continuity type 0x08, seven bytes,
+// whose device class is 0x0007. `mfg` starts at the company ID (4C 00).
+bool isHomePodSiri(const uint8_t* mfg, uint8_t len);
+// The Find My status byte (0 if the advert has none); see signatures.cpp.
+uint8_t airTagStatusByte(const uint8_t* payload, uint8_t len);
+// Which Find My frame the advert carries: 0x02 (the short "nearby" frame a
+// tag sends while its owner's phone is close), 0x19 (the full "separated"
+// frame with the public key, sent once apart), 0x07 (Proximity Pairing: a
+// tag not set up with a phone yet), or 0 for none. The byte that follows
+// the frame type goes to *status when asked.
+uint8_t airTagFrame(const uint8_t* payload, uint8_t len, uint8_t* status);
+// The Find Hub frame type: 0x40 while the tag is in its normal mode, 0x41
+// once its owner's phone has put it in unwanted-tracking-protection mode
+// (apart from the owner). 0 when the advert has no Find Hub frame.
+uint8_t fmdnFrameType(const uint8_t* payload, uint8_t len);
+// A cheap P2P camera's setup hotspot, named after its own UID:
+// "ABCD-123456-ABCDE" (3-4 capitals, 6 digits, 5 capitals). The LookCam,
+// HDWifiCamPro, JXLCAM and TinyCam Pro families all do this.
+bool isP2pCamSsid(const char* ssid);
 
 // iBeacon check, run against the PARSED manufacturer-data field (company
 // ID included, i.e. what NimBLE's getManufacturerData() returns).

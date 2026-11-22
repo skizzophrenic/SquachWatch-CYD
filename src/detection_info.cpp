@@ -13,7 +13,7 @@ static const char* const EXPLAIN_TEXT[] = {
     // UNKNOWN
     "Nothing in the signature tables matched this one. It is the fallback the panel falls back TO, so if you are reading it about a real sighting, that sighting got logged under a type with no explanation of its own -- which is a bug worth reporting.",
     // FLOCK
-    "Flock Safety makes automated license-plate-reader cameras, usually mounted on poles at neighborhood entrances. They log every plate that passes, suspect or not. Check the confidence: of the 29 hardware prefixes filed here exactly ONE is registered to Flock, and the rest are the generic Espressif and Liteon parts they build on -- shared with every dev board and smart plug on earth. A LOW reading here means a radio Flock might use, not a Flock camera.",
+    "Flock Safety makes automated license-plate-reader cameras, usually mounted on poles at neighborhood entrances. They log every plate that passes, suspect or not. Check the confidence: of the 32 hardware prefixes filed here exactly ONE is registered to Flock, and the rest are the Liteon, Silicon Labs and USI radio modules they build on -- shared with plenty of other kit. A LOW reading here means a radio Flock might use, not a Flock camera.",
     // AXON
     "Axon makes body cameras and TASERs for law enforcement. This picks up a body cam's own wireless signal, not necessarily an officer's exact location.",
     // META
@@ -21,7 +21,7 @@ static const char* const EXPLAIN_TEXT[] = {
     // SKIMMER
     "A Bluetooth card skimmer, usually wired into an ATM or gas pump reader. It quietly exfiltrates stolen card data over BLE instead of needing physical pickup.",
     // RAVEN
-    "A Raven gunshot-detection sensor, usually mounted on a streetlight or rooftop. It listens constantly, not just after something happens. Matched on Raven's own Bluetooth service IDs, which have not been checked against real hardware -- hence the middling confidence. NOT ShotSpotter: those hold no registered hardware ID at all and backhaul over cellular rather than broadcasting, so nothing here can see one.",
+    "A Raven gunshot-detection sensor, usually mounted on a streetlight or rooftop. It listens constantly, not just after something happens. Matched on Raven's own Bluetooth service IDs, which have not been checked against real hardware -- hence the middling confidence. ShotSpotter sensors are filed here too, on ShotSpotter's own registered WiFi prefix, but only a sensor with its WiFi up can be heard: most backhaul over cellular and say nothing.",
     // AIRTAG
     "An Apple AirTag, riding Apple's Find My network. Legitimate for keys and luggage -- also a known method for tracking a person or vehicle without consent.",
     // DRONE
@@ -29,7 +29,7 @@ static const char* const EXPLAIN_TEXT[] = {
     // ALPR
     "An automated license-plate reader from a vendor other than Flock. Same idea: logs every plate that passes, usually feeding a shared database.",
     // CAMERA
-    "A camera-brand WiFi or Bluetooth radio, matched by hardware vendor rather than a specific known network. Could be a doorbell, a security cam, almost anything with a lens.",
+    "A camera-brand WiFi or Bluetooth radio, matched by hardware vendor rather than a specific known network. Could be a doorbell, a security cam, almost anything with a lens. Dashcams count: the hotspot a Viofo, BlackVue, 70mai or Thinkware puts up for its app, and the fleet cameras in delivery vans. So do the cheap hidden cameras that sit in setup mode under a name like ABCD-123456-ABCDE until somebody pairs them -- the one to look for in a rental.",
     // SAMSUNG_TAG
     "A Samsung Galaxy SmartTag, riding Samsung's own item-finder network. Same tracking-without-consent concern as an AirTag, different ecosystem.",
     // GOOGLE_TAG
@@ -50,6 +50,8 @@ static const char* const EXPLAIN_TEXT[] = {
     "A LoRaWAN network is in range: the long-range, low-power radio that utility meters, parking sensors and city infrastructure report home over. The name is the OPERATOR, read from the network prefix every device address starts with -- not a device, and not who owns one. Everything such a network carries is encrypted and stays that way; this is the envelope, not the letter. One alert per operator, however many of its devices are in earshot. Only a board with a LoRa radio hears it, and only while LORA is listening on a LoRaWAN profile -- the RX2 downlink profiles hear the most.",
     // MINE
     "A WiFi network whose name matches one of YOUR patterns, from Settings > MY ALERTS. Nothing in the built-in tables says what it is: you told the board to watch for this name, and here it is. The label on the alert is the one you gave the pattern. Network names are chosen by whoever runs the router, so anyone can name theirs to match.",
+    // LISTENER
+    "A smart speaker with microphones, the kind that waits all day for its wake word. Sonos speakers are known by their maker's addresses and Bluetooth ID; some older and smaller Sonos models have no microphone, so a Sonos match means a mic is likely, not certain. A HomePod is known only when someone nearby talks to Siri, and then it is certain. An Echo or a Google speaker looks like every other Amazon or Google device, so it shows only while it is being set up. Ships switched OFF: turn it on in DETECTION FILTER for a hotel or rental check.",
 };
 static const uint8_t EXPLAIN_TEXT_N = sizeof(EXPLAIN_TEXT) / sizeof(EXPLAIN_TEXT[0]);
 

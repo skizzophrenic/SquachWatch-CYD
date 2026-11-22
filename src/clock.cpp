@@ -16,6 +16,8 @@ void consoleFrameShot();     // main.cpp: SENSE SHOT
 #endif
 #include "flood_bench.h" // FLOOD N, for the bench (a no-op outside FLOOD_BENCH builds)
 #include "settings.h"
+#include "wigle_up.h"      // WIGLEKEY, from the flasher page
+#include "encounters.h"    // ENCOUNTER <n>, for the bench
 #include "crowd_bench.h"
 #include "blackbox.h"    // BLACKBOX dumps it
 #include "pet.h"         // YETI DISCO / YETI FLOSS
@@ -555,6 +557,8 @@ void pollSerial() {
     // in response to a typo is worse than a line of help.
 #if defined(TAB5) && defined(SENSE_CYD_APP)
     static char line[112];   // WIFISAVE <32-byte name><TAB><64-byte password>
+#elif SQW_WIGLE_UPLOAD
+    static char line[160];   // WIGLEKEY <WiGLE's Encoded for use value, up to about 120>
 #else
     static char line[48];
 #endif
@@ -815,6 +819,38 @@ void pollSerial() {
         if (strcasecmp(line, "WIGLE") == 0)        { g_consoleGps = 7; continue; }
         if (strcasecmp(line, "WIGLE ALL") == 0)    { g_consoleGps = 8; continue; }
         if (strcasecmp(line, "WIGLE CLEAR") == 0)  { g_consoleGps = 9; continue; }
+        // ENCOUNTER <0-8>, for the bench: that random encounter, now (the
+        // order of Encounters::Kind: DRIFTER GOBLIN ICONS ZOOMIES KAIJU LOST
+        // TWIN ABDUCT ELDER). ENCOUNTER <n> SHINY makes it a shiny.
+        if (strncasecmp(line, "ENCOUNTER ", 10) == 0) {
+            const int k = atoi(line + 10);
+            // ENCOUNTER MISS [1-5]: the die drops and comes to nothing (a 1
+            // bounces off his head). ENCOUNTER FREE puts a free roll's die on
+            // the floor, ENCOUNTER ROLL throws it.
+            if (strncasecmp(line + 10, "MISS", 4) == 0) Encounters::forceMiss((uint8_t)atoi(line + 14));
+            else if (strncasecmp(line + 10, "FREE", 4) == 0) { Encounters::setFree(true); Serial.println("[encounter] a free roll is waiting"); }
+            else if (strncasecmp(line + 10, "ROLL", 4) == 0) Serial.println(uiClearFreeRoll() ? "[encounter] rolling the free one" : "[encounter] no free roll waiting");
+            else if (strncasecmp(line + 10, "PLAY", 4) == 0) uiClearDiePlayNow();   // the waiting die goes over to be booted
+            else if (k >= 0 && k < (int)Encounters::Kind::COUNT) {
+                Encounters::force((Encounters::Kind)k, strcasestr(line, "SHINY") != nullptr);
+            } else Serial.println("[encounter] ENCOUNTER 0-9: DRIFTER GOBLIN ICONS ZOOMIES KAIJU LOST TWIN ABDUCT ELDER MIMIC");
+            continue;
+        }
+        // WIGLEKEY <WiGLE's "Encoded for use" value>, from the flasher page:
+        // the key for UPLOAD NOW. WIGLEKEY CLEAR forgets it. Never echoed.
+        if (strncasecmp(line, "WIGLEKEY", 8) == 0) {
+#if SQW_WIGLE_UPLOAD
+            const char* v = line + 8;
+            while (*v == ' ') v++;
+            if (strcasecmp(v, "CLEAR") == 0) { WigleUp::clearKey(); Serial.println("[wigle] key cleared"); }
+            else if (!*v) Serial.printf("[wigle] key %s\n", WigleUp::hasKey() ? "set" : "not set");
+            else if (WigleUp::setKey(v)) Serial.printf("[wigle] key saved for %s\n", WigleUp::keyName());
+            else Serial.println("[wigle] key refused: not WiGLE's Encoded for use value");
+#else
+            Serial.println("[wigle] no upload on this board: use the flasher page's UPLOAD TO WIGLE");
+#endif
+            continue;
+        }
         if (strcasecmp(line, "RTC") == 0)    { g_consoleRtc = true; continue; }
         if (strcasecmp(line, "BUZZ") == 0)   { g_consoleBuzz = true; continue; }
         if (strcasecmp(line, "MOTION") == 0) { g_consoleMotion = true; continue; }

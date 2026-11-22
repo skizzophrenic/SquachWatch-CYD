@@ -1,5 +1,9 @@
 // SquachWatch-CYD — DetectionEngine implementation
 #include "detection.h"
+#include "trail.h"
+
+#include "places.h"
+#include "gnss.h"
 #include "wardrive.h"
 #include "wifi_auth.h"
 #include "serial_flush.h"
@@ -21,6 +25,19 @@ void bootStage(uint8_t s);   // main.cpp: the power diary's steps through setup(
 #define BOOT_STAGE(n) ((void)0)
 #endif
 #include <Arduino.h>
+
+// On the console whenever a tag's owner byte reads differently from the last
+// one seen, so a bench can pin the bits against a real tag: next to its
+// phone, then away from it for an hour.
+static void logOwner(const Detection& det, uint8_t st, uint8_t frame) {
+    static uint8_t s_lastMac[6], s_lastSt = 0xFF, s_lastFr = 0;
+    if (memcmp(s_lastMac, det.mac, 6) != 0 || s_lastSt != st || s_lastFr != frame) {
+        memcpy(s_lastMac, det.mac, 6); s_lastSt = st; s_lastFr = frame;
+        Serial.printf("[tag] %02x:%02x %s frame 0x%02x status 0x%02x -> %s\n", det.mac[4], det.mac[5],
+                      det.vendor ? det.vendor : "?", frame, st,
+                      det.owner == OWNER_WITH ? "WITH OWNER" : det.owner == OWNER_AWAY ? "AWAY" : "NOT SET UP");
+    }
+}
 // Which radios this file drives. The Tab5's ESP32-P4 has none of its own: its
 // WiFi frames come from the ESP32-C6 over ESP-Hosted (tab5_radio.h) and are
 // parsed by the same code every other board runs on its own sniffer. Its
@@ -618,6 +635,11 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
                             // off the end of a 20-byte field.
                             snprintf(det.name, sizeof(det.name), "%02X%02X%02X %u.%u",
                                      b[4], b[5], b[6], major, minor);
+                        } else if (isHomePodSiri(b, (uint8_t)mfgLen)) {
+                            // A HomePod answering "Hey Siri": a smart speaker
+                            // with microphones, and certain (see the rule).
+                            det.type = DetectionType::LISTENER;
+                            label    = "HomePod";
                         }
                     }
                 }
@@ -729,6 +751,10 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
         if (det.type == DetectionType::HACKER) {
             det.conf = matchedByName ? Confidence::MED_CONF : Confidence::HIGH_CONF;
         }
+        // A HomePod's own Siri block: only a HomePod sends that class.
+        if (det.type == DetectionType::LISTENER && label && strcmp(label, "HomePod") == 0) {
+            det.conf = Confidence::HIGH_CONF;
+        }
         // A bare ten-digit name is how one Penguin firmware names itself, and
         // also something any gadget could be called. Logged, but LOW.
         if (det.type == DetectionType::FLOCK && matchedByName && isBareSerialName(det.name)) {
@@ -749,6 +775,21 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
         // Set vendor label based on the matched table entry.
         if (det.type == DetectionType::AIRTAG) {
             det.vendor = "Apple";
+            // With its owner or apart from it, from the status byte (see
+            // airTagStatusByte): the one fact about a tag that decides
+            // whether it is anyone's business.
+            // The frame says it: the short "nearby" frame (0x02) only goes
+            // out while the owner's phone is close, the full "separated"
+            // frame (0x19) once it is not. The status byte rides along on
+            // the console for the bench.
+            uint8_t st = 0;
+            const uint8_t fr = airTagFrame(adv->getPayload().data(), (uint8_t)adv->getPayload().size(), &st);
+            if (fr) {
+                // 0x07 is a tag nobody has set up: no owner to be with or
+                // away from, so the chip stays off and the console says so.
+                det.owner = (fr == 0x02) ? OWNER_WITH : (fr == 0x19) ? OWNER_AWAY : OWNER_UNKNOWN;
+                logOwner(det, st, fr);
+            }
         } else if (det.type == DetectionType::DRONE) {
             det.vendor = "DroneID";
         } else if (det.type == DetectionType::META) {
@@ -764,6 +805,14 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
         } else if (det.type == DetectionType::GOOGLE_TAG) {
             // Find Hub, DULT or Chipolo: whichever row matched.
             det.vendor = label ? label : "Google";
+            // Frame type 0x41 is unwanted-tracking-protection mode, which
+            // the owner's phone turns on once the tag has been apart from
+            // them for a while; 0x40 is the tag at home with its owner.
+            const uint8_t ft = fmdnFrameType(adv->getPayload().data(), (uint8_t)adv->getPayload().size());
+            if (ft) {
+                det.owner = (ft == 0x41) ? OWNER_AWAY : OWNER_WITH;
+                logOwner(det, 0, ft);
+            }
         } else if (det.type == DetectionType::TILE) {
             det.vendor = "Tile";
         } else if (det.type == DetectionType::AXON) {
@@ -1731,6 +1780,17 @@ void DetectionEngine::loop() {
     // Back from NEARBY, a WiFi sweep or an update: the room was not being
     // listened to, so that time does not count against "last seen".
     resumeAgeing();
+    // Where the board is, for the trail: the WiFi fingerprint every pass, a
+    // GPS position when there is a fresh one.
+    {
+        const uint32_t now = millis();
+        Places::tick(now);
+        static uint32_t s_fixAt = 0;
+        if (Gnss::fresh(now) && now - s_fixAt >= 5000) {
+            s_fixAt = now;
+            Places::noteFix(Gnss::fix().lat7, Gnss::fix().lon7, now);
+        }
+    }
     // After the raw-scan return above, so a raw scan that owns the radio is
     // never restarted out from under it.
     scanFlushTick();
@@ -2128,6 +2188,8 @@ void DetectionEngine::postBle(Detection d) {
             }
             _log[slot].rssi = d.rssi;
             _log[slot].lastSeen = millis();
+            Trail::noteSighting(_log[slot], d.rssi, millis());
+            Trail::noteOwner(_log[slot], d.owner, millis());
             Bingo::note(d.type);
             Dex::note(d.type, d.rssi);
             Regulars::note(d.mac, d.type);
@@ -2717,6 +2779,9 @@ void DetectionEngine::processWiFiQ() {
         // (beacon), same offsets postWiFi() was already called with.
         checkWatchWifi(e.mac, e.rssi);
         checkHuntWifi(e.mac, e.rssi);
+        // Every beacon tells the places tracker what networks are about (its
+        // SSID names the network; a pwnagotchi's or a drone's is not one).
+        if (e.ssid[0] && !e.pwnagotchi && !e.drone) Places::noteBssid(e.mac, e.rssi, e.ssid, millis());
         // Every captured frame feeds the spectrum-waterfall's channel
         // activity level, whether or not it ends up matching anything
         // below — this is meant to reflect real ambient RF traffic,
@@ -2811,6 +2876,7 @@ void DetectionEngine::processWiFiQ() {
                 _log[slot].rssi = e.rssi;
                 _log[slot].lastSeen = millis();
                 _log[slot].channel = e.channel;
+                Trail::noteSighting(_log[slot], e.rssi, millis());
                 if (reactivating) {
                     _log[slot].active = true;
                     _log[slot].restored = 0;
@@ -2876,6 +2942,8 @@ void DetectionEngine::pushLog(const Detection& d) {
     _log[_logHead] = d;
     _log[_logHead].prevRssi = d.rssi;                 // no trend on a first sight
     _log[_logHead].prevAt   = (uint8_t)(millis() >> 11);
+    Trail::noteSighting(_log[_logHead], d.rssi, millis());
+    if (d.owner) _log[_logHead].ownerMin = (uint16_t)(millis() / 60000u);
     _logHead = (_logHead + 1) % LOG_CAP;
     if (_logCount < LOG_CAP) _logCount++;
     _latest = &_log[(_logHead + LOG_CAP - 1) % LOG_CAP];

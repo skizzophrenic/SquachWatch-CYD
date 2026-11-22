@@ -1,5 +1,6 @@
 // SquachWatch-CYD — persisted user settings implementation
 #include "settings.h"
+#include "alert_skin.h"   // which alert card skins this board carries
 #include "lora_myname.h"
 #include <stdio.h>
 #include <strings.h>
@@ -48,6 +49,16 @@ static bool        s_rotationLocked = DEFAULT_ROTATION_LOCK;
 static bool        s_aura = true;
 static bool        s_detXp = true;
 static bool        s_lavaLamp = true;
+// The alert card's window. A skin the S3 boards can afford in glass; the
+// ESP32 boards get System 7, which costs nothing to read back.
+#if defined(SQW_S3)
+static const uint8_t DEFAULT_ALERT_SKIN = 4;   // GLASS
+#else
+static const uint8_t DEFAULT_ALERT_SKIN = 3;   // SYSTEM 7
+#endif
+static uint8_t     s_alertSkin = DEFAULT_ALERT_SKIN;
+static bool       s_alertAnimate = true;
+static bool        s_alertSunset = true;
 // Eight is the ceiling because the radio's own squad ring holds eight (see
 // SQUAD_N in mesh.cpp). A menu that offered thirty would be offering something
 // the hardware cannot hear: the ninth board in the room evicts the first, and
@@ -105,7 +116,12 @@ static const uint8_t CLOCK_BG_N  = 7;
 // rather than on type, so with an exact-match signature every one of them
 // would take over the display. Off by default, one tap away in DETECTION
 // FILTER, and everything about the detection itself is honest either way.
-static const uint32_t DEFAULT_OFF = (1u << (uint8_t)DetectionType::IBEACON);
+//
+// LISTENER joined it: a smart speaker on a kitchen counter is not something
+// to be alerted about at home, only when it is somewhere it should not be,
+// and the owner who wants the room check turns it on.
+static const uint32_t DEFAULT_OFF = (1u << (uint8_t)DetectionType::IBEACON) |
+                                    (1u << (uint8_t)DetectionType::LISTENER);
 
 // typeEnabled()'s comment. Default has bits 1..(COUNT-1) set (every real
 // type on), computed once at namespace-init time rather than a hand-
@@ -617,6 +633,13 @@ void load() {
     s_aura           = s_prefs.getBool("aura", true);
     s_detXp          = s_prefs.getBool("detxp", true);
     s_lavaLamp       = s_prefs.getBool("lavalamp", true);
+    s_alertSkin      = s_prefs.getUChar("askin", DEFAULT_ALERT_SKIN);
+    // A pick this board does not carry (a settings file from a bigger board,
+    // or a list that has since shrunk) comes up as the default instead.
+    if (!AlertSkin::available(s_alertSkin)) s_alertSkin = DEFAULT_ALERT_SKIN;
+    // Stored as it was when it had three steps: 2 was OFF.
+    s_alertAnimate   = s_prefs.getUChar("amotion", 0) != 2;
+    s_alertSunset    = s_prefs.getBool("asunset", true);
     s_rotation = s_prefs.getUChar("rot", DEFAULT_ROTATION);
     if (s_rotation > 3) s_rotation = DEFAULT_ROTATION;
 #if defined(TDECK_PLUS)
@@ -979,6 +1002,32 @@ void toggleDetXp() {
     s_prefs.putBool("detxp", s_detXp);
 }
 
+uint8_t alertSkin() { return s_alertSkin; }
+void setAlertSkin(uint8_t id) {
+    if (!AlertSkin::available(id)) id = DEFAULT_ALERT_SKIN;
+    s_alertSkin = id;
+    s_prefs.putUChar("askin", s_alertSkin);
+}
+// The next (or the one before) of the skins this board carries.
+void cycleAlertSkin(bool back) {
+    uint8_t id = s_alertSkin;
+    for (uint8_t k = 0; k < AlertSkin::COUNT; k++) {
+        id = (uint8_t)((id + (back ? AlertSkin::COUNT - 1 : 1)) % AlertSkin::COUNT);
+        if (AlertSkin::available(id)) break;
+    }
+    setAlertSkin(id);
+}
+bool alertAnimate() { return s_alertAnimate; }
+void toggleAlertAnimate() {
+    s_alertAnimate = !s_alertAnimate;
+    s_prefs.putUChar("amotion", s_alertAnimate ? 0 : 2);
+}
+bool alertSunset() { return s_alertSunset; }
+void toggleAlertSunset() {
+    s_alertSunset = !s_alertSunset;
+    s_prefs.putBool("asunset", s_alertSunset);
+}
+
 bool lavaLamp() { return s_lavaLamp; }
 void toggleLavaLamp() {
     s_lavaLamp = !s_lavaLamp;
@@ -1281,7 +1330,7 @@ bool typeEnabled(DetectionType t) {
 
 void toggleType(DetectionType t) {
     uint8_t idx = (uint8_t)t;
-    if (idx == 0 || idx >= (uint8_t)DetectionType::MINE) return;
+    if (idx == 0 || idx >= (uint8_t)DetectionType::COUNT || t == DetectionType::MINE) return;
     s_typeMask ^= (1u << idx);
     s_prefs.putUInt("typemask", s_typeMask);
     // Stamped alongside the mask so a later firmware can tell which
@@ -1291,8 +1340,8 @@ void toggleType(DetectionType t) {
 
 uint8_t enabledTypeCount() {
     uint8_t n = 0;
-    for (uint8_t t = 1; t < (uint8_t)DetectionType::MINE; t++) {
-        if (s_typeMask & (1u << t)) n++;
+    for (uint8_t i = 0; i < CATALOGUE_N; i++) {
+        if (s_typeMask & (1u << (uint8_t)catalogueAt(i))) n++;
     }
     return n;
 }

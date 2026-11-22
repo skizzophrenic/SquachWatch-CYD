@@ -78,6 +78,7 @@ keychain mode, so TERMINAL MODE is a row in its Settings instead.)
 | `IBEACON` | Retail proximity beacons | Exact Apple header `4C 00 02 15` — **off by default**, see below |
 | `MY ALERT` | WiFi networks whose names match your own patterns | Settings → MY ALERTS; see [Alert controls](#alert-controls) |
 | `HACKER` | Flipper Zero, Pwnagotchi, WiFi Pineapple, ESP deauthers | Flipper Zero's service UUIDs `0x3081`–`0x3083` and its name (not Flipper's company ID or OUI, which the BUSY Bar desk sign uses); the Pwnagotchi's own beacon payload; `Pineapple_` and `pwned` SSIDs |
+| `LISTENER` | Smart speakers with microphones (Sonos, HomePod; Echo and Google speakers only while being set up) | 15 Sonos WiFi OUI, Sonos company ID `0x05A7` and UUID `0xFE07`, a HomePod's "Hey Siri" block, the `GoogleHome` setup hotspot — **off by default**, see below |
 | `LORAWAN` | A LoRaWAN operator's network in range (a utility's meters, city sensors, The Things Network) | LoRa boards only, with LORA set to LORAWAN: the DevAddr prefix of a data frame, looked up in the LoRa Alliance NetID registry. One alert per operator, not per device |
 
 ### Confidence is per signature, not per type
@@ -95,11 +96,21 @@ passing ESP32 in the log without taking over the screen.
 
 The audit also removed `00:0E:58`, which sat here for eleven releases
 labelled "Vigilant" and is registered to **Sonos**. Every speaker in range
-was being logged as a plate reader.
+was being logged as a plate reader. It is back now as what it is: a Sonos,
+under `LISTENER`.
 
 `IBEACON` ships switched off — not a judgement about importance, one about
 volume. One shop can put more beacons in range than this device would
 otherwise see all week. It is one tap away in `TYPE FILTER`.
+
+`LISTENER` ships switched off too: a speaker on your own kitchen counter is
+not news. Turn it on for a hotel or rental check. It counts in the main
+screen's CAM column, with the cameras, because that is the question the
+column answers in a strange room: what in here is recording? Sonos is
+certain as the maker and likely as a microphone (a few Sonos models have
+none). A HomePod shows only when someone near it says "Hey Siri", and then
+it is certain. An Echo or a Google speaker on the room's WiFi looks like any
+other Amazon or Google device, so it shows only in setup mode.
 
 ## Boards
 
@@ -400,6 +411,80 @@ ESP32 and ESP32-S3 board has it, and so does the Tab5, which senses with
 its own ESP32-C6 radio (it joins your network over the C6, so add one in
 **SETTINGS > WIFI NETWORKS** first). The ESP32-C5 boards do not yet.
 
+## The alert card
+
+A catch takes the screen as a card with a verdict on it: **NEW**, **MET
+BEFORE** (a regular, with its name), **FOLLOWING**, or **SPAM FLOOD**, beside
+the type and its icon. Under that is the trail: a line of the places you have
+stopped at since the device was first heard, with the time at each, the
+distance between them where the board has a position, and a YOU pin
+standing on HERE. A row of ticks says why the verdict is what it is (AWAY from its
+owner, at EVERY STOP, how many MIN it has been with you, CLOSER), a ladder
+shows the last minute of its signal, and the rows under it give the rest:
+who, the address, first and last seen, and for a tracker an OWNER row (WITH
+OWNER, AWAY and for how long, or NOT SET UP for a tag nobody has paired),
+then confidence. Catches that arrive while a card
+is up wait behind it and the **+N MORE** chip steps through them; before
+this they were dropped.
+
+**FOLLOWING** means the device was heard at three or more of your stops
+over at least a quarter of an hour, and at every stop in between. A "stop"
+is where the WiFi around you changes wholesale (or, on a board with a GPS
+fix, 300 m from the last one), so it works without GPS; with GPS the stops
+are spaced to scale and the legs carry distances. A tracker's card also says
+whether it is **WITH OWNER** or **AWAY** from its owner, read from the
+tag's own advert, with how long. A phone changes its Bluetooth address every
+quarter hour and never earns FOLLOWING; a tag away from its owner keeps its
+address for most of a day, which is exactly what makes the check work.
+
+Five buttons along the bottom: **RING** (or **HUNT** where RING does not
+apply), **WATCH**, **SNOOZE**, **IGNORE**, **INFO**. On the keyboards they
+are their first letters, and **N** steps to the next waiting catch.
+
+**Hold a LOG row** and that device's card opens, the same card a catch
+brings up, so its trail, owner state and signal are a press away. A card
+opened this way stays until you close it, goes back to LOG, and is not
+counted as a new catch; a tracker's card puts **HUNT** where SNOOZE was,
+next to RING, and its INFO page starts with where it was seen when the board
+had a position.
+
+### Alert card skins
+
+**Settings > APPEARANCE > ALERT CARD** puts the card in a window from
+another operating system. Same card, same buttons, eleven looks:
+
+| Skin | What it is |
+|---|---|
+| **TRAIL** | The card above, as it has always been drawn |
+| **SUNSET 95** | Windows 95 bones in sunset colours: the verdict in the title bar, the chips in a menu bar |
+| **NEON DESKTOP** | The card split into TRAIL, SIGNAL and DETAILS windows, the buttons a taskbar |
+| **SYSTEM 7** | A classic Mac at dusk: menu bar, pinstriped title, RING as the default button. Opens with zoom rectangles |
+| **GLASS** | Frosted glass over the sunset. Grows out of the middle, then a band of light sweeps across |
+| **TILING** | A tiling window manager: tiles, a status bar with the queue as workspaces, hotkeys on the dock |
+| **BEOS** | The yellow tab and a Deskbar. The tab slides in and the window unrolls under it |
+| **AMIGA** | Workbench blue and orange. The alert is its own screen and rises over the Workbench |
+| **NEXTSTEP** | Black title bar, grey bevels, a Dock with a tile for each catch |
+| **XP LUNA** | Luna blue and a green RING. Dissolves in; a balloon pops up for a new catch |
+| **AQUA** | Traffic lights, pinstripes and gel buttons, RING throbbing. Drops in like a sheet |
+| **TERMINAL** | Nothing but characters. Types itself out, scanlines and all |
+
+**STYLE** opens a made-up AirTag that has been following you, drawn in the
+current style, with an arrow in each bottom corner: step through the styles
+the way OUTFIT steps through outfits (each one is kept as you land on it),
+and tap anywhere else to go back. The page's other two rows:
+**OPEN WITH ANIMATION** (each style's opening, or none) and **SUNSET
+BEHIND** (the sunset behind the window, or a plain colour). The sunset holds
+still: a moving one tore across the screen.
+
+Every skin follows the colour theme: its colours are worked out from the
+theme's own, and a theme with a black background keeps it black inside the
+window. **DU5K**, a seventh theme, is the dusk the skins were designed in.
+The ESP32 CYDs and the C5 boards carry seven of the eleven, for flash: SUNSET
+95, SYSTEM 7, GLASS, AMIGA, XP LUNA, AQUA and TERMINAL. The S3 boards carry
+all eleven. Screens too small for a window (the T-Watch, the StickS3, the
+Cardputer, a CYD turned portrait) always show TRAIL. New boards come up in SYSTEM 7 on the
+ESP32 CYDs and GLASS on the S3 boards.
+
 ## Alert controls
 
 A detector that cries wolf gets switched off, so there are a few ways to
@@ -410,14 +495,14 @@ the screen.
 | Control | Where | What it does |
 |---|---|---|
 | **IGNORE** | The alert card, or a LOG row | That one device never raises an alert again, and its LOG row wears an IGNORED tag. UN-IGNORE undoes it; Settings → IGNORED lists them all |
-| **SNOOZE** | The alert card | The same, for a while: each tap steps it up (10 min, 30 min, 1 hour, 4 hours), and it locks in three seconds after the last tap |
+| **SNOOZE** | The alert card | The same, for a while: tap it and pick 10 MIN, 30 MIN, 1 HOUR or 4 HOURS from the chips that come up |
 | **AUTO SNOOZE** | Settings: OFF, AFTER 5, AFTER 10 | After that many alerts a device has to come 7 dB closer than it ever has before it may interrupt again. Its allowance comes back after half an hour. The alert that uses up the last one says QUIET UNLESS IT NEARS |
 | **ALERT FILTER** | Settings: ALL, MED+, HIGH ONLY | The lowest confidence allowed to take over the screen |
 | **TYPE FILTER** | Settings | Whole detection types on or off. An off type is dropped, not logged |
 | **MY ALERTS** | Settings | Up to eight WiFi names of your own to alert on, each with an optional label for the alert card. Plain text catches names that start with it; `*` stands for anything and `?` for one character, so `veh*` catches `veh912` and `veh9??` catches `veh901`. Patterns need at least two fixed characters. A duress wipe clears the list |
-| **Watch list** | Hold a LOG row, then WATCH | When that device turns up you get **LOCKED ON**: a radar scope with its signal and whether it is getting closer, which stays until you tap it. A watched device always gets through AUTO SNOOZE and spam floods. While one is set, Settings shows a **WATCHING** row with its name; tap it to stop watching |
+| **Watch list** | WATCH on the alert card, or hold a LOG row for its card, then WATCH | When that device turns up you get **LOCKED ON**: a radar scope with its signal and whether it is getting closer, which stays until you tap it. A watched device always gets through AUTO SNOOZE and spam floods. While one is set, Settings shows a **WATCHING** row with its name; tap it to stop watching |
 | **RING** | RING on a tracker's alert card, or hold its LOG row → RING IT | On the S3 and C5 boards, for an AirTag, Samsung, Google or Tile tracker: the board connects for a few seconds and asks it to play its sound, then says how it went (RINGING, NO ANSWER, NO SOUND or IT SAID NO). Trackers only beep for strangers while they are away from their owner's phone, so one sitting next to its owner will usually say no. The idea came from JBoHack and Hedge |
-| **HUNT MODE** | HUNT on the alert card, or hold a LOG row or a SCAN result | A signal gauge to walk the device down. While a hunt runs, the HUNTING pill on the main screen takes you back to it; STOP HUNT ends it, and so does a tap on the **HUNTING** row in Settings. A phone changes its Bluetooth address every 15 minutes or so: hunting one picked from SCAN, the board notices when it goes quiet and a new one of its kind turns up, and asks whether to follow it |
+| **HUNT MODE** | HUNT on the alert card (a tracker's card opened from LOG has it in SNOOZE's place, next to RING), or hold a LOG row or a SCAN result | A signal gauge to walk the device down. While a hunt runs, the HUNTING pill on the main screen takes you back to it; STOP HUNT ends it, and so does a tap on the **HUNTING** row in Settings. A phone changes its Bluetooth address every 15 minutes or so: hunting one picked from SCAN, the board notices when it goes quiet and a new one of its kind turns up, and asks whether to follow it |
 | **Phone labels** | SCAN → BLE | Devices that give no name are labelled from their broadcast when it says what they are: (iPhone?), (Android?), (Samsung?), (AirPods?), (Apple). Best guesses, hence the question marks. iPhones never broadcast their own name over Bluetooth |
 | **Spam floods** | Automatic | A storm of fake tags (piles of addresses heard for a moment and never again) gets one alert with a SPAM: N FAKE TAGS banner, then quiet logging until it dies down |
 | **HEADS-UP** | Settings → SQUACHMESH | Serious catches from your squad's boards arrive as a banner; see [SquachMesh](#squachmesh) |
@@ -493,12 +578,49 @@ The LilyGo T-Watch S3 and S3 Plus (BETA) run the whole firmware on a
   logged without waking the screen or buzzing. ALERT puts them back.
 - **BATTERY** and **CHIP TEMP** at the top and bottom of WATCH SETTINGS are
   readings: the charge, and the chip's temperature in °C.
-- **Wardriving**, S3 Plus only: **WARDRIVE** switches the GPS and its log on
-  together. WiFi networks (with their security) and Bluetooth devices are
-  logged with position, altitude and accuracy while there is a fresh fix,
-  kept in the watch's own flash across restarts. **DOWNLOAD WIGLE FILE** on
-  the web flasher (desktop Chrome or Edge) saves it as a file for
-  [wigle.net](https://wigle.net/uploads).
+- **Wardriving**, S3 Plus only: **WARDRIVE** opens the WARDRIVE page (see
+  [Wardriving](#wardriving)). WiFi networks (with their security) and
+  Bluetooth devices are logged with position, altitude and accuracy while
+  there is a fresh fix, kept in the watch's own flash across restarts.
+
+## Wardriving
+
+On the boards with a GPS -- the T-Deck Plus, the T-Watch S3 Plus, the
+Cardputer ADV with its Grove GPS, the Marauder V8, the Freenove S3 GPS
+builds and a CYD with a GPS wired on -- **WARDRIVE** in Settings (WATCH
+SETTINGS on the watch) opens a page of its own:
+
+- **WARDRIVE** switches the GPS and the log on together. Only sightings made
+  with a fresh fix are kept.
+- **GPS**: the fix, the satellites, or why there is none yet.
+- **THIS DRIVE**: networks and Bluetooth devices written since it was turned on.
+- **FILE** (SD boards): the WiGLE file this drive is writing, `/wigle-YYYYMMDD-HHMM.csv`.
+  **KEPT** (the watch): how much of its flash log is used.
+
+**Getting it to WiGLE.** Every board can go through the web flasher:
+**UPLOAD TO WIGLE** under AFTER INSTALLING takes your API name and token
+from [wigle.net/account](https://wigle.net/account) and sends files straight
+from the page to WiGLE: the watch's log from DOWNLOAD WIGLE FILE, or the
+`wigle-*.csv` files off an SD card. Nothing passes through squachwatch.com,
+and the name and token stay in your browser only if you tick the box.
+
+The S3 boards with room for it -- **T-Deck Plus, T-Watch S3 Plus and the
+Freenove S3 GPS builds** -- upload by themselves. **SEND KEY TO MY BOARD** on
+the same panel gives the board your key over the cable, once. Then the
+WARDRIVE page has:
+
+- **UPLOAD NOW**: pauses the radios the way a WiFi update does, joins the
+  strongest saved network (SETTINGS > WIFI NETWORKS), and sends what is new
+  over HTTPS. The SD boards send each finished drive's file and move it to
+  `/wigle-sent`; the watch sends what it has kept since its last upload.
+- **AUTO UPLOAD**: ON CHARGER does that by itself, at most every half hour,
+  when the board is on the charger, on the main screen and untouched for a
+  minute.
+- **WIGLE KEY** (whose it is) and **LAST UPLOAD** (when, and how many rows).
+
+The CYDs and the Cardputer do not have the room for HTTPS, so their page says
+to upload at squachwatch.com. A duress wipe forgets the key along with the
+logs.
 
 ## The status light
 
@@ -542,6 +664,14 @@ twenty-byte BLE advert. The name is one row, **NAME** under SQUACHMESH: a
 curated one until somebody types one on the payphone, where **SHUFFLE**
 steps through the curated list for anyone who would rather not type.
 Whichever it is, the visitor wears it on a sticker on his chest.
+
+**Goblins visit too.** A [Network Goblin Scout](https://github.com/skizzophrenic/SquachWatch-CYD/issues/37)
+goblin in range walks in when no Squachy is visiting: a high five (he has to
+jump for it), his name and level over his head, a sack of loot that grows
+with his hoard, a hat if he wears one, and a bit of chat. He stays about 45
+seconds, says goodbye, and the same goblin is not hosted again for half an
+hour. A goblin is never a detection: nothing about him is logged or kept.
+SQUACHMESH's DETECT switch and CROWD NONE turn goblins off with the squad.
 
 That was where it started. Since then the squad has picked up
 [messages](#messages), and thirty-five emotes you can send from the message
@@ -692,7 +822,8 @@ None of this finds anything. All of it is why you leave him on.
 
 | What | Where | |
 |---|---|---|
-| **THEME** | Settings → APPEARANCE | Six palettes: VAPRW4VE, CYB3RGR33N, AMB3RTERM, BUBBL3GUM, GH0ST and BL00D |
+| **THEME** | Settings → APPEARANCE | Seven palettes: VAPRW4VE, CYB3RGR33N, AMB3RTERM, BUBBL3GUM, GH0ST, BL00D and DU5K, the dusk the alert card skins were designed in |
+| **ALERT CARD** | Settings → APPEARANCE | The alert card's window: TRAIL or one of eleven operating-system skins, picked from a live card with arrows; whether it opens with its animation; the sunset behind it or not (see [Alert card skins](#alert-card-skins)) |
 | **BACKGROUND** | Settings → APPEARANCE | Ten animated scenes: DIGITAL RAIN, STARFIELD, FLYING TOASTERS, AQUARIUM, TERMINAL LOG, FIREFLIES, FIRE, SNOWFALL, THE GIBSON (drawn from your own log) and SYNTHWAVE. Some of them hide things. A tap at the left or right edge of the main screen changes it too |
 | **LOCK BACKGROUND** | Settings → APPEARANCE | ON stops edge taps from changing the background, on the main screen and the desk |
 | **OUTFIT** | Settings → APPEARANCE | Pick from the costumes he has earned; see [Every outfit](#every-outfit) |
@@ -704,6 +835,7 @@ None of this finds anything. All of it is why you leave him on.
 | **FONTS** | Settings → APPEARANCE | A slider for each kind of text: MENUS, TEXT, BUTTONS, BUBBLES, PETS and the XP TILES, each as far as your screen can go. Tap a label to switch it between PIXEL and SMOOTH. The preview box shows the one you just moved |
 | **CRYPTID FIELD GUIDE** | Settings | A page for every cryptid he has found, and a clue for the ones he has not. EQUIP puts a found one out as his pet |
 | **SQUACHY-DEX** | Settings | A card per detection type: lore, habitat, radio, rarity, and your own record with it. Whatever you catch most, ten or more, becomes his nemesis |
+| **RANDOM ENCOUNTERS** | Settings → FIELD JOURNAL | Every so often something turns up on the main screen: a stranger Squachy, a wandering goblin, your last catch on little legs, the pet's zoomies, a giant Mothman over the horizon, a lost WiFi signal to tap home, an evil twin, a UFO, or -- rarely -- the Elder, who gets his photo taken if you tap him in time. (A tenth, the mimic, only the free roll can find: see below.) The board rolls its own dice every ten minutes of main-screen time, and what it has caught tilts them. On average it is one every hour and a quarter of screen time, never more than four hours. You see the roll: a gold d20 drops in by his feet and shows its number (6 and up is a hit, the rarer the higher, and a 20 is a shiny), so nobody takes a made-up visitor for a SquachWatcher in range. The three that come as visitors fall out of a hole in the sky, boot the die off the screen, and leave by the same hole; somebody really in range walks in from the edge. About one empty roll in four is shown as well: the die lands on a dud and Squachy cannot work out what it wanted. A 1 is worse: it bounces up off the floor and onto his head, and he sees stars. A 20 turns gold with rays behind it, and he cheers. There is also a **FREE ROLL** anybody can make: one is waiting after the update and another turns up after every twelve hours the board has been running (counted across restarts, so pulling the plug earns nothing). Its die sits on the floor by the right-hand edge of the main screen for thirty seconds, then rolls off if nobody has touched it; tap it and it goes up and comes down as an honest d20 that the journal counts (1 to 5 nothing, 6 to 12 COMMON, 13 to 16 UNCOMMON, 17 and 18 RARE, 19 LEGENDARY, 20 a shiny). With no touch screen, press **P** on a Cardputer ADV or T-Deck Plus, or select **FREE ROLL** on the FIELD JOURNAL page, which also says how long until the next one. While the die waits, it now and then rolls over and bumps Squachy's foot, and he boots it off the edge of the screen and back to its spot. And about one time in eight it was never a die: touch it and it opens its eyes, grows teeth and goes for him (**THE MIMIC**, the journal's tenth entry). A shiny one looks it for as long as it is there: sparkles round it and a trail of them behind, the Legend's aura on a shiny Squachy and gold skin on a shiny goblin. Once you have done the unlock-everything hold, **P** plays the next dice scene on demand instead: a miss, a 1, each of the nine the dice pick in turn, a 20, and the mimic. Those are only played, and the journal does not count them. **ENCOUNTERS** sets OFF, RARE, NORMAL or OFTEN; the **FIELD JOURNAL** keeps who has turned up, how often and when, and the shinies (one in 64) |
 | **BINGO** | Settings | A weekly card of sixteen detection types. Four in a row is a line, and finished weeks make a streak |
 | **SQUACHY'S DIARY** | Settings | Lifetime catches, most caught, first ever catch, best streaks, times petted |
 | **SHOW OFF** | Settings | Every pose he knows, back to back, each one named |
@@ -870,6 +1002,9 @@ SquachWatch-CYD/
 - Waveshare ESP32-C5-Touch-LCD-2.8 port: **bobsdinner-cell**.
 - The emulator building on macOS, and its incremental build: **aroth**.
 - Testing every single build, boot loops and green skies included: **Houdini**.
+- Goblin visitors: **MostlyWithinSpec**, maker of Network Goblin Scout, who
+  published the goblin beacon format in issue #37 so a goblin could visit a
+  Squachy. The goblin drawn here is our own.
 - Bug reports that found real bugs: **rrahmani** (Remote ID never caught a
   real drone; photos and a diagnosis of the 3.5" drawing half its screen
   twice), **bradshapiro59** (phantom Flock alerts from garbage Bluetooth

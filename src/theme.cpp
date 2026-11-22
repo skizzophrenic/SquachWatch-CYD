@@ -76,6 +76,10 @@ const Palette kPalettes[PALETTE_COUNT] = {
     { "BUBBL3GUM",  0x1002, 0x2004, 0xF81F, 0xFB9D, 0xF96F, 0xFB99, 0xE01F, 0xFA1F, 0xFFF0, 0xFB56, 0xFD20, 0xF800 },
     { "GH0ST",      0x0000, 0x2104, 0xFFFF, 0xF79E, 0xC638, 0xEF7D, 0xB5B6, 0xDEFB, 0xFFFF, 0xFFFF, 0xFFFF, 0xF800 },
     { "BL00D",      0x1000, 0x2000, 0xF800, 0xFB2C, 0xFAEB, 0xF9AB, 0xC0C4, 0xF9CB, 0xFC60, 0xF800, 0xFD20, 0xF800 },
+    // The opener's dusk, every value one an 8-bit frame holds exactly: an
+    // indigo night, plum, aqua, dusty pink, peach, lavender, teal, the sun's
+    // yellow, mint, gold, and a rose for RED. Softer than the rest on purpose.
+    { "DU5K",       0x200A, 0x000A, 0x4935, 0x6EDF, 0xDB75, 0xFDB5, 0xB5BF, 0x05B5, 0xFECA, 0x6ED5, 0xFDAA, 0xDA4A },
 };
 
 void applyPalette(uint8_t idx) {
@@ -137,6 +141,8 @@ uint16_t colorFor(DetectionType t) {
             return VAPOR_PURPLE;
         case DetectionType::CAMERA:
         case DetectionType::RING:
+        // A microphone in the room, filed with the cameras in the room.
+        case DetectionType::LISTENER:
             return CYAN;
         case DetectionType::DEAUTH:
         case DetectionType::EVILTWIN:
@@ -1206,6 +1212,16 @@ void drawTypeIcon(TFT_eSPI& t, DetectionType type, int cx, int cy, int s) {
         t.fillRect(cx-1,cy-s/2,3,s*3/2,ICO_METAL);
         for(int i=1;i<=2;i++) t.drawCircle(cx,cy-s/2,s/4+i*s/4,ICO_LENS);
         t.fillCircle(cx,cy-s/2,3,ICO_LED);
+        break;   // it fell through into MINE's router, drawn over the mast
+    case DetectionType::LISTENER:
+        // A smart speaker: what it hears coming off it, a fabric body with a
+        // grille, and the light ring on top that says it is listening.
+        for(int i=1;i<=2;i++) t.drawCircle(cx,cy,s*2/3+i*s/4,ICO_LENS);
+        t.fillRoundRect(cx-s*2/3,cy-s,s*4/3,s*2,s/3,SHELL_LO);
+        for(int r=0;r<3;r++) for(int c=0;c<3;c++)
+            t.fillCircle(cx-s/3+c*s/3,cy-s/6+r*s/3,s/10+1,ICO_INK);
+        t.fillRect(cx-s/2,cy-s+3,s,3,ICO_LED);
+        break;
     case DetectionType::MINE:
         // A plain router -- the in-car kind it was asked for -- with its
         // two aerials and the name it shouts drawn as a tag on a string.
