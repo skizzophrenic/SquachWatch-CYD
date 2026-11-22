@@ -164,6 +164,20 @@ namespace Settings {
     bool       lavaLamp();
     void       toggleLavaLamp();
 
+    // ALERT CARD on the APPEARANCE page (see alert_skin.h): which window the
+    // alert card is drawn in (0 is the TRAIL card itself, then the eleven
+    // operating-system skins), whether the window opens with its animation,
+    // and whether the skins that sit on a desk show the sunset behind the
+    // window or a plain colour. Panels too small for a window keep TRAIL
+    // whatever the pick.
+    uint8_t    alertSkin();
+    void       setAlertSkin(uint8_t id);
+    void       cycleAlertSkin(bool back);
+    bool       alertAnimate();
+    void       toggleAlertAnimate();
+    bool       alertSunset();
+    void       toggleAlertSunset();
+
     // FONTS on the APPEARANCE page: a slider per kind of text, around the
     // size each board was built with. 0..4 for -2..+2; 2 is as built. Theme
     // decides what a step means on this board and how far it can go

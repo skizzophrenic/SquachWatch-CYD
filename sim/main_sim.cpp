@@ -27,10 +27,13 @@
 #include "detection.h"
 #include "detection_info.h"
 #include "ui_clear.h"
+#include "encounters.h"
 #include "ui_log.h"
 #include "ui_alert.h"
 #include "ui_settings.h"
-#include "sim_detections.h"   // simMakeDetection(), for --alert on a kind the seeds lack
+#include "sim_detections.h"
+#include "trail.h"
+#include "places.h"   // simMakeDetection(), for --alert on a kind the seeds lack
 #include "ui_diary.h"
 #include "ui_hunt.h"
 #include "ui_rawscan.h"
@@ -342,9 +345,14 @@ static void usage() {
         "  --phrase-mode N   phrase screen: 0 show, 1 rolled, 2 picking a word, 3 picking a letter\n"
         "  --bg N            background style 0..9 (see Settings::Background)\n"
         "  --theme N         palette index\n"
+        "  --skin N          the alert card's window: 0 TRAIL, 1-11 the skins (alert_skin.h)\n"
+        "  --motion N        the alert card's opening: 0 animated, 2 none\n"
+        "  SQUACHSIM_BROWSE=1  the alert card as ALERT CARD > STYLE shows it: the browser strip\n"
+        "  --plain           a plain desk behind the alert card's window\n"
         "  --alert N         DetectionType the ALERT screen fires on\n"
         "  --first / --night / --lastfree   the ALERT card's banners\n"
-        "                    SQUACHSIM_SNOOZE=\"30 MIN\": SNOOZE mid-pick on that step\n"
+        "                    SQUACHSIM_SNOOZE=1: SNOOZE tapped, the four time chips up\n"
+        "                    SQUACHSIM_QUEUE=N: N catches waiting, the last arriving 1 s in\n"
         "                    SQUACHSIM_TOAST=\"HEAD|sub\": a toast over CLEAR\n"
         "  --noseed          no detections at all -- CLEAR's idle state\n"
         "  --gps             a fresh GPS fix: CLEAR's GPS label, DIAGNOSTICS' GPS lines,\n"
@@ -381,6 +389,7 @@ int main(int argc, char** argv) {
     int confirmRow = -1;   // settings screen: put a confirm panel up
     int scrollBy = 0;      // settings screen: scroll down N rows first
     int bg = -1, themeIdx = -1, frames = 90, sequence = 1, outfitIdx = -1, poseIdx = -1, petIdx = -1;
+    int skinIdx = -1, motionIdx = -1; bool plainDesk = false;
     // Background taps to inject during the warm-up, as frame:x:y. Every egg
     // (the lodge, the moon, the gold toaster, the starfield eye, the aquarium
     // shark) is reached through Theme::backgroundTap(), and until this flag
@@ -435,6 +444,9 @@ int main(int argc, char** argv) {
         else if (a == "--onboard") onboard = true;
         else if (a == "--bg" && i + 1 < argc) bg = atoi(argv[++i]);
         else if (a == "--theme" && i + 1 < argc) themeIdx = atoi(argv[++i]);
+        else if (a == "--skin" && i + 1 < argc) skinIdx = atoi(argv[++i]);
+        else if (a == "--motion" && i + 1 < argc) motionIdx = atoi(argv[++i]);
+        else if (a == "--plain") plainDesk = true;
         else if (a == "--outfit" && i + 1 < argc) outfitIdx = atoi(argv[++i]);
         else if (a == "--pet" && i + 1 < argc) petIdx = atoi(argv[++i]);
         else if (a == "--pose" && i + 1 < argc) poseIdx = atoi(argv[++i]);
@@ -499,6 +511,12 @@ int main(int argc, char** argv) {
     // Settings' own cycle* mutators are the only public way in, so walk
     // them to the requested index rather than reaching past the API.
     if (themeIdx >= 0) while ((int)Settings::paletteIndex() != themeIdx % (int)Theme::PALETTE_COUNT) Settings::cyclePalette();
+    // The alert card's window (Settings > APPEARANCE > ALERT CARD): --skin N
+    // (0 TRAIL, 1..11 the skins), --motion N (0 FULL, 1 OPENING ONLY, 2 OFF),
+    // --plain for a plain desk behind it.
+    if (skinIdx >= 0) Settings::setAlertSkin((uint8_t)skinIdx);
+    if (motionIdx >= 0 && (motionIdx != 2) != Settings::alertAnimate()) Settings::toggleAlertAnimate();
+    if (plainDesk == Settings::alertSunset()) Settings::toggleAlertSunset();
     // SQUACHSIM_BORING=1: BORING MODE on -- the backdrop with nobody on it.
     if (getenv("SQUACHSIM_BORING") && !Settings::boringMode()) Settings::toggleBoringMode();
     if (bg >= 0) {
@@ -559,6 +577,18 @@ int main(int argc, char** argv) {
         guest.phone = getenv("SQUACHSIM_PEERPHONE") != nullptr;
         snprintf(guest.name, sizeof(guest.name), "%s", peerName.c_str());
         uiClearSetGuest(&guest);
+    }
+    // SQUACHSIM_GOBLIN=Name[,level,hue,hat,hoard]: a Network Goblin Scout
+    // goblin visits instead (goblin.h). "Mock,12,200,0,0" is issue #37's.
+    static Goblin::Visitor goblin{};
+    if (const char* gs = getenv("SQUACHSIM_GOBLIN")) {
+        unsigned lv = 12, hue = 85, hat = 3, hoard = 4;
+        char nm[16] = "";
+        sscanf(gs, "%15[^,],%u,%u,%u,%u", nm, &lv, &hue, &hat, &hoard);
+        goblin.id = 0x12345678u; goblin.level = (uint16_t)lv; goblin.hue = (uint8_t)hue;
+        goblin.hat = (uint8_t)(hat & 31); goblin.hoard = (uint8_t)(hoard & 7);
+        snprintf(goblin.name, sizeof goblin.name, "%s", nm);
+        uiClearSetGoblin(&goblin);
     }
 
     // Messages go through the real runtime and the real receive path; only
@@ -685,6 +715,12 @@ int main(int argc, char** argv) {
     // SQUACHSIM_SAY="LINE": a line in his bubble as the screen opens, for
     // comparing bubble sizes across panels.
     if (const char* say = getenv("SQUACHSIM_SAY")) Squachy::announce(say);
+    // SQUACHSIM_ENCOUNTER=n: random encounter n (encounters.h's order) starts
+    // with the capture, as if the dice had just picked it.
+    if (const char* en = getenv("SQUACHSIM_ENCOUNTER")) Encounters::force((Encounters::Kind)atoi(en));
+    // SQUACHSIM_HUSH=1: he stands still and keeps quiet, as during a visit
+    // (Squachy::setHush), so a lab clip can put its own scene around him.
+    if (getenv("SQUACHSIM_HUSH")) Squachy::setHush(true);
     // SQUACHSIM_CLIPCATCH=TYPE: C1iPPY has just seen a catch of that type and
     // has his expert opinion ready.
     if (const char* cc = getenv("SQUACHSIM_CLIPCATCH")) Pet::noteCatch((uint8_t)atoi(cc));
@@ -806,12 +842,15 @@ int main(int argc, char** argv) {
                       false, false, false);   // no confirm panel in the sim: nothing watched, nothing hunted
         }
         else if (screen == "alert")    {
-            // SQUACHSIM_SNOOZE=label: SNOOZE mid-pick, showing that step, its
-            // bar running out over 3 s from the capture's start.
-            if (const char* snz = getenv("SQUACHSIM_SNOOZE")) {
+            // SQUACHSIM_SNOOZE=1: SNOOZE tapped, its four time chips up.
+            // SQUACHSIM_QUEUE=N: N catches waiting behind the card, the last
+            // of them arriving a second into the capture.
+            if (getenv("SQUACHSIM_SNOOZE")) uiAlertSetSnoozePicking(true);
+            if (getenv("SQUACHSIM_BROWSE")) uiAlertSetPreview(true);
+            if (const char* q = getenv("SQUACHSIM_QUEUE")) {
+                static bool queued = false;
                 const uint32_t from = now + (uint32_t)frames * STEP_MS;
-                const uint32_t gone = t > from ? (t - from) / 3 : 0;
-                uiAlertSetSnoozePick(snz, (uint16_t)(gone >= 1000 ? 0 : 1000 - gone));
+                if (!queued && t + 1000 >= from) { uiAlertSetQueue((uint8_t)atoi(q)); queued = true; }
             }
             uiAlertTick(frame, t, engine, false, nullptr, "");
         }
@@ -1346,6 +1385,45 @@ int main(int argc, char** argv) {
             d = engine.logAt(0);
         }
         if (!d) { fprintf(stderr, "no seeded detection to alert on\n"); return 1; }
+        // The trail, the way a tag that has been with you for 41 minutes
+        // would carry it: three stops (home, a place, here) 1.3 and 0.8 km
+        // apart, away from its owner for two hours, a minute of signal
+        // closing in. Written onto the engine's own row, which is what the
+        // card re-reads each frame. SQUACHSIM_TRAIL=0 leaves the row bare.
+        {
+            const char* tr = getenv("SQUACHSIM_TRAIL");
+            if (!tr || atoi(tr) != 0) {
+                Detection& row = *const_cast<Detection*>(d);
+                const uint32_t t0 = 60000u;                       // minute 1 of uptime
+                Places::reset();
+                Places::forceNewAt(t0, 407128000, -740060000, true);
+                Trail::noteSighting(row, -78, t0);
+                Trail::noteSighting(row, -74, t0 + 4u * 60000u);
+                Places::forceNewAt(t0 + 17u * 60000u, 407210000, -739960000, false);
+                Trail::noteSighting(row, -72, t0 + 17u * 60000u);
+                Trail::noteSighting(row, -70, t0 + 22u * 60000u);
+                Places::forceNewAt(t0 + 34u * 60000u, 407260000, -739900000, false);
+                const uint32_t tEnd = t0 + 41u * 60000u;
+                for (int i = 0; i < 12; i++) Trail::noteSighting(row, (int8_t)(-78 + i * 2), tEnd - (11 - i) * 4100u);
+                row.rssi = -58;
+                switch (row.type) {
+                    case DetectionType::AIRTAG: case DetectionType::SAMSUNG_TAG:
+                    case DetectionType::GOOGLE_TAG: case DetectionType::TILE:
+                        row.owner = OWNER_AWAY;
+                        row.ownerMin = (uint16_t)(tEnd / 60000u - 120u);   // apart from its owner for two hours
+                        break;
+                    default: break;
+                }
+                row.hits = 7;
+                row.firstSeen = t0;
+                row.lastSeen  = tEnd;
+                row.active = true;
+                SimClock::nowMs = tEnd;
+                now = SimClock::nowMs;
+                // An afternoon, so the stops read as times of day.
+                if (!getenv("SQUACHSIM_EPOCH")) Clock::setEpoch(1795185780u);
+            }
+        }
         uiAlertInit(frame, *d);
         if (gps) {
             gpsFeed(now);
@@ -1385,6 +1463,7 @@ int main(int argc, char** argv) {
         if (screen == "lorasettings") { uiLoraSettingsTap(x, y, when); return; }
         // The pet first, as on the board: a still tap is a grab and a let-go.
         if (Pet::clippyHit(x, y)) { Pet::clippyGrab(x, y, when); Pet::clippyRelease(when); }
+        else if (uiClearEncounterTap(x, y, when)) {}   // the Lost Signal, the Elder's photo
         else if (Squachy::hitTest(x, y)) { Squachy::noteTapAt(x, y); Squachy::trigger(Squachy::Event::PETTED); }
         else {
             Theme::backgroundTap(x, y, when);
@@ -1477,6 +1556,42 @@ int main(int argc, char** argv) {
         // SQUACHSIM_WANDER=1 or -1: his edge-to-edge wander, starting with the capture.
         if (s == 0 && wanderAt < 0 && getenv("SQUACHSIM_WANDER")) { SimClock::nowMs = sNow; Squachy::wanderNow((int8_t)atoi(getenv("SQUACHSIM_WANDER"))); }
         if (gps) gpsFeed(sNow);
+        // SQUACHSIM_SAYAT="F:line|F:line": he says each line at capture frame
+        // F. "@UP" reaches up (the high five's arm), "@LAUGH" cracks up,
+        // "@ENC n" starts random encounter n, "@MISS" drops the die for
+        // nothing, "@POSE n ms" holds a VisitPose.
+        if (const char* sa = getenv("SQUACHSIM_SAYAT")) {
+            const char* p = sa;
+            while (*p) {
+                const int f = atoi(p);
+                const char* c = strchr(p, ':'); if (!c) break;
+                const char* e = strchr(c + 1, '|');
+                std::string line(c + 1, e ? (size_t)(e - c - 1) : strlen(c + 1));
+                if (f == s) {
+                    SimClock::nowMs = sNow;
+                    if (line == "@UP") Squachy::visitReach(sNow, 1400, Squachy::Reach::UP);
+                    else if (line == "@LAUGH") Squachy::visitLaugh(sNow);
+                    // "@ENC n": random encounter n starts at this frame, so a
+                    // clip can show the screen before it.
+                    else if (line == "@MISS") Encounters::forceMiss();
+                    else if (line.rfind("@ENC", 0) == 0) Encounters::force((Encounters::Kind)atoi(line.c_str() + 4));
+                    // "@POSE n ms": he holds VisitPose n for ms milliseconds.
+                    else if (line.rfind("@POSE", 0) == 0) {
+                        int pn = 0, pms = 1000;
+                        sscanf(line.c_str() + 5, "%d %d", &pn, &pms);
+                        Squachy::visitPose(sNow, (uint32_t)pms, (Squachy::VisitPose)pn);
+                    }
+                    else {
+                        // He keeps the pointer for as long as the bubble is up.
+                        static std::string kept[16]; static int keptN = 0;
+                        kept[keptN % 16] = line;
+                        Squachy::announce(kept[keptN++ % 16].c_str());
+                    }
+                }
+                if (!e) break;
+                p = e + 1;
+            }
+        }
         tick(sNow);
         // --tap frame numbers run straight on through the capture, so a tap
         // can land on a frame you can actually look at afterwards.

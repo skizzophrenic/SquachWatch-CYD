@@ -45,6 +45,11 @@ void uiClearInfoOnly(bool on);
 // Boards without a battery never set one, and their screen does not change.
 typedef bool (*BatterySource)(uint8_t& pct, bool& charging);
 void uiClearSetBatterySource(BatterySource fn);
+// The battery as the board reads it now; false on a board with no reading.
+bool uiClearBatteryNow(uint8_t& pct, bool& charging);
+// A tap on the main screen that a random encounter wants (the Lost Signal,
+// the Elder's photo). True when it took the tap.
+bool uiClearEncounterTap(int x, int y, uint32_t now);
 bool uiClearHasBattery();   // a source is set: this board can show a battery
 
 // TERMINAL MODE (Settings::boringMode()): the windows on the home screen.
@@ -66,6 +71,10 @@ uint8_t uiTerminalStops(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint
 namespace SquachMesh { struct Peer; }
 const SquachMesh::Peer* uiClearGuest();
 void uiClearSetGuest(const SquachMesh::Peer* p);
+// A goblin from Network Goblin Scout to host, from outside the radio: the
+// emulator's --goblin. nullptr goes back to whatever the radio hears.
+namespace Goblin { struct Visitor; }
+void uiClearSetGoblin(const Goblin::Visitor* g);
 // The little speech bubble beside a visitor, which opens the message screen.
 // Its rectangle is filled in by the draw; this reads it.
 bool uiClearBubbleHit(int x, int y);

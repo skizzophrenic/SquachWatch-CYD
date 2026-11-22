@@ -112,12 +112,15 @@ static void cydGpsTick(uint32_t now);
 #include "lora_sniffer.h"   // the watch's SX1262; inline no-ops elsewhere
 #include "lora_profiles.h"  // meshPresetFind, for LORASET PRESET
 #include "wardrive.h"
+#include "wigle_up.h"
+#include "encounters.h"
 #include "ui_bingo.h"
 #include "bingo.h"
 #include "dex.h"
 #include "ui_dex.h"
 #include "ui_cryptid_guide.h"
 #include "regulars.h"
+#include "places.h"
 #include "notices.h"
 #include "theme.h"            // the crash card on the splash
 #include "clock.h"            // ...and the ten-minute IGNORE on it
@@ -1776,14 +1779,11 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         return n;
     }
     if (state == AppState::ALERT) {
-        // No stop on the plate: a box over it hid the text, and BACK
-        // dismisses it already.
-        add(37, h - 15);                // HUNT
-        add(w / 2, h - 15);             // SNOOZE
-        add(w - 37, h - 15);            // INFO
-        add(w - 35, 14);                // IGNORE
-        int rx, ry;
-        if (uiAlertRingCentre(w, h, rx, ry)) add(rx, ry);   // RING, on trackers
+        // The five buttons, then the +N MORE chip when catches are waiting.
+        // No stop on the card itself: BACK dismisses it already.
+        int16_t xs[6], ys[6];
+        const uint8_t k = uiAlertStops(w, h, xs, ys, 6);
+        for (uint8_t i = 0; i < k; i++) add(xs[i], ys[i]);
         return n;
     }
     if (state == AppState::OUTFIT_UNLOCK) return 0;   // a card: SELECT or BACK closes it
@@ -2429,14 +2429,19 @@ static int stickRegionId(int x, int y) {
             const RawScanTap r = uiRawScanHitTest(x, y, w, h);
             return r == RawScanTap::NONE ? -1 : 9200 + (int)r;
         }
-        case AppState::ALERT:
+        case AppState::ALERT: {
             if (s_infoPending) return -1;
+            const int chipHit = uiAlertHitSnoozeChip(x, y, w, h);
+            if (chipHit >= 0)                   return 9407 + chipHit;
             if (uiAlertHitSnooze(x, y, w, h))   return 9400;
             if (uiAlertHitHunt(x, y, w, h))     return 9401;
             if (uiAlertHitMoreInfo(x, y, w, h)) return 9402;
             if (uiAlertHitRing(x, y, w, h))     return 9404;
             if (uiAlertHitIgnore(x, y, w, h))   return 9403;
+            if (uiAlertHitWatch(x, y, w, h))    return 9405;
+            if (uiAlertHitQueue(x, y, w, h))    return 9406;
             return -1;
+        }
         case AppState::HUNT:
             if (uiHuntHitBack(x, y, w, h)) return 9700;
             if (uiHuntHitStop(x, y, w, h)) return 9701;
@@ -2834,6 +2839,17 @@ static void tdeckKey(char c, uint32_t now) {
     // Enter on the home screen opens the LORA page, when the radio is on: the
     // keyboard is the reason to own a T-Deck (asked for 2026-10-15).
     else if (state == AppState::CLEAR && c == '\n' && Settings::loraListen() != 0) enterLoraHome();
+#endif
+#if defined(SQW_DICE_BENCH) && SQUACH_MESH
+    // A bench build only (-DSQW_DICE_BENCH=1): P on the main screen plays the
+    // next dice scene -- a miss, then each of the nine encounters in turn.
+    else if (state == AppState::CLEAR && (c == 'p' || c == 'P')) {
+        static uint8_t s_benchN = 0;
+        if (s_benchN == 0) Encounters::forceMiss();
+        else Encounters::force((Encounters::Kind)(s_benchN - 1));
+        Serial.printf("[bench] dice scene %u of 10\n", (unsigned)s_benchN + 1);
+        s_benchN = (uint8_t)((s_benchN + 1) % 10);
+    }
 #endif
 #if defined(SENSE_CYD_APP)
     // HUMAN SENSING's three buttons from the keyboard: Backspace is BACK, R
@@ -3665,7 +3681,25 @@ static const uint32_t SNOOZE_PICK_MS = 3000;
 static uint8_t  s_snoozeStep  = 0;
 static uint32_t s_snoozeTapAt = 0;
 
+// Catches that arrive while a card is up wait their turn behind it (the +N
+// MORE chip): the address and type, since the log row can be overwritten.
+struct QueuedCatch { uint8_t mac[6]; DetectionType type; };
+static QueuedCatch s_queue[4];
+static uint8_t     s_queueN = 0;
+static bool nextQueued();
+
+// The card on screen was opened by hand (holding a LOG row), not by a catch:
+// no timeout, back to LOG when it closes, and Squachy does not hear about it
+// as a catch. Every enterAlert() clears it; openCardFromLog() sets it after.
+static bool s_alertByHand = false;
+// Where the black box last had it, for a card opened from LOG: the old LOG
+// panel's SEEN AT line, now at the top of the card's INFO page. Empty when
+// it was never logged with a position.
+static char s_alertSeenAt[40] = "";
+
 static void enterAlert(const Detection& d) {
+    s_alertByHand = false;
+    if (state != AppState::ALERT) s_queueN = 0;   // a fresh card starts with nothing behind it
     s_snoozeStep = 0;
     s_backToDesk = (state == AppState::DESK) || (state == AppState::CLEAR && s_fob);
 #if SQUACH_LORA && defined(TDECK_PLUS)
@@ -3735,6 +3769,8 @@ static void enterAlert(const Detection& d) {
     // entry this came from can be overwritten before HUNT is tapped.
     memcpy(s_alertMac, d.mac, 6);
     s_alertIsBle = (d.channel == 0);   // same discriminator LOG's long-press uses
+    uiAlertSetWatching(engine.isWatched(d.mac, s_alertIsBle));
+    uiAlertSetQueue(s_queueN);
     {
         const char* lbl = d.name[0] ? d.name : vendorText(d);
         strncpy(s_alertLabel, lbl, sizeof(s_alertLabel) - 1);
@@ -3743,6 +3779,70 @@ static void enterAlert(const Detection& d) {
 #if defined(CYD35)
     clearSharedFrameBuffer();
 #endif
+}
+
+// A catch heard while a card was up: behind it, once, unless it is the card.
+static void queueCatch(const Detection& d) {
+    if (memcmp(d.mac, s_alertMac, 6) == 0 && d.type == lastAlertType) return;
+    for (uint8_t i = 0; i < s_queueN; i++)
+        if (memcmp(s_queue[i].mac, d.mac, 6) == 0 && s_queue[i].type == d.type) return;
+    if (s_queueN == sizeof s_queue / sizeof s_queue[0]) return;
+    memcpy(s_queue[s_queueN].mac, d.mac, 6);
+    s_queue[s_queueN].type = d.type;
+    s_queueN++;
+    uiAlertSetQueue(s_queueN);
+}
+// The next waiting catch's card, if its row is still in the log. False when
+// nothing waits, so the caller goes home.
+static bool nextQueued() {
+    while (s_queueN) {
+        const QueuedCatch q = s_queue[0];
+        for (uint8_t i = 1; i < s_queueN; i++) s_queue[i - 1] = s_queue[i];
+        s_queueN--;
+        for (uint8_t i = 0; i < engine.logCount(); i++) {
+            const Detection* d = engine.logAt(i);
+            if (d && memcmp(d->mac, q.mac, 6) == 0 && d->type == q.type) {
+                const Detection copy = *d;
+                enterAlert(copy);
+                return true;
+            }
+        }
+    }
+    return false;
+}
+// Leaving the card by any route that acknowledges it: Squachy hears about
+// it, and the next waiting catch takes the screen, or the main screen does.
+static void enterLog();   // further down; a card opened from LOG goes back to it
+static void leaveAlert() {
+    // A card opened from LOG goes back to LOG, and is not a catch to tell
+    // Squachy about -- he heard about this device when it was caught.
+    if (s_alertByHand) {
+        s_alertByHand = false;
+        if (!nextQueued()) enterLog();
+        return;
+    }
+    squachyCatch(lastAlertType, s_alertMac, lastAlertHits, lastAlertRssi, lastAlertConf);
+    if (!nextQueued()) enterClear();
+}
+
+// Holding a LOG row: that device's full card -- the trail, its owner state,
+// the ladder, the facts -- rather than the old WATCH / HUNT / INFO panel, in
+// whichever skin is picked. A copy, because the log keeps being written.
+static void openCardFromLog(const Detection& d) {
+    const Detection copy = d;
+    enterAlert(copy);
+    s_firstLine[0] = '\0';     // FIRST EVER and AT NIGHT are for a catch, not a look
+    s_alertByHand = true;
+    uiAlertSetByHand(true);
+    // "SEEN AT 41.43910,-123.69580": five decimals, as the LOG panel wrote it.
+    s_alertSeenAt[0] = 0;
+    int32_t la = 0, lo = 0;
+    if (BlackBox::lastPosition(d.mac, (uint8_t)d.type, la, lo)) {
+        const long a = (long)la, o = (long)lo;
+        snprintf(s_alertSeenAt, sizeof s_alertSeenAt, "SEEN AT %s%ld.%05ld,%s%ld.%05ld.",
+                 a < 0 ? "-" : "", labs(a) / 10000000L, (labs(a) % 10000000L) / 100L,
+                 o < 0 ? "-" : "", labs(o) / 10000000L, (labs(o) % 10000000L) / 100L);
+    }
 }
 
 static void enterWatchAlert() {
@@ -4507,6 +4607,10 @@ static void performWipe(WipeBoot after) {
 #elif defined(CYD_GPS)
     Wardrive::sdWipe();      // the WiGLE file is a record of everywhere the board has been
 #endif
+#if SQW_WIGLE_UPLOAD
+    WigleUp::wipe();         // the WiGLE key is the owner's account
+#endif
+    Encounters::wipe();      // the FIELD JOURNAL
 #if HAVE_NVS_ERASE
     // The frame buffer is 77 KB the wipe can have: the board restarts in a
     // moment and the screen is meant to go quiet anyway. Without it the copy
@@ -6541,6 +6645,12 @@ void setup() {
     // The wardrive log, and its GPS if wardriving was left on.
     wardriveBegin();
 #endif
+    Encounters::begin();
+#if SQW_WIGLE_UPLOAD
+    // The upload pauses the radios the way a WiFi update does.
+    WigleUp::begin();
+    WigleUp::setRadioHooks([] { engine.startUpdateRadio(); }, [] { engine.stopUpdateRadio(); });
+#endif
 
 #if defined(TWATCH_S3)
     // What the watch is like at the moment the radios start. A boot that
@@ -6574,6 +6684,9 @@ void setup() {
     Bingo::begin(engine);
     Dex::begin();
     Regulars::begin();
+    // The trail: where the board has been, with the saved networks naming HOME.
+    Places::begin();
+    Places::setHomeCheck([](const char* ssid) { return OtaWifi::savedIndexOf(ssid) >= 0; });
     MyAlerts::begin();
     Squachy::setIdleProvider([]() { return Notices::idleLine(engine); });
 #if SQUACH_MESH
@@ -7199,7 +7312,13 @@ static void gpsTick() {
     else if (cmd == 6) { Wardrive::setEnabled(false); gpsStop(); Serial.println("[wardrive] off"); }
     else if (cmd == 7) wigleExport(false);
     else if (cmd == 8) wigleExport(true);
-    else if (cmd == 9) { Wardrive::clear(); Serial.println("[wardrive] cleared"); }
+    else if (cmd == 9) {
+        Wardrive::clear();
+#if SQW_WIGLE_UPLOAD
+        WigleUp::forgetProgress();
+#endif
+        Serial.println("[wardrive] cleared");
+    }
 
     // A bench fix is held until a real one replaces it; refreshed here so it
     // does not go stale while the console test runs.
@@ -8230,6 +8349,17 @@ void loop() {
         touchJustUp = false;
     }
     engine.loop();
+#if SQW_WIGLE_UPLOAD
+    {
+        // AUTO UPLOAD goes by itself only on the main screen, a minute after
+        // the last touch, with the board on the charger.
+        uint8_t pct = 0; bool chg = false;
+        const uint32_t t = millis();
+        const bool autoOk = state == AppState::CLEAR && t - lastTouch > 60000 &&
+                            uiClearBatteryNow(pct, chg) && chg;
+        WigleUp::tick(t, autoOk);
+    }
+#endif
     Settings::tick(millis());
     if (state != AppState::LOG) uiLogLeave();
 #if defined(SENSE_CYD_APP)
@@ -9609,6 +9739,10 @@ void loop() {
                     Theme::showToast("GONE", "It just left", Theme::CYAN);
                 }
             } else if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
+                       uiClearEncounterTap(tp.x, tp.y, now)) {
+                // A random encounter took it: the Lost Signal, the Elder's photo.
+                lastTouch = now;
+            } else if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
                        Theme::backgroundTap(tp.x, tp.y, now)) {
                 // Something tappable in the background itself claimed
                 // this touch -- currently only the moon on the FIRE
@@ -9758,6 +9892,12 @@ void loop() {
         case AppState::ALERT: {
             const char* alertInfoText = s_infoShowingPrimer ? DetectionInfo::rssiConfidencePrimer()
                                                               : DetectionInfo::explainFor(s_confirmType, s_confirmVendor, privName(s_confirmName), engine, s_confirmMac);
+            // A card opened from LOG leads its INFO page with where it was seen.
+            static char s_infoWhere[720];
+            if (s_alertByHand && s_alertSeenAt[0] && !s_infoShowingPrimer) {
+                snprintf(s_infoWhere, sizeof s_infoWhere, "%s %s", s_alertSeenAt, alertInfoText);
+                alertInfoText = s_infoWhere;
+            }
             // No heading during the primer page -- it's about RSSI/
             // confidence in general, not any one detection type.
             const char* alertInfoTypeName = s_infoShowingPrimer ? nullptr
@@ -9781,6 +9921,18 @@ void loop() {
                 uiAlertTick(tft, now, engine, s_infoPending, alertInfoTypeName, alertInfoText);
             }
 #else
+#if !defined(SQUACHSIM)
+            // The skins' glass reads the 8-bit frame back; only when this frame
+            // is the whole screen (the emulator reads pixels instead). buf(),
+            // NOT getPointer(): the library's getPointer() returns the buffer
+            // the sprite was first given, and the boards that push in the
+            // background swap buffers every frame -- the glass, the dithered
+            // desks and Aqua's shadow landed in the one already on its way to
+            // the panel, every other frame, and flashed (T-Deck, 2026-11-21).
+            uiAlertSetFrame((canvas == &frame && frame.created() && frame.getColorDepth() == 8 &&
+                             frame.width() == tft.width() && frame.height() == tft.height())
+                            ? frame.buf() : nullptr, frame.width(), frame.height());
+#endif
             uiAlertTick(*canvas, now, engine, s_infoPending, alertInfoTypeName, alertInfoText);
 #endif
             // The finger that opened the card has to lift before the card
@@ -9819,11 +9971,19 @@ void loop() {
                         // dismiss step once you'd already read the
                         // explanation.
                         s_infoPending = false;
-                        squachyCatch(lastAlertType, s_alertMac, lastAlertHits, lastAlertRssi, lastAlertConf);
-                        enterClear();
+                        leaveAlert();
                     }
                 }
                 break;
+            }
+
+            // Catches that arrive while a card is up are not dropped any more:
+            // they wait behind it, through the same gates the main screen
+            // applies, and the chip says how many.
+            if (const Detection* f = freshCatch(now)) {
+                if (f->conf >= Settings::minConfidence() && !IgnoreList::silenced(f->mac) &&
+                    alertMayInterrupt(*f))
+                    queueCatch(*f);
             }
 
             // Locked: an alert is for looking at, not acting on. MORE INFO,
@@ -9837,41 +9997,41 @@ void loop() {
                 }
                 break;
             }
-            // A SNOOZE time being tapped through. Once picking has started
-            // the whole card is the SNOOZE button: a tap anywhere is the next
-            // step. A second tap that lands a few pixels off the button used
-            // to count as "somewhere else", lock the pick in and close the
-            // card (seen on the 3.5in, 2026-10-22). It locks in only when the
-            // taps stop: whatever the button shows then is what you get.
-            if (s_snoozeStep) {
-                const uint32_t since = now - s_snoozeTapAt;
+            // ALERT CARD's style browser: a made-up card, so no button does
+            // anything to anyone. The arrows step through the styles (kept as
+            // they go, the way OUTFIT keeps an outfit); a tap anywhere else
+            // goes back to the page -- unless real catches queued meanwhile.
+            // No timeout: it is a picker, not an alert.
+            if (uiAlertPreviewing()) {
                 if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
-                    Serial.printf("[snooze] tap %d,%d after %u ms -> step %u\n", tp.x, tp.y,
-                                  (unsigned)since, (unsigned)(s_snoozeStep % SNOOZE_STEPS + 1));
-                    lastTouch     = now;
-                    s_snoozeStep  = (uint8_t)(s_snoozeStep % SNOOZE_STEPS + 1);
-                    s_snoozeTapAt = now;
-                    s_alertArmed  = false;
-                    uiAlertSetSnoozePick(SNOOZE_STEP[s_snoozeStep - 1].label, 1000);
-                    break;
-                }
-                if (since >= SNOOZE_PICK_MS) {
-                    Serial.printf("[snooze] locked step %u\n", (unsigned)s_snoozeStep);
-                    const SnoozeStep& st = SNOOZE_STEP[s_snoozeStep - 1];
-                    char sub[28];
-                    if (IgnoreList::snooze(s_alertMac, st.dur))
-                        snprintf(sub, sizeof sub, "This one, %s", st.toast);
-                    else
-                        snprintf(sub, sizeof sub, "Snooze list full");
-                    s_snoozeStep = 0;
                     lastTouch = now;
-                    Theme::showToast("SNOOZED", sub, Theme::AMBER);
-                    squachyCatch(lastAlertType, s_alertMac, lastAlertHits, lastAlertRssi, lastAlertConf);
-                    enterClear();
-                    break;
+                    if (uiAlertPreviewArrow(tp.x, tp.y, tft.width(), tft.height())) alertStart = now;
+                    else if (!nextQueued()) { enterSettings(); uiSettingsOpenPage(SettingsPage::ALERT_CARD); }
                 }
-                uiAlertSetSnoozePick(SNOOZE_STEP[s_snoozeStep - 1].label,
-                                     (uint16_t)(1000 - since * 1000 / SNOOZE_PICK_MS));
+                break;
+            }
+            // SNOOZE: its four time chips are up over the facts. A chip
+            // snoozes the device and closes the card; a tap anywhere else
+            // puts the chips away and the card stays.
+            if (uiAlertSnoozePicking()) {
+                if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                    lastTouch = now;
+                    const int c = uiAlertHitSnoozeChip(tp.x, tp.y, tft.width(), tft.height());
+                    uiAlertSetSnoozePicking(false);
+                    if (c >= 0) {
+                        const SnoozeStep& st = SNOOZE_STEP[c];
+                        char sub[28];
+                        if (IgnoreList::snooze(s_alertMac, st.dur))
+                            snprintf(sub, sizeof sub, "This one, %s", st.toast);
+                        else
+                            snprintf(sub, sizeof sub, "Snooze list full");
+                        Theme::showToast("SNOOZED", sub, Theme::AMBER);
+                        leaveAlert();
+                    } else {
+                        alertStart = now;   // the card stays; its timer starts again
+                    }
+                }
+                break;
             }
             if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
                 lastTouch = now;
@@ -9901,48 +10061,45 @@ void loop() {
                 } else if (uiAlertHitIgnore(tp.x, tp.y, tft.width(), tft.height())) {
                     // Toggle, not just add: the button reads MUTED once the
                     // device is on the list, so tapping it again has to be
-                    // the way back off. Fires the DETECTION trigger for the
-                    // same reason HUNT does below -- leaving by this route
-                    // is still the user acknowledging the alert.
-                    lastTouch = now;
+                    // the way back off.
                     if (IgnoreList::contains(s_alertMac)) IgnoreList::remove(s_alertMac);
                     else                                  IgnoreList::add(s_alertMac, lastAlertType);
-                    squachyCatch(lastAlertType, s_alertMac, lastAlertHits, lastAlertRssi, lastAlertConf);
-                    enterClear();
+                    leaveAlert();
                 } else if (uiAlertHitSnooze(tp.x, tp.y, tft.width(), tft.height())) {
-                    // This device, for a while: no more alerts from it,
-                    // while it goes on being scanned, counted and logged like
-                    // anything IGNOREd. Each tap steps the time up (10 MIN,
-                    // 30 MIN, 1 HOUR, 4 HOURS, round again) and the card
-                    // stays up; SNOOZE_PICK_MS after the last tap the pick
-                    // locks in (above). No ALWAYS step: IGNORE is already
-                    // the forever button, and unlike a hidden always-snooze
-                    // it can be seen and undone from its list.
-                    lastTouch = now;
-                    s_snoozeStep  = (uint8_t)(s_snoozeStep % SNOOZE_STEPS + 1);
-                    s_snoozeTapAt = now;
-                    Serial.printf("[snooze] first tap %d,%d -> step %u\n", tp.x, tp.y, (unsigned)s_snoozeStep);
-                    s_alertArmed  = false;   // the next step needs a fresh tap, not a held finger
-                    uiAlertSetSnoozePick(SNOOZE_STEP[s_snoozeStep - 1].label, 1000);
+                    // The chips come up; the pick is made on the next tap.
+                    uiAlertSetSnoozePicking(true);
+                    s_alertArmed = false;
+                    alertStart = now;
+                } else if (uiAlertHitWatch(tp.x, tp.y, tft.width(), tft.height())) {
+                    // WATCH from the card, as LOG's panel does it, and a
+                    // second tap takes it back. The card stays up.
+                    if (engine.isWatched(s_alertMac, s_alertIsBle)) {
+                        engine.clearWatch();
+                        Theme::showToast("UNWATCHED", "Not following it now", Theme::CYAN);
+                    } else {
+                        if (s_alertIsBle) engine.watchBle(s_alertMac, s_alertLabel);
+                        else              engine.watchWifi(s_alertMac, s_alertLabel);
+                        Theme::showToast("WATCHING", "You hear when it is back", Theme::CYAN);
+                    }
+                    uiAlertSetWatching(engine.isWatched(s_alertMac, s_alertIsBle));
+                    alertStart = now;
+                } else if (uiAlertHitQueue(tp.x, tp.y, tft.width(), tft.height())) {
+                    // +N MORE: the next waiting catch.
+                    leaveAlert();
                 } else if (uiAlertHitHunt(tp.x, tp.y, tft.width(), tft.height())) {
-                    // Same call pair LOG's confirm panel makes. The
-                    // DETECTION trigger fires here too: leaving via HUNT
-                    // is still the user acknowledging this alert, and
-                    // without it a detection chased straight from the
-                    // alert would never register with Squachy at all --
-                    // the only other exits (tap-to-dismiss, and GOT IT
-                    // on the info panel) both fire it.
+                    // Same call pair LOG's confirm panel makes. Leaving via
+                    // HUNT is still the user acknowledging this alert.
                     if (s_alertIsBle) engine.huntBle(s_alertMac, s_alertLabel);
                     else              engine.huntWifi(s_alertMac, s_alertLabel);
-                    squachyCatch(lastAlertType, s_alertMac, lastAlertHits, lastAlertRssi, lastAlertConf);
+                    if (!s_alertByHand) squachyCatch(lastAlertType, s_alertMac, lastAlertHits, lastAlertRssi, lastAlertConf);
+                    s_alertByHand = false;
+                    s_queueN = 0;
                     enterHunt();
                 } else {
-                    squachyCatch(lastAlertType, s_alertMac, lastAlertHits, lastAlertRssi, lastAlertConf);
-                    enterClear();
+                    leaveAlert();
                 }
-            } else if ((now - alertStart) > ALERT_AUTO_DISMISS_MS && !s_snoozeStep) {
-                squachyCatch(lastAlertType, s_alertMac, lastAlertHits, lastAlertRssi, lastAlertConf);
-                enterClear();
+            } else if ((now - alertStart) > ALERT_AUTO_DISMISS_MS && !s_alertByHand) {
+                leaveAlert();   // a card opened from LOG stays until it is closed
             }
             break;
         }
@@ -10231,7 +10388,7 @@ void loop() {
                     const Detection* d = (row >= 0) ? uiLogRow(engine, row) : nullptr;
                     if (d) {
                         rowHoldFired = true;
-                        armLogConfirm(*d);
+                        openCardFromLog(*d);
                     }
                 }
             }
@@ -10687,6 +10844,44 @@ void loop() {
                             break;
 #endif
 #endif
+#if SQUACH_MESH
+                        case SettingsRow::JOURNAL: uiSettingsOpenPage(SettingsPage::JOURNAL); break;
+                        case SettingsRow::ENCOUNTERS:
+                            Encounters::cycleLevel();
+                            Theme::showToast("ENCOUNTERS", Encounters::level() == 0 ? "No more visitors" :
+                                             Encounters::level() == 1 ? "About one every 1 3/4 h on screen" :
+                                             Encounters::level() == 2 ? "About one an hour and a quarter" : "About one every 50 min",
+                                             Theme::AMBER);
+                            break;
+                        case SettingsRow::JOURNAL_0: case SettingsRow::JOURNAL_1: case SettingsRow::JOURNAL_2:
+                        case SettingsRow::JOURNAL_3: case SettingsRow::JOURNAL_4: case SettingsRow::JOURNAL_5:
+                        case SettingsRow::JOURNAL_6: case SettingsRow::JOURNAL_7: case SettingsRow::JOURNAL_8: break;
+#endif
+#if defined(CYD_GPS) || defined(TWATCH_S3)
+                        // The WARDRIVE page.
+                        case SettingsRow::WARDRIVE_PAGE: uiSettingsOpenPage(SettingsPage::WARDRIVE); break;
+                        case SettingsRow::WD_GPS: case SettingsRow::WD_COUNT: case SettingsRow::WD_KEPT: break;   // readings
+#if SQW_WIGLE_UPLOAD
+                        case SettingsRow::WD_UPLOAD:
+                            if (WigleUp::busy()) { WigleUp::cancel(); Theme::showToast("UPLOAD", "Stopping", Theme::AMBER); }
+                            else if (WigleUp::start()) Theme::showToast("UPLOAD TO WIGLE", "Joining the saved WiFi", Theme::CYAN);
+                            else Theme::showToast("UPLOAD TO WIGLE", WigleUp::failText(), Theme::AMBER);
+                            break;
+                        case SettingsRow::WD_AUTO:
+                            WigleUp::toggleAuto();
+                            Theme::showToast("AUTO UPLOAD", WigleUp::autoOn() ? "On the charger, over a saved WiFi" : "Off", Theme::CYAN);
+                            break;
+                        case SettingsRow::WD_KEY:
+                            Theme::showToast("WIGLE KEY", WigleUp::hasKey() ? "Change it at squachwatch.com" : "Set it at squachwatch.com, over USB",
+                                             Theme::CYAN);
+                            break;
+                        case SettingsRow::WD_LAST: break;
+#else
+                        case SettingsRow::WD_WEB:
+                            Theme::showToast("UPLOAD TO WIGLE", "Plug in at squachwatch.com", Theme::CYAN);
+                            break;
+#endif
+#endif
                         case SettingsRow::STATUS_LIGHT: enterLight(); break;
                         case SettingsRow::SECURITY:    enterSecurity(); break;
                         case SettingsRow::IGNORED_DEVICES:  enterIgnoreList(); break;
@@ -10787,6 +10982,18 @@ void loop() {
                         // rows and the preview box redraw at the new size
                         // straight away.
                         case SettingsRow::FONTS:        uiSettingsOpenPage(SettingsPage::FONTS); break;
+                        // ALERT CARD: its page. STYLE opens a live card to step
+                        // through the styles with the arrows, the way OUTFIT does.
+                        case SettingsRow::ALERT_CARD:   uiSettingsOpenPage(SettingsPage::ALERT_CARD); break;
+                        case SettingsRow::ALERT_STYLE: {
+                            Detection sample;
+                            uiAlertMakeSample(sample);
+                            enterAlert(sample);
+                            uiAlertSetPreview(true);
+                            break;
+                        }
+                        case SettingsRow::ALERT_MOTION: Settings::toggleAlertAnimate(); break;
+                        case SettingsRow::ALERT_DESK:   Settings::toggleAlertSunset(); break;
                         case SettingsRow::FONT_MENUS:
                         case SettingsRow::FONT_TEXT:
                         case SettingsRow::FONT_BUTTONS:

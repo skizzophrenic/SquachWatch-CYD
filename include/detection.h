@@ -2,6 +2,7 @@
 #pragma once
 #if SQUACH_MESH
 #include "squachmesh.h"
+#include "goblin.h"
 #endif
 #include "state.h"
 #include "sd_log.h"
@@ -143,6 +144,9 @@ namespace Mesh {
     // The visitor, or nullptr. Goes stale on its own if the peer walks away.
     const SquachMesh::Peer* peer();
     const uint8_t*          peerMac();
+    // A goblin from Network Goblin Scout in range (goblin.h), or nullptr. One
+    // at a time, the first heard; stale like a peer. Never a detection.
+    const Goblin::Visitor*  goblin();
     // How many SquachWatches have been heard in the last twenty seconds (PEER_STALE_MS) --
     // the visitor and everybody else. For the small "+2" beside him.
     uint8_t                 squadCount(uint32_t now);

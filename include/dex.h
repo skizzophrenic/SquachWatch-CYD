@@ -14,9 +14,9 @@ class DetectionEngine;
 
 namespace Dex {
 
-static const uint8_t ENTRIES = (uint8_t)DetectionType::MINE - 1;    // UNKNOWN and MINE have no card
+static const uint8_t ENTRIES = CATALOGUE_N;    // UNKNOWN and MINE have no card
 
-// Entry i (0-based) is DetectionType i+1.
+// Entry i (0-based) is catalogueAt(i): the types in order, MINE stepped over.
 DetectionType typeAt(uint8_t i);
 uint8_t       indexOf(DetectionType t);
 

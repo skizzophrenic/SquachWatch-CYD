@@ -1,0 +1,97 @@
+// SquachWatch-CYD -- random encounters on the main screen.
+//
+// Everybody gets them: the dice are on the board, not in the air. While the
+// main screen is up (no alert, no visitor, no POCKET or TERMINAL MODE, screen
+// on) the board rolls every ten minutes. A roll starts at 5% and every miss
+// adds 2%, and after 24 misses -- four hours of screen time -- the next roll
+// always hits: on average one encounter every hour and a quarter. RARE halves
+// the odds, OFTEN doubles them, OFF stops the dice.
+//
+// A hit rolls a d100 for the rarity (COMMON 1-60, UNCOMMON 61-85, RARE 86-96,
+// LEGENDARY 97-100; in quiet air LEGENDARY starts at 96), then a weighted pick
+// inside it that the board's own day tilts: the last catch, how busy the air
+// is, the night, the pet. One in 64 is a shiny. Every one is written to the
+// FIELD JOURNAL (counts, the first date, shinies), kept in NVS like the DEX.
+//
+// This file is the dice and the journal and nothing that draws: the host tests
+// in test/encounters_test.cpp check the odds. The encounters themselves are
+// played by ui_clear.cpp.
+#pragma once
+#include <stdint.h>
+#include <stddef.h>
+
+namespace Encounters {
+
+enum class Kind : uint8_t {
+    DRIFTER = 0,   // a stranger Squachy visits                    COMMON
+    GOBLIN,        // a wandering goblin visits                     COMMON
+    ICONS,         // the last catch's icon grows legs              COMMON
+    ZOOMIES,       // the pet runs laps                             COMMON
+    KAIJU,         // a giant Mothman over the horizon              UNCOMMON
+    LOST,          // a lost WiFi creature: tap it home             UNCOMMON
+    TWIN,          // Squachy's evil twin visits, then glitches     RARE
+    ABDUCT,        // a UFO beams up the pet, and gives it back     RARE
+    ELDER,         // the Elder rises over the ridge                LEGENDARY
+    COUNT,
+    NONE = 255
+};
+enum class Tier : uint8_t { COMMON, UNCOMMON, RARE, LEGENDARY };
+
+// What the board knows that tilts the pick.
+struct Context {
+    uint8_t lastCatch;   // DetectionType of the last catch, 0 for none yet
+    bool    city;        // busy air: lots of networks and adverts
+    bool    woods;       // quiet air
+    bool    night;
+    bool    pet;         // a pet is out
+    bool    visits;      // the board has the visit scene (SQUACH_MESH)
+};
+
+// ---- the dice (pure) --------------------------------------------------------
+// level: 0 OFF, 1 RARE, 2 NORMAL, 3 OFTEN.
+// The chance a roll hits after `misses` empty rolls, in thousandths.
+uint16_t chancePermille(uint8_t level, uint16_t misses);
+Tier     tierFor(uint8_t d100, bool woods);           // d100 is 1..100
+Tier     tierOf(Kind k);
+// A weighted pick inside the tier from a random number; NONE if nothing in
+// that tier can happen here (a RARE roll on a board with no visits and no
+// UFO weights, say), and the caller rolls again.
+Kind     pick(Tier t, const Context& c, uint32_t r);
+const char* name(Kind k);       // "THE DRIFTER", for the journal
+const char* tierName(Tier t);
+
+// ---- the run (encounters.cpp) -----------------------------------------------
+void begin();
+// From the loop: `eligible` is true while the main screen could take an
+// encounter. Counts that time; every ten minutes of it, a roll.
+void tick(uint32_t nowMs, bool eligible, const Context& c);
+Kind     active();              // the one playing, or NONE
+bool     activeShiny();
+uint32_t activeSince();
+void     finish();              // the player is done with it
+// The console's ENCOUNTER <n>, for the bench: that one, now.
+void     force(Kind k, bool shiny = false);
+// A roll that came to nothing, and that the board chose to show: about one
+// miss in four. True once; the main screen then drops the die for nothing and
+// Squachy wonders what it was. forceMiss() is the console's ENCOUNTER MISS.
+bool     takeMiss();
+void     forceMiss();
+// Rolls waiting to happen in the next minute... for DIAGNOSTICS.
+uint16_t misses();
+
+// ---- the setting ---------------------------------------------------------------
+uint8_t     level();
+void        cycleLevel();
+const char* levelName();
+
+// ---- the FIELD JOURNAL ---------------------------------------------------------------
+uint16_t met(Kind k);
+uint32_t firstEpoch(Kind k);    // UTC of the first, 0 when the clock was not set or never met
+uint16_t shinies(Kind k);
+uint8_t  kindsMet();
+// The Elder's photo was taken (tapped in time) this many times.
+uint16_t photos();
+void     notePhoto();
+void     wipe();
+
+}  // namespace Encounters

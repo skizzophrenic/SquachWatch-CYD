@@ -107,8 +107,9 @@ int main() {
     // 00:0E:58 sat in the ALPR block as "Vigilant" for eleven releases. It
     // is registered to Sonos, Inc. and was removed; this is here so it
     // cannot come back by copy-paste from an older detector.
-    ck("00:0E:58 no longer matches anything",
-       lookup(0x00, 0x0E, 0x58, &conf) == DetectionType::UNKNOWN);
+    // Since 2026-11-21 it is back, as what it is: a Sonos speaker, LISTENER.
+    ck("00:0E:58 is Sonos, never ALPR",
+       lookup(0x00, 0x0E, 0x58, &conf) == DetectionType::LISTENER && conf == Confidence::MED_CONF);
 
     suite("An ESP32 is not a camera");
     // BC:DD:C2 sat in the camera block as "Arlo" and is registered to
@@ -151,6 +152,37 @@ int main() {
     ck("...graded LOW", conf == Confidence::LOW_CONF);
     ck("Samsung's 48:27:EA is left out", lookup(0x48, 0x27, 0xEA, &conf) == DetectionType::UNKNOWN);
     ck("a bare Flock network is FLOCK", lookupSsid("Flock") == DetectionType::FLOCK);
+
+    suite("Dashcam and hidden-camera hotspots (2026-11-20)");
+    ck("VIOFO_A139_1234 is a camera", lookupSsid("VIOFO_A139_1234") == DetectionType::CAMERA);
+    ck("...labelled Viofo", strcmp(ssidVendorName("VIOFO_A139_1234"), "Viofo") == 0);
+    ck("BlackVue770X-ABC123", lookupSsid("BlackVue770X-ABC123") == DetectionType::CAMERA);
+    ck("70mai_d06_1234", lookupSsid("70mai_d06_1234") == DetectionType::CAMERA);
+    ck("Thinkware_68 (any case)", lookupSsid("Thinkware_68") == DetectionType::CAMERA);
+    ck("NEXTBASE 312GW 123 (with the space)", lookupSsid("NEXTBASE 312GW 123") == DetectionType::CAMERA);
+    ck("...but NEXTBASE_ fan page is not", lookupSsid("NEXTBASE_fans") == DetectionType::UNKNOWN);
+    ck("E1 Lite_VANTRUE_1234 (name in the middle)", lookupSsid("E1 Lite_VANTRUE_1234") == DetectionType::CAMERA);
+    ck("...labelled Vantrue", strcmp(ssidVendorName("E1 Lite_VANTRUE_1234"), "Vantrue") == 0);
+    ck("ROVE_R2-4K_123456", lookupSsid("ROVE_R2-4K_123456") == DetectionType::CAMERA);
+    ck("a P2P camera's UID hotspot", isP2pCamSsid("ACCQ-046396-NNMPZ"));
+    ck("...three-letter prefix too", isP2pCamSsid("DGK-123456-ABCDE"));
+    ck("...is a CAMERA", lookupSsid("FHBB-123456-ABCDE") == DetectionType::CAMERA);
+    ck("...labelled P2P-Cam when the family is unknown", strcmp(ssidVendorName("FHBB-123456-ABCDE"), "P2P-Cam") == 0);
+    ck("...and LookCam when it is", strcmp(ssidVendorName("ACCQ-046396-NNMPZ"), "LookCam") == 0);
+    ck("five digits is not one", !isP2pCamSsid("ACCQ-04639-NNMPZ"));
+    ck("lower case is not one", !isP2pCamSsid("accq-046396-nnmpz"));
+    ck("a trailing character is not one", !isP2pCamSsid("ACCQ-046396-NNMPZ2"));
+    ck("two letters is not one", !isP2pCamSsid("AB-123456-ABCDE"));
+    ck("MV12345678 is a V380", lookupSsid("MV12345678") == DetectionType::CAMERA);
+    ck("MV Motors is not", lookupSsid("MV Motors") == DetectionType::UNKNOWN);
+    ck("MV123 is too short", lookupSsid("MV123") == DetectionType::UNKNOWN);
+    ck("CLOUDCAM_1234 is a camera", lookupSsid("cloudcam_1234") == DetectionType::CAMERA);
+    ck("Pineapple still wins over nothing", lookupSsid("Pineapple_1337") == DetectionType::HACKER);
+    ck("a home network is still nothing", lookupSsid("Smith Family WiFi") == DetectionType::UNKNOWN);
+    ck("a Cradlepoint is LE kit at LOW",
+       lookupOui((const uint8_t[]){ 0x00, 0x30, 0x44, 1, 2, 3 }, &conf) == DetectionType::AXON && conf == Confidence::LOW_CONF);
+    ck("a BlackVue block is a camera at HIGH",
+       lookupOui((const uint8_t[]){ 0x00, 0x25, 0x42, 1, 2, 3 }, &conf) == DetectionType::CAMERA && conf == Confidence::HIGH_CONF);
     ck("...and not every network that starts with it", lookupSsid("Flockhart Family") == DetectionType::UNKNOWN);
     ck("a ten-digit serial name is FLOCK", lookupBtName("4022019033") == DetectionType::FLOCK);
     ck("eleven digits is not", !isBareSerialName("40220190331"));
@@ -185,6 +217,9 @@ int main() {
         ck("...and in unwanted-tracking mode (0x41)", isFmdnPayload(utp, sizeof utp));
         const uint8_t url[] = { 0x02, 0x01, 0x06, 0x03, 0x03, 0xAA, 0xFE, 0x06, 0x16, 0xAA, 0xFE, 0x10, 0x00, 0x01 };
         ck("an Eddystone URL beacon on the same UUID is not", !isFmdnPayload(url, sizeof url));
+        ck("frame type 0x40 reads back (with owner)", fmdnFrameType(fmdn, sizeof fmdn) == 0x40);
+        ck("frame type 0x41 reads back (apart from owner)", fmdnFrameType(utp, sizeof utp) == 0x41);
+        ck("no frame type on the URL beacon", fmdnFrameType(url, sizeof url) == 0);
     }
     {
         const uint8_t tile[] = { 0x02, 0x01, 0x06, 0x05, 0x16, 0xED, 0xFE, 0x02, 0x00 };

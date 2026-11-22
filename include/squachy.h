@@ -428,6 +428,9 @@ namespace Squachy {
     // His bubble saying `text`, centred on cx with its top at topY, no tail:
     // the FONTS page's preview.
     void drawSampleBubble(TFT_eSPI& t, int cx, int topY, const char* text);
+    // A visitor's bubble in his style, its bottom edge at bottomY and its tail
+    // pointing down at tailX: for a guest that is not a Squachy (a goblin).
+    void drawGuestBubble(TFT_eSPI& t, int cx, int bottomY, const char* text, uint32_t now, int tailX);
     // While on, his bubble keeps the 2.8"'s text size on the big panels too.
     // Set around one draw and cleared after, like the previews.
     void setBubbleSmall(bool on);
@@ -467,6 +470,11 @@ namespace Squachy {
     // looks like. It is also just wrong: he should not be muttering about
     // the airwaves while there is somebody standing next to him.
     void setVisiting(bool v);
+    // Hushed: no idle moods, no wander, no idle or watching lines -- what a
+    // visit does to him, for whatever else needs him standing still and
+    // listening (an encounter on the main screen, the emulator's lab clips).
+    // Anything said to him on purpose (announce, a catch) still goes.
+    void setHush(bool on);
     bool visiting();
     // Whether he is dancing right now (a squad DANCE emote, party mode, a
     // milestone): the yeti pet joins in when he is.
@@ -531,6 +539,15 @@ namespace Squachy {
 
     // Say an arbitrary visit line in the host's bubble. Returns its ms.
     uint32_t visitSay(const char* line);
+
+    // A goblin from Network Goblin Scout visiting (goblin.h). His own lines,
+    // and the host's for a goblin: the Squachy pools talk about outfits and
+    // squads a goblin has none of. setGoblinGuest() before the first line.
+    void        setGoblinGuest(const char* name, uint16_t level, uint8_t hoard);
+    const char* goblinGuestLine(VisitMoment m, uint32_t seed);   // his, to draw
+    uint32_t    goblinReaction(VisitMoment m, uint32_t seed);    // the host says it
+    uint32_t    goblinHangHost(uint32_t seed);
+    const char* goblinHangGuest(uint32_t seed);
 
     // The host cracks up: a short, fast bounce, the same one the idle
     // flourish uses. Called when the OTHER one's line lands, which is what

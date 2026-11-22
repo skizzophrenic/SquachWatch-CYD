@@ -21,6 +21,12 @@ namespace Pet {
     // Does nothing at all unless a pet is unlocked AND switched on, so the
     // call site does not need to check either.
     void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom);
+    // ZOOMIES (a random encounter): for `ms`, the pet's own clock runs three
+    // times as fast -- every pet's walk, hop and fidget at triple speed.
+    // Every way into this module takes the caller's time through the same
+    // conversion, so the pet's clock stays one clock, only ever ahead.
+    void zoomies(uint32_t now, uint32_t ms);
+    bool zooming(uint32_t now);
     // 2 on the large panels: the pets live in a half-size world that the
     // caller doubles onto the screen (see pet.cpp's zoom). Positions in and
     // out of this module stay in SCREEN pixels either way; tick()'s
