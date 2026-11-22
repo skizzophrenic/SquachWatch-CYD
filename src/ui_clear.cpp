@@ -1922,7 +1922,33 @@ static bool battRead(uint32_t now, uint8_t& pctOut, bool& chgOut) {
     return has;
 }
 
+#if defined(M5_STOPWATCH)
+void uiClearDrawStopWatchBattery(TFT_eSPI& t, uint32_t now, int x, int y) {
+    uint8_t pct=0; bool charging=false;
+    const bool valid=battRead(now,pct,charging);
+    const uint16_t color=valid && pct<=15 ? Theme::AMBER : Theme::CYAN;
+    t.fillRoundRect(x,y,92,30,10,Theme::BLACK);
+    t.drawRoundRect(x+8,y+8,22,14,3,color);
+    t.fillRect(x+30,y+12,3,6,color);
+    if(valid && pct) t.fillRect(x+11,y+11,(16*pct+99)/100,8,color);
+    if(charging) { // White plus marks charging, including at full charge.
+        t.drawFastHLine(x+14,y+14,9,Theme::WHITE);
+        t.drawFastVLine(x+18,y+10,9,Theme::WHITE);
+    }
+    char label[8];
+    if(valid) snprintf(label,sizeof label,"%u%%",(unsigned)pct);
+    else snprintf(label,sizeof label,"--%%");
+    t.setTextFont(1);t.setTextSize(2);t.setTextColor(Theme::WHITE,Theme::BLACK);
+    t.setCursor(x+39,y+7);t.print(label);t.setTextSize(1);
+}
+#endif
+
 static void drawBatteryGauge(TFT_eSPI& t, uint32_t now) {
+#if defined(M5_STOPWATCH)
+    // Reserved between the menu/counter rim and the speech band (y >= 212).
+    if(!Settings::boringMode()) uiClearDrawStopWatchBattery(t,now,290,150);
+    return;
+#endif
     // TERMINAL MODE has its own battery, in the LOG's title bar: the lamp
     // stood on the LOG's title and its TIME heading.
     if (Settings::boringMode() || !Settings::lavaLamp()) return;   // LAVA LAMP OFF (#132)

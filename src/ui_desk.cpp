@@ -499,6 +499,10 @@ void uiDeskTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adva
         }
     }
 
+#if defined(M5_STOPWATCH)
+    uiClearDrawStopWatchBattery(t,now,187,86);
+#endif
+
     // The time is laid out for either 12- or 24-hour format, sized to the
     // screen's width so the portrait rotation keeps the same look.
     bool pm = false;
@@ -598,7 +602,7 @@ void uiDeskTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adva
     const int  tallTop  = tallFeet - w * 3 / 4;
     int yBase =
 #if defined(M5_STOPWATCH)
-112; // Plate starts at 89, below the curved menu (bottom at 80).
+144; // Plate starts at 121; battery owns y=86..115 below the menu.
 #else
 lowered ? 43 : 26;
 #endif

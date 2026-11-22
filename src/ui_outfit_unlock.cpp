@@ -147,9 +147,7 @@ void uiOutfitUnlockTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {
     const int panelY = h / 2 - panelH / 2;
     if (panelH < 8) return;
 
-#if defined(M5_STOPWATCH)
-    t.drawCircle(w / 2, h / 2, panelH / 2 - 4, Theme::VAPOR_PURPLE);
-#else
+#if !defined(M5_STOPWATCH)
     t.drawRect(4, panelY, w - 8, panelH, Theme::VAPOR_PURPLE);
     t.drawRect(5, panelY + 1, w - 10, panelH - 2, Theme::PURPLE);
 #endif

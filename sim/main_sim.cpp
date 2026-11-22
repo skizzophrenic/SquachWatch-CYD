@@ -499,6 +499,9 @@ int main(int argc, char** argv) {
 
     Settings::load();
     Clock::begin();
+#if defined(M5_STOPWATCH)
+    uiClearSetBatterySource([](uint8_t& pct, bool& charging) { pct=78; charging=false; return true; });
+#endif
     Regulars::begin();
     // Settings' own cycle* mutators are the only public way in, so walk
     // them to the requested index rather than reaching past the API.
