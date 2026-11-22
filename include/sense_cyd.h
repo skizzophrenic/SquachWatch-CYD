@@ -58,6 +58,7 @@ struct SenseReport {
   int8_t   rssi;      // dBm
   uint32_t drop;      // readings lost to a full queue since the start
   bool     presence;  // MOTION now, or within the hold time (15 s)
+  uint8_t  band;      // 2 or 5 (GHz); 0 when the radio does not say
 };
 
 void        senseCydStart(const char* ssid, const char* pass);   // ssid "" = none saved
@@ -69,6 +70,18 @@ const char* senseCydNetwork();              // the network it was given, "" for 
 uint16_t    senseCydReason();
 uint16_t    senseCydRetryIn();              // seconds until the next join try after a refusal; 0 = trying now               // the driver's last disconnect reason
 uint8_t     senseCydMode();                 // SENSE_MODE_*
+// Which radio is sensing, for the screen: "MONSTER C5" (an M5MonsterC5 on the
+// Tab5's back connector, running the sensing radio's firmware), "TAB5 C6"
+// (the Tab5's own), "FINDING RADIO" while it looks, "" on the other boards.
+const char* senseCydRadio();
+// The Monster C5's own line about itself ($I: firmware, MAC, ...), "" for none.
+const char* senseCydRadioInfo();
+#if defined(TAB5)
+// From the loop, whatever screen is up: a few seconds after boot it listens on
+// the back connector once for a Monster C5, and says so if one answers.
+void senseTab5Probe(uint32_t now);
+bool senseTab5MonsterSeen();
+#endif
 
 // SENSE OPEN / SENSE CLOSE / SENSE OPEN NOWIFI on the console (bench): 1 open the
 // screen, 2 back to the detector, 3 open it as if no network were saved (the

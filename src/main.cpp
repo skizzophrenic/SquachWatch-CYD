@@ -1598,10 +1598,6 @@ static int stickListId(int x, int y) {
             return r == 0xFF ? -1 : (int)r;
         }
         case AppState::RAWSCAN: {
-            if (s_confirmPending) {
-                const RawScanConfirmTap c = uiRawScanHitConfirm(x, y, w, h);
-                return c == RawScanConfirmTap::NONE ? -1 : 4000 + (int)c;
-            }
             const int r = uiRawScanRowAt(*canvas, x, y, w, h);
             const int count = s_rawScanIsBle ? engine.rawBleCount() : engine.rawWifiCount();
             return (r >= 0 && r < count) ? r : -1;
@@ -3556,8 +3552,6 @@ static bool stickBackPoint(StickPt& at) {
         case AppState::HUNT:        return sweep([&](int x, int y) { return uiHuntHitBack(x, y, w, h); });
         case AppState::DIAGNOSTICS: return sweep([&](int x, int y) { return uiDiagnosticsHitBack(x, y, w, h); });
         case AppState::RAWSCAN:
-            if (s_confirmPending)
-                return sweep([&](int x, int y) { return uiRawScanHitConfirm(x, y, w, h) == RawScanConfirmTap::CANCEL; });
             return sweep([&](int x, int y) { return uiRawScanHitTest(x, y, w, h) == RawScanTap::BACK; });
         case AppState::ALERT:       return put(w / 3, h / 2);   // the plate: a tap anywhere dismisses
         case AppState::WATCH_ALERT: return put(w / 2, h / 3);
@@ -3654,11 +3648,17 @@ static bool onLoraPage() {
 }
 #endif
 
+// The card on screen was opened by holding a SCAN result: closed, it goes
+// back to that list, and the scan is still running underneath it.
+static bool s_cardFromRawScan = false;
+
 // The screens that run the raw scan, which switches detection off while it
 // runs. Leaving one by anything but its own BACK -- the lock icon, the gear,
 // an auto-lock -- has to stop it, or detection stays off until a restart.
+// A card opened from SCAN's list counts: the scan is still on behind it.
 static bool onRawScanScreen() {
     return state == AppState::RAWSCAN || state == AppState::WIFI_ADD
+        || (state == AppState::ALERT && s_cardFromRawScan)
 #if SQUACH_MESH
         || state == AppState::SQUAD_UPDATE
 #endif
@@ -3774,6 +3774,9 @@ static bool nextQueued();
 // no timeout, back to LOG when it closes, and Squachy does not hear about it
 // as a catch. Every enterAlert() clears it; openCardFromLog() sets it after.
 static bool s_alertByHand = false;
+// That card was opened from a TERMINAL MODE row: closed, it goes back to the
+// terminal, not to LOG. Every enterAlert() clears it too.
+static bool s_cardFromTerminal = false;
 // Where the black box last had it, for a card opened from LOG: the old LOG
 // panel's SEEN AT line, now at the top of the card's INFO page. Empty when
 // it was never logged with a position.
@@ -3781,6 +3784,8 @@ static char s_alertSeenAt[40] = "";
 
 static void enterAlert(const Detection& d) {
     s_alertByHand = false;
+    s_cardFromTerminal = false;
+    s_cardFromRawScan = false;
     if (state != AppState::ALERT) s_queueN = 0;   // a fresh card starts with nothing behind it
     s_snoozeStep = 0;
     s_backToDesk = (state == AppState::DESK) || (state == AppState::CLEAR && s_fob);
@@ -3895,12 +3900,16 @@ static bool nextQueued() {
 // Leaving the card by any route that acknowledges it: Squachy hears about
 // it, and the next waiting catch takes the screen, or the main screen does.
 static void enterLog();   // further down; a card opened from LOG goes back to it
+static void backToRawScan();   // ...and one opened from SCAN's list, to that
 static void leaveAlert() {
     // A card opened from LOG goes back to LOG, and is not a catch to tell
     // Squachy about -- he heard about this device when it was caught.
     if (s_alertByHand) {
         s_alertByHand = false;
-        if (!nextQueued()) enterLog();
+        if (s_cardFromRawScan) { s_cardFromRawScan = false; backToRawScan(); return; }
+        const bool toTerminal = s_cardFromTerminal;
+        s_cardFromTerminal = false;
+        if (!nextQueued()) { if (toTerminal) enterClear(); else enterLog(); }
         return;
     }
     squachyCatch(lastAlertType, s_alertMac, lastAlertHits, lastAlertRssi, lastAlertConf);
@@ -3941,43 +3950,22 @@ static void enterWatchAlert() {
 #endif
 }
 
-// Set when TERMINAL MODE opened the panel below for one of its rows: once
-// the panel (or INFO after it) is closed, back to the terminal rather than
-// the LOG screen it was drawn over. enterLog() clears it.
-static bool s_logFromTerminal = false;
-
 static void enterLog() {
     state = AppState::LOG;
     transitionStart = millis();
     s_confirmPending = false;
     s_infoPending    = false;
-    s_logFromTerminal = false;
     uiLogInit(*canvas);
 }
 
-// The LOG screen's WATCH / HUNT / INFO / IGNORE / CANCEL panel, for one
-// device: what a long press on a LOG row opens, and what TERMINAL MODE opens
-// for the row it has picked.
-static void armLogConfirm(const Detection& d) {
-    memcpy(s_confirmMac, d.mac, 6);
-    s_confirmIsBle = (d.channel == 0);
-    s_confirmType  = d.type;
-    snprintf(s_confirmVendor, sizeof s_confirmVendor, "%s", vendorText(d));
-    memcpy(s_confirmName, d.name, sizeof s_confirmName);
-    s_confirmLabelIsName = d.name[0] != 0;
-    const char* lbl = s_confirmLabelIsName ? d.name : vendorText(d);
-    strncpy(s_confirmLabel, lbl, sizeof(s_confirmLabel) - 1);
-    s_confirmLabel[sizeof(s_confirmLabel) - 1] = 0;
-    {
-        int32_t la = 0, lo = 0;
-        const bool has = BlackBox::lastPosition(d.mac, (uint8_t)d.type, la, lo);
-        uiLogSetConfirmWhere(has, la, lo);
-    }
-    uiLogSetConfirmRing(s_confirmIsBle && TagRing::canRing(d.type));
-    s_confirmPending = true;
-    s_confirmArmed   = false;
+// Back to SCAN's results from a card opened on one of them: the same scan,
+// still running, the list where it was.
+static void backToRawScan() {
+    state = AppState::RAWSCAN;
+    transitionStart = millis();
+    s_confirmPending = false;
+    uiRawScanResume(*canvas);
 }
-
 
 static void enterRawScan(bool isBle) {
     state = AppState::RAWSCAN;
@@ -7316,11 +7304,13 @@ void twatchLoraBadge(TFT_eSPI& t) {
     const int w = t.textWidth(txt) + 10, h = t.fontHeight() + 6;
     const int x = (t.width() - w) / 2;
 #if defined(TWATCH_S3)
-    const bool gpsUp = s_gpsOn;
+    const int y = s_gpsOn ? 4 + h + 3 : 4;   // under the watch's GPS counter
 #else
-    const bool gpsUp = Gnss::fresh(millis());   // the CYD GPS counter sits there while it has a fix
+    // The T-Deck's GPS is the small label at the right end of the bar, not a
+    // counter up here, so a fix no longer pushes the pill down (it did, on the
+    // TERMINAL screen too, until 2026-11-22).
+    const int y = 4;
 #endif
-    const int y = gpsUp ? 4 + h + 3 : 4;
     t.fillRoundRect(x, y, w, h, 4, Theme::BG);
     t.drawRoundRect(x, y, w, h, 4, Theme::PINK);
     t.setTextColor(Theme::PINK, Theme::BG);
@@ -8553,6 +8543,8 @@ void loop() {
         // first. Started at once, the first join came up deaf (no CSI, every
         // ping lost) on the bench, 2026-11-09; opened later it never did.
 #if defined(TAB5)
+        // A Monster C5 on the back connector: looked for once after boot.
+        senseTab5Probe(millis());
         // Bench: C6UPDATE on the console (clock.cpp) writes the radio now.
         if (Tab5Radio::g_c6UpdateConsole) {
             Tab5Radio::g_c6UpdateConsole = false;
@@ -8591,7 +8583,8 @@ void loop() {
 #if defined(TAB5)
             // A radio that sniffs but cannot sense (an older C6 image): the
             // update is offered here, where it is wanted, not at every boot.
-            if (!Tab5Radio::senseCapable() && Tab5Radio::up()) {
+            // Not with a Monster C5 on the back, which senses instead.
+            if (!Tab5Radio::senseCapable() && Tab5Radio::up() && !senseTab5MonsterSeen()) {
                 Tab5Radio::offerSenseUpdate();
                 tab5RadioUpdatePrompt(true);
                 FramePush::invalidate();
@@ -9735,16 +9728,17 @@ void loop() {
             // every window, so they work as they always have.
             if (boring && !s_scanPickerOpen && uiTerminalTouch(tp.x, tp.y, tp.valid, touchJustDown, now)) {
                 lastTouch = now;
-                // Its picked row asked for the device's menu: the LOG
-                // screen's panel, and back here when it closes.
+                // Its picked row asked for the device: its alert card, the
+                // same one holding a LOG row opens, and back here when it
+                // closes (asked for 2026-11-22; it used to be LOG's old
+                // WATCH / HUNT panel).
                 uint8_t want[6];
                 if (uiTerminalTakeOpen(want)) {
                     for (uint8_t i = 0; i < engine.logCount(); i++) {
                         const Detection* d = engine.logAt(i);
                         if (!d || memcmp(d->mac, want, 6)) continue;
-                        enterLog();
-                        armLogConfirm(*d);
-                        s_logFromTerminal = true;
+                        openCardFromLog(*d);
+                        s_cardFromTerminal = true;
                         break;
                     }
                 }
@@ -10261,7 +10255,16 @@ void loop() {
                 } else if (uiAlertHitHunt(tp.x, tp.y, tft.width(), tft.height())) {
                     // Same call pair LOG's confirm panel makes. Leaving via
                     // HUNT is still the user acknowledging this alert.
-                    if (s_alertIsBle) engine.huntBle(s_alertMac, s_alertLabel);
+                    // From SCAN's list: end the scan (detection is off while it
+                    // runs), and give a phone its kind, which turns on the
+                    // ID-change watch (DetectionEngine::checkHuntSwap).
+                    uint8_t rawKind = 0;
+                    if (s_cardFromRawScan) {
+                        if (s_alertIsBle) rawKind = engine.rawBleKindFor(s_alertMac);
+                        engine.stopRawScan();
+                        s_cardFromRawScan = false;
+                    }
+                    if (s_alertIsBle) engine.huntBle(s_alertMac, s_alertLabel, rawKind);
                     else              engine.huntWifi(s_alertMac, s_alertLabel);
                     if (!s_alertByHand) squachyCatch(lastAlertType, s_alertMac, lastAlertHits, lastAlertRssi, lastAlertConf);
                     s_alertByHand = false;
@@ -10369,14 +10372,6 @@ void loop() {
                           IgnoreList::contains(s_confirmMac));
                 Theme::drawToast(t, now);
             });
-
-            // Opened from TERMINAL MODE: once its panel (and INFO, if that
-            // came next) is closed, straight back to the terminal.
-            if (s_logFromTerminal && !s_confirmPending && !s_infoPending) {
-                s_logFromTerminal = false;
-                enterClear();
-                break;
-            }
 
             // Same "ignore the touch that opened this until it releases"
             // gate s_confirmArmed uses on the confirm panel, applied to
@@ -10569,74 +10564,9 @@ void loop() {
         case AppState::RAWSCAN: {
             bool done = s_rawScanIsBle ? engine.rawBleScanDone() : engine.rawWifiScanDone();
             drawTwoBand([&](TFT_eSPI& t, bool advance) {
-                uiRawScanTick(t, now, engine, s_rawScanIsBle, done, s_confirmPending, confirmLabelOnScreen(),
-                              engine.isWatched(s_confirmMac, s_rawScanIsBle),
-                              engine.isHunted(s_confirmMac, s_rawScanIsBle),
-                              IgnoreList::contains(s_confirmMac), advance);
+                uiRawScanTick(t, now, engine, s_rawScanIsBle, done, advance);
                 Theme::drawToast(t, now);
             });
-
-            // The confirm panel is modal: while it's up, a tap only
-            // ever means WATCH, HUNT, or CANCEL on it, nothing else on
-            // this screen (BACK/SWITCH, another long-press, scrolling)
-            // is reachable underneath it.
-            if (s_confirmPending) {
-                if (!s_confirmArmed) {
-                    // Still the same touch that opened the panel --
-                    // ignore it until it's released (see s_confirmArmed's
-                    // comment) so it can't register as an instant tap.
-                    if (!tp.valid) s_confirmArmed = true;
-                } else if (tp.valid && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
-                    RawScanConfirmTap ctap = uiRawScanHitConfirm(tp.x, tp.y, tft.width(), tft.height());
-                    if (ctap == RawScanConfirmTap::WATCH) {
-                        lastTouch = now;
-                        s_confirmPending = false;
-                        // See the LOG screen's copy: same toggle. Unwatching
-                        // stays on this screen -- the reason to leave was to
-                        // go watch the thing, and there is nothing to go to.
-                        if (engine.isWatched(s_confirmMac, s_rawScanIsBle)) {
-                            engine.clearWatch();
-                            Theme::showToast("UNWATCHED", nullptr, Theme::CYAN);
-                        } else {
-                            if (s_rawScanIsBle) engine.watchBle(s_confirmMac, s_confirmLabel);
-                            else                engine.watchWifi(s_confirmMac, s_confirmLabel);
-                            engine.stopRawScan();
-                            enterClear();
-                        }
-                    } else if (ctap == RawScanConfirmTap::IGNORE) {
-                        lastTouch = now;
-                        s_confirmPending = false;
-                        // The raw scanner classifies nothing, so there is no
-                        // type to record and none to name in the toast.
-                        const bool wasOn = IgnoreList::contains(s_confirmMac);
-                        if (wasOn) IgnoreList::remove(s_confirmMac);
-                        else       IgnoreList::add(s_confirmMac, DetectionType::UNKNOWN);
-                        Theme::showToast(wasOn ? "UN-IGNORED" : "IGNORED",
-                                         nullptr, Theme::CYAN);
-                    } else if (ctap == RawScanConfirmTap::HUNT) {
-                        lastTouch = now;
-                        s_confirmPending = false;
-                        // See the LOG screen's copy: same toggle. Stopping
-                        // leaves the scan running, because the list you were
-                        // looking at is still the thing you came here for.
-                        if (engine.isHunted(s_confirmMac, s_rawScanIsBle)) {
-                            engine.clearHunt();
-                            Theme::showToast("HUNT STOPPED", nullptr, Theme::CYAN);
-                        } else {
-                            // The scan's guess goes with it: a phone's kind turns on
-                            // the ID-change watch (DetectionEngine::checkHuntSwap).
-                            if (s_rawScanIsBle) engine.huntBle(s_confirmMac, s_confirmLabel, engine.rawBleKindFor(s_confirmMac));
-                            else                engine.huntWifi(s_confirmMac, s_confirmLabel);
-                            engine.stopRawScan();
-                            enterHunt();
-                        }
-                    } else if (ctap == RawScanConfirmTap::CANCEL) {
-                        lastTouch = now;
-                        s_confirmPending = false;
-                    }
-                }
-                break;
-            }
 
             // BACK/SWITCH commit on release, not press, and only if the
             // touch never moved past the scroll threshold -- same
@@ -10692,30 +10622,46 @@ void loop() {
                     uint8_t count = s_rawScanIsBle ? engine.rawBleCount() : engine.rawWifiCount();
                     if (row >= 0 && row < (int)count) {
                         rowHoldFired = true;
-                        bool haveTarget = false;
+                        // Its alert card, the one LOG and the terminal open: WATCH,
+                        // HUNT, IGNORE and the rest are all on it (asked for
+                        // 2026-11-22; it used to be a TRACK THIS TARGET? panel).
+                        // The log's own entry when it has one -- a tracker, a
+                        // camera -- else a card made from what the scan heard.
+                        Detection d{};
+                        bool have = false;
                         if (s_rawScanIsBle) {
                             const RawBleResult* r = engine.rawBleAt((uint8_t)row);
                             if (r) {
-                                memcpy(s_confirmMac, r->mac, 6);
-                                s_confirmLabelIsName = true;  // name or placeholder; Privacy::name exempts the latter
-                                strncpy(s_confirmLabel, r->name[0] ? r->name : r->kind ? rawBleKindLabel(r->kind) : "Unnamed device",
-                                        sizeof(s_confirmLabel) - 1);
-                                haveTarget = true;
+                                memcpy(d.mac, r->mac, 6);
+                                d.rssi = r->rssi;
+                                d.channel = 0;
+                                snprintf(d.name, sizeof d.name, "%s", r->name);
+                                d.vendor = r->name[0] ? nullptr : rawBleKindLabel(r->kind);
+                                have = true;
                             }
                         } else {
                             const uint8_t* bssid = engine.rawWifiBssid((uint8_t)row);
                             if (bssid) {
-                                memcpy(s_confirmMac, bssid, 6);
+                                memcpy(d.mac, bssid, 6);
+                                d.rssi = engine.rawWifiRssi((uint8_t)row);
+                                d.channel = engine.rawWifiChannel((uint8_t)row);
                                 const char* ssid = engine.rawWifiSsid((uint8_t)row);
-                                s_confirmLabelIsName = true;  // SSID / "(hidden)" placeholder
-                                strncpy(s_confirmLabel, ssid[0] ? ssid : "(hidden)", sizeof(s_confirmLabel) - 1);
-                                haveTarget = true;
+                                snprintf(d.name, sizeof d.name, "%s", ssid[0] ? ssid : "(hidden)");
+                                have = true;
                             }
                         }
-                        if (haveTarget) {
-                            s_confirmLabel[sizeof(s_confirmLabel) - 1] = 0;
-                            s_confirmPending = true;
-                            s_confirmArmed   = false;
+                        if (have) {
+                            d.type = DetectionType::UNKNOWN;
+                            d.firstSeen = d.lastSeen = now;
+                            d.hits = 1;
+                            d.prevRssi = d.rssi;
+                            for (uint8_t i = 0; i < engine.logCount(); i++) {
+                                const Detection* l = engine.logAt(i);
+                                if (l && !memcmp(l->mac, d.mac, 6) && (l->channel == 0) == (d.channel == 0)) { d = *l; break; }
+                            }
+                            lastTouch = now;
+                            openCardFromLog(d);
+                            s_cardFromRawScan = true;
                         }
                     }
                 }

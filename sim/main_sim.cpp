@@ -867,7 +867,9 @@ int main(int argc, char** argv) {
         else if (screen == "desk")     uiDeskTick(frame, t, engine);
         else if (screen == "zonecard") { uiClearTick(frame, t, engine, true, false); uiZoneCardDraw(frame, t); }
         else if (screen == "hunt")     uiHuntTick(frame, t, engine);
-        else if (screen == "rawscan")  uiRawScanTick(frame, t, engine, true, true, false, "", false, false, false);
+        // SQUACHSIM_SCANNING=1: still listening (the SCAN.LOG feed); =wifi for a WiFi scan.
+        else if (screen == "rawscan")  uiRawScanTick(frame, t, engine, !(getenv("SQUACHSIM_SCANNING") && !strcmp(getenv("SQUACHSIM_SCANNING"), "wifi")),
+                                                     !getenv("SQUACHSIM_SCANNING"));
         else if (screen == "phone")    uiPhoneTick(frame, t, engine);
         else if (screen == "bingo")    uiBingoTick(frame, t, engine);
         else if (screen == "dex")      uiDexTick(frame, t, engine);

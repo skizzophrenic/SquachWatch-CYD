@@ -808,6 +808,20 @@ uint16_t senseCydRetryIn() {
   return left > 0 ? (uint16_t)((left + 999) / 1000) : 0;
 }
 uint8_t senseCydMode() { return s_mode; }
+// Only the Tab5 has a choice of radio. The emulator can pretend, for a look at
+// the Tab5's screens (SQUACHSIM_MONSTER=1).
+const char* senseCydRadio() {
+#ifndef ARDUINO
+    if (getenv("SQUACHSIM_MONSTER")) return atoi(getenv("SQUACHSIM_MONSTER")) ? "MONSTER C5" : "TAB5 C6";
+#endif
+    return "";
+}
+const char* senseCydRadioInfo() {
+#ifndef ARDUINO
+    if (getenv("SQUACHSIM_MONSTER") && atoi(getenv("SQUACHSIM_MONSTER"))) return "1.4.2,58:E6:C5:00:12:34,1,6,park,0";
+#endif
+    return "";
+}
 
 #if SENSE_RICH
 // VITALS asks every frame it is up: on allocates the chest signal (~116 KB of

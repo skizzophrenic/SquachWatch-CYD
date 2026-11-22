@@ -48,7 +48,9 @@ inline bool presenceAt(uint16_t i) { return SenseStore::presenceAt(i); }
 inline const Path& path(uint8_t i) { return SenseStore::path(i); }
 inline uint8_t livePaths(uint32_t) { return SenseStore::livePaths(); }
 inline uint8_t events(Event* out, uint8_t cap) { return SenseStore::events(out, cap); }
-inline const char* info() { return "the Tab5's own radio (C6)"; }
+inline const char* info() { return senseCydRadioInfo()[0] ? senseCydRadioInfo() : "the Tab5's own radio (C6)"; }
+inline bool monster() { return !strcmp(senseCydRadio(), "MONSTER C5"); }
+inline const char* ghz(const SenseReport& s) { return s.band == 5 ? "5" : "2.4"; }
 inline uint32_t lines() { return SenseStore::statuses(); }
 inline uint32_t badLines() { return 0; }
 }  // namespace Tab5Sense
@@ -694,8 +696,10 @@ void tabsAndList(TFT_eSPI& t, uint32_t now) {
         char b[64];
         char fw[24] = "--"; const char* inf = Tab5Sense::info();
         if (inf[0]) { size_t k = 0; while (inf[k] && inf[k] != ',' && k < sizeof fw - 1) { fw[k] = inf[k]; k++; } fw[k] = 0; }
-        snprintf(b, sizeof b, "radio firmware %s", fw); text(t, 12, y0, b, Theme::CYAN, Theme::BG, 2);
-        snprintf(b, sizeof b, "%s GHz channel %u, %s", "2.4", (unsigned)s.chan,
+        if (Tab5Sense::monster()) snprintf(b, sizeof b, "MONSTER C5 on the M5-Bus, firmware %s", fw);
+        else snprintf(b, sizeof b, "the Tab5's own radio (C6)");
+        text(t, 12, y0, b, Tab5Sense::monster() ? Theme::VAPOR_PINK : Theme::CYAN, Theme::BG, 2);
+        snprintf(b, sizeof b, "%s GHz channel %u, %s", Tab5Sense::ghz(s), (unsigned)s.chan,
                  s.mode == SENSE_MODE_STA ? "joined, pinging the router" : (s.mode == SENSE_MODE_PARK ? "listening on one channel" : "starting"));
         text(t, 12, y0 + 18, b, Theme::CYAN, Theme::BG, 2);
         snprintf(b, sizeof b, "%u samples a second, %lu lost", (unsigned)s.rate, (unsigned long)s.drop); text(t, 12, y0 + 36, b, Theme::CYAN, Theme::BG, 2);
@@ -710,9 +714,29 @@ void statusLine(TFT_eSPI& t, uint32_t now) {
     if (fresh && (now % 1000) < 600) t.fillCircle(42, 8, 3, Theme::GREEN);
     textT(t, 50, 4, fresh ? "LIVE" : "WAIT", fresh ? Theme::GREEN : Theme::AMBER, 1);
     if (Tab5Sense::heard()) {
-        snprintf(b, sizeof b, "%s GHz ch %u  %u/s", "2.4", (unsigned)s.chan, (unsigned)s.rate); textT(t, 84, 4, b, Theme::CYAN, 1);
+        snprintf(b, sizeof b, "%s GHz ch %u  %u/s", Tab5Sense::ghz(s), (unsigned)s.chan, (unsigned)s.rate); textT(t, 84, 4, b, Theme::CYAN, 1);
         snprintf(b, sizeof b, "%u PATHS", (unsigned)Tab5Sense::livePaths(now)); textT(t, 220, 4, b, Theme::VAPOR_PINK, 1);
-        snprintf(b, sizeof b, "%d dBm", (int)s.rssi); textT(t, 604, 4, b, Theme::VAPOR_PURPLE, 1, 2);
+        snprintf(b, sizeof b, "%d dBm", (int)s.rssi); textT(t, 548, 4, b, Theme::VAPOR_PURPLE, 1, 2);
+    }
+}
+
+// Which radio is sensing, top right on every page: the Monster C5 filled in
+// pink (it pulses while new), the Tab5's own C6 outlined.
+void radioBadge(TFT_eSPI& t, uint32_t now) {
+    const char* r = senseCydRadio();
+    if (!r[0]) return;
+    const int w = (int)strlen(r) * 6 + 10, x = 636 - w, y = 1, h = 14;
+    static uint32_t monAt = 0;
+    if (Tab5Sense::monster()) {
+        if (!monAt) monAt = now ? now : 1;
+        const bool pulse = now - monAt < 3000 && ((now - monAt) / 250) % 2;
+        t.fillRoundRect(x, y, w, h, 3, pulse ? Theme::WHITE : Theme::VAPOR_PINK);
+        textT(t, x + 5, y + 3, r, Theme::BG, 1);
+    } else {
+        monAt = 0;
+        const uint16_t c = !strcmp(r, "TAB5 C6") ? Theme::CYAN : Theme::AMBER;
+        t.drawRoundRect(x, y, w, h, 3, c);
+        textT(t, x + 5, y + 3, r, c, 1);
     }
 }
 
@@ -1752,6 +1776,7 @@ void uiSensingTick(TFT_eSPI& t, uint32_t now, bool advance) {
     else drawSensing(t, now, dt);
     if (s_mode == M_SENSING) statusLine(t, now);
     modeDots(t);
+    radioBadge(t, now);
     // SCOPE, SNEAK and VITALS are EXPERIMENTAL: more than "something moved"
     // asks a lot of one router's signal. Beside the page dots.
     if (s_mode != M_SENSING) {

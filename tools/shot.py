@@ -84,7 +84,13 @@ def main():
     if len(sys.argv) < 3:
         raise SystemExit(__doc__)
     port, out, keys = sys.argv[1], sys.argv[2], sys.argv[3:]
-    s = serial.Serial(port, 115200, timeout=0.2)
+    # DTR and RTS held off before the port opens: either one resets a native-USB
+    # S3 (the T-Deck rebooted on every shot until 2026-11-22).
+    s = serial.Serial()
+    s.port, s.baudrate, s.timeout = port, 115200, 0.2
+    s.dtr = False
+    s.rts = False
+    s.open()
     time.sleep(0.2)
     s.reset_input_buffer()
     for k in keys:

@@ -43,6 +43,8 @@ static const char* targetLabel(DetectionType t) {
         case DetectionType::LORAWAN:     return "LORAWAN NETWORK";
         case DetectionType::MINE:        return "MY ALERT";
         case DetectionType::LISTENER:    return "SMART SPEAKER";
+        // A device opened from SCAN's list, which the scan does not classify.
+        case DetectionType::UNKNOWN:     return "DEVICE";
         default:                     return "UNKNOWN";
     }
 }

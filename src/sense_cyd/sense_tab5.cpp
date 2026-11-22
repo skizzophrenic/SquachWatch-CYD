@@ -1,5 +1,11 @@
 // HUMAN SENSING on the M5Stack Tab5: the engine behind sense_cyd.h, run on
-// the Tab5's own radio (its ESP32-C6, over ESP-Hosted).
+// the Tab5's own radio (its ESP32-C6, over ESP-Hosted) -- or, when one is
+// plugged into the back, on an M5MonsterC5 running the sensing radio's
+// firmware (I:\GitHub\Tab5-Monster-C5-CSI-Human-Sensing, src/radio/sense_c5.cpp).
+// That one sends the same lines over a plain serial link on the M5-Bus, hears
+// 5 GHz as well, and does VITALS' fit itself ($V lines), so the Tab5 only
+// listens to it. Looked for once a few seconds after boot (senseTab5Probe) and
+// again whenever the screen opens; nothing heard in time and it is the C6.
 //
 // On every other board the sensing engine (sense_cyd.cpp) reads the radio's
 // channel state itself. The Tab5's P4 has no radio: its WiFi is the C6's,
@@ -34,6 +40,7 @@
 #include "sense_vitals.h"
 #include "csi_vitals.h"
 #include "tab5_radio.h"
+#include "theme.h"         // the Monster C5 toasts
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 extern "C" {
@@ -46,6 +53,63 @@ extern "C" {
 volatile uint8_t g_senseConsole = 0;
 
 namespace {
+
+// ---- The Monster C5 on the M5-Bus (the sensing app's sense_proto.h) --------
+const int      MON_TX = 37, MON_RX = 38;    // the Tab5's side; the C5's UART0 is TX 11, RX 12
+const uint32_t MON_BAUD = 115200;
+enum class Src : uint8_t { NONE, PROBING, C6, MONSTER };
+Src      s_src = Src::NONE;
+bool     s_uart = false;
+char     s_ubuf[200];
+uint16_t s_ulen = 0;
+char     s_monInfo[96] = "";
+int8_t   s_monBoot = -1;                     // the boot probe: -1 not yet, 0 nobody, 1 a Monster
+uint32_t s_probeAt = 0, s_probeFor = 0;      // the screen's own look
+char     s_pendSsid[33] = "", s_pendPass[65] = "";   // held while it looks, for the C6's join
+uint32_t s_monLines = 0;
+
+void uartOpen() {
+    if (s_uart) return;
+    // Ten $S lines a second is ~1 KB/s, and VITALS adds twenty $V: 4 KB is
+    // two seconds of slack.
+    Serial1.setRxBufferSize(4096);
+    Serial1.begin(MON_BAUD, SERIAL_8N1, MON_RX, MON_TX);
+    s_uart = true; s_ulen = 0;
+}
+void uartClose() {
+    if (!s_uart) return;
+    // Let a last command finish leaving, then let go of the pin we drive:
+    // left as a UART pin it holds the Monster's RX, and its own USB-C can no
+    // longer reach it (the sensing app's lesson, 2026-11-07).
+    Serial1.flush();
+    delay(5);
+    Serial1.end();
+    pinMode(MON_TX, INPUT);
+    s_uart = false;
+}
+void uartSend(const char* c) {
+    if (!s_uart || !c) return;
+    Serial1.print(c);
+    Serial1.print('\n');
+}
+// Whole lines off the link, at most `budget` characters a call.
+template <typename F> void uartPump(int budget, F onLineFn) {
+    while (s_uart && budget-- > 0 && Serial1.available()) {
+        const char c = (char)Serial1.read();
+        if (c == '\n' || c == '\r') {
+            if (s_ulen) { s_ubuf[s_ulen] = 0; onLineFn(s_ubuf); s_ulen = 0; }
+        } else if (s_ulen < sizeof s_ubuf - 1) {
+            s_ubuf[s_ulen++] = c;
+        } else {
+            s_ulen = 0;   // a line too long is thrown away
+        }
+    }
+}
+// A line only the sensing radio's firmware sends.
+bool monsterLine(const char* l) { return l[0] == '$' && (l[1] == 'S' || l[1] == 'I') && l[2] == ','; }
+void keepInfo(const char* l) {
+    if (l[0] == '$' && l[1] == 'I' && l[2] == ',') { strncpy(s_monInfo, l + 3, sizeof s_monInfo - 1); s_monInfo[sizeof s_monInfo - 1] = 0; }
+}
 
 // ---- Lines from the C6 (RPC task -> loop) ----------------------------------
 struct Line { uint8_t len; char text[161]; };   // SENSE_LINE_MAX is 160
@@ -123,12 +187,17 @@ bool startPing(uint32_t gw) {
     if (esp_ping_new_session(&pc, &cb, &s_ping) != ESP_OK) { s_ping = nullptr; return false; }
     return esp_ping_start(s_ping) == ESP_OK;
 }
+// To whichever radio is sensing.
+void radioSend(const char* cmd) {
+    if (s_src == Src::MONSTER) uartSend(cmd);
+    else if (s_src == Src::C6) Tab5Radio::senseSend(cmd);
+}
 void listen(const char* why) {
     stopPing();
     if (s_join == Join::JOINING || s_join == Join::UP) esp_wifi_disconnect();
     s_join = Join::LISTEN;
     note("%s: listening instead (the C6 parks on the loudest channel)", why);
-    Tab5Radio::senseSend("park auto");
+    radioSend("park auto");
 }
 void startJoin(const char* pass) {
     static bool handlers = false;
@@ -162,8 +231,8 @@ void wentUp(uint32_t now) {
     char cmd[48];
     snprintf(cmd, sizeof cmd, "station %02x:%02x:%02x:%02x:%02x:%02x %u", ap.bssid[0], ap.bssid[1], ap.bssid[2],
              ap.bssid[3], ap.bssid[4], ap.bssid[5], (unsigned)ap.primary);
-    Tab5Radio::senseSend(cmd);
-    if (s_vitOn) Tab5Radio::senseSend("vitals frames");   // again, so it follows the router
+    radioSend(cmd);
+    if (s_vitOn) radioSend("vitals frames");   // again, so it follows the router
     s_join = Join::UP; s_everUp = true; s_reason = 0;
     s_statAt = now; s_okAt = s_pingOk; s_lostAt = s_pingLost;
     note("joined: channel %u rssi %d, %s", (unsigned)ap.primary, (int)ap.rssi, pinging ? "pinging the router every 20 ms" : "THE PING DID NOT START");
@@ -279,7 +348,7 @@ void parse(char* l, uint32_t now) {
         SenseReport r = {};
         r.upMs = now;
         r.score = (uint8_t)atoi(f[1]); r.state = (uint8_t)atoi(f[2]); r.rate = (uint16_t)atoi(f[3]);
-        r.chan = (uint16_t)atoi(f[4]); r.rssi = (int8_t)atoi(f[6]); r.rel = (uint8_t)atoi(f[7]); r.cal = (uint8_t)atoi(f[8]);
+        r.chan = (uint16_t)atoi(f[4]); r.band = (uint8_t)atoi(f[5]); r.rssi = (int8_t)atoi(f[6]); r.rel = (uint8_t)atoi(f[7]); r.cal = (uint8_t)atoi(f[8]);
         const uint8_t m = (uint8_t)atoi(f[10]);
         r.mode = m == 2 ? SENSE_MODE_STA : (m == 1 ? SENSE_MODE_PARK : SENSE_MODE_JOINING);
         r.live = (uint16_t)atoi(f[14]); r.drop = (uint32_t)strtoul(f[15], nullptr, 10); r.presence = atoi(f[16]) != 0;
@@ -295,6 +364,9 @@ void parse(char* l, uint32_t now) {
     } else if (!strncmp(l, "$V,", 3)) {
         if (fields(l + 3, f, 6) < 5 || !s_vitOn) return;
         Vitals::feed(atol(f[1]) / 10000.0f, (uint8_t)atoi(f[4]));
+    } else if (l[0] == '$' && l[1] == 'I' && l[2] == ',') {
+        keepInfo(l);
+        Serial.printf("[sense] radio: %s\n", l + 3);
     } else if (l[0] == '#' || l[0] == '$') {
         if (g_senseConsole || l[0] == '#') Serial.printf("[sense] %s\n", l);
     }
@@ -314,15 +386,11 @@ void frameIn(const uint8_t* b, size_t len) {
 }  // namespace
 
 // ---- sense_cyd.h ---------------------------------------------------------------
-void senseCydStart(const char* ssid, const char* pass) {
-    if (s_running) return;
-    // Running even when it cannot start, as sense_cyd.cpp does, so the loop
-    // does not ask again every pass; the screen says why.
-    s_running = true;
+// The Tab5's own radio: what HUMAN SENSING always ran on before the Monster.
+static void startC6(const char* ssid, const char* pass) {
+    s_src = Src::C6;
     if (!Tab5Radio::senseCapable()) { note("the radio's image has no sensing (\"%s\"): radio update needed", Tab5Radio::tag()); return; }
     if (!s_q) s_q = xQueueCreate(64, sizeof(Line));
-    if (!s_sp) s_sp = (SpecState*)calloc(1, sizeof(SpecState));
-    if (s_sp) { memset(s_sp, 0, sizeof *s_sp); s_sp->peak = -1; }
     if (!s_q) { note("no memory for the line queue"); return; }
     s_linked = Tab5Radio::senseLink(true, onLine);
     if (!s_linked) { note("the radio would not lend its line slot"); return; }
@@ -335,8 +403,55 @@ void senseCydStart(const char* ssid, const char* pass) {
     else listen("no saved network");
 }
 
+// The Monster answered: it senses on its own (it parks on the loudest
+// channel it hears, and can hear 5 GHz), so there is nothing to join.
+static void startMonster(uint32_t now) {
+    s_src = Src::MONSTER;
+    s_mode = SENSE_MODE_PARK;
+    s_monLines = 0;
+    memset(s_pendPass, 0, sizeof s_pendPass);
+    // VITALS listens rather than joining a network: clear any VITALS network
+    // the radio was given (the sensing app does the same).
+    uartSend("vitalsnet forget");
+    uartSend("info");
+    note("HUMAN SENSING on the Monster C5 (M5-Bus): heap %lu", (unsigned long)ESP.getFreeHeap());
+    Theme::showToast("MONSTER C5", "Sensing on the Monster", Theme::VAPOR_PINK, 2500);
+    (void)now;
+}
+
+void senseCydStart(const char* ssid, const char* pass) {
+    if (s_running) return;
+    // Running even when it cannot start, as sense_cyd.cpp does, so the loop
+    // does not ask again every pass; the screen says why.
+    s_running = true;
+    if (!s_sp) s_sp = (SpecState*)calloc(1, sizeof(SpecState));
+    if (s_sp) { memset(s_sp, 0, sizeof *s_sp); s_sp->peak = -1; }
+    // A Monster C5 on the back first. Nothing heard in time and it is the
+    // Tab5's own radio, with the network the loop picked (held till then).
+    strncpy(s_pendSsid, ssid ? ssid : "", sizeof s_pendSsid - 1); s_pendSsid[sizeof s_pendSsid - 1] = 0;
+    strncpy(s_pendPass, pass ? pass : "", sizeof s_pendPass - 1); s_pendPass[sizeof s_pendPass - 1] = 0;
+    s_monInfo[0] = 0;
+    uartOpen();
+    uartSend("info");
+    s_src = Src::PROBING;
+    s_probeAt = millis();
+    s_probeFor = s_monBoot == 1 ? 5000 : 2500;   // longer for one that answered at boot
+    s_mode = SENSE_MODE_JOINING;
+    note("looking for a Monster C5 on the M5-Bus (%lu ms)", (unsigned long)s_probeFor);
+}
+
 void senseCydStop() {
     if (!s_running) return;
+    if (s_src == Src::MONSTER || s_src == Src::PROBING) {
+        if (s_vitOn) { uartSend("vitals off"); Vitals::end(); s_vitOn = false; }
+        uartClose();
+        memset(s_pendPass, 0, sizeof s_pendPass);
+        free(s_sp); s_sp = nullptr;
+        if (s_src == Src::MONSTER) note("HUMAN SENSING off: %lu lines from the Monster C5", (unsigned long)s_monLines);
+        s_src = Src::NONE;
+        s_running = false; s_mode = SENSE_MODE_OFF;
+        return;
+    }
     if (s_vitOn) { Tab5Radio::senseSend("vitals off"); Vitals::end(); delete s_cv; s_cv = nullptr; s_vitOn = false; }
     Tab5Radio::senseSend("off");
     stopPing();
@@ -348,12 +463,36 @@ void senseCydStop() {
     if (s_q) xQueueReset(s_q);
     free(s_sp); s_sp = nullptr;
     s_running = false; s_mode = SENSE_MODE_OFF;
+    s_src = Src::NONE;
     note("HUMAN SENSING off: %lu lines lost", (unsigned long)s_linesLost);
 }
 
 void senseCydTick() {
-    if (!s_running || !s_linked) return;
+    if (!s_running) return;
     const uint32_t now = millis();
+    if (s_src == Src::PROBING || s_src == Src::MONSTER) {
+        uartPump(4096, [&](char* l) {
+            if (s_src == Src::PROBING && monsterLine(l)) startMonster(now);
+            if (s_src != Src::MONSTER) return;
+            s_monLines++;
+            parse(l, now);
+        });
+        if (s_src == Src::PROBING && now - s_probeAt >= s_probeFor) {
+            note("no Monster C5 answered: the Tab5's own radio");
+            uartClose();
+            startC6(s_pendSsid, s_pendPass);
+            memset(s_pendPass, 0, sizeof s_pendPass);
+        }
+        // VITALS: the Monster does the fit and sends $V lines; ask again if
+        // they stop (it restarted).
+        if (s_src == Src::MONSTER) {
+            static uint32_t askAt = 0;
+            if (s_vitOn && (!Vitals::lastFrameAt() || now - Vitals::lastFrameAt() > 1500) && now - askAt > 12000) { uartSend("vitals on"); askAt = now; }
+        }
+        SenseStore::tick(now);
+        return;
+    }
+    if (!s_linked) return;
     joinTick(now);
     Line l;
     for (int k = 0; k < 64 && s_q && xQueueReceive(s_q, &l, 0) == pdTRUE; k++) {
@@ -364,7 +503,49 @@ void senseCydTick() {
 }
 
 bool        senseCydRunning() { return s_running; }
-void        senseCydCommand(const char* cmd) { if (s_running && cmd) Tab5Radio::senseSend(cmd); }
+void        senseCydCommand(const char* cmd) { if (s_running && cmd) radioSend(cmd); }
+const char* senseCydRadio() {
+    switch (s_src) {
+        case Src::MONSTER: return "MONSTER C5";
+        case Src::C6:      return "TAB5 C6";
+        case Src::PROBING: return "FINDING RADIO";
+        default:           return s_monBoot == 1 ? "MONSTER C5" : "";
+    }
+}
+const char* senseCydRadioInfo() { return s_src == Src::MONSTER ? s_monInfo : ""; }
+
+// ---- The boot look ---------------------------------------------------------------
+// Once, a few seconds after boot, on whatever screen: open the link, ask the
+// radio who it is, listen for six seconds, let go of the pins. A Monster
+// running other firmware (JanOS, the MonsterC5 app) sends none of these lines
+// and is left alone.
+void senseTab5Probe(uint32_t now) {
+    static uint32_t openAt = 0;
+    if (s_monBoot >= 0 || s_running) return;
+    if (!openAt) {
+        if (now < 4000) return;
+        uartOpen();
+        uartSend("info");
+        openAt = now ? now : 1;
+        return;
+    }
+    bool found = false;
+    uartPump(2048, [&](char* l) { if (monsterLine(l)) { found = true; keepInfo(l); } });
+    if (found) {
+        s_monBoot = 1;
+        // The $I line may still be on its way: one more short wait for it.
+        const uint32_t until = millis() + 300;
+        while (!s_monInfo[0] && (int32_t)(until - millis()) > 0) { uartPump(512, [&](char* l) { keepInfo(l); }); delay(10); }
+        uartClose();
+        Serial.printf("[sense] Monster C5 on the M5-Bus: %s\n", s_monInfo[0] ? s_monInfo : "(no info line)");
+        Theme::showToast("MONSTER C5 FOUND", "HUMAN SENSING will use it", Theme::VAPOR_PINK, 3500);
+    } else if (now - openAt > 6000) {
+        s_monBoot = 0;
+        uartClose();
+        Serial.println("[sense] no Monster C5 on the M5-Bus");
+    }
+}
+bool senseTab5MonsterSeen() { return s_monBoot == 1; }
 // Listening with no network saved still reads as a network: the screen's
 // ADD WIFI is for the boards that have a list to add one to.
 const char* senseCydNetwork() { return s_ssid[0] ? s_ssid : (s_running ? "LISTENING" : ""); }
@@ -373,6 +554,21 @@ uint16_t    senseCydRetryIn() { return (s_join == Join::JOINING && s_retryAt) ? 
 uint8_t     senseCydMode()    { return s_mode; }
 
 void senseCydVitals(bool on) {
+    if (s_src == Src::MONSTER) {
+        // The Monster fits the chest signal itself and sends $V lines.
+        if (on && !s_vitOn && s_running) {
+            if (!Vitals::begin(millis())) { note("VITALS: no memory"); Vitals::end(); return; }
+            s_vitOn = true;
+            uartSend("vitals on");
+            note("VITALS on: the Monster C5 fits the chest signal");
+        } else if (!on && s_vitOn) {
+            uartSend("vitals off");
+            Vitals::end();
+            s_vitOn = false;
+            note("VITALS off");
+        }
+        return;
+    }
     if (on && !s_vitOn && s_running && s_linked) {
         if (!s_cv) s_cv = new (std::nothrow) CsiVitals();
         if (!s_cv || !s_cv->begin() || !Vitals::begin(millis())) {
