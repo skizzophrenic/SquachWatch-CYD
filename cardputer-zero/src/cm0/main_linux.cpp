@@ -95,6 +95,12 @@ static const uint32_t STEP_MS = 33;
 // kill it from). One second: not an accidental BACK tap, not a wait.
 static const uint32_t ESC_EXIT_MS = 1000;
 
+// L's level key is held across the cadence (this thread owns the loop, so a
+// sleep inside dispatchLine would never be sampled by loop()). The deadline
+// arms in tickLive, whose clock (SDL ticks or monoMs) is per front end.
+static bool     s_levelHeld = false, s_levelArmed = false;
+static uint32_t s_levelMs = 0, s_levelUntil = 0;
+
 // The Cardputer Zero's panel, landscape: the long side of the two
 // cardputer_zero_user_setup.h dimensions across, the short side down.
 static const int PANEL_W = TFT_WIDTH > TFT_HEIGHT ? TFT_WIDTH : TFT_HEIGHT;
@@ -234,12 +240,18 @@ static void dispatchLine(const char* in, bool& quit) {
     } else if (cmd == 'H') {
         simCardKey(3, true);   // back (the console letter predates v1.43, when this was home)
     } else if (cmd == 'L') {
-        // Level is a *state*, not an edge: hold it across at least one
-        // 33 ms loop so smallKeysRead() samples it pressed.
-        simCardKey(0, true);
-        struct timespec ts = { 0, 50 * 1000 * 1000 };
-        nanosleep(&ts, nullptr);
-        simCardKey(0, false);
+        // Level is a *state*, not an edge: press it here, release it in
+        // tickLive() when the clock passes the deadline. A nanosleep here
+        // would block the shared cadence and the press never sampled.
+        int ms = 120;
+        sscanf(l + 1, "%d", &ms);
+        if (ms < 1) ms = 120;
+        if (!s_levelHeld) {
+            simCardKey(0, true);
+            s_levelHeld = true;
+            s_levelArmed = false;
+            s_levelMs = (uint32_t)ms;
+        }
     } else {
         fprintf(stderr,
             "[console] unknown command (T <n|type> [rssi] / S [n] / Q / N / P / H / L / Y <text>)\n");
@@ -571,6 +583,13 @@ static bool tickLive(uint32_t now, uint32_t& next, bool& quit) {
     if (s_escDownAt && (int32_t)(now - s_escDownAt) >= (int32_t)ESC_EXIT_MS) {
         fprintf(stderr, "[cm0] ESC held %u ms: exiting\n", now - s_escDownAt);
         quit = true;
+    }
+    if (s_levelHeld) {
+        if (!s_levelArmed) { s_levelUntil = now + s_levelMs; s_levelArmed = true; }
+        if ((int32_t)(now - s_levelUntil) >= 0) {
+            simCardKey(0, false);
+            s_levelHeld = s_levelArmed = false;
+        }
     }
     if ((int32_t)(now - next) >= 0) {
         step();
