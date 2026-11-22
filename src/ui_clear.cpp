@@ -165,6 +165,7 @@ static int      s_freeX = -1000, s_freeY = 0, s_freeR = 0;   // where it sits: t
 static bool     s_freeWant   = false;   // asked for by a key or the journal: thrown when the screen can
 static uint32_t s_freeWantAt = 0;
 static bool     s_freeSaid   = false;   // he has pointed it out
+static uint32_t s_freeStayMs = 0, s_freeStayLast = 0;   // how long it has sat there in view, of Encounters::FREE_STAY_MS
 static int      s_freeCx = -1000, s_freeCy = 0;   // where it is drawn now (it gets about): what a finger lands on
 static int      s_outX = 0;             // where it was when it was called away
 static int      s_tossX = 0, s_tossY = 0;         // where it was thrown from
@@ -4155,6 +4156,7 @@ void freeToss(uint32_t now) {
     s_die = Die::TOSS; s_dieAt = now; s_dieSaid = 0; s_dieFor = Kind::NONE;
     const bool drawnYet = s_freeCx > -500;
     s_tossX = drawnYet ? s_freeCx : s_freeX; s_tossY = drawnYet ? s_freeCy : s_freeY;
+    s_freeStayMs = 0;
     s_freeShown = false; s_freeOutAt = 0; s_playAt = 0;
     s_freeWant = false; s_freeWantAt = 0;
     Squachy::setHush(true);
@@ -4164,6 +4166,7 @@ void freeToss(uint32_t now) {
 void freeThrow(uint32_t now) {
     if (Encounters::takeMimic()) {
         s_mimTapped = true;
+        s_freeStayMs = 0;
         s_freeShown = false; s_freeOutAt = 0; s_playAt = 0;
         s_freeWant = false; s_freeWantAt = 0; s_freeSaid = false;
         return;
@@ -4282,12 +4285,12 @@ void freeDraw(TFT_eSPI& t, uint32_t now, int w, int h) {
         const float q = 1.0f - (float)ms / 620.0f;
         x += (float)(w + s_freeR + 2 - s_freeX) * q * q; ang = 360.0f * q * q;
     } else {
-        const uint32_t c = (ms - 620) % 3400;
-        if (c >= 3000) {
-            const float q = (float)(c - 3000) / 400.0f;
+        const uint32_t c = (ms - 620) % 8000;                       // a hop every eight seconds, and a glint between
+        if (c >= 7600) {
+            const float q = (float)(c - 7600) / 400.0f;
             y -= 4.0f * q * (1.0f - q) * 9.0f * u; ang = 120.0f * q;
-        } else if (c >= 1100 && c < 1500) {                         // a glint off its corner
-            glint = (int)(c - 1100) < 200 ? (int)(c - 1100) : 400 - (int)(c - 1100);
+        } else if (c >= 3600 && c < 4000) {                         // a glint off its corner
+            glint = (int)(c - 3600) < 200 ? (int)(c - 3600) : 400 - (int)(c - 3600);
         }
     }
     s_freeCx = (int)x; s_freeCy = (int)y;
@@ -4693,9 +4696,21 @@ static void encounterBack(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
         s_freeShown = show;
         if (s_freeWant && !s_freeWantAt) s_freeWantAt = now ? now : 1;
         if (show) {
+            // Thirty seconds in view and nobody has touched it: it rolls off, and
+            // that one is gone. Not in the middle of a game with him.
+            if (now != s_freeStayLast) {
+                const uint32_t dt = now - s_freeStayLast;
+                s_freeStayMs += dt > 100 ? 100 : dt;
+            }
             if (s_freeWant) freeThrow(now);
+            else if (s_freeStayMs >= Encounters::FREE_STAY_MS && !s_playAt) {
+                s_freeStayMs = 0; s_freeSaid = false;
+                Encounters::setFree(false);
+                Serial.println("[encounter] the free roll's die went unrolled");
+            }
             else if (!s_freeSaid && now - s_freeAt > 2500) { s_freeSaid = true; Squachy::announce(FREE_LINE); }
         }
+        s_freeStayLast = now;
         playTick(now, w, u);
         // Asked for and the screen never came free: let it go.
         if (s_freeWant && now - s_freeWantAt > 20000) { s_freeWant = false; s_freeWantAt = 0; }

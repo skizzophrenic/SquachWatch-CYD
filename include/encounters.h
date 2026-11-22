@@ -16,8 +16,9 @@
 // And one roll anybody can make: the FREE ROLL. One is waiting after the
 // update, and another turns up after every twelve hours the board has been
 // running (counted across restarts, so pulling the plug earns nothing). Its
-// die sits on the main screen's floor until it is tapped, and it is an honest
-// d20 -- faceOf() -- that the journal counts like any other roll.
+// die sits on the main screen's floor for thirty seconds of that screen's time
+// (FREE_STAY_MS); tapped, it is an honest d20 -- faceOf() -- that the journal
+// counts like any other roll, and left alone it rolls off and that one is gone.
 //
 // This file is the dice and the journal and nothing that draws: the host tests
 // in test/encounters_test.cpp check the odds. The encounters themselves are
@@ -73,6 +74,8 @@ struct Face { bool miss; bool shiny; Tier tier; };
 Face     faceOf(uint8_t d20);
 // Minutes of running between free rolls.
 const uint16_t FREE_EVERY_MIN = 12 * 60;
+// How long its die waits on the main screen before it rolls off, unrolled.
+const uint32_t FREE_STAY_MS = 30UL * 1000UL;
 
 // ---- the run (encounters.cpp) -----------------------------------------------
 void begin();

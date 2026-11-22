@@ -79,6 +79,7 @@ int main() {
     ck("19 is LEGENDARY", fLegend == 1 && faceOf(19).tier == Tier::LEGENDARY && !faceOf(19).shiny);
     ck("only a 20 is a shiny", fShiny == 1 && faceOf(20).shiny && !faceOf(20).miss);
     ck("a new one every twelve hours of running", FREE_EVERY_MIN == 720);
+    ck("its die waits thirty seconds, then rolls off", FREE_STAY_MS == 30000);
 
     suite("The mimic");
     bool picked = false;
