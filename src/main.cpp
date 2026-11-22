@@ -741,18 +741,33 @@ const uint16_t      TOUCH_DEBOUNCE_MS = 200;
 static const uint32_t TAP_MAX_MS = 500;
 
 #if SQUACH_MESH
-// The P key on the boards with a keyboard, for anybody who has done the
-// unlock-everything hold: the next dice scene, now -- a roll that misses, then
-// each of the nine encounters in turn. They are only played: the FIELD JOURNAL
-// does not count them. Not in TERMINAL MODE, where nothing could play one and
-// it would sit waiting, holding up the real dice.
+// Why there is no free roll to make, for the key and the journal's row.
+__attribute__((unused)) static void freeRollToast() {
+    static char b[40];
+    if (Encounters::level() == 0) { Theme::showToast("FREE ROLL", "Random encounters are off", Theme::AMBER); return; }
+    const unsigned m = Encounters::freeInMin();
+    snprintf(b, sizeof b, "Next one in %uh %02um of running", m / 60, m % 60);
+    Theme::showToast("NO ROLL YET", b, Theme::AMBER, 2200);
+}
+// The P key on the boards with a keyboard. For everybody it throws the free
+// roll's die when one is waiting. For anybody who has done the
+// unlock-everything hold it is the next dice scene instead, now: a roll that
+// misses, a 1, each of the nine encounters in turn, and a 20. Those are only
+// played: the FIELD JOURNAL does not count them. Not in TERMINAL MODE, where
+// nothing could play one and it would sit waiting, holding up the real dice.
 __attribute__((unused)) static void diceSceneKey() {
-    if (!Squachy::superUnlocked() || Settings::boringMode()) return;
+    if (Settings::boringMode()) return;
+    if (!Squachy::superUnlocked()) {
+        if (!uiClearFreeRoll()) freeRollToast();
+        return;
+    }
     static uint8_t n = 0;
-    if (n == 0) Encounters::forceMiss();
-    else Encounters::force((Encounters::Kind)(n - 1), false, false);
-    Serial.printf("[keys] P: dice scene %u of 10\n", (unsigned)n + 1);
-    n = (uint8_t)((n + 1) % 10);
+    if (n == 0)       Encounters::forceMiss(3);
+    else if (n == 1)  Encounters::forceMiss(1);
+    else if (n == 11) Encounters::force(Encounters::Kind::DRIFTER, true, false);
+    else              Encounters::force((Encounters::Kind)(n - 2), false, false);
+    Serial.printf("[keys] P: dice scene %u of 12\n", (unsigned)n + 1);
+    n = (uint8_t)((n + 1) % 12);
 }
 #endif
 
@@ -8115,6 +8130,7 @@ void loop() {
     // is the only way in for the one serial command the firmware takes.
     Clock::pollSerial();
     runtimeTick(millis());
+    Encounters::runTick(millis());      // running time towards the next free roll
 #if defined(ESP32) && !defined(TWATCH_S3)
 #if SQW_BOOT_BTN
     bootButtonTick(millis());
@@ -9752,8 +9768,11 @@ void loop() {
                 }
             } else if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
                        uiClearEncounterTap(tp.x, tp.y, now)) {
-                // A random encounter took it: the Lost Signal, the Elder's photo.
+                // A random encounter took it: the Lost Signal, the Elder's
+                // photo, the free roll's die. Not also a pat for Squachy, who
+                // may be standing over the die.
                 lastTouch = now;
+                sqActive  = false;
             } else if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS &&
                        Theme::backgroundTap(tp.x, tp.y, now)) {
                 // Something tappable in the background itself claimed
@@ -10864,6 +10883,12 @@ void loop() {
                                              Encounters::level() == 1 ? "About one every 1 3/4 h on screen" :
                                              Encounters::level() == 2 ? "About one an hour and a quarter" : "About one every 50 min",
                                              Theme::AMBER);
+                            break;
+                        case SettingsRow::FREE_ROLL:
+                            // Back to the main screen, where it is thrown.
+                            if (Settings::boringMode()) Theme::showToast("FREE ROLL", "Not in TERMINAL MODE", Theme::AMBER);
+                            else if (uiClearFreeRoll()) enterClear();
+                            else                        freeRollToast();
                             break;
                         case SettingsRow::JOURNAL_0: case SettingsRow::JOURNAL_1: case SettingsRow::JOURNAL_2:
                         case SettingsRow::JOURNAL_3: case SettingsRow::JOURNAL_4: case SettingsRow::JOURNAL_5:

@@ -147,12 +147,24 @@ static bool             s_encGobOn = false;
 //   PUFF  gone in a puff (the encounters nobody walks on for)
 //   MISS  at rest on a dud while Squachy works out what it is
 //   AWAY  rolling off, after a miss
-enum class Die : uint8_t { NONE, DROP, WAIT, FLY, PUFF, MISS, AWAY };
+//   TOSS  the free roll's die, tapped: up off the screen, to come down as DROP
+//   BONK  a 1: off the floor, onto his head and away, and the stars after
+enum class Die : uint8_t { NONE, DROP, WAIT, FLY, PUFF, MISS, AWAY, TOSS, BONK };
 static Die              s_die     = Die::NONE;
 static uint32_t         s_dieAt   = 0;       // when it dropped; for FLY, PUFF and AWAY, when that began
 static uint8_t          s_dieNum  = 0;       // 1-5 a miss, 6-19 by rarity, 20 a shiny
 static uint8_t          s_dieSaid = 0;       // its cues, a bit each
 static Encounters::Kind s_dieFor  = Encounters::Kind::NONE;   // what starts once it has been read
+static int              s_bonkX = 0, s_bonkY = 0;             // a 1: the top of his head, where it lands
+// The free roll's die (Encounters::freeReady()). It sits on the floor by the
+// right-hand edge while the screen is his alone, and a tap throws it.
+static bool     s_freeShown  = false;
+static uint32_t s_freeAt     = 0;       // when it rolled in
+static uint32_t s_freeOutAt  = 0;       // when it was called away, to roll off; 0 for not
+static int      s_freeX = -1000, s_freeY = 0, s_freeR = 0;   // where it sits: the tap's target, the throw's start
+static bool     s_freeWant   = false;   // asked for by a key or the journal: thrown when the screen can
+static uint32_t s_freeWantAt = 0;
+static bool     s_freeSaid   = false;   // he has pointed it out
 // A random visitor does not walk in from the edge, as somebody in range does:
 // a hole opens in the sky, he drops out of it, and he leaves by it. On the
 // clock since the visit's ARRIVING began (ms): the hole opens, he falls, he
@@ -3882,10 +3894,59 @@ bool dieAt(uint32_t ms, int restX, int floorY, int u, float& x, float& y, float&
     return false;
 }
 
+const uint32_t DIE_READ20_MS = 2700;    // a 20 is looked at for longer
+const uint32_t DIE_TOSS_MS   = 600;     // the free roll's die, thrown: up and off the screen
+const uint32_t BONK_HIT_MS   = 420;     // a 1: from the floor to the top of his head
+uint32_t dieRead() { return s_dieNum == 20 ? DIE_READ20_MS : DIE_READ_MS; }
+
+// A four-pointed twinkle.
+void star4(TFT_eSPI& t, int x, int y, int r, uint16_t col) {
+    if (r < 1) return;
+    const int q = r / 3 > 0 ? r / 3 : 1;
+    t.fillTriangle(x, y - r, x - q, y, x + q, y, col);
+    t.fillTriangle(x, y + r, x - q, y, x + q, y, col);
+    t.fillTriangle(x - r, y, x, y - q, x, y + q, col);
+    t.fillTriangle(x + r, y, x, y - q, x, y + q, col);
+}
+
+// Something landing, or leaving in a hurry: eight short lines, spreading.
+void drawBurst(TFT_eSPI& t, int cx, int cy, uint32_t ms, int u) {
+    const int q = (5 + (int)(ms / 11)) * u;
+    for (int d = 0; d < 8; d++) {
+        const float aa = d * 0.785398f;
+        t.drawLine(cx + (int)((q - 4 * u) * cosf(aa)), cy + (int)((q - 4 * u) * sinf(aa)),
+                   cx + (int)(q * cosf(aa)), cy + (int)(q * sinf(aa)), Theme::WHITE);
+    }
+}
+
+// A natural 20 at rest: rays turning behind it, like a sun coming up off the
+// floor (nothing is drawn below `floorY`, where the buttons are), and
+// twinkles round it. `ms` since it stopped.
+void drawGlory(TFT_eSPI& t, int cx, int cy, int r, uint32_t ms, int u, int floorY) {
+    const float grow = ms < 220 ? (float)ms / 220.0f : 1.0f;
+    const float base = (float)ms / 700.0f;
+    const int r0 = r - 2 * u, r1 = r + (int)(24.0f * u * grow);
+    for (int k = 0; k < 10; k++) {
+        const float a = base + k * 0.628319f, hw = 0.13f;
+        const int tipY = cy + (int)(r1 * sinf(a));
+        if (tipY > floorY) continue;
+        t.fillTriangle(cx + (int)(r0 * cosf(a - hw)), cy + (int)(r0 * sinf(a - hw)),
+                       cx + (int)(r0 * cosf(a + hw)), cy + (int)(r0 * sinf(a + hw)),
+                       cx + (int)(r1 * cosf(a)), tipY, (k & 1) ? Theme::WHITE : (uint16_t)0xFFE0);
+    }
+    static const int8_t TW[5][2] = { { -31, -20 }, { 27, -29 }, { 35, -6 }, { -37, -2 }, { 3, -41 } };
+    for (int k = 0; k < 5; k++) {
+        const float ph = sinf((float)ms / 130.0f + k * 1.9f);
+        if (ph > 0) star4(t, cx + TW[k][0] * u, cy + TW[k][1] * u, (int)((2.0f + 4.0f * ph) * u), Theme::WHITE);
+    }
+}
+
 // A d20, face on: a hexagon, the three faces round the middle one, and the
-// number on it when it has stopped.
-void drawD20(TFT_eSPI& t, float cx, float cy, int r, float angDeg, uint8_t num, int u) {
-    const uint16_t BODY = 0xFDA0, SHADE = 0x9240, FACE = num ? 0xFF75 : 0xFED5, INK = 0x0000;
+// number on it when it has stopped. `glow` is the natural 20's gold: 1, or 2
+// for the frames it flashes.
+void drawD20(TFT_eSPI& t, float cx, float cy, int r, float angDeg, uint8_t num, int u, uint8_t glow = 0) {
+    const uint16_t BODY  = glow ? 0xFFE0 : 0xFDA0, SHADE = glow ? 0xFD20 : 0x9240, INK = 0x0000;
+    const uint16_t FACE  = glow == 2 ? 0xFFFF : glow ? 0xFFF4 : num ? 0xFF75 : 0xFED5;
     const float f = num ? 0.66f : 0.55f;
     int hx[6], hy[6], tx[3], ty[3];
     for (int k = 0; k < 6; k++) {
@@ -3916,16 +3977,19 @@ void drawD20(TFT_eSPI& t, float cx, float cy, int r, float angDeg, uint8_t num, 
     }
 }
 
-// What it says it rolled.
-void drawRolled(TFT_eSPI& t, int x, int y, uint8_t num, int u) {
-    char b[12]; snprintf(b, sizeof b, "ROLLED %u", (unsigned)num);
+// What it says it rolled. A 20 says so in gold and a 1 in red.
+void drawRolled(TFT_eSPI& t, int x, int y, uint8_t num, int u, uint32_t now) {
+    char b[14];
+    if (num == 20) snprintf(b, sizeof b, "NATURAL 20!");
+    else           snprintf(b, sizeof b, "ROLLED %u", (unsigned)num);
     const uint8_t callerFont = t.textfont;
     t.setTextFont(2); t.setTextSize(u);
     const int bw = t.textWidth(b) + 10 * u, bh = 22 * u;
     if (x + bw > t.width() - 2) x = t.width() - 2 - bw;
+    const bool flash = num == 20 && ((now / 110) & 1);
     t.fillRoundRect(x, y, bw, bh, 3 * u, Theme::BG);
-    t.drawRoundRect(x, y, bw, bh, 3 * u, Theme::VAPOR_PINK);
-    t.setTextColor(Theme::AMBER);
+    t.drawRoundRect(x, y, bw, bh, 3 * u, num == 20 ? (uint16_t)0xFFE0 : Theme::VAPOR_PINK);
+    t.setTextColor(num == 1 ? Theme::RED : flash ? Theme::WHITE : Theme::AMBER);
     t.setCursor(x + 5 * u, y + 3 * u); t.print(b);
     t.setTextSize(1); t.setTextFont(callerFont);
 }
@@ -3955,8 +4019,61 @@ void dieStart(Kind k, uint32_t now) {
 }
 void missStart(uint32_t now) {
     s_die = Die::MISS; s_dieAt = now; s_dieFor = Kind::NONE; s_dieSaid = 0;
-    s_dieNum = (uint8_t)random(1, 6);
+    s_dieNum = Encounters::missRolled();
+    if (s_dieNum < 1 || s_dieNum > 5) s_dieNum = 3;
     Squachy::setHush(true);
+}
+
+// ---- the free roll's die --------------------------------------------------------
+// What he says when one turns up: how to throw it on this board.
+#if defined(CARDPUTER_ADV)
+const char* const FREE_LINE = "A die! Press P to roll it.";
+#elif defined(STICKS3)
+const char* const FREE_LINE = "A die! FREE ROLL, in the journal.";
+#else
+const char* const FREE_LINE = "A die! Tap it to roll.";
+#endif
+
+// Thrown: up it goes. What it rolls is decided when it has left the screen
+// (encounterBack), and it comes back down as any roll does.
+void freeToss(uint32_t now) {
+    s_die = Die::TOSS; s_dieAt = now; s_dieSaid = 0; s_dieFor = Kind::NONE;
+    s_freeShown = false; s_freeOutAt = 0;
+    s_freeWant = false; s_freeWantAt = 0;
+    Squachy::setHush(true);
+}
+
+// On the floor, waiting. It rolls in from the edge, hops now and then so it
+// reads as something to tap, and rolls off again if the screen is wanted for
+// something else.
+void freeDraw(TFT_eSPI& t, uint32_t now, int w, int h) {
+    if (s_freeR <= 0) return;
+    const int u = h >= 400 ? 2 : 1;
+    const float far = (float)(w + s_freeR + 2 - s_freeX);          // from its spot to just off the edge
+    if (!s_freeShown) {
+        if (!s_freeOutAt || now - s_freeOutAt >= 420) return;
+        const float k = (float)(now - s_freeOutAt) / 420.0f;
+        drawD20(t, (float)s_freeX + far * k * k, (float)s_freeY, s_freeR, 300.0f * k * k, 0, u);
+        return;
+    }
+    const uint32_t ms = now - s_freeAt;
+    float x = (float)s_freeX, y = (float)s_freeY, ang = 0;
+    if (ms < 620) {
+        const float q = 1.0f - (float)ms / 620.0f;
+        x += far * q * q; ang = 360.0f * q * q;
+    } else {
+        const uint32_t c = (ms - 620) % 3400;
+        if (c >= 3000) {
+            const float q = (float)(c - 3000) / 400.0f;
+            y -= 4.0f * q * (1.0f - q) * 9.0f * u; ang = 120.0f * q;
+        } else if (c >= 1100 && c < 1500) {                        // a glint off its corner
+            const int g = (int)(c - 1100), k = g < 200 ? g : 400 - g;
+            drawD20(t, x, y, s_freeR, 0, 0, u);
+            star4(t, s_freeX + s_freeR * 6 / 10, s_freeY - s_freeR * 7 / 10, (2 + k / 50) * u, Theme::WHITE);
+            return;
+        }
+    }
+    drawD20(t, x, y, s_freeR, ang, 0, u);
 }
 bool dieCue(uint8_t bit, uint32_t ms, uint32_t at) {
     if (ms < at || (s_dieSaid & (1u << bit))) return false;
@@ -3967,7 +4084,7 @@ bool dieCue(uint8_t bit, uint32_t ms, uint32_t at) {
 // The die's own script. A hit: it lands (he jumps), it is read, and then
 // either the visitor it rolled is let in to kick it, or it goes in a puff and
 // the encounter starts. A miss: it lands, he looks, he shrugs, it rolls off.
-void dieTick(uint32_t now, int floorY, int u) {
+void dieTick(uint32_t now, int w, int floorY, int u) {
     if (s_die == Die::NONE) return;
     const uint32_t ms = now - s_dieAt;
     float x, y, a; uint32_t rest;
@@ -3975,7 +4092,11 @@ void dieTick(uint32_t now, int floorY, int u) {
     switch (s_die) {
         case Die::DROP:
             if (dieCue(0, ms, rest)) Squachy::visitPose(now, 900, Squachy::VisitPose::STARTLED);
-            if (ms < rest + DIE_READ_MS) break;
+            if (s_dieNum == 20 && dieCue(1, ms, rest + 750)) {   // the best there is
+                Squachy::announce("NATURAL TWENTY!");
+                Squachy::visitPose(now, 1800, Squachy::VisitPose::CHEER);
+            }
+            if (ms < rest + dieRead()) break;
             if (Encounters::active() != s_dieFor) {             // called off while it rolled
                 s_dieFor = Kind::NONE; s_die = Die::PUFF; s_dieAt = now;
             } else if (drawn(s_dieFor)) {
@@ -4008,6 +4129,21 @@ void dieTick(uint32_t now, int floorY, int u) {
         case Die::MISS: {
             static const char* const WHAT[] = { "Huh?", "What's this?", "Uh. Hello?" };
             static const char* const NOPE[] = { "Nothing? Weird.", "Guess not.", "Okay then." };
+            if (s_dieNum == 1) {
+                // The worst there is. He has just time to wonder about it.
+                if (dieCue(0, ms, rest))        Squachy::visitPose(now, 900, Squachy::VisitPose::STARTLED);
+                if (dieCue(1, ms, rest + 1150)) {
+                    Squachy::announce("A one?!");
+                    Squachy::visitPose(now, 1100, Squachy::VisitPose::SCRATCH);
+                }
+                if (ms >= rest + 2500) {
+                    s_die = Die::BONK; s_dieAt = now; s_dieSaid = 0;
+                    int hw, top, bot;
+                    if (!Squachy::lastFootprint(s_bonkX, hw, top, bot)) s_bonkX = w / 2;
+                    s_bonkY = Squachy::crownY();
+                }
+                break;
+            }
             if (dieCue(0, ms, rest))        Squachy::visitPose(now, 900, Squachy::VisitPose::STARTLED);
             if (dieCue(1, ms, rest + 1150)) {
                 Squachy::announce(WHAT[s_dieNum % 3]);
@@ -4024,7 +4160,22 @@ void dieTick(uint32_t now, int floorY, int u) {
         case Die::AWAY:
             if (ms > 1600) { s_die = Die::NONE; Squachy::setHush(false); }
             break;
-        default: break;
+        case Die::BONK: {
+            static const char* const RUDE[] = { "Rude.", "Not my lucky day.", "I felt that." };
+            if (ms < BONK_HIT_MS) {                     // he may shift his feet while it is in the air
+                int cx, hw, top, bot;
+                if (Squachy::lastFootprint(cx, hw, top, bot)) { s_bonkX = cx; s_bonkY = Squachy::crownY(); }
+            }
+            if (dieCue(0, ms, BONK_HIT_MS)) {
+                Squachy::announce("OW!");
+                Squachy::visitPose(now, 500, Squachy::VisitPose::CROUCH);
+            }
+            if (dieCue(1, ms, BONK_HIT_MS + 520))  Squachy::visitPose(now, 1700, Squachy::VisitPose::SAD);
+            if (dieCue(2, ms, BONK_HIT_MS + 1500)) Squachy::announce(RUDE[(now / 7) % 3]);
+            if (ms > BONK_HIT_MS + 2700) { s_die = Die::NONE; Squachy::setHush(false); }
+            break;
+        }
+        default: break;      // TOSS: encounterBack rolls it when it has left the screen
     }
 }
 
@@ -4034,30 +4185,66 @@ bool dieDraw(TFT_eSPI& t, uint32_t now, int w, int h, int floorY) {
     const int u = h >= 400 ? 2 : 1;
     const uint32_t ms = now - s_dieAt;
     const int rx = dieRestX(w), R = 15 * u, big = 5 * u;
+    // A natural 20 is gold, and flashes.
+    const uint8_t glow = s_dieNum == 20 ? (((now / 110) & 1) ? 2 : 1) : 0;
     switch (s_die) {
         case Die::DROP: case Die::MISS: {
             float x, y, a; uint32_t rest;
             if (!dieAt(ms, rx, floorY, u, x, y, a, rest)) { drawD20(t, x, y, R, a, 0, u); break; }
             // It swells a touch as it settles, to show its face.
             const int grow = ms - rest < 165 ? (int)((ms - rest) * big / 165) : big;
-            drawD20(t, (float)rx, y - grow, R + grow, 0, s_dieNum, u);
-            if (ms >= rest + 130 && ms < rest + 130 + DIE_READ_MS - 100)
-                drawRolled(t, rx + R + big + 6 * u, floorY - 32 * u, s_dieNum, u);
+            if (glow) drawGlory(t, rx, (int)y - grow, R + grow, ms - rest, u, floorY);
+            drawD20(t, (float)rx, y - grow, R + grow, 0, s_dieNum, u, glow);
+            if (ms >= rest + 130 && ms < rest + 130 + dieRead() - 100)
+                drawRolled(t, rx + R + big + 6 * u, floorY - 32 * u, s_dieNum, u, now);
             break;
         }
         case Die::WAIT:
-            drawD20(t, (float)rx, (float)(floorY - R - big), R + big, 0, s_dieNum, u);
+            drawD20(t, (float)rx, (float)(floorY - R - big), R + big, 0, s_dieNum, u, glow);
             break;
         case Die::FLY: {
             const float f = (float)ms / 33.0f;
             const float x = (float)rx - 8.0f * u * f, y = (float)(floorY - R - big) - 18.0f * u * f + 0.5f * u * f * f;
-            if (x > -2 * R && y > -2 * R) drawD20(t, x, y, R, -31.0f * f, 0, u);
-            if (ms < 130) {                                      // the boot landing
-                const int cx = rx + R + big + 2 * u, cy = floorY - 16 * u, q = (5 + (int)(ms / 11)) * u;
-                for (int d = 0; d < 8; d++) {
-                    const float aa = d * 0.785398f;
-                    t.drawLine(cx + (int)((q - 4 * u) * cosf(aa)), cy + (int)((q - 4 * u) * sinf(aa)),
-                               cx + (int)(q * cosf(aa)), cy + (int)(q * sinf(aa)), Theme::WHITE);
+            if (x > -2 * R && y > -2 * R) drawD20(t, x, y, R, -31.0f * f, 0, u, glow ? 1 : 0);
+            if (ms < 130) drawBurst(t, rx + R + big + 2 * u, floorY - 16 * u, ms, u);   // the boot landing
+            break;
+        }
+        case Die::TOSS: {
+            // Flicked up off the floor, turning, and out of the top of the screen.
+            const float f = (float)ms / 33.0f;
+            const float x = (float)s_freeX - 1.0f * u * f, y = (float)s_freeY - 24.0f * u * f + 0.35f * u * f * f;
+            const int r = s_freeR + (int)(0.3f * u * f) > R ? R : s_freeR + (int)(0.3f * u * f);
+            if (y > -2.0f * R) drawD20(t, x, y, r, 41.0f * f, 0, u);
+            if (ms < 130) drawBurst(t, s_freeX, s_freeY + s_freeR - 2 * u, ms, u);
+            break;
+        }
+        case Die::BONK: {
+            const float sx = (float)rx, sy = (float)(floorY - R - big);
+            const float tx = (float)s_bonkX, ty = (float)(s_bonkY - R + 2 * u);
+            if (ms < BONK_HIT_MS) {                              // up off the floor in an arc, at his head
+                const float k = (float)ms / (float)BONK_HIT_MS;
+                drawD20(t, sx + (tx - sx) * k, sy + (ty - sy) * k - 4.0f * k * (1.0f - k) * 28.0f * u, R, -330.0f * k, 0, u);
+                break;
+            }
+            const uint32_t since = ms - BONK_HIT_MS;
+            const float f = (float)since / 33.0f;
+            // Off his head and away, on over the side it did not come from.
+            const float dir = tx <= sx ? -1.0f : 1.0f;
+            const float x = tx + dir * 6.0f * u * f, y = ty - 11.0f * u * f + 0.12f * u * f * f;
+            if (x > -2.0f * R && x < (float)(w + 2 * R) && y > -2.0f * R) drawD20(t, x, y, R, dir * 29.0f * f, 0, u);
+            if (since < 130) drawBurst(t, (int)tx, (int)ty + R, since, u);
+            if (since < 2400) {
+                // He sees stars: three of them, round and round the top of
+                // his head, wherever that is by now.
+                int cx, hw, top, bot;
+                if (Squachy::lastFootprint(cx, hw, top, bot)) {
+                    const float gs = Squachy::lastScale();
+                    const int hy = Squachy::crownY();
+                    for (int j = 0; j < 3; j++) {
+                        const float aa = (float)since / 190.0f + j * 2.0944f;
+                        star4(t, cx + (int)(17.0f * gs * cosf(aa)), hy - (int)(2.0f * gs) + (int)(5.0f * gs * sinf(aa)),
+                              (int)(2.6f * gs) + 1, (uint16_t)0xFFE0);
+                    }
                 }
             }
             break;
@@ -4229,6 +4416,11 @@ void polaroid(TFT_eSPI& t, int x, int y, int u, uint32_t now) {
 
 // The tap a random encounter wants: the Lost Signal, or the Elder for his photo.
 bool uiClearEncounterTap(int x, int y, uint32_t now) {
+    if (s_freeShown) {
+        // The free roll's die: a finger's width round it.
+        const int dx = x - s_freeX, dy = y - s_freeY, r = s_freeR * 2 + 1;
+        if (dx * dx + dy * dy <= r * r) { freeToss(now); return true; }
+    }
     if (s_encK == Kind::NONE || s_encTapped || s_encHitR <= 0) return false;
     const int dx = x - s_encHitX, dy = y - s_encHitY;
     if (dx * dx + dy * dy > s_encHitR * s_encHitR) return false;
@@ -4241,13 +4433,20 @@ bool uiClearEncounterTap(int x, int y, uint32_t now) {
     return true;
 }
 
+bool uiClearFreeRoll() {
+    if (!Encounters::freeReady()) return false;
+    s_freeWant = true; s_freeWantAt = 0;
+    return true;
+}
+
 // Rolls the dice, starts what they picked, and ends it. Then draws the parts
 // that go behind Squachy.
 static void encounterBack(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int w, int h,
                           int bandTop, int floorY, bool eligible) {
     // The dice: only on the bare main screen, with nobody visiting.
+    Encounters::Context c{};
+    const int u = h >= 400 ? 2 : 1;
     {
-        Encounters::Context c{};
         c.lastCatch = (uint8_t)Squachy::lastCaught();
         const uint32_t rate = advertRate();
         c.city   = rate > 40;
@@ -4257,8 +4456,30 @@ static void encounterBack(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
         c.visits = true;
         Encounters::tick(now, eligible && s_encK == Kind::NONE && s_vp == VisitPhase::GONE, c);
     }
+    // The free roll's die: on the floor while the screen is his alone.
+    {
+        s_freeR = 11 * u; s_freeX = w - 26 * u; s_freeY = floorY - s_freeR;
+        const bool show = eligible && s_encK == Kind::NONE && s_vp == VisitPhase::GONE && s_die == Die::NONE &&
+                          Encounters::active() == Kind::NONE && Encounters::freeReady();
+        if (show && !s_freeShown) { s_freeAt = now; s_freeOutAt = 0; }
+        if (!show && s_freeShown) s_freeOutAt = now ? now : 1;       // called away
+        s_freeShown = show;
+        if (s_freeWant && !s_freeWantAt) s_freeWantAt = now ? now : 1;
+        if (show) {
+            if (s_freeWant) freeToss(now);
+            else if (!s_freeSaid && now - s_freeAt > 2500) { s_freeSaid = true; Squachy::announce(FREE_LINE); }
+        }
+        // Asked for and the screen never came free: let it go.
+        if (s_freeWant && now - s_freeWantAt > 20000) { s_freeWant = false; s_freeWantAt = 0; }
+        if (s_die == Die::TOSS && now - s_dieAt >= DIE_TOSS_MS) {
+            // Out of sight: now it is rolled, and what it rolled comes down.
+            s_die = Die::NONE;
+            s_freeSaid = false;
+            Squachy::setHush(false);
+            Encounters::rollFree(c);
+        }
+    }
     const Kind want = Encounters::active();
-    const int u = h >= 400 ? 2 : 1;
     if (want == Kind::NONE) {
         if (s_encK != Kind::NONE) encEnd();
     } else if (want != s_encK && want != s_dieFor) {
@@ -4269,7 +4490,7 @@ static void encounterBack(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
     }
     if (s_die == Die::NONE && s_encK == Kind::NONE && eligible && s_vp == VisitPhase::GONE &&
         Encounters::takeMiss()) missStart(now);
-    dieTick(now, floorY, u);
+    dieTick(now, w, floorY, u);
     if (s_encK == Kind::NONE) return;
     const uint32_t ms = encMs(now);
     s_encHitR = 0;
@@ -4347,6 +4568,7 @@ static bool encounterPlay(TFT_eSPI& t, uint32_t now, int w, int h, int bandTop, 
 static bool encounterFront(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, int w, int h, int bandTop, int floorY) {
     (void)eng;
     const bool played = encounterPlay(t, now, w, h, bandTop, floorY);
+    freeDraw(t, now, w, h);                              // the free roll's, waiting: the idle events carry on round it
     return dieDraw(t, now, w, h, floorY) || played;      // the die goes on top of whatever is playing
 }
 static bool encounterPlay(TFT_eSPI& t, uint32_t now, int w, int h, int bandTop, int floorY) {
@@ -4465,6 +4687,7 @@ static bool encounterPlay(TFT_eSPI& t, uint32_t now, int w, int h, int bandTop, 
 }
 #else
 bool uiClearEncounterTap(int, int, uint32_t) { return false; }
+bool uiClearFreeRoll() { return false; }
 #endif
 
 void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance, bool scanMenu) {

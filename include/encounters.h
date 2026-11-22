@@ -13,6 +13,12 @@
 // is, the night, the pet. One in 64 is a shiny. Every one is written to the
 // FIELD JOURNAL (counts, the first date, shinies), kept in NVS like the DEX.
 //
+// And one roll anybody can make: the FREE ROLL. One is waiting after the
+// update, and another turns up after every twelve hours the board has been
+// running (counted across restarts, so pulling the plug earns nothing). Its
+// die sits on the main screen's floor until it is tapped, and it is an honest
+// d20 -- faceOf() -- that the journal counts like any other roll.
+//
 // This file is the dice and the journal and nothing that draws: the host tests
 // in test/encounters_test.cpp check the odds. The encounters themselves are
 // played by ui_clear.cpp.
@@ -59,6 +65,13 @@ Tier     tierOf(Kind k);
 Kind     pick(Tier t, const Context& c, uint32_t r);
 const char* name(Kind k);       // "THE DRIFTER", for the journal
 const char* tierName(Tier t);
+// What a face of the free roll's d20 comes to: 1-5 nothing, 6-12 COMMON,
+// 13-16 UNCOMMON, 17-18 RARE, 19 LEGENDARY, 20 a shiny (its tier is rolled as
+// any hit's is). The same faces the die on screen shows for every roll.
+struct Face { bool miss; bool shiny; Tier tier; };
+Face     faceOf(uint8_t d20);
+// Minutes of running between free rolls.
+const uint16_t FREE_EVERY_MIN = 12 * 60;
 
 // ---- the run (encounters.cpp) -----------------------------------------------
 void begin();
@@ -77,7 +90,21 @@ void     force(Kind k, bool shiny = false, bool count = true);
 // miss in four. True once; the main screen then drops the die for nothing and
 // Squachy wonders what it was. forceMiss() is the console's ENCOUNTER MISS.
 bool     takeMiss();
-void     forceMiss();
+// `face` is the number the dud shows, 1-5; 0 rolls one. A 1 is the one that
+// bounces off his head.
+void     forceMiss(uint8_t face = 0);
+uint8_t  missRolled();          // the face of the miss being shown
+
+// ---- the free roll ------------------------------------------------------------
+// From the loop, on every board, whatever screen is up: counts running time
+// towards the next one. tick() calls it too.
+void     runTick(uint32_t nowMs);
+bool     freeReady();           // one is waiting (never with ENCOUNTERS OFF)
+uint16_t freeInMin();           // running time until the next, 0 while one waits
+// Spends it: an honest d20, a hit written to the journal. The face it rolled,
+// 0 when none was waiting or something is already playing.
+uint8_t  rollFree(const Context& c);
+void     setFree(bool waiting); // the bench's ENCOUNTER FREE, and the emulator
 // Rolls waiting to happen in the next minute... for DIAGNOSTICS.
 uint16_t misses();
 

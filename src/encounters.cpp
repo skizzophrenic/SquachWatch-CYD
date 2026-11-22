@@ -73,6 +73,17 @@ Kind pick(Tier t, const Context& c, uint32_t r) {
     return Kind::NONE;
 }
 
+Face faceOf(uint8_t d20) {
+    Face f{ false, false, Tier::COMMON };
+    if (d20 <= 5)       f.miss  = true;
+    else if (d20 <= 12) f.tier  = Tier::COMMON;
+    else if (d20 <= 16) f.tier  = Tier::UNCOMMON;
+    else if (d20 <= 18) f.tier  = Tier::RARE;
+    else if (d20 == 19) f.tier  = Tier::LEGENDARY;
+    else                f.shiny = true;
+    return f;
+}
+
 const char* name(Kind k) {
     switch (k) {
         case Kind::DRIFTER: return "THE DRIFTER";
@@ -114,7 +125,11 @@ uint32_t s_eligibleMs = 0, s_lastTick = 0;
 Kind     s_active = Kind::NONE;
 bool     s_shiny = false;
 bool     s_missShow = false;
+uint8_t  s_missNum = 3;
 uint32_t s_since = 0;
+// The free roll: whether one waits, and the running time towards the next.
+uint8_t  s_free = 0;
+uint32_t s_runMin = 0, s_runSavedMin = 0, s_runMs = 0, s_runLast = 0;
 
 void save() {
     s_prefs.putBytes("book", s_book, sizeof s_book);
@@ -139,14 +154,70 @@ void begin() {
     if (s_level > 3) s_level = 2;
     s_misses = (uint16_t)s_prefs.getUInt("miss", 0);
     s_photos = (uint16_t)s_prefs.getUInt("photo", 0);
+    // No key yet is a board that has just been updated: its first one waits.
+    s_free   = s_prefs.getUChar("free", 1) ? 1 : 0;
+    s_runMin = s_runSavedMin = s_prefs.getUInt("run", 0);
     // A short read means kinds were added since it was written.
     size_t have = s_prefs.getBytesLength("book");
     if (have > sizeof s_book) have = sizeof s_book;
     if (have >= sizeof(Entry)) s_prefs.getBytes("book", s_book, have - have % sizeof(Entry));
 }
 
+void runTick(uint32_t nowMs) {
+    begin();
+    const uint32_t dt = s_runLast ? nowMs - s_runLast : 0;
+    s_runLast = nowMs ? nowMs : 1;
+    if (s_free) return;                     // one waits at a time: nothing banks behind it
+    s_runMs += dt;
+    if (s_runMs < 60000UL) return;
+    s_runMin += s_runMs / 60000UL;
+    s_runMs  %= 60000UL;
+    if (s_runMin >= FREE_EVERY_MIN) {
+        setFree(true);
+        Serial.println("[encounter] a free roll is waiting");
+    } else if (s_runMin - s_runSavedMin >= 15) {
+        // Kept every quarter of an hour: that much is the most a pulled plug costs.
+        s_runSavedMin = s_runMin;
+        s_prefs.putUInt("run", s_runMin);
+    }
+}
+
+void setFree(bool waiting) {
+    begin();
+    s_free = waiting ? 1 : 0;
+    s_runMin = s_runSavedMin = 0; s_runMs = 0;
+    s_prefs.putUChar("free", s_free);
+    s_prefs.putUInt("run", 0);
+}
+
+bool     freeReady() { begin(); return s_free && s_level != 0; }
+uint16_t freeInMin() {
+    begin();
+    if (s_free) return 0;
+    return (uint16_t)(s_runMin >= FREE_EVERY_MIN ? 1 : FREE_EVERY_MIN - s_runMin);
+}
+
+uint8_t rollFree(const Context& c) {
+    begin();
+    if (!s_free || s_level == 0 || s_active != Kind::NONE) return 0;
+    setFree(false);
+    const uint8_t d = (uint8_t)random(1, 21);
+    const Face f = faceOf(d);
+    Serial.printf("[encounter] free roll: %u\n", (unsigned)d);
+    if (f.miss) { forceMiss(d); return d; }
+    // A 20's tier is rolled as any hit's is. A tier with nothing in it here
+    // steps down to one that has.
+    int tr = (int)(f.shiny ? tierFor((uint8_t)random(1, 101), c.woods) : f.tier);
+    Kind k = Kind::NONE;
+    for (; tr >= 0 && k == Kind::NONE; tr--) k = pick((Tier)tr, c, (uint32_t)random(0, 0x7FFFFFFF));
+    if (k == Kind::NONE) k = c.lastCatch ? Kind::ICONS : Kind::LOST;
+    force(k, f.shiny);
+    return d;
+}
+
 void tick(uint32_t nowMs, bool eligible, const Context& c) {
     begin();
+    runTick(nowMs);
     const uint32_t dt = s_lastTick ? nowMs - s_lastTick : 0;
     s_lastTick = nowMs;
     if (s_active != Kind::NONE || !eligible || s_level == 0) return;
@@ -159,6 +230,7 @@ void tick(uint32_t nowMs, bool eligible, const Context& c) {
         s_prefs.putUInt("miss", s_misses);
         // One miss in four is seen: the die drops for nothing.
         s_missShow = random(0, 4) == 0;
+        s_missNum  = (uint8_t)random(1, 6);
         Serial.printf("[encounter] roll missed (%u in 1000), %u misses%s\n", (unsigned)p, (unsigned)s_misses,
                       s_missShow ? ", shown" : "");
         return;
@@ -182,7 +254,12 @@ void force(Kind k, bool shiny, bool count) {
 }
 
 bool     takeMiss()    { const bool m = s_missShow; s_missShow = false; return m; }
-void     forceMiss()   { s_missShow = true; Serial.println("[encounter] a miss, shown"); }
+void     forceMiss(uint8_t face) {
+    s_missShow = true;
+    s_missNum  = (face >= 1 && face <= 5) ? face : (uint8_t)random(1, 6);
+    Serial.printf("[encounter] a miss, shown: a %u\n", (unsigned)s_missNum);
+}
+uint8_t  missRolled()  { return s_missNum; }
 Kind     active()      { return s_active; }
 bool     activeShiny() { return s_shiny; }
 uint32_t activeSince() { return s_since; }
@@ -213,6 +290,10 @@ void wipe() {
     memset(s_book, 0, sizeof s_book);
     s_photos = 0; s_misses = 0;
     s_prefs.clear();
+    // The free roll is not the journal's: it is as it was.
+    s_prefs.putUChar("free", s_free);
+    s_prefs.putUInt("run", s_runMin);
+    s_runSavedMin = s_runMin;
 }
 #endif
 

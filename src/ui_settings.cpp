@@ -204,6 +204,7 @@ static const uint8_t ALERT_ROWS_N = sizeof(ALERT_ROWS) / sizeof(ALERT_ROWS[0]);
 // encounter -- a name once met, "???" until then.
 static const SettingsRow JOURNAL_ROWS[] = {
     SettingsRow::ENCOUNTERS,
+    SettingsRow::FREE_ROLL,
     SettingsRow::JOURNAL_0, SettingsRow::JOURNAL_1, SettingsRow::JOURNAL_2, SettingsRow::JOURNAL_3, SettingsRow::JOURNAL_4,
     SettingsRow::JOURNAL_5, SettingsRow::JOURNAL_6, SettingsRow::JOURNAL_7, SettingsRow::JOURNAL_8,
 };
@@ -368,6 +369,8 @@ static RowGroupId groupFor(SettingsRow r) {
             break;
         case SettingsRow::ENCOUNTERS:
             return s_page == SettingsPage::JOURNAL ? RowGroupId::JOURNAL : RowGroupId::APPEARANCE;
+        case SettingsRow::FREE_ROLL:
+            return RowGroupId::JOURNAL;
         case SettingsRow::JOURNAL:
             return groupFor(SettingsRow::DEX);
         default:
@@ -1512,6 +1515,16 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
         case SettingsRow::ENCOUNTERS:
             // Named in full where it sits among other things.
             label = s_page == SettingsPage::JOURNAL ? "ENCOUNTERS" : "RANDOM ENCOUNTERS"; value = Encounters::levelName();
+            break;
+        case SettingsRow::FREE_ROLL:
+            label = "FREE ROLL";
+            if (Encounters::level() == 0)      value = "OFF";
+            else if (Encounters::freeReady())  value = "READY";
+            else {
+                const unsigned m = Encounters::freeInMin();
+                snprintf(valBuf, valBufN, "IN %uH %02uM", m / 60, m % 60);
+                value = valBuf;
+            }
             break;
         case SettingsRow::JOURNAL_0: case SettingsRow::JOURNAL_1: case SettingsRow::JOURNAL_2:
         case SettingsRow::JOURNAL_3: case SettingsRow::JOURNAL_4: case SettingsRow::JOURNAL_5:

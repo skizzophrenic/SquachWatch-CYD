@@ -48,8 +48,13 @@ void uiClearSetBatterySource(BatterySource fn);
 // The battery as the board reads it now; false on a board with no reading.
 bool uiClearBatteryNow(uint8_t& pct, bool& charging);
 // A tap on the main screen that a random encounter wants (the Lost Signal,
-// the Elder's photo). True when it took the tap.
+// the Elder's photo, the free roll's die on the floor). True when it took
+// the tap.
 bool uiClearEncounterTap(int x, int y, uint32_t now);
+// The free roll, for a board with no touch and for the FIELD JOURNAL's row:
+// its die is thrown as soon as the main screen can take it. False when no
+// roll is waiting.
+bool uiClearFreeRoll();
 bool uiClearHasBattery();   // a source is set: this board can show a battery
 
 // TERMINAL MODE (Settings::boringMode()): the windows on the home screen.

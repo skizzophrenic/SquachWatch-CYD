@@ -33,7 +33,7 @@ way around.
 
 | Screen | Keys |
 |--------|------|
-| Home | **S** scan, **L** log, **D** desk. ESC opens the menu. **P** plays the next dice scene, once everything is unlocked |
+| Home | **S** scan, **L** log, **D** desk. ESC opens the menu. **P** throws the free roll's die when one is waiting on the floor (once everything is unlocked it plays the next dice scene instead) |
 | Scan picker | **B** BLE, **W** WiFi, **S** closes it |
 | WiFi scan | **B** switches to BLE. ESC back |
 | BLE scan | **W** switches to WiFi. ESC back |

@@ -824,8 +824,12 @@ void pollSerial() {
         // TWIN ABDUCT ELDER). ENCOUNTER <n> SHINY makes it a shiny.
         if (strncasecmp(line, "ENCOUNTER ", 10) == 0) {
             const int k = atoi(line + 10);
-            // ENCOUNTER MISS: the die drops and comes to nothing.
-            if (strncasecmp(line + 10, "MISS", 4) == 0) Encounters::forceMiss();
+            // ENCOUNTER MISS [1-5]: the die drops and comes to nothing (a 1
+            // bounces off his head). ENCOUNTER FREE puts a free roll's die on
+            // the floor, ENCOUNTER ROLL throws it.
+            if (strncasecmp(line + 10, "MISS", 4) == 0) Encounters::forceMiss((uint8_t)atoi(line + 14));
+            else if (strncasecmp(line + 10, "FREE", 4) == 0) { Encounters::setFree(true); Serial.println("[encounter] a free roll is waiting"); }
+            else if (strncasecmp(line + 10, "ROLL", 4) == 0) Serial.println(uiClearFreeRoll() ? "[encounter] rolling the free one" : "[encounter] no free roll waiting");
             else if (k >= 0 && k < (int)Encounters::Kind::COUNT) {
                 Encounters::force((Encounters::Kind)k, strcasestr(line, "SHINY") != nullptr);
             } else Serial.println("[encounter] ENCOUNTER 0-8: DRIFTER GOBLIN ICONS ZOOMIES KAIJU LOST TWIN ABDUCT ELDER");

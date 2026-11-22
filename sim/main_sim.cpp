@@ -718,6 +718,9 @@ int main(int argc, char** argv) {
     // SQUACHSIM_ENCOUNTER=n: random encounter n (encounters.h's order) starts
     // with the capture, as if the dice had just picked it.
     if (const char* en = getenv("SQUACHSIM_ENCOUNTER")) Encounters::force((Encounters::Kind)atoi(en));
+    // SQUACHSIM_FREEROLL=1 puts the free roll's die on the floor, 0 takes it
+    // away. Unset, it is as the last run left it (a fresh one has it waiting).
+    if (const char* fr = getenv("SQUACHSIM_FREEROLL")) Encounters::setFree(atoi(fr) != 0);
     // SQUACHSIM_HUSH=1: he stands still and keeps quiet, as during a visit
     // (Squachy::setHush), so a lab clip can put its own scene around him.
     if (getenv("SQUACHSIM_HUSH")) Squachy::setHush(true);
@@ -1573,8 +1576,13 @@ int main(int argc, char** argv) {
                     else if (line == "@LAUGH") Squachy::visitLaugh(sNow);
                     // "@ENC n": random encounter n starts at this frame, so a
                     // clip can show the screen before it.
-                    else if (line == "@MISS") Encounters::forceMiss();
-                    else if (line.rfind("@ENC", 0) == 0) Encounters::force((Encounters::Kind)atoi(line.c_str() + 4));
+                    // "@MISS n" is a miss showing n (a 1 bounces off his
+                    // head), "@ENC n SHINY" a natural 20, "@FREE" earns the
+                    // free roll and "@ROLL" throws it.
+                    else if (line.rfind("@MISS", 0) == 0) Encounters::forceMiss((uint8_t)atoi(line.c_str() + 5));
+                    else if (line.rfind("@ENC", 0) == 0) Encounters::force((Encounters::Kind)atoi(line.c_str() + 4), line.find("SHINY") != std::string::npos);
+                    else if (line == "@FREE") Encounters::setFree(true);
+                    else if (line == "@ROLL") uiClearFreeRoll();
                     // "@POSE n ms": he holds VisitPose n for ms milliseconds.
                     else if (line.rfind("@POSE", 0) == 0) {
                         int pn = 0, pms = 1000;

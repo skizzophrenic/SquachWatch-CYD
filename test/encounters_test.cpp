@@ -62,5 +62,22 @@ int main() {
     uint32_t twins = 0; for (uint32_t r = 0; r < 500; r++) if (pick(Tier::RARE, c, r) == Kind::TWIN) twins++;
     ck("after an evil twin catch, the twin is likelier", twins > 300);
     ck("every kind has a name", name(Kind::ELDER)[0] != '?' && name(Kind::DRIFTER)[0] != '?');
+
+    suite("The free roll's d20");
+    int fMiss = 0, fCommon = 0, fUncommon = 0, fRare = 0, fLegend = 0, fShiny = 0;
+    for (uint8_t d = 1; d <= 20; d++) {
+        const Face f = faceOf(d);
+        if (f.miss) fMiss++;
+        else if (f.shiny) fShiny++;
+        else if (f.tier == Tier::COMMON) fCommon++;
+        else if (f.tier == Tier::UNCOMMON) fUncommon++;
+        else if (f.tier == Tier::RARE) fRare++;
+        else fLegend++;
+    }
+    ck("five faces come to nothing", fMiss == 5 && faceOf(1).miss && faceOf(5).miss && !faceOf(6).miss);
+    ck("seven are COMMON, four UNCOMMON, two RARE", fCommon == 7 && fUncommon == 4 && fRare == 2);
+    ck("19 is LEGENDARY", fLegend == 1 && faceOf(19).tier == Tier::LEGENDARY && !faceOf(19).shiny);
+    ck("only a 20 is a shiny", fShiny == 1 && faceOf(20).shiny && !faceOf(20).miss);
+    ck("a new one every twelve hours of running", FREE_EVERY_MIN == 720);
     return report();
 }
