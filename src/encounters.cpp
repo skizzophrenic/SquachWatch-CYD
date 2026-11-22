@@ -33,7 +33,7 @@ Tier tierOf(Kind k) {
     switch (k) {
         case Kind::DRIFTER: case Kind::GOBLIN: case Kind::ICONS: case Kind::ZOOMIES: return Tier::COMMON;
         case Kind::KAIJU: case Kind::LOST:                                          return Tier::UNCOMMON;
-        case Kind::TWIN: case Kind::ABDUCT:                                         return Tier::RARE;
+        case Kind::TWIN: case Kind::ABDUCT: case Kind::MIMIC:                       return Tier::RARE;
         default:                                                                    return Tier::LEGENDARY;
     }
 }
@@ -95,6 +95,7 @@ const char* name(Kind k) {
         case Kind::TWIN:    return "EVIL TWIN";
         case Kind::ABDUCT:  return "ABDUCTION";
         case Kind::ELDER:   return "THE ELDER";
+        case Kind::MIMIC:   return "THE MIMIC";
         default:            return "?";
     }
 }
@@ -213,6 +214,15 @@ uint8_t rollFree(const Context& c) {
     if (k == Kind::NONE) k = c.lastCatch ? Kind::ICONS : Kind::LOST;
     force(k, f.shiny);
     return d;
+}
+
+bool takeMimic() {
+    begin();
+    if (!s_free || s_level == 0 || s_active != Kind::NONE) return false;
+    if (random(0, MIMIC_ONE_IN) != 0) return false;
+    setFree(false);
+    force(Kind::MIMIC);
+    return true;
 }
 
 void tick(uint32_t nowMs, bool eligible, const Context& c) {

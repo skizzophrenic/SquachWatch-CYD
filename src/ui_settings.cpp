@@ -207,6 +207,7 @@ static const SettingsRow JOURNAL_ROWS[] = {
     SettingsRow::FREE_ROLL,
     SettingsRow::JOURNAL_0, SettingsRow::JOURNAL_1, SettingsRow::JOURNAL_2, SettingsRow::JOURNAL_3, SettingsRow::JOURNAL_4,
     SettingsRow::JOURNAL_5, SettingsRow::JOURNAL_6, SettingsRow::JOURNAL_7, SettingsRow::JOURNAL_8,
+    SettingsRow::JOURNAL_9,
 };
 static const uint8_t JOURNAL_ROWS_N = sizeof(JOURNAL_ROWS) / sizeof(JOURNAL_ROWS[0]);
 #endif
@@ -374,7 +375,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::JOURNAL:
             return groupFor(SettingsRow::DEX);
         default:
-            if (r >= SettingsRow::JOURNAL_0 && r <= SettingsRow::JOURNAL_8) return RowGroupId::JOURNAL;
+            if (r >= SettingsRow::JOURNAL_0 && r <= SettingsRow::JOURNAL_9) return RowGroupId::JOURNAL;
             break;
     }
     switch (r) {
@@ -1528,7 +1529,8 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             break;
         case SettingsRow::JOURNAL_0: case SettingsRow::JOURNAL_1: case SettingsRow::JOURNAL_2:
         case SettingsRow::JOURNAL_3: case SettingsRow::JOURNAL_4: case SettingsRow::JOURNAL_5:
-        case SettingsRow::JOURNAL_6: case SettingsRow::JOURNAL_7: case SettingsRow::JOURNAL_8: {
+        case SettingsRow::JOURNAL_6: case SettingsRow::JOURNAL_7: case SettingsRow::JOURNAL_8:
+        case SettingsRow::JOURNAL_9: {
             const Encounters::Kind k = (Encounters::Kind)((uint8_t)r - (uint8_t)SettingsRow::JOURNAL_0);
             const uint16_t n = Encounters::met(k);
             if (!n) {

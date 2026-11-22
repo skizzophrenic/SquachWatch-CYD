@@ -38,6 +38,7 @@ enum class Kind : uint8_t {
     TWIN,          // Squachy's evil twin visits, then glitches     RARE
     ABDUCT,        // a UFO beams up the pet, and gives it back     RARE
     ELDER,         // the Elder rises over the ridge                LEGENDARY
+    MIMIC,         // the free roll's die was never a die           RARE (the free roll only)
     COUNT,
     NONE = 255
 };
@@ -105,6 +106,11 @@ uint16_t freeInMin();           // running time until the next, 0 while one wait
 // 0 when none was waiting or something is already playing.
 uint8_t  rollFree(const Context& c);
 void     setFree(bool waiting); // the bench's ENCOUNTER FREE, and the emulator
+// Asked as the free roll's die is touched: about one time in MIMIC_ONE_IN it
+// was never a die. True spends the roll and starts the MIMIC, with no throw.
+// The dice never pick the mimic any other way.
+const uint8_t MIMIC_ONE_IN = 8;
+bool     takeMimic();
 // Rolls waiting to happen in the next minute... for DIAGNOSTICS.
 uint16_t misses();
 

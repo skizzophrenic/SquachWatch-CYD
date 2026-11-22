@@ -6999,14 +6999,25 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         }
     } else {
         const int legH = S(10) - crouch, footY = hy + S(49) - crouch;
+        // A boot (VisitPose::KICK): his right foot goes out to the side and
+        // comes back, once, the leg following it half-way -- the same sideways
+        // shift his legs make when he dangles, since nothing here can swing.
+        int kx = 0;
+        if (act == VisitPose::KICK) {
+            static uint32_t seen = 0, start = 0;
+            if (now - seen > 250u) start = now;
+            seen = now;
+            const uint32_t el = now - start;
+            if (el < 340u) kx = (int)(sinf((float)el / 340.0f * 3.14159265f) * S(10));
+        }
         legKey(cx2 - S(10), hy + S(40), S(8), legH);
-        legKey(cx2 + S(2),  hy + S(40), S(8), legH);
+        legKey(cx2 + S(2) + kx / 2,  hy + S(40), S(8), legH - kx / 4);
         keyRR(cx2 - S(13), footY, S(12), S(6), 2);
-        keyRR(cx2 + S(1),  footY, S(12), S(6), 2);
+        keyRR(cx2 + S(1) + kx,  footY - kx / 3, S(12), S(6), 2);
         legFill(cx2 - S(10), hy + S(40), S(8), legH);
-        legFill(cx2 + S(2),  hy + S(40), S(8), legH);
+        legFill(cx2 + S(2) + kx / 2,  hy + S(40), S(8), legH - kx / 4);
         s_footLx = cx2 - S(13); s_footLy = footY;
-        s_footRx = cx2 + S(1);  s_footRy = footY;
+        s_footRx = cx2 + S(1) + kx;  s_footRy = footY - kx / 3;
         if (!feetHidden) {
             t.fillRoundRect(s_footLx, s_footLy, S(12), S(6), 2, furLight);
             t.fillRoundRect(s_footRx, s_footRy, S(12), S(6), 2, furLight);

@@ -55,6 +55,9 @@ bool uiClearEncounterTap(int x, int y, uint32_t now);
 // its die is thrown as soon as the main screen can take it. False when no
 // roll is waiting.
 bool uiClearFreeRoll();
+// For the emulator and the bench: the waiting die's next game with Squachy is
+// due now (it still waits for him to be standing about with nothing on).
+void uiClearDiePlayNow();
 bool uiClearHasBattery();   // a source is set: this board can show a battery
 
 // TERMINAL MODE (Settings::boringMode()): the windows on the home screen.

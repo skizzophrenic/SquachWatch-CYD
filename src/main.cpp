@@ -752,8 +752,8 @@ __attribute__((unused)) static void freeRollToast() {
 // The P key on the boards with a keyboard. For everybody it throws the free
 // roll's die when one is waiting. For anybody who has done the
 // unlock-everything hold it is the next dice scene instead, now: a roll that
-// misses, a 1, each of the nine encounters in turn, and a 20. Those are only
-// played: the FIELD JOURNAL does not count them. Not in TERMINAL MODE, where
+// misses, a 1, each of the nine the dice pick in turn, a 20, and the mimic.
+// Those are only played: the FIELD JOURNAL does not count them. Not in TERMINAL MODE, where
 // nothing could play one and it would sit waiting, holding up the real dice.
 __attribute__((unused)) static void diceSceneKey() {
     if (Settings::boringMode()) return;
@@ -765,9 +765,10 @@ __attribute__((unused)) static void diceSceneKey() {
     if (n == 0)       Encounters::forceMiss(3);
     else if (n == 1)  Encounters::forceMiss(1);
     else if (n == 11) Encounters::force(Encounters::Kind::DRIFTER, true, false);
+    else if (n == 12) Encounters::force(Encounters::Kind::MIMIC, false, false);
     else              Encounters::force((Encounters::Kind)(n - 2), false, false);
-    Serial.printf("[keys] P: dice scene %u of 12\n", (unsigned)n + 1);
-    n = (uint8_t)((n + 1) % 12);
+    Serial.printf("[keys] P: dice scene %u of 13\n", (unsigned)n + 1);
+    n = (uint8_t)((n + 1) % 13);
 }
 #endif
 
@@ -10892,7 +10893,8 @@ void loop() {
                             break;
                         case SettingsRow::JOURNAL_0: case SettingsRow::JOURNAL_1: case SettingsRow::JOURNAL_2:
                         case SettingsRow::JOURNAL_3: case SettingsRow::JOURNAL_4: case SettingsRow::JOURNAL_5:
-                        case SettingsRow::JOURNAL_6: case SettingsRow::JOURNAL_7: case SettingsRow::JOURNAL_8: break;
+                        case SettingsRow::JOURNAL_6: case SettingsRow::JOURNAL_7: case SettingsRow::JOURNAL_8:
+                        case SettingsRow::JOURNAL_9: break;
 #endif
 #if defined(CYD_GPS) || defined(TWATCH_S3)
                         // The WARDRIVE page.

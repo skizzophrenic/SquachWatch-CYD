@@ -728,7 +728,10 @@ namespace Squachy {
                                      COVER, LOOK_AROUND, HANDS_UP,
                                      // Puzzled: a hand scratching the top of
                                      // his head (the die that rolled nothing).
-                                     SCRATCH };
+                                     SCRATCH,
+                                     // A boot: his right foot out to the side
+                                     // and back, once (the die at his feet).
+                                     KICK };
 #if SQUACH_MESH
     // The host's half of an emote's beat: any VisitPose, held for `ms`. The
     // older ones go through the same moods visitReach() and friends use.

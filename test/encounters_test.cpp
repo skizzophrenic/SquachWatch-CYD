@@ -79,5 +79,13 @@ int main() {
     ck("19 is LEGENDARY", fLegend == 1 && faceOf(19).tier == Tier::LEGENDARY && !faceOf(19).shiny);
     ck("only a 20 is a shiny", fShiny == 1 && faceOf(20).shiny && !faceOf(20).miss);
     ck("a new one every twelve hours of running", FREE_EVERY_MIN == 720);
+
+    suite("The mimic");
+    bool picked = false;
+    for (int tr = 0; tr < 4; tr++)
+        for (uint32_t r = 0; r < 400; r++) if (pick((Tier)tr, c, r) == Kind::MIMIC) picked = true;
+    ck("the dice never pick it: only the free roll's die turns into one", !picked);
+    ck("it is RARE, and it has a name", tierOf(Kind::MIMIC) == Tier::RARE && name(Kind::MIMIC)[0] != '?');
+    ck("ten kinds in the journal", (int)Kind::COUNT == 10);
     return report();
 }

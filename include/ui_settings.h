@@ -132,6 +132,7 @@ enum class SettingsRow : uint8_t {
     ENCOUNTERS,
     FREE_ROLL,       // READY, or how long until the next: selecting it rolls
     JOURNAL_0, JOURNAL_1, JOURNAL_2, JOURNAL_3, JOURNAL_4, JOURNAL_5, JOURNAL_6, JOURNAL_7, JOURNAL_8,
+    JOURNAL_9,
     BACK,
     COUNT,
     NONE = 255

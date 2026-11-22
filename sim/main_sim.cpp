@@ -1583,6 +1583,7 @@ int main(int argc, char** argv) {
                     else if (line.rfind("@ENC", 0) == 0) Encounters::force((Encounters::Kind)atoi(line.c_str() + 4), line.find("SHINY") != std::string::npos);
                     else if (line == "@FREE") Encounters::setFree(true);
                     else if (line == "@ROLL") uiClearFreeRoll();
+                    else if (line == "@PLAY") uiClearDiePlayNow();   // the waiting die goes over to be booted
                     // "@POSE n ms": he holds VisitPose n for ms milliseconds.
                     else if (line.rfind("@POSE", 0) == 0) {
                         int pn = 0, pms = 1000;

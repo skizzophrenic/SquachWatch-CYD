@@ -830,9 +830,10 @@ void pollSerial() {
             if (strncasecmp(line + 10, "MISS", 4) == 0) Encounters::forceMiss((uint8_t)atoi(line + 14));
             else if (strncasecmp(line + 10, "FREE", 4) == 0) { Encounters::setFree(true); Serial.println("[encounter] a free roll is waiting"); }
             else if (strncasecmp(line + 10, "ROLL", 4) == 0) Serial.println(uiClearFreeRoll() ? "[encounter] rolling the free one" : "[encounter] no free roll waiting");
+            else if (strncasecmp(line + 10, "PLAY", 4) == 0) uiClearDiePlayNow();   // the waiting die goes over to be booted
             else if (k >= 0 && k < (int)Encounters::Kind::COUNT) {
                 Encounters::force((Encounters::Kind)k, strcasestr(line, "SHINY") != nullptr);
-            } else Serial.println("[encounter] ENCOUNTER 0-8: DRIFTER GOBLIN ICONS ZOOMIES KAIJU LOST TWIN ABDUCT ELDER");
+            } else Serial.println("[encounter] ENCOUNTER 0-9: DRIFTER GOBLIN ICONS ZOOMIES KAIJU LOST TWIN ABDUCT ELDER MIMIC");
             continue;
         }
         // WIGLEKEY <WiGLE's "Encoded for use" value>, from the flasher page:
