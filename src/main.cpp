@@ -4518,6 +4518,39 @@ void setup() {
         OtaWifi::bootCheck(9000);
         if (panelTextOk()) { PANEL.fillRect(0, 0, tft.width(), tft.height(), Theme::BG); panelShow(); }
     }
+#if SQW_BOOT_CLOCK
+    // UPDATE CHECK off -- a board kept on a build of its own has every reason
+    // to turn it off -- left nothing to set the clock after a power cut, and
+    // the SD log wrote every row to the nodate file until someone noticed.
+    // The same join for the time alone, and only when the time was lost: a
+    // software restart keeps it, and costs no WiFi.
+    else if (!Settings::updateCheck() && !Clock::trusted() && !Security::locked() && OtaWifi::hasSaved()) {
+        bootCheckRan = true;
+#if defined(CROWPANEL7)
+        CrowBL::set(24);
+#elif defined(TAB5)
+        Tab5Panel::backlight(24);
+#elif defined(TDECK_PLUS)
+        tdeckBacklight(24);
+#else
+        ledcWrite(BL_CH_ORIG, 24);
+        ledcWrite(BL_CH_CAP,  24);
+        ledcWrite(BL_CH_AWOK, 24);
+#endif
+        if (panelTextOk()) {
+            PANEL.fillRect(0, 0, tft.width(), tft.height(), Theme::BG);
+            PANEL.setTextSize(1);
+            PANEL.setTextWrap(false);
+            PANEL.setTextColor(Theme::CYAN, Theme::BG);
+            const char* m = "SETTING THE CLOCK...";
+            PANEL.setCursor((tft.width() - PANEL.textWidth(m)) / 2, tft.height() / 2 - 4);
+            PANEL.print(m);
+            panelShow();
+        }
+        OtaWifi::bootCheck(9000, false);   // the update check's budget: 6000 gave up mid-join
+        if (panelTextOk()) { PANEL.fillRect(0, 0, tft.width(), tft.height(), Theme::BG); panelShow(); }
+    }
+#endif
 
 
 #if defined(CYD35)

@@ -925,7 +925,7 @@ void connect(const char* ssid, const char* pass, bool save) {
     }
 }
 
-bool bootCheck(uint32_t budgetMs) {
+bool bootCheck(uint32_t budgetMs, bool askSite) {
     readSaved();
     if (!s_n) return false;
     const uint32_t t0 = millis();
@@ -1017,6 +1017,7 @@ bool bootCheck(uint32_t budgetMs) {
     bool found = false;
     if (st == WL_CONNECTED) {
         Serial.printf("[ota] boot check: joined in %lu ms, signal %d dBm\n", (unsigned long)(millis() - t0), (int)WiFi.RSSI());
+        if (askSite) {
         uint8_t body[1024];
         size_t  len = 0;
         // From the join, like the join's own wait, and never below a second:
@@ -1061,6 +1062,7 @@ bool bootCheck(uint32_t budgetMs) {
             }
             plain.stop();
         }
+        }  // askSite
         // The clock, asked AFTER the manifest rather than alongside it. The
         // two used to overlap to save a moment, and on two boots in three
         // the manifest's GET then took 2.8-3.0 s instead of 70 ms: two name

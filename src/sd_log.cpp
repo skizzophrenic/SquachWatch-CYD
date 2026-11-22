@@ -192,17 +192,16 @@ void SdLog::openDaily() {
     // gets the nodate file, because its date can be days behind.
     _day = Clock::trusted() ? Clock::localDay() : 0;
     SdRow::fileName(_filename, sizeof(_filename), _day);
-#if defined(NM_CYD_C5)
     // Say what is already on the card for today. Mounting proves the card
     // answers; it does not prove a single row ever reached it, and until this
     // line existed the only way to tell the two apart was to pull the card.
-    // Board-gated for the same reason as the branch in logEvent() below.
+    // On every board now: the 3.5" had a card that mounted and logged nothing,
+    // and serial said only "card mounted".
     FramePush::busLock();
     File f = CARD.open(_filename, FILE_READ);
     if (f) { Serial.printf("[sd] %s: %lu bytes already\n", _filename, (unsigned long)f.size()); f.close(); }
     else   { Serial.printf("[sd] %s: new file\n", _filename); }
     FramePush::busUnlock();
-#endif
 }
 
 void SdLog::logEvent(const Detection& d) {
@@ -218,24 +217,18 @@ void SdLog::logEvents(const Detection* ring, uint8_t cap, uint8_t from, uint8_t 
     File f = CARD.open(_filename, FILE_APPEND);
     if (!f) {
         FramePush::busUnlock();
-#if defined(NM_CYD_C5)
         // Once, not once per detection: a card that mounts but cannot be
         // opened for append reads exactly like a card that was logging, and
         // begin()'s own comment two screens up says that is the thing to
         // avoid. A write-protected card, a full one, or a filesystem the
-        // driver mounted but cannot write all land here.
-        //
-        // Board-gated ON PURPOSE. It is worth having on every board and costs
-        // ~288 bytes of flash, but this is a board-port PR: no existing board
-        // should change by a byte on account of it. Lift the guard if you want
-        // it everywhere -- see the note in the PR description.
+        // driver mounted but cannot write all land here. Once board-gated to
+        // the C5; on every board now, for the same reason as openDaily().
         static bool said = false;
         if (!said) {
             said = true;
             Serial.printf("[sd] cannot open %s for append: mounted, but nothing is being logged\n",
                           _filename);
         }
-#endif
         return;
     }
     char line[SdRow::ROW_MAX];
