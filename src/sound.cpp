@@ -59,6 +59,15 @@ static const int PIN_AMP = -1;
 static const int PIN_MCK = -1, PIN_BCK = 7, PIN_WS = 5, PIN_DOUT = 6;
 static const int PIN_AMP = -1;
 #define SOUND_NO_CODEC 1
+#elif defined(WS_C5_35)
+// Waveshare C5 3.5": ESP32-C5 -> I2S -> ES8311 (0x18 on the shared touch bus)
+// -> NS4150B amp -> onboard speaker. NO external MCLK net: the codec clocks off
+// BCLK (see the board's own codecInit). The amp enable is not a GPIO: it is the
+// 0x24 expander's EXIO5, which WsExio::begin() drives high at start-up. The
+// amp quiets when the I2S clocks stop between sounds. Pins from the hardware
+// ref: BCLK 23, LRCK 10, DOUT 25. (Mic/DIN 24 is unused: TX/DAC only.)
+static const int PIN_MCK = -1, PIN_BCK = 23, PIN_WS = 10, PIN_DOUT = 25;
+static const int PIN_AMP = -1;
 #else
 static const int PIN_MCK = 4,  PIN_BCK = 5,  PIN_WS = 7,  PIN_DOUT = 8;
 static const int PIN_AMP = 1;
@@ -172,16 +181,76 @@ static bool wr(uint8_t r, uint8_t v) {
     return Wire.endTransmission() == 0;
 }
 static uint8_t rd(uint8_t r) {
+#if defined(WS_C5_35)
+    // The ES8311 shares the FT6336 touch bus (SDA 27 / SCL 26) over a flex at
+    // 100 kHz. A repeated-start read (endTransmission(false)) errors on the C5
+    // and leaves the bus mid-transaction, which then breaks touch. Send a STOP
+    // between the register-pointer write and the read; if it still errors,
+    // reset the bus and retry once so a bad read never wedges touch.
+    for (int attempt = 0; attempt < 2; attempt++) {
+        Wire.beginTransmission(CODEC); Wire.write(r);
+        if (Wire.endTransmission(true) == 0 && Wire.requestFrom(CODEC, (uint8_t)1) == 1)
+            return (uint8_t)Wire.read();
+        Wire.end(); Wire.begin(27, 26, 100000U);
+    }
+    return 0;
+#else
     Wire.beginTransmission(CODEC); Wire.write(r);
     if (Wire.endTransmission(false) != 0) return 0;
     if (Wire.requestFrom(CODEC, (uint8_t)1) != 1) return 0;
     return (uint8_t)Wire.read();
+#endif
 }
 // Espressif's es8311 driver boiled down to one case: slave on the bus, MCLK
 // from its pin at 256 x 16 kHz, 16-bit I2S in, the DAC on, the ADC left
 // asleep. The divider registers (02-08) only matter to the codec as a bus
 // master, but they are set to the table's 4.096 MHz / 16 kHz row anyway, as
 // the driver does. Volume register 32 sits at the driver's 85%.
+#if defined(WS_C5_35)
+// Waveshare C5 3.5": the register sequence of the ESP32-C5-BSP driver, which
+// is the one heard on this board. No MCLK pin, so the codec clocks off SCLK
+// (BCLK x8 = 256 x 16 kHz), which must already be running: begin() installs
+// and starts I2S before this. The short sequence the other boards use left
+// the speaker silent here: it never wrote the analog power registers (10, 11),
+// the internal reference (44) or the DAC unmute (31).
+static bool codecInit() {
+    uint8_t v;
+    if (rd(0x0D) != 0xFA) wr(0x0D, 0xFA);
+    wr(0x44, 0x08); wr(0x44, 0x08);         // I2C noise immunity, twice as the vendor does
+    wr(0x01, 0x30); wr(0x02, 0x00); wr(0x03, 0x10);
+    wr(0x16, 0x24); wr(0x04, 0x10); wr(0x05, 0x00);
+    wr(0x0B, 0x00); wr(0x0C, 0x00); wr(0x10, 0x1F);
+    wr(0x11, 0x7F); wr(0x00, 0x80);
+    v = rd(0x00); wr(0x00, (uint8_t)(v & 0xBF));           // serial port slave
+    wr(0x01, 0xBF);                         // clock from SCLK, every clock on
+    v = rd(0x06); wr(0x06, (uint8_t)(v & ~0x20));          // SCLK not inverted
+    wr(0x13, 0x10); wr(0x1B, 0x0A); wr(0x1C, 0x6A);
+    wr(0x44, 0x58);                         // internal reference
+    v = rd(0x02); wr(0x02, (uint8_t)((v & 0x07) | (3 << 3)));   // SCLK x8
+    wr(0x05, 0x00);                         // ADC and DAC dividers 1
+    v = rd(0x03); wr(0x03, (uint8_t)((v & 0x80) | 0x10));  // single speed, ADC OSR
+    v = rd(0x04); wr(0x04, (uint8_t)((v & 0x80) | 0x10));  // DAC OSR
+    v = rd(0x07); wr(0x07, (uint8_t)(v & 0xC0));           // LRCK divider high
+    wr(0x08, 0xFF);                         // LRCK divider low
+    v = rd(0x06); wr(0x06, (uint8_t)((v & 0xE0) | 0x03));  // BCLK divider 4
+    v = rd(0x09); wr(0x09, (uint8_t)((v | 0x0C) & 0xFC));  // SDP in: 16-bit I2S
+    v = rd(0x0A); wr(0x0A, (uint8_t)((v | 0x0C) & 0xFC));  // SDP out: 16-bit I2S
+    wr(0x00, 0x80); wr(0x01, 0xBF);
+    v = rd(0x09); wr(0x09, (uint8_t)(v & ~0x40));          // DAC serial input on
+    wr(0x17, 0xBF);
+    wr(0x0E, 0x02);                         // PGA and ADC modulator
+    wr(0x12, 0x00);                         // DAC up
+    wr(0x14, 0x1A);
+    v = rd(0x14); wr(0x14, (uint8_t)(v & ~0x40));          // no digital microphone
+    wr(0x0D, 0x01);                         // analog circuitry up
+    wr(0x15, 0x40);
+    wr(0x37, 0x08);                         // DAC equalizer bypass
+    wr(0x45, 0x00);
+    const bool ok = wr(0x32, 0xD8);         // DAC volume, 85%
+    v = rd(0x31); wr(0x31, (uint8_t)(v & 0x9F));           // DAC unmuted
+    return ok;
+}
+#else
 static bool codecInit() {
     if (!wr(0x00, 0x1F)) return false;      // reset everything
     delay(20);
@@ -211,6 +280,7 @@ static bool codecInit() {
     wr(0x32, 0xD8);                         // DAC volume, 85%
     return true;
 }
+#endif
 
 // ---- the amplifier ---------------------------------------------------------
 #if defined(STICKS3)
