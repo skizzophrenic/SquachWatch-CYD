@@ -21,6 +21,10 @@
 #include <string.h>
 #include "sense_cyd.h"
 #include "sense_store.h"
+#if SENSE_RICH
+#include "sense_vitals.h"
+#include "ui_sensing_cyd.h"
+#endif
 
 volatile uint8_t g_senseConsole = 0;
 
@@ -63,6 +67,17 @@ void step(uint32_t at) {
     r.presence = s_room == R_PRESENCE || s_room == R_MOTION || (s_lastMotion && at - s_lastMotion < 15000);
     SenseStore::status(r, at);
     SenseStore::router(0x5a17, r.rssi, r.rate, r.score, r.cal, r.rel, at);
+#if SENSE_RICH
+    // SCOPE's other paths: a TV, a phone, a laptop. Walking crosses the
+    // phone's path, the second one; the others barely stir.
+    if (r.mode == SENSE_MODE_STA) {
+        const bool walk = s_room == R_MOTION;
+        const uint8_t cal = s_room == R_CAL ? 40 : 100;
+        SenseStore::path(1, 0x3c11, -61, 14, (uint8_t)(walk ? 50 + 30 * fabsf(sinf(at / 500.0f)) : 4 + rnd() * 8), cal, 80, at);
+        SenseStore::path(2, 0x7e02, -74, 9, (uint8_t)(walk ? 18 + rnd() * 8 : 3 + rnd() * 6), cal, 70, at);
+        if (s_room != R_LOW) SenseStore::path(3, 0x91c4, -82, 5, (uint8_t)(2 + rnd() * 6), cal, 55, at);
+    }
+#endif
     // The spectrum: a breathing-speed rhythm when someone sits still, a broad
     // smear while they move, faint noise otherwise.
     uint8_t* row = s_rows[s_head];
@@ -82,6 +97,9 @@ void step(uint32_t at) {
 }
 }  // namespace
 
+#if SENSE_RICH
+static void vitStep(uint32_t now);
+#endif
 // The emulator's driver: begin() fills the last 30 s, step() keeps it going.
 void simSenseBegin(uint32_t now) {
     const char* e = getenv("SQUACHSIM_SENSE");
@@ -90,6 +108,10 @@ void simSenseBegin(uint32_t now) {
            : !strcmp(e, "nowifi") ? R_NOWIFI : R_CLEAR;
     SenseStore::begin();
     s_head = s_count = 0;
+#if SENSE_RICH
+    // SQUACHSIM_PAGE=1..3: SCOPE, SNEAK or VITALS instead of SENSING.
+    if (const char* pg = getenv("SQUACHSIM_PAGE")) for (int k = atoi(pg) & 3; k > 0; k--) uiSensingSwipe(1);
+#endif
     if (s_room == R_NOWIFI) { s_next = now; return; }
     const Room keep = s_room;
     // 30 s back, whatever the clock reads: the times are uint32 and the store
@@ -103,6 +125,9 @@ void simSenseBegin(uint32_t now) {
     s_next = now;
 }
 void simSenseStep(uint32_t now) {
+#if SENSE_RICH
+    vitStep(now);
+#endif
     if (s_room == R_NOWIFI) return;
     while ((int32_t)(now - s_next) >= 0) { step(s_next); s_next += 100; }
 }
@@ -129,6 +154,32 @@ void senseCydStart(const char*, const char*) {
     s_next = now;
     s_running = true;
 }
+#if SENSE_RICH
+// VITALS: a chest signal of 12.5 breaths and 66 beats a minute, the heartbeat
+// far smaller, some noise; while somebody walks, a mess. Sixty seconds of it
+// go in at once so a render has a full spectrum and real numbers.
+static bool s_vitOn = false;
+static uint32_t s_vitFrames = 0, s_vitNext = 0;
+static void vitFrame() {
+    const float t = s_vitFrames / 20.0f;
+    float c1 = sinf(6.2832f * 12.5f / 60 * t) + 0.04f * sinf(6.2832f * 66.0f / 60 * t) + (rnd() - 0.5f) * 0.12f;
+    if (s_room == R_MOTION) c1 += (rnd() - 0.5f) * 6;
+    if (s_room == R_CAL || s_room == R_LOW || s_room == R_JOIN || s_room == R_NOWIFI) return;
+    Vitals::feed(c1, 80);
+    s_vitFrames++;
+}
+void senseCydVitals(bool on) {
+    if (on && !s_vitOn) {
+        s_vitOn = Vitals::begin(millis());
+        for (int i = 0; i < 1200 && s_vitOn; i++) vitFrame();
+        s_vitNext = millis();
+    } else if (!on && s_vitOn) { Vitals::end(); s_vitOn = false; }
+}
+static void vitStep(uint32_t now) {
+    if (!s_vitOn) return;
+    while ((int32_t)(now - s_vitNext) >= 0) { vitFrame(); s_vitNext += 50; }
+}
+#endif
 void senseCydStop()    { s_running = false; }
 bool senseCydRunning() { return s_running; }
 void senseCydTick()    { if (s_running) simSenseStep(millis()); }

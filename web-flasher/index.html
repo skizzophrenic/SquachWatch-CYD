@@ -713,6 +713,12 @@
   .step .identify-result{grid-column:1 / -1;margin-top:0;min-height:0}
   .step .identify-result:empty{display:none}
   @media (max-width:480px){.step .identify-row{grid-template-columns:1fr}}
+  .wigle-panel{grid-column:1 / -1;display:grid;gap:8px;border:1px solid rgba(0,255,245,0.3);border-radius:8px;padding:10px 12px;margin-top:4px}
+  .wigle-panel label{display:grid;gap:2px;font-family:'VT323', monospace;font-size:1rem;color:var(--vapor-blue);letter-spacing:.03em}
+  .wigle-panel input[type=text],.wigle-panel input[type=password]{font-family:'VT323', monospace;font-size:1rem;background:rgba(0,0,0,0.35);color:var(--cyan);border:1px solid rgba(0,255,245,0.4);border-radius:5px;padding:4px 8px;min-width:0}
+  .wigle-panel .wigle-check{display:flex;align-items:center;gap:8px}
+  .wigle-panel .wigle-actions{display:flex;flex-wrap:wrap;gap:8px}
+  .wigle-panel .wigle-actions .identify-btn{flex:1 1 200px}
   .advanced .overclock-row.disabled{display:none}
 </style>
 </head>
@@ -819,6 +825,7 @@
       <optgroup label="M5STACK">
       <option value="./manifest-sticks3.json" data-ocnote="The StickS3 runs its screen at its own full speed; there is no slower build.">M5Stack StickS3 &mdash; 1.14&quot; landscape, two buttons (BETA)</option>
       <option value="./manifest-cardputer-adv.json" data-ocnote="The Cardputer runs its screen at its own full speed; there is no slower build.">M5Stack Cardputer ADV &mdash; keyboard; not the original Cardputer (BETA)</option>
+      <option value="./manifest-tab5.json" data-ocnote="The Tab5 has one build. On its first boot it offers a one-time update for its radio chip: keep it plugged in for that minute.">M5Stack Tab5 &mdash; 5&quot; ESP32-P4; updates its radio on first boot (BETA)</option>
       </optgroup>
       <optgroup label="WATCHES">
       <option value="./manifest-twatch-s3.json">LilyGo T-Watch S3 / S3 Plus (BETA)</option>
@@ -880,9 +887,32 @@
       <p class="tool-desc">T-Watch S3 Plus with WARDRIVE on: saves its log for WiGLE.</p>
       <div class="identify-result" id="wigleResult"></div>
     </div>
+    <div class="identify-row">
+      <button id="wigleUpBtn" class="identify-btn">[ UPLOAD TO WIGLE ]</button>
+      <p class="tool-desc">Sends wardrive files to your WiGLE account, or gives an S3 board your key so it uploads by itself.</p>
+      <div class="wigle-panel" id="wiglePanel" hidden>
+        <label for="wigleName">API NAME (wigle.net/account)
+          <input type="text" id="wigleName" autocomplete="off" spellcheck="false" placeholder="AID...">
+        </label>
+        <label for="wigleToken">API TOKEN
+          <input type="password" id="wigleToken" autocomplete="off" spellcheck="false">
+        </label>
+        <label class="wigle-check" for="wigleRemember"><input type="checkbox" id="wigleRemember"> Remember them on this computer</label>
+        <label for="wigleFiles">WARDRIVE FILES (wigle-*.csv from the SD card, or a downloaded file)
+          <input type="file" id="wigleFiles" accept=".csv,.gz,text/csv" multiple>
+        </label>
+        <div class="wigle-actions">
+          <button id="wigleSendBtn" class="identify-btn">[ UPLOAD FILES ]</button>
+          <button id="wigleKeyBtn" class="identify-btn">[ SEND KEY TO MY BOARD ]</button>
+        </div>
+        <p class="tool-desc">The name and token go only to wigle.net, and to your board over the cable. SEND KEY is for the boards that upload on their own: T-Deck Plus, T-Watch S3 Plus, and the Freenove S3 GPS builds. They then have UPLOAD NOW and AUTO UPLOAD under SETTINGS &gt; WARDRIVE.</p>
+      </div>
+      <div class="identify-result" id="wigleUpResult"></div>
+    </div>
       <details class="advanced">
         <summary>More about these tools</summary>
-    <p class="browser-note"><strong>Download WiGLE File</strong> is for a T-Watch S3 Plus with WARDRIVE on (WATCH SETTINGS): it saves every network and device the watch logged, with where, as a WiGLE file you can upload at <a href="https://wigle.net/uploads" target="_blank" rel="noopener">wigle.net/uploads</a>. The log stays on the watch until you clear it.</p>
+    <p class="browser-note"><strong>Download WiGLE File</strong> is for a T-Watch S3 Plus with WARDRIVE on (WATCH SETTINGS): it saves every network and device the watch logged, with where, as a WiGLE file. The log stays on the watch until you clear it.</p>
+    <p class="browser-note"><strong>Upload to WiGLE</strong> sends wardrive files straight from this page to your <a href="https://wigle.net/account" target="_blank" rel="noopener">WiGLE account</a>: the watch's download, or the <code>wigle-*.csv</code> files a CYD, Cardputer or Marauder writes to its SD card. <strong>Send Key to My Board</strong> gives a T-Deck Plus, T-Watch S3 Plus or Freenove S3 GPS build your key over the cable, and from then on it uploads by itself over your saved WiFi.</p>
     <p class="browser-note">After flashing, <strong>Set Time &amp; Zone</strong> tells the board this computer's clock and time zone over the same cable. The zone is kept for good; the clock lasts until the board is unplugged, and a saved WiFi network puts it back at every boot. A T-Watch has its clock set for it after installing, and keeps the time from then on, even through a flat battery.</p>
       </details>
     </section>
@@ -2138,7 +2168,9 @@
       setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000);
       var sent = +ended[1];
       wigleResult.textContent = 'SAVED ' + keep.length + ' rows as ' + name + (sent !== keep.length ? ' (the watch sent ' + sent + '; ' + (sent - keep.length) + ' arrived damaged and were left out)' : '') +
-        '. Upload it at wigle.net/uploads.';
+        '. UPLOAD TO WIGLE below sends it.';
+      wiglePending = new File([blob], name, { type: 'text/csv' });
+      if (wiglePanel) { wiglePanel.hidden = false; wigleUpResult.textContent = 'Ready to send ' + name + ': fill in your API name and token, then UPLOAD FILES.'; }
       say('Every network I heard, and where. WiGLE is going to love this.', 7600);
     } catch (err) {
       wigleResult.className = 'identify-result err';
@@ -2148,6 +2180,123 @@
       try { if (port) await port.close(); } catch (e4) {}
     } finally {
       wigleBtn.disabled = false;
+    }
+  }
+
+  // ---- UPLOAD TO WIGLE ---------------------------------------------------------
+  // Straight from this page to api.wigle.net: WiGLE allows it from a web page
+  // (checked 2026-11-21), so nothing passes through squachwatch.com. The
+  // name and token are kept in this browser only if asked.
+  var wigleUpBtn = document.getElementById('wigleUpBtn');
+  var wiglePanel = document.getElementById('wiglePanel');
+  var wigleUpResult = document.getElementById('wigleUpResult');
+  var wigleName = document.getElementById('wigleName');
+  var wigleToken = document.getElementById('wigleToken');
+  var wigleRemember = document.getElementById('wigleRemember');
+  var wigleFiles = document.getElementById('wigleFiles');
+  var wigleSendBtn = document.getElementById('wigleSendBtn');
+  var wigleKeyBtn = document.getElementById('wigleKeyBtn');
+  var wiglePending = null;
+  try {
+    var savedWigle = JSON.parse(localStorage.getItem('sqwWigle') || 'null');
+    if (savedWigle && wigleName) { wigleName.value = savedWigle.n || ''; wigleToken.value = savedWigle.t || ''; wigleRemember.checked = true; }
+  } catch (e) {}
+  if (wigleUpBtn) wigleUpBtn.addEventListener('click', function () { wiglePanel.hidden = !wiglePanel.hidden; });
+  if (wigleSendBtn) wigleSendBtn.addEventListener('click', uploadWigleFiles);
+  if (wigleKeyBtn) {
+    if (!('serial' in navigator)) { wigleKeyBtn.disabled = true; wigleKeyBtn.textContent = '[ SEND KEY ] (needs a desktop browser)'; }
+    else wigleKeyBtn.addEventListener('click', sendWigleKey);
+  }
+  function wigleEncoded() {
+    var n = (wigleName.value || '').trim(), t = (wigleToken.value || '').trim();
+    if (!n || !t) return null;
+    try {
+      if (wigleRemember.checked) localStorage.setItem('sqwWigle', JSON.stringify({ n: n, t: t }));
+      else localStorage.removeItem('sqwWigle');
+    } catch (e) {}
+    return btoa(n + ':' + t);
+  }
+  function wigleSay(text, err) { wigleUpResult.className = 'identify-result' + (err ? ' err' : ''); wigleUpResult.textContent = text; }
+  async function uploadWigleFiles() {
+    var enc = wigleEncoded();
+    if (!enc) { wigleSay('Fill in your API name and API token from wigle.net/account first.', true); return; }
+    var files = Array.prototype.slice.call(wigleFiles.files || []);
+    if (wiglePending) files.unshift(wiglePending);
+    if (!files.length) { wigleSay('Pick a file first: the wigle-*.csv files on the SD card, or download the watch\u2019s above.', true); return; }
+    wigleSendBtn.disabled = true;
+    var sent = 0;
+    try {
+      for (var i = 0; i < files.length; i++) {
+        var f = files[i];
+        wigleSay('Sending ' + f.name + (files.length > 1 ? ' (' + (i + 1) + ' of ' + files.length + ')' : '') + '...');
+        var fd = new FormData();
+        fd.append('file', f, f.name);
+        var resp = await fetch('https://api.wigle.net/api/v2/file/upload', {
+          method: 'POST', headers: { 'Authorization': 'Basic ' + enc, 'Accept': 'application/json' }, body: fd });
+        var j = null;
+        try { j = await resp.json(); } catch (e) {}
+        if (resp.status === 401 || resp.status === 403) throw new Error('WiGLE refused the name and token. Copy them again from wigle.net/account.');
+        if (!resp.ok || !j || !j.success) throw new Error((j && j.message) ? j.message : ('WiGLE answered ' + resp.status));
+        sent++;
+        if (f === wiglePending) wiglePending = null;
+      }
+      wigleSay('SENT ' + sent + ' file' + (sent === 1 ? '' : 's') + ' to WiGLE. They appear at wigle.net/uploads once processed.');
+      say('Off to WiGLE. Every network on the map.', 6200);
+    } catch (err) {
+      wigleSay((sent ? 'Sent ' + sent + ', then: ' : 'Couldn\u2019t send it: ') + (err && err.message ? err.message : 'no answer from WiGLE'), true);
+    } finally {
+      wigleSendBtn.disabled = false;
+    }
+  }
+  // The key to an S3 board over the cable: WIGLEKEY <name:token in base64>,
+  // which WiGLE calls "Encoded for use". Opening the port can restart the
+  // board; if it does not answer, the line goes again once it is up.
+  async function sendWigleKey() {
+    var enc = wigleEncoded();
+    if (!enc) { wigleSay('Fill in your API name and API token from wigle.net/account first.', true); return; }
+    wigleKeyBtn.disabled = true;
+    var port, reader, writer;
+    try {
+      wigleSay('Pick the board\u2019s port...');
+      port = await navigator.serial.requestPort({ filters: [{ usbVendorId: 0x303A }] });
+      await port.open({ baudRate: 115200, bufferSize: 16384 });
+      try { await port.setSignals({ requestToSend: false }); } catch (e) {}
+      try { await port.setSignals({ dataTerminalReady: false }); } catch (e) {}
+      var encd = new TextEncoder(), dec = new TextDecoder();
+      reader = port.readable.getReader();
+      async function ask() {
+        writer = port.writable.getWriter();
+        await writer.write(encd.encode('\nWIGLEKEY ' + enc + '\n'));
+        writer.releaseLock(); writer = null;
+      }
+      await ask();
+      var text = '', t0 = Date.now(), asked = 1, sentAt = Date.now(), m = null;
+      while (!m) {
+        var chunk = await Promise.race([reader.read(), new Promise(function (r) { setTimeout(function () { r({ done: false, value: null }); }, 400); })]);
+        if (chunk.done) break;
+        if (chunk.value) text += dec.decode(chunk.value, { stream: true });
+        m = /\[wigle\] (key saved for [^\r\n]*|key refused[^\r\n]*|no upload on this board[^\r\n]*)/.exec(text);
+        if (m) break;
+        if (text.indexOf('[frame]') >= 0 && Date.now() - sentAt > 4000 && asked < 3) { text = ''; sentAt = Date.now(); asked++; await ask(); }
+        if (Date.now() - t0 > 45000) throw new Error('the board did not answer. Is it on this firmware?');
+        wigleSay('Giving the board your key...');
+      }
+      if (!m) throw new Error('the board went quiet');
+      if (m[1].indexOf('key saved') === 0) {
+        wigleSay('DONE: the board has your key (' + m[1].slice(14) + '). SETTINGS > WARDRIVE > UPLOAD NOW sends its log over your saved WiFi.');
+        say('Key safe. I\u2019ll take it from here.', 6000);
+      } else if (m[1].indexOf('no upload') === 0) {
+        wigleSay('This board uploads through this page instead: pick its files above and press UPLOAD FILES.', true);
+      } else {
+        wigleSay('The board refused it: check the API name and token.', true);
+      }
+    } catch (err) {
+      wigleSay('Couldn\u2019t send the key: ' + (err && err.message ? err.message : 'unknown error'), true);
+    } finally {
+      try { if (writer) writer.releaseLock(); } catch (e2) {}
+      try { if (reader) { await reader.cancel(); reader.releaseLock(); } } catch (e3) {}
+      try { if (port) await port.close(); } catch (e4) {}
+      wigleKeyBtn.disabled = false;
     }
   }
 

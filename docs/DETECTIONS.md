@@ -20,26 +20,20 @@ cameras that aren't actively transmitting — they still leak their MAC
 when the promiscuous listener sends them a frame.
 
 **What the audit found.** Every prefix in this table was checked against
-the IEEE registry. Of the 29 entries it had then, exactly **one** is
-registered to Flock Safety: `B4:1E:52`. Sixteen are Espressif blocks; the
-rest are Liteon, one Shenzhen Intellirocks, one SPECTRA - TEK (labelled
-"Flock-Sierra" for a long time, which is neither Sierra nor Flock), one
-not in the registry at all, and one locally-administered address, which
-by definition identifies no vendor.
+the IEEE registry. Exactly **one** is registered to Flock Safety:
+`B4:1E:52`, the only High row. The rest (32 rows in all) are the radio
+modules Flock builds on: fourteen Liteon, three Silicon Labs, two USI, a
+Qualcomm Atheros block for the newer cameras, and a handful from
+Flock-You's field list and DeFlock, all Low because other kit uses the
+same modules.
 
-v1.24.0 added twenty more from Flock-You's field list and a Flock
-camera's firmware dump: thirteen Liteon, two USI, three Silicon Labs, one
-Espressif, and Atheros's factory-default block. All module vendors, so
-all Low. That makes **49** Flock prefixes, still with exactly one High.
-One prefix from that list was left out on purpose: `48:27:EA` is
-registered to Samsung Electronics and would call every Samsung TV a
-Flock camera.
-
-That is not an argument for deleting them. Flock really does build on
-ESP32, so an Espressif prefix really is evidence — it is just evidence
-shared with every dev board, smart plug and hobby project on earth,
-including **another SquachWatch**. Two of these devices in a room would
-otherwise flag each other as ALPR cameras.
+Seventeen Espressif blocks used to sit here as well. Espressif makes the
+chip in every ESP32, this board and every other SquachWatch included, so
+they named all of those a Flock camera; two SquachWatches in a room
+flagged each other as ALPR cameras. They came out in v1.38.0, after the
+projects that test at real Flock sites stopped trusting them. One prefix
+from Flock-You's list was left out on purpose: `48:27:EA` is registered
+to Samsung Electronics and would call every Samsung TV a Flock camera.
 
 So the rows stay and the *grading* changed. Confidence is now a property
 of the matched signature rather than of the type:
@@ -95,6 +89,17 @@ on the camera being powered on and transmitting).
 the legacy Taser International block, is High; `E4:05:40` and
 `28:24:FF` are Low.
 
+**In-vehicle routers (2026-11-20).** The rugged routers that give a
+patrol car its own WiFi and link its cameras and laptop to the station:
+Cradlepoint (`00:30:44`, `00:E0:1C`) and Sierra Wireless AirLink
+(`00:A0:D5`, `28:A3:31`, `50:13:9D`, `64:CE:6E`, `84:DB:2F`,
+`CC:93:4A`), all IEEE MA-L. Filed here because this is the type the
+screens call LE equipment, and **Low** because buses, ambulances and
+utility trucks carry the same boxes: the label says whose router, the
+grade says it might be anyone's. Neither maker publishes a default
+hotspot name for its current models, so there is no SSID row; Peplink
+and Digi were left out because both also sell office and home gear.
+
 ---
 
 ## Camera glasses — `META` (shown as `GLASS`) — **Medium confidence**
@@ -105,9 +110,10 @@ The specific one is BLE service UUID `0xFD5F`, which Ray-Ban Meta
 glasses advertise. That one is High on its own.
 
 The broad one is the Bluetooth SIG company IDs that the dedicated
-glasses-spotting apps key on: `0x01AB` Meta Platforms, `0x058E` Meta
-Platforms Technologies, `0x0D53` Luxottica (who make Ray-Ban), and
-`0x03C2` Snap, for Spectacles. This is what turns a one-product
+glasses-spotting apps key on: `0x01AB` Meta Platforms, `0x0D53`
+Luxottica (who make Ray-Ban), and `0x03C2` Snap, for Spectacles.
+(`0x058E`, Meta Platforms Technologies, was here and came out: it is
+what Quest headsets send.) This is what turns a one-product
 detection into a category one.
 
 **Source:** [Eye Spy project](https://simeononsecurity.com/articles/eye-spy-passive-surveillance-detector-esp32-2026/),
@@ -115,6 +121,15 @@ the [HN "glasses to detect smart-glasses" project](https://news.ycombinator.com/
 [banrays](https://github.com/NullPxl/banrays), and the company-ID list
 reported for the Nearby Glasses / AntiZuck apps
 ([VR.org](https://vr.org/articles/smart-glasses-bluetooth-detection-apps-antizuck-2026)).
+
+**Two more makers (2026-11-20):** Rokid `28:E8:88`, registered to
+Lingban Technology (Hangzhou), Rokid's legal name, and Vuzix
+`98:DA:92`, both Low: the Rokid link is press and wiki rather than
+Rokid's own site, and one Vuzix block covers the Blade and M400 (with
+cameras) and the Z100 (without). Looked at and left out: Even Realities,
+Echo Frames and Halliday (no camera), Xreal and RayNeo (tethered, rarely
+beacon), Brilliant Labs (a 128-bit service UUID only, which the tables
+do not carry yet).
 
 **Confidence:** **Medium**, and it was High before the company IDs
 were added. Meta puts those same IDs on their other Bluetooth
@@ -270,8 +285,8 @@ really is registered to the vendor named.
 ## Generic / covert IP cameras — `CAMERA` — **graded per row**
 
 **Why it works:** Most consumer IP cameras use WiFi modules from a
-small set of manufacturers. We match OUIs from Wyze, Arlo, Blink,
-Hikvision, Amazon, Realtek, and Tuya on the consumer side (Ring has
+small set of manufacturers. We match OUIs from Wyze, SimpliSafe, Arlo,
+Blink, Hikvision, Amazon, Realtek, and Tuya on the consumer side (Ring has
 its own type, below), plus Verkada, Avigilon (Alta), and Axis
 Communications on the
 commercial/institutional side — the brands actually installed in
@@ -310,6 +325,38 @@ fallback the paragraph above says is *not* built: one Espressif OUI was
 flagging cameras regardless, because it did not look like Espressif.
 `tools/check_ouis.py` now reads this table against the IEEE registry so
 the next one is caught by a job rather than by a reader.
+
+**Dashcams (2026-11-20).** A dashcam puts up its own WiFi for its phone
+app, named as its manual says, and most ride a generic Realtek or Ampak
+module, so the name is the handle: `VIOFO_` / `VIOFO-`, `BlackVue`,
+`70mai_`, `thinkware`, `NEXTBASE ` (the older series, with the space),
+`ROVE_R`, `REDTIGER_`, and `_VANTRUE_` anywhere in the name (Vantrue
+puts the model first). The three brands with their own IEEE blocks are
+High on the OUI too: BlackVue `00:25:42` (Pittasoft), 70mai `44:27:F3` /
+`B8:59:C8`, Thinkware `00:1F:4F`. The fleet systems in delivery vans
+and trucks are OUI-only: Lytx `00:16:B2` (DriveCam, its old name),
+`2C:42:05`, `50:DF:95`, `70:E4:6E`, `58:A7:48` at Medium, and Samsara
+`FC:DB:21` / `28:EA:5B` at Low because the block also covers its plain
+vehicle gateways. Left out: Garmin (fifteen blocks shared with every
+watch and GPS, no hotspot name), Rexing (module-default names), and
+Netradyne and Motive, which hold only 28-bit blocks this table cannot
+express yet. Sources: the makers' manuals and support pages, the IEEE
+registry.
+
+**Hidden and mini cameras (2026-11-20).** The cheap WiFi cameras sold
+for "home security" sit in access-point mode until paired, under a name
+from their app's firmware. The biggest family (LookCam, HDWifiCamPro,
+JXLCAM, TinyCam Pro and the other CS2/PPPP apps) names the hotspot after
+the camera's own UID, `ABCD-123456-ABCDE`: three or four capitals, six
+digits, five capitals. That shape is a rule (`isP2pCamSsid`), not a
+word list, and no home router is named like it. Prefix rows put the
+family on the label (`DGK-` HDWifiCam, `ACCQ-`/`BCCQ-`/`XCCQ-` LookCam,
+`HCAM-` TinyCam) plus `CLOUDCAM_` (YCC365), `MEYE_` (Sricam), `GW_IPC`
+(Yoosee), `IPC_AP_` (Zosi) and V380's `MV` + six or more digits.
+Rejected as too generic: `CAM-`, `A9`, `HD-`, `Camera-`, `IPCAM-`, and
+Tuya's `SmartLife-`, which every unpaired plug and bulb also uses.
+Sources: the Warwick hidden-camera paper, hacked.camera's prefix table,
+the apps' own pairing instructions and manuals.
 
 ---
 
@@ -515,11 +562,10 @@ that no locally-administered row is ever graded above Low.
 ### What is deliberately NOT in this bucket
 
 **Bare Espressif and other generic silicon.** A nyanBOX, an ESP32 Marauder,
-an M5Stack and a SquachWatch are the same chip. Seventeen Espressif prefixes
-already sit under `FLOCK`; adding them here as well would have the two
-types fight over the same evidence and make every SquachWatch flag every
-other one. HACKER takes exact signatures only, and that is what makes it
-worth alerting on.
+an M5Stack and a SquachWatch are the same chip. The Espressif prefixes
+that once sat under `FLOCK` came out for exactly that reason, and they
+are not coming back here. HACKER takes exact signatures only, and that is
+what makes it worth alerting on.
 
 **Receive-only and wired gear**, which no firmware change can reach:
 HackRF, Ubertooth One, RTL-SDR, Proxmark3, Wi-Fi Coconut, any Alfa card in
@@ -548,6 +594,117 @@ plenty of things that are not a Pineapple produce one.
 
 ---
 
+## LoRaWAN operators — `LORAWAN` — **High or Medium, by address type**
+
+Only on a board with a LoRa radio (`SQUACH_LORA`), and only while that radio
+is listening on a LoRaWAN profile: set **LORA** to LORAWAN (WATCH SETTINGS on
+the T-Watch; Settings > SYSTEM, or LORA SETTINGS > LISTEN, on the T-Deck
+Plus). The mesh chats go quiet while it listens there. Everything else on
+this page is WiFi or Bluetooth; this one comes from the sniffer in
+`docs/LORA.md`. Its counter tile reads LWAN.
+
+Every LoRaWAN data frame starts with the device's address in the clear, and
+the front of that address is the operator's NetID. The LoRa Alliance registry
+is in flash (`include/lora_netid_table.h`, 143 rows), so the board can say
+whose network it is hearing without asking anybody: "Oresundskraft", "The
+Things Network", "Netmore".
+
+**One detection per operator, not per device.** A utility's meters share a
+NetID and a street holds hundreds of them. The log row carries an address
+made up from the NetID -- `02:4C:57` and the three NetID bytes -- so IGNORE,
+SNOOZE, WATCH and HUNT work on the operator the way they work on a device.
+HUNT's gauge moves when the operator's next frame lands, which is minutes
+apart, and it is whichever of its devices spoke: a bearing on a network,
+not on one meter.
+
+**It alerts once.** A row in the log goes quiet after a minute, and a network
+that speaks every ten minutes would otherwise come back as news every time.
+The alert returns only after the operator has been unheard for an hour.
+
+| What | Grade |
+|---|---|
+| DevAddr type 0-2 (the whole NetID is in the address) | **High** |
+| DevAddr type 3-7 (11 to 17 bits of a 21-bit NetID) | **Medium** -- the registry row it lands on is the likeliest owner |
+
+### What is deliberately NOT counted
+
+- **Join requests, join accepts and Class B beacons.** None carries a
+  DevAddr. A join request names the device's maker and stays in NODES.
+- **NetID 0 and 1**, "private/experimental". Not an operator, and where an
+  all-zero or garbage header lands.
+- **A single downlink.** Gateways send downlinks without a payload CRC, so
+  one frame off RX2 is only as good as its header checksum. The same
+  operator has to be heard twice within the hour. An uplink whose CRC held
+  counts at once.
+
+The payload is encrypted and is never touched. `test/lora_opalert_test.cpp`
+pins all of the above.
+
+---
+
+## Your own WiFi names — `MINE` (shown as `MY ALERT`) — **High confidence**
+
+Not a signature table: Settings → MY ALERTS lets the owner type up to eight
+network names to alert on, because some of the most useful patterns are
+local. It was asked for by a tester whose city's patrol cars run in-car
+routers named `veh` plus the unit number, and whose county does the same.
+
+- Checked against every beacon's SSID, after the evil-twin check and ahead
+  of the OUI and SSID tables, so a name the owner asked about wins over a
+  vendor guess for the same router.
+- Plain text is a prefix (the built-in SSID table's rule). `*` and `?` make
+  it a whole-name glob, case-insensitive. Under two fixed characters is
+  refused; under three is saved with a warning.
+- High confidence because the match is exact. What it means is the owner's
+  call: anyone can name a router anything.
+- No DEX card, not on the BINGO card and not in TYPE FILTER: the list is
+  its own switch. While the list has anything in it, MINE takes the main
+  screen's twelfth counter and beacons (if on) fold into TRACKER.
+- Never shared with the squad: the label is the owner's own words.
+
+---
+
+## Smart speakers — `LISTENER` (shown in the CAM column) — **Medium; HomePod High**, off by default
+
+Microphones in the room: the hotel or rental check, beside the hidden
+cameras. Off by default in TYPE FILTER, because a speaker at home is not
+news; on the main screen it counts in the CAM column.
+
+- **Sonos**, Medium. Fifteen MA-L blocks registered to Sonos, Inc. (IEEE
+  registry, 2026-11-21): `00:0E:58`, `34:7E:5C`, `38:42:0B`, `48:A6:B8`,
+  `54:2A:1B`, `5C:AA:FD`, `60:F6:20`, `74:CA:60`, `78:28:CA`, `80:4A:F2`,
+  `94:9F:3E`, `B8:E9:37`, `C4:38:75`, `F0:F6:C1`, `F8:5C:24`. Plus Sonos's
+  Bluetooth company ID `0x05A7` and service UUID `0xFE07` (Bluetooth SIG;
+  ESPresense keys Sonos on the same two). Medium rather than High because
+  the maker is certain and the microphone is not: One SL, Five, Sub, Amp,
+  Port, Play:1, Play:3, Playbar, Playbase, Connect and IKEA's Symfonisk line
+  have none. One, Beam, Arc, Move, Roam and Era do. `00:04:3C` ("SONOS Co.
+  Ltd") is a different company and is not matched.
+- **HomePod**, High. Apple's Continuity "Hey Siri" message (type `0x08`,
+  seven bytes) carries a device class, and `0x0007` is a HomePod
+  ([furiousMAC/continuity](https://github.com/furiousMAC/continuity/blob/master/messages/hey_siri.md)).
+  It is sent only when somebody nearby says "Hey Siri", so it is rare and
+  certain.
+- **Google Home / Nest speakers in setup**, Medium. The setup hotspot is
+  `GoogleHome` and four digits (Google's own setup help). Once the speaker
+  is on the room's WiFi it is a client, and that hotspot is gone.
+
+### What is deliberately NOT matched
+
+- **Amazon Echo.** Amazon's 205 MA-L blocks are every Kindle, Fire TV,
+  Ring and Blink too. Company ID `0x0171` is what Amazon tells third-party
+  Alexa Gadgets to send; `0xFE03` is the gadgets' UUID, not the Echo's. No
+  public capture ties Amazon's other UUIDs to an Echo. Its `Amazon-XXXX`
+  setup hotspot is used by other Amazon gear as well.
+- **Google speakers on WiFi.** Google's 114 blocks are Pixels and
+  Chromecasts too, and Fast Pair (`0xFE2C`) is every Android phone.
+- **Nest Labs prefixes** (`64:16:66`, `18:B4:30`): thermostats, smoke alarms
+  and cameras. Nest speakers use Google's blocks.
+- **Bose, JBL / Harman**: their prefixes and IDs are mostly headphones, car
+  audio and speakers with no microphone.
+
+---
+
 ## License / attribution
 
 | Source | License | Used for |
@@ -568,11 +725,24 @@ plenty of things that are not a Pineapple produce one.
 | all-cameras-are-beacons (soyboi1312) | Apache-2.0 | Axon `BWCDEVICE` tag, `FS-` Flock names, BodyWorn name, the false-positive work that retired the Espressif Flock rows |
 | AirGuard (seemoo-lab) | Apache-2.0 | Tracker service-data matching, DULT, Chipolo |
 | Google Fast Pair FMDN spec | public | Find Hub frame types `0x40` / `0x41` |
+| furiousMAC/continuity | public research | HomePod "Hey Siri" device class `0x0007` |
+| ESPresense | MIT | Sonos company ID `0x05A7` / UUID `0xFE07` cross-check |
 
 We use signature *data* (OUIs, UUIDs, names) as facts; we don't
 copy GPL code into this project.
 
 ---
+
+## 2026-11-20 additions
+
+Dashcams, fleet cameras and hidden cameras in setup mode under `CAMERA`,
+in-vehicle routers under `AXON` at Low, two glasses makers under `META`
+(the sections above have the rows and the reasoning). Every OUI was read
+against the IEEE registry the same day (`tools/check_ouis.py`); every
+hotspot name comes from the maker's manual or support page, or from the
+hidden-camera research cited above. Also new: Google Find Hub frame
+`0x41` now reads as the tag being away from its owner (`0x40` with), the
+same owner state the AirTag status byte gives.
 
 ## 2026-10-14 additions and fixes
 

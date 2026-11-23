@@ -97,6 +97,7 @@ static const char* stateName(AppState s) {
         case AppState::LOG: return "LOG";
         case AppState::SETTINGS: return "SETTINGS";
         case AppState::DIARY: return "DIARY";
+        case AppState::CRYPTID_GUIDE: return "CRYPTID_GUIDE";
         case AppState::OUTFIT: return "OUTFIT";
         case AppState::RAWSCAN: return "RAWSCAN";
         case AppState::WATCH_ALERT: return "WATCH_ALERT";

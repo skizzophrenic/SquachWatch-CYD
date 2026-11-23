@@ -289,7 +289,7 @@ void yetiDance(int8_t which) {
     if (which < 0 || which > 1) return;
     if (s_yPhase == YPhase::TALK || s_yPhase == YPhase::IN || s_yPhase == YPhase::NAP) {
         s_yDance = (uint8_t)which; s_yDanceVisit = true;
-        if (s_yPhase != YPhase::IN) { s_yPhase = YPhase::DANCE; s_yAt = millis(); s_yAnswered = false; }
+        if (s_yPhase != YPhase::IN) { s_yPhase = YPhase::DANCE; s_yAt = pnow(millis()); s_yAnswered = false; }
         return;
     }
     s_yForce = which;

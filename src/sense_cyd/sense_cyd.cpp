@@ -15,7 +15,8 @@
 // Notes go to the console as "[sense] ..."; nothing is saved.
 //
 // Console (SENSE <cmd>): cal | win <ms> | caltime <ms> | hold <ms> | pingms <ms> | rates | stat | help
-#if defined(SENSE_CYD_APP)
+// The Tab5 has its own engine (sense_tab5.cpp): its radio is the C6, over ESP-Hosted.
+#if defined(SENSE_CYD_APP) && !defined(TAB5)
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_wifi.h>
@@ -26,6 +27,11 @@
 #include "sense_store.h"
 #include "settings.h"
 #include "csi_motion_model.h"
+#include "detection.h"   // g_sniffMuted
+#if SENSE_RICH
+#include "csi_vitals.h"
+#include "sense_vitals.h"
+#endif
 #include "lwip/ip_addr.h"
 #include "lwip/sockets.h"
 #include "lwip/inet_chksum.h"
@@ -35,7 +41,7 @@
 static const uint8_t  kQueueSize   = 32;
 static const uint16_t kMaxCsiBytes = 128;   // L-LTF only: 64 tones x int8 imag, real
 
-struct Sample { uint16_t length; int8_t rssi; bool fwi; uint32_t at; int8_t iq[kMaxCsiBytes]; };
+struct Sample { uint16_t length; int8_t rssi; bool fwi; uint8_t who; uint32_t at; int8_t iq[kMaxCsiBytes]; };   // who: 0 the router, 1-3 SCOPE's other paths
 // The queue and the motion model (~6.6 KB) come from the heap while the
 // screen is up and go back when it closes (senseCydStart / senseCydStop).
 // As fixed RAM they cost every board that much heap all the time, sensing or
@@ -236,16 +242,65 @@ const uint8_t* senseCydSpecRow(int r) {
 int senseCydSpecPeak() { return s_sp ? s_sp->peak : -1; }
 float senseCydSpecBinHz() { return 10.0f / kSpN; }
 
-// ---- CSI: only the router's frames are queued ------------------------------
+// ---- SCOPE's other paths (SENSE_RICH) ------------------------------------------
+// While joined, these boards also listen to the whole channel (promiscuous, the
+// detector muted, include/detection.h) and model the three busiest other
+// transmitters they hear, the way the Tab5's sensing radio does: a TV, a phone,
+// a laptop each make another path through the room for SCOPE to draw. The
+// state of the room (SENSING's word, the score) stays the router's alone, as
+// it shipped.
+#if SENSE_RICH
+static const uint8_t  kExtra = 3, kSrcSlots = 16;
+static const uint32_t kRankMs = 2000, kEvictMs = 10000;
+static const uint16_t kMinRate = 2;   // readings a second before a transmitter is worth a model
+struct Src { uint8_t mac[6]; volatile uint16_t frames; uint32_t lastAt; };
+static Src* s_src = nullptr;                    // the heap, with the rest
+struct Extra { bool used; uint8_t mac[6]; uint32_t accepted, lastAt; CsiMotionModel* m; };
+static Extra s_x[kExtra];
+static volatile bool s_xUsed[kExtra];           // the callback's copy: which slots to queue
+static uint8_t s_xMac[kExtra][6];
+static uint32_t s_lastRankMs = 0;
+static bool s_promisc = false;
+// VITALS: the chest signal on the router's readings, only while asked.
+static CsiVitals* s_vit = nullptr;
+#endif
+
+// ---- CSI: the router's frames are queued (and SCOPE's paths', SENSE_RICH) ------
 static void IRAM_ATTR csiCb(void* ctx, wifi_csi_info_t* info) {
   (void)ctx;
   Sample* const q = s_queue;
   if (!q || !info || !info->buf || info->len < 16) return;
   s_seen++;
-  if (!s_haveAp || memcmp(info->mac, s_apMac, 6) != 0) return;
+  uint8_t who = 0;
+  if (!s_haveAp || memcmp(info->mac, s_apMac, 6) != 0) {
+#if SENSE_RICH
+    // Another transmitter: counted for the ranking, queued if it has a model.
+    Src* const src = s_src;
+    if (!src) return;
+    const uint32_t now = millis();
+    int freeSlot = -1, oldest = 0; bool counted = false;
+    for (int i = 0; i < kSrcSlots; i++) {
+      if (src[i].lastAt && memcmp(src[i].mac, info->mac, 6) == 0) {
+        if (src[i].frames < 0xFFFF) src[i].frames++;
+        src[i].lastAt = now; counted = true; break;
+      }
+      if (!src[i].lastAt) { if (freeSlot < 0) freeSlot = i; }
+      else if (src[i].lastAt < src[oldest].lastAt) oldest = i;
+    }
+    if (!counted) {
+      const int k = freeSlot >= 0 ? freeSlot : oldest;
+      memcpy(src[k].mac, info->mac, 6); src[k].frames = 1; src[k].lastAt = now;
+    }
+    for (uint8_t k = 0; k < kExtra; k++) if (s_xUsed[k] && memcmp(s_xMac[k], info->mac, 6) == 0) { who = (uint8_t)(k + 1); break; }
+    if (!who) return;
+#else
+    return;
+#endif
+  }
   const uint8_t next = (uint8_t)((s_wr + 1) % kQueueSize);
   if (next == s_rd) { s_dropped++; return; }
   Sample& s = q[s_wr];
+  s.who = who;
   s.length = info->len > kMaxCsiBytes ? kMaxCsiBytes : info->len;
   s.rssi = info->rx_ctrl.rssi;
   s.fwi = info->first_word_invalid;
@@ -278,6 +333,69 @@ static void csiStop() {
   esp_wifi_set_csi_rx_cb(nullptr, nullptr);
   s_csiOn = false;
 }
+
+#if SENSE_RICH
+static void extraClear() {
+  for (uint8_t k = 0; k < kExtra; k++) { s_xUsed[k] = false; s_x[k].used = false; }
+  if (s_src) memset(s_src, 0, sizeof(Src) * kSrcSlots);
+}
+// The whole channel, for SCOPE: promiscuous with the detector muted.
+static void promiscOn() {
+  if (s_promisc || !s_src) return;
+  g_sniffMuted = true;
+  wifi_promiscuous_filter_t f = {};
+  f.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA;
+  esp_wifi_set_promiscuous_filter(&f);
+  const esp_err_t e = esp_wifi_set_promiscuous(true);
+  s_promisc = e == ESP_OK;
+  note("listening to the channel for SCOPE: %s", esp_err_to_name(e));
+}
+static void promiscOff() {
+  if (s_promisc) esp_wifi_set_promiscuous(false);
+  s_promisc = false;
+  g_sniffMuted = false;
+}
+// Every 2 s: drop the quiet ones, give free slots to the busiest unmodelled.
+static void rankExtra(uint32_t now) {
+  if (!s_src) return;
+  for (uint8_t k = 0; k < kExtra; k++)
+    if (s_x[k].used && now - s_x[k].lastAt > kEvictMs) { s_xUsed[k] = false; s_x[k].used = false; }
+  struct Cand { uint8_t mac[6]; uint16_t frames; } cand[kSrcSlots];
+  int n = 0;
+  for (int i = 0; i < kSrcSlots; i++) {
+    const uint16_t f = s_src[i].frames; s_src[i].frames = 0;
+    if (!s_src[i].lastAt || !f) continue;
+    if (now - s_src[i].lastAt > kEvictMs) { s_src[i].lastAt = 0; continue; }
+    memcpy(cand[n].mac, s_src[i].mac, 6); cand[n].frames = f; n++;
+  }
+  for (int i = 1; i < n; i++) { Cand c = cand[i]; int j = i; while (j && cand[j - 1].frames < c.frames) { cand[j] = cand[j - 1]; j--; } cand[j] = c; }
+  const uint16_t minFrames = (uint16_t)(kMinRate * kRankMs / 1000);
+  for (int i = 0; i < n; i++) {
+    if (cand[i].frames < minFrames) break;
+    bool have = false;
+    for (uint8_t k = 0; k < kExtra; k++) if (s_x[k].used && !memcmp(s_x[k].mac, cand[i].mac, 6)) have = true;
+    if (have) continue;
+    int slot = -1;
+    for (uint8_t k = 0; k < kExtra; k++) if (!s_x[k].used && s_x[k].m) { slot = k; break; }
+    if (slot < 0) break;
+    Extra& x = s_x[slot];
+    x.used = true; memcpy(x.mac, cand[i].mac, 6); x.accepted = 0; x.lastAt = now;
+    x.m->reset(now, s_calMs, s_windowMs);
+    memcpy(s_xMac[slot], x.mac, 6); s_xUsed[slot] = true;
+    if (priv()) note("path %d: a transmitter, %u readings in 2 s", slot + 1, (unsigned)cand[i].frames);
+    else note("path %d: %02X:%02X:%02X:%02X:%02X:%02X, %u readings in 2 s", slot + 1, x.mac[0], x.mac[1], x.mac[2], x.mac[3], x.mac[4], x.mac[5], (unsigned)cand[i].frames);
+  }
+}
+static void extraFuse(uint32_t now) {
+  for (uint8_t k = 0; k < kExtra; k++) {
+    Extra& x = s_x[k];
+    if (!x.used || !x.m) continue;
+    x.m->tick(now, x.accepted, 0);
+    SenseStore::path((uint8_t)(k + 1), (uint16_t)((x.mac[4] << 8) | x.mac[5]), x.m->rssi(), x.m->samplesPerSecond(),
+                     x.m->calibrated() ? x.m->motionScore() : 0, x.m->calibrationPercent(now), x.m->reliability(), millis());
+  }
+}
+#endif
 
 // ---- The pings: the router's answers are what the radio measures ------------
 // Sent from the loop on a raw socket, one every s_pingMs, the replies drained
@@ -351,11 +469,18 @@ static void resetModels() {
   s_motionVotes = s_stillVotes = 0; s_state = SENSE_STATE_CAL; s_presence = false;
   s_lastFusionMs = now;
   specReset();
+#if SENSE_RICH
+  for (uint8_t k = 0; k < kExtra; k++) if (s_x[k].used && s_x[k].m) { s_x[k].m->reset(now, s_calMs, s_windowMs); s_x[k].accepted = 0; }
+  if (s_vit) s_vit->reset();
+#endif
 }
 
 static void startJoin() {
   if (!s_ssid[0]) return;
   csiStop(); s_haveAp = false;   // the ping socket stays: see startPing
+#if SENSE_RICH
+  promiscOff(); extraClear();
+#endif
   esp_wifi_set_promiscuous(false);
   WiFi.disconnect(false, false);   // as the WiFi update does: the radio stays up for the detector
   WiFi.persistent(false);
@@ -409,6 +534,10 @@ static void onJoined() {
   // failed esp_wifi_set_csi held the loop up for seconds).
   s_mode = SENSE_MODE_STA;
   startPing();
+#if SENSE_RICH
+  extraClear();
+  promiscOn();
+#endif
   if (priv()) note("joined: channel %u rssi %d csi %s heap %lu largest %lu", s_chan, WiFi.RSSI(), csi ? "on" : "FAILED",
                    (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
   else note("joined: BSSID %02X:%02X:%02X:%02X:%02X:%02X channel %u rssi %d csi %s heap %lu",
@@ -553,17 +682,36 @@ static void tickBody(uint32_t now) {
 
   while (s_rd != s_wr) {
     Sample& s = s_queue[s_rd];
+#if SENSE_RICH
+    if (s.who) {
+      Extra& x = s_x[s.who - 1];
+      if (x.used && x.m) { x.m->addSample(s.iq, s.length, s.rssi, s.at, s.fwi, CsiMotionModel::SampleEncoding::SIGNED_8_IMAG_REAL); x.accepted++; x.lastAt = s.at; }
+      s_rd = (uint8_t)((s_rd + 1) % kQueueSize);
+      continue;
+    }
+    if (s_vit) s_vit->addSample8(s.iq, s.length);
+#endif
     s_model->addSample(s.iq, s.length, s.rssi, s.at, s.fwi, CsiMotionModel::SampleEncoding::SIGNED_8_IMAG_REAL);
     specAdd(s.iq, s.length);
     s_modelAccepted++;
     s_lastReadingAt = now;
     s_rd = (uint8_t)((s_rd + 1) % kQueueSize);
   }
+#if SENSE_RICH
+  if (s_vit && s_mode == SENSE_MODE_STA) {
+    float c1, c2; uint8_t n, q;
+    if (s_vit->tick(now, c1, c2, n, q)) Vitals::feed(c1, q);
+  }
+  if (s_mode == SENSE_MODE_STA && now - s_lastRankMs >= kRankMs) { s_lastRankMs = now; rankExtra(now); }
+#endif
   if (s_mode == SENSE_MODE_STA) specTick(now);
 
   if (now - s_lastFusionMs >= 1000) {
     s_lastFusionMs = now;
     fuse(now); sendRouter(now);
+#if SENSE_RICH
+    extraFuse(now);
+#endif
     static uint8_t statTick = 0;
     if (++statTick >= 10) { statTick = 0; sendStat(now); }
     if (s_state == SENSE_STATE_MOTION) { s_presence = true; s_lastMotionMs = now; }
@@ -607,6 +755,12 @@ void senseCydStart(const char* ssid, const char* pass) {
     return;   // running, so the loop does not ask again; tickBody does nothing
   }
   specBegin();
+#if SENSE_RICH
+  if (!s_src) s_src = (Src*)calloc(kSrcSlots, sizeof(Src));
+  for (uint8_t k = 0; k < kExtra; k++) if (!s_x[k].m) s_x[k].m = new (std::nothrow) CsiMotionModel();
+  extraClear();
+  note("SCOPE paths: %s", s_src && s_x[kExtra - 1].m ? "on" : "NO MEMORY");
+#endif
   s_lastLineMs = s_lastFusionMs = millis();
   s_mode = SENSE_MODE_OFF;
   resetModels();
@@ -621,6 +775,10 @@ void senseCydStart(const char* ssid, const char* pass) {
 void senseCydStop() {
   if (!s_running) return;
   stopPing(); csiStop(); s_haveAp = false;
+#if SENSE_RICH
+  promiscOff();
+  senseCydVitals(false);
+#endif
   WiFi.disconnect(false, false);
   WiFi.setAutoReconnect(true);   // the library's default, for whatever uses WiFi next
   stopPing(); s_pingGw = 0;
@@ -631,6 +789,11 @@ void senseCydStop() {
   // csiStop() took the callback away first, so nothing writes the queue now.
   Sample* q = s_queue; s_queue = nullptr; free(q);
   delete s_model; s_model = nullptr;
+#if SENSE_RICH
+  extraClear();
+  for (uint8_t k = 0; k < kExtra; k++) { delete s_x[k].m; s_x[k].m = nullptr; }
+  free(s_src); s_src = nullptr;
+#endif
   note("HUMAN SENSING off: heap %lu, %lu readings dropped", (unsigned long)ESP.getFreeHeap(), (unsigned long)s_dropped);
 }
 
@@ -645,4 +808,24 @@ uint16_t senseCydRetryIn() {
   return left > 0 ? (uint16_t)((left + 999) / 1000) : 0;
 }
 uint8_t senseCydMode() { return s_mode; }
+
+#if SENSE_RICH
+// VITALS asks every frame it is up: on allocates the chest signal (~116 KB of
+// PSRAM) and the screen's buffers, off gives them back.
+void senseCydVitals(bool on) {
+  if (on && !s_vit && s_running) {
+    s_vit = new (std::nothrow) CsiVitals();
+    if (!s_vit || !s_vit->begin() || !Vitals::begin(millis())) {
+      note("VITALS: no memory for the chest signal (PSRAM free %lu)", (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+      delete s_vit; s_vit = nullptr; Vitals::end();
+      return;
+    }
+    note("VITALS on: chest signal from the router");
+  } else if (!on && s_vit) {
+    delete s_vit; s_vit = nullptr;
+    Vitals::end();
+    note("VITALS off");
+  }
+}
+#endif
 #endif  // SENSE_CYD_APP

@@ -305,7 +305,8 @@ jobs:
           else
             echo "::warning::No Marauder V8 build this run; the release goes out without it."
           fi
-          # The Tab5, lab only: its four files, for the lab list below.
+          # The Tab5: its four files. Public from v1.47.0, once the firmware
+          # learned to update the C6 radio itself on first boot.
           if [ -f c5/tab5-firmware.bin ]; then
             cp c5/tab5-firmware.bin c5/tab5-bootloader.bin c5/tab5-partitions.bin c5/tab5-boot_app0.bin .
           else
@@ -470,6 +471,15 @@ jobs:
             python tools/sign_firmware.py --key "$RUNNER_TEMP/ota_key.pem" \
               --env "$v" --bin "$v-firmware.bin" --out "$v-firmware.sig"
           done
+          # The boards built on the C5 runner, when it managed them (the merge
+          # step above copied them in). They were left out of the list above
+          # until v1.46.0, so a C5 or a Marauder V8 found its update but no
+          # signature beside it: every WiFi update stopped on HTTP 404 (#121).
+          for v in nm-cyd-c5 marauder-v8 tab5; do
+            [ -f "$v-firmware.bin" ] || continue
+            python tools/sign_firmware.py --key "$RUNNER_TEMP/ota_key.pem" \
+              --env "$v" --bin "$v-firmware.bin" --out "$v-firmware.sig"
+          done
           rm -f "$RUNNER_TEMP/ota_key.pem"
 
       - name: Stamp manifest versions
@@ -510,7 +520,8 @@ jobs:
                     "web-flasher/manifest-cardputer-adv.json",
                     "web-flasher/manifest-nm-cyd-c5.json",
                     "web-flasher/manifest-marauder-v8.json",
-                    "web-flasher/manifest-tdeck-plus.json"):
+                    "web-flasher/manifest-tdeck-plus.json",
+                    "web-flasher/manifest-tab5.json"):
               m = json.load(open(p))
               m["version"] = "${{ steps.ver.outputs.version }}"
               if name: m["release_name"] = name
@@ -626,6 +637,8 @@ jobs:
             manifest-cyd35c-fast.json \
             $(ls nm-cyd-c5-*.bin esp32c5-*.bin 2>/dev/null) \
             $([ -f nm-cyd-c5-firmware.bin ] && cp web-flasher/manifest-nm-cyd-c5.json manifest-nm-cyd-c5.json && echo manifest-nm-cyd-c5.json)             $(ls marauder-v8-*.bin 2>/dev/null)             $([ -f marauder-v8-firmware.bin ] && cp web-flasher/manifest-marauder-v8.json manifest-marauder-v8.json && echo manifest-marauder-v8.json) \
+            $(ls tab5-*.bin 2>/dev/null) \
+            $([ -f tab5-firmware.bin ] && cp web-flasher/manifest-tab5.json manifest-tab5.json && echo manifest-tab5.json) \
             $(ls *-firmware.sig 2>/dev/null)
 
       - name: Build the browser emulator
@@ -732,6 +745,7 @@ jobs:
           cp web-flasher/manifest-nm-cyd-c5.json _site/manifest-nm-cyd-c5.json
           cp web-flasher/manifest-marauder-v8.json _site/manifest-marauder-v8.json
           cp web-flasher/manifest-tdeck-plus.json _site/manifest-tdeck-plus.json
+          cp web-flasher/manifest-tab5.json _site/manifest-tab5.json
           # A LAB RUN MUST NOT CHANGE WHAT THE PUBLIC PAGE SERVES.
           #
           # A Pages deploy is wholesale -- there is no partial update -- so a
@@ -866,6 +880,9 @@ jobs:
             # rather than sit in the picker and 404 when chosen.
             if [ -f nm-cyd-c5-firmware.bin ]; then
               cp nm-cyd-c5-firmware.bin nm-cyd-c5-partitions.bin esp32c5-bootloader.bin esp32c5-boot_app0.bin _site/
+              # ...and its signature, which a WiFi or Bluetooth update fetches
+              # from the site root beside the image (#121).
+              if [ -f nm-cyd-c5-firmware.sig ]; then cp nm-cyd-c5-firmware.sig _site/; fi
             else
               rm -f _site/manifest-nm-cyd-c5.json
               python3 - <<'PY'
@@ -880,6 +897,7 @@ jobs:
             # C5's boot_app0, or off this release's page.
             if [ -f marauder-v8-firmware.bin ]; then
               cp marauder-v8-firmware.bin marauder-v8-bootloader.bin marauder-v8-partitions.bin esp32c5-boot_app0.bin _site/
+              if [ -f marauder-v8-firmware.sig ]; then cp marauder-v8-firmware.sig _site/; fi
             else
               rm -f _site/manifest-marauder-v8.json
               python3 - <<'PY'
@@ -888,6 +906,19 @@ jobs:
           p, n = re.subn(r'[ \t]*<option value="\./manifest-marauder-v8\.json"[^\n]*</option>\n', "", p)
           open("_site/index.html", "w", encoding="utf-8").write(p)
           print("::warning::no Marauder V8 build this run: its option is off the page (%d removed)" % n)
+          PY
+            fi
+            # The Tab5, the same way: its four files, or off this release's page.
+            if [ -f tab5-firmware.bin ]; then
+              cp tab5-firmware.bin tab5-bootloader.bin tab5-partitions.bin tab5-boot_app0.bin _site/
+            else
+              rm -f _site/manifest-tab5.json
+              python3 - <<'PY'
+          import re
+          p = open("_site/index.html", encoding="utf-8").read()
+          p, n = re.subn(r'[ \t]*<option value="\./manifest-tab5\.json"[^\n]*</option>\n', "", p)
+          open("_site/index.html", "w", encoding="utf-8").write(p)
+          print("::warning::no Tab5 build this run: its option is off the page (%d removed)" % n)
           PY
             fi
           fi

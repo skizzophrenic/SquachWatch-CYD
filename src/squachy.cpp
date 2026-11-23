@@ -339,8 +339,10 @@ static const char* const ONBOARD_LINES[] = {
     "All zeroes down there means nothing's around. It flips to a big flashing ALERT the second something matches.",
 #if defined(STICKS3)
     "Down there: SCAN rescans, LOG shows history, FOB is keychain mode.",
+    "Just want the data? Settings > TERMINAL MODE swaps me for a dashboard. No hard feelings.",
 #else
-    "Down there: SCAN rescans, LOG shows history, DESK is a big clock.",
+    "Down there: SCAN rescans, LOG shows history, MODE switches how this looks.",
+    "MODE once: a desk clock. Twice: TERMINAL MODE, all data, no me. Three times and I'm back.",
 #endif
 #if defined(STICKS3)
     "Front button steps, hold it to pick. Side button goes back, hold it to go home.",
@@ -561,6 +563,7 @@ static uint32_t      moodUntil       = 0;
 // How long a double-take runs before SHOCKED settles into its normal
 // pose. See the offset curve in tick().
 static const uint32_t DT_TOTAL_MS_BASE = 900;
+static const uint32_t DT_SETTLE_FROM_MS = 580;   // where the double-take's settle starts
 static uint32_t       DT_TOTAL_MS = 900;
 
 static const uint32_t WALK_CYCLE_MS_BASE = 9000;
@@ -682,6 +685,8 @@ static const char* s_clippyIntro     = nullptr;
 static bool     s_toasterUnlocked    = false;  // earned by tapping the same flying toaster three times
 static bool     s_ballUnlocked    = false;      // the ball and chain, earned by serving a sentence
 static const char* s_toasterIntro    = nullptr;
+static bool     s_mothmanUnlocked = false;     // earned by tapping the red eyes in the FIREFLIES treeline
+static bool     s_mothmanPowerOutfit = false;  // RED WINGS: earned by tapping Mothman while he is out
 static bool     s_meatyUnlocked    = false;  // earned by knocking three times on the SNOWFALL igloo
 static const char* s_meatyIntro    = nullptr;
 // Whether the card has been shown for him. Kept separately from the unlock
@@ -898,6 +903,12 @@ static const uint32_t FLICK_OUT_MS = 380, FLICK_HOLD_MS = 420, FLICK_BACK_MS = 1
 static uint8_t s_tapZone = 0;
 
 static int   s_lastCx = -10000, s_lastHeadTopY = 0;
+// The distance he still has to walk off rather than jump. See "nobody
+// teleports" in tick().
+static float    s_glide     = 0.0f;
+static int      s_glideLast = -10000;
+static uint32_t s_glideAt   = 0;
+static int      s_glideW    = 0;
 // The head's top for THIS frame, bob and squash included. Deliberately
 // separate from s_lastHeadTopY, which lastFootprint() reports and which is
 // the UN-animated base: a tap target that bobbed would move under a finger
@@ -1121,6 +1132,8 @@ enum class OutfitId : uint8_t {
     SHAMBLER,
     TH3_0N3,
     STRIPES,
+    MOTH_HOOD,
+    RED_WINGS,
     COUNT
 };
 
@@ -1174,6 +1187,8 @@ static const OutfitDef OUTFITS[] = {
     // Earned by serving ten minutes in them -- the sentence for throwing a
     // pet ten times inside a minute. See jailStart().
     { "STRIPES",        OUTFIT_BY_EVENT },
+    { "MOTH HOOD",      OUTFIT_BY_EVENT },
+    { "RED WINGS",      OUTFIT_BY_EVENT },
 };
 static const uint8_t OUTFITS_N = sizeof(OUTFITS) / sizeof(OUTFITS[0]);
 static_assert(OUTFITS_N == (uint8_t)OutfitId::COUNT, "OUTFITS must match OutfitId");
@@ -1208,6 +1223,8 @@ static bool outfitUnlocked(uint8_t i) {
             case OutfitId::SHAMBLER:   return s_shamblerUnlocked;
             case OutfitId::TH3_0N3:    return s_th3Unlocked;
             case OutfitId::STRIPES:    return s_stripesUnlocked;
+            case OutfitId::MOTH_HOOD:  return s_mothmanUnlocked;
+            case OutfitId::RED_WINGS:  return s_mothmanPowerOutfit;
             default:                   return false;
         }
     }
@@ -1540,6 +1557,8 @@ static void ensurePrefsLoaded() {
     s_toasterUnlocked    = s_petPrefs.getBool("toaster", false);
     s_ballUnlocked       = s_petPrefs.getBool("ball", false);
     s_meatyUnlocked    = s_petPrefs.getBool("meaty", false);
+    s_mothmanUnlocked  = s_petPrefs.getBool("mothman", false);
+    s_mothmanPowerOutfit = s_petPrefs.getBool("mothWings", false);
     // The master unlock means every pet too, including ones that did not
     // exist when it was entered: a board that has it catches up at boot.
     if (s_allOutfitsUnlocked) {
@@ -1548,6 +1567,8 @@ static void ensurePrefsLoaded() {
         if (!s_toasterUnlocked) { s_toasterUnlocked = true; s_petPrefs.putBool("toaster", true); }
         if (!s_ballUnlocked)    { s_ballUnlocked = true;    s_petPrefs.putBool("ball", true); }
         if (!s_meatyUnlocked) { s_meatyUnlocked = true; s_petPrefs.putBool("meaty", true); }
+        if (!s_mothmanUnlocked) { s_mothmanUnlocked = true; s_petPrefs.putBool("mothman", true); }
+        if (!s_mothmanPowerOutfit) { s_mothmanPowerOutfit = true; s_petPrefs.putBool("mothWings", true); }
     }
     // Defaults ON once earned: somebody who just unlocked a pet wants to
     // see it, not to go and find a switch.
@@ -1986,6 +2007,11 @@ void toasterNear(int x, int y) {
 void setTempo(uint8_t pct) {
     s_tempoPct = pct < 50 ? 50 : (pct > 200 ? 200 : pct);
     DT_TOTAL_MS      = tempo(DT_TOTAL_MS_BASE);
+    // Its first three beats are fixed lengths (see the curve in tick()), 580 ms
+    // of them, and only what is left after those is the settle. At the default
+    // 70% that left 50 ms: he whipped round and then was simply back where he
+    // started, twenty pixels away, on the next frame.
+    if (DT_TOTAL_MS < DT_SETTLE_FROM_MS + 260u) DT_TOTAL_MS = DT_SETTLE_FROM_MS + 260u;
     WALK_CYCLE_MS    = tempo(WALK_CYCLE_MS_BASE);
     WALK_DURATION_MS = WALK_CYCLE_MS * WALK_CYCLES;
     WATCH_EVERY_MS   = tempo(WATCH_EVERY_MS_BASE);
@@ -2755,7 +2781,7 @@ bool consumePetUnlockCard() {
 bool petUnlocked() { ensurePrefsLoaded(); return s_petUnlocked; }
 bool clippyUnlocked() { ensurePrefsLoaded(); return s_clippyUnlocked; }
 bool toasterUnlocked() { ensurePrefsLoaded(); return s_toasterUnlocked; }
-bool anyPetUnlocked() { ensurePrefsLoaded(); return s_petUnlocked || s_clippyUnlocked || s_toasterUnlocked || s_ballUnlocked || s_meatyUnlocked; }
+bool anyPetUnlocked() { ensurePrefsLoaded(); return s_petUnlocked || s_clippyUnlocked || s_toasterUnlocked || s_ballUnlocked || s_meatyUnlocked || s_mothmanUnlocked; }
 bool meatyUnlocked() { ensurePrefsLoaded(); return s_meatyUnlocked; }
 bool ballUnlocked() { ensurePrefsLoaded(); return s_ballUnlocked; }
 bool ballPetOn() { ensurePrefsLoaded(); return s_ballUnlocked && (PetId)s_petSel == PetId::BALL && !s_jailLeft; }
@@ -2776,6 +2802,7 @@ static bool petOutNow() {
     if (p == PetId::TOASTER) return s_toasterUnlocked;
     if (p == PetId::BALL)    return s_ballUnlocked;
     if (p == PetId::MEATY) return s_meatyUnlocked;
+    if (p == PetId::MOTHMAN) return s_mothmanUnlocked;
     return false;
 }
 
@@ -2786,6 +2813,51 @@ static constexpr bool kSmallBoard = true;
 #else
 static constexpr bool kSmallBoard = false;
 #endif
+
+bool mothmanUnlocked() { ensurePrefsLoaded(); return s_mothmanUnlocked; }
+
+// The Field Guide's EQUIP: straight to him, rather than round the PET row.
+void equipMothman() {
+    if (!mothmanUnlocked() || jailed()) return;
+    s_petSel = (uint8_t)PetId::MOTHMAN;
+    s_petPrefs.putUChar("petSel", s_petSel);
+}
+
+// The red eyes in the FIREFLIES treeline, tapped. The pet and MOTH HOOD
+// together; the outfit gets the usual OUTFIT UNLOCKED card on top of the
+// toast, the same as every other costume earned by an event.
+void unlockMothman() {
+    if (mothmanUnlocked()) return;
+    // The same manners as the other pets: out at once when nobody else is.
+    const bool equip = !petOutNow() && !kSmallBoard;
+    s_mothmanUnlocked = true;
+    s_petPrefs.putBool("mothman", true);
+    if (equip) equipMothman();
+    refreshOutfitUnlocks();
+    Theme::showToast("MOTHMAN FOUND", "Field Guide + Moth Hood", Theme::RED, 3500);
+}
+
+// The console's MOTHMAN LOCK: find him again. RED WINGS stays earned; it
+// only comes from tapping him, and he has to be found first for that.
+bool relockMothman() {
+    if (!mothmanUnlocked()) return true;
+    if (!s_petPrefs.putBool("mothman", false)) return false;
+    s_mothmanUnlocked = false;
+    if ((PetId)s_petSel == PetId::MOTHMAN) {
+        s_petSel = (uint8_t)PetId::OFF;
+        s_petPrefs.putUChar("petSel", s_petSel);
+    }
+    return true;
+}
+
+// Mothman tapped on the main screen while he is out: the first time earns
+// RED WINGS, which says so with the OUTFIT UNLOCKED card.
+void unlockMothmanPowerOutfit() {
+    if (!mothmanUnlocked() || s_mothmanPowerOutfit) return;
+    s_mothmanPowerOutfit = true;
+    s_petPrefs.putBool("mothWings", true);
+    refreshOutfitUnlocks();
+}
 
 void unlockClippy(const char* why) {
     ensurePrefsLoaded();
@@ -2916,6 +2988,7 @@ const char* petName() {
         case PetId::TOASTER: return "T0@$TY";
         case PetId::BALL:   return "BALL & CHAIN";
         case PetId::MEATY: return "M3@ty";
+        case PetId::MOTHMAN: return "MOTHMAN";
         default:            return "OFF";
     }
 }
@@ -3133,6 +3206,8 @@ void unlockChromeWing() {
     say("caught one!", 3400);
 }
 
+bool superUnlocked() { ensurePrefsLoaded(); return s_allOutfitsUnlocked; }
+
 void unlockAllOutfits() {
     ensurePrefsLoaded();
     s_allOutfitsUnlocked = true;
@@ -3145,6 +3220,10 @@ void unlockAllOutfits() {
     if (!s_toasterUnlocked) { s_toasterUnlocked = true; s_petPrefs.putBool("toaster", true); }
     if (!s_ballUnlocked) { s_ballUnlocked = true; s_petPrefs.putBool("ball", true); }
     if (!s_meatyUnlocked) { s_meatyUnlocked = true; s_petPrefs.putBool("meaty", true); }
+    // Mothman too, and his RED WINGS with him, so the Field Guide reads as
+    // found rather than offering a hunt for something already handed over.
+    if (!s_mothmanUnlocked) { s_mothmanUnlocked = true; s_petPrefs.putBool("mothman", true); }
+    if (!s_mothmanPowerOutfit) { s_mothmanPowerOutfit = true; s_petPrefs.putBool("mothWings", true); }
     // No popups for the cheat: it already has its own rainbow-and-confetti
     // tell below, and eleven modals in a row would bury it. Mark the lot as
     // seen so nothing queues now or on the next boot.
@@ -3252,6 +3331,8 @@ static const char* const WINK_LINES[] = {
 // two speech bubbles on a 240px-tall screen is not a conversation, it is a
 // pile-up; taking turns is what makes it read as talking.
 void setVisiting(bool v) { s_visiting = v; }
+static bool s_hush = false;
+void setHush(bool on) { s_hush = on; }
 static bool s_company = false;
 void setCompany(bool on) { s_company = on; }
 static float s_sizeBoost = 1.0f;
@@ -3849,6 +3930,87 @@ const char* visitGuestLine(VisitMoment m, uint32_t seed) {
             return PART_GUEST_LINES[seed % POOL_N(PART_GUEST_LINES)];
     }
 }
+
+// ---- a goblin visiting -------------------------------------------------------
+// A goblin from Network Goblin Scout (MostlyWithinSpec, issue #37). He has a
+// name and a level and maybe a sack of loot; he has no outfit, no squad and no
+// messages, so none of the Squachy-to-Squachy banter fits him.
+static char     s_gobName[13] = "";
+static uint16_t s_gobLevel    = 0;
+static uint8_t  s_gobHoard    = 0;
+static char     s_gobLine[64];
+
+void setGoblinGuest(const char* name, uint16_t level, uint8_t hoard) {
+    snprintf(s_gobName, sizeof s_gobName, "%s", name ? name : "");
+    s_gobLevel = level;
+    s_gobHoard = hoard;
+}
+
+static const char* const GOB_PART_LINES[] = {
+    "Back to the hoard!",
+    "Packets to count. Bye!",
+    "Off I go. Keep it shiny.",
+};
+static const char* const GOB_MEET_HOST[] = {
+    "A goblin! In MY woods?",
+    "Hey, little buddy!",
+    "A Goblin Scout! Hi!",
+    "Whoa. Nice ears.",
+};
+static const char* const GOB_PART_HOST[] = {
+    "Bye, goblin!",
+    "Come back with loot!",
+    "Safe travels, little buddy.",
+};
+struct GobExchange { const char* host; const char* guest; };
+static const GobExchange GOB_HANG[] = {
+    { "Find anything good today?",  "Three routers and a sock." },
+    { "Seen any AirTags?",          "Bit one. Tasted like apples." },
+    { "How do you hear WiFi?",      "Big ears. VERY big ears." },
+    { "Want to scan together?",     "Only if I keep the XP." },
+    { "You're pretty short.",       "You're pretty hairy." },
+    { "Do goblins sleep?",          "Only when the airwaves do." },
+    { "Where do goblins live?",     "Behind the router. It's warm." },
+    { "What's in the sack?",        "Loot. Don't ask." },
+};
+static const uint8_t GOB_HANG_N = POOL_N(GOB_HANG);
+
+const char* goblinGuestLine(VisitMoment m, uint32_t seed) {
+    switch (m) {
+        case VisitMoment::MEET:
+            if (!s_gobName[0]) {
+                snprintf(s_gobLine, sizeof s_gobLine, "A goblin! Level %u. Name's a secret.", (unsigned)s_gobLevel);
+            } else if (seed % 3 == 0) {
+                snprintf(s_gobLine, sizeof s_gobLine, "Oi! I'm %s. Level %u goblin.", s_gobName, (unsigned)s_gobLevel);
+            } else if (seed % 3 == 1) {
+                snprintf(s_gobLine, sizeof s_gobLine, "Goblin %s reporting! Level %u!", s_gobName, (unsigned)s_gobLevel);
+            } else if (s_gobHoard >= 4) {
+                snprintf(s_gobLine, sizeof s_gobLine, "%s, level %u. Big hoard. Very big.", s_gobName, (unsigned)s_gobLevel);
+            } else {
+                snprintf(s_gobLine, sizeof s_gobLine, "%s, level %u. Got anything shiny?", s_gobName, (unsigned)s_gobLevel);
+            }
+            return s_gobLine;
+        case VisitMoment::HANGOUT:
+            return goblinHangGuest(seed);
+        default:
+            return GOB_PART_LINES[seed % POOL_N(GOB_PART_LINES)];
+    }
+}
+
+uint32_t goblinReaction(VisitMoment m, uint32_t seed) {
+    if (m == VisitMoment::MEET) return visitSay(GOB_MEET_HOST[seed % POOL_N(GOB_MEET_HOST)]);
+    if (m == VisitMoment::HANGOUT) return goblinHangHost(seed);
+    return visitSay(GOB_PART_HOST[seed % POOL_N(GOB_PART_HOST)]);
+}
+
+// The sack question only makes sense when he is carrying one.
+static uint32_t gobHangIndex(uint32_t seed) {
+    uint32_t i = seed % GOB_HANG_N;
+    if (s_gobHoard == 0 && i == GOB_HANG_N - 1) i = 0;
+    return i;
+}
+uint32_t    goblinHangHost(uint32_t seed)  { return visitSay(GOB_HANG[gobHangIndex(seed)].host); }
+const char* goblinHangGuest(uint32_t seed) { return GOB_HANG[gobHangIndex(seed)].guest; }
 #endif // SQUACH_MESH
 
 // Flavor pool for watchAlertReaction() -- fires once when a watched
@@ -4749,6 +4911,20 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
     using namespace Theme;
 
     switch (outfit) {
+        case OutfitId::MOTH_HOOD:
+        case OutfitId::RED_WINGS: {
+            const uint16_t hood = outfit == OutfitId::RED_WINGS ? 0x600B : 0x31AA;
+            const int hoodTop = hy - S(9);
+            const int top = hoodTop < s_topLimit ? s_topLimit : hoodTop;
+            const int antennaTop = top - S(4) < s_topLimit ? s_topLimit : top - S(4);
+            t.fillTriangle(cx2 - S(12), hy, cx2, top, cx2 + S(12), hy, hood);
+            for (int side : {-1, 1}) {
+                const int x = cx2 + side * S(5);
+                t.drawLine(x, hy - S(2), x + side * S(5), antennaTop, hood);
+                t.fillCircle(x, hy - S(2), S(2) < 1 ? 1 : S(2), 0xFA08);
+            }
+            break;
+        }
         case OutfitId::STRIPES: {
             // The striped pillbox cap, sat on his crown with his crest poking
             // out of the top, and a short brim under it.
@@ -6443,6 +6619,15 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
                         -38.0f, beat, 0.22f, 0, WHITE, WHITE, 0.55f, 26.0f, cBr);
     }
 
+    if (outfitNow == OutfitId::RED_WINGS) {
+        const float y = hy + S(20);
+        // drawWing() multiplies the flap by its lift (26 degrees here), so it
+        // is a fraction: 0.3 is a beat of about eight degrees either way.
+        const float flap = 0.3f * sinf(now / 95.0f);
+        Theme::drawWing(t, cx2 - S(10), y, S(21), 218.0f, -flap, 0.55f, 3, 0xA165, BLACK, -0.55f, 26.0f, 0x5825);
+        Theme::drawWing(t, cx2 + S(10), y, S(21), -38.0f, flap, 0.55f, 3, 0xA165, BLACK, 0.55f, 26.0f, 0x5825);
+    }
+
     // ---- WOLF PELT's hide down his back ------------------------------------
     // Behind him for the same reason as the wings and the tanooki's tail.
     if (outfitNow == OutfitId::WOLFPELT) {
@@ -6814,14 +6999,25 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         }
     } else {
         const int legH = S(10) - crouch, footY = hy + S(49) - crouch;
+        // A boot (VisitPose::KICK): his right foot goes out to the side and
+        // comes back, once, the leg following it half-way -- the same sideways
+        // shift his legs make when he dangles, since nothing here can swing.
+        int kx = 0;
+        if (act == VisitPose::KICK) {
+            static uint32_t seen = 0, start = 0;
+            if (now - seen > 250u) start = now;
+            seen = now;
+            const uint32_t el = now - start;
+            if (el < 340u) kx = (int)(sinf((float)el / 340.0f * 3.14159265f) * S(10));
+        }
         legKey(cx2 - S(10), hy + S(40), S(8), legH);
-        legKey(cx2 + S(2),  hy + S(40), S(8), legH);
+        legKey(cx2 + S(2) + kx / 2,  hy + S(40), S(8), legH - kx / 4);
         keyRR(cx2 - S(13), footY, S(12), S(6), 2);
-        keyRR(cx2 + S(1),  footY, S(12), S(6), 2);
+        keyRR(cx2 + S(1) + kx,  footY - kx / 3, S(12), S(6), 2);
         legFill(cx2 - S(10), hy + S(40), S(8), legH);
-        legFill(cx2 + S(2),  hy + S(40), S(8), legH);
+        legFill(cx2 + S(2) + kx / 2,  hy + S(40), S(8), legH - kx / 4);
         s_footLx = cx2 - S(13); s_footLy = footY;
-        s_footRx = cx2 + S(1);  s_footRy = footY;
+        s_footRx = cx2 + S(1) + kx;  s_footRy = footY - kx / 3;
         if (!feetHidden) {
             t.fillRoundRect(s_footLx, s_footLy, S(12), S(6), 2, furLight);
             t.fillRoundRect(s_footRx, s_footRy, S(12), S(6), 2, furLight);
@@ -7075,6 +7271,17 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
             hang(-sd);
             limbTo(cx2 + sd * S(11), hy + S(26), cx2 + sd * S(27), hy - S(4));
             break;
+        case VisitPose::SCRATCH: {              // puzzled: scratching his head
+            // He has no elbows and no hands anywhere else, so he has none
+            // here: one arm, its usual length, straight up the side of his
+            // head -- which is drawn over it -- with its end showing at the
+            // top corner and sliding along the edge as it rubs. The question
+            // mark that goes with it is drawn after his head, further down.
+            const int rub = (int)(sinf((float)(now % 260) / 260.0f * 6.2831853f) * S(2));
+            hang(-sd);
+            limbTo(cx2 + sd * S(11), hy + S(26), cx2 + sd * (S(18) - rub / 2), hy + S(3) - rub);
+            break;
+        }
         case VisitPose::STRAIN: {               // an arm locked out, trembling
             hang(-sd);
             const int sh = (int)(sinf((float)(now % 120) / 120.0f * 6.2831853f) * S(1));
@@ -7702,6 +7909,21 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
         }
     }
 
+    if (act == VisitPose::SCRATCH) {
+        // The head scratch's question mark, over his other shoulder: keyed, so
+        // it reads on any sky, and bobbing.
+        const uint8_t callerFont = t.textfont;
+        const int qs = scale >= 2.6f ? 3 : 2;
+        const int qx = cx2 - s_reachDir * S(20) - 3 * qs;
+        const int qy = hy - S(9) - (int)(sinf((float)(now % 900) / 900.0f * 6.2831853f) * S(2));
+        t.setTextFont(1); t.setTextSize(qs);
+        t.setTextColor(keyCol);
+        for (int o = 0; o < 4; o++) { t.setCursor(qx + (o == 0) - (o == 1), qy + (o == 2) - (o == 3)); t.print("?"); }
+        t.setTextColor(AMBER);
+        t.setCursor(qx, qy); t.print("?");
+        t.setTextSize(1); t.setTextFont(callerFont);
+    }
+
     // The aura's lightning, in front of him and his costume.
     if (aura) auraFront(t, cx2, hy, hy + S(55) - crouch, now, m, scale);
     SQ_LAP(X5);
@@ -7879,6 +8101,11 @@ void drawSampleBubble(TFT_eSPI& t, int cx, int topY, const char* text) {
     drawBubbleIn(t, cx, topY, text, bubbleStart + BUBBLE_POP_MS, false, NO_TAIL);
     Theme::bubbleFontOff(t);
     t.setTextSize(1);
+}
+void drawGuestBubble(TFT_eSPI& t, int cx, int bottomY, const char* text, uint32_t now, int tailX) {
+    if (!text || !text[0]) return;
+    const int top = bottomY - bubbleHeight(t, text) - 4;
+    drawBubble(t, cx, top, text, now, false, tailX);
 }
 // How tall his bubble comes out for `text` on this panel, without drawing
 // it: the same font, size and wrap width drawBubbleIn() uses.
@@ -8116,7 +8343,7 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     // Skipped while he is mid-anything (onboarding, showing off, asleep,
     // already talking) rather than interrupting: a scripted line landing on
     // top of a nap reads as a bug, and the next beat is only 30s away.
-    if (!s_onboardActive && !s_showOff && mood == Mood::IDLE &&
+    if (!s_onboardActive && !s_showOff && mood == Mood::IDLE && !s_hush &&
 #if SQUACH_MESH
         !s_visiting &&                      // he is in the middle of a chat
 #endif
@@ -8134,7 +8361,7 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     static uint32_t s_idleRolledAt = 0;
     const uint32_t  idleGap  = nextIdleAt > s_idleRolledAt ? nextIdleAt - s_idleRolledAt : 0;
     const uint32_t  idleDue  = s_idleRolledAt + (uint32_t)(idleGap * Settings::banterScale());
-    if (!s_onboardActive && !s_showOff && mood == Mood::IDLE &&
+    if (!s_onboardActive && !s_showOff && mood == Mood::IDLE && !s_hush &&
 #if SQUACH_MESH
         !s_visiting &&
 #endif
@@ -8661,9 +8888,9 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
         float o;
         if (e < 140u)      o = A * (float)e / 140.0f;
         else if (e < 380u) o = A;
-        else if (e < 580u) o = A + (B - A) * ((float)(e - 380u) / 200.0f);
+        else if (e < DT_SETTLE_FROM_MS) o = A + (B - A) * ((float)(e - 380u) / 200.0f);
         else {
-            const float k = (float)(e - 580u) / (float)(DT_TOTAL_MS - 580u);
+            const float k = (float)(e - DT_SETTLE_FROM_MS) / (float)(DT_TOTAL_MS - DT_SETTLE_FROM_MS);
             o = B * (1.0f - k) * cosf(k * 6.0f);   // settle, with a wobble
         }
         bodyCx = cx + (int)o;
@@ -8995,6 +9222,47 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     // through instead of a box. (Party mode is the one exception —
     // when it's active the wash above already repaints this whole
     // region every frame, same guarantee, just with extra flair.)
+    // ---- nobody teleports -------------------------------------------
+    // Everything above works out where he SHOULD be this frame, and several
+    // of them change their mind in one: a visitor arriving moves his mark a
+    // quarter of the screen (and gives it back on leaving), a detection or a
+    // pose cuts a wander short at the far wall, a backing-away step is nine
+    // units at once. s_glide is what is left between where he was drawn and
+    // where that sum now puts him. It is taken up whenever the two part by
+    // more than he could have covered on purpose, and walked off at his
+    // wander's pace, on his wander's legs when he is doing nothing else.
+    //
+    // A finger, a throw, a drop and a flick move him as fast as they like,
+    // and so does coming back to this screen after being away from it.
+    bool gliding = false;
+    {
+        const bool handled = s_grabbed || s_thPhase != Throw::NONE || s_dropStart != 0 ||
+                             s_flickStart != 0 || s_onboardActive;
+        const uint32_t dtMs = now - s_glideAt;
+        // The spring at the end of a double-take is quicker still, and meant to be.
+        const bool whip = (mood == Mood::SHOCKED || mood == Mood::TRIP) && s_dtStart != 0 && now - s_dtStart < DT_TOTAL_MS;
+        if (now != s_glideAt || s_glideLast < -5000) {      // once a frame; a band's second call reuses it
+            if (handled || s_glideLast < -5000 || dtMs > 300u || s_glideW != t.width()) {
+                s_glide = 0.0f;
+            } else {
+                const float dt    = (float)(dtMs > 80u ? 80u : dtMs) / 1000.0f;
+                const float moved = (float)bodyCx + s_glide - (float)s_glideLast;
+                // Quicker than the shake, the whip of a double-take or a
+                // patrol at full stride, which are the fastest things he does.
+                const float most  = (whip ? 560.0f : 170.0f) * scale * dt + 1.0f;
+                if (fabsf(moved) > most) s_glide -= moved;
+                if (s_glide != 0.0f) {
+                    const float step = (50.0f * scale + fabsf(s_glide) * 0.3f) * dt;
+                    if (fabsf(s_glide) <= step) s_glide = 0.0f;
+                    else s_glide += s_glide > 0.0f ? -step : step;
+                }
+            }
+            s_glideAt = now; s_glideW = t.width();
+            s_glideLast = bodyCx + (int)lroundf(s_glide);
+        }
+        bodyCx += (int)lroundf(s_glide);
+        gliding = fabsf(s_glide) > 2.0f * scale;
+    }
     // Whatever moved him -- a patrol, a double-take, a dart -- at least half
     // of him stays on the screen. Hanging off an edge is allowed; gone is not.
     if (bodyCx < 0)         bodyCx = 0;
@@ -9004,7 +9272,8 @@ void tick(TFT_eSPI& t, int cx, int topY, int availHeight, uint32_t now,
     s_actPose    = s_hostAct;
     s_actReact   = (mood == Mood::SHOCKED && (int32_t)(s_hostActUntil - now) > 0) ? s_hostReact : -1;
     SQ_LAP(X6);
-    drawBody(t, bodyCx, hy, headTopY, now, mood, scale);
+    // Walking it off looks like walking, where he has nothing else on.
+    drawBody(t, bodyCx, hy, headTopY, now, (gliding && mood == Mood::IDLE) ? Mood::WALK : mood, scale);
     s_actReact   = -1;
     if (now < s_petFxUntil) drawHeartFx(t, bodyCx, headTopY, now);
     if (scanningFx) drawScanFx(t, bodyCx, headTopY, now, scale);

@@ -33,12 +33,12 @@ way around.
 
 | Screen | Keys |
 |--------|------|
-| Home | **S** scan, **L** log, **D** desk. ESC opens the menu |
+| Home | **S** scan, **L** log, **D** desk. ESC opens the menu. **P** throws the free roll's die when one is waiting on the floor (once everything is unlocked it plays the next dice scene instead) |
 | Scan picker | **B** BLE, **W** WiFi, **S** closes it |
 | WiFi scan | **B** switches to BLE. ESC back |
 | BLE scan | **W** switches to WiFi. ESC back |
 | Track this target (ENTER on a scan or log row) | **W** watch, **H** hunt, **I** ignore, **C** cancel. From the log also **M** more info. ESC cancels |
-| Alert | **H** hunt, **S** snooze (again for longer). **I** steps between INFO and IGNORE, ENTER presses |
+| Alert | **R** ring or **H** hunt, **W** watch, **S** snooze then a time chip, **N** the next waiting catch. **I** steps between INFO and IGNORE, ENTER presses |
 | Hunt | **S** stop. ESC back |
 | Log | **S** or **L** back home. Arrows pick a row, ENTER opens it |
 | Desk | **F** focus timer. ESC back |
@@ -54,7 +54,7 @@ question asked, so it takes the arrows and ENTER.
 | See WiFi around you | S, W |
 | See Bluetooth around you | S, B |
 | Hunt a device from its alert | H |
-| Quiet a device that keeps alerting | S (once 10 min, again for 30 min, 1 hour, 4 hours) |
+| Quiet a device that keeps alerting | S, then a chip: 10 min, 30 min, 1 hour, 4 hours |
 | Track something from a scan | arrows to the row, ENTER, then W or H |
 | Get home from anywhere | hold ESC |
 | Change the look | B on home |

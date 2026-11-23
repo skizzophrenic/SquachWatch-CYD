@@ -63,8 +63,8 @@ int main() {
 
     suite("MESHTASTIC PRESET: found by name in either band plan");
     {
-        for (uint8_t r = 0; r < 2; r++) {
-            setRegion(r == 0 ? REGION_EU : REGION_US);
+        for (uint8_t r = 0; r < 3; r++) {
+            setRegion(r == 0 ? REGION_EU : r == 1 ? REGION_US : REGION_AU);
             const int16_t lf = meshPresetFind(Proto::MESHTASTIC, "");
             ck("nothing chosen is LongFast", lf >= 0 && !strcmp(profile((uint8_t)lf).name, "MT LongFast"));
             ck("null is LongFast too", meshPresetFind(Proto::MESHTASTIC, nullptr) == lf);
@@ -81,9 +81,37 @@ int main() {
             for (uint8_t i = 0; i < n; i++) allMt = allMt && profile(rows[i]).hint == Proto::MESHTASTIC;
             ck("the list is every Meshtastic preset, LongFast first", allMt && rows[0] == (uint8_t)lf);
         }
+        setRegion(REGION_EU);
+        const int16_t nf = meshPresetFind(Proto::MESHTASTIC, "NarrowFast");
+        ck("EU NarrowFast is 869.442 MHz SF7 BW62.5 CR4/6",
+           nf >= 0 && !strcmp(profile((uint8_t)nf).name, "MT NarrowFast") && profile((uint8_t)nf).freqHz == 869442000u &&
+           profile((uint8_t)nf).sf == 7 && profile((uint8_t)nf).bwKhz10 == 625 && profile((uint8_t)nf).cr == 6);
+        const int16_t ns = meshPresetFind(Proto::MESHTASTIC, "NarrowSlow");
+        ck("NarrowSlow is still its own row", ns >= 0 && ns != nf && profile((uint8_t)ns).sf == 8);
         setRegion(REGION_US);
         const int16_t ms = meshPresetFind(Proto::MESHTASTIC, "MediumSlow");
         ck("US MediumSlow is 914.875 MHz SF10", ms >= 0 && profile((uint8_t)ms).freqHz == 914875000u && profile((uint8_t)ms).sf == 10);
+        setRegion(REGION_AU);
+        ck("AU is its own plan", region() == REGION_AU && !strcmp(regionName(), "AU 915"));
+        // Every Meshtastic row where the slot rule puts it in ANZ's 915-928.
+        bool slots = true;
+        uint8_t rows[32];
+        const uint8_t n = meshPresetRows(Proto::MESHTASTIC, rows, 32);
+        for (uint8_t i = 0; i < n; i++) {
+            const Profile& p = profile(rows[i]);
+            static const struct { const char* row; const char* name; } NM[] = {
+                { "MT LongFast", "LongFast" }, { "MT MediumFast", "MediumFast" }, { "MT MediumSlow", "MediumSlow" },
+                { "MT ShortFast", "ShortFast" }, { "MT ShortSlow", "ShortSlow" }, { "MT LongSlow", "LongSlow" },
+                { "MT LongMod", "LongModerate" } };
+            for (const auto& m : NM)
+                if (!strcmp(p.name, m.row))
+                    slots = slots && p.freqHz == meshtasticSlotHz(915000000u, 928000000u, p.bwKhz10, 0, 0, m.name);
+        }
+        ck("AU Meshtastic rows sit on ANZ's slots", n >= 7 && slots);
+        ck("AU LongFast is 919.875 (slot 20)", profile((uint8_t)meshPresetFind(Proto::MESHTASTIC, "")).freqHz == 919875000u);
+        const int16_t mca = meshPresetFind(Proto::MESHCORE, nullptr);
+        ck("AU MeshCore's own row is Mid, 915.075 SF9", mca >= 0 && profile((uint8_t)mca).freqHz == 915075000u && profile((uint8_t)mca).sf == 9);
+        setRegion(REGION_EU);
     }
 
     return report();

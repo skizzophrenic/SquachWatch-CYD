@@ -57,6 +57,14 @@ static uint32_t s_squadSeen[SQUAD_N];
 static bool     s_squadLive[SQUAD_N];
 static SquachMesh::Peer s_squadPeer[SQUAD_N];   // what each one looks like
 
+// A goblin from Network Goblin Scout (goblin.h): the first one heard, until
+// it has been quiet for PEER_STALE_MS. Written in the BLE task, read in the
+// loop, like the peer above. Its ID is the only thing that says it is the
+// same goblin, and it is kept only while it is here.
+static Goblin::Visitor s_goblin{};
+static uint32_t        s_goblinSeen = 0;
+static bool            s_haveGoblin = false;
+
 // The visitor somebody picked on the SQUAD screen, if any. RAM only.
 static uint8_t  s_preferMac[6] = { 0 };
 static bool     s_preferSet    = false;
@@ -164,6 +172,7 @@ const SquachMesh::Peer* peer() {
     return s_havePeer ? &s_peer : nullptr;
 }
 const uint8_t* peerMac() { return s_peerMac; }
+const Goblin::Visitor* goblin() { return s_haveGoblin ? &s_goblin : nullptr; }
 
 // What we look like, read fresh each time rather than cached: the outfit and
 // the name can both change while this is running, and a peer drawing a stale
@@ -195,6 +204,21 @@ bool onManufacturerData(const uint8_t* d, size_t len, const uint8_t* mac, uint32
     if (len < 2 + SquachMesh::LEN_INDEXED) return false;
     const uint16_t cid = (uint16_t)(d[0] | ((uint16_t)d[1] << 8));
     if (cid != SquachMesh::COMPANY_ID) return false;
+
+    // A goblin. 'N' 'G' where SquachMesh has 'S' 'Q' 'M' '1', so neither
+    // decoder believes the other's advert. Consumed here either way: a goblin
+    // is a visitor, and must never reach the signature tables.
+    {
+        Goblin::Visitor g;
+        if (Goblin::decode(d + 2, len - 2, g)) {
+            if (!s_haveGoblin || g.id == s_goblin.id) {
+                s_goblin = g;
+                s_goblinSeen = now;
+                s_haveGoblin = true;
+            }
+            return true;
+        }
+    }
 
     // A message frame rather than an advert. Queued raw for the loop task:
     // this runs in the BLE host task and the cipher lives on the loop, so no
@@ -252,7 +276,8 @@ void tick(uint32_t now) {
     // Detecting is its own switch now, and off means no visitor at all --
     // not "advertise less". A peer already on screen is dropped rather than
     // frozen there.
-    if (!Settings::meshDetect()) { s_havePeer = false; return; }
+    if (!Settings::meshDetect()) { s_havePeer = false; s_haveGoblin = false; return; }
+    if (s_haveGoblin && (int32_t)(now - s_goblinSeen) > (int32_t)PEER_STALE_MS) s_haveGoblin = false;
 
     // SIGNED. s_peerSeen is stamped in the BLE task with its own millis(),
     // which can be later than this loop pass's `now`; unsigned, that age was

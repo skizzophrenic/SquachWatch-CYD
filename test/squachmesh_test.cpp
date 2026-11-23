@@ -225,7 +225,7 @@ int main() {
 
     suite("Unknown indices clamp rather than refuse");
     {
-        // Five bits hold 0..31 and this build has 19 outfits, so a peer on
+        // Five bits hold 0..31 and this build has 22 outfits, so a peer on
         // newer firmware can send one we do not have: a wrong hat, not an
         // attack.
         size_t n = encode(mk(15, 31, 3, nullptr), buf);
@@ -237,7 +237,7 @@ int main() {
 
     suite("The seventeenth outfit, and boards from before it");
     {
-        ck("twenty outfits", OUTFIT_N == 20);
+        ck("twenty-two outfits", OUTFIT_N == 22);
         size_t n = encode(mk(3, 16, 1, nullptr), buf);
         ck("outfit 16 survives the trip", decode(buf, n, p) && p.outfit == 16);
         ck("its fifth bit is a spare bit, not a new byte", n == LEN_INDEXED);
@@ -267,6 +267,19 @@ int main() {
         // A board with eighteen outfits sees 16|2 = 18 and clamps 18 % 18 to
         // 0: plain Squachy again.
         ck("its low four bits are 2 and the fifth is set", ((w >> 8) & 0x0F) == 2 && (w & 0x10));
+    }
+
+    suite("MOTH HOOD and RED WINGS, and boards from before them");
+    {
+        size_t n = encode(mk(3, 20, 1, nullptr), buf);
+        ck("outfit 20 survives the trip", decode(buf, n, p) && p.outfit == 20);
+        n = encode(mk(3, 21, 1, nullptr), buf);
+        ck("outfit 21 survives the trip", decode(buf, n, p) && p.outfit == 21);
+        const uint16_t w = (uint16_t)(buf[5] | ((uint16_t)buf[6] << 8));
+        // A board with twenty outfits sees 16|5 = 21 and clamps 21 % 20 to
+        // 1: the wrong hat, as the format chose, and still one frame long.
+        ck("its low four bits are 5 and the fifth is set", ((w >> 8) & 0x0F) == 5 && (w & 0x10));
+        ck("and it is still the short frame", n == LEN_INDEXED);
     }
 
     suite("The aura goes visiting, and boards from before it");

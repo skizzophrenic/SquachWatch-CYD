@@ -1,5 +1,9 @@
 // SquachWatch-CYD — DetectionEngine implementation
 #include "detection.h"
+#include "trail.h"
+
+#include "places.h"
+#include "gnss.h"
 #include "wardrive.h"
 #include "wifi_auth.h"
 #include "serial_flush.h"
@@ -10,8 +14,10 @@
 #include "bingo.h"
 #include "dex.h"
 #include "regulars.h"
+#include "my_alerts.h"
 #include "clock.h"
 #include "sound.h"
+#include "tag_ring.h"
 #if SQW_BOOT_POWEROFF
 void bootStage(uint8_t s);   // main.cpp: the power diary's steps through setup()
 #define BOOT_STAGE(n) bootStage(n)
@@ -19,6 +25,19 @@ void bootStage(uint8_t s);   // main.cpp: the power diary's steps through setup(
 #define BOOT_STAGE(n) ((void)0)
 #endif
 #include <Arduino.h>
+
+// On the console whenever a tag's owner byte reads differently from the last
+// one seen, so a bench can pin the bits against a real tag: next to its
+// phone, then away from it for an hour.
+static void logOwner(const Detection& det, uint8_t st, uint8_t frame) {
+    static uint8_t s_lastMac[6], s_lastSt = 0xFF, s_lastFr = 0;
+    if (memcmp(s_lastMac, det.mac, 6) != 0 || s_lastSt != st || s_lastFr != frame) {
+        memcpy(s_lastMac, det.mac, 6); s_lastSt = st; s_lastFr = frame;
+        Serial.printf("[tag] %02x:%02x %s frame 0x%02x status 0x%02x -> %s\n", det.mac[4], det.mac[5],
+                      det.vendor ? det.vendor : "?", frame, st,
+                      det.owner == OWNER_WITH ? "WITH OWNER" : det.owner == OWNER_AWAY ? "AWAY" : "NOT SET UP");
+    }
+}
 // Which radios this file drives. The Tab5's ESP32-P4 has none of its own: its
 // WiFi frames come from the ESP32-C6 over ESP-Hosted (tab5_radio.h) and are
 // parsed by the same code every other board runs on its own sniffer. Its
@@ -33,6 +52,8 @@ void bootStage(uint8_t s);   // main.cpp: the power diary's steps through setup(
 #define SQW_BLE 1
 #if SQW_WIFI_HOSTED
 #include "tab5_radio.h"
+#include <esp_wifi.h>   // the C6 driver's scan, over ESP-Hosted (startRawWifiScan)
+#include <esp_event.h>
 #else
 #include <WiFi.h>
 #include <esp_wifi.h>
@@ -79,6 +100,51 @@ void bootStage(uint8_t s);   // main.cpp: the power diary's steps through setup(
 #if !defined(TAB5)   // the Tab5's card is not driven yet; nothing here reads SD directly anyway
 #include <SD.h>
 #endif
+
+// -------- which heap the pressure numbers below are about --------
+//
+// Every "largest free block" this file reads is a number about INTERNAL
+// SRAM, and it has to be asked for that way: MALLOC_CAP_8BIT on its own is
+// not a question about internal SRAM at all.
+//
+// On a board with PSRAM -- sticks3, twatch-s3, tdeck-plus, crowpanel7 and
+// the Freenove S3 envs all build with -DBOARD_HAS_PSRAM -- arduino-esp32
+// registers the external RAM into the same capability-aware allocator that
+// holds internal SRAM, and the PSRAM region carries MALLOC_CAP_8BIT too. So
+// heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) walks both pools and
+// hands back the LARGER block, which on those boards is always PSRAM's:
+// megabytes against the few kilobytes the thresholds here are written in.
+// The comparison can then never come out true, so the seatbelt never arms,
+// the early flush never fires and the scan never falls back to passive: a
+// PSRAM board was reading the wrong pool, calling it healthy, and running
+// into the host-task abort those three exist to survive while every number
+// it printed looked fine. Reported by mattjfiorentino, issue #54.
+//
+// Internal SRAM is the pool that matters here whatever the board: the
+// strings NimBLE hands back, the library's per-device records, the WiFi
+// driver's buffers and every FreeRTOS object come out of it, and nothing in
+// this file ever allocates into PSRAM.
+//
+// MALLOC_CAP_8BIT stays in the mask beside MALLOC_CAP_INTERNAL rather than
+// being replaced by it. MALLOC_CAP_INTERNAL alone would also match the
+// IRAM-only region, which is internal but 32-bit-access only and can never
+// serve a byte-addressable allocation -- that would start inflating the
+// number on the classic ESP32 boards whose thresholds were measured. With
+// both bits set a board without PSRAM reads exactly what it read before, so
+// nothing changes on the shipping three.
+//
+// The thresholds themselves are untouched by this. They were measured
+// against MALLOC_CAP_8BIT figures on a 320 KB classic ESP32, and they are
+// what a PSRAM board will now actually be held to for the first time; what
+// the right bar is on a board with a different internal-SRAM budget is a
+// measurement somebody with that hardware still owes.
+//
+// The tree already names MALLOC_CAP_INTERNAL wherever internal SRAM is what
+// is meant: src/crowpanel7_probe.cpp asks for its free size and largest block
+// that way, and src/lora_sniffer.cpp allocates its ring from
+// MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT when PSRAM will not do. This file was
+// the one asking the looser question.
+static const uint32_t HEAP_PRESSURE_CAPS = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
 
 // -------- global engine instance (referenced by callbacks) --------
 static DetectionEngine* g_engine = nullptr;
@@ -520,6 +586,12 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
         // (#22). Read from the advert's bytes now, with no string at all.
         const std::vector<uint8_t>& advPl = adv->getPayload();
         AdFields::copyName(advPl.data(), advPl.size(), det.name, sizeof(det.name));
+#if SQW_RING
+        // RING NAME, for the bench: any device by its advertised name.
+        if (TagRing::findWanted())
+            TagRing::noteNamed(mac, adv->getAddress().getType(), det.name, adv->isConnectable(),
+                               advPl.data(), advPl.size());
+#endif
         // The matched row's own label, for the types that cover several
         // devices -- see where the vendor is written, below.
         const char* label = nullptr;
@@ -563,6 +635,11 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
                             // off the end of a 20-byte field.
                             snprintf(det.name, sizeof(det.name), "%02X%02X%02X %u.%u",
                                      b[4], b[5], b[6], major, minor);
+                        } else if (isHomePodSiri(b, (uint8_t)mfgLen)) {
+                            // A HomePod answering "Hey Siri": a smart speaker
+                            // with microphones, and certain (see the rule).
+                            det.type = DetectionType::LISTENER;
+                            label    = "HomePod";
                         }
                     }
                 }
@@ -674,6 +751,10 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
         if (det.type == DetectionType::HACKER) {
             det.conf = matchedByName ? Confidence::MED_CONF : Confidence::HIGH_CONF;
         }
+        // A HomePod's own Siri block: only a HomePod sends that class.
+        if (det.type == DetectionType::LISTENER && label && strcmp(label, "HomePod") == 0) {
+            det.conf = Confidence::HIGH_CONF;
+        }
         // A bare ten-digit name is how one Penguin firmware names itself, and
         // also something any gadget could be called. Logged, but LOW.
         if (det.type == DetectionType::FLOCK && matchedByName && isBareSerialName(det.name)) {
@@ -694,6 +775,21 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
         // Set vendor label based on the matched table entry.
         if (det.type == DetectionType::AIRTAG) {
             det.vendor = "Apple";
+            // With its owner or apart from it, from the status byte (see
+            // airTagStatusByte): the one fact about a tag that decides
+            // whether it is anyone's business.
+            // The frame says it: the short "nearby" frame (0x02) only goes
+            // out while the owner's phone is close, the full "separated"
+            // frame (0x19) once it is not. The status byte rides along on
+            // the console for the bench.
+            uint8_t st = 0;
+            const uint8_t fr = airTagFrame(adv->getPayload().data(), (uint8_t)adv->getPayload().size(), &st);
+            if (fr) {
+                // 0x07 is a tag nobody has set up: no owner to be with or
+                // away from, so the chip stays off and the console says so.
+                det.owner = (fr == 0x02) ? OWNER_WITH : (fr == 0x19) ? OWNER_AWAY : OWNER_UNKNOWN;
+                logOwner(det, st, fr);
+            }
         } else if (det.type == DetectionType::DRONE) {
             det.vendor = "DroneID";
         } else if (det.type == DetectionType::META) {
@@ -709,6 +805,14 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
         } else if (det.type == DetectionType::GOOGLE_TAG) {
             // Find Hub, DULT or Chipolo: whichever row matched.
             det.vendor = label ? label : "Google";
+            // Frame type 0x41 is unwanted-tracking-protection mode, which
+            // the owner's phone turns on once the tag has been apart from
+            // them for a while; 0x40 is the tag at home with its owner.
+            const uint8_t ft = fmdnFrameType(adv->getPayload().data(), (uint8_t)adv->getPayload().size());
+            if (ft) {
+                det.owner = (ft == 0x41) ? OWNER_AWAY : OWNER_WITH;
+                logOwner(det, 0, ft);
+            }
         } else if (det.type == DetectionType::TILE) {
             det.vendor = "Tile";
         } else if (det.type == DetectionType::AXON) {
@@ -728,6 +832,10 @@ class BleScanCallbacks : public NimBLEScanCallbacks {
         } else {
             det.vendor = "BLE";
         }
+#if SQW_RING
+        // RING connects later and wants the address type this advert used.
+        if (TagRing::canRing(det.type)) TagRing::noteSeen(det.mac, adv->getAddress().getType(), adv->isConnectable());
+#endif
         g_engine->postBle(det);
     }
 };
@@ -744,6 +852,8 @@ static BleScanCallbacks g_bleScanCallbacks;
 //
 // 802.11 frame header: bytes 0..23 contain frame control, duration,
 // addr1 (DA, offset 4), addr2 (SA, offset 10), addr3 (BSSID, offset 16).
+volatile bool g_sniffMuted = false;
+
 static void onWifiFrame(const uint8_t* frame, uint16_t sigLen, uint16_t avail, int8_t rssi, uint8_t channel) {
     s_wifiRaw++;
     if (!g_engine) return;
@@ -917,11 +1027,11 @@ bool DetectionEngine::init() {
     BOOT_STAGE(4);
     Serial.println("[boot] starting WiFi: the C6 over ESP-Hosted");
     serialFlush();
-    Serial.printf("[boot] heap before the link: %lu free, %lu largest\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    Serial.printf("[boot] heap before the link: %lu free, %lu largest\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS));
     if (Tab5Radio::begin()) {
         setSniffChannel(_wifiChannel);
         sniffOn();
-        Serial.printf("[boot] heap with the link up: %lu free, %lu largest\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+        Serial.printf("[boot] heap with the link up: %lu free, %lu largest\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS));
     } else {
         Serial.println("[boot] no radio this boot: WiFi detections are off");
     }
@@ -940,7 +1050,7 @@ bool DetectionEngine::init() {
     BOOT_STAGE(4);
     Serial.println("[boot] starting WiFi");
     serialFlush();
-    Serial.printf("[boot] heap before WiFi: %lu free, %lu largest\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    Serial.printf("[boot] heap before WiFi: %lu free, %lu largest\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS));
     WiFi.mode(WIFI_STA);
     BOOT_STAGE(11);
     WiFi.disconnect();
@@ -1004,7 +1114,7 @@ bool DetectionEngine::init() {
             WiFi.mode(WIFI_STA);
         }
     }
-    Serial.printf("[boot] heap with WiFi started: %lu free, %lu largest\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    Serial.printf("[boot] heap with WiFi started: %lu free, %lu largest\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS));
     esp_wifi_set_promiscuous(true);
     BOOT_STAGE(14);
 #if SQW_WIFI_5G
@@ -1029,6 +1139,7 @@ bool DetectionEngine::init() {
     filter.filter_mask = WIFI_PROMIS_FILTER_MASK_MGMT | WIFI_PROMIS_FILTER_MASK_DATA;
     esp_wifi_set_promiscuous_filter(&filter);
     esp_wifi_set_promiscuous_rx_cb([](void* buf, wifi_promiscuous_pkt_type_t) {
+        if (g_sniffMuted) return;   // HUMAN SENSING has the channel (include/detection.h)
         const wifi_promiscuous_pkt_t* pkt = (const wifi_promiscuous_pkt_t*)buf;
         onWifiFrame(pkt->payload, pkt->rx_ctrl.sig_len, pkt->rx_ctrl.sig_len, pkt->rx_ctrl.rssi, pkt->rx_ctrl.channel);
     });
@@ -1042,7 +1153,7 @@ bool DetectionEngine::init() {
     // asked for both at once -- see the backlight note in main.cpp's setup().
     delay(150);
     s_bootHeap.wifiFree    = ESP.getFreeHeap();
-    s_bootHeap.wifiLargest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    s_bootHeap.wifiLargest = heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS);
     Serial.printf("[boot] heap with WiFi up: %lu free, %lu largest\n",
                   (unsigned long)s_bootHeap.wifiFree, (unsigned long)s_bootHeap.wifiLargest);
 #if SQW_BLE
@@ -1056,7 +1167,7 @@ bool DetectionEngine::init() {
         Serial.println("[boot] no Bluetooth this boot: BLE detections are off");
         BOOT_STAGE(7);
         s_bootHeap.bleFree    = ESP.getFreeHeap();
-        s_bootHeap.bleLargest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+        s_bootHeap.bleLargest = heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS);
         _sd.begin();
         BOOT_STAGE(8);
         return true;
@@ -1114,7 +1225,7 @@ bool DetectionEngine::init() {
     scan->start(0, false, false);   // forever; not a restart
     BOOT_STAGE(7);
     s_bootHeap.bleFree    = ESP.getFreeHeap();
-    s_bootHeap.bleLargest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    s_bootHeap.bleLargest = heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS);
     Serial.printf("[boot] heap with Bluetooth up: %lu free, %lu largest\n",
                   (unsigned long)s_bootHeap.bleFree, (unsigned long)s_bootHeap.bleLargest);
 
@@ -1188,7 +1299,7 @@ Stats stats() {
     st.advOn  = Mesh::advertising();
     st.advMs  = 1500;
     st.heapFreeKb  = ESP.getFreeHeap() / 1024;
-    st.heapBlockKb = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024;
+    st.heapBlockKb = heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS) / 1024;
     return st;
 }
 
@@ -1241,7 +1352,7 @@ static void txFailure(uint8_t code, const char* stage) {
         Serial.printf("[mesh-tx] FAILED %s (%u), count=%lu, heap=%lu, largest=%lu\n",
                       stage, (unsigned)code, (unsigned long)s_txFailures,
                       (unsigned long)ESP.getFreeHeap(),
-                      (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+                      (unsigned long)heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS));
 }
 
 // The payload we last handed the stack, so an unchanged one is never handed
@@ -1348,7 +1459,7 @@ static void setAdvertising(bool on, uint32_t now) {
     if (out && !s_txWasSending) {
         Serial.printf("[mesh-tx] controller advertising PRIMARY MESSAGE/INVITE (%u-byte frame), heap=%lu, largest=%lu\n",
                       (unsigned)outLen, (unsigned long)ESP.getFreeHeap(),
-                      (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+                      (unsigned long)heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS));
     }
     s_txWasSending = MeshTalk::sending(now);
     memcpy(s_lastAdv, buf, n);
@@ -1561,7 +1672,7 @@ static void scanFlushTick() {
     if (s_lastTickMs && tickNow - s_lastTickMs < 100) return;
     s_lastTickMs = tickNow;
     if (!bleLive()) {
-        s_heapLow = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < 1536;
+        s_heapLow = heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS) < 1536;
         return;
     }
     // Printed from here rather than the host task, which should never be kept
@@ -1571,11 +1682,11 @@ static void scanFlushTick() {
         Serial.printf("[scan] restart %lu freed %lu B (%lu total), heap %lu, largest %lu, dropped %lu\n",
                       (unsigned long)s_flush.count, (unsigned long)s_flush.lastFreed,
                       (unsigned long)s_flush.totalFreed, (unsigned long)ESP.getFreeHeap(),
-                      (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT),
+                      (unsigned long)heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS),
                       (unsigned long)s_advertsDropped);
     }
     const uint32_t now = millis();
-    const uint32_t largest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    const uint32_t largest = heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS);
     s_heapLow = largest < 1536;
     bool modeChanged = scanModeTick(now, largest);
     if (s_windowPending) { s_windowPending = false; modeChanged = true; Serial.printf("[scan] window %u from the next restart\n", (unsigned)s_windowReq); }
@@ -1620,7 +1731,7 @@ bool scanPassiveNow()           { return true; }
 ScanFlushStats scanFlushStats() { return ScanFlushStats{ 0, 0, 0 }; }
 uint32_t advertRate()           { return 0; }
 static void scanFlushTick() {
-    s_heapLow = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) < 1536;
+    s_heapLow = heap_caps_get_largest_free_block(HEAP_PRESSURE_CAPS) < 1536;
 }
 #endif  // SQW_BLE
 
@@ -1669,6 +1780,17 @@ void DetectionEngine::loop() {
     // Back from NEARBY, a WiFi sweep or an update: the room was not being
     // listened to, so that time does not count against "last seen".
     resumeAgeing();
+    // Where the board is, for the trail: the WiFi fingerprint every pass, a
+    // GPS position when there is a fresh one.
+    {
+        const uint32_t now = millis();
+        Places::tick(now);
+        static uint32_t s_fixAt = 0;
+        if (Gnss::fresh(now) && now - s_fixAt >= 5000) {
+            s_fixAt = now;
+            Places::noteFix(Gnss::fix().lat7, Gnss::fix().lon7, now);
+        }
+    }
     // After the raw-scan return above, so a raw scan that owns the radio is
     // never restarted out from under it.
     scanFlushTick();
@@ -2066,6 +2188,8 @@ void DetectionEngine::postBle(Detection d) {
             }
             _log[slot].rssi = d.rssi;
             _log[slot].lastSeen = millis();
+            Trail::noteSighting(_log[slot], d.rssi, millis());
+            Trail::noteOwner(_log[slot], d.owner, millis());
             Bingo::note(d.type);
             Dex::note(d.type, d.rssi);
             Regulars::note(d.mac, d.type);
@@ -2082,6 +2206,43 @@ void DetectionEngine::postBle(Detection d) {
             }
             return;
         }
+    }
+    pushLog(d);
+}
+
+void DetectionEngine::postLora(Detection d) {
+    if (!Settings::typeEnabled(d.type)) return;
+    const uint32_t now = millis();
+    for (uint8_t i = 0; i < _logCount; i++) {
+        const uint8_t slot = (_logHead + LOG_CAP - 1 - i) % LOG_CAP;
+        Detection& row = _log[slot];
+        if (memcmp(row.mac, d.mac, 6) != 0 || row.type != d.type) continue;
+        // A row kept from before this boot has no lastSeen to measure from,
+        // and the first frame of a new boot is news either way.
+        const bool gone = row.restored || (now - row.lastSeen) > LORA_GONE_MS;
+        {
+            const uint8_t nowAt = (uint8_t)(now >> 11);
+            if (row.prevAt != nowAt) { row.prevRssi = row.rssi; row.prevAt = nowAt; }
+        }
+        row.rssi     = d.rssi;
+        row.lastSeen = now;
+        Bingo::note(d.type);
+        Dex::note(d.type, d.rssi);
+        Regulars::note(d.mac, d.type);
+        if (!row.active) {
+            row.active = true;
+            _typeCounts[(uint8_t)d.type]++;
+        }
+        if (gone) {
+            row.hits++;
+            row.restored  = 0;
+            row.firstSeen = d.firstSeen;       // a fresh sighting, for the alert; the caller's stamp
+            _latest = &row;
+            _latestNew = false;
+            _latestSeq = _latestSeq + 1;
+            queueBlackBox(row, true);
+        }
+        return;
     }
     pushLog(d);
 }
@@ -2143,20 +2304,71 @@ const RawBleResult* DetectionEngine::rawBleAt(uint8_t idx) const {
 }
 
 #if SQW_WIFI_HOSTED
-// The driver's own network scan is not on the link yet: a WIFI sweep on the
-// Tab5 finishes at once with nothing to show.
+// The C6 driver's own network scan, over ESP-Hosted (each esp_wifi_* call on
+// the P4 is an RPC to the C6). The sniffer is off while it runs, as it is for
+// a scan everywhere. The add-a-network screen and SCAN read the results: it
+// said "No networks found" on the Tab5 until this (2026-11-17), because the
+// sweep used to finish at once with nothing. Strongest first, one row per
+// name (the strongest access point of each), hidden networks left out.
+static wifi_ap_record_t* s_hostRec = nullptr;
+static uint16_t          s_hostRecN = 0;
+static volatile bool     s_hostScanDone = false;
+static bool              s_hostScanOk = false, s_hostCollected = false;
+static uint32_t          s_hostScanAt = 0;
+static void hostScanDone(void*, esp_event_base_t, int32_t, void*) { s_hostScanDone = true; }
+static void hostCollect() {
+    s_hostCollected = true;
+    free(s_hostRec); s_hostRec = nullptr; s_hostRecN = 0;
+    if (!s_hostScanOk) return;
+    uint16_t n = 0;
+    if (esp_wifi_scan_get_ap_num(&n) != ESP_OK || !n) { esp_wifi_clear_ap_list(); return; }
+    if (n > 24) n = 24;
+    wifi_ap_record_t* r = (wifi_ap_record_t*)calloc(n, sizeof(wifi_ap_record_t));
+    if (!r) { esp_wifi_clear_ap_list(); return; }
+    uint16_t got = n;
+    if (esp_wifi_scan_get_ap_records(&got, r) != ESP_OK) { free(r); return; }
+    for (uint16_t i = 1; i < got; i++) { wifi_ap_record_t x = r[i]; int j = i; while (j && r[j - 1].rssi < x.rssi) { r[j] = r[j - 1]; j--; } r[j] = x; }
+    uint16_t k = 0;
+    for (uint16_t i = 0; i < got; i++) {
+        if (!r[i].ssid[0]) continue;
+        bool dup = false;
+        for (uint16_t j = 0; j < k && !dup; j++) dup = !strcmp((const char*)r[j].ssid, (const char*)r[i].ssid);
+        if (!dup) r[k++] = r[i];
+    }
+    s_hostRec = r; s_hostRecN = k > 12 ? 12 : k;
+    Serial.printf("[scan] wifi: %u networks heard over the C6\n", (unsigned)s_hostRecN);
+}
 void DetectionEngine::startRawWifiScan() {
     if (g_rawMode == RawScanMode::REST) wakeRadios();
     g_rawMode = RawScanMode::WIFI;
     sniffOff();
+    static bool registered = false;
+    if (!registered) { esp_event_handler_instance_register(WIFI_EVENT, WIFI_EVENT_SCAN_DONE, hostScanDone, nullptr, nullptr); registered = true; }
+    free(s_hostRec); s_hostRec = nullptr; s_hostRecN = 0;
+    s_hostScanDone = false; s_hostCollected = false;
+    wifi_scan_config_t cfg = {};
+    cfg.show_hidden = false;
+    cfg.scan_type = WIFI_SCAN_TYPE_ACTIVE;
+    cfg.scan_time.active.min = 60;
+    cfg.scan_time.active.max = 120;
+    const esp_err_t e = esp_wifi_scan_start(&cfg, false);
+    s_hostScanOk = e == ESP_OK;
+    s_hostScanAt = millis();
+    if (!s_hostScanOk) { Serial.printf("[scan] wifi scan refused: %s\n", esp_err_to_name(e)); s_hostScanDone = true; }
 }
-bool DetectionEngine::rawWifiScanDone() const { return g_rawMode == RawScanMode::WIFI; }
-uint8_t DetectionEngine::rawWifiCount() const { return 0; }
-const char* DetectionEngine::rawWifiSsid(uint8_t) const { return ""; }
-int8_t DetectionEngine::rawWifiRssi(uint8_t) const { return 0; }
-uint8_t DetectionEngine::rawWifiChannel(uint8_t) const { return 0; }
-bool DetectionEngine::rawWifiOpen(uint8_t) const { return false; }
-const uint8_t* DetectionEngine::rawWifiBssid(uint8_t) const { return nullptr; }
+bool DetectionEngine::rawWifiScanDone() const {
+    if (g_rawMode != RawScanMode::WIFI) return false;
+    // The event, or 8 s (a scan of every channel takes ~2 s): either way, collect.
+    if (!s_hostScanDone && millis() - s_hostScanAt > 8000) s_hostScanDone = true;
+    if (s_hostScanDone && !s_hostCollected) hostCollect();
+    return s_hostScanDone;
+}
+uint8_t DetectionEngine::rawWifiCount() const { return rawWifiScanDone() ? (uint8_t)s_hostRecN : 0; }
+const char* DetectionEngine::rawWifiSsid(uint8_t i) const { return i < rawWifiCount() ? (const char*)s_hostRec[i].ssid : ""; }
+int8_t DetectionEngine::rawWifiRssi(uint8_t i) const { return i < rawWifiCount() ? s_hostRec[i].rssi : 0; }
+uint8_t DetectionEngine::rawWifiChannel(uint8_t i) const { return i < rawWifiCount() ? s_hostRec[i].primary : 0; }
+bool DetectionEngine::rawWifiOpen(uint8_t i) const { return i < rawWifiCount() && s_hostRec[i].authmode == WIFI_AUTH_OPEN; }
+const uint8_t* DetectionEngine::rawWifiBssid(uint8_t i) const { return i < rawWifiCount() ? s_hostRec[i].bssid : nullptr; }
 
 #else
 void DetectionEngine::startRawWifiScan() {
@@ -2567,6 +2779,9 @@ void DetectionEngine::processWiFiQ() {
         // (beacon), same offsets postWiFi() was already called with.
         checkWatchWifi(e.mac, e.rssi);
         checkHuntWifi(e.mac, e.rssi);
+        // Every beacon tells the places tracker what networks are about (its
+        // SSID names the network; a pwnagotchi's or a drone's is not one).
+        if (e.ssid[0] && !e.pwnagotchi && !e.drone) Places::noteBssid(e.mac, e.rssi, e.ssid, millis());
         // Every captured frame feeds the spectrum-waterfall's channel
         // activity level, whether or not it ends up matching anything
         // below — this is meant to reflect real ambient RF traffic,
@@ -2600,6 +2815,11 @@ void DetectionEngine::processWiFiQ() {
         // throwaway SSID must not be fed to the AP tracker as if it were a
         // network somebody might be impersonating.
         bool evilTwin = false;
+        // MY ALERTS: the owner's own patterns. After the evil-twin check, so
+        // the AP tracker still hears every named network, and ahead of the
+        // signature tables: somebody who typed "veh*" wants to hear about
+        // veh912 even when its router's prefix is also in the camera list.
+        int8_t mine = -1;
         if (e.pwnagotchi) {
             t = DetectionType::HACKER;
             conf = Confidence::HIGH_CONF;
@@ -2609,6 +2829,9 @@ void DetectionEngine::processWiFiQ() {
             conf = confidenceFor(t);
         } else if ((evilTwin = (e.ssid[0] && noteApBeacon(e.mac, e.ssid, e.encrypted)))) {
             t = DetectionType::EVILTWIN;
+        } else if (e.ssid[0] && (mine = MyAlerts::match(e.ssid)) >= 0) {
+            t = DetectionType::MINE;
+            conf = Confidence::HIGH_CONF;   // the owner said so, by name
         } else {
             // Check OUI first (per DESIGN.md §6.2 precedence); fall back
             // to the SSID prefix (e.g. an Axon/Flock unit in pairing
@@ -2653,6 +2876,7 @@ void DetectionEngine::processWiFiQ() {
                 _log[slot].rssi = e.rssi;
                 _log[slot].lastSeen = millis();
                 _log[slot].channel = e.channel;
+                Trail::noteSighting(_log[slot], e.rssi, millis());
                 if (reactivating) {
                     _log[slot].active = true;
                     _log[slot].restored = 0;
@@ -2688,6 +2912,11 @@ void DetectionEngine::processWiFiQ() {
         } else if (e.drone) {
             d.vendor = "DroneID";
             strncpy(d.name, e.ssid, sizeof(d.name) - 1);   // its serial, when the pack had one
+        } else if (mine >= 0) {
+            // The owner's label (or their pattern) on the plate, and the
+            // network's own name under it: "CITY PD" over "veh912".
+            d.vendor = MyAlerts::tag((uint8_t)mine);
+            strncpy(d.name, e.ssid, sizeof(d.name) - 1);
         } else if (matchedBySsid) {
             const char* name = ssidVendorName(e.ssid);
             if (name) d.vendor = name;
@@ -2713,6 +2942,8 @@ void DetectionEngine::pushLog(const Detection& d) {
     _log[_logHead] = d;
     _log[_logHead].prevRssi = d.rssi;                 // no trend on a first sight
     _log[_logHead].prevAt   = (uint8_t)(millis() >> 11);
+    Trail::noteSighting(_log[_logHead], d.rssi, millis());
+    if (d.owner) _log[_logHead].ownerMin = (uint16_t)(millis() / 60000u);
     _logHead = (_logHead + 1) % LOG_CAP;
     if (_logCount < LOG_CAP) _logCount++;
     _latest = &_log[(_logHead + LOG_CAP - 1) % LOG_CAP];
@@ -2866,7 +3097,11 @@ void DetectionEngine::expireStale() {
         uint8_t slot = (_logHead + LOG_CAP - 1 - i) % LOG_CAP;
         // Signed: lastSeen is written from the radio tasks and can land a
         // moment after `now` was read.
-        if (_log[slot].active && (int32_t)(now - _log[slot].lastSeen) > (int32_t)STALE_MS) {
+        // A LoRaWAN operator's devices speak minutes apart, not seconds: on
+        // the Bluetooth clock its row would leave the counters between every
+        // two frames.
+        const uint32_t limit = _log[slot].type == DetectionType::LORAWAN ? LORA_STALE_MS : STALE_MS;
+        if (_log[slot].active && (int32_t)(now - _log[slot].lastSeen) > (int32_t)limit) {
             _log[slot].active = false;
             // A Bluetooth address heard for a burst and never again is what a
             // fake tag looks like; enough of one type and the type goes quiet.

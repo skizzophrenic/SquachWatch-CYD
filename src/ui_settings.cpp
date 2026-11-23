@@ -15,12 +15,17 @@
 #include "settings.h"
 #include "security.h"
 #include "ignore_list.h"
+#include "my_alerts.h"
 #include "squachy.h"
 #include "bingo.h"
 #include "dex.h"
 #include "ui_dex.h"
 #include "ui_clear.h"   // uiClearSampleTile(), for the FONTS preview
+#include "alert_skin.h" // the ALERT CARD page's style names
 #include "pet.h"        // Pet::drawSampleBalloon(), the same
+#include "clock.h"      // LAST UPLOAD's date
+#include "wigle_up.h"   // the WARDRIVE page's upload rows
+#include "encounters.h" // the FIELD JOURNAL page
 #include <Arduino.h>
 
 // Was 16, which put the first row's top edge 4px ABOVE the bottom of the
@@ -34,7 +39,7 @@ static const int TOP_MARGIN = 32;
 
 // One scroll position per page, not one shared: see SettingsPage in the header.
 static SettingsPage s_page = SettingsPage::MAIN;
-static int g_scrollFor[6] = { 0, 0, 0, 0, 0, 0 };
+static int g_scrollFor[9] = { 0, 0, 0, 0, 0, 0, 0, 0, 0 };   // one per SettingsPage
 #define g_scroll (g_scrollFor[(uint8_t)s_page])
 
 // BACK is pinned along the bottom now. Height of that strip, reserved out of
@@ -74,7 +79,12 @@ static const SettingsRow ALL_ROWS[] = {
     // to ten rows, so the main list carries one row that opens it.
     SettingsRow::WATCH_SETTINGS,
 #endif
-    SettingsRow::BORING_MODE, SettingsRow::CONFIDENCE, SettingsRow::AUTO_QUIET,
+#if defined(STICKS3)
+    // TERMINAL MODE has its own button everywhere else (MODE, bottom right);
+    // the StickS3's is FOB, so its way in stays here.
+    SettingsRow::BORING_MODE,
+#endif
+    SettingsRow::CONFIDENCE, SettingsRow::AUTO_QUIET,
 #if defined(CROWPANEL7)
     // Beside ALERT FILTER and AUTO SNOOZE because it is about alerts: one
     // switch, not a page of knobs like the light. Compiled only for the
@@ -91,6 +101,9 @@ static const SettingsRow ALL_ROWS[] = {
     SettingsRow::WIFI_BANDS,
 #endif
     SettingsRow::DETECTION_FILTER,
+    // The owner's own WiFi names, between what the board filters out and
+    // what it has been told to ignore.
+    SettingsRow::MY_ALERTS,
     SettingsRow::IGNORED_DEVICES,
 #if defined(SENSE_CYD_APP)
     // Beside what the detector listens for: what the board's radio senses
@@ -120,16 +133,16 @@ static const SettingsRow ALL_ROWS[] = {
     // -- see APPEARANCE_ROWS. Everything about how he LOOKS is on one page;
     // what stays here is what he DOES.
     SettingsRow::REPLAY_INTRO, SettingsRow::SHOW_OFF, SettingsRow::VIEW_DIARY,
-    SettingsRow::BINGO, SettingsRow::DEX,
+    SettingsRow::BINGO, SettingsRow::DEX, SettingsRow::CRYPTID_GUIDE,
+#if SQUACH_MESH
+    SettingsRow::JOURNAL,   // random encounters: who has turned up, and how often they roll
+#endif
 #if !defined(STICKS3)   // the StickS3 has FOB MODE on the main screen in its place
     SettingsRow::DESK_MODE,
 #endif
     SettingsRow::POWER_SAVER,
 #if defined(CYD_GPS)
-    SettingsRow::WATCH_WARDRIVE,   // the watch's row and setting, on the CYD GPS builds
-#if defined(CARDPUTER_ADV)
-    SettingsRow::WARDRIVE_SOUND,
-#endif
+    SettingsRow::WARDRIVE_PAGE,    // WARDRIVE and what it is doing; opens the WARDRIVE page
 #endif
 #if defined(ESP32) && !defined(TWATCH_S3)
     SettingsRow::CHARGE_MODE,
@@ -158,6 +171,11 @@ static const SettingsRow APPEARANCE_ROWS[] = {
     SettingsRow::PET,
 #endif
     SettingsRow::SHADES_COLOR, SettingsRow::BANTER, SettingsRow::AURA,
+#if SQUACH_MESH
+    // Who turns up on his screen: the dice, here as well as on the FIELD
+    // JOURNAL page, because this is where people look to switch them off.
+    SettingsRow::ENCOUNTERS,
+#endif
     // Then how the SCREEN looks.
     SettingsRow::THEME, SettingsRow::BACKGROUND, SettingsRow::BACKGROUND_LOCK, SettingsRow::DET_STYLE,
     SettingsRow::LAVA_LAMP, SettingsRow::BRIGHTNESS,
@@ -166,7 +184,51 @@ static const SettingsRow APPEARANCE_ROWS[] = {
     SettingsRow::STATUS_LIGHT,
     // How big the words are, on a page of its own.
     SettingsRow::FONTS,
+#if !defined(SQW_SMALL) && !defined(TWATCH_S3)
+    // The alert card's window: a page of its own. Not on the boards whose
+    // screens are too small for a window -- they always draw TRAIL.
+    SettingsRow::ALERT_CARD,
+#endif
 };
+
+// The ALERT CARD page: which window (STYLE opens a live card to step through
+// them, the way OUTFIT does), whether it opens with its animation, and
+// whether the sunset is behind it.
+static const SettingsRow ALERT_ROWS[] = {
+    SettingsRow::ALERT_STYLE, SettingsRow::ALERT_MOTION, SettingsRow::ALERT_DESK,
+};
+static const uint8_t ALERT_ROWS_N = sizeof(ALERT_ROWS) / sizeof(ALERT_ROWS[0]);
+
+#if SQUACH_MESH
+// The FIELD JOURNAL page: how often the dice roll, then every kind of
+// encounter -- a name once met, "???" until then.
+static const SettingsRow JOURNAL_ROWS[] = {
+    SettingsRow::ENCOUNTERS,
+    SettingsRow::FREE_ROLL,
+    SettingsRow::JOURNAL_0, SettingsRow::JOURNAL_1, SettingsRow::JOURNAL_2, SettingsRow::JOURNAL_3, SettingsRow::JOURNAL_4,
+    SettingsRow::JOURNAL_5, SettingsRow::JOURNAL_6, SettingsRow::JOURNAL_7, SettingsRow::JOURNAL_8,
+    SettingsRow::JOURNAL_9,
+};
+static const uint8_t JOURNAL_ROWS_N = sizeof(JOURNAL_ROWS) / sizeof(JOURNAL_ROWS[0]);
+#endif
+
+#if defined(CYD_GPS) || defined(TWATCH_S3)
+// The WARDRIVE page: the switch, what it is doing, and where the log goes --
+// to WiGLE over the WiFi on the boards with room for it, through
+// squachwatch.com on the rest.
+static const SettingsRow WD_ROWS[] = {
+    SettingsRow::WATCH_WARDRIVE, SettingsRow::WD_GPS, SettingsRow::WD_COUNT, SettingsRow::WD_KEPT,
+#if defined(CARDPUTER_ADV) && defined(CYD_GPS)
+    SettingsRow::WARDRIVE_SOUND,
+#endif
+#if SQW_WIGLE_UPLOAD
+    SettingsRow::WD_UPLOAD, SettingsRow::WD_AUTO, SettingsRow::WD_KEY, SettingsRow::WD_LAST,
+#else
+    SettingsRow::WD_WEB,
+#endif
+};
+static const uint8_t WD_ROWS_N = sizeof(WD_ROWS) / sizeof(WD_ROWS[0]);
+#endif
 
 // The FONTS page: one row per kind of text. A kind this board can show at
 // only one size is left off (see buildDisplayList()).
@@ -196,7 +258,7 @@ static Settings::FontKind fontKindFor(SettingsRow r) {
 // The WATCH SETTINGS page: the battery first (a reading), then the knobs that
 // decide how long it lasts, then the buzz, then the tools.
 static const SettingsRow WATCH_ROWS[] = {
-    SettingsRow::WATCH_BATTERY, SettingsRow::WATCH_WARDRIVE, SettingsRow::WATCH_QUIET_TAGS,
+    SettingsRow::WATCH_BATTERY, SettingsRow::WARDRIVE_PAGE, SettingsRow::WATCH_QUIET_TAGS,
 #if SQUACH_LORA
     SettingsRow::WATCH_LORA_CHATS, SettingsRow::WATCH_LORA,
 #endif
@@ -233,12 +295,14 @@ static const SettingsRow SYSTEM_ROWS[] = {
 };
 static const uint8_t SYSTEM_ROWS_N = sizeof(SYSTEM_ROWS) / sizeof(SYSTEM_ROWS[0]);
 
-// The DESK MODE page: everything about the desk in one place, so it can grow.
-// The way in comes first; then how it looks; then who is on it.
+// The DESK SETTINGS page: everything about the desk in one place, so it can
+// grow. How it looks first; then who is on it. (Its OPEN row went when the
+// main screen's MODE button became the way in.)
 static const SettingsRow DESK_ROWS[] = {
-    SettingsRow::DESK_OPEN, SettingsRow::DESK_BACKGROUND,
+    SettingsRow::DESK_BACKGROUND,
     SettingsRow::CLOCK_FONT, SettingsRow::CLOCK_SIZE, SettingsRow::CLOCK_BACKDROP,
     SettingsRow::CLOCK_FORMAT,
+    SettingsRow::DESK_ALERT,
     SettingsRow::TIME_ZONE,
 #if SQUACH_MESH
     SettingsRow::DESK_SQUAD, SettingsRow::DESK_CROWD, SettingsRow::DESK_VISIT,
@@ -281,7 +345,7 @@ static bool isSquachyOnlyRow(SettingsRow r) {
            r == SettingsRow::PET || r == SettingsRow::AURA;
 }
 
-enum class RowGroupId : uint8_t { APPEARANCE, BEHAVIOR, SQUACHY, SYSTEM, DESK, SQUAD, WATCH, FONTS };
+enum class RowGroupId : uint8_t { APPEARANCE, BEHAVIOR, SQUACHY, SYSTEM, DESK, SQUAD, WATCH, FONTS, ALERTS, WARDRIVE, JOURNAL };
 
 static RowGroupId groupFor(SettingsRow r) {
     // Appearance sits with the Squachy rows because that is where it was asked
@@ -293,11 +357,27 @@ static RowGroupId groupFor(SettingsRow r) {
     if (r == SettingsRow::APPEARANCE && Settings::boringMode()) return RowGroupId::SYSTEM;
 #if defined(CYD_GPS)
     // Under its neighbor's heading: a CYD has no WATCH heading.
-    if (r == SettingsRow::WATCH_WARDRIVE) return groupFor(SettingsRow::POWER_SAVER);
+    if (r == SettingsRow::WARDRIVE_PAGE) return groupFor(SettingsRow::POWER_SAVER);
+#endif
+    switch (r) {
+        case SettingsRow::WATCH_WARDRIVE: case SettingsRow::WD_GPS: case SettingsRow::WD_COUNT:
+        case SettingsRow::WD_KEPT: case SettingsRow::WD_UPLOAD: case SettingsRow::WD_AUTO:
+        case SettingsRow::WD_KEY: case SettingsRow::WD_LAST: case SettingsRow::WD_WEB:
 #if defined(CARDPUTER_ADV)
-    if (r == SettingsRow::WARDRIVE_SOUND) return groupFor(SettingsRow::POWER_SAVER);
+        case SettingsRow::WARDRIVE_SOUND:
 #endif
-#endif
+            if (s_page == SettingsPage::WARDRIVE) return RowGroupId::WARDRIVE;
+            break;
+        case SettingsRow::ENCOUNTERS:
+            return s_page == SettingsPage::JOURNAL ? RowGroupId::JOURNAL : RowGroupId::APPEARANCE;
+        case SettingsRow::FREE_ROLL:
+            return RowGroupId::JOURNAL;
+        case SettingsRow::JOURNAL:
+            return groupFor(SettingsRow::DEX);
+        default:
+            if (r >= SettingsRow::JOURNAL_0 && r <= SettingsRow::JOURNAL_9) return RowGroupId::JOURNAL;
+            break;
+    }
     switch (r) {
         case SettingsRow::WATCH_BATTERY:
         case SettingsRow::WATCH_RADIO:
@@ -306,7 +386,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::WATCH_BUZZ:
         case SettingsRow::WATCH_SETTINGS:
         case SettingsRow::WATCH_TEMP:
-        case SettingsRow::WATCH_WARDRIVE:
+        case SettingsRow::WARDRIVE_PAGE:
         case SettingsRow::WATCH_LORA:
         case SettingsRow::WATCH_LORA_CHATS:
         case SettingsRow::LORA_TX:
@@ -321,6 +401,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::CLOCK_SIZE:
         case SettingsRow::CLOCK_BACKDROP:
         case SettingsRow::CLOCK_FORMAT:
+        case SettingsRow::DESK_ALERT:
             return RowGroupId::DESK;
         case SettingsRow::DESK_SQUAD:
         case SettingsRow::DESK_CROWD:
@@ -346,7 +427,12 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::DET_STYLE:
         case SettingsRow::LAVA_LAMP:
         case SettingsRow::FONTS:
+        case SettingsRow::ALERT_CARD:
             return RowGroupId::APPEARANCE;
+        case SettingsRow::ALERT_STYLE:
+        case SettingsRow::ALERT_MOTION:
+        case SettingsRow::ALERT_DESK:
+            return RowGroupId::ALERTS;
         case SettingsRow::FONT_MENUS:
         case SettingsRow::FONT_TEXT:
         case SettingsRow::FONT_BUTTONS:
@@ -369,6 +455,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::WIFI_BANDS:
 #endif
         case SettingsRow::DETECTION_FILTER:
+        case SettingsRow::MY_ALERTS:
         case SettingsRow::IGNORED_DEVICES:
 #if defined(SENSE_CYD_APP)
         case SettingsRow::SENSING:
@@ -381,6 +468,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::VIEW_DIARY:
         case SettingsRow::BINGO:
         case SettingsRow::DEX:
+        case SettingsRow::CRYPTID_GUIDE:
         case SettingsRow::DESK_MODE:
         case SettingsRow::SHOW_OFF:
             return RowGroupId::SQUACHY;
@@ -397,6 +485,9 @@ static const char* groupName(RowGroupId g) {
         case RowGroupId::DESK:       return "DESK";
         case RowGroupId::SQUAD:      return "SQUAD";
         case RowGroupId::FONTS:      return "TEXT SIZE";
+        case RowGroupId::ALERTS:     return "ALERT CARD";
+        case RowGroupId::WARDRIVE:   return "WARDRIVE";
+        case RowGroupId::JOURNAL:    return "FIELD JOURNAL";
 #if defined(TDECK_PLUS)
         case RowGroupId::WATCH:      return "LORA";    // the T-Deck has the watch's LoRa rows and nothing else of the watch's
 #else
@@ -417,6 +508,9 @@ static uint16_t groupColor(RowGroupId g) {
         case RowGroupId::DESK:       return Theme::CYAN;
         case RowGroupId::SQUAD:      return Theme::GREEN;
         case RowGroupId::FONTS:      return Theme::CYAN;
+        case RowGroupId::ALERTS:     return Theme::PINK;
+        case RowGroupId::WARDRIVE:   return Theme::GREEN;
+        case RowGroupId::JOURNAL:    return Theme::AMBER;
         case RowGroupId::WATCH:      return Theme::AMBER;
         default:                     return Theme::VAPOR_PURPLE;
     }
@@ -442,6 +536,13 @@ static uint8_t buildDisplayList(DisplayItem* out) {
     else if (s_page == SettingsPage::SYSTEM) { src = SYSTEM_ROWS;    srcN = SYSTEM_ROWS_N; }
     else if (s_page == SettingsPage::DESK)   { src = DESK_ROWS;      srcN = DESK_ROWS_N; }
     else if (s_page == SettingsPage::FONTS)  { src = FONT_ROWS;      srcN = FONT_ROWS_N; }
+    else if (s_page == SettingsPage::ALERT_CARD) { src = ALERT_ROWS; srcN = ALERT_ROWS_N; }
+#if defined(CYD_GPS) || defined(TWATCH_S3)
+    else if (s_page == SettingsPage::WARDRIVE) { src = WD_ROWS; srcN = WD_ROWS_N; }
+#endif
+#if SQUACH_MESH
+    else if (s_page == SettingsPage::JOURNAL) { src = JOURNAL_ROWS; srcN = JOURNAL_ROWS_N; }
+#endif
 #if defined(TWATCH_S3)
     else if (s_page == SettingsPage::WATCH)  { src = WATCH_ROWS;     srcN = WATCH_ROWS_N; }
 #endif
@@ -789,7 +890,7 @@ void uiSettingsInit(TFT_eSPI& t) {
     // visit -- carrying it across a fresh entry would drop you mid-list with
     // no idea why.
     s_page = SettingsPage::MAIN;
-    for (uint8_t i = 0; i < 6; i++) g_scrollFor[i] = 0;
+    for (uint8_t i = 0; i < sizeof g_scrollFor / sizeof g_scrollFor[0]; i++) g_scrollFor[i] = 0;
     // Any pending question dies with the screen. Coming back to Settings and
     // finding a confirm panel still up from last time would be answering
     // something you no longer remember asking.
@@ -936,7 +1037,11 @@ void uiSettingsOpenPage(SettingsPage p) {
 
 SettingsPage uiSettingsCurrentPage() { return s_page; }
 SettingsPage uiSettingsParentPage() {
-    return s_page == SettingsPage::FONTS ? SettingsPage::APPEARANCE : SettingsPage::MAIN;
+    if (s_page == SettingsPage::FONTS || s_page == SettingsPage::ALERT_CARD) return SettingsPage::APPEARANCE;
+#if defined(TWATCH_S3)
+    if (s_page == SettingsPage::WARDRIVE) return SettingsPage::WATCH;   // its row is on WATCH SETTINGS
+#endif
+    return SettingsPage::MAIN;
 }
 
 void uiSettingsOpenAppearance(bool open) {
@@ -1219,6 +1324,9 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
         case SettingsRow::CLOCK_FORMAT:
             label = "CLOCK FORMAT"; value = Settings::clock24Hour() ? "24 HOUR" : "12 HOUR";
             break;
+        case SettingsRow::DESK_ALERT:
+            label = "DESK ALERT"; value = Settings::deskAlertName();
+            break;
 #if SQUACH_MESH
         case SettingsRow::DESK_SQUAD:
             label = "SQUAD ON DESK"; value = Settings::deskSquad() ? "ON" : "OFF";
@@ -1292,7 +1400,12 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             // keeps the full name in its title bar.
             label = "TYPE FILTER";
             snprintf(valBuf, valBufN, "%u/%u", (unsigned)Settings::enabledTypeCount(),
-                     (unsigned)DetectionType::COUNT - 1);
+                     (unsigned)CATALOGUE_N);
+            value = valBuf;
+            break;
+        case SettingsRow::MY_ALERTS:
+            label = "MY ALERTS";
+            snprintf(valBuf, valBufN, "%u", (unsigned)MyAlerts::count());
             value = valBuf;
             break;
         case SettingsRow::IGNORED_DEVICES:
@@ -1331,6 +1444,7 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
         case SettingsRow::WATCH_TEMP:
             label = "CHIP TEMP"; snprintf(valBuf, valBufN, "%d C", twatchChipC()); value = valBuf;
             break;
+        case SettingsRow::WARDRIVE_PAGE:
         case SettingsRow::WATCH_WARDRIVE: {
             // OFF, or what it is doing: finding the GPS, waiting for a fix, or
             // logging, with how many sightings are kept.
@@ -1366,6 +1480,7 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             break;
 #endif
 #if defined(CYD_GPS)
+        case SettingsRow::WARDRIVE_PAGE:
         case SettingsRow::WATCH_WARDRIVE:
             // OFF, or what stands between it and a row, or the rows written.
             label = "WARDRIVE";
@@ -1390,6 +1505,118 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
         case SettingsRow::WARDRIVE_SOUND:
             label = "WARDRIVE SOUND"; value = Wardrive::soundOn() ? "ON" : "OFF";
             break;
+#endif
+#if SQUACH_MESH
+        // ---- the FIELD JOURNAL ------------------------------------------------
+        case SettingsRow::JOURNAL:
+            label = "FIELD JOURNAL";
+            snprintf(valBuf, valBufN, "%u/%u MET", (unsigned)Encounters::kindsMet(), (unsigned)Encounters::Kind::COUNT);
+            value = valBuf;
+            break;
+        case SettingsRow::ENCOUNTERS:
+            // Named in full where it sits among other things.
+            label = s_page == SettingsPage::JOURNAL ? "ENCOUNTERS" : "RANDOM ENCOUNTERS"; value = Encounters::levelName();
+            break;
+        case SettingsRow::FREE_ROLL:
+            label = "FREE ROLL";
+            if (Encounters::level() == 0)      value = "OFF";
+            else if (Encounters::freeReady())  value = "READY";
+            else {
+                const unsigned m = Encounters::freeInMin();
+                snprintf(valBuf, valBufN, "IN %uH %02uM", m / 60, m % 60);
+                value = valBuf;
+            }
+            break;
+        case SettingsRow::JOURNAL_0: case SettingsRow::JOURNAL_1: case SettingsRow::JOURNAL_2:
+        case SettingsRow::JOURNAL_3: case SettingsRow::JOURNAL_4: case SettingsRow::JOURNAL_5:
+        case SettingsRow::JOURNAL_6: case SettingsRow::JOURNAL_7: case SettingsRow::JOURNAL_8:
+        case SettingsRow::JOURNAL_9: {
+            const Encounters::Kind k = (Encounters::Kind)((uint8_t)r - (uint8_t)SettingsRow::JOURNAL_0);
+            const uint16_t n = Encounters::met(k);
+            if (!n) {
+                label = "???";
+                value = Encounters::tierName(Encounters::tierOf(k));
+            } else {
+                label = Encounters::name(k);
+                char when[16] = "";
+                if (Encounters::firstEpoch(k)) Clock::formatEpochStamp(Encounters::firstEpoch(k), when, sizeof when);
+                const uint16_t sh = Encounters::shinies(k);
+                if (k == Encounters::Kind::ELDER && Encounters::photos())
+                    snprintf(valBuf, valBufN, "x%u  %u PHOTO%s", (unsigned)n, (unsigned)Encounters::photos(), Encounters::photos() == 1 ? "" : "S");
+                else if (sh)
+                    snprintf(valBuf, valBufN, "x%u  %s  *%u SHINY", (unsigned)n, when, (unsigned)sh);
+                else
+                    snprintf(valBuf, valBufN, "x%u  %s", (unsigned)n, when);
+                value = valBuf;
+            }
+            break;
+        }
+#endif
+#if defined(CYD_GPS) || defined(TWATCH_S3)
+        // ---- the WARDRIVE page ----------------------------------------------
+        case SettingsRow::WD_GPS:
+            label = "GPS";
+#if defined(TWATCH_S3)
+            {
+                const uint8_t g = twatchGpsState();
+                if (g == 0)      value = "OFF";
+                else if (g == 4) value = "RESTING";
+                else if (g == 1) value = "STARTING";
+                else             value = Gnss::status(millis(), valBuf, valBufN);
+            }
+#else
+            value = Gnss::status(millis(), valBuf, valBufN);
+#endif
+            break;
+        case SettingsRow::WD_COUNT:
+            label = "THIS DRIVE";
+            snprintf(valBuf, valBufN, "%lu WIFI  %lu BT",
+                     (unsigned long)Wardrive::writtenWifi(), (unsigned long)Wardrive::writtenBle());
+            value = valBuf;
+            break;
+        case SettingsRow::WD_KEPT:
+#if defined(CYD_GPS)
+            label = "FILE";
+            if (Wardrive::sdFileName()[0]) value = Wardrive::sdFileName() + 1;   // without the slash
+            else value = Wardrive::enabled() ? "AT THE FIRST FIX" : "NONE THIS DRIVE";
+#else
+            label = "KEPT";
+            snprintf(valBuf, valBufN, "%lu  %lu%% FULL", (unsigned long)Wardrive::count(),
+                     Wardrive::capacity() ? (unsigned long)((uint64_t)Wardrive::count() * 100 / Wardrive::capacity()) : 0UL);
+            value = valBuf;
+#endif
+            break;
+#if SQW_WIGLE_UPLOAD
+        case SettingsRow::WD_UPLOAD:
+            label = WigleUp::busy() ? "UPLOADING" : "UPLOAD NOW";
+            value = WigleUp::status(valBuf, valBufN);
+            break;
+        case SettingsRow::WD_AUTO:
+            label = "AUTO UPLOAD"; value = WigleUp::autoOn() ? "ON CHARGER" : "OFF";
+            break;
+        case SettingsRow::WD_KEY:
+            label = "WIGLE KEY";
+            if (WigleUp::hasKey()) value = WigleUp::keyName()[0] ? WigleUp::keyName() : "SET";
+            else value = "SET IT AT SQUACHWATCH.COM";
+            break;
+        case SettingsRow::WD_LAST: {
+            label = "LAST UPLOAD";
+            const uint32_t at = WigleUp::lastEpoch();
+            if (!at) value = "NEVER";
+            else {
+                char when[24];
+                Clock::formatEpochStamp(at, when, sizeof when);
+                snprintf(valBuf, valBufN, "%s  %lu", when, (unsigned long)WigleUp::lastRows());
+                value = valBuf;
+            }
+            break;
+        }
+#else
+        case SettingsRow::WD_WEB:
+            label = "UPLOAD";
+            value = "AT SQUACHWATCH.COM";
+            break;
+#endif
 #endif
         case SettingsRow::EXT_SCREEN:
             label = "EXT SCREEN"; value = Settings::extScreen() ? "ON" : "OFF";
@@ -1522,6 +1749,10 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             value = bingoVal;
             break;
         }
+        case SettingsRow::CRYPTID_GUIDE:
+            label = "CRYPTID FIELD GUIDE";
+            value = Squachy::mothmanUnlocked() ? "1/1 >" : "0/1 >";
+            break;
         case SettingsRow::DEX: {
             label = "SQUACHY-DEX";
             static char dexVal[12];
@@ -1530,7 +1761,7 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             break;
         }
         case SettingsRow::DESK_MODE:
-            label = "DESK MODE";
+            label = "DESK SETTINGS";
             value = ">";
             break;
         case SettingsRow::RESET_STATS:
@@ -1547,6 +1778,18 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
             break;
         case SettingsRow::FONTS:
             label = "FONTS"; value = ">";
+            break;
+        case SettingsRow::ALERT_CARD:
+            label = "ALERT CARD"; value = ">";
+            break;
+        case SettingsRow::ALERT_STYLE:
+            label = "STYLE"; value = AlertSkin::name(Settings::alertSkin());
+            break;
+        case SettingsRow::ALERT_MOTION:
+            label = "OPEN WITH ANIMATION"; value = Settings::alertAnimate() ? "YES" : "NO";
+            break;
+        case SettingsRow::ALERT_DESK:
+            label = "SUNSET BEHIND"; value = Settings::alertSunset() ? "YES" : "NO";
             break;
         case SettingsRow::FONT_MENUS:   label = "MENUS";   value = nullptr; break;
         case SettingsRow::FONT_TEXT:    label = "TEXT";    value = nullptr; break;
@@ -1616,9 +1859,12 @@ if (!Theme::stillBackdrop(t)) switch (Settings::background()) {
     const char* pageTitle = ">> SETTINGS <<";
     if (s_page == SettingsPage::APPEARANCE) pageTitle = ">> APPEARANCE <<";
     else if (s_page == SettingsPage::SYSTEM) pageTitle = ">> SYSTEM <<";
-    else if (s_page == SettingsPage::DESK)   pageTitle = ">> DESK MODE <<";
+    else if (s_page == SettingsPage::DESK)   pageTitle = ">> DESK SETTINGS <<";
     else if (s_page == SettingsPage::WATCH)  pageTitle = ">> WATCH SETTINGS <<";
     else if (s_page == SettingsPage::FONTS)  pageTitle = ">> FONTS <<";
+    else if (s_page == SettingsPage::ALERT_CARD) pageTitle = ">> ALERT CARD <<";
+    else if (s_page == SettingsPage::WARDRIVE) pageTitle = ">> WARDRIVE <<";
+    else if (s_page == SettingsPage::JOURNAL) pageTitle = ">> FIELD JOURNAL <<";
     Theme::drawTitleBar(t, pageTitle);
 
     // +6, not +4: four group headers plus the two tracking rows.

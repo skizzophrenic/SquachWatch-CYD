@@ -27,6 +27,7 @@
 #include <cstdint>
 #include "state.h"
 #include "signatures.h"
+#include "my_alerts.h"
 
 struct SimDetectionProfile {
     DetectionType type;
@@ -64,12 +65,14 @@ inline const SimDetectionProfile kSimProfiles[] = {
     { DetectionType::AXON,        {0x00, 0x09, 0xBC}, "BodyWorn",    "BodyWorn Remote",-71, false, "BodyWorn remote" },
     { DetectionType::AXON,        {0x00, 0x1D, 0x96}, "WatchGuard",  "",               -73, true,  "WatchGuard Video" },
     { DetectionType::AXON,        {0x00, 0x23, 0xBD}, "DigitalAlly", "",               -74, true,  "Digital Ally" },
+    { DetectionType::AXON,        {0x00, 0x30, 0x44}, "Cradlepoint", "",               -66, true,  "Fleet router" },
     // META
     { DetectionType::META,        {0x02, 0xFD, 0x5F}, "RayBanMeta",  "",               -66, false, "Ray-Ban Meta glasses" },
     { DetectionType::META,        {0x02, 0x01, 0xAB}, "Meta",        "",               -64, false, "Meta radio (glasses or Quest)" },
     { DetectionType::META,        {0x02, 0x0D, 0x53}, "Luxottica",   "",               -67, false, "Luxottica frames" },
     { DetectionType::META,        {0x02, 0x03, 0xC2}, "Snap",        "",               -65, false, "Snap Spectacles" },
     { DetectionType::META,        {0x02, 0x06, 0x0C}, "Vuzix",       "",               -66, false, "Vuzix glasses" },
+    { DetectionType::META,        {0x28, 0xE8, 0x88}, "Rokid",       "",               -66, true,  "Rokid glasses" },
     // SKIMMER -- over Bluetooth a name match is labelled just "BLE"
     { DetectionType::SKIMMER,     {0x98, 0xD3, 0x31}, "BLE",         "HC-05",          -49, false, "HC-05 module" },
     { DetectionType::SKIMMER,     {0x02, 0x42, 0x04}, "BLE",         "RN42",           -52, false, "RN42 module" },
@@ -86,6 +89,7 @@ inline const SimDetectionProfile kSimProfiles[] = {
     // CAMERA -- each maker's own prefix from the OUI table
     { DetectionType::CAMERA,      {0x2C, 0xAA, 0x8E}, "Wyze",        "",               -63, true,  "Wyze camera" },
     { DetectionType::CAMERA,      {0xB8, 0xD7, 0xAF}, "Wyze-Mod",    "",               -66, true,  "Wyze module" },
+    { DetectionType::CAMERA,      {0xF8, 0x51, 0x28}, "SimpliSafe",  "",               -64, true,  "SimpliSafe" },
     { DetectionType::CAMERA,      {0xF0, 0x27, 0x2D}, "Amazon",      "",               -62, true,  "Amazon device" },
     { DetectionType::CAMERA,      {0xC0, 0x56, 0xE3}, "Hikvision",   "",               -64, true,  "Hikvision camera" },
     { DetectionType::CAMERA,      {0x00, 0xE0, 0x4C}, "Realtek",     "",               -67, true,  "Realtek chip" },
@@ -96,6 +100,11 @@ inline const SimDetectionProfile kSimProfiles[] = {
     { DetectionType::CAMERA,      {0x70, 0x1A, 0xD5}, "Avigilon",    "",               -71, true,  "Avigilon camera" },
     { DetectionType::CAMERA,      {0x00, 0x40, 0x8C}, "Axis",        "",               -69, true,  "Axis camera" },
     { DetectionType::CAMERA,      {0xD4, 0x2D, 0xC5}, "i-PRO",       "",               -70, true,  "i-PRO camera" },
+    // The dashcam and hidden-camera hotspots: the name is the SSID, as the
+    // WiFi path writes it, and the hidden camera's is its UID.
+    { DetectionType::CAMERA,      {0x00, 0x25, 0x42}, "BlackVue",    "BlackVue770X-A1B2C3", -63, true, "Dashcam" },
+    { DetectionType::CAMERA,      {0x2C, 0x42, 0x05}, "Lytx",        "",               -72, true,  "Fleet camera" },
+    { DetectionType::CAMERA,      {0x06, 0xCA, 0x3E}, "LookCam",     "ACCQ-046396-NNMPZ", -51, true, "Hidden camera" },
     // The tag networks, Ring, and the rogue-radio behaviours
     { DetectionType::SAMSUNG_TAG, {0x02, 0xFD, 0x5A}, "Samsung",     "Galaxy SmartTag",-58, false, "Samsung SmartTag" },
     { DetectionType::GOOGLE_TAG,  {0x02, 0xFE, 0xAA}, "Google",      "Find My Device", -61, false, "Google Find My tracker" },
@@ -112,6 +121,15 @@ inline const SimDetectionProfile kSimProfiles[] = {
     { DetectionType::HACKER,      {0x06, 0x50, 0x49}, "Pineapple",   "",               -60, true,  "WiFi Pineapple" },
     { DetectionType::HACKER,      {0x06, 0xDE, 0xA7}, "Deauther",    "",               -57, true,  "ESP deauther" },
     { DetectionType::HACKER,      {0x02, 0xC0, 0xCA}, "Hak5-LA",     "",               -63, true,  "Hak5 address" },
+    // LORAWAN -- the made-up address Lora::OpAlert::macFor gives an operator,
+    // and the operator's name where a device's would be.
+    { DetectionType::LORAWAN,     {0x02, 0x4C, 0x57}, "LoRaWAN",     "Oresundskraft",  -97, false, "LoRaWAN operator" },
+    // MY ALERTS -- an in-car router of the kind it was asked for. The label
+    // is the first pattern on the list when there is one (see below).
+    { DetectionType::MINE,        {0x02, 0x76, 0x45}, "CITY PD",     "veh912",         -64, true,  "My alert (car WiFi)" },
+    // LISTENER -- a Sonos on the room's WiFi, and a HomePod that heard "Hey Siri".
+    { DetectionType::LISTENER,    {0x34, 0x7E, 0x5C}, "Sonos",       "",               -58, true,  "Sonos speaker" },
+    { DetectionType::LISTENER,    {0x02, 0x00, 0x4C}, "HomePod",     "",               -63, false, "HomePod" },
 };
 inline const size_t kSimProfileCount = sizeof(kSimProfiles) / sizeof(kSimProfiles[0]);
 
@@ -147,6 +165,12 @@ inline void simMakeDetection(Detection& d, const SimDetectionProfile& p, uint32_
     d.conf      = confidenceFor(p.type);
     d.vendor = p.vendor;   // a pointer into the seed table, as on the board
     snprintf(d.name,   sizeof(d.name),   "%s", p.name);
+    // MY ALERTS reads as the owner's own list when they have one: their first
+    // entry's label on the plate, as the board would write it.
+    if (p.type == DetectionType::MINE) {
+        const int8_t slot = MyAlerts::nth(0);
+        if (slot >= 0) d.vendor = MyAlerts::tag((uint8_t)slot);
+    }
     d.firstSeen = now;
     d.lastSeen  = now;
     d.hits      = 1;

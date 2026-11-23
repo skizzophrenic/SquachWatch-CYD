@@ -378,6 +378,9 @@ const char* spokenName(uint8_t t) {
         case DetectionType::EVILTWIN:    return "EVIL TWIN";
         case DetectionType::IBEACON:     return "BEACON";
         case DetectionType::HACKER:      return "HACKER";
+        case DetectionType::LORAWAN:     return "LORAWAN";
+        case DetectionType::MINE:        return "MY ALERT";
+        case DetectionType::LISTENER:    return "SPEAKER";
         default:                         return nullptr;
     }
 }

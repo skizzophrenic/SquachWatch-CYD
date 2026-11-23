@@ -15,6 +15,18 @@
 
 namespace Pet {
 
+// ---- ZOOMIES --------------------------------------------------------------------
+// The pet's clock: the caller's, plus however far zoomies have pushed it on.
+static uint32_t s_warp = 0, s_warpLast = 0, s_zoomUntil = 0;
+static uint32_t pnow(uint32_t now) {
+    if (s_warpLast && (int32_t)(now - s_warpLast) > 0 && s_zoomUntil && (int32_t)(now - s_zoomUntil) < 0)
+        s_warp += 2u * (now - s_warpLast);
+    if (!s_warpLast || (int32_t)(now - s_warpLast) > 0) s_warpLast = now;
+    return now + s_warp;
+}
+void zoomies(uint32_t now, uint32_t ms) { pnow(now); s_zoomUntil = now + ms; }
+bool zooming(uint32_t now) { return s_zoomUntil && (int32_t)(now - s_zoomUntil) < 0; }
+
 // ---- the zoom -------------------------------------------------------------
 // On the large panels the pets live in a world half the screen's size: they
 // draw exactly as they always have, into a layer half as wide and half as
@@ -328,6 +340,9 @@ static const char* clipCatchLine(uint8_t type) {
         case DetectionType::EVILTWIN:    return "That WiFi has an evil twin. Tip: don't join the evil one.";
         case DetectionType::HACKER:      return "It looks like a hacker tool. Hello, colleague.";
         case DetectionType::IBEACON:     return "A shop beacon wants to sell you things. Tip: walk faster.";
+        case DetectionType::LORAWAN:     return "It looks like a LoRaWAN network. The meters are talking.";
+        case DetectionType::MINE:        return "It looks like the WiFi you asked about. Would you like a reminder?";
+        case DetectionType::LISTENER:    return "It looks like a smart speaker. Tip: it heard that.";
         default:                         return nullptr;
     }
 }
@@ -539,7 +554,7 @@ extern int16_t s_jX, s_jY, s_jR;
 
 void noteCatch(uint8_t type) {
     if (toasterOn()) { toasterNoteCatch(type); return; }
-    if (meatyOn()) { if (!ballOut(millis())) meatyNoteCatch(type); return; }   // not banked through a sentence
+    if (meatyOn()) { if (!ballOut(pnow(millis()))) meatyNoteCatch(type); return; }   // not banked through a sentence
     if (Squachy::petChoice() != Squachy::PetId::CLIPPY) return;
     s_cPending = (uint8_t)(type + 1);
 }
@@ -573,7 +588,7 @@ static void clipSay(const char* line, uint32_t now, bool caught) {
 
 bool clippyHit(int x, int y) {
     x /= s_k; y /= s_k;
-    if (ballOut(millis())) return ballHit(x, y);
+    if (ballOut(pnow(millis()))) return ballHit(x, y);
     if (toasterOn()) return toasterHit(x, y);
     if (meatyOn()) return meatyHit(x, y);
     if (yetiChosen()) return yetiHit(x, y);
@@ -582,6 +597,7 @@ bool clippyHit(int x, int y) {
 }
 
 void clippyPoke(uint32_t now) {
+    now = pnow(now);
     if (toasterOn()) { toasterPoke(now); return; }
     if (meatyOn()) { meatyPoke(now); return; }
     if (yetiChosen()) { yetiPoke(now); return; }
@@ -594,7 +610,7 @@ void clippyPoke(uint32_t now) {
 }
 
 static bool clippyCenterZ(int& x, int& y) {
-    if (ballOut(millis())) { if (s_jX < -50) return false; x = s_jX; y = s_jY - s_jR; return true; }
+    if (ballOut(pnow(millis()))) { if (s_jX < -50) return false; x = s_jX; y = s_jY - s_jR; return true; }
     if (toasterOn()) return toasterCenter(x, y);
     if (meatyOn()) return meatyCenter(x, y);
     if (yetiChosen()) return yetiCenter(x, y);
@@ -609,6 +625,7 @@ bool clippyCenter(int& x, int& y) {
 }
 
 void clippyGrab(int x, int y, uint32_t now) {
+    now = pnow(now);
     x /= s_k; y /= s_k;
     if (ballOut(now)) { s_jGrab = true; return; }
     if (toasterOn()) { toasterGrab(x, y, now); return; }
@@ -622,6 +639,7 @@ void clippyGrab(int x, int y, uint32_t now) {
 }
 
 void clippyDrag(int x, int y, uint32_t now) {
+    now = pnow(now);
     x /= s_k; y /= s_k;
     if (s_jGrab) return;
     if (toasterOn()) { toasterDrag(x, y, now); return; }
@@ -640,6 +658,7 @@ static void clipLaunch(float vx, float vy, uint32_t now) {
 }
 
 void clippyRelease(uint32_t now) {
+    now = pnow(now);
     if (s_jGrab) { s_jGrab = false; ballPoke(now); return; }
     if (toasterOn()) { toasterRelease(now); return; }
     if (meatyOn()) { meatyRelease(now); return; }
@@ -1080,7 +1099,68 @@ bool drawnAt(int& x, int& y) {
     return false;
 }
 
+// ---- Mothman --------------------------------------------------------------
+// He hovers in the right-hand part of the band rather than walking the floor
+// like the others. Where he was last drawn, in screen pixels, is kept for the
+// tap test, and only trusted for a quarter second: a tap on the spot he left
+// when the screen changed under him is not a tap on him.
+static int s_mothX = 0, s_mothY = 0;
+static uint32_t s_mothDrawnAt = 0, s_mothPowerAt = 0;
+static constexpr uint32_t MOTH_POWER_MS = 3500;   // how long a tap's glowing swoop lasts
+
+static bool mothmanOut() {
+    return Squachy::petChoice() == Squachy::PetId::MOTHMAN &&
+           Squachy::mothmanUnlocked() && !Squachy::jailed();
+}
+
+// Wings first, then the body over their roots, then the red eyes. Powered,
+// the wings go red, beat faster and a ring pulses round him.
+void drawMothman(TFT_eSPI& t, int x, int y, int scale, uint32_t now, bool powered) {
+    const uint16_t wing = powered ? 0xA165 : 0x51ED;
+    const uint16_t shade = powered ? 0x5825 : 0x2947;
+    const int flap = (int)(3.0f * sinf(now / (powered ? 40.0f : 95.0f)));
+    for (int side : {-1, 1}) {
+        const int tip = x + side * 15 * scale;
+        const int high = y - (7 + flap) * scale;
+        t.fillTriangle(x, y, tip, high, x + side * 11 * scale, y + 7 * scale, wing);
+        t.fillTriangle(x, y + 2 * scale, tip, high, x + side * 8 * scale, y + 4 * scale, shade);
+        t.drawLine(x, y, tip, high, wing);
+        t.drawLine(x + side * 2 * scale, y - 3 * scale,
+                   x + side * 5 * scale, y - 8 * scale, wing);
+    }
+    t.fillCircle(x, y + 2 * scale, 5 * scale, 0x39CA);
+    t.fillCircle(x, y - 3 * scale, 5 * scale, 0x39CA);
+    t.fillCircle(x - 2 * scale, y - 3 * scale, scale, 0xFA08);
+    t.fillCircle(x + 2 * scale, y - 3 * scale, scale, 0xFA08);
+    if (powered) t.drawCircle(x, y, (16 + (now / 90) % 4) * scale, 0xF986);
+}
+
+// On the DESK clock he hangs from the plate's edge by two legs.
+void drawMothmanPerch(TFT_eSPI& t, int x, int y, uint32_t now) {
+    if (!mothmanOut()) return;
+    const int k = 1;
+    t.drawLine(x - 3, y, x - 3, y + 7, 0x51ED);
+    t.drawLine(x + 3, y, x + 3, y + 7, 0x51ED);
+    drawMothman(t, x, y + 11, k, now);
+}
+
+// The tap is his whenever it lands on him, so a second tap mid-swoop does
+// not fall through to Squachy; only a fresh swoop chirps.
+bool mothmanTap(int x, int y, uint32_t now) {
+    now = pnow(now);
+    if (!mothmanOut() || !s_mothDrawnAt || now - s_mothDrawnAt > 250 ||
+        abs(x - s_mothX) > 18 * s_k || abs(y - s_mothY) > 12 * s_k) return false;
+    if (!s_mothPowerAt || now - s_mothPowerAt >= MOTH_POWER_MS) {
+        s_mothPowerAt = now;
+        Squachy::unlockMothmanPowerOutfit();
+        Sound::play(Sound::Id::WD_FIX);     // the GPS-fix pair: two rising notes
+    }
+    return true;
+}
+
 void reset() {
+    s_mothDrawnAt = 0;
+    s_mothPowerAt = 0;
     toasterReset();
     meatyReset();
     jailReset();
@@ -1262,6 +1342,7 @@ static void yetiTick(TFT_eSPI& t, uint32_t now, int screenW, int cx, int halfW, 
 
 
 void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom) {
+    now = pnow(now);
     s_balloonCeil = bandTop * s_k;
     if (Squachy::petChoice() != Squachy::PetId::MEATY || ballOut(now)) meatyAway();
     // Serving time: the pet is in custody, and the ball is out instead. Or
@@ -1291,6 +1372,23 @@ void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom) {
         return;
     }
     s_mX = -100;
+    if (which == Squachy::PetId::MOTHMAN) {
+        s_phase = Phase::AWAY;
+        s_yPhase = YPhase::AWAY;
+        // A slow drift on two sines, a third of the way down the band; a
+        // tap's swoop widens the side-to-side to a third of the screen.
+        if (mothmanOut() && screenW >= 40 && bandBottom - bandTop >= 26) {
+            const bool powered = s_mothPowerAt && now - s_mothPowerAt < MOTH_POWER_MS;
+            const int x = screenW * 3 / 4 + (int)((powered ? screenW / 6 : 6) * sinf(now / 230.0f));
+            const int y = bandTop + 14 + (bandBottom - bandTop - 26) / 3
+                          + (int)(5.0f * sinf(now / 180.0f));
+            s_mothX = x * s_k;
+            s_mothY = y * s_k;
+            s_mothDrawnAt = now;
+            drawMothman(t, x, y, 1, now, powered);
+        }
+        return;
+    }
     if (!Squachy::petUnlocked() || which == Squachy::PetId::OFF) {
         s_phase  = Phase::AWAY;
         s_yPhase = YPhase::AWAY;
@@ -1535,11 +1633,13 @@ void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom) {
 // than clear and scan 38 KB to find it empty (about five frames a second on
 // the 3.5", measured 2026-10-09).
 bool anyOut(uint32_t now) {
+    now = pnow(now);
     if (ballOut(now)) return true;
     const Squachy::PetId which = Squachy::petChoice();
     if (which == Squachy::PetId::CLIPPY)  return Squachy::clippyUnlocked();
     if (which == Squachy::PetId::TOASTER) return Squachy::toasterUnlocked();
     if (which == Squachy::PetId::MEATY) return Squachy::meatyUnlocked();
+    if (which == Squachy::PetId::MOTHMAN) return mothmanOut();
     return Squachy::petUnlocked() && which != Squachy::PetId::OFF;
 }
 

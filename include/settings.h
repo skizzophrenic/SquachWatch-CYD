@@ -68,7 +68,8 @@ namespace Settings {
     Background deskBackground();
 
     // The desk clock. FONT: 0 the segment digits, 1 Bangers. SIZE: 0 small,
-    // 1 medium (the size it has always been), 2 large. BACKDROP: what plays
+    // 1 medium (the size it has always been), 2 large, 3 X-LARGE (half as big
+    // again as medium, held back where it would not fit). BACKDROP: what plays
     // inside its plate -- 0 plain, 1 digital rain, 2 snow, 3 flying toasters,
     // 4 fire, 5 starfield, 6 fireflies. The time format is 12 or 24 hour.
     uint8_t     clockFont();
@@ -77,6 +78,15 @@ namespace Settings {
     uint8_t     clockSize();
     const char* clockSizeName();
     void        cycleClockSize();
+    // DESK ALERT, what a catch does on the desk (PR #112 by GreyFox01):
+    // CARD, the small card at the bottom left (the default, as it always was);
+    // BIG CARD, a box filling most of the screen for its few seconds; FULL
+    // SCREEN, straight to the ALERT screen as CLEAR does. A tap on either card
+    // opens the full alert.
+    bool        deskAlertFull();
+    bool        deskAlertBig();
+    void        cycleDeskAlert();
+    const char* deskAlertName();
     uint8_t     clockBackdrop();
     const char* clockBackdropName();
     void        cycleClockBackdrop();
@@ -153,6 +163,20 @@ namespace Settings {
     // screen's battery lamp, on (the default) or off (issue #132).
     bool       lavaLamp();
     void       toggleLavaLamp();
+
+    // ALERT CARD on the APPEARANCE page (see alert_skin.h): which window the
+    // alert card is drawn in (0 is the TRAIL card itself, then the eleven
+    // operating-system skins), whether the window opens with its animation,
+    // and whether the skins that sit on a desk show the sunset behind the
+    // window or a plain colour. Panels too small for a window keep TRAIL
+    // whatever the pick.
+    uint8_t    alertSkin();
+    void       setAlertSkin(uint8_t id);
+    void       cycleAlertSkin(bool back);
+    bool       alertAnimate();
+    void       toggleAlertAnimate();
+    bool       alertSunset();
+    void       toggleAlertSunset();
 
     // FONTS on the APPEARANCE page: a slider per kind of text, around the
     // size each board was built with. 0..4 for -2..+2; 2 is as built. Theme
@@ -271,6 +295,10 @@ namespace Settings {
     // switched off there boots back into it.
     bool       sensing();
     void       setSensing(bool on);
+    // Which HUMAN SENSING page was showing (0 SENSING .. 3 VITALS), so a
+    // restart comes back to it. Saved when the page is turned.
+    uint8_t    sensePage();
+    void       setSensePage(uint8_t p);
     // EXT SCREEN (the Cardputer ADV): a second panel on the EXT header shows
     // the main scene, and the built-in screen is left for the menus.
     bool       extScreen();
@@ -339,13 +367,13 @@ namespace Settings {
     // default: the radio takes turns between the two). Applied by
     // Lora::applyListen().
     uint8_t     loraListen();
-    void        setLoraListen(uint8_t v);   // 0 off, 1 Meshtastic, 2 MeshCore, 3 both
+    void        setLoraListen(uint8_t v);   // 0 off, 1 Meshtastic, 2 MeshCore, 3 both, 4 LoRaWAN
     void        cycleLoraListen();
     const char* loraListenName();
     // LORA TX (the T-Deck): what the chats' compose line sends at. 0 = off,
     // else dBm. Off by default: a sniffer that talks is opt-in.
     uint8_t     loraTxDbm();
-    void        cycleLoraTx();         // OFF -> 10 dBm -> 20 dBm -> OFF
+    void        cycleLoraTx();         // OFF -> 10 dBm -> 20 dBm -> 22 dBm -> OFF
     const char* loraTxName();
     uint8_t     loraRegion();
     void        setLoraRegion(uint8_t r);

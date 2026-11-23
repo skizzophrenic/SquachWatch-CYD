@@ -20,14 +20,14 @@ Just want to flash a board and go? **[Open the web flasher](https://squachwatch.
 - [False positives](#false-positives)
 - [SquachMesh and squads](#squachmesh-and-squads)
 - [Touch is off, the screen is white, the colours are wrong](#touch-is-off-the-screen-is-white-the-colours-are-wrong)
-- [GPS and LoRa (watches only)](#gps-and-lora-watches-only)
+- [GPS and LoRa](#gps-and-lora)
 - [What's with the Sasquach on the screen?](#whats-with-the-sasquach-on-the-screen)
 - [Is this legal?](#is-this-legal)
 - [Bugs, contributing and the license](#bugs-contributing-and-the-license)
 
 ## What is this thing?
 
-SquachWatch listens to the WiFi and Bluetooth around you and flags the specific fingerprints of surveillance gear. Seventeen detection types: Flock Safety cameras, Axon body cams and TASERs, camera glasses (Ray-Ban Meta and friends), Bluetooth card skimmers, Raven gunshot detectors, AirTags, Samsung, Google and Tile trackers, Remote ID drones, plate readers, generic and covert IP cameras, Ring doorbells, deauth floods, evil-twin access points, iBeacons (off by default) and hacking hardware like a Flipper Zero or a Pwnagotchi.
+SquachWatch listens to the WiFi and Bluetooth around you and flags the specific fingerprints of surveillance gear. Nineteen detection types: Flock Safety cameras, Axon body cams and TASERs, camera glasses (Ray-Ban Meta and friends), Bluetooth card skimmers, Raven gunshot detectors, AirTags, Samsung, Google and Tile trackers, Remote ID drones, plate readers, generic and covert IP cameras, Ring doorbells, deauth floods, evil-twin access points, iBeacons (off by default), hacking hardware like a Flipper Zero or a Pwnagotchi, LoRaWAN networks (on the LoRa boards), and MY ALERT, WiFi names you choose yourself.
 
 It's not magic and it's not X-ray vision. It's a small board doing pattern-matching on radio noise, wearing a mascot costume. But it matches real, documented signatures, each with a confidence grade, not vibes. The full per-type breakdown, with sources, lives in [DETECTIONS.md](DETECTIONS.md).
 
@@ -83,7 +83,7 @@ Want to build from source instead? Grab [PlatformIO](https://platformio.org/) an
 Go to **Settings > SYSTEM > UPDATE FIRMWARE**. The screen shows the version you're running and offers:
 
 - **UPDATE OVER WIFI.** Joins one of your saved WiFi networks (or asks you to pick one and type the password), checks squachwatch.com, and shows UPDATE AVAILABLE or YOU'RE UP TO DATE. Tap INSTALL. Detection and Bluetooth stay off until the board restarts.
-- **UPDATE OVER BLUETOOTH (BETA).** Only on the S3 boards (T-Watch, StickS3, Cardputer ADV, Freenove S3, CrowPanel); the CYDs dropped it in v1.22.0 to free up memory. Open [squachwatch.com/update](https://squachwatch.com/update/) in Chrome or Edge on a computer, or Chrome on Android, and type the code the board shows. Brave blocks website Bluetooth, and iPhone and iPad browsers can't do it at all.
+- **UPDATE OVER BLUETOOTH (BETA).** Only on the S3 boards (T-Watch, StickS3, Cardputer ADV, Freenove S3, T-Deck Plus, CrowPanel); the CYDs dropped it in v1.22.0 to free up memory. Open [squachwatch.com/update](https://squachwatch.com/update/) in Chrome or Edge on a computer, or Chrome on Android, and type the code the board shows. Brave blocks website Bluetooth, and iPhone and iPad browsers can't do it at all.
 - **UPDATE SQUAD.** Once one board is updated, this tells every squad board in range to update to the same version. More on that in [SquachMesh and squads](#squachmesh-and-squads).
 - **SWITCH TO.** Goes back to the version in the other firmware slot. Your settings stay.
 
@@ -108,12 +108,15 @@ Yes, a little, and I'd rather you hear it from me. Older versions of this FAQ sa
 | **WiFi for an update you asked for.** | Only when you tap UPDATE OVER WIFI, or accept a squad update | Don't tap it. |
 | **A Bluetooth update server.** S3 boards only. | Only while the UPDATE OVER BLUETOOTH screen is open | Leave that screen. |
 | **SquachMesh adverts.** A Bluetooth advert every 1.5 seconds with a fixed address, your Squachy's name and outfit. Messages, heads-ups and squad updates ride on it. | Only with **TRANSMIT** on | It's **off by default**, behind a warning screen that literally says THIS MAKES YOU TRACKABLE. Settings > SQUACHMESH > TRANSMIT. |
+| **HUMAN SENSING pings.** The board joins your saved WiFi network and pings the router about fifty times a second to watch the signal change. | Only while the HUMAN SENSING screen is on (SLEEP turns the screen off but keeps sensing) | **BACK** on that screen, or **O** on the T-Deck. |
+| **LoRa from the T-Deck Plus.** Your chat messages and private messages, delivery receipts for private messages sent to you, a Meshtastic name card (NodeInfo) before your first text and again with a text three or more hours later, and a MeshCore advert before a private message. | Only with **LORA TX** on | LORA TX is **OFF by default** (Settings > SYSTEM > LORA TX, or LORA SETTINGS > TX POWER). ANNOUNCE NAME OFF sends a number instead of your name. |
+| **LoRa ONLINE LOOKUPS** (T-Deck Plus). Asks public websites about LoRa nodes it heard: callsigns, the OGN database, a MeshCore feed. Plain HTTP, and only while the board is already on WiFi for an update; it never joins WiFi for this. | Only with ONLINE LOOKUPS and one of its sources on | All **OFF by default**, in LORA SETTINGS. |
 
 The WiFi detection itself just listens, and so does the manual **WIFI SCAN**: both ask the radio for a *passive* sweep, which hears the beacons networks send out anyway without sending anything itself.
 
 That last part is new, and the old behaviour belongs in this table even though it is now gone. Until this release the manual WiFi sweep used Arduino's default scan, which is an **active** one: it sent a probe request on every channel, with this board's address in it, every time you opened that screen. It was never a deliberate choice -- the setting is the third argument of a function that was being called with one -- and this table, which promises you everything that goes out, never mentioned it. It is passive now, and `tools/check_emissions.sh` fails the build if any scan in the firmware goes back to active without a line saying why.
 
-LoRa on the watches only listens. Nothing else talks.
+LoRa on the watches only listens; only the T-Deck Plus can send, as above. Nothing else talks.
 
 **PRIVACY MODE** (Settings > SYSTEM) is not a radio switch. It's for filming: addresses show as AA:BB:CC:XX:XX:XX and device and network names are cut to three characters, on the screen only. The log keeps the real values.
 
@@ -124,14 +127,15 @@ LoRa on the watches only listens. Nothing else talks.
 - **The LOG, across restarts.** Since v1.12.0 the board keeps a "black box" in its flash: about 1,800 sightings and the last hundred or so boots, including what happened if one of them was a crash. After a restart the LOG comes back with the newest sighting of up to 200 devices, in grey so it sits quietly under what's live. **CLR** on the LOG screen clears it.
 - **A microSD card, if you put one in.** Every detection is also appended to a daily CSV file on the card. No card, no file; the black box still works.
 - **Your settings**, the ignore list, saved WiFi passwords (up to six networks) and, if you use SquachMesh, your squad phrase and key.
-- **On the T-Watch S3 Plus with WARDRIVE on**, a log of every network and device it heard with where it heard them. See [GPS and LoRa](#gps-and-lora-watches-only).
+- **With WARDRIVE on** (boards with GPS), a log of every network and device it heard with where it heard them: in the watch's flash, or as a WiGLE file on the SD card on the other boards. See [GPS and LoRa](#gps-and-lora).
+- **With a WiGLE key sent to it** (T-Deck Plus, T-Watch S3 Plus, Freenove S3 GPS builds), your WiGLE API name and token, so UPLOAD NOW can send the log. It only ever goes to api.wigle.net, over HTTPS, over your saved WiFi. A duress wipe forgets it.
 
 None of this leaves the board unless you plug it in and ask for it.
 
 **Who can read it:** anyone holding the board, unless you lock it. **Settings > SECURITY** has:
 
 - **PIN LOCK** with a 4, 6 or 8 digit PIN, **AUTO-LOCK** (on sleep, or after 1 to 30 idle minutes) and **LOCK AT BOOT** (on by default once you set a PIN, so a reset does not unlock it). Detection keeps running while locked; **ALERTS LOCKED** decides how much an alert shows to a stranger (FULL, TYPE ONLY or NONE).
-- **DURESS PIN.** A second PIN that looks like it unlocks the board, but first wipes it: the squad phrase and key, saved WiFi passwords, the ignore list, the devices seen on several days, the LoRa DM keys and names, the black box log and crash history, the SD card's log files and the watch's wardrive log. Then it restarts quietly and comes up looking like an ordinary, empty SquachWatch. Your other settings survive the wipe.
+- **DURESS PIN.** A second PIN that looks like it unlocks the board, but first wipes it: the squad phrase and key, saved WiFi passwords, the ignore list, MY ALERTS, the devices seen on several days, the LoRa DM keys and names, the black box log and crash history, the SD card's log files (uploaded ones too), the watch's wardrive log, the WiGLE key and the FIELD JOURNAL. Then it restarts quietly and comes up looking like an ordinary, empty SquachWatch. Your other settings survive the wipe.
 - **WIPE AFTER 10.** The same wipe after ten wrong guesses.
 
 Be honest with yourself about what the PIN does: it stops a snoop who picks the board up. It does not stop someone with a USB cable and some time, because the flash can be read directly. The board tells you this when you set the PIN, too.
@@ -144,9 +148,11 @@ Be honest with yourself about what the PIN does: it stops a snoop who picks the 
 
 **CHARGE MODE** (Settings, every board except the watch) turns off the radios, the status light and the screen so a battery charges faster. Tap the dark screen to see how long it's been charging; tap again while that shows to wake the board.
 
-**The BOOT button** on the CYD-style boards: a short press turns the screen off, and only another press turns it back on. That's **POCKET MODE**: a touch won't wake it, so a board in a pocket or a bag stays dark. Alerts still light it for their card and then it goes dark again. Hold BOOT for about a second to start CHARGE MODE. On the Freenove ESP32-S3 2.8" and 3.5", which have a battery connector, holding BOOT is the power switch instead: at about a second it says KEEP HOLDING, at three it powers off, and a press of BOOT turns it back on. CHARGE MODE is on the Settings list there.
+**The BOOT button** on the CYD-style boards: a short press turns the screen off, and only another press turns it back on. That's **POCKET MODE**: a touch won't wake it, so a board in a pocket or a bag stays dark. Alerts still light it for their card and then it goes dark again. Hold BOOT for about a second to start CHARGE MODE. On the Freenove ESP32-S3 3.5", which has a battery connector, holding BOOT is the power switch instead: at about a second it says KEEP HOLDING, at three it powers off, and a press of BOOT turns it back on. CHARGE MODE is on the Settings list there.
 
-**The speaker.** The Freenove ESP32-S3 2.8" and 3.5" have one. SOUND in Settings is OFF (the default), ALERTS (a device you've never seen, a watch-list hit, a low battery) or ALL (those plus a squad message, a visitor, throws and landings, C1iPPY, the toaster and the lamp noticing the cable). VOLUME is 0-100% on its - and + buttons; each press plays a sample. Nothing plays while the screen is dimmed or at night (11 pm to 5 am), except a watch-list hit.
+**The T-Deck Plus** does POCKET MODE on its trackball: hold it down for 2 seconds and the screen goes dark; press it to wake.
+
+**The speaker.** The Freenove ESP32-S3 2.8" and 3.5", the T-Deck Plus, the StickS3 and the Cardputer ADV have one (on the Cardputer it plays short tones). SOUND in Settings is OFF (the default), ALERTS (a device you've never seen, a watch-list hit, a low battery) or ALL (those plus a squad message, a visitor, throws and landings, C1iPPY, the toaster and the lamp noticing the cable). VOLUME is 0-100% on its - and + buttons; each press plays a sample. Nothing plays while the screen is dimmed or at night (11 pm to 5 am), except a watch-list hit.
 
 **The battery lamp.** On the Freenove ESP32-S3 2.8" and 3.5" and the T-Watch, a little lava lamp under the menu button is the battery: the lava is the charge. On the cable, bubbles stream up and a rainbow runs through the cap and base; under 10% it flickers. The Freenove boards work out the cable from the battery voltage jumping when you plug in, so it can take a few seconds to notice. Boards with no battery don't show a lamp. Rather not have it? **Settings → APPEARANCE → LAVA LAMP: OFF**.
 
@@ -161,29 +167,37 @@ The DIYmalls JC2432W328C has a physical BAT connector and battery switch, but th
 
 ## Does it make any noise?
 
-Mostly no. Two exceptions:
+Mostly no. The exceptions:
 
+- **Boards with a speaker** (the Freenove ESP32-S3 2.8" and 3.5", the T-Deck Plus, the StickS3 and the Cardputer ADV). **SOUND** in Settings is OFF until you change it; see [the speaker](#battery-and-power) above. On the T-Deck, **MESSAGE SOUND** in LORA SETTINGS is the ding for a new LoRa message.
 - **The T-Watch buzzes.** A double tap per alert (at most one every 10 seconds), three long buzzes for a device you're watching, and one buzz for a new LoRa message. **BUZZ** in WATCH SETTINGS sets it to OFF, HIGH, MED (the default) or LOW.
 - **The CrowPanel 7" has a buzzer.** It's off by default. **BUZZER** under BEHAVIOR set to NEW ONLY gives one chirp for a device the board hasn't seen before, never at night (11 pm to 5 am, once the clock is set), never while the screen is dimmed, and never at boot.
 
-Nothing else makes a sound. The CYD's RGB status light is the loudest it gets, and **STATUS LIGHT** under APPEARANCE turns that off too.
+Nothing else makes a sound. On the classic CYDs the RGB status light is the loudest it gets, and **STATUS LIGHT** under APPEARANCE turns that off too.
 
 ## An alert popped up. Now what?
 
-A full-screen alert means one detection matched one signature. It tells you what it thinks it saw, how confident that match is, the signal strength, and the address. FIRST OF ITS KIND means this board has never caught that type before; AT NIGHT means what it sounds like. The card closes when you tap it, or by itself after ten seconds.
+A full-screen alert means one detection matched one signature. The top of the card is the verdict (NEW, MET BEFORE with the regular's name, FOLLOWING, or SPAM FLOOD) next to the type, with chips beside them: AWAY or WITH OWNER for a tracker, how many days you have met a regular, AT NIGHT, and +N MORE when other catches are waiting behind this one. Under that is the trail: the stops you have made since the device was first heard, with the time at each and the distance between them when the board knows it, and a YOU pin at HERE. A row of ticks says why (AWAY, EVERY STOP, how many MIN, CLOSER), the ladder on the right is the last minute of signal, and the four rows under it are who it is, its address, first and last seen, and the confidence. The card closes when you tap it, or by itself after ten seconds, and the next waiting catch takes its place.
+
+**Can the card look different?** Yes: Settings > APPEARANCE > ALERT CARD has eleven skins (SUNSET 95, NEON DESKTOP, SYSTEM 7, GLASS, TILING, BEOS, AMIGA, NEXTSTEP, XP LUNA, AQUA, TERMINAL) as well as the TRAIL card itself. STYLE shows a made-up card with arrows to step through them, like OUTFIT; OPEN WITH ANIMATION and SUNSET BEHIND are the other two rows. Every skin takes its colours from your theme. Small screens always show TRAIL.
+
+**FOLLOWING** is the one to take seriously: heard at three or more of your stops over at least fifteen minutes, and at every stop in between. One stop is where the WiFi around you changes wholesale, or 300 m on a board with a GPS fix, so it works on every board. A phone never earns it (its Bluetooth address changes every quarter hour); a tag away from its owner does, because it keeps its address for most of a day.
 
 The buttons:
 
-- **MORE INFO**: what this thing is and why it matched.
+- **RING** (trackers, on the S3 and C5 boards) or **HUNT**: make the tag beep, or a hot/cold fox hunt for the device, GETTING WARMER or GETTING COLDER as you move.
+- **WATCH**: keep an eye on this device. You get LOCKED ON when it turns up again; tap WATCHING to stop.
+- **SNOOZE**: quiet about this device for a while. Four chips come up: 10 MIN, 30 MIN, 1 HOUR, 4 HOURS. For good, use IGNORE.
 - **IGNORE**: never alert on this exact device again. It's still logged and counted, with an IGNORED tag on its LOG row. Tap it again (it reads MUTED) or use Settings > IGNORED to undo it.
-- **SNOOZE**: quiet about this device for a while. Tap once for 10 minutes, twice for 30, three times for an hour, four times for 4 hours. The button shows the time, and it locks in three seconds after your last tap. After the first tap the card says TAP AGAIN: LONGER. For good, use IGNORE.
-- **HUNT**: a hot/cold fox hunt for that device, GETTING WARMER or GETTING COLDER as you move. STOP HUNT ends it.
+- **INFO**: what this thing is and why it matched.
 
 **Too many alerts?**
 
 - **AUTO SNOOZE** (Settings > BEHAVIOR): OFF, AFTER 5 or AFTER 10. Past its allowance a device has to come 7 dB closer than it ever has to alert again, and the allowance comes back after thirty minutes. Made for the doorbell across the street that takes your screen every time you walk past.
 - **ALERT FILTER**: ALL, MED+ or HIGH ONLY. Lower-confidence matches still go in the LOG; they just don't take over the screen.
 - **TYPE FILTER**: switch whole detection types on or off.
+
+**Alerting on a WiFi name of your own.** Settings > **MY ALERTS** holds up to eight network names to watch for: police car routers named by unit number, a neighbour's camera, anything with a name. ADD asks for the name, then an optional label (up to 15 characters) that goes on the alert card. Plain text catches names that start with it. `*` stands for anything and `?` for one character: `veh*` catches `veh912`, `veh9??` catches `veh901` but not `veh9012`, and `*-pd-*` catches any name with `-pd-` in it. Upper and lower case are the same. A pattern needs at least two fixed characters, and under three the board warns you it will catch other people's networks too. Anyone can name a router anything, so a match means the name matched, not who owns it. The 5 GHz boards (the C5s) hear it on both bands.
 - **Spam floods.** If a type suddenly produces a pile of addresses that are heard once and never again (somebody's tracker spammer, for example), you get one alert with a "SPAM: N FAKE TAGS" banner, and then that type is logged quietly until five minutes pass without more.
 
 **Keeping an eye on one device.** Long-press any row in the LOG and pick **WATCH**. It works on any device, even one that matched nothing. When it comes back you get **LOCKED ON**: a radar scope with the signal and whether it's getting CLOSER or FURTHER, and it stays up until you tap it. REMOVE FROM WATCH LIST stops watching. It's one device at a time and it resets when the board restarts. A watched device always gets through AUTO SNOOZE and the spam filter. Fair warning: many phones and trackers change their Bluetooth address on purpose to defeat exactly this, so it's best on gear that doesn't.
@@ -198,6 +212,7 @@ They happen, and the confidence grade is there so you can tell a solid match fro
 - **Why isn't my phone flagged?** Because phones aren't on the list. It matches specific signatures (a Flock prefix, an AirTag's Find My payload, a body cam's network name), not "anything Apple" or "anything nearby". An ordinary phone doesn't match any of them.
 - **AirPods showing up as AIRTAG?** Known and accepted. A freshly powered AirTag sends the same kind of advert AirPods do, and catching the tag mattered more. [DETECTIONS.md](DETECTIONS.md) has the details.
 - **Your own AirTag or doorbell** is a true positive every single time. IGNORE it.
+- **Can I make a tracker beep?** On the S3 and C5 boards, yes: RING on a tracker's alert card, or RING IT on its LOG row. The board connects for a few seconds and asks it to play its sound. Trackers only beep for strangers while they're away from their owner's phone (that's the anti-stalking design), so a tracker next to its owner will usually answer IT SAID NO or NO ANSWER. The CYDs don't have RING; it needs memory they haven't got.
 - Another SquachWatch, an ESP32 Marauder or a nyanBOX is the same chip, and none of them is flagged as hacking hardware on that alone.
 
 **Found a real false positive?** [Open an issue](https://github.com/skizzophrenic/SquachWatch-CYD/issues) with the type, the confidence, the first half of the address, the name if it had one, and what the thing actually was. Turn on PRIVACY MODE before you take a photo of the screen.
@@ -211,7 +226,7 @@ It's opt-in and has two switches under **Settings > SQUACHMESH**:
 - **DETECT** only listens for other boards. It sends nothing.
 - **TRANSMIT** broadcasts your Squachy. Before it turns on, a warning screen explains exactly what goes out: an advert every 1.5 seconds with a Bluetooth address that never changes, plus your Squachy's name and outfit. Anyone with a scanner can log that address with a time and place, and because it never changes, those sightings join up. That's the same trick this device warns you about, so think about it.
 
-**A squad** is a group of boards that share a five-word phrase. On the PHRASE screen, ROLL makes a new one; read it to a friend and they ENTER the same five words. Or skip the reading: **ADD TO SQUAD** (from INVITE on the SQUAD screen) adds a board that's right next to you, and both screens show four digits to compare so nobody in the middle can sneak in. With **SHOW PHRASE** off, the phrase is never shown, and the squad only grows in person.
+**A squad** is a group of boards that share a five-word phrase. On the PHRASE screen, ROLL makes a new one; read it to a friend and they ENTER the same five words. Or skip the reading: **ADD TO SQUAD** (the ADD button on the SQUAD screen) adds a board that's right next to you, and both screens show four digits to compare so nobody in the middle can sneak in. With **SHOW PHRASE** off, the phrase is never shown, and the squad only grows in person.
 
 A squad gets you:
 
@@ -235,23 +250,25 @@ A squad gets you:
 
 **Colours wrong (blue where red should be, or everything looks like a negative)?** **Settings > SYSTEM > CHECK COLORS** puts red, green and blue on screen with two buttons, INVERT and ORDER; tap until they match. The same two settings live under APPEARANCE as **INVERT COLORS** and **COLOR ORDER**. The check also runs once on first boot.
 
-## GPS and LoRa (watches only)
+## GPS and LoRa
 
-**GPS** is on the **T-Watch S3 Plus**, and on the **Cardputer ADV** with a Grove GPS (see [SMALL-BOARDS.md](SMALL-BOARDS.md)). **WARDRIVE** in WATCH SETTINGS turns the GPS and the log on together: every WiFi network and Bluetooth device it hears, with position, logged only while it has a fresh fix. It holds up to 125,000 sightings across restarts. **DOWNLOAD WIGLE FILE** on the web flasher (desktop Chrome or Edge) saves it as a file you can upload to [wigle.net](https://wigle.net/uploads). The log stays on the watch until you clear it, and a duress wipe takes it with everything else. The watch also sets its clock from GPS. Wardriving was marked not road-tested when it shipped in v1.25.0, so treat it as new.
+**GPS** comes on the **T-Watch S3 Plus**, the **T-Deck Plus** and the **Marauder V8**. The **Cardputer ADV** takes a Grove GPS (see [SMALL-BOARDS.md](SMALL-BOARDS.md)). The 2.8" CYD and the Freenove ESP32-S3 2.8" take a GPS module with their own GPS builds, which you build yourself (wiring in [PINOUT.md](PINOUT.md#gps-module-cyd-gps-builds)). Every one of them sets its clock from the GPS once it has a fix.
 
-**SEEN AT.** Anything the LOG kept with a GPS position shows it: long-press the device in the LOG and it says SEEN AT and where.
+**WARDRIVE** turns the GPS and the log on together: every WiFi network and Bluetooth device it hears, with position, logged only while it has a fresh fix. On the watch it is in WATCH SETTINGS, and the log lives in the watch's own flash: up to 125,000 sightings across restarts, saved as a file by **DOWNLOAD WIGLE FILE** on the web flasher (desktop Chrome or Edge), ready for [wigle.net](https://wigle.net/uploads). The log stays on the watch until you clear it, and a duress wipe takes it with everything else. On the other boards WARDRIVE is in Settings and writes a WiGLE file straight to the SD card (`/wigle-YYYYMMDD-HHMM.csv`), so those need a card in. Wardriving was marked not road-tested when it shipped in v1.25.0, so treat it as new.
 
-**LoRa** is on both the T-Watch S3 and the S3 Plus, and it only listens. It decodes the public channels of Meshtastic and MeshCore, using the EU 868 or US 915 band depending on your time zone. **LORA** in WATCH SETTINGS picks BOTH, MESHTASTIC, MESHCORE or OFF, and **LORA CHATS** shows what was said, one tab per network. More in [LORA.md](LORA.md).
+**Uploading to WiGLE.** WARDRIVE opens a page with the GPS, this drive's counts and the file. Every board can upload through the web flasher's **UPLOAD TO WIGLE**, which sends the files straight from your browser to WiGLE with your API name and token. The T-Deck Plus, T-Watch S3 Plus and Freenove S3 GPS builds can also do it themselves: **SEND KEY TO MY BOARD** gives them the key over the cable, then **UPLOAD NOW** sends what is new over your saved WiFi, and **AUTO UPLOAD** does it on the charger. The CYDs and the Cardputer have no room for the HTTPS it needs.
 
-No other board has GPS or LoRa, and I won't ask you to solder one on.
+**SEEN AT.** Anything the LOG kept with a GPS position shows it: hold the device in the LOG to open its card, tap INFO, and it starts with SEEN AT and where.
+
+**LoRa** is on the T-Watch S3, the S3 Plus and the T-Deck Plus. It decodes the public channels of Meshtastic and MeshCore, using the EU 868, US 915 or AU 915 band depending on your time zone. **LORA** (WATCH SETTINGS on the watch, Settings > SYSTEM on the T-Deck) picks BOTH, MESHTASTIC, MESHCORE, LORAWAN (alerts for LoRaWAN networks in range, no mesh chats) or OFF, and **LORA CHATS** shows what was said, one tab per network. The watches only listen. The T-Deck can also send, from its keyboard, once you turn on LORA TX; that and the rest of its LoRa page are in [LORA.md](LORA.md#on-the-lilygo-t-deck-plus).
 
 ## What's with the Sasquach on the screen?
 
-That's Squachy. The detection is the *why*, Squachy is the *fun*. He reacts to what the board catches, cracks jokes when nothing's happening, grows through stages as your lifetime catch count climbs, and earns outfits and pets along the way. Some of those you earn by catching things; some are hidden, and I'm not telling you where. Tap him. He likes that.
+That's Squachy. The detection is the *why*, Squachy is the *fun*. He reacts to what the board catches, cracks jokes when nothing's happening, grows through stages as your lifetime catch count climbs (his fur changes at 25, 100 and 500 catches, and at 500 he is a Legend with a flame aura), and earns outfits and pets along the way. Some of those you earn by catching things; some are hidden, and I'm not telling you where. Tap him. He likes that.
 
-Other things hiding in Settings: the SQUACHY-DEX (a card per detection type with your record), BINGO, Squachy's diary, and DESK MODE, a clock for your desk.
+Other things hiding in Settings: the SQUACHY-DEX (a card per detection type with your record), BINGO, Squachy's diary, and DESK SETTINGS, for the desk clock that MODE opens.
 
-**Don't want him?** **Settings > BEHAVIOR > TERMINAL MODE** (it used to be called BORING MODE) swaps him for a plain dashboard: a sortable LOG, an AIR graph, COUNTS and the LATEST catch. Detection is exactly the same. The same row turns him back on.
+**Don't want him?** Use **TERMINAL MODE**: the **MODE** button on the main screen, twice (the desk, then terminal). On the StickS3 it's **Settings > BEHAVIOR > TERMINAL MODE**. It used to be called BORING MODE. It swaps him for a dashboard built for the tool itself: a LOG you can sort by time, kind, device or signal, an AIR graph, COUNTS by kind and the LATEST catch, with WATCH, HUNT, INFO and IGNORE a tap away. Detection is exactly the same, and it stays that way through restarts. MODE again brings him back.
 
 ## Is this legal?
 
@@ -261,7 +278,7 @@ That said, I'm a hairy cryptid mascot, not a lawyer. Know your local laws, use y
 
 ## Bugs, contributing and the license
 
-**Something's broken?** [Open an issue](https://github.com/skizzophrenic/SquachWatch-CYD/issues). Tell me the board, the version (it's on the UPDATE FIRMWARE screen), what you expected, and what actually happened. A photo helps. If it crashed, the crash card on the next boot and **Settings > SYSTEM > DIAGNOSTICS** have the details, and a serial log is gold (the speed for your board is the `monitor_speed` in [platformio.ini](../platformio.ini)). Your board not on the flasher? Same place.
+**Something's broken?** [Open an issue](https://github.com/skizzophrenic/SquachWatch-CYD/issues). Tell me the board, the version (it's on the UPDATE FIRMWARE screen), what you expected, and what actually happened. A photo helps. If it crashed, the crash card on the next boot and **Settings > SYSTEM > DIAGNOSTICS** have the details (DIAGNOSTICS shows the board and build, uptime, memory, the last reset and crash, the touch calibration, frame times, how many Bluetooth devices it has seen, the log, the clock, GPS and wardriving, and SquachMesh traffic), and a serial log is gold (the speed for your board is the `monitor_speed` in [platformio.ini](../platformio.ini)). Your board not on the flasher? Same place.
 
 **Want to contribute?** PRs welcome, especially new detection signatures with real sources behind them. See [DETECTIONS.md](DETECTIONS.md) for the format. I take provenance seriously: I don't want to flag your neighbour's baby monitor as a Flock camera because someone guessed at a prefix. Several boards on the list above came from contributors, too.
 

@@ -17,6 +17,7 @@
 // screen full of detections, but it is NOT exercising the real matching
 // logic that decides what counts as a detection in the first place.
 #include "detection.h"
+#include "trail.h"
 #include <cstring>
 #if defined(CYD_GPS)
 #include "wardrive.h"
@@ -76,7 +77,7 @@ void DetectionEngine::loop() {
     }
 }
 #else
-void DetectionEngine::loop() {}
+void DetectionEngine::loop() { Places::tick(millis()); }
 #endif
 // No radio, so nothing to restart and nothing freed.
 ScanFlushStats scanFlushStats() { return ScanFlushStats{ 0, 0, 0 }; }
@@ -116,6 +117,7 @@ void DetectionEngine::resetLifetime() {
 
 void DetectionEngine::pushLog(const Detection& d) {
     _log[_logHead] = d;
+    Trail::noteSighting(_log[_logHead], d.rssi, millis());
     _latest = &_log[_logHead];
     _latestNew = true;   // the stand-in only ever pushes; nothing here reactivates
     _latestSeq = _latestSeq + 1;
@@ -147,6 +149,8 @@ void DetectionEngine::mergeRemoteId(const uint8_t* mac, const uint8_t* payload,
     RemoteId::merge(payload, len, _rid, millis());
 }
 void DetectionEngine::postBtClassic(Detection d) { pushLog(d); }
+// A LoRaWAN operator (PR #138), on the LoRa builds: main.cpp posts it.
+void DetectionEngine::postLora(Detection d) { pushLog(d); }
 void DetectionEngine::postRawBle(RawBleResult r) {
     if (_rawBleCount < RAW_BLE_CAP) _rawBle[_rawBleCount++] = r;
 }

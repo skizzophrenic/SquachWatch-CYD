@@ -20,7 +20,15 @@
 #pragma once
 
 #define USER_SETUP_INFO    "SquachWatch-CYD / RL Phantom 2.4 inch resistive / ILI9341"
+#if defined(RLPHANTOM_R_ALT)
+// A batch of S024R panels wants the alternate ILI9341 init table: on the
+// plain one it shows a noise band along the bottom quarter and mirrored text
+// (#88). Its own build, rlphantom-r-alt, so the boards the stock one is
+// right for are untouched -- the 2.8in's "try the other one" split.
+#define ILI9341_2_DRIVER
+#else
 #define ILI9341_DRIVER
+#endif
 
 #define TFT_WIDTH   240
 #define TFT_HEIGHT  320

@@ -17,6 +17,8 @@
 #include "lora_classify.h"
 #include "lora_meshcore.h"
 #include "lora_nodes.h"
+#include "lora_opalert.h"
+#include "lora_lorawan.h"
 #include "lora_meshtastic.h"
 #include "lora_crypto.h"
 #include "lora_channels.h"
@@ -679,6 +681,8 @@ void forgetNames() {
     Serial.println("[lora] remembered Meshtastic names forgotten, stored copy included");
 }
 
+static void wanHook(const LoRaWAN::Decoded& d, const Packet& pk, uint32_t now);   // with takeOperatorHit, below
+
 bool begin() {
     s_lock = xSemaphoreCreateMutex();
     // Before the radio, like the channel keys below: the names are the
@@ -686,6 +690,7 @@ bool begin() {
     namesRestore();
     dmRestore();
     mcRestore();
+    Nodes::setLoRaWANHook(wanHook);
     memset(&s_stats, 0, sizeof s_stats);
     // The request log exists before the first request can be issued, which is
     // the point of it: an empty log is a claim the owner can check.
@@ -755,10 +760,12 @@ bool begin() {
             const char* z = Clock::zoneName(Settings::timeZone());
             static const char* const AMERICAS[] = { "US ", "ARIZONA", "ALASKA", "HAWAII", "ATLANTIC", "NEWFOUNDLAND",
                                                     "BRAZIL", "MEXICO", "COLOMBIA", "CHILE", "ARGENTINA" };
+            static const char* const ANZ[] = { "AUS ", "QUEENSLAND", "DARWIN", "NEW ZEALAND" };
             r = 1;
             for (const char* a : AMERICAS) if (z && strncmp(z, a, strlen(a)) == 0) { r = 2; break; }
+            for (const char* a : ANZ)      if (z && strncmp(z, a, strlen(a)) == 0) { r = 3; break; }
         }
-        setRegion(r == 2 ? REGION_US : REGION_EU);
+        setRegion(r == 2 ? REGION_US : r == 3 ? REGION_AU : REGION_EU);
         Serial.printf("[lora] band plan %s (%s)\n", regionName(), Settings::loraRegion() == 0 ? "from the time zone" : "set by LORA REGION");
     }
     uint64_t mask = 0;
@@ -960,6 +967,15 @@ static uint16_t meshtasticFrame(uint8_t port, const uint8_t* payload, size_t ple
     return Meshtastic::buildFrame(ch, from, id, Settings::loraHops(), port, payload, plen, f);
 }
 
+// The most the EU mesh profiles send at. Every PG_MESH_EU profile sits in
+// 869.4-869.65 MHz (ERC 70-03 band h1.4 / ETSI EN 300 220 sub-band g3), where
+// 500 mW ERP (27 dBm) is allowed with a 10 % duty cycle -- not the 25 mW of
+// the 868.0-868.6 sub-band this used to assume. The SX1262 tops out at 22 dBm
+// (LoraRadio::transmit clamps there too), so that is the ceiling. The duty
+// cycle is the operator's to keep: chat text and the occasional NodeInfo stay
+// far under 10 %, a flood of DMs would not.
+static const int8_t EU_MESH_DBM_MAX = 22;
+
 // The sniffer parked, the preset applied, the frame out, and back to whatever
 // the radio was doing.
 static bool transmitOn(const Profile& prof, const uint8_t* f, uint16_t n, int8_t dbm) {
@@ -1044,7 +1060,7 @@ bool sendText(Proto p, const char* name, const char* text, int8_t dbm, int16_t c
     uint8_t idx = 0;
     if (!meshProfile(p, idx)) return false;
     const Profile& prof = profile(idx);
-    if (prof.group == PG_MESH_EU && dbm > 14) dbm = 14;      // ETSI's 25 mW
+    if (prof.group == PG_MESH_EU && dbm > EU_MESH_DBM_MAX) dbm = EU_MESH_DBM_MAX;
     // Which channel: the default when none is named, else exactly the one
     // named -- or nothing at all (see the header).
     const char* primary = presetChannel(prof);
@@ -1108,7 +1124,7 @@ static void dmTick(uint32_t now) {
     if (!meshProfile(Proto::MESHTASTIC, idx)) return;
     const Profile& prof = profile(idx);
     int8_t dbm = (int8_t)Settings::loraTxDbm();
-    if (prof.group == PG_MESH_EU && dbm > 14) dbm = 14;
+    if (prof.group == PG_MESH_EU && dbm > EU_MESH_DBM_MAX) dbm = EU_MESH_DBM_MAX;
     const uint32_t me = myMeshtasticNum();
     for (int k = 0; k < 2; k++) {
         Dm::Out o;
@@ -1218,7 +1234,7 @@ static void mcTick(uint32_t now) {
     if (!meshProfile(Proto::MESHCORE, idx)) return;
     const Profile& prof = profile(idx);
     int8_t dbm = (int8_t)Settings::loraTxDbm();
-    if (prof.group == PG_MESH_EU && dbm > 14) dbm = 14;
+    if (prof.group == PG_MESH_EU && dbm > EU_MESH_DBM_MAX) dbm = EU_MESH_DBM_MAX;
     const char* name = MyName::longName(Settings::loraName(), Squachy::nickname());
     for (int k = 0; k < 2; k++) {
         McDm::Out o;
@@ -1234,6 +1250,22 @@ static void mcTick(uint32_t now) {
     }
 }
 
+// LoRaWAN's one listening post: the first downlink profile of the band plan
+// (RX2 at SF9 in EU 868), else any LoRaWAN profile there is. Not the Class B
+// beacon, which names no operator.
+static bool wanProfile(uint8_t& idx) {
+    int16_t any = -1;
+    for (uint8_t i = 0; i < profileCount(); i++) {
+        const Profile& p = profile(i);
+        if (p.group != PG_LORAWAN || (p.flags & PF_IMPLICIT)) continue;
+        if (p.flags & PF_INVERT) { idx = i; return true; }
+        if (any < 0) any = i;
+    }
+    if (any < 0) return false;
+    idx = (uint8_t)any;
+    return true;
+}
+
 void applyListen(uint8_t listen) {
     uint8_t mt = 0, mc = 0;
     const bool haveMt = meshProfile(Proto::MESHTASTIC, mt);
@@ -1243,6 +1275,13 @@ void applyListen(uint8_t listen) {
         case 0: s_noLinger = false; setMode(Mode::OFF); break;
         case 1: s_noLinger = false; if (haveMt) { s_focus = mt; setMode(Mode::FOCUS); } break;
         case 2: s_noLinger = false; if (haveMc) { s_focus = mc; setMode(Mode::FOCUS); } break;
+        case 4: {
+            uint8_t wan = 0;
+            s_noLinger = false;
+            if (wanProfile(wan)) { s_focus = wan; setMode(Mode::FOCUS); }
+            else setMode(Mode::OFF);      // no LoRaWAN in this band plan: say nothing rather than listen elsewhere
+            break;
+        }
         default:
             // Both: the survey over just these two. A CAD on each takes
             // tens of milliseconds, far inside either network's preamble.
@@ -1260,7 +1299,7 @@ void applyListen(uint8_t listen) {
             setMode(Mode::SURVEY);
             break;
     }
-    Serial.printf("[lora] listening: %s\n", listen == 0 ? "off" : listen == 1 ? "Meshtastic" : listen == 2 ? "MeshCore" : "Meshtastic and MeshCore in turn");
+    Serial.printf("[lora] listening: %s\n", listen == 0 ? "off" : listen == 1 ? "Meshtastic" : listen == 2 ? "MeshCore" : listen == 4 ? "LoRaWAN downlinks" : "Meshtastic and MeshCore in turn");
 }
 
 uint16_t rssiTrail(int8_t* out, uint16_t cap) {
@@ -1444,6 +1483,36 @@ bool nodeAt(uint8_t i, Nodes::Node& out) {
     xSemaphoreGive(s_lock);
     return n != nullptr;
 }
+// ---- LoRaWAN operators -----------------------------------------------------------
+// Sightings on their way to the detection engine. wanHook runs on the radio
+// task inside s_lock (Nodes::note calls it); takeOperatorHit runs on loop().
+// One slot per operator: a later frame overwrites its own entry, so the queue
+// holds the newest signal of each and a busy network cannot fill it.
+static const uint8_t OP_Q_CAP = 8;
+static OpAlert::Hit s_opQ[OP_Q_CAP];
+static uint8_t      s_opQN = 0;
+
+static void wanHook(const LoRaWAN::Decoded& d, const Packet& pk, uint32_t now) {
+    OpAlert::Hit h;
+    if (!OpAlert::note(d, pk, now, h)) return;
+    for (uint8_t i = 0; i < s_opQN; i++)
+        if (s_opQ[i].netId == h.netId) { s_opQ[i] = h; return; }
+    if (s_opQN < OP_Q_CAP) s_opQ[s_opQN++] = h;     // full: loop() is stalled, and the next frame asks again
+}
+
+bool takeOperatorHit(OpAlert::Hit& out) {
+    if (!s_lock || !s_opQN) return false;           // the count is one byte: an unlocked peek is fine
+    if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(20)) != pdTRUE) return false;
+    const bool have = s_opQN > 0;
+    if (have) {
+        out = s_opQ[0];
+        s_opQN--;
+        memmove(&s_opQ[0], &s_opQ[1], s_opQN * sizeof s_opQ[0]);
+    }
+    xSemaphoreGive(s_lock);
+    return have;
+}
+
 uint8_t nodeSnapshot(Nodes::Node* out, uint8_t cap, uint8_t from) {
     if (!out || !cap || !s_lock) return 0;
     if (xSemaphoreTake(s_lock, pdMS_TO_TICKS(20)) != pdTRUE) return 0;
@@ -2319,7 +2388,7 @@ bool console(const char* line) {
         // Meshtastic, MeshCore, both. For the night a board's screen froze
         // with the radio on a shared bus (the T-Deck, 2026-10-12).
         const int v = atoi(a + 6);
-        Settings::setLoraListen((uint8_t)(v < 0 ? 0 : v > 3 ? 3 : v));
+        Settings::setLoraListen((uint8_t)(v < 0 ? 0 : v > 4 ? 3 : v));
         applyListen(Settings::loraListen());
         return true;
     }
@@ -2327,7 +2396,8 @@ bool console(const char* line) {
         const char* v = a + 6; while (*v == ' ') v++;
         uint8_t r = 255;
         if (strcasecmp(v, "AUTO") == 0) r = 0; else if (strcasecmp(v, "EU") == 0) r = 1; else if (strcasecmp(v, "US") == 0) r = 2;
-        if (r == 255) { Serial.printf("[lora] band plan %s; LORA REGION AUTO|EU|US (restarts)\n", regionName()); return true; }
+        else if (strcasecmp(v, "AU") == 0) r = 3;
+        if (r == 255) { Serial.printf("[lora] band plan %s; LORA REGION AUTO|EU|US|AU (restarts)\n", regionName()); return true; }
         Settings::setLoraRegion(r);
         Serial.println("[lora] band plan saved; restarting to apply");
         delay(200);

@@ -2,6 +2,7 @@
 #pragma once
 #if SQUACH_MESH
 #include "squachmesh.h"
+#include "goblin.h"
 #endif
 #include "state.h"
 #include "sd_log.h"
@@ -143,6 +144,9 @@ namespace Mesh {
     // The visitor, or nullptr. Goes stale on its own if the peer walks away.
     const SquachMesh::Peer* peer();
     const uint8_t*          peerMac();
+    // A goblin from Network Goblin Scout in range (goblin.h), or nullptr. One
+    // at a time, the first heard; stale like a peer. Never a detection.
+    const Goblin::Visitor*  goblin();
     // How many SquachWatches have been heard in the last twenty seconds (PEER_STALE_MS) --
     // the visitor and everybody else. For the small "+2" beside him.
     uint8_t                 squadCount(uint32_t now);
@@ -205,6 +209,11 @@ bool     wifi5Enabled();                // 5 GHz on, and the radio accepted some
 void     setWifi5Enabled(bool on);      // takes effect at the next sweep
 #endif
 extern char g_bootRadioLine[192];     // how the radios started this boot
+// HUMAN SENSING on the boards with the extra screens (SENSE_RICH) listens to
+// the whole channel while it has the radio, for SCOPE's paths. The detector's
+// promiscuous handler stays installed, so it is told to drop what it is fed
+// until sensing hands the radio back.
+extern volatile bool g_sniffMuted;
 uint32_t advertsSeen();      // adverts the radio has handed over since boot, seatbelt or not
 const volatile uint32_t* advertKinds();   // [ind, direct, scan, nonconn, other] since boot
 // The scan window, 1..100 of the 100 ms interval, changed live: WINDOW N on
@@ -311,6 +320,19 @@ public:
 
     // Called from the BT Classic inquiry callback when a name match hits.
     void postBtClassic(Detection d);
+
+    // A LoRaWAN operator's network (Lora::OpAlert), from loop(). The same
+    // merge by address as postBle(), with one difference that is the reason
+    // it is separate: postBle() re-announces a row that went stale, and a row
+    // goes stale after STALE_MS of silence. That is right for an AirTag, which
+    // advertises every two seconds, and wrong for a network whose meters speak
+    // every ten minutes -- every frame would be a comeback and every comeback
+    // an alert. Here a row comes back quietly unless the operator has been
+    // unheard for LORA_GONE_MS, which is long enough to mean you left.
+    void postLora(Detection d);
+    static const uint32_t LORA_GONE_MS = 60UL * 60UL * 1000UL;
+    // ...and how long before its row stops counting as here (expireStale).
+    static const uint32_t LORA_STALE_MS = 10UL * 60UL * 1000UL;
 
     // Called from the BLE scan callback while a raw BLE scan is active
     // (see startRawBleScan()) -- every advertisement, not just known

@@ -63,6 +63,8 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/squachy.cpp \
             $(SRC)/squachmesh.cpp \
             $(SRC)/mesh.cpp \
+            $(SRC)/goblin.cpp \
+            $(SRC)/encounters.cpp \
             $(SRC)/meshmsg.cpp \
             $(SRC)/emote_script.cpp \
             $(SRC)/crowd_bench.cpp \
@@ -92,8 +94,10 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/ui_bingo.cpp \
             $(SRC)/dex.cpp \
             $(SRC)/regulars.cpp \
+            $(SRC)/places.cpp \
             $(SRC)/notices.cpp \
             $(SRC)/ui_dex.cpp \
+            $(SRC)/ui_cryptid_guide.cpp \
             $(SRC)/detection_info.cpp \
             $(SRC)/device_info.cpp \
             $(SRC)/idle_events.cpp \
@@ -104,6 +108,9 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/pet.cpp \
             $(SRC)/ui_log.cpp \
             $(SRC)/ui_alert.cpp \
+            $(SRC)/alert_skin.cpp \
+            $(SRC)/alert_skin_roles.cpp \
+            $(SRC)/tag_ring.cpp \
             $(SRC)/ui_settings.cpp \
             $(SRC)/ui_boot.cpp \
             $(SRC)/ui_colorcheck.cpp \
@@ -126,6 +133,8 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/ui_wifipass.cpp \
             $(SRC)/ui_sysprops.cpp \
             $(SRC)/ui_wifinets.cpp \
+            $(SRC)/ui_myalerts.cpp \
+            $(SRC)/my_alerts.cpp \
             $(SRC)/frame_push.cpp \
             $(SRC)/frame_prof.cpp \
             $(SRC)/fast_sprite.cpp \
@@ -159,7 +168,10 @@ SIM_FLAGS := -DSQUACH_LORA_FAKE=1
 # with SENSE_CYD_APP on these objects alone (build/sense/): the flag also adds a
 # Settings row, and the rest of the emulator must keep drawing the shipping
 # builds' Settings.
-SENSE_SRCS := $(SRC)/sense_cyd/ui_sensing_cyd.cpp $(SRC)/sense_cyd/sense_store.cpp $(SIM_DIR)/sense_cyd_sim.cpp
+# SENSE_RICH_SIM: the render tool also draws SCOPE, SNEAK and VITALS (the
+# SENSE_RICH boards' screens) at any size; SQUACHSIM_PAGE=1..3 picks one. The
+# web build is left without it: it plays the boards that do not have them.
+SENSE_SRCS := $(SRC)/sense_cyd/ui_sensing_cyd.cpp $(SRC)/sense_cyd/ui_sensing_tab5.cpp $(SRC)/sense_cyd/sense_store.cpp $(SRC)/sense_cyd/sense_vitals.cpp $(SIM_DIR)/sense_cyd_sim.cpp
 
 # The interactive target additionally compiles the firmware's real
 # main.cpp -- its actual setup()/loop(), state machine, gesture handling
@@ -287,7 +299,7 @@ WASM_TDECK_SRCS := $(UI_SRCS) $(SRC)/main.cpp $(SRC)/cap_touch.cpp $(SRC)/touch_
              $(SIM_DIR)/lora_sim.cpp $(SIM_DIR)/gt911_sim.cpp $(SIM_DIR)/main_wasm.cpp $(SIM_DIR)/detection_sim.cpp \
              $(SENSE_SRCS)
 WASM_TDECK_FLAGS := $(filter-out -DSQUACHSIM_BOOT=1,$(WASM_FLAGS)) \
-             -DTDECK_PLUS=1 -DSQUACH_LORA=1 -DCYD_GPS=1 -DSQUACHSIM=1
+             -DTDECK_PLUS=1 -DSQUACH_LORA=1 -DCYD_GPS=1 -DSQW_RING=1 -DSQUACHSIM=1
 
 wasm-tdeck: $(WASM_TDECK_OUT)
 
@@ -310,7 +322,7 @@ WASM_TWATCH_SRCS := $(UI_SRCS) $(SRC)/main.cpp $(SRC)/cap_touch.cpp $(SRC)/touch
              $(SRC)/wardrive.cpp $(SIM_DIR)/lora_sim.cpp $(SIM_DIR)/main_wasm.cpp $(SIM_DIR)/detection_sim.cpp \
              $(SENSE_SRCS)
 WASM_TWATCH_FLAGS := $(filter-out -DSQUACHSIM_BOOT=1,$(WASM_FLAGS)) \
-             -DTWATCH_S3=1 -DSQUACH_LORA=1 -DSQUACHSIM=1
+             -DTWATCH_S3=1 -DSQUACH_LORA=1 -DSQW_RING=1 -DSQUACHSIM=1
 
 wasm-twatch: $(WASM_TWATCH_OUT)
 
@@ -322,7 +334,7 @@ $(WASM_TWATCH_OUT): $(WASM_TWATCH_SRCS) $(wildcard $(SIM_DIR)/*.h) $(wildcard $(
 WASM_CARD_OUT  := $(WASM_DIR)/squachsim-cardputer.js
 WASM_CARD_SRCS := $(WASM_SRCS)
 WASM_CARD_FLAGS := $(filter-out -DSQUACHSIM_BOOT=1,$(WASM_FLAGS)) \
-             -DCARDPUTER_ADV=1 -DSQW_SMALL=1 -DSQUACHSIM=1
+             -DCARDPUTER_ADV=1 -DSQW_SMALL=1 -DSQW_RING=1 -DSQUACHSIM=1
 
 wasm-cardputer: $(WASM_CARD_OUT)
 
@@ -353,7 +365,7 @@ $(OBJ_DIR)/live/%.o: %.cpp Makefile
 
 $(OBJ_DIR)/sense/%.o: %.cpp Makefile
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) $(SIM_FLAGS) -DSENSE_CYD_APP=1 -MMD -MP -c -o $@ $<
+	$(CXX) $(CXXFLAGS) $(SIM_FLAGS) -DSENSE_CYD_APP=1 -DSENSE_RICH_SIM=1 -MMD -MP -c -o $@ $<
 
 $(BIN): $(UI_OBJS) $(SIM_OBJS) $(SENSE_OBJS)
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lm

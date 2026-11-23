@@ -115,6 +115,9 @@ static const char* toastCatchLine(uint8_t type) {
         case DetectionType::EVILTWIN:    return "An evil twin network. I only have good twins.";
         case DetectionType::HACKER:      return "A hacker tool! I am mostly brave.";
         case DetectionType::IBEACON:     return "A shop beacon. I'm not for sale.";
+        case DetectionType::LORAWAN:     return "A LoRaWAN network. Long range. I'm short range.";
+        case DetectionType::MINE:        return "That's the one you told me to watch for!";
+        case DetectionType::LISTENER:    return "A smart speaker. Don't tell it my secrets.";
         default:                         return nullptr;
     }
 }
@@ -135,8 +138,10 @@ static uint8_t toastBrowning(uint8_t type) {
         case DetectionType::IBEACON:     return 0;
         case DetectionType::AIRTAG: case DetectionType::SAMSUNG_TAG:
         case DetectionType::GOOGLE_TAG: case DetectionType::TILE: case DetectionType::DRONE: return 1;
-        case DetectionType::CAMERA: case DetectionType::RING: case DetectionType::META:    return 2;
-        case DetectionType::SKIMMER: case DetectionType::ALPR: case DetectionType::RAVEN:  return 3;
+        case DetectionType::CAMERA: case DetectionType::RING: case DetectionType::META:
+        case DetectionType::LISTENER:                                                       return 2;
+        case DetectionType::SKIMMER: case DetectionType::ALPR: case DetectionType::RAVEN:
+        case DetectionType::MINE:                                                           return 3;
         default:                         return 4;
     }
 }

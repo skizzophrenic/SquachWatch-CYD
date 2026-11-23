@@ -76,6 +76,10 @@ const Palette kPalettes[PALETTE_COUNT] = {
     { "BUBBL3GUM",  0x1002, 0x2004, 0xF81F, 0xFB9D, 0xF96F, 0xFB99, 0xE01F, 0xFA1F, 0xFFF0, 0xFB56, 0xFD20, 0xF800 },
     { "GH0ST",      0x0000, 0x2104, 0xFFFF, 0xF79E, 0xC638, 0xEF7D, 0xB5B6, 0xDEFB, 0xFFFF, 0xFFFF, 0xFFFF, 0xF800 },
     { "BL00D",      0x1000, 0x2000, 0xF800, 0xFB2C, 0xFAEB, 0xF9AB, 0xC0C4, 0xF9CB, 0xFC60, 0xF800, 0xFD20, 0xF800 },
+    // The opener's dusk, every value one an 8-bit frame holds exactly: an
+    // indigo night, plum, aqua, dusty pink, peach, lavender, teal, the sun's
+    // yellow, mint, gold, and a rose for RED. Softer than the rest on purpose.
+    { "DU5K",       0x200A, 0x000A, 0x4935, 0x6EDF, 0xDB75, 0xFDB5, 0xB5BF, 0x05B5, 0xFECA, 0x6ED5, 0xFDAA, 0xDA4A },
 };
 
 void applyPalette(uint8_t idx) {
@@ -120,6 +124,10 @@ uint16_t colorFor(DetectionType t) {
             return VAPOR_YELLOW;
         case DetectionType::RAVEN:
         case DetectionType::ALPR:
+        // MY ALERTS: amber, with the police kit. It was asked for to spot
+        // patrol cars by their routers, and whatever else it ends up
+        // watching for, it is something the owner wanted to be warned about.
+        case DetectionType::MINE:
             return AMBER;
         case DetectionType::AIRTAG:
         case DetectionType::DRONE:
@@ -133,6 +141,8 @@ uint16_t colorFor(DetectionType t) {
             return VAPOR_PURPLE;
         case DetectionType::CAMERA:
         case DetectionType::RING:
+        // A microphone in the room, filed with the cameras in the room.
+        case DetectionType::LISTENER:
             return CYAN;
         case DetectionType::DEAUTH:
         case DetectionType::EVILTWIN:
@@ -143,6 +153,11 @@ uint16_t colorFor(DetectionType t) {
         // flood or a rogue AP -- and often literally the box producing one.
         case DetectionType::HACKER:
             return RED;
+        // Infrastructure, and said so: a utility's meter network is not
+        // watching anybody and is not attacking anything. It gets the colour
+        // nothing else on this screen uses for a warning.
+        case DetectionType::LORAWAN:
+            return GREEN;
         default:
             return GREEN;
     }
@@ -913,7 +928,8 @@ void drawButtonBar(TFT_eSPI& t, ButtonId highlighted, ButtonBarMode mode) {
     // On the StickS3 that slot opens FOB MODE, the keychain screen.
     drawButton(t, g.x[2], g.y, g.w[2], g.h, mode == ButtonBarMode::LOG ? "[ CLR ]" : "[ FOB ]",
 #else
-    drawButton(t, g.x[2], g.y, g.w[2], g.h, mode == ButtonBarMode::LOG ? "[ CLR ]" : "[ DESK ]",
+    // MODE: the main screen, the desk and TERMINAL MODE in turn (main.cpp).
+    drawButton(t, g.x[2], g.y, g.w[2], g.h, mode == ButtonBarMode::LOG ? "[ CLR ]" : "[ MODE ]",
 #endif
                highlighted == ButtonId::CLR);
 }
@@ -1189,6 +1205,33 @@ void drawTypeIcon(TFT_eSPI& t, DetectionType type, int cx, int cy, int s) {
         t.fillCircle(cx+s/2,cy+s/4,s/3,ICO_STEM);
         t.fillRect(cx+s/2-s/5,cy+s/4-3,s*2/5,6,ICO_INK);
         t.fillRect(cx+s/2-3,cy+s/4-s/5,6,s*2/5,ICO_INK);
+        break;
+    case DetectionType::LORAWAN:
+        // A mast on its foot, and two rings of what comes off the top of it.
+        t.fillTriangle(cx-s/2,cy+s,cx+s/2,cy+s,cx,cy+s/4,SHELL_LO);
+        t.fillRect(cx-1,cy-s/2,3,s*3/2,ICO_METAL);
+        for(int i=1;i<=2;i++) t.drawCircle(cx,cy-s/2,s/4+i*s/4,ICO_LENS);
+        t.fillCircle(cx,cy-s/2,3,ICO_LED);
+        break;   // it fell through into MINE's router, drawn over the mast
+    case DetectionType::LISTENER:
+        // A smart speaker: what it hears coming off it, a fabric body with a
+        // grille, and the light ring on top that says it is listening.
+        for(int i=1;i<=2;i++) t.drawCircle(cx,cy,s*2/3+i*s/4,ICO_LENS);
+        t.fillRoundRect(cx-s*2/3,cy-s,s*4/3,s*2,s/3,SHELL_LO);
+        for(int r=0;r<3;r++) for(int c=0;c<3;c++)
+            t.fillCircle(cx-s/3+c*s/3,cy-s/6+r*s/3,s/10+1,ICO_INK);
+        t.fillRect(cx-s/2,cy-s+3,s,3,ICO_LED);
+        break;
+    case DetectionType::MINE:
+        // A plain router -- the in-car kind it was asked for -- with its
+        // two aerials and the name it shouts drawn as a tag on a string.
+        housing(t, cx-s, cy, s*2, s/2);
+        for(int i=0;i<3;i++) t.fillCircle(cx-s/2+i*s/3, cy+s/4, s/12, ICO_LED);
+        t.fillRect(cx-s*3/4, cy-s*3/4, 3, s*3/4, ICO_METAL);
+        t.fillRect(cx+s*3/4-3, cy-s*3/4, 3, s*3/4, ICO_METAL);
+        for(int i=1;i<=2;i++) t.drawCircle(cx, cy, i*s/3, ICO_WARN);
+        t.fillRect(cx-s/2, cy-s, s, s/3, ICO_PLASTIC);                    // the name tag
+        t.fillRect(cx-s/2+3, cy-s+s/8, s-6, s/12, SHELL_LO);
         break;
     default:
         t.drawCircle(cx,cy,s,ICO_METAL);
@@ -4570,7 +4613,8 @@ static uint32_t s_ffWaveAt = 0,  s_ffWaveStart = 0;   // the sync ripple
 static uint32_t s_ffGustAt = 0,  s_ffGustStart = 0;   // wind through the grass
 static uint32_t s_ffEyesAt = 0,  s_ffEyesStart = 0;   // something in the treeline
 static uint32_t s_ffLantAt = 0,  s_ffLantStart = 0;   // one passes close to the lens
-static int      s_ffEyesX = 0;
+static int      s_ffEyesX = 0, s_ffEyesY = 0;
+static uint32_t s_ffEyesDrawnAt = 0;
 static float    s_ffLantY = 0.0f;
 
 static void ffSpawn(Fly& f, int w, int y0, int y1, float spd) {
@@ -4701,7 +4745,7 @@ void drawFireflies(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         s_ffLastMs = now;
         s_ffWaveAt = now + (uint32_t)random(9000, 16000);
         s_ffGustAt = now + (uint32_t)random(18000, 30000);
-        s_ffEyesAt = now + (uint32_t)random(14000, 26000);
+        s_ffEyesAt = now + (uint32_t)random(6500, 11000);
         s_ffLantAt = now + (uint32_t)random(20000, 34000);
         s_ffInit = true;
     }
@@ -4814,15 +4858,26 @@ void drawFireflies(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         }
     }
 
-    // Something in the trees. Two green eyes, for three seconds, with
-    // one blink. Nothing else about it is ever shown.
+    // Something in the trees: two red eyes for five seconds, with one blink.
+    // They are Mothman's, and a tap on them while they show finds him (see
+    // mothmanEyesTap()). Only the visible pair can be tapped, including when
+    // the screen is drawn in two bands. Once he is found they come back as
+    // the old green ones, and take no taps.
+    s_ffEyesDrawnAt = 0;
     if (s_ffEyesStart) {
-        const uint32_t ea = now - s_ffEyesStart;
-        if (ea > 3200u) { s_ffEyesStart = 0; s_ffEyesAt = now + (uint32_t)random(16000, 30000); }
-        else if (!(ea > 1700u && ea < 1850u)) {
-            const uint16_t eye = (uint16_t)0x97ED;
-            t.fillRect(s_ffEyesX - 4, horizon - 9, 2, 2, eye);
-            t.fillRect(s_ffEyesX + 2, horizon - 9, 2, 2, eye);
+        const uint32_t age = now - s_ffEyesStart;
+        if (age > 5000u) {
+            s_ffEyesStart = 0;
+            s_ffEyesAt = now + (uint32_t)random(9000, 16000);
+        } else if (age < 2350u || age >= 2500u) {
+            const bool found = Squachy::mothmanUnlocked();
+            s_ffEyesY = horizon - 9;
+            for (int side : {-1, 1}) {
+                const int x = s_ffEyesX + 5 * side;
+                t.fillCircle(x, s_ffEyesY, 3, found ? 0x3243 : 0x5800);
+                t.fillCircle(x, s_ffEyesY, 2, found ? 0x97ED : 0xFA08);
+            }
+            if (!found) s_ffEyesDrawnAt = now;
         }
     }
 
@@ -5043,8 +5098,10 @@ void dimRegion(TFT_eSPI& t, int x, int y, int w, int h, uint8_t amount) {
         t.drawFastHLine(x, yy, w, BG);
 }
 
-static char     s_toastHead[18] = {0};
-static char     s_toastSub[22]  = {0};
+// 18 and 22 used to cut lines short ("Press the trackball to wake" showed
+// as "Press the trackball t"); drawToast() keeps the box on the screen.
+static char     s_toastHead[24] = {0};
+static char     s_toastSub[40]  = {0};
 static uint16_t s_toastAccent   = 0;
 static uint32_t s_toastUntil    = 0;
 
@@ -5056,6 +5113,8 @@ void showToast(const char* head, const char* sub, uint16_t accent, uint32_t ms) 
     s_toastAccent = accent;
     s_toastUntil  = millis() + ms;
 }
+
+bool toastUp(uint32_t now) { return s_toastUntil && (int32_t)(now - s_toastUntil) < 0; }
 
 void drawToast(TFT_eSPI& t, uint32_t now) {
     if (!s_toastUntil) return;
@@ -5085,8 +5144,13 @@ void drawToast(TFT_eSPI& t, uint32_t now) {
     if (s_toastSub[0]) {
         bodyFontOn(t);
         t.setTextColor(WHITE, BG);
-        t.setCursor(bx + (bw - t.textWidth(s_toastSub)) / 2, by + 31);
-        t.print(s_toastSub);
+        // A narrow panel (the StickS3, the watch) can't fit the longest
+        // lines: drop letters off the end rather than spill past the box.
+        char sub[sizeof(s_toastSub)];
+        strcpy(sub, s_toastSub);
+        for (size_t n = strlen(sub); n > 1 && t.textWidth(sub) > bw - 8; ) sub[--n] = 0;
+        t.setCursor(bx + (bw - t.textWidth(sub)) / 2, by + 31);
+        t.print(sub);
         bodyFontOff(t);
     }
 }
@@ -5420,6 +5484,19 @@ bool consumeIglooKnock() {
 bool consumeEyeCatch() {
     if (!s_eyePairPending) return false;
     s_eyePairPending = false;
+    return true;
+}
+
+// Generous by a few pixels round the pair, the way the lil guy's box is: they
+// are small and only up for five seconds. A hit puts them away and keeps them
+// away for twelve, so the discovery toast is not followed by the same eyes.
+bool mothmanEyesTap(int x, int y, uint32_t now) {
+    if (Settings::background() != Settings::Background::FIREFLIES ||
+        !s_ffEyesDrawnAt || now - s_ffEyesDrawnAt > 250 ||
+        abs(x - s_ffEyesX) > 17 || abs(y - s_ffEyesY) > 13) return false;
+    s_ffEyesDrawnAt = 0;
+    s_ffEyesStart = 0;
+    s_ffEyesAt = now + 12000u;
     return true;
 }
 
