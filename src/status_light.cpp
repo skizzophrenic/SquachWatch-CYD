@@ -34,6 +34,8 @@
 #define STATUS_LIGHT_HW 1
 #elif defined(WAVESHARE_C5)
 #define STATUS_LIGHT_HW 0
+#elif defined(WS_S3_35)
+#define STATUS_LIGHT_HW 0   // no addressable LED on the Waveshare S3 3.5"
 #elif defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || (defined(NM_CYD_C5) && !defined(MARAUDER_V8) && !defined(WS_C5_35))
 #define STATUS_LIGHT_HW 2
 // Not the Waveshare C5 3.5": its GPIO27 is the I2C SDA line (touch, expander,

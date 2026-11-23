@@ -25,6 +25,11 @@ void begin(int sda, int scl, int rst, uint8_t addr, uint32_t hz) {
     Wire.begin(sda, scl, hz);
 }
 
+void ft6336Normal() {
+    Wire.beginTransmission(ADDR); Wire.write(0xD0); Wire.write(0x00); Wire.endTransmission();   // gesture mode off
+    Wire.beginTransmission(ADDR); Wire.write(0xD3); Wire.write(0x00); Wire.endTransmission();   // last gesture cleared
+}
+
 bool probe() {
     Wire.beginTransmission(ADDR);
     return Wire.endTransmission() == 0;
@@ -41,7 +46,13 @@ bool read(uint16_t& x, uint16_t& y) {
     uint8_t xl = Wire.read();
     uint8_t yh = Wire.read();
     uint8_t yl = Wire.read();
+#if defined(WS_S3_35)
+    // 0 = finger up; more than 2 is not a touch count on this chip, it is a
+    // bad read (all ones on a bus error) and would be a phantom tap.
+    if (fingerNum == 0 || (fingerNum & 0x0F) > 2) return false;
+#else
     if (fingerNum == 0) return false;
+#endif
 
     x = ((uint16_t)(xh & 0x0F) << 8) | xl;
     y = ((uint16_t)(yh & 0x0F) << 8) | yl;

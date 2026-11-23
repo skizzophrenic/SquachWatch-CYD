@@ -98,7 +98,10 @@ bool SdLog::begin() {
     // CLK 5, CMD 4, D0 6, D1 7, D2 2, D3 3 on the 3.5", each with a 10K
     // pull-up on the board. 4-bit first; if a card will not start that way,
     // 1-bit (CLK/CMD/D0 only) before giving up, and the log says which.
-#if defined(FREENOVE_S3_35)
+#if defined(WS_S3_35)
+    // The Waveshare 3.5": 1-bit only (CLK 11, CMD 10, D0 9), per its schematic.
+    SD_MMC.setPins(11, 10, 9);
+#elif defined(FREENOVE_S3_35)
     SD_MMC.setPins(5, 4, 6, 7, 2, 3);
 #else
     SD_MMC.setPins(38, 40, 39, 41, 48, 47);
@@ -106,7 +109,9 @@ bool SdLog::begin() {
     bool mounted = SD_MMC.begin("/sd", false, false, SDMMC_FREQ_DEFAULT, SD_MAX_FILES);
     if (!mounted) {
         SD_MMC.end();
-#if defined(FREENOVE_S3_35)
+#if defined(WS_S3_35)
+        SD_MMC.setPins(11, 10, 9);
+#elif defined(FREENOVE_S3_35)
         SD_MMC.setPins(5, 4, 6);
 #else
         SD_MMC.setPins(38, 40, 39);
