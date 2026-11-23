@@ -911,6 +911,13 @@ static uint16_t CAP_NY_MIN = St77922Touch::NY_MIN, CAP_NY_MAX = St77922Touch::NY
 // five-target calibration still runs on first boot.
 static uint16_t CAP_NX_MIN = 0, CAP_NX_MAX = 239;
 static uint16_t CAP_NY_MIN = 0, CAP_NY_MAX = 319;
+#elif defined(WS_C5_35)
+// The FT6336 reports the panel's own 320x480 pixels (WsTouch::read() drops
+// anything outside them). Without this the 3.5" fell through to the 2.8"
+// ranges below, so a board that timed out of the first-boot calibration put
+// taps nowhere near the finger -- most of them on the rotate button.
+static uint16_t CAP_NX_MIN = 0, CAP_NX_MAX = TFT_WIDTH - 1;
+static uint16_t CAP_NY_MIN = 0, CAP_NY_MAX = TFT_HEIGHT - 1;
 #else
 static uint16_t CAP_NX_MIN = 32,  CAP_NX_MAX = 166;
 static uint16_t CAP_NY_MIN = 10,  CAP_NY_MAX = 308;
