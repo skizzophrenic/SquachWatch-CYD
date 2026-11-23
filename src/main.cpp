@@ -120,6 +120,7 @@
 #include "blackbox.h"
 #include "gnss.h"
 #if defined(CYD_GPS)
+#include "ws_c5_gps.h"   // the 3.5"'s LC76G on I2C (CYD_GPS_I2C); empty elsewhere
 #include "sd_row.h"
 static void cydGpsStart();
 static void cydGpsTick(uint32_t now);
@@ -7640,12 +7641,18 @@ static void cydGpsStart() {
     // buffer overflows in one slow frame and the lost bytes break sentences.
     CYD_GPS_SERIAL.setRxBufferSize(2048);
 #endif
+#if defined(CYD_GPS_I2C)
+    WsGps::begin();   // no UART: the LC76G on the touch bus, read from cydGpsTick()
+#else
     CYD_GPS_SERIAL.begin(s_cydGpsBaud, SERIAL_8N1, s_cydGpsPin, -1);
+#endif
     s_cydGpsBaudAt = millis();
     Wardrive::sdBegin();
 }
 static void cydGpsBaudTick(uint32_t now) {
-#if defined(CYD_GPS_RX_SEARCH)
+#if defined(CYD_GPS_I2C)
+    (void)now;   // no pin or speed to search on I2C
+#elif defined(CYD_GPS_RX_SEARCH)
     if (Gnss::good() || now - s_cydGpsBaudAt < 6000) return;
     const uint8_t pins = sizeof kGpsPins / sizeof kGpsPins[0];
     const uint8_t bauds = sizeof kGpsBauds / sizeof kGpsBauds[0];
@@ -7829,8 +7836,13 @@ static void cydGpsTick(uint32_t now) {
     else if (cmd == 3) {
         const Gnss::Sky k = Gnss::sky();
         const Gnss::Fix& f = Gnss::fix();
+#if defined(CYD_GPS_I2C)
+        Serial.printf("[gps] status: I2C 0x50, %lu reads, %lu with no answer; sentences %lu good, %lu bad; in view %u, heard %u, used %u; ",
+                      (unsigned long)WsGps::cycles(), (unsigned long)WsGps::fails(),
+#else
         Serial.printf("[gps] status: GPIO%d at %lu baud; sentences %lu good, %lu bad; in view %u, heard %u, used %u; ",
                       (int)s_cydGpsPin, (unsigned long)s_cydGpsBaud,
+#endif
                       (unsigned long)Gnss::good(), (unsigned long)Gnss::bad(), k.view, k.heard, f.used);
         {
             char raw[sizeof s_cydGpsRaw + 1];
@@ -7883,12 +7895,20 @@ static void cydGpsTick(uint32_t now) {
     // does not go stale while the console test runs.
     if (Gnss::faked()) Gnss::fake(Gnss::fix().lat7, Gnss::fix().lon7, Clock::isSet() ? Clock::nowEpoch() : 0, now);
 
+#if defined(CYD_GPS_I2C)
+    WsGps::tick([](char c, uint32_t at) {
+        s_cydGpsBytes++;
+        s_cydGpsRaw[s_cydGpsRawAt++ % sizeof s_cydGpsRaw] = c;
+        Gnss::feed(c, at);
+    }, now);
+#else
     while (CYD_GPS_SERIAL.available()) {
         const char c = (char)CYD_GPS_SERIAL.read();
         s_cydGpsBytes++;
         s_cydGpsRaw[s_cydGpsRawAt++ % sizeof s_cydGpsRaw] = c;
         Gnss::feed(c, now);
     }
+#endif
     cydGpsBaudTick(now);
     Wardrive::sdTick(now, engine.sd().ready());
 #if defined(CARDPUTER_ADV)
