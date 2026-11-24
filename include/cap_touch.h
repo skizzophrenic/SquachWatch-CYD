@@ -15,7 +15,8 @@ namespace CapTouch {
     // before probe().
     // `rst` below zero skips the reset pulse (the T-Watch's FT6336 has no
     // reset line we drive); `addr` is the controller's I2C address, 0x15
-    // for the CST816/CST820 and 0x38 for the FT6336, whose registers
+    // for the CST816/CST820, 0x38 for the FT6336 and 0x2E for the CHSC6540
+    // (M5Stack Tough; begin() also sends it the 5A 5A wake M5GFX does), whose registers
     // 0x02..0x06 (finger count, X high/low, Y high/low) share a layout.
     // hz: the bus clock. 100 kHz unless the board has checked its chip and
     // everything else on that bus runs faster (the T-Watch: 400 kHz).

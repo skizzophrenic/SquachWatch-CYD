@@ -30,7 +30,7 @@
 //
 // The Waveshare ESP32-C5-Touch-LCD-2.8 has no LED at all, and its GPIO27 is
 // the codec's I2S data in: it gets nothing.
-#if defined(ESP32) && !defined(CYD35) && !defined(AWOK) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(NM_CYD_C5) && !defined(TAB5)
+#if defined(ESP32) && !defined(CYD35) && !defined(AWOK) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(NM_CYD_C5) && !defined(TAB5) && !defined(M5TOUGH)   // the Tough: GPIO4 is the SD card's CS, 16/17 the PSRAM
 #define STATUS_LIGHT_HW 1
 #elif defined(WAVESHARE_C5)
 #define STATUS_LIGHT_HW 0
