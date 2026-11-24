@@ -413,6 +413,7 @@ static const Zone ZONES[] = {
     { "QUEENSLAND",  "AEST-10" },                         // Brisbane: AUS EASTERN's hour, no summer time
     { "AUS CENTRAL", "ACST-9:30ACDT,M10.1.0,M4.1.0/3" },
     { "DARWIN",      "ACST-9:30" },
+    { "TAIWAN",      "TST-8" },
 };
 static const uint8_t ZONES_N = sizeof(ZONES) / sizeof(ZONES[0]);
 
@@ -423,7 +424,7 @@ static const uint8_t ORDER[] = {
     21, 22, 23, 7, 8, 9, 24,             // Mexico to Argentina
     10, 11, 25, 12, 26, 13, 28, 27,      // UTC, UK, Africa, Europe, Israel
     29, 14, 30, 31, 15, 32, 33,          // Turkey to SE Asia
-    16, 34, 19, 35, 17,                  // China to Japan
+    16, 39, 34, 19, 35, 17,              // UTC+8 zones through Japan
     38, 37, 36, 18, 20,                  // Australia, New Zealand
 };
 static_assert(sizeof(ORDER) == ZONES_N, "every zone once in ORDER");
@@ -891,6 +892,12 @@ void pollSerial() {
         }
 #endif
 #endif
+        if (strcasecmp(line, "ZONE") == 0) {
+            char buf[32];
+            formatClock(buf, sizeof buf);
+            Serial.printf("[zone] active %s (%s)\n", Settings::timeZoneName(), buf);
+            continue;
+        }
         if (strncasecmp(line, "ZONE ", 5) == 0) {
             // ZONE US EASTERN, or ZONE 4: the flasher sends the name it
             // worked out from the browser's own zone.
@@ -902,7 +909,11 @@ void pollSerial() {
                 if (i >= 0 && i < (long)zoneCount()) found = (int)i;
             } else {
                 for (uint8_t i = 0; i < zoneCount(); i++)
-                    if (strcasecmp(arg, zoneName(i)) == 0) { found = i; break; }
+                    if (strcasecmp(arg, zoneName(i)) == 0 ||
+                        (strcasecmp(arg, "Asia/Taipei") == 0 && strcmp(zoneName(i), "TAIWAN") == 0)) {
+                        found = i;
+                        break;
+                    }
             }
             if (found >= 0) {
                 Settings::setTimeZone((uint8_t)found);

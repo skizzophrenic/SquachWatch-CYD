@@ -138,7 +138,7 @@ scroll; tap a row to change it.
 | **MESHTASTIC PRESET** | Which Meshtastic preset the radio uses, from the ones the band allows. It shows the frequency, spreading factor and bandwidth |
 | **TX POWER** | OFF, 10, 20 or 22 dBm, the same setting as LORA TX. OFF means the chats cannot send |
 | **HOPS** | How many times a Meshtastic message you send may be relayed, 1 to 7 (3 is stock) |
-| **REGION** | AUTO (from the time zone), EU, US or AU. Takes effect at the next restart |
+| **REGION** | AUTO (from the time zone), EU, US, AU or TW. Takes effect at the next restart |
 | **CHANNELS** | The channels the T-Deck can read and send on. **+ MESHTASTIC** adds one by name and base64 key; **+ MESHCORE** adds a `#tag` (no key needed) or a hex key. REMOVE takes one of yours off; BUILT IN ones stay |
 | **NAME** | Your name on both networks. Empty means the default (squad nickname, or SQUACHY) |
 | **SHORT NAME** | Meshtastic's four letters |
@@ -149,6 +149,14 @@ scroll; tap a row to change it.
 | **ONLINE LOOKUPS** | OFF by default. When on, with CALLSIGNS (hamrig.com, for APRS and MeshCom), OGN (the OGN database, for FANET) or MESHCORE FEED switched on too, the board asks those sites about nodes it heard. Plain HTTP, and only while it is already on WiFi for an update; it never joins WiFi for this |
 | **CLEAR CHATS** | Deletes the messages it holds, after a second tap to confirm |
 | **FORGET NAMES** | Forgets the Meshtastic names it has learned, after a second tap to confirm |
+
+With the Taiwan region, the T-Deck uses Meshtastic MediumFast on slot 1
+(920.125 MHz, SF9, 250 kHz). Select Taiwan under TIME ZONE to use this
+profile with REGION set to AUTO. Add community or private channel names
+and their keys through CHANNELS. These channels share the same radio profile.
+
+The T-Deck's LoRa landing page and LORA CHATS can display incoming UTF-8
+Traditional Chinese and common Chinese punctuation.
 
 ## What is built
 

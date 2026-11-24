@@ -167,9 +167,9 @@ void buildMain() {
     }
     {
         Row& r = add(REGION, "REGION");
-        static const char* const N[4] = { "AUTO", "EU", "US", "AU" };
+        static const char* const N[] = { "AUTO", "EU", "US", "AU", "TW" };
         const uint8_t g = Settings::loraRegion();
-        snprintf(r.value, sizeof r.value, "%s", N[g < 4 ? g : 0]);
+        snprintf(r.value, sizeof r.value, "%s", N[g < sizeof(N) / sizeof(N[0]) ? g : 0]);
         if (s_bootRegion >= 0 && g != (uint8_t)s_bootRegion) { snprintf(r.hint, sizeof r.hint, "RESTART TO APPLY"); r.valCol = Theme::AMBER; }
         else snprintf(r.hint, sizeof r.hint, "NOW %s", Lora::regionName());
     }
@@ -543,7 +543,8 @@ void tapRow(const Row& r) {
         case HOPS:     Settings::cycleLoraHops(); break;
         case REGION: {
             const uint8_t g = Settings::loraRegion();
-            Settings::setLoraRegion(g == 0 ? 2 : g == 2 ? 1 : g == 1 ? 3 : 0);   // AUTO -> US -> EU -> AU -> AUTO
+            static const uint8_t NEXT[] = {2, 3, 1, Settings::LORA_REGION_TW, 0};
+            Settings::setLoraRegion(NEXT[g]);
             break;
         }
         case CHANNELS: s_view = View::CHANNELS; s_scroll[1] = 0; break;

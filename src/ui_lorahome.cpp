@@ -19,6 +19,9 @@
 #include "settings.h"
 #include "theme.h"
 #include "privacy.h"
+#if defined(TDECK_PLUS)
+#include "chat_text.h"
+#endif
 #include "gnss.h"
 #include "squachy.h"
 #include <Arduino.h>
@@ -889,15 +892,35 @@ void drawChats(TFT_eSPI& t, uint32_t now) {
         age(now, r.ms, ago, sizeof ago);
         const uint16_t bg = i == 0 ? dim(cols[c], 22) : Theme::BG;
         // In DMs, each name in its own network's colour.
-        t.setTextColor(c == 2 ? netCol(r.proto) : cols[c], bg); t.setCursor(8, y + 1); t.print(who);
+        const uint16_t nameColor = c == 2 ? netCol(r.proto) : cols[c];
+#if defined(TDECK_PLUS)
+        if (ChatText::needsFallback(who)) {
+            const int end = ChatText::drawClipped(t, who, 8, y, 102, nameColor, bg, ChatText::COMPACT_GLYPH);
+            t.setCursor(end, y + 1);
+        } else
+#endif
+        { t.setTextColor(nameColor, bg); t.setCursor(8, y + 1); t.print(who); }
         // A conversation with something we have not read: NEW after the name.
         if (c == 2 && !r.mine && r.ms > uiLoraChatDmSeenMs(r.peer)) { t.setTextColor(Theme::WHITE, bg); t.print(" NEW"); }
         const int tx = t.getCursorX() + 6;
         const int agoW = t.textWidth(ago);
-        char text[64]; snprintf(text, sizeof text, "%s%s", c == 2 && r.mine ? "you: " : "", r.text);
-        size_t tn = strlen(text);
-        while (tn && tx + t.textWidth(text) > 316 - 8 - agoW) text[--tn] = '\0';
-        t.setTextColor(Theme::WHITE, bg); t.setCursor(tx, y + 1); t.print(text);
+#if defined(TDECK_PLUS)
+        if (ChatText::needsFallback(r.text)) {
+            int start = tx;
+            if (c == 2 && r.mine) {
+                t.setTextColor(Theme::WHITE, bg); t.setCursor(tx, y + 1); t.print("you: ");
+                start = t.getCursorX();
+            }
+            ChatText::drawClipped(t, r.text, start, y, 316 - 8 - agoW - start,
+                                  Theme::WHITE, bg, ChatText::COMPACT_GLYPH);
+        } else
+#endif
+        {
+            char text[64]; snprintf(text, sizeof text, "%s%s", c == 2 && r.mine ? "you: " : "", r.text);
+            size_t tn = strlen(text);
+            while (tn && tx + t.textWidth(text) > 316 - 8 - agoW) text[--tn] = '\0';
+            t.setTextColor(Theme::WHITE, bg); t.setCursor(tx, y + 1); t.print(text);
+        }
         t.setTextColor(dim(Theme::WHITE, 110), bg); t.setCursor(316 - 4 - agoW, y + 1); t.print(ago);
     }
 }

@@ -2,6 +2,9 @@
 #include "settings.h"
 #include "alert_skin.h"   // which alert card skins this board carries
 #include "lora_myname.h"
+#if SQUACH_LORA
+#include "lora_profiles.h"
+#endif
 #include <stdio.h>
 #include <strings.h>
 #include <string.h>
@@ -452,20 +455,30 @@ void adjustSoundVolume(int8_t delta) {
 }
 uint8_t loraMode()  { return s_loraMode; }
 void cycleLoraMode() { s_loraMode = (uint8_t)((s_loraMode + 1) % 3); s_prefs.putUChar("loraMode", s_loraMode); }
-uint8_t loraListen() { return s_loraListen; }
+static bool taiwanRadioPlan() {
+#if SQUACH_LORA
+    return Lora::region() == Lora::REGION_TW;
+#else
+    return false;
+#endif
+}
+uint8_t loraListen() {
+    return taiwanRadioPlan() && s_loraListen ? 1 : s_loraListen;
+}
 // BOTH, MESHTASTIC, MESHCORE, LORAWAN, OFF, and round. 0-3 are a bit each
 // for the two meshes, which the LORA page reads as such; 4 is neither of
 // them: the radio parked on LoRaWAN's downlink channel, where the meshes are
 // not heard and the LORAWAN detection is.
 void cycleLoraListen() {
     static const uint8_t NEXT[5] = { 3, 2, 4, 1, 0 };
-    s_loraListen = NEXT[s_loraListen <= 4 ? s_loraListen : 0];
+    if (taiwanRadioPlan()) s_loraListen = loraListen() ? 0 : 1;
+    else s_loraListen = NEXT[s_loraListen <= 4 ? s_loraListen : 0];
     s_prefs.putUChar("loraLstn", s_loraListen);
 }
 void setLoraListen(uint8_t v) { s_loraListen = v > 4 ? 3 : v; s_prefs.putUChar("loraLstn", s_loraListen); }
 const char* loraListenName() {
     static const char* const N[5] = { "OFF", "MESHTASTIC", "MESHCORE", "BOTH", "LORAWAN" };
-    return N[s_loraListen <= 4 ? s_loraListen : 3];
+    return N[loraListen()];
 }
 uint8_t loraTxDbm() { return s_loraTx; }
 void cycleLoraTx() {
@@ -474,7 +487,7 @@ void cycleLoraTx() {
 }
 const char* loraTxName() { return s_loraTx == 0 ? "OFF" : s_loraTx == 10 ? "10 dBm" : s_loraTx == 20 ? "20 dBm" : "22 dBm"; }
 uint8_t loraRegion() { return s_loraRegion; }
-void setLoraRegion(uint8_t r) { s_loraRegion = r > 3 ? 0 : r; s_prefs.putUChar("loraRgn", s_loraRegion); }   // 0 AUTO, 1 EU, 2 US, 3 AU
+void setLoraRegion(uint8_t r) { s_loraRegion = r > LORA_REGION_TW ? 0 : r; s_prefs.putUChar("loraRgn", s_loraRegion); }
 uint8_t loraFocus() { return s_loraFocus; }
 void setLoraFocus(uint8_t ix) { s_loraFocus = ix; s_prefs.putUChar("loraFocus", ix); }
 // Keys: 8, 9, 9 and 9 characters, inside NVS's limit of 15, and none of them is
@@ -734,7 +747,7 @@ void load() {
     if (s_loraListen > 4) s_loraListen = 3;
     s_loraTx = s_prefs.getUChar("loraTx", 0);
     if (s_loraTx != 10 && s_loraTx != 20 && s_loraTx != 22) s_loraTx = 0;   // 22 came with #138 and was lost at every restart
-    if (s_loraRegion > 3) s_loraRegion = 0;
+    if (s_loraRegion > LORA_REGION_TW) s_loraRegion = 0;
     // False, every time, unless somebody has said otherwise on this board.
     s_loraLookups  = s_prefs.getBool("loraLkup", false);
     s_loraLkCall   = s_prefs.getBool("loraLkCal", false);

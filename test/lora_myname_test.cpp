@@ -114,5 +114,19 @@ int main() {
         setRegion(REGION_EU);
     }
 
+    suite("Taiwan household profile");
+    {
+        setRegion(REGION_TW);
+        const int16_t idx = meshPresetFind(Proto::MESHTASTIC, "MediumFast");
+        ck("Taiwan is selected and has one Meshtastic profile",
+           idx == 0 && profileCount() == 1 && !strcmp(regionName(), "TW 920"));
+        const Profile& p = profile(0);
+        ck("Explicit slot 1 uses 920.125 MHz, SF9, BW250, CR4/5 and sync 0x2b",
+           p.freqHz == 920125000u && p.sf == 9 && p.bwKhz10 == 2500 &&
+           p.cr == 5 && p.sync == 0x2b && p.preamble == 16 && (p.flags & PF_CRC));
+        ck("No MeshCore profile is selected on the Taiwan Meshtastic band plan",
+           meshPresetFind(Proto::MESHCORE, nullptr) < 0);
+    }
+
     return report();
 }
