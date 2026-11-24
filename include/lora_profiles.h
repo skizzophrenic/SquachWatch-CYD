@@ -12,7 +12,7 @@ namespace Lora {
 // New Zealand, 915-928 MHz). Chosen once, before the sniffer starts
 // (Lora::begin), because profile indices are only stable within one table.
 // EU until told otherwise, which is what the host tests get.
-enum : uint8_t { REGION_EU = 0, REGION_US = 1, REGION_AU = 2 };
+enum : uint8_t { REGION_EU = 0, REGION_US = 1, REGION_AU = 2, REGION_TW = 3 };
 void        setRegion(uint8_t r);
 uint8_t     region();
 const char* regionName();   // "EU 868", "US 915", "AU 915"

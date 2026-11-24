@@ -231,7 +231,7 @@ int main() {
         clearUserChannels();
     }
 
-    suite("The default channel, a plaintext one, and a key we cannot seal");
+    suite("The default channel and a plaintext channel");
     {
         uint8_t f[256];
         const char* msg = "hello";
@@ -250,10 +250,40 @@ int main() {
         memset(&pk, 0, sizeof pk); memcpy(pk.data, f, n); pk.len = (uint8_t)n;
         ck("and it reads back on that channel", decode(pk, d) && d.haveData && d.channelIdx == oi && !strcmp(d.text, msg));
 
-        ck("a 32-byte key added", addChannel("Big", "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="));
-        const Channel b = channel((uint8_t)findChannel("Big"));
-        ck("cannot be sent on (no AES-256 here)", b.keyLen == 32 && !canSend(b) &&
-           buildFrame(b, 1, 2, 3, PORT_TEXT, (const uint8_t*)msg, 5, f) == 0);
+        clearUserChannels();
+    }
+
+    suite("A 32-byte channel key matches an independent AES-256-CTR vector");
+    {
+        // Python cryptography's AES-CTR over Data{portnum=1, payload=UTF-8},
+        // with key bytes 1..32 and nonce struct.pack("<QQ", 0x0badf00d, 0x5a5a1234).
+        static const char msg[] = "繁體中文：臺灣網路驗證。";
+        static const uint8_t expected[] = {
+            0xFF, 0xFF, 0xFF, 0xFF, 0x34, 0x12, 0x5A, 0x5A, 0x0D, 0xF0, 0xAD, 0x0B,
+            0x63, 0x6C, 0x00, 0x34, 0x29, 0xD3, 0xB7, 0x7D, 0xFE, 0xCD, 0x00, 0x93,
+            0xA9, 0xBB, 0x46, 0xF9, 0x18, 0x6D, 0x66, 0xA7, 0x51, 0xF6, 0x3F, 0x56,
+            0x91, 0x41, 0xFE, 0x04, 0x1C, 0x1D, 0xD3, 0xF1, 0xBB, 0x32, 0xE4, 0x36,
+            0x5E, 0xA9, 0x13, 0xB0, 0xB3, 0x82, 0xAE, 0x92,
+        };
+        ck("the 32-byte channel is accepted", addChannel("Big", "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="));
+        const uint8_t idx = (uint8_t)findChannel("Big");
+        const Channel c = channel(idx);
+        ck("the channel can send", c.keyLen == 32 && canSend(c));
+
+        memset(&pk, 0, sizeof pk);
+        pk.flags = Lora::PK_CRC_PRESENT | Lora::PK_CRC_OK;
+        memcpy(pk.data, expected, sizeof expected);
+        pk.len = sizeof expected;
+        Decoded d;
+        ck("the independent ciphertext decodes to the original UTF-8",
+           decode(pk, d) && d.haveData && d.channelIdx == idx && d.data.portnum == PORT_TEXT &&
+           !strcmp(d.text, msg));
+
+        uint8_t f[256];
+        const uint16_t n = buildFrame(c, 0x5A5A1234u, 0x0BADF00Du, 3, PORT_TEXT,
+                                      (const uint8_t*)msg, sizeof msg - 1, f);
+        ck("the transmitted bytes match the independent vector",
+           n == sizeof expected && !memcmp(f, expected, sizeof expected));
         clearUserChannels();
     }
 

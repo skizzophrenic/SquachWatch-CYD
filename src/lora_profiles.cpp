@@ -151,18 +151,31 @@ static const Profile PROFILES_AU[] = {
     { "MT 70cm Narrow", 433650000,  625,  8, 6, 0x2B, 16, PF_CRC|PF_HAM|PF_433, 0, Proto::MESHTASTIC, PG_HAM_433 },
 };
 
+// Taiwan MediumFast on the locally explicit, one-based Meshtastic slot 1.
+static const Profile PROFILES_TW[] = {
+    { "MT MediumFast", 920125000, 2500, 9, 5, 0x2B, 16, PF_CRC, 0, Proto::MESHTASTIC, PG_MESH_US },
+};
+
 static const Profile* s_tab = PROFILES_EU;
 static uint8_t        s_n   = (uint8_t)(sizeof(PROFILES_EU) / sizeof(PROFILES_EU[0]));
 static uint8_t        s_region = REGION_EU;
 
 void setRegion(uint8_t r) {
-    s_region = (r == REGION_US || r == REGION_AU) ? r : (uint8_t)REGION_EU;
+    s_region = (r == REGION_US || r == REGION_AU || r == REGION_TW) ? r : (uint8_t)REGION_EU;
     if (s_region == REGION_US)      { s_tab = PROFILES_US; s_n = (uint8_t)(sizeof(PROFILES_US) / sizeof(PROFILES_US[0])); }
     else if (s_region == REGION_AU) { s_tab = PROFILES_AU; s_n = (uint8_t)(sizeof(PROFILES_AU) / sizeof(PROFILES_AU[0])); }
+    else if (s_region == REGION_TW) { s_tab = PROFILES_TW; s_n = (uint8_t)(sizeof(PROFILES_TW) / sizeof(PROFILES_TW[0])); }
     else                            { s_tab = PROFILES_EU; s_n = (uint8_t)(sizeof(PROFILES_EU) / sizeof(PROFILES_EU[0])); }
 }
 uint8_t     region()     { return s_region; }
-const char* regionName() { return s_region == REGION_US ? "US 915" : s_region == REGION_AU ? "AU 915" : "EU 868"; }
+const char* regionName() {
+    switch (s_region) {
+        case REGION_US: return "US 915";
+        case REGION_AU: return "AU 915";
+        case REGION_TW: return "TW 920";
+        default: return "EU 868";
+    }
+}
 
 const Profile* profiles()     { return s_tab; }
 uint8_t        profileCount() { return s_n; }

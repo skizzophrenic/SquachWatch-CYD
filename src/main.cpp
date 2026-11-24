@@ -45,6 +45,7 @@
 #endif
 #if defined(SENSE_CYD_APP)
 // HUMAN SENSING: WiFi motion sensing on the CYD's own radio (include/sense_cyd.h).
+#include "frame_shot_writer.h"
 #include "sense_store.h"
 #include "ui_sensing_cyd.h"
 #include "sense_cyd.h"
@@ -7162,30 +7163,41 @@ void consoleFrameShot() {
     const uint8_t* px = (const uint8_t*)frame.getPointer();
     const int w = frame.width(), h = frame.height();
 #if defined(SQW_S3) || defined(TAB5) || defined(WAVESHARE_C5)
-    // Native USB drops what the host has not read yet (setup()); a shot is
-    // only ever asked for by a host that is reading, so it may wait for it.
-    Serial.setTxTimeoutMs(250);
+    const uint32_t startedAt = millis();
+    const auto writeShot = [startedAt](const char* data, size_t len) {
+        return FrameShot::write(Serial, data, len, startedAt, []() { return millis(); }, []() { delay(1); });
+    };
+#else
+    const auto writeShot = [](const char* data, size_t len) {
+        const size_t wrote = Serial.write(reinterpret_cast<const uint8_t*>(data), len);
+        Serial.flush();   // Pace the UART so the USB-to-UART bridge receives whole rows.
+        return wrote == len;
+    };
 #endif
-    Serial.printf("#SHOT %d %d rgb332\n", w, h);
     static const char HX[] = "0123456789abcdef";
     // From the heap for the length of the shot: a bench command has no
     // business holding a kilobyte of fixed RAM on every board for good.
     const int cap = 8 + 2 * w + 2;
     char* line = (char*)malloc(cap);
     if (!line) { Serial.println("[sense] shot: no memory"); return; }
-    for (int y = 0; y < h; y++) {
+    char header[48];
+    const int headerLen = snprintf(header, sizeof header, "#SHOT %d %d rgb332\n", w, h);
+    bool delivered = writeShot(header, headerLen);
+    for (int y = 0; y < h && delivered; y++) {
         int n = snprintf(line, cap, "#R%03d:", y);
-        for (int x = 0; x < w && n < cap - 3; x++) { const uint8_t v = px[y * w + x]; line[n++] = HX[v >> 4]; line[n++] = HX[v & 15]; }
-        line[n] = 0;
-        Serial.println(line);
-        Serial.flush();   // a row at a time: at 2 Mbaud whole rows went missing on the PC
+        for (int x = 0; x < w; x++) {
+            const uint8_t v = px[y * w + x];
+            line[n++] = HX[v >> 4];
+            line[n++] = HX[v & 15];
+        }
+        line[n++] = '\r';
+        line[n++] = '\n';
+        delivered = writeShot(line, n);
     }
     free(line);
-    Serial.println("#SHOT END");
-#if defined(SQW_S3) || defined(TAB5) || defined(WAVESHARE_C5)
-    Serial.flush();
-    Serial.setTxTimeoutMs(0);
-#endif
+    static const char end[] = "#SHOT END\r\n";
+    if (delivered && writeShot(end, sizeof end - 1)) return;
+    Serial.println("\n[sense] shot: incomplete");
 }
 #endif
 
@@ -7832,7 +7844,7 @@ static void cydGpsTick(uint32_t now) {
                 const char c = s_cydGpsRaw[(s_cydGpsRawAt - n + i) % sizeof s_cydGpsRaw];
                 raw[i] = (c >= 32 && c < 127) ? c : '.';
             }
-            raw[n] = ' ';
+            raw[n] = '\0';
             Serial.printf("raw bytes %lu, last \"%s\"; ", (unsigned long)s_cydGpsBytes, raw);
         }
         if (s_cydGpsFirstFixMs) Serial.printf("first fix %lu s after boot; ", (unsigned long)(s_cydGpsFirstFixMs / 1000));
@@ -8661,6 +8673,13 @@ void loop() {
             uiLoraSettingsNextPreset();
             const int16_t i = Lora::meshPresetFind(Lora::Proto::MESHTASTIC, Settings::loraMtPreset());
             Serial.printf("[lora] MESHTASTIC PRESET %s\n", i >= 0 ? Lora::profile((uint8_t)i).name : "none");
+        } else if (c == 4) {
+            enterLoraHome();
+            Serial.println("[lora] page open");
+        } else if (c == 5) {
+            uiLoraChatSelect(0);
+            enterLoraChat();
+            Serial.println("[lora] chats open");
         }
         else             { enterClear(); Serial.println("[lora] home"); }
     }

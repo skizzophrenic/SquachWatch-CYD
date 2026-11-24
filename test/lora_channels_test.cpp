@@ -504,18 +504,21 @@ int main() {
         ck("a built-in ham-mode row is not pickable", Meshtastic::channel(ham).keyLen == 0 && !C::txSendable(Proto::MESHTASTIC, ham, "LongFast"));
         ck("alone, a step stays on the default", C::txStep(Proto::MESHTASTIC, "LongFast") == 0 && !Settings::loraTxChan(false)[0]);
 
-        // Two of the user's Meshtastic channels (one with a key that cannot be
-        // sealed) and three MeshCore ones.
+        // Three Meshtastic channels with 16-, 32-, and zero-byte keys,
+        // and three MeshCore channels.
         Meshtastic::addChannel("Yowie", "ah3yOYBexxSbQugNc68msQ==");
-        Meshtastic::addChannel("Big", MT_KEY);           // 32 bytes: skipped
-        Meshtastic::addChannel("OpenCamp", "0");          // no key: pickable
+        Meshtastic::addChannel("Big", MT_KEY);
+        Meshtastic::addChannel("OpenCamp", "0");
         MeshCore::addChannel("#hiking", nullptr);
         MeshCore::addChannel("Priv", PRIVATE_HEX);
         MeshCore::addChannel("#ping", nullptr);
         C::save();
         const uint8_t yi = (uint8_t)Meshtastic::findChannel("Yowie"), oi = (uint8_t)Meshtastic::findChannel("OpenCamp");
+        const uint8_t bi = (uint8_t)Meshtastic::findChannel("Big");
         ck("step: Yowie", C::txStep(Proto::MESHTASTIC, "LongFast") == yi && !strcmp(Settings::loraTxChan(false), "Yowie"));
-        ck("step: past the 32-byte key to OpenCamp", C::txStep(Proto::MESHTASTIC, "LongFast") == oi);
+        ck("step: Big is sendable with its 32-byte key", C::txStep(Proto::MESHTASTIC, "LongFast") == bi &&
+           !strcmp(Settings::loraTxChan(false), "Big"));
+        ck("step: OpenCamp", C::txStep(Proto::MESHTASTIC, "LongFast") == oi);
         ck("step: round to LongFast, stored as the default", C::txStep(Proto::MESHTASTIC, "LongFast") == 0 && !Settings::loraTxChan(false)[0]);
         ck("step: Yowie again", C::txStep(Proto::MESHTASTIC, "LongFast") == yi);
 

@@ -375,6 +375,7 @@ namespace Settings {
     uint8_t     loraTxDbm();
     void        cycleLoraTx();         // OFF -> 10 dBm -> 20 dBm -> 22 dBm -> OFF
     const char* loraTxName();
+    constexpr uint8_t LORA_REGION_TW = 4;       // saved region selector value
     uint8_t     loraRegion();
     void        setLoraRegion(uint8_t r);
     uint8_t     loraFocus();

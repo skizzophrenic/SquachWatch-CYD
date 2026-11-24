@@ -413,6 +413,7 @@ static const Zone ZONES[] = {
     { "QUEENSLAND",  "AEST-10" },                         // Brisbane: AUS EASTERN's hour, no summer time
     { "AUS CENTRAL", "ACST-9:30ACDT,M10.1.0,M4.1.0/3" },
     { "DARWIN",      "ACST-9:30" },
+    { "TAIWAN",      "TST-8" },
 };
 static const uint8_t ZONES_N = sizeof(ZONES) / sizeof(ZONES[0]);
 
@@ -423,7 +424,7 @@ static const uint8_t ORDER[] = {
     21, 22, 23, 7, 8, 9, 24,             // Mexico to Argentina
     10, 11, 25, 12, 26, 13, 28, 27,      // UTC, UK, Africa, Europe, Israel
     29, 14, 30, 31, 15, 32, 33,          // Turkey to SE Asia
-    16, 34, 19, 35, 17,                  // China to Japan
+    16, 39, 34, 19, 35, 17,              // UTC+8 zones through Japan
     38, 37, 36, 18, 20,                  // Australia, New Zealand
 };
 static_assert(sizeof(ORDER) == ZONES_N, "every zone once in ORDER");
@@ -786,6 +787,7 @@ void pollSerial() {
         if (strcasecmp(line, "SCREEN") == 0) { g_consoleScreen = true; continue; }
         // LORASET: open LORA SETTINGS (over the LORA page); LORASET DET: step
         // SQUACHWATCH DETECTIONS; LORASET PRESET: the next Meshtastic preset;
+        // LORASET PAGE and CHATS: open the LoRa preview and Meshtastic chat.
         // LORASET HOME: back to the main screen. The
         // T-Deck's bench, where a finger is not always to hand. Before LORA's
         // own commands below, which take every line that starts LORA.
@@ -793,6 +795,8 @@ void pollSerial() {
         if (strcasecmp(line, "LORASET DET") == 0)  { g_consoleLoraSet = 1; continue; }
         if (strcasecmp(line, "LORASET HOME") == 0) { g_consoleLoraSet = 2; continue; }
         if (strcasecmp(line, "LORASET PRESET") == 0) { g_consoleLoraSet = 3; continue; }   // the next Meshtastic preset
+        if (strcasecmp(line, "LORASET PAGE") == 0) { g_consoleLoraSet = 4; continue; }
+        if (strcasecmp(line, "LORASET CHATS") == 0) { g_consoleLoraSet = 5; continue; }
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
         if (strcasecmp(line, "POWER OFF") == 0) { g_consolePowerOff = true; continue; }
         if (strcasecmp(line, "NAPTEST") == 0)   { g_consoleNapTest = true; g_consolePowerOff = true; continue; }
@@ -891,6 +895,12 @@ void pollSerial() {
         }
 #endif
 #endif
+        if (strcasecmp(line, "ZONE") == 0) {
+            char buf[32];
+            formatClock(buf, sizeof buf);
+            Serial.printf("[zone] active %s (%s)\n", Settings::timeZoneName(), buf);
+            continue;
+        }
         if (strncasecmp(line, "ZONE ", 5) == 0) {
             // ZONE US EASTERN, or ZONE 4: the flasher sends the name it
             // worked out from the browser's own zone.
@@ -902,7 +912,11 @@ void pollSerial() {
                 if (i >= 0 && i < (long)zoneCount()) found = (int)i;
             } else {
                 for (uint8_t i = 0; i < zoneCount(); i++)
-                    if (strcasecmp(arg, zoneName(i)) == 0) { found = i; break; }
+                    if (strcasecmp(arg, zoneName(i)) == 0 ||
+                        (strcasecmp(arg, "Asia/Taipei") == 0 && strcmp(zoneName(i), "TAIWAN") == 0)) {
+                        found = i;
+                        break;
+                    }
             }
             if (found >= 0) {
                 Settings::setTimeZone((uint8_t)found);

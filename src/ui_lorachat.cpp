@@ -25,6 +25,9 @@
 #include "settings.h"
 #include "theme.h"
 #include "privacy.h"
+#if defined(TDECK_PLUS)
+#include "chat_text.h"
+#endif
 #if defined(TDECK_PLUS) || SQUACH_LORA_FAKE
 #define LORACHAT_COMPOSE 1
 #include "ui_lorasettings.h"   // uiLoraMyName(): what MeshCore shows before the colon
@@ -459,13 +462,23 @@ void uiLoraChatTick(TFT_eSPI& t, uint32_t now) {
             t.setCursor(w - 8 - t.textWidth(ago), y); t.print(ago);
             y += t.fontHeight() + 2;
             Theme::bubbleFontOn(t);
-            char one[64]; snprintf(one, sizeof one, "%s", r.text);
-            size_t n = strlen(one);
-            while (n && t.textWidth(one) > w - 20) one[--n] = '\0';
-            t.setTextColor(Theme::WHITE, rb);
-            t.setCursor(10, y + Theme::bubbleAscent()); t.print(one);
+            int previewLineHeight = lineH;
+#if defined(TDECK_PLUS)
+            if (ChatText::needsFallback(r.text)) {
+                if (previewLineHeight <= ChatText::FULL_GLYPH) previewLineHeight = ChatText::FULL_GLYPH + 1;
+                ChatText::drawClipped(t, r.text, 10, y, w - 20, Theme::WHITE, rb,
+                                      ChatText::FULL_GLYPH, Theme::bubbleAscent());
+            } else
+#endif
+            {
+                char one[64]; snprintf(one, sizeof one, "%s", r.text);
+                size_t n = strlen(one);
+                while (n && t.textWidth(one) > w - 20) one[--n] = '\0';
+                t.setTextColor(Theme::WHITE, rb);
+                t.setCursor(10, y + Theme::bubbleAscent()); t.print(one);
+            }
             Theme::bubbleFontOff(t);
-            y += lineH + 6;
+            y += previewLineHeight + 6;
         } else {
             // A message: who, which channel (or the mark on one of ours), how long ago.
             t.setTextColor(r.mine ? Theme::blend(Theme::BG, Theme::WHITE, 200) : s_tab == 2 ? netCol(r.proto) : accent, Theme::BG);
@@ -480,9 +493,18 @@ void uiLoraChatTick(TFT_eSPI& t, uint32_t now) {
             y += t.fontHeight() + 2;
             Theme::bubbleFontOn(t);
             t.setTextColor(Theme::WHITE, Theme::BG);
-            const int n = wrap(t, r.text, 10, y, w - 20, lineH, bodyBottom, true);
+            int messageLineHeight = lineH;
+            int n;
+#if defined(TDECK_PLUS)
+            if (ChatText::needsFallback(r.text)) {
+                if (messageLineHeight <= ChatText::FULL_GLYPH) messageLineHeight = ChatText::FULL_GLYPH + 1;
+                n = ChatText::drawWrapped(t, r.text, 10, y, w - 20, messageLineHeight,
+                                          bodyBottom, Theme::WHITE, Theme::BG, Theme::bubbleAscent(), true);
+            } else
+#endif
+                n = wrap(t, r.text, 10, y, w - 20, lineH, bodyBottom, true);
             Theme::bubbleFontOff(t);
-            y += n * lineH + 6;
+            y += n * messageLineHeight + 6;
         }
         if (s_rowsDrawn < KEEP) { s_rowTop[s_rowsDrawn] = top - 2; s_rowBot[s_rowsDrawn] = y - 3; s_rowsDrawn++; }
         if (y < bodyBottom) t.drawFastHLine(6, y - 3, w - 12, Theme::blend(Theme::BG, accent, 60));

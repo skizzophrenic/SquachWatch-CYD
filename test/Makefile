@@ -167,6 +167,12 @@ TESTS += chestsig_test
 chestsig_test_SRCS  := $(SRC)/sense_cyd/csi_vitals.cpp
 chestsig_test_FLAGS := -DSENSE_MODEL_HOST=1
 
+TESTS += chat_text_test
+chat_text_test_SRCS := $(SRC)/chat_text.cpp $(SRC)/tw_chat_font.S
+chat_text_test_FLAGS := -DSQW_CHAT_TEXT_TEST=1 -DSQW_CHAT_FONT_PATH=\"../assets/chat-font/tw-chat-glyphs.bin\"
+
+TESTS += lora_spectrum_test
+
 .PHONY: all clean
 all: $(addprefix run-,$(TESTS))
 
@@ -183,6 +189,8 @@ run-$(1): $(OUT)/$(1)
 endef
 
 $(foreach t,$(TESTS),$(eval $(call TEST_rule,$(t))))
+
+$(OUT)/chat_text_test: ../assets/chat-font/tw-chat-glyphs.bin
 
 clean:
 	@rm -rf $(OUT)

@@ -13,7 +13,9 @@
 // repeats the code's own arithmetic only proves the file was saved.
 #include "test_util.h"
 #include "frame_push.h"
+#include "frame_shot_writer.h"
 #include <cstdint>
+#include <string>
 
 // Expand an n-bit field the way a display driver does: shift up and
 // replicate the high bits down, so all-ones stays all-ones rather than
@@ -28,7 +30,46 @@ static uint16_t asRgb565(uint16_t wire) {
     return (uint16_t)(((wire & 0xFF) << 8) | (wire >> 8));
 }
 
+struct ShotPort {
+    int room = 64;
+    size_t writeLimit = 7;
+    std::string received;
+    int availableForWrite() const { return room; }
+    size_t write(const uint8_t* bytes, size_t len) {
+        if (len > writeLimit) len = writeLimit;
+        received.append(reinterpret_cast<const char*>(bytes), len);
+        return len;
+    }
+};
+
 int main() {
+    suite("USB screenshot writes have a bounded wait");
+    {
+        ShotPort port;
+        uint32_t stamp = 0;
+        const auto now = [&]() { return stamp; };
+        const auto idle = [&]() { ++stamp; };
+        const std::string row(648, 'a');
+        ck("partial writes deliver the full row", FrameShot::write(port, row.data(), row.size(), stamp, now, idle)
+            && port.received == row);
+
+        port.room = 0;
+        ck("an unread USB port yields and times out",
+           !FrameShot::write(port, row.data(), row.size(), stamp, now, idle) && stamp == 250);
+        port.room = 64;
+        port.writeLimit = 0;
+        ck("a write that accepts no bytes also times out",
+           !FrameShot::write(port, row.data(), row.size(), stamp, now, idle) && stamp == 500);
+
+        port.writeLimit = 7;
+        port.received.clear();
+        stamp = 11995;
+        const auto slowNow = [&]() { return stamp++; };
+        ck("a slow reader still hits the whole-shot deadline",
+           !FrameShot::write(port, row.data(), row.size(), 0, slowNow, idle)
+           && !port.received.empty() && port.received.size() < row.size());
+    }
+
     suite("Every one of the 256 colours");
     {
         int wrongRed = 0, wrongGreen = 0, wrongBlue = 0;
