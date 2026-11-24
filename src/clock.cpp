@@ -787,6 +787,7 @@ void pollSerial() {
         if (strcasecmp(line, "SCREEN") == 0) { g_consoleScreen = true; continue; }
         // LORASET: open LORA SETTINGS (over the LORA page); LORASET DET: step
         // SQUACHWATCH DETECTIONS; LORASET PRESET: the next Meshtastic preset;
+        // LORASET PAGE and CHATS: open the LoRa preview and Meshtastic chat.
         // LORASET HOME: back to the main screen. The
         // T-Deck's bench, where a finger is not always to hand. Before LORA's
         // own commands below, which take every line that starts LORA.
@@ -794,6 +795,8 @@ void pollSerial() {
         if (strcasecmp(line, "LORASET DET") == 0)  { g_consoleLoraSet = 1; continue; }
         if (strcasecmp(line, "LORASET HOME") == 0) { g_consoleLoraSet = 2; continue; }
         if (strcasecmp(line, "LORASET PRESET") == 0) { g_consoleLoraSet = 3; continue; }   // the next Meshtastic preset
+        if (strcasecmp(line, "LORASET PAGE") == 0) { g_consoleLoraSet = 4; continue; }
+        if (strcasecmp(line, "LORASET CHATS") == 0) { g_consoleLoraSet = 5; continue; }
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
         if (strcasecmp(line, "POWER OFF") == 0) { g_consolePowerOff = true; continue; }
         if (strcasecmp(line, "NAPTEST") == 0)   { g_consoleNapTest = true; g_consolePowerOff = true; continue; }

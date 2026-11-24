@@ -540,7 +540,8 @@ ShortFast 0x70, MediumSlow 0x18, LongSlow 0x0F, LongMod 0x6E and NarrowSlow
 preset can be decrypted with the published key. In ham mode the PSK is
 stripped and the payload is plain protobuf.
 
-**Encryption.** Channel traffic is AES-CTR (AES-128 for 16-byte keys) with the
+**Encryption.** Channel traffic is AES-CTR (AES-128 for 16-byte keys and
+AES-256 for 32-byte keys) with the
 nonce `id (u64 LE) ‖ from (u32 LE) ‖ 0`. There is no MAC, so a decryption is
 judged by whether the protobuf parses. PKI DMs (2.5+) use X25519 and AES-CCM
 and cannot be read by a third party. 2.8 adds XEdDSA signatures inside `Data`

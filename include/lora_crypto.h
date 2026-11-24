@@ -1,6 +1,6 @@
 // SquachWatch-CYD — the arithmetic behind the LoRa decoders.
 //
-// AES-128, SHA-256, HMAC and CMAC, written out here rather than taken from
+// AES, SHA-256, HMAC and CMAC, written out here rather than taken from
 // mbedtls for one reason: the decoders are tested on a desktop against
 // published vectors (test/lora_crypto_test.cpp, test/lora_*_test.cpp), and a
 // desktop has no mbedtls. One implementation on both sides means the bytes
@@ -35,12 +35,15 @@ void ctr(const Aes128& k, const uint8_t nonce[16], uint8_t* buf, size_t len);
 // AES-CMAC (RFC 4493), the LoRaWAN MIC's primitive.
 void cmac(const Aes128& k, const uint8_t* msg, size_t len, uint8_t mac[16]);
 
-// ---- AES-256 and CCM (Meshtastic's direct messages) -------------------------
+// ---- AES-256 and CCM -------------------------------------------------------
 struct Aes256 {
     uint32_t rk[60];
     void setKey(const uint8_t key[32]);
     void encryptBlock(const uint8_t in[16], uint8_t out[16]) const;
 };
+// The same CTR mode for Meshtastic channels with a 32-byte key.
+void ctr(const Aes256& k, const uint8_t nonce[16], uint8_t* buf, size_t len);
+
 // AES-CCM the way Meshtastic runs it (src/mesh/aes-ccm.cpp there, which is
 // wpa_supplicant's): a 13-byte nonce, so a two-byte length (L = 2), an 8-byte
 // tag, no associated data. Seal writes len bytes of ciphertext to `out` and

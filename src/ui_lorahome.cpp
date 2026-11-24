@@ -22,6 +22,7 @@
 #if defined(TDECK_PLUS)
 #include "chat_text.h"
 #endif
+#include "lora_spectrum.h"
 #include "gnss.h"
 #include "squachy.h"
 #include <Arduino.h>
@@ -479,12 +480,7 @@ void drawStrip(TFT_eSPI& t, uint32_t now, const Numbers& n, uint32_t dt) {
     // heat the newest one; everything cools.
     if (!s_spec) heatPrefill(now);
     if (s_spec) {
-        while (now - s_colAt >= SP_COL_MS) {
-            s_colAt += SP_COL_MS;
-            memmove(&s_spec->heat[0][0], &s_spec->heat[1][0], sizeof(float) * SP_ROWS * (SP_COLS - 1));
-            memmove(&s_spec->kind[0][0], &s_spec->kind[1][0], SP_ROWS * (SP_COLS - 1));
-            for (int r = 0; r < SP_ROWS; r++) { s_spec->heat[SP_COLS - 1][r] = 0; s_spec->kind[SP_COLS - 1][r] = 0; }
-        }
+        LoraSpectrum::advance(s_spec->heat, s_spec->kind, s_colAt, now, SP_COL_MS);
         for (uint8_t i = 0; i < hn; i++) if ((int32_t)(hits[i].ms - s_hitSeen) > 0) {
             s_hitSeen = hits[i].ms;
             heatPacket(SP_COLS - 1, hits[i].rssi, hits[i].proto, 1.0f);
@@ -1037,6 +1033,7 @@ void uiLoraHomeSetNet(uint8_t net) { s_net = net ? 1 : 0; s_dmTab = false; }
 uint8_t uiLoraHomeNet() { return s_net; }
 
 void uiLoraHomeTick(TFT_eSPI& t, uint32_t now) {
+    if (now - s_openedAt >= 0x80000000u) now = s_openedAt;
     refreshSnapshot(now, false);
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
     const uint32_t dt = s_lastFrame ? (now - s_lastFrame > 200 ? 200 : now - s_lastFrame) : 16;

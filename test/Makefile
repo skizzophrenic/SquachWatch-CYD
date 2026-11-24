@@ -171,6 +171,8 @@ TESTS += chat_text_test
 chat_text_test_SRCS := $(SRC)/chat_text.cpp $(SRC)/tw_chat_font.S
 chat_text_test_FLAGS := -DSQW_CHAT_TEXT_TEST=1 -DSQW_CHAT_FONT_PATH=\"../assets/chat-font/tw-chat-glyphs.bin\"
 
+TESTS += lora_spectrum_test
+
 .PHONY: all clean
 all: $(addprefix run-,$(TESTS))
 
