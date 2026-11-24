@@ -72,6 +72,8 @@ static bool        s_deskFullVisit = false;   // one visitor: the whole visit, n
 // one step round from that with its crown on the right (LilyGo's default).
 #if defined(TWATCH_S3)
 static const uint8_t DEFAULT_ROTATION = 2;
+#elif defined(WS_S3_169)
+static const uint8_t DEFAULT_ROTATION = 0;   // 240x280 portrait, as the board is held
 #elif defined(CROWPANEL7) || defined(TAB5)
 static const uint8_t DEFAULT_ROTATION = 0;   // the panel is landscape as wired (the Tab5: as blitted)
 #else

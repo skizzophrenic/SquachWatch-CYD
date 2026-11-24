@@ -31,4 +31,10 @@ namespace CapTouch {
     // rotated/calibrated to the display's coordinate space) if a
     // finger is currently down.
     bool read(uint16_t& x, uint16_t& y);
+
+    // CST816T only: stop the chip dropping into standby a few seconds after
+    // the last touch (register 0xFE = 1). In standby it does not answer on
+    // I2C until a finger wakes it, so every poll in between is a bus error.
+    // Returns false if the write was not acknowledged.
+    bool disableAutoSleep();
 }

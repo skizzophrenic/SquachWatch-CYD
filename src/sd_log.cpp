@@ -75,8 +75,8 @@ static const uint8_t SD_MAX_FILES = 2;
 
 bool SdLog::begin() {
     if (_ready) return true;
-#if defined(TWATCH_S3) || (defined(SQW_SMALL) && !defined(CARDPUTER_ADV))   // the Cardputer's slot: see below
-    return false;   // no card slot; GPIO19/20 are the S3's USB pins
+#if defined(TWATCH_S3) || (defined(SQW_SMALL) && !defined(CARDPUTER_ADV)) || defined(WS_S3_169)   // the Cardputer's slot: see below
+    return false;   // no card slot; GPIO19/20 are the S3's USB pins (and GPIO5 is the 1.69"'s LCD CS)
 #endif
 #if defined(CROWPANEL7)
     // A slot, but not brought up in this port: it shares GPIO 4/5/6 with the

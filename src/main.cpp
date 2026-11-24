@@ -543,6 +543,8 @@ static void drawCrashCard(TFT_eSPI& t) {
 #define BL_PIN_S3   38   // the StickS3's and the Cardputer ADV's
 #elif defined(FREENOVE_S3_35)
 #define BL_PIN_S3   41   // the Freenove 3.5"'s, through a BSS138 (HIGH is on)
+#elif defined(WS_S3_169)
+#define BL_PIN_S3   15   // the Waveshare S3 1.69"'s LCD_BL (HIGH is on)
 #elif defined(TDECK_PLUS)
 #define BL_PIN_S3   42   // the T-Deck's 16-step driver chip: HIGH is full, pulses step it (tdeckBacklight)
 #else
@@ -630,6 +632,11 @@ constexpr bool PANEL_NEEDS_INVERSION = false;
 // The Waveshare C5 3.5" ST7796 wants inversion on (Waveshare's own init sends
 // 0x21), validated on this board. As everywhere, the live control point is this
 // constant, not the header's TFT_INVERSION_ON; INVERT in Settings flips it.
+constexpr bool PANEL_NEEDS_INVERSION = true;
+#elif defined(WS_S3_169)
+// Waveshare's own ST7789V2 init turns inversion on
+// (esp_lcd_panel_invert_color(true)). UNCONFIRMED by eye until the board is
+// looked at; INVERT in Settings flips it if wrong.
 constexpr bool PANEL_NEEDS_INVERSION = true;
 #else
 constexpr bool PANEL_NEEDS_INVERSION = false;
@@ -3476,6 +3483,8 @@ static void runTouchCalibration() {
     TouchFit::Fit fit;
 #if defined(TWATCH_S3)
     TouchCal::setDensityScale(1.6f);   // 240 px across 27 mm, against the 2.8" board's 5.6 px/mm
+#elif defined(WS_S3_169)
+    TouchCal::setDensityScale(1.5f);   // 240 px across 28 mm on the 1.69"
 #endif
     const bool canSkip = s_calSource != CalSource::BUILT_IN || DEFAULT_TOUCH_USABLE;
     const TouchCal::Outcome r =
@@ -4895,7 +4904,7 @@ static void sticksPowerUp() {
 }
 #endif
 
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)
+#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(WS_S3_169)
 // The Freenove S3's battery: a 1-cell LiPo on its JST, a TP4054 charging it
 // from USB, and a 200K/200K divider from the cell to GPIO9 (ADC1, so WiFi does
 // not take it away) -- GPIO8 on the 3.5", per Freenove's battery sketch. The
@@ -4905,8 +4914,16 @@ static void sticksPowerUp() {
 #define BOARD_BAT_ADC 8
 #elif defined(TDECK_PLUS)
 #define BOARD_BAT_ADC 4
+#elif defined(WS_S3_169)
+// The Waveshare S3 1.69": an ETA6098 charger and a 200K/100K divider from the
+// cell to GPIO1 (ADC1), per Waveshare's 07_LVGL_Measuring_voltage -- a third.
+#define BOARD_BAT_ADC 1
+#define BOARD_BAT_DIV 3
 #else
 #define BOARD_BAT_ADC 9
+#endif
+#ifndef BOARD_BAT_DIV
+#define BOARD_BAT_DIV 2
 #endif
 // No fuel gauge, and the charger's CHRG line goes to an LED rather than a
 // GPIO -- so a voltage and an estimate from it, and "charging" only as a guess
@@ -4915,7 +4932,7 @@ static void sticksPowerUp() {
 static uint16_t boardBatteryMv() {
     uint32_t sum = 0;
     for (int i = 0; i < 8; i++) sum += analogReadMilliVolts(BOARD_BAT_ADC);
-    return (uint16_t)(sum / 8 * 2);   // the divider halves it
+    return (uint16_t)(sum / 8 * BOARD_BAT_DIV);   // undo the divider
 }
 // Resting LiPo, per cell: rough, but a percent that moves the right way.
 static uint8_t boardBatteryPct(uint16_t mv) {
@@ -6047,6 +6064,15 @@ void setup() {
     // Before anything else can allocate: the breadcrumb has to be read out
     // while it is still the previous life's, not this one's.
     crashReportInit();
+#if defined(WS_S3_169)
+    // The power latch. On the battery, the power key only powers the board
+    // while it is held; SYS_EN (GPIO41) HIGH keeps it on after it is let go.
+    // First thing, before anything slow. GPIO40 is the key's own sense line
+    // (SYS_OUT) and is left as an input. Boards of the first revision put
+    // these on 35/36, which are octal PSRAM lines on an S3R8 and are not
+    // touched here; on those, run it from USB.
+    pinMode(41, OUTPUT); digitalWrite(41, HIGH);
+#endif
     Serial.begin(SERIAL_BAUD);
 #if SQW_BOOT_POWEROFF
     // POWER OFF left BOOT's pad on the RTC side for its wake, and a pad on
@@ -6579,6 +6605,18 @@ void setup() {
     uiClearSetBatterySource(boardBatteryState);
     Sound::begin();                       // the codec is on the touch bus, now up
     Serial.printf("[power] boot: %s, wake cause %d\n", resetReasonName(), (int)(s_wokeFromOff ? s_offWakeCause : esp_sleep_get_wakeup_cause()));
+#elif defined(WS_S3_169)
+    // The Waveshare S3 1.69"'s CST816T, on I2C SDA 11 / SCL 10 at 0x15, reset
+    // on GPIO13 (active low), interrupt on GPIO14 (unused: polled). The
+    // QMI8658 and PCF85063 share the bus. Auto-sleep off, or the chip stops
+    // answering a few seconds after each touch.
+    CapTouch::begin(11, 10, 13, 0x15);
+    usingCapTouch = CapTouch::probe();
+    if (usingCapTouch) CapTouch::disableAutoSleep();
+    Serial.println(usingCapTouch ? "Waveshare S3 1.69 -- CST816T capacitive touch answered."
+                                 : "Waveshare S3 1.69 -- CST816T did not answer; no touch.");
+    { char b[16]; boardBatteryLine(b, sizeof b); Serial.printf("[batt] %s (raw GPIO%d %u mV)\n", b, BOARD_BAT_ADC, (unsigned)analogReadMilliVolts(BOARD_BAT_ADC)); }
+    uiClearSetBatterySource(boardBatteryState);
 #elif defined(FREENOVE_S3)
     // The Freenove S3 2.8"'s FT6336, on I2C SDA 16 / SCL 15 at 0x38, reset on
     // GPIO18 (active low). The ES8311 codec shares the bus at 0x18. FNK0104A
@@ -12325,6 +12363,8 @@ void loop() {
             info.boardName = "freenove-s3-40";
 #elif defined(WS_C5_35)
             info.boardName = "Waveshare C5 3.5";
+#elif defined(WS_S3_169)
+            info.boardName = "Waveshare S3 1.69 LAB";
 #elif defined(CYD35C)
             info.boardName = "cyd35c BETA";
 #elif defined(CYD35)

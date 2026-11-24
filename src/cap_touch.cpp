@@ -48,4 +48,11 @@ bool read(uint16_t& x, uint16_t& y) {
     return true;
 }
 
+bool disableAutoSleep() {
+    Wire.beginTransmission(ADDR);
+    Wire.write(0xFE);   // DisAutoSleep
+    Wire.write(0x01);
+    return Wire.endTransmission() == 0;
+}
+
 }  // namespace CapTouch
