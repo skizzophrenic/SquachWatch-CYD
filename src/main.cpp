@@ -816,6 +816,14 @@ uint8_t             screenRotation = 0;
 #else
 uint8_t             screenRotation = 1;
 #endif
+// The Tab5 and the 7in CrowPanel draw landscape only: their display shims
+// ignore setRotation(). A rotate there turned the touch map but not the
+// picture, so every tap landed somewhere else, and the saved rotation kept
+// it that way across power cycles. Those boards stay at rotation 1 and show
+// no rotate button.
+#if defined(TAB5) || defined(CROWPANEL7)
+#define SQW_FIXED_LANDSCAPE 1
+#endif
 // Timestamp of the last screen/rotation change — drives a brief CRT
 // tear/glitch overlay on the new frame so transitions have some punch
 // instead of just snapping straight to the next screen.
@@ -6190,7 +6198,7 @@ void setup() {
     // Which version lives in this slot, and whether this boot is a fresh
     // update on probation or the aftermath of one that was rolled back.
     OtaCore::boot();
-#if !defined(AWOK) && !defined(SQW_SMALL)   // the StickS3 is landscape only, by its owner's choice
+#if !defined(AWOK) && !defined(SQW_SMALL) && !defined(SQW_FIXED_LANDSCAPE)   // the StickS3 is landscape only, by its owner's choice
     // AWOK has no rotate button and stays fixed at its one physical
     // orientation (see screenRotation's own comment above) -- only
     // boards that can actually rotate restore a saved orientation.
@@ -6217,7 +6225,7 @@ void setup() {
     // sit below the bottom of a 135-row screen.
     if (!Settings::colorChecked()) Settings::markColorChecked();
 #endif
-#if defined(AWOK)
+#if defined(AWOK) || defined(SQW_FIXED_LANDSCAPE)
     // No rotate button on this board (see the rotate handler in
     // loop(), not even compiled in on AWOK) -- hide the icon too so
     // there's nothing dead-looking left in the title bar.
@@ -9122,7 +9130,7 @@ void loop() {
                           (int)pick->rssi, pick->restored ? ", from before this boot" : "");
         }
     }
-#if defined(SQW_SMALL)
+#if defined(SQW_SMALL) || defined(SQW_FIXED_LANDSCAPE)
     g_consoleRotate = false;
     if (false && (tp.valid && !Settings::rotationLocked() && !Squachy::isHeld() &&
 #else
