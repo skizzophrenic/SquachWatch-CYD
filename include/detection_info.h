@@ -45,4 +45,12 @@ namespace DetectionInfo {
     const char* explainFor(DetectionType t, const char* vendor, const char* name,
                            const DetectionEngine& eng, const uint8_t* mac = nullptr);
     const char* titleFor(DetectionType t, const char* vendor, const char* name);
+
+    // The info card's three short lines and its colours (tools/card_text.json,
+    // generated into src/card_text.inc): a one-line headline, WHY (the
+    // reason behind SURE / LIKELY / MAYBE), a TIP, and the kind's two
+    // colours for the banner. The device's own page's lines where it has
+    // one, else its type's.
+    struct CardLines { const char* head; const char* why; const char* tip; uint16_t kindA, kindB; };
+    CardLines cardLines(DetectionType t, const char* vendor, const char* name);
 }

@@ -322,7 +322,22 @@ static float ladder(SC& s, const Card& c, float x, float y, float w, const K& k)
     }
     return y + c.sparkN * 3;
 }
+// ---- the info card in a skin's window (drawInfo below) ----
+static InfoBody s_infoBody = nullptr;
+static uint8_t  s_infoN = 0;   // the buttons the body asked for, set as it draws
+static void infoBody(SC& s, Box B, uint16_t bg) {
+    s.fillRect(B.x, B.y, B.w, B.h, bg);
+    const int x0 = s.X(B.x), y0 = s.Y(B.y);
+    s_infoN = s_infoBody(s.t, x0, y0, s.X(B.x + B.w) - x0, s.Y(B.y + B.h) - y0);
+}
+static const char* infoLabel(int n, int i) {
+    static const char* const L3[3] = { "BACK", "MORE", "GOT IT" };
+    static const char* const L2[2] = { "BACK", "GOT IT" };
+    return n == 3 ? L3[i] : L2[i];
+}
+
 static void content(SC& s, const Card& c, Box B, const K& k, const Clk& ck, CO o = CO()) {
+    if (s_infoBody) { infoBody(s, B, k.bg); return; }   // the info card's middle instead
     if (o.fill) s.fillRect(B.x, B.y, B.w, B.h, k.bg);
     const float px = B.x + B.w - o.ladW - 4, R = px - 6;
     float y = B.y + 4;
@@ -421,12 +436,15 @@ static void face(SC& s, BK kind, float x, float y, float w, float h, const char*
     }
 }
 static void buttons(SC& s, const Card& c, BK kind, const BO& o, const Clk& ck) {
-    const float w = ((o.x1 - o.x0) - o.gap * 4) / 5;
+    // The info card has two or three (BACK, MORE, GOT IT) in the same faces.
+    const int n = s_infoBody ? (s_infoN == 3 ? 3 : 2) : 5;
+    const float w = ((o.x1 - o.x0) - o.gap * (n - 1)) / n;
     float x = o.x0;
-    for (int i = 0; i < 5; i++) {
-        face(s, kind, x, o.y, w, o.h, c.btn[i], i == 0, c.sunk[i], o, ck);
+    for (int i = 0; i < n; i++) {
+        const char* b = s_infoBody ? infoLabel(n, i) : c.btn[i];
+        face(s, kind, x, o.y, w, o.h, b, i == 0, s_infoBody ? false : c.sunk[i], o, ck);
         s.mark(s_btn[i], x, o.y, w, o.h);
-        Theme::hotButton(s_btn[i].x, s_btn[i].y, s_btn[i].w, s_btn[i].h, c.hot[i]);
+        Theme::hotButton(s_btn[i].x, s_btn[i].y, s_btn[i].w, s_btn[i].h, s_infoBody ? b : c.hot[i]);
         x += w + o.gap;
     }
 }
@@ -469,7 +487,7 @@ static void sSunset(SC& s, const Card& c, const Clk& ck, bool sunset) {
     s.fillRect(X0 + 3, Y0 + 32, WW - 6, 13, P.indigo);
     float mx = X0 + 8;
     if (c.owner[0]) { s.text(mx, Y0 + 35, c.owner, c.ownerAway ? P.gold : P.dim); s.hline(mx, Y0 + 43, 5, P.gold); mx += s.textW(c.owner) + 16; }
-    s.text(mx, Y0 + 35, c.met, P.lav); s.hline(mx, Y0 + 43, 5, P.lav);
+    if (c.met[0]) { s.text(mx, Y0 + 35, c.met, P.lav); s.hline(mx, Y0 + 43, 5, P.lav); }
     if (c.queue) {
         char more[16]; snprintf(more, sizeof more, "+%u MORE >", (unsigned)c.queue);
         const float mw = s.textW(more), bx = X0 + WW - 8 - mw;
@@ -499,6 +517,12 @@ static void sDesktop(SC& s, const Card& c, const Clk& ck, bool sunset) {
     desk(s, sunset, { 0.58f, 0.78f, 48, false }, ck.amb, P.deep);
     s.fillRect(0, 202, 320, 38, P.indigo); s.hline(0, 202, 320, P.rose2); s.hline(0, 203, 320, P.plum2);
     BO bo; bo.y = 207; bo.h = 29;
+    if (s_infoBody) {
+        win(s, 4, 4, 312, 196, "INFO", true);
+        infoBody(s, { 5, 16, 310, 183 }, P.night);
+        buttons(s, c, BK::TASKBAR, bo, ck);
+        return;
+    }
     auto shown = [&](int k) { return ck.age >= (uint32_t)k * 130; };
     if (c.queue && shown(3)) { win(s, 14, 2, 236, 40, "", false, false); if (c.queue > 1) win(s, 9, 7, 236, 40, "", false, false); }
     if (shown(0)) {
@@ -622,6 +646,12 @@ static void sTiling(SC& s, const Card& c, const Clk& ck, bool) {
     s.textR(316, 3, "| 14:43", P.lav);
     if (c.owner[0]) s.textR(316 - s.textW("| 14:43") - 6, 3, c.owner, c.ownerAway ? P.gold : P.dim);
     BO bo; bo.keys = true; bo.y = 207; bo.h = 30; bo.x0 = 4; bo.x1 = 316; bo.gap = 3;
+    if (s_infoBody) {
+        tile(s, 2, top, 316, 198 - top, "info", true);
+        infoBody(s, { 4, top + 4, 312, 198 - top - 6 }, P.night);
+        buttons(s, c, BK::TAB, bo, ck);
+        return;
+    }
     const float k = ck.age >= 520 ? 1 : ck.age / 520.0f, H1 = 112;
     if (k < 0.3f) { tile(s, 2, top, 316, 198 - top, "trail", true); buttons(s, c, BK::TAB, bo, ck); return; }
     K kk = KD(); kk.bg = P.night; kk.stop = P.rose2; kk.line = P.plum; kk.lineHi = P.mauve; kk.boxBg = P.night; kk.boxEdge = P.rose2; kk.check = P.peach;
@@ -822,6 +852,24 @@ static void sTerm(SC& s, const Card& c, const Clk& ck, bool) {
     label(3, 0, " SQUACHWATCH ", hi);
     char of[16]; snprintf(of, sizeof of, " 1 OF %u ", (unsigned)(c.queue + 1)); label(38, 0, of, dim);
     if (c.queue) markQueue(s, cx6(38), 0, 60, 8);
+    if (s_infoBody) {
+        label(38, 0, " INFO ", dim);
+        infoBody(s, { cx6(1) + 2, ry8(1) + 2, cx6(51) - cx6(1) - 2, ry8(25) - ry8(1) - 2 }, bg);
+        const int n = s_infoN == 3 ? 3 : 2;
+        const float gap = 6, x0 = cx6(1), w = (cx6(52) - x0 - gap * (n - 1)) / n;
+        for (int i = 0; i < n; i++) {
+            const uint16_t cc = i == 0 ? hi : acc;
+            const char* b = infoLabel(n, i);
+            char lb[16]; snprintf(lb, sizeof lb, "[%c]%s", b[0], b + 1);
+            const float x = x0 + i * (w + gap);
+            s.drawRect(x, 208, w, 30, cc); if (i == 0) s.drawRect(x + 1, 209, w - 2, 28, cc);
+            s.textC(x + w / 2, 219, lb, cc);
+            s.mark(s_btn[i], x, 208, w, 30); Theme::hotButton(s_btn[i].x, s_btn[i].y, s_btn[i].w, s_btn[i].h, b);
+        }
+        buildLuts();
+        remap(s, 0, 0, s.pw, s.ph, L_scan, [](int, int y) { return (y & 1) == 1; });
+        return;
+    }
     const int shown = (int)(ck.age / 24);
     auto row = [&](int r) { return r <= shown; };
     auto put = [&](float col, int r, const char* str, uint16_t cc) { if (row(r)) s.text(cx6(col), ry8(r), str, cc); };
@@ -934,6 +982,24 @@ void draw(TFT_eSPI& t, uint8_t id, const Card& c, uint32_t now, uint32_t openedA
         case TERMINAL: sTerm(s, c, ck, sunset); break;
         default: break;
     }
+}
+
+void drawInfo(TFT_eSPI& t, uint8_t id, const char* name, DetectionType type, InfoBody body,
+              uint32_t now, bool sunset, uint8_t palette) {
+    Card c{};
+    c.verdict = Verdict::NEW;
+    c.verdictWord = "ABOUT";
+    c.typeLabel = name ? name : "";
+    c.typeShort = c.typeLabel;
+    c.type = type;
+    c.conf = "";
+    c.trend = "";
+    static const char* const NONE[5] = { "", "", "", "", "" };
+    for (int i = 0; i < 5; i++) { c.btn[i] = NONE[i]; c.hot[i] = NONE[i]; }
+    s_infoBody = body; s_infoN = 0;
+    // As if it had been open a long while: no opening animation.
+    draw(t, id, c, now, now - 100000u, 0, 2, sunset, palette);
+    s_infoBody = nullptr;
 }
 
 }  // namespace AlertSkin

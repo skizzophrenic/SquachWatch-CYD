@@ -26,6 +26,7 @@
 #include "pet.h"
 #include "detection.h"
 #include "detection_info.h"
+#include "info_card.h"
 #include "ui_clear.h"
 #include "encounters.h"
 #include "ui_log.h"
@@ -856,6 +857,35 @@ int main(int argc, char** argv) {
                 if (!queued && t + 1000 >= from) { uiAlertSetQueue((uint8_t)atoi(q)); queued = true; }
             }
             uiAlertTick(frame, t, engine, false, nullptr, "");
+        }
+        // The MORE INFO panel over the main screen: SQUACHSIM_INFO_TYPE=<DetectionType
+        // number>, and SQUACHSIM_INFO_VENDOR / _NAME pick a device page the way a
+        // real row's vendor and name do. For checking the wording renders.
+        else if (screen == "info") {
+            uiClearTick(frame, t, engine, true, false);
+            const DetectionType ty = (DetectionType)(getenv("SQUACHSIM_INFO_TYPE") ? atoi(getenv("SQUACHSIM_INFO_TYPE")) : 6);
+            const char* ven = getenv("SQUACHSIM_INFO_VENDOR");
+            const char* nm  = getenv("SQUACHSIM_INFO_NAME");
+            // The new card, fed as main.cpp feeds it, with a made-up history:
+            // SQUACHSIM_INFO_CONF=0..2 for the pill, SQUACHSIM_INFO_FOLLOW for
+            // FOLLOWING, SQUACHSIM_INFO_OLD=1 for the old panel.
+            if (!getenv("SQUACHSIM_INFO_OLD")) {
+                const DetectionInfo::CardLines L = DetectionInfo::cardLines(ty, ven, nm);
+                InfoCard::Card c{};
+                c.name = DetectionInfo::titleFor(ty, ven, nm);
+                c.head = L.head; c.why = L.why; c.tip = L.tip; c.kindA = L.kindA; c.kindB = L.kindB;
+                c.body = DetectionInfo::explainFor(ty, ven, nm, engine);
+                c.type = ty;
+                c.conf = getenv("SQUACHSIM_INFO_CONF") ? (uint8_t)atoi(getenv("SQUACHSIM_INFO_CONF")) : 2;
+                c.history = true;
+                c.following = getenv("SQUACHSIM_INFO_FOLLOW") != nullptr;
+                snprintf(c.seen, sizeof c.seen, "%s", c.following ? "41X" : "12X");
+                snprintf(c.places, sizeof c.places, "%s", c.following ? "3" : "1");
+                snprintf(c.first, sizeof c.first, "%s", "07:40");
+                InfoCard::feed(c, t);
+            }
+            Theme::drawInfoPanel(frame, frame.width(), frame.height(), t,
+                                 DetectionInfo::titleFor(ty, ven, nm), DetectionInfo::explainFor(ty, ven, nm, engine));
         }
         else if (screen == "settings") uiSettingsTick(frame, t, engine);
         else if (screen == "detfilter") uiDetFilterTick(frame, t, engine);

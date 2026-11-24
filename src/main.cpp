@@ -392,6 +392,8 @@ static void drawCrashCard(TFT_eSPI& t) {
 #include "ui_hunt.h"
 #include "ui_colorcheck.h"
 #include "detection_info.h"
+#include "info_card.h"
+#include "trail.h"
 #include "ui_diary.h"
 #include "ui_outfit.h"
 #include "pet.h"
@@ -1784,6 +1786,13 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
     s_stickRectOn = false;
     auto add = [&](int x, int y, uint8_t kind = 0) { if (n < cap) out[n++] = { (int16_t)x, (int16_t)y, kind }; };
     if (s_infoPending && (state == AppState::LOG || state == AppState::ALERT)) {
+        // The info card's own buttons when it is the one up; the old
+        // panel's single MORE / GOT IT otherwise (the primer).
+        int bx, by;
+        if (InfoCard::fresh(millis())) {
+            for (uint8_t i = 0; i < 3; i++) if (InfoCard::buttonCenter(i, bx, by)) add(bx, by);
+            if (n) return n;
+        }
         add(w / 2, h - 17);             // MORE / GOT IT
         return n;
     }
@@ -3527,7 +3536,11 @@ static bool stickBackPoint(StickPt& at) {
     const int w = tft.width(), h = tft.height();
     auto put = [&](int x, int y) { at = { (int16_t)x, (int16_t)y, 0 }; return true; };
 #define sweep(fn) stickSweep(fn, at)
-    if (s_infoPending && (state == AppState::LOG || state == AppState::ALERT)) return put(w / 2, h - 17);   // GOT IT
+    if (s_infoPending && (state == AppState::LOG || state == AppState::ALERT)) {
+        int bx, by;
+        if (InfoCard::fresh(millis()) && InfoCard::buttonCenter(0, bx, by)) return put(bx, by);   // the card's BACK
+        return put(w / 2, h - 17);   // GOT IT
+    }
     switch (state) {
         case AppState::CLEAR:
             if (s_scanPickerOpen) return put(w * 5 / 6 - 4, h - 16);   // the picker's BACK, in DESK's place
@@ -3942,6 +3955,46 @@ static void openCardFromLog(const Detection& d) {
                  a < 0 ? "-" : "", labs(a) / 10000000L, (labs(a) % 10000000L) / 100L,
                  o < 0 ? "-" : "", labs(o) / 10000000L, (labs(o) % 10000000L) / 100L);
     }
+}
+
+// The MORE INFO card (info_card.h) for the device INFO is about: its lines,
+// its colours, and what this board has seen of it. Fed every frame the page
+// is up; the panel draws it while it is fresh.
+static void feedInfoCard(const char* body, uint32_t now, bool fromAlert) {
+    InfoCard::Card c{};
+    const char* nm = privName(s_confirmName);
+    const DetectionInfo::CardLines L = DetectionInfo::cardLines(s_confirmType, s_confirmVendor, nm);
+    c.name  = DetectionInfo::titleFor(s_confirmType, s_confirmVendor, nm);
+    c.head  = L.head; c.why = L.why; c.tip = L.tip;
+    c.kindA = L.kindA; c.kindB = L.kindB;
+    c.body  = body;
+    c.type  = s_confirmType;
+    // The alert's own confidence when INFO came from one (a SCAN device is
+    // in no log row); the log row's below wins when there is one.
+    const Confidence cf = fromAlert ? lastAlertConf : Confidence::MED_CONF;
+    c.conf  = cf == Confidence::HIGH_CONF ? 2 : cf == Confidence::MED_CONF ? 1 : 0;
+    for (uint8_t i = 0; i < engine.logCount(); i++) {
+        const Detection* d = engine.logAt(i);
+        if (!d || memcmp(d->mac, s_confirmMac, 6) || d->type != s_confirmType) continue;
+        c.conf = d->conf == Confidence::HIGH_CONF ? 2 : d->conf == Confidence::MED_CONF ? 1 : 0;
+        c.history = true;
+        snprintf(c.seen, sizeof c.seen, "%uX", (unsigned)(d->hits ? d->hits : 1));
+        uint8_t places = 0;
+        for (uint8_t a = 0; a < d->stops; a++) {
+            bool dup = false;
+            for (uint8_t b = 0; b < a; b++) if (d->stopPlace[b] == d->stopPlace[a]) dup = true;
+            if (!dup) places++;
+        }
+        snprintf(c.places, sizeof c.places, "%u", (unsigned)(places ? places : 1));
+        char stamp[24];
+        if (d->restored) Clock::formatEpochStamp(d->firstSeen, stamp, sizeof stamp);
+        else             Clock::formatStamp(d->firstSeen, stamp, sizeof stamp);
+        stamp[5] = 0;
+        snprintf(c.first, sizeof c.first, "%s", stamp);
+        c.following = Trail::following(*d);
+        break;
+    }
+    InfoCard::feed(c, now);
 }
 
 static void enterWatchAlert() {
@@ -10076,6 +10129,7 @@ void loop() {
             // confidence in general, not any one detection type.
             const char* alertInfoTypeName = s_infoShowingPrimer ? nullptr
                                           : DetectionInfo::titleFor(s_confirmType, s_confirmVendor, privName(s_confirmName));
+            if (s_infoPending && !s_infoShowingPrimer) feedInfoCard(alertInfoText, now, true);
 #if defined(CYD35)
             if (frameBufferOk) {
                 // Same two-pass half-height `frame` trick CLEAR/BOOT
@@ -10211,6 +10265,7 @@ void loop() {
                 lastTouch = now;
                 if (uiAlertHitMoreInfo(tp.x, tp.y, tft.width(), tft.height())) {
                     s_confirmType        = lastAlertType;
+                    memcpy(s_confirmMac, s_alertMac, 6);   // the card's history comes from this row
                     memcpy(s_confirmVendor, s_alertVendor, sizeof s_confirmVendor);
                     memcpy(s_confirmName,   s_alertName,   sizeof s_confirmName);
                     s_infoShowingPrimer  = !Settings::infoPrimerShown();
@@ -10370,6 +10425,7 @@ void loop() {
             // confidence in general, not any one detection type.
             const char* infoTypeName = s_infoShowingPrimer ? nullptr
                                      : DetectionInfo::titleFor(s_confirmType, s_confirmVendor, privName(s_confirmName));
+            if (s_infoPending && !s_infoShowingPrimer) feedInfoCard(infoText, now, false);
             // Nothing on LOG moves by the call -- the note about
             // drawActiveBackground in ui_log.cpp is a comment, not a call.
             drawTwoBand([&](TFT_eSPI& t, bool) {

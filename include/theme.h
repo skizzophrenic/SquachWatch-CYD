@@ -707,7 +707,7 @@ namespace Theme {
     // Covers A-Z, 0-9, space, '!'; anything else is silently skipped.
     // LG is sized for the boot splash title, MD for the ALERT screen's
     // "!! DETECTION !!" — pick whichever fits the string in question.
-    enum class BangersSize { LG, MD };
+    enum class BangersSize { LG, MD, SM };   // SM: the info card (bangers_font.h)
 
     // x,y is the top-left of the font's ascender box, same convention
     // as TFT_eSPI's setCursor for the built-in font.

@@ -1,6 +1,7 @@
 // SquachWatch-CYD — theme implementation
 #include "theme.h"
 #include "draw_band.h"
+#include "info_card.h"
 #include "frame_prof.h"
 #include "caustic_tile.h"
 #include "lil_guy.h"
@@ -10074,8 +10075,10 @@ void drawSignalRadar(TFT_eSPI& t, int cx, int cy, int r, uint32_t now,
 }
 
 static const BangersFont::Glyph* bangersFind(char c, BangersSize size) {
-    const BangersFont::Glyph* table = (size == BangersSize::LG) ? BangersFont::LG_GLYPHS : BangersFont::MD_GLYPHS;
-    uint8_t count = (size == BangersSize::LG) ? BangersFont::LG_GLYPH_COUNT : BangersFont::MD_GLYPH_COUNT;
+    const BangersFont::Glyph* table = size == BangersSize::LG ? BangersFont::LG_GLYPHS
+                                    : size == BangersSize::SM ? BangersFont::SM_GLYPHS : BangersFont::MD_GLYPHS;
+    uint8_t count = size == BangersSize::LG ? BangersFont::LG_GLYPH_COUNT
+                  : size == BangersSize::SM ? BangersFont::SM_GLYPH_COUNT : BangersFont::MD_GLYPH_COUNT;
     for (uint8_t i = 0; i < count; i++) {
         if (table[i].ch == c) return &table[i];
     }
@@ -10672,8 +10675,8 @@ uint8_t wrapText(TFT_eSPI& t, const char* text, int maxW,
 
 // Info panel geometry -- see theme.h's comment on drawInfoPanel() for
 // what this is/who uses it.
-static const uint8_t INFO_MAX_LINES = 7;
-// The compact panels' rows and the large panels' rows. A board is one or the
+// The compact panels' rows (and the small panels' narrow ones) and the large
+// panels' rows. A board is one or the
 // other (or neither), never both, so they share one block: 2.5 KB, not 3.6.
 static const uint8_t INFO_COMPACT_MAX = 24, INFO_WIDE_MAX = 32;
 static union {
@@ -10724,6 +10727,8 @@ static void infoRects(int screenW, int screenH,
 static uint8_t  s_infoPage = 0, s_infoPages = 1;
 static uint32_t s_infoDrawnAt = 0;
 bool infoPanelHitDismiss(int x, int y, int screenW, int screenH) {
+    // The new card (info_card.h) takes the tap while it is the one up.
+    if (!s_compact && InfoCard::fresh(millis())) return InfoCard::tapCloses(x, y, screenW, screenH);
     if (s_compact) {
         const int bw = screenW - 28, bh = 18, bx = 14, by = screenH - 4 - 4 - bh;
         if (!(x >= bx && x <= bx + bw && y >= by && y <= by + bh)) return false;
@@ -10740,9 +10745,10 @@ bool infoPanelHitDismiss(int x, int y, int screenW, int screenH) {
     infoRects(screenW, screenH, px, py, pw, ph, headingY, squachyCx, squachyBaseY, squachyScale, squachyWander,
               textTop, textMaxW, btnX, btnY, btnW, btnH);
     if (!(x >= btnX && x <= btnX + btnW && y >= btnY && y <= btnY + btnH)) return false;
-    // The large panels page their size-2 text the way the compact ones do:
-    // the button reads MORE until the last page.
-    if (s_large) {
+    // Every panel pages its text the way the compact ones do: the button
+    // reads MORE until the last page. Only the large panels used to, so on
+    // the 2.8" and the watch a long paragraph ran on behind the button.
+    {
         static uint32_t last = 0;
         const uint32_t now = millis();
         if (now - last < 250) return false;     // one press, one page
@@ -10755,6 +10761,9 @@ bool infoPanelHitDismiss(int x, int y, int screenW, int screenH) {
 
 void drawInfoPanel(TFT_eSPI& t, int w, int h, uint32_t now,
                    const char* typeName, const char* text) {
+    // A detection's MORE INFO: the card main.cpp fed this frame. The primer
+    // (no typeName), Bingo and the small boards keep the panel below.
+    if (!s_compact && typeName && InfoCard::fresh(now)) { InfoCard::draw(t, w, h, now); return; }
     if (s_compact) {
         if (now - s_infoDrawnAt > 400) s_infoPage = 0;
         s_infoDrawnAt = now;
@@ -10817,13 +10826,15 @@ void drawInfoPanel(TFT_eSPI& t, int w, int h, uint32_t now,
     t.setTextColor(WHITE, BG);
     const int step = s_large ? t.fontHeight() + 3 : 12;
     char (*wide)[80] = s_infoRows.wide;
-    char narrow[INFO_MAX_LINES][48];
+    // The narrow rows share the compact panel's buffer: room for a long
+    // paragraph, paged above. (Seven lines on the stack cut the rest off.)
+    char (*narrow)[48] = s_infoRows.compact;
     int per = (btnY - 4 - textTop) / step;
     if (per < 1) per = 1;
     const uint8_t n = s_large ? wrapText(t, text, textMaxW, wide, INFO_WIDE_MAX)
-                              : wrapText(t, text, textMaxW, narrow, INFO_MAX_LINES);
+                              : wrapText(t, text, textMaxW, narrow, INFO_COMPACT_MAX);
     int first = 0, last = n;
-    if (s_large) {
+    {
         if (now - s_infoDrawnAt > 400) s_infoPage = 0;   // a new panel opens on page one
         s_infoDrawnAt = now;
         s_infoPages = (uint8_t)((n + per - 1) / per);
@@ -10843,7 +10854,7 @@ void drawInfoPanel(TFT_eSPI& t, int w, int h, uint32_t now,
     t.setTextSize(1);
 
     char lbl[24];
-    if (s_large && s_infoPage + 1 < s_infoPages) snprintf(lbl, sizeof lbl, "[ MORE %u/%u ]", s_infoPage + 1, s_infoPages);
+    if (s_infoPage + 1 < s_infoPages) snprintf(lbl, sizeof lbl, "[ MORE %u/%u ]", s_infoPage + 1, s_infoPages);
     else                                         snprintf(lbl, sizeof lbl, "[ GOT IT ]");
     drawButton(t, btnX, btnY, btnW, btnH, lbl, false, 2);
 }

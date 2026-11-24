@@ -684,6 +684,8 @@ void pollSerial() {
             continue;
         }
         if (strcasecmp(line, "TOSS") == 0)      { g_devImu = 2; continue; }
+        if (strncasecmp(line, "SKIN ", 5) == 0) { Settings::setAlertSkin((uint8_t)atoi(line + 5));
+                                                  Serial.printf("[dev] skin %u\n", Settings::alertSkin()); continue; }
         if (strcasecmp(line, "QUIET") == 0)     { g_devQuiet = !g_devQuiet;
                                                   Serial.printf("[dev] alerts %s\n", g_devQuiet ? "QUIET" : "on"); continue; }
         if (strcasecmp(line, "IMU") == 0)       { static bool on = false; on = !on; Shake::setTrace(on);

@@ -11,21 +11,21 @@ namespace DetectionInfo {
 // in state.h (UNKNOWN..DEAUTH), one entry per value up to COUNT.
 static const char* const EXPLAIN_TEXT[] = {
     // UNKNOWN
-    "Nothing in the signature tables matched this one. It is the fallback the panel falls back TO, so if you are reading it about a real sighting, that sighting got logged under a type with no explanation of its own -- which is a bug worth reporting.",
+    "Something the scan heard that matches nothing on SquachWatch's lists. Most are ordinary: phones, earbuds, watches, smart bulbs. Its name and maker are the best clues. If it keeps turning up wherever you go, WATCH it.",
     // FLOCK
-    "Flock Safety makes automated license-plate-reader cameras, usually mounted on poles at neighborhood entrances. They log every plate that passes, suspect or not. Check the confidence: of the 32 hardware prefixes filed here exactly ONE is registered to Flock, and the rest are the Liteon, Silicon Labs and USI radio modules they build on -- shared with plenty of other kit. A LOW reading here means a radio Flock might use, not a Flock camera.",
+    "Flock Safety makes automated license-plate-reader cameras, usually mounted on poles at neighborhood entrances. They log every plate that passes, suspect or not. Flock says they do not do facial recognition, but reporting by 404 Media and WIRED found the cameras detect people too, and police use Flock's tools to search for specific people by description and follow them across towns. Only one of the 32 address blocks filed here belongs to Flock itself; the rest are radio chips plenty of other gadgets use too, so a LOW reading means a chip Flock might use, not a Flock camera.",
     // AXON
-    "Axon makes body cameras and TASERs for law enforcement. This picks up a body cam's own wireless signal, not necessarily an officer's exact location.",
+    "Police body cameras and the gear around them: Axon, Motorola's WatchGuard, Digital Ally and BodyWorn, plus holster sensors and patrol-car routers. It means police gear is near, not where an officer is standing.",
     // META
     "Camera glasses -- Ray-Ban Meta, Snap Spectacles and the like. They record video and photos, and the little LED that's supposed to warn you is easy to miss and easier to cover. Careful with this one: Meta puts the same Bluetooth ID on Quest headsets, so it can also just be a VR headset in a bag.",
     // SKIMMER
-    "A Bluetooth card skimmer, usually wired into an ATM or gas pump reader. It quietly exfiltrates stolen card data over BLE instead of needing physical pickup.",
+    "A Bluetooth card skimmer, usually wired into an ATM or gas pump reader. It sends the stolen card numbers over Bluetooth to the crook's phone, so they never have to come back for it.",
     // RAVEN
     "A Raven gunshot-detection sensor, usually mounted on a streetlight or rooftop. It listens constantly, not just after something happens. Matched on Raven's own Bluetooth service IDs, which have not been checked against real hardware -- hence the middling confidence. ShotSpotter sensors are filed here too, on ShotSpotter's own registered WiFi prefix, but only a sensor with its WiFi up can be heard: most backhaul over cellular and say nothing.",
     // AIRTAG
-    "An Apple AirTag, riding Apple's Find My network. Legitimate for keys and luggage -- also a known method for tracking a person or vehicle without consent.",
+    "An Apple AirTag on Apple's Find My network. Fine on keys and luggage; also a known way to track a person or car. Not yours and been with you a while? Check bags and the car. On boards with RING, it can be made to beep once it has been away from its owner.",
     // DRONE
-    "A drone broadcasting Remote ID, the wireless 'license plate' the FAA requires most drones to transmit. It is decoded, not just spotted: where the aircraft is, and often where the person flying it is standing. Heard over Bluetooth and in WiFi beacons. Not its camera feed -- that stays private, which is rather the point of the complaint. Not the Bluetooth 5 long-range form either: this chip is BLE 4.2 and cannot hear it.",
+    "A drone broadcasting Remote ID, the wireless 'license plate' the FAA requires most drones to transmit. It is decoded, not just spotted: where the aircraft is, and often where the person flying it is standing. Heard over Bluetooth and in WiFi beacons. Not its camera feed -- that stays private, which is rather the point of the complaint. SquachWatch does not listen for the newer Bluetooth 5 long-range form yet, so some drones will not show.",
     // ALPR
     "An automated license-plate reader from a vendor other than Flock. Same idea: logs every plate that passes, usually feeding a shared database.",
     // CAMERA
@@ -35,9 +35,9 @@ static const char* const EXPLAIN_TEXT[] = {
     // GOOGLE_TAG
     "A tracker on Google's Find My Device network -- Chipolo, Pebblebee, Moto Tag and others all ride the same system. Android's answer to Find My.",
     // TILE
-    "A Tile Bluetooth tracker, one of the original item-finders. Independent of Apple/Google/Samsung's networks, same basic capability either way.",
+    "A Tile Bluetooth tracker, one of the original item-finders. Its own finder network, owned by Life360, separate from Apple's, Google's and Samsung's. Same capability either way.",
     // RING
-    "A Ring doorbell or camera, Amazon's video doorbell line. Often networked into neighborhood-wide sharing through the Neighbors app.",
+    "A Ring doorbell or camera, Amazon's video doorbell line. Owners share clips in the Neighbors app, and police can ask owners for footage through it again.",
     // DEAUTH
     "Not a device -- a burst of WiFi deauthentication frames, the kind used to forcibly knock devices off a network. One frame is normal traffic; a flood like this usually isn't.",
     // EVILTWIN
@@ -101,6 +101,25 @@ const char* explainFor(DetectionType t, const char* vendor, const char* name,
     if (t == DetectionType::DRONE) return explainLive(t, eng, mac);
     const DeviceInfo::Device* d = DeviceInfo::find(t, vendor, name);
     return d ? d->text : explain(t);
+}
+
+// ---- the info card's short lines --------------------------------------------
+struct CardType { const char* head; const char* why; const char* tip; uint16_t a, b; };
+struct CardPage { const char* title; const char* head; const char* why; const char* tip; };
+#include "card_text.inc"
+static_assert(sizeof(CARD_TYPES) / sizeof(CARD_TYPES[0]) == (size_t)DetectionType::COUNT,
+              "every DetectionType needs a line in tools/card_text.json, in enum order");
+
+CardLines cardLines(DetectionType t, const char* vendor, const char* name) {
+    uint8_t idx = (uint8_t)t;
+    if (idx >= (uint8_t)DetectionType::COUNT) idx = 0;
+    const CardType& ct = CARD_TYPES[idx];
+    CardLines c = { ct.head, ct.why, ct.tip, ct.a, ct.b };
+    if (const DeviceInfo::Device* d = DeviceInfo::find(t, vendor, name)) {
+        for (const CardPage& p : CARD_PAGES)
+            if (strcmp(p.title, d->title) == 0) { c.head = p.head; c.why = p.why; c.tip = p.tip; break; }
+    }
+    return c;
 }
 
 const char* titleFor(DetectionType t, const char* vendor, const char* name) {

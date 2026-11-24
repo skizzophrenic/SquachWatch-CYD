@@ -126,4 +126,13 @@ bool queueRect(int& x, int& y, int& w, int& h);
 bool chipRect(uint8_t i, int& x, int& y, int& w, int& h);
 void forget();   // a new card: nothing drawn yet
 
+// The MORE INFO card inside the picked window (info_card.cpp). The window and
+// its buttons are the skin's; the middle is `body`, which draws the card in
+// panel pixels and returns how many buttons it wants: 2 (BACK, GOT IT) or 3
+// (BACK, MORE, GOT IT). The title says ABOUT and the device's name. No
+// opening animation: the window is already up behind it.
+typedef uint8_t (*InfoBody)(TFT_eSPI& t, int x, int y, int w, int h);
+void drawInfo(TFT_eSPI& t, uint8_t id, const char* name, DetectionType type, InfoBody body,
+              uint32_t now, bool sunset, uint8_t palette);
+
 }  // namespace AlertSkin
