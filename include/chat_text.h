@@ -4,7 +4,8 @@
 
 namespace ChatText {
 
-constexpr int COMPACT_GLYPH = 12;
+constexpr int COMPACT_GLYPH = 10;
+constexpr int COMPACT_ADVANCE = COMPACT_GLYPH + 1;
 constexpr int FULL_GLYPH = 16;
 
 bool needsFallback(const char* text);

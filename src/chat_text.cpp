@@ -73,16 +73,72 @@ char latin(uint32_t codepoint) {
 }
 
 int advance(TFT_eSPI& target, uint32_t codepoint, int size) {
-    if (codepoint >= 128) return size;
+    if (codepoint >= 128) return size == COMPACT_GLYPH ? COMPACT_ADVANCE : size;
     const char ascii[]{latin(codepoint), '\0'};
     return target.textWidth(ascii);
 }
 
+// The 16-to-10 resize uses a common grid where each source pixel covers
+// five units and each output pixel covers eight.
+struct SampleSpan {
+    uint8_t first;
+    uint8_t weights[3];
+};
+
+static_assert(FULL_GLYPH == 16 && COMPACT_GLYPH == 10, "The weights match the 16-to-10 resize");
+constexpr SampleSpan compactSpans[COMPACT_GLYPH] = {
+    { 0, {5, 3, 0}}, { 1, {2, 5, 1}}, { 3, {4, 4, 0}}, { 4, {1, 5, 2}}, { 6, {3, 5, 0}},
+    { 8, {5, 3, 0}}, { 9, {2, 5, 1}}, {11, {4, 4, 0}}, {12, {1, 5, 2}}, {14, {3, 5, 0}},
+};
+
+// RGB565 shade at quarter coverage. The preview is drawn into an RGB332
+// sprite, so a few distinct coverage levels are enough for its edges.
+uint16_t shade(uint16_t fg, uint16_t bg, unsigned quarters) {
+    const unsigned r = ((fg >> 11) * quarters + (bg >> 11) * (4 - quarters)) / 4;
+    const unsigned g = (((fg >> 5) & 63) * quarters + ((bg >> 5) & 63) * (4 - quarters)) / 4;
+    const unsigned b = ((fg & 31) * quarters + (bg & 31) * (4 - quarters)) / 4;
+    return static_cast<uint16_t>((r << 11) | (g << 5) | b);
+}
+
+void drawCompactGlyph(TFT_eSPI& target, const Glyph& glyph, int x, int y,
+                      const uint16_t* palette) {
+    // The last three-pixel span includes one zero-weight sample beyond the
+    // source edge. A zero row pads the vertical pass for that sample.
+    uint8_t horizontal[FULL_GLYPH + 1][COMPACT_GLYPH] = {};
+    for (int row = 0; row < FULL_GLYPH; ++row) {
+        const uint16_t bits = glyph.rows[row];
+        if (!bits) continue;
+        for (int col = 0; col < COMPACT_GLYPH; ++col) {
+            const auto& span = compactSpans[col];
+            int coverage = 0;
+            for (int tap = 0; tap < 3; ++tap) {
+                if (bits & (0x8000u >> (span.first + tap))) coverage += span.weights[tap];
+            }
+            horizontal[row][col] = static_cast<uint8_t>(coverage);
+        }
+    }
+    for (int row = 0; row < COMPACT_GLYPH; ++row) {
+        const auto& span = compactSpans[row];
+        const auto* samples = horizontal + span.first;
+        for (int col = 0; col < COMPACT_GLYPH; ++col) {
+            const int coverage = samples[0][col] * span.weights[0] +
+                                 samples[1][col] * span.weights[1] +
+                                 samples[2][col] * span.weights[2];
+            const int level = (coverage + 8) / 16;
+            if (level) target.drawPixel(x + col, y + row, palette[level]);
+        }
+    }
+}
+
 void drawGlyph(TFT_eSPI& target, uint32_t codepoint, int x, int y,
-               uint16_t color, int size) {
+               uint16_t color, int size, const uint16_t* compactPalette) {
     const Glyph* glyph = findGlyph(codepoint);
     if (!glyph) {
         target.drawRect(x + 2, y + 2, size - 4, size - 4, color);
+        return;
+    }
+    if (size == COMPACT_GLYPH) {
+        drawCompactGlyph(target, *glyph, x, y, compactPalette);
         return;
     }
     for (int iy = 0; iy < size; ++iy) {
@@ -103,16 +159,22 @@ void drawGlyph(TFT_eSPI& target, uint32_t codepoint, int x, int y,
 int drawRange(TFT_eSPI& target, const char* p, const char* end, int x, int y,
               int width, uint16_t color, uint16_t background, int size, int ascent) {
     const int right = x + width;
+    const bool compact = size == COMPACT_GLYPH;
+    uint16_t palette[5] = {};
+    if (compact) {
+        for (unsigned level = 1; level < 4; ++level) palette[level] = shade(color, background, level);
+        palette[4] = color;
+    }
     target.setTextColor(color, background);
     while (p != end && *p) {
         const Character c = decode(p);
         const int step = advance(target, c.codepoint, size);
         if (x + step > right) break;
         if (c.codepoint < 128) {
-            target.setCursor(x, y + ascent + (size == COMPACT_GLYPH ? 2 : 0));
+            target.setCursor(x, y + ascent + (compact ? 1 : 0));
             target.write(static_cast<uint8_t>(latin(c.codepoint)));
         } else {
-            drawGlyph(target, c.codepoint, x, y, color, size);
+            drawGlyph(target, c.codepoint, x, y + (compact ? 1 : 0), color, size, palette);
         }
         x += step;
         p = c.next;
