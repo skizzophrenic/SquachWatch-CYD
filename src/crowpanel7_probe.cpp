@@ -85,6 +85,12 @@ void crowPeriphProbe() {
     // DetectionEngine::init() (detection.cpp); a deaf sniffer starts here.
     {
         esp_wifi_set_promiscuous(false);
+        // SQW_ACTIVE_SCAN_OK: this is a bring-up probe, run by hand from the
+        // dev console on one opt-in board, and its whole job is to answer
+        // "is this radio deaf?" with a number comparable to a laptop's scan
+        // from the same desk. Probing makes that number trustworthy. It is
+        // not on any path a user reaches, so it stays active -- declared
+        // here rather than inherited from an argument default.
         wifi_scan_config_t c = {}; c.scan_type = WIFI_SCAN_TYPE_ACTIVE; c.scan_time.active.min = 100; c.scan_time.active.max = 300;
         uint16_t n = 0; esp_err_t e = esp_wifi_scan_start(&c, true); esp_wifi_scan_get_ap_num(&n);
         Serial.printf("[probe] WiFi scan through the sniffer's driver: %s, %u APs\n", esp_err_to_name(e), (unsigned)n);

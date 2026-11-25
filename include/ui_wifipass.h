@@ -17,6 +17,13 @@ enum class WifiPassTouch  : uint8_t { DOWN, MOVE, UP };
 enum class WifiPassResult : uint8_t { NONE, OK, BACK };
 
 void           uiWifiPassInit(TFT_eSPI& t, const char* ssid);
+// The same keyboard for short text that is not a secret (MY ALERTS' patterns
+// and labels): `prompt` replaces "PASSWORD FOR" in the header, `subject` is
+// the line beside it, the text shows from the start, it opens holding
+// `initial`, takes at most `maxLen` characters, and OK takes an empty field
+// when `allowEmpty` (an optional label). uiWifiPassSsid() returns `subject`.
+void           uiWifiPassInitText(TFT_eSPI& t, const char* prompt, const char* subject, const char* initial,
+                                  uint8_t maxLen, bool allowEmpty);
 void           uiWifiPassTick(TFT_eSPI& t, uint32_t now);
 // The next tick draws everything, not only what changed. For a caller whose
 // buffer does not keep the last frame (the 3.5"'s half-height sprite).
@@ -24,6 +31,7 @@ void           uiWifiPassRedrawAll();
 void           uiWifiPassTouch(int x, int y, uint32_t now, WifiPassTouch phase);
 // A character from a physical keyboard: '\b' deletes, '\n' is OK.
 void           uiWifiPassKey(char c, uint32_t now);
+bool           uiWifiPassBackRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h);
 WifiPassResult uiWifiPassResult();
 const char*    uiWifiPassText();
 const char*    uiWifiPassSsid();

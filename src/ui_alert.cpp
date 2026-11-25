@@ -1,14 +1,25 @@
-// SquachWatch-CYD — ALERT screen implementation
+// SquachWatch-CYD — ALERT screen: the Trail card (see ui_alert.h).
+//
+// Laid out in a 320x240 design space and mapped onto the panel: a landscape
+// panel 300 or wider scales it (the 2.8in exactly, the 3.5in by 1.5, the Tab5
+// by 2 across and 1.5 down); a narrow panel (the watch's 240x240, the 2.8in
+// turned portrait) keeps the trail at full width and stacks the header's
+// chips under the tabs; the 240x135 boards get their own small cut.
 #include "ui_alert.h"
 #include "theme.h"
 #include "privacy.h"
 #include "signatures.h"
 #include "detection.h"
 #include "ignore_list.h"
+#include "tag_ring.h"
+#include "trail.h"
+#include "places.h"
+#include "regulars.h"
+#include "clock.h"
+#include "squachy.h"
+#include "settings.h"
+#include "alert_skin.h"
 #include <Arduino.h>
-#if defined(CYD_GPS)
-#include "sd_row.h"   // degreesText() for the place line
-#endif
 
 static const char* targetLabel(DetectionType t) {
     switch (t) {
@@ -25,766 +36,822 @@ static const char* targetLabel(DetectionType t) {
         case DetectionType::GOOGLE_TAG:  return "GOOGLE TAG";
         case DetectionType::TILE:        return "TILE";
         case DetectionType::RING:        return "RING CAM";
+        case DetectionType::DEAUTH:      return "DEAUTH FLOOD";
         case DetectionType::EVILTWIN:    return "EVIL TWIN AP";
         case DetectionType::IBEACON:     return "PROXIMITY BEACON";
         case DetectionType::HACKER:      return "HACKER HARDWARE";
+        case DetectionType::LORAWAN:     return "LORAWAN NETWORK";
+        case DetectionType::MINE:        return "MY ALERT";
+        case DetectionType::LISTENER:    return "SMART SPEAKER";
+        // A device opened from SCAN's list, which the scan does not classify.
+        case DetectionType::UNKNOWN:     return "DEVICE";
         default:                     return "UNKNOWN";
     }
 }
+// A shorter name for the tab when the long one and the verdict will not both
+// fit the row.
+static const char* shortLabel(DetectionType t) {
+    switch (t) {
+        case DetectionType::FLOCK:   return "FLOCK";
+        case DetectionType::AXON:    return "AXON";
+        case DetectionType::META:    return "GLASSES";
+        case DetectionType::SKIMMER: return "SKIMMER";
+        case DetectionType::SAMSUNG_TAG: return "SMARTTAG";
+        case DetectionType::GOOGLE_TAG:  return "FIND HUB";
+        case DetectionType::RING:        return "RING";
+        case DetectionType::DEAUTH:      return "DEAUTH";
+        case DetectionType::EVILTWIN:    return "EVIL TWIN";
+        case DetectionType::IBEACON:     return "IBEACON";
+        case DetectionType::HACKER:      return "HACKER";
+        case DetectionType::LORAWAN:     return "LORAWAN";
+        case DetectionType::LISTENER:    return "SPEAKER";
+        default: return targetLabel(t);
+    }
+}
 
+// ---- state ------------------------------------------------------------
 static Detection s_last;
 static bool s_touched = false;
+static bool s_ringing = false;
+static bool s_watching = false;
 static bool s_redacted = false;
-void uiAlertSetRedacted(bool r) { s_redacted = r; }
-
-// Six saturated stops blended pairwise. The same construction the CLEAR
-// headline's rainbow uses, and for the same reason: RGB332 has 8 levels of
-// red and green but only FOUR of blue, so a computed HSV sweep bands badly
-// while a walk between colours known to survive the downconvert does not.
-static uint16_t hue6(float pos) {
-    static const uint16_t STOPS[6] = {
-        Theme::RED, Theme::AMBER, Theme::GREEN,
-        Theme::CYAN, Theme::VAPOR_PURPLE, Theme::PINK
-    };
-    pos = fmodf(pos, 6.0f);
-    if (pos < 0) pos += 6.0f;
-    const int i0 = (int)pos, i1 = (i0 + 1) % 6;
-    return Theme::blend(STOPS[i0], STOPS[i1], (uint16_t)((pos - i0) * 255));
-}
-
-static uint16_t lighten(uint16_t c, uint16_t amt) { return Theme::blend(c, Theme::WHITE, amt); }
-static uint16_t darken (uint16_t c, uint16_t amt) { return Theme::blend(c, Theme::BLACK, amt); }
-
-// The RGB frame. One full spectrum wrapped exactly once around the
-// perimeter, rotating -- so every hue is on screen at all times and the
-// border never goes dark or reads as switched off.
-//
-// The walk is what makes that possible: d is the distance travelled around
-// the outer rectangle, continuous from 0 back to P, so the hue at the last
-// pixel of the left edge meets the hue at the first pixel of the top. Each
-// step paints BORDER_W pixels inward, which means the four corners are
-// painted twice -- they agree, because both visits carry the same d.
-static const int   BORDER_W  = 2;
-static const float BORDER_MS = 400.0f;  // ms per sixth of the spectrum
-
-static void drawRgbBorder(TFT_eSPI& t, int w, int h, uint32_t now) {
-    const float P = (float)(2 * (w + h));
-    const float phase = (float)now / BORDER_MS;
-    for (int x = 0; x < w; x++) {
-        t.drawFastVLine(x, 0, BORDER_W, hue6((float)x / P * 6.0f + phase));
-        t.drawFastVLine(x, h - BORDER_W, BORDER_W,
-                        hue6((float)(w + h + (w - 1 - x)) / P * 6.0f + phase));
-    }
-    for (int y = 0; y < h; y++) {
-        t.drawFastHLine(w - BORDER_W, y, BORDER_W,
-                        hue6((float)(w + y) / P * 6.0f + phase));
-        t.drawFastHLine(0, y, BORDER_W,
-                        hue6((float)(2 * w + h + (h - 1 - y)) / P * 6.0f + phase));
-    }
-}
-
-// The header strip's bevel, built from the strip's OWN colour rather than
-// Win95 grey: the strip is a coloured title bar, and grey chrome around it
-// would read as a second, unrelated widget sitting behind the type name.
-//
-// Pushed harder than the IGNORE button's bevel. That one has five distinct
-// greys to build from; a bevel made out of a single colour has only what
-// lightening and darkening can reach from that colour, and on a mid purple
-// through RGB332 the gentle version came back as almost nothing.
-static void stripBevel(TFT_eSPI& t, int x, int y, int w, int stripH, uint16_t c) {
-    const uint16_t lit = lighten(c, 170), litSoft = lighten(c, 75);
-    const uint16_t shd = darken(c, 170),  shdSoft = darken(c, 75);
-    const int R = x + w - 1, Bm = y + stripH - 1;
-    t.drawFastHLine(x, y, w, lit);
-    t.drawFastHLine(x, y + 1, w, litSoft);
-    t.drawFastHLine(x, Bm - 1, w, shdSoft);
-    t.drawFastHLine(x, Bm, w, shd);
-    t.drawFastVLine(x, y, stripH, lit);
-    t.drawFastVLine(x + 1, y, stripH, litSoft);
-    t.drawFastVLine(R - 1, y, stripH, shdSoft);
-    t.drawFastVLine(R, y, stripH, shd);
-}
-
-// Whether the player's selected background animates behind the alert.
-// Kept as a named constant rather than inlined so it is one edit to take
-// back out, and 0..255 of dim so it can be tuned without touching the
-// draw order.
-static const bool     ALERT_SHOW_BACKGROUND = true;
-static const uint16_t ALERT_PALETTE_DIM     = 150;  // palette knock-back
-static const uint8_t  ALERT_BACKGROUND_DIM  = 128;  // every other row to BG
-
-// ALERT gets its own deliberate glitch cadence instead of waiting on
-// the shared ambient 5-10s roll -- one right away (so the screen reads
-// as glitchy from the first frame, not just eventually), then again at
-// 5s/8s/10s, each one louder than the last (see
-// Theme::triggerGlitchBurst()'s intensity param), then holding at the
-// loudest level every 2.5s for as long as the alert stays up. All of
-// it fires through that same shared burst drawBangersText()/
-// drawGlitchStatic() everywhere else already read from, so this is
-// just a schedule + escalation curve, not a second rendering path.
+static bool s_first = false, s_night = false, s_lastFree = false;
+static bool s_spam = false;
+static uint16_t s_spamFakes = 0;
+static uint8_t  s_queue = 0;
+static bool     s_picking = false;
 static uint32_t s_alertStart = 0;
 static uint8_t  s_glitchStep = 0;
+static uint32_t s_queueAt = 0;     // when the last catch joined the queue, for the skins' flourish
+static bool     s_preview = false; // ALERT CARD's PREVIEW
+static bool     s_skinned = false; // the last frame was drawn by a skin: taps go by its rects
+static bool     s_byHand = false;  // opened from a LOG row: HUNT takes SNOOZE's slot on a tracker
+static int      browseH(int h);    // the style browser's strip, further down
+static void     drawBrowseStrip(TFT_eSPI& t, int w, int h);
+static void     ownerRowText(char* out, size_t n);   // the OWNER fact row, further down
 
-// step 0 (immediate) -> level 1, step 1 (2.5s) -> level 2, step 2 (4s)
-// -> level 3 (screen tear joins in), step 3 (5s) -> level 4 (loudest),
-// step 4+ (every 1.25s after) stays pinned at 4. Twice the cadence of
-// the original 0/5/8/10s + 2.5s schedule -- same shape, half the wait.
-static uint32_t glitchStepOffsetMs(uint8_t step) {
-    switch (step) {
-        case 0: return 0;
-        case 1: return 2500;
-        case 2: return 4000;
-        case 3: return 5000;
-        default: return 5000 + (uint32_t)(step - 3) * 1250;
-    }
-}
-static uint8_t glitchStepLevel(uint8_t step) {
-    uint16_t lv = (uint16_t)step + 1;
-    return (uint8_t)(lv > 4 ? 4 : lv);
-}
-
-static bool s_first = false;
-static bool s_night = false;
-static bool s_lastFree = false;
-void uiAlertSetFirst(bool first) { s_first = first; }
-void uiAlertSetNight(bool night) { s_night = night; }
-void uiAlertSetLastFree(bool lastFree) { s_lastFree = lastFree; }
-static bool     s_spam      = false;
-static uint16_t s_spamFakes = 0;
-static const char* s_snzLabel = nullptr;
-static uint16_t    s_snzLeft  = 0;
-void uiAlertSetSnoozePick(const char* label, uint16_t left) {
-    s_snzLabel = label;
-    s_snzLeft  = left > 1000 ? 1000 : left;
-}
+void uiAlertSetRinging(bool on)       { s_ringing = on; }
+void uiAlertSetWatching(bool on)      { s_watching = on; }
+void uiAlertSetRedacted(bool r)       { s_redacted = r; }
+void uiAlertSetFirst(bool first)      { s_first = first; }
+void uiAlertSetNight(bool night)      { s_night = night; }
+void uiAlertSetLastFree(bool lf)      { s_lastFree = lf; }
 void uiAlertSetSpam(bool spam, uint16_t fakes) { s_spam = spam; s_spamFakes = fakes; }
+void uiAlertSetQueue(uint8_t n)       { if (n > s_queue) s_queueAt = millis(); s_queue = n; }
+void uiAlertSetPreview(bool on)       { s_preview = on; }
+void uiAlertSetByHand(bool on)        { s_byHand = on; }
+bool uiAlertPreviewing()              { return s_preview; }
+void uiAlertSetFrame(uint8_t* buf, int w, int h) { AlertSkin::setFrame(buf, w, h); }
+void uiAlertSetSnoozePicking(bool on) { s_picking = on; }
+bool uiAlertSnoozePicking()           { return s_picking; }
+void uiAlertSetSnoozePick(const char*, uint16_t) {}
 #if defined(CYD_GPS)
-static bool    s_place = false, s_placeFake = false;
-static int32_t s_placeLat7 = 0, s_placeLon7 = 0;
-void uiAlertSetPlace(bool has, int32_t lat7, int32_t lon7, bool fake) {
-    s_place = has; s_placeLat7 = lat7; s_placeLon7 = lon7; s_placeFake = fake;
-}
+void uiAlertSetPlace(bool, int32_t, int32_t, bool) {}
 #endif
+bool uiAlertTouched()   { return s_touched; }
+void uiAlertNoteTouch() { s_touched = true; }
+
+// ALERT's glitch cadence: one burst right away, then louder at 2.5 / 4 / 5 s,
+// then the loudest every 1.25 s for as long as it stays up.
+static uint32_t glitchStepOffsetMs(uint8_t step) {
+    switch (step) { case 0: return 0; case 1: return 2500; case 2: return 4000; case 3: return 5000;
+                    default: return 5000 + (uint32_t)(step - 3) * 1250; }
+}
+static uint8_t glitchStepLevel(uint8_t step) { return (uint8_t)(step + 1 > 4 ? 4 : step + 1); }
 
 void uiAlertInit(TFT_eSPI& t, const Detection& d) {
     s_last = d;
-    s_first = false;
-    s_night = false;
-    s_lastFree = false;
-    s_spam     = false;
-    s_snzLabel = nullptr;
-#if defined(CYD_GPS)
-    s_place    = false;   // a card never shows an earlier alert's place
-#endif
+    s_first = s_night = s_lastFree = s_spam = false;
+    s_queue = 0;
+    s_picking = false;
+    s_watching = false;
     s_touched = false;
     s_alertStart = millis();
     s_glitchStep = 0;
-    // fillScreen() relies on TFT_eSPI's base-class width/height, which
-    // TFT_eSprite::createSprite() never updates — it leaves stale
-    // remnants of whatever screen was drawn before when t is a sprite.
+    s_queueAt = 0;
+    s_preview = false;
+    s_skinned = false;
+    s_byHand = false;
+    AlertSkin::forget();
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
 }
 
-// MORE INFO button, bottom-right corner -- every other element on this
-// screen (title, target label, confidence, vendor, MAC, RSSI, radar,
-// wordmark) stays horizontally centered regardless of rotation, so a
-// corner is the one spot guaranteed clear on all of them.
-// Every number on this screen was measured against a 320x240 panel and then
-// fixed there, so on the 3.5" the card, the radar and the three buttons all
-// kept their old sizes and drifted apart around a hole in the middle. These
-// scale them together; the narrow case returns exactly what it always did.
-static inline bool wideAlert(int w) { return w >= 400; }
-// The StickS3's 240x135: everything on the card is laid out again for it,
-// smaller and closer, rather than scaled -- see each rect below.
-static inline bool tinyAlert(int h) { return h < 200; }
-static inline int  stripHOf(int w, int h)  { return tinyAlert(h) ? 28 : (wideAlert(w) ? 56 : 42); }
+// ---- layout -------------------------------------------------------------
+// Design-space numbers (320x240) and the map onto the panel.
+struct Lay {
+    int  w, h;
+    bool compact;   // 240x135: its own cut
+    bool narrow;    // w < 300: trail at full width, chips on their own row
+    float kx, ky;   // design -> panel
+    int  ts;        // the 5x7 text size for the small print: 1, or 2 on the large panels
+    int  tabsH;     // the header's height (panel px)
+    int  btnY, btnH, btnGap, btnW;   // the five buttons (panel px)
+};
+static Lay layoutFor(int w, int h) {
+    Lay L;
+    L.w = w; L.h = h;
+    L.compact = h < 200;
+    L.narrow  = !L.compact && w < 300;
+    L.kx = L.compact ? 1.0f : (float)w / 320.0f;
+    L.ky = L.compact ? 1.0f : (float)h / 240.0f;
+    if (L.narrow) { L.ky = (float)h / 240.0f; L.kx = 1.0f; }
+    const float k = L.kx < L.ky ? L.kx : L.ky;
+    L.ts   = (!L.compact && (k >= 1.5f || L.w >= 480 || L.ky >= 1.8f)) ? 2 : 1;
+    L.tabsH = L.compact ? 20 : (int)(30 * L.ky + 0.5f);
+    if (L.tabsH < 30 && !L.compact) L.tabsH = 30;
+    L.btnH  = L.compact ? 22 : (int)(36 * L.ky + 0.5f);
+    L.btnGap = L.compact ? 2 : 3;
+    L.btnY  = h - L.btnH - (L.compact ? 2 : 4);
+    L.btnW  = (w - L.btnGap * 6) / 5;
+    return L;
+}
+static inline int X(const Lay& L, int x) { return (int)(x * L.kx + 0.5f); }
+static inline int Y(const Lay& L, int y) { return (int)(y * L.ky + 0.5f); }
 
-static void moreInfoBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, int& bh) {
-    // Stacked "MORE"/"INFO" on two lines (see the draw call below)
-    // instead of one wide "MORE INFO" row -- a size-2 attempt at a
-    // bigger tap target that widened the button instead ate into the
-    // running critter animation's clear margin on the narrowest 240px
-    // landscape rotation. Going taller instead of wider keeps the
-    // footprint narrow enough to actually clear the radar/MAC/wordmark
-    // over there while still being a generously padded, easy target.
-    // Sized off this font's known 12x16px-per-glyph metrics at size 2
-    // (both words are 4 characters, so one width covers both) rather
-    // than a live measurement, since these are fixed literal strings,
-    // not runtime data -- the actual draw call still centers each line
-    // with a live t.textWidth() regardless, so a few px of slop here
-    // just shows up as slightly uneven padding, never a layout break.
-    bw = wideAlert(screenW) ? 104 : 70;
-    bh = wideAlert(screenW) ?  64 : 48;
-    if (tinyAlert(screenH)) { bw = 66; bh = 22; }   // one line, INFO
-    bx = screenW - bw - 4;
-    by = screenH - bh - 4;
+static void btnRect(const Lay& L, int i, int& bx, int& by, int& bw, int& bh) {
+    bx = L.btnGap + i * (L.btnW + L.btnGap);
+    by = L.btnY; bw = L.btnW; bh = L.btnH;
+}
+static bool inRect(int x, int y, int bx, int by, int bw, int bh, int slop = 0) {
+    return x >= bx - slop && x <= bx + bw + slop && y >= by - slop && y <= by + bh + slop;
+}
+static bool hitSlot(int x, int y, int w, int h, int i) {
+    if (s_skinned) { int bx, by, bw, bh; if (AlertSkin::buttonRect((uint8_t)i, bx, by, bw, bh)) return inRect(x, y, bx, by, bw, bh, 2); }
+    const Lay L = layoutFor(w, h);
+    int bx, by, bw, bh; btnRect(L, i, bx, by, bw, bh);
+    return inRect(x, y, bx, by, bw, bh, 2);
 }
 
-// HUNT button, bottom-LEFT corner -- the mirror of moreInfoBtnRect()
-// above, and for the same reason: the corners are the only spots
-// guaranteed clear of the centered column of text on every rotation.
-// Same 70x48 footprint so the two read as a matched pair, even though
-// "HUNT" is one short line and doesn't need the height -- matching the
-// neighbour matters more here than shrinking to fit the label.
-static void huntBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, int& bh) {
-    bw = wideAlert(screenW) ? 104 : 70;
-    bh = wideAlert(screenW) ?  64 : 48;
-    if (tinyAlert(screenH)) { bw = 66; bh = 22; }
-    bx = 4;
-    by = screenH - bh - 4;
+static bool ringShown() { return TagRing::canRing(s_last.type); }
+bool uiAlertRingShown() { return ringShown(); }
+bool uiAlertHitRing(int x, int y, int w, int h)     { return ringShown() && hitSlot(x, y, w, h, 0); }
+// HUNT lives in slot 3 on a tracker's card opened by hand (slot 1 is RING).
+static bool huntInSnoozeSlot() { return s_byHand && ringShown(); }
+bool uiAlertHitHunt(int x, int y, int w, int h)     { return (!ringShown() && hitSlot(x, y, w, h, 0)) || (huntInSnoozeSlot() && hitSlot(x, y, w, h, 2)); }
+bool uiAlertHitWatch(int x, int y, int w, int h)    { return hitSlot(x, y, w, h, 1); }
+bool uiAlertHitSnooze(int x, int y, int w, int h)   { return !huntInSnoozeSlot() && hitSlot(x, y, w, h, 2); }
+bool uiAlertHitIgnore(int x, int y, int w, int h)   { return hitSlot(x, y, w, h, 3); }
+bool uiAlertHitMoreInfo(int x, int y, int w, int h) { return hitSlot(x, y, w, h, 4); }
+bool uiAlertRingCentre(int w, int h, int& cx, int& cy) {
+    if (!ringShown()) return false;
+    const Lay L = layoutFor(w, h);
+    int bx, by, bw, bh; btnRect(L, 0, bx, by, bw, bh);
+    if (s_skinned) AlertSkin::buttonRect(0, bx, by, bw, bh);
+    cx = bx + bw / 2; cy = by + bh / 2;
+    return true;
 }
 
-// Height of the coloured header strip the detection type is named in. File
-// scope rather than a local in the draw function because the IGNORE button
-// sits inside this strip and is centred in it -- a number two things have to
-// agree on is not one either of them should own privately.
-
-
-// IGNORE sits in the header strip, at its right-hand end. The bottom two
-// corners are taken by HUNT and MORE INFO, and the strip's left-hand end is
-// where the detection type is named, so this is the remaining spot that
-// stays clear on the narrow rotations as well as the wide ones.
-static void ignoreBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, int& bh) {
-    // Deliberately smaller than HUNT and MORE INFO, which are 70x48 down
-    // in the corners where nothing else goes. Up here it shares the header
-    // strip with the target label, and the label's budget is measured off
-    // this rect (see the stripHOf(w, h) block), so every pixel taken here is a
-    // pixel taken from the longest type names.
-    //
-    // 62x28. Thicker than the 54x20 it replaced, and WIDER in step with it
-    // rather than just taller: "IGNORE" is 36px at size 1, so inside the 2px
-    // bevel 62x28 leaves 11px of air each side against 8 above and below.
-    // Horizontal padding exceeding vertical is the proportion that makes a
-    // push button look like one, and growing the height alone would have
-    // inverted it -- a Win95 button is a wide, shallow thing (75x23 dialog
-    // units, about 3.3:1), so getting chunkier has to mean getting bigger,
-    // not getting squarer.
-    //
-    // The width is capped by the header label beside it, whose budget is
-    // measured off this rect: on the 240px rotation that budget is 218-bw,
-    // and every type name was measured in Bangers MD to find the real
-    // ceiling. The longest that still fits the face is "CARD SKIMMER" at
-    // 151px, so bw can reach 67 before it would push that one into the
-    // built-in font. 62 leaves 5px of margin. The only two names over the
-    // line -- "PROXIMITY BEACON" at 188 and "HACKER HARDWARE" at 187 --
-    // were already stepping down at any width.
-    bw = wideAlert(screenW) ? 92 : 62;
-    bh = wideAlert(screenW) ? 38 : 28;
-    if (tinyAlert(screenH)) { bw = 54; bh = 20; }
-    // 8 from the edge rather than 4. The margin has to clear the BORDER, not
-    // the screen: with a 3px frame drawn over the outermost columns, a 4px
-    // margin left the button one pixel off it, which reads as a collision
-    // rather than a gap. 8 leaves 5 clear of the widest frame.
-    bx = screenW - bw - 8;
-    // Centred in the strip rather than pinned 4px below its top edge, which
-    // left 18 rows of dead colour underneath and made the button read as
-    // stuck to the ceiling instead of sitting in a title bar. The strip is
-    // the only thing behind it, so centring on the strip IS centring on
-    // everything it overlaps -- and it is derived, so if stripHOf(w, h) ever moves
-    // the button moves with it.
-    by = (stripHOf(screenW, screenH) - bh) / 2;
+// The +N MORE chip: top right of the header (its own row when narrow).
+static void queueRect(const Lay& L, int& bx, int& by, int& bw, int& bh) {
+    bw = L.compact ? 44 : X(L, 52); bh = L.compact ? 12 : Y(L, 14);
+    bx = L.w - bw - 3;
+    by = L.narrow ? L.tabsH + 3 : (L.compact ? 4 : Y(L, 3));
+}
+bool uiAlertHitQueue(int x, int y, int w, int h) {
+    if (!s_queue) return false;
+    if (s_skinned) { int bx, by, bw, bh; return AlertSkin::queueRect(bx, by, bw, bh) && inRect(x, y, bx, by, bw, bh, 6); }
+    const Lay L = layoutFor(w, h);
+    int bx, by, bw, bh; queueRect(L, bx, by, bw, bh);
+    return inRect(x, y, bx, by, bw, bh, 6);
 }
 
-bool uiAlertHitIgnore(int x, int y, int screenW, int screenH) {
-    int bx, by, bw, bh;
-    ignoreBtnRect(screenW, screenH, bx, by, bw, bh);
-    // Padded outward. The button lost 4 rows becoming the right shape, and
-    // a correctly proportioned button is no use if a resistive panel and a
-    // fingertip cannot land on it -- so the drawn rect shrank and the
-    // target grew. Nothing else is up here to steal a near miss from: the
-    // slop runs into the screen edge on two sides and into the header
-    // strip's own dead space on the others.
-    const int SLOP = 6;
-    return x >= bx - SLOP && x <= bx + bw + SLOP &&
-           y >= by - SLOP && y <= by + bh + SLOP;
+// The snooze chips, over the facts block.
+static const char* const SNZ[4] = { "10 MIN", "30 MIN", "1 HOUR", "4 HOURS" };
+static void chipRect(const Lay& L, int i, int& bx, int& by, int& bw, int& bh) {
+    const int gap = L.compact ? 2 : 4;
+    bw = (L.w - gap * 5) / 4;
+    bh = L.compact ? 18 : Y(L, 30);
+    bx = gap + i * (bw + gap);
+    by = L.compact ? L.btnY - bh - 4 : Y(L, 134);
+}
+int uiAlertHitSnoozeChip(int x, int y, int w, int h) {
+    if (!s_picking) return -1;
+    if (s_skinned) {
+        for (int i = 0; i < 4; i++) { int bx, by, bw, bh; if (AlertSkin::chipRect((uint8_t)i, bx, by, bw, bh) && inRect(x, y, bx, by, bw, bh, 3)) return i; }
+        return -1;
+    }
+    const Lay L = layoutFor(w, h);
+    for (int i = 0; i < 4; i++) {
+        int bx, by, bw, bh; chipRect(L, i, bx, by, bw, bh);
+        if (inRect(x, y, bx, by, bw, bh, 3)) return i;
+    }
+    return -1;
 }
 
-// SNOOZE, bottom centre. The corners are taken and the plate ends well
-// above the bottom row, so between HUNT and MORE INFO is the one strip
-// left clear on every rotation: 92 px on the narrow one, 84 used.
-static void snoozeBtnRect(int screenW, int screenH, int& bx, int& by, int& bw, int& bh) {
-    bw = wideAlert(screenW) ? 124 : 84;
-    bh = wideAlert(screenW) ?  40 : 28;
-    if (tinyAlert(screenH)) { bw = 84; bh = 22; }
-    bx = (screenW - bw) / 2;
-    by = screenH - bh - 4;
+uint8_t uiAlertStops(int w, int h, int16_t* xs, int16_t* ys, uint8_t cap) {
+    if (s_preview && cap >= 3) {   // the browser: next, before, and back -- OUTFIT's three
+        const int y = h - browseH(h) / 2;
+        xs[0] = (int16_t)(w - 17); ys[0] = (int16_t)y;
+        xs[1] = 17;               ys[1] = (int16_t)y;
+        xs[2] = (int16_t)(w / 2); ys[2] = (int16_t)(h / 2);
+        return 3;
+    }
+    if (s_skinned) {
+        uint8_t n = 0; int bx, by, bw, bh;
+        for (uint8_t i = 0; i < 5 && n < cap; i++) if (AlertSkin::buttonRect(i, bx, by, bw, bh)) { xs[n] = (int16_t)(bx + bw / 2); ys[n] = (int16_t)(by + bh / 2); n++; }
+        if (s_queue && n < cap && AlertSkin::queueRect(bx, by, bw, bh)) { xs[n] = (int16_t)(bx + bw / 2); ys[n] = (int16_t)(by + bh / 2); n++; }
+        return n;
+    }
+    const Lay L = layoutFor(w, h);
+    uint8_t n = 0;
+    for (int i = 0; i < 5 && n < cap; i++) {
+        int bx, by, bw, bh; btnRect(L, i, bx, by, bw, bh);
+        xs[n] = (int16_t)(bx + bw / 2); ys[n] = (int16_t)(by + bh / 2); n++;
+    }
+    if (s_queue && n < cap) {
+        int bx, by, bw, bh; queueRect(L, bx, by, bw, bh);
+        xs[n] = (int16_t)(bx + bw / 2); ys[n] = (int16_t)(by + bh / 2); n++;
+    }
+    return n;
 }
 
-bool uiAlertHitSnooze(int x, int y, int screenW, int screenH) {
-    int bx, by, bw, bh;
-    snoozeBtnRect(screenW, screenH, bx, by, bw, bh);
-    return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
+// ---- the verdict ---------------------------------------------------------
+enum class Verdict : uint8_t { NEW, MET, FOLLOWING, SPAM };
+static Verdict verdictOf(const Detection& d) {
+    if (s_preview) return Verdict::FOLLOWING;
+    if (s_spam) return Verdict::SPAM;
+    if (Trail::following(d)) return Verdict::FOLLOWING;
+    if (Regulars::nameFor(d.mac)) return Verdict::MET;
+    return Verdict::NEW;
+}
+static const char* verdictWord(Verdict v) {
+    switch (v) {
+        case Verdict::FOLLOWING: return "FOLLOWING";
+        case Verdict::MET:       return "MET BEFORE";
+        case Verdict::SPAM:      return "SPAM FLOOD";
+        default:                 return s_first ? "FIRST EVER" : "NEW";
+    }
+}
+static uint16_t verdictColour(Verdict v) {
+    switch (v) {
+        case Verdict::FOLLOWING: return Theme::RED;
+        case Verdict::MET:       return Theme::VAPOR_BLUE;
+        case Verdict::SPAM:      return Theme::AMBER;
+        default:                 return Theme::CYAN;
+    }
 }
 
-bool uiAlertHitHunt(int x, int y, int screenW, int screenH) {
-    int bx, by, bw, bh;
-    huntBtnRect(screenW, screenH, bx, by, bw, bh);
-    return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
+// ---- small drawing helpers ------------------------------------------------
+static void sysText(TFT_eSPI& t, int x, int y, const char* s, uint16_t col, uint16_t bg, int size = 1) {
+    t.setTextFont(1); t.setTextSize(size); t.setTextWrap(false);
+    t.setTextColor(col, bg); t.setCursor(x, y); t.print(s);
+}
+static int sysW(TFT_eSPI& t, const char* s, int size) { t.setTextFont(1); t.setTextSize(size); return t.textWidth(s); }
+static void sysTextC(TFT_eSPI& t, int cx, int y, const char* s, uint16_t col, uint16_t bg, int size = 1) {
+    sysText(t, cx - sysW(t, s, size) / 2, y, s, col, bg, size);
+}
+static void sysTextR(TFT_eSPI& t, int rx, int y, const char* s, uint16_t col, uint16_t bg, int size = 1) {
+    sysText(t, rx - sysW(t, s, size), y, s, col, bg, size);
+}
+// A little filled chip with a label; returns its width.
+static int chip(TFT_eSPI& t, int x, int y, const char* s, uint16_t fill, uint16_t ink, int size, int h) {
+    const int w = sysW(t, s, size) + 8;
+    t.fillRect(x, y, w, h, fill);
+    sysText(t, x + 4, y + (h - 8 * size) / 2, s, ink, fill, size);
+    return w;
+}
+// A tick box with its word: green when it holds, grey when it does not.
+static int tick(TFT_eSPI& t, int x, int y, const char* s, bool on, int size) {
+    const int b = 7 * size;
+    const uint16_t box = on ? Theme::GREEN : (uint16_t)0x4208;
+    t.fillRect(x, y, b, b, box);
+    if (on) {
+        t.drawLine(x + 1 * size, y + 3 * size, x + 3 * size, y + 5 * size, Theme::BLACK);
+        t.drawLine(x + 3 * size, y + 5 * size, x + 6 * size, y + 1 * size, Theme::BLACK);
+    }
+    sysText(t, x + b + 3 * size, y, s, on ? Theme::WHITE : (uint16_t)0x8410, Theme::BG, size);
+    return x + b + 3 * size + sysW(t, s, size) + 9 * size;
+}
+static void stampOf(uint16_t minOfUptime, char* out, size_t n) {
+    Clock::formatStamp((uint32_t)minOfUptime * 60000u, out, n);
+}
+static void kmText(uint16_t m, char* out, size_t n) {
+    if (m >= 1000) snprintf(out, n, "%u.%u KM", (unsigned)(m / 1000), (unsigned)((m % 1000) / 100));
+    else           snprintf(out, n, "%u M", (unsigned)m);
+}
+static const char* trendWord(int8_t tr) { return tr > 0 ? "CLOSER" : tr < 0 ? "FURTHER" : "HOLDING"; }
+
+// The row this card is about, re-read from the engine so the ladder and the
+// trail keep moving while it is up.
+static void refresh(const DetectionEngine& eng) {
+    for (uint8_t i = 0; i < eng.logCount(); i++) {
+        const Detection* d = eng.logAt(i);
+        if (d && memcmp(d->mac, s_last.mac, 6) == 0 && d->type == s_last.type) { s_last = *d; return; }
+    }
 }
 
-bool uiAlertHitMoreInfo(int x, int y, int screenW, int screenH) {
-    int bx, by, bw, bh;
-    moreInfoBtnRect(screenW, screenH, bx, by, bw, bh);
-    return x >= bx && x <= bx + bw && y >= by && y <= by + bh;
+// ---- the header ------------------------------------------------------------
+static void drawHeader(TFT_eSPI& t, const Lay& L, Verdict v, uint16_t typeCol) {
+    const int H = L.tabsH;
+    const uint16_t vcol = verdictColour(v);
+    const char* vw = verdictWord(v);
+    const int w = L.w;
+    // Bangers MD is a 27-row face: it fits a 30-row tab. The compact boards
+    // get the system font at size 2.
+    const bool bang = !L.compact;
+    const char* tl = targetLabel(s_last.type);
+    int vwid, twid;
+    if (bang) {
+        vwid = Theme::bangersTextWidth(vw, Theme::BangersSize::MD) + 14;
+        twid = Theme::bangersTextWidth(tl, Theme::BangersSize::MD) + 14 + 26;   // and the icon after the name
+        // Chips need about 110 px beside the tabs on a 320 panel; a long type
+        // name takes its short form, then the verdict loses its tab to a word.
+        const int room = L.narrow ? w : w - X(L, 112);
+        if (vwid + twid > room) { tl = shortLabel(s_last.type); twid = Theme::bangersTextWidth(tl, Theme::BangersSize::MD) + 14 + 26; }
+    } else {
+        vwid = sysW(t, vw, 2) + 8;
+        tl = shortLabel(s_last.type);
+        twid = sysW(t, tl, 2) + 8;
+        if (vwid + twid > w) { vwid = sysW(t, vw, 1) + 8; twid = sysW(t, tl, 1) + 8; }
+    }
+    // The verdict tab, then the type tab.
+    t.fillRect(0, 0, vwid, H, vcol);
+    t.fillRect(vwid, 0, twid, H, typeCol);
+    if (bang) {
+        Theme::drawBangersText(t, 7, (H - 27) / 2, vw, Theme::labelOn(vcol), Theme::BangersSize::MD);
+        Theme::drawBangersText(t, vwid + 7, (H - 27) / 2, tl, Theme::labelOn(typeCol), Theme::BangersSize::MD);
+        // The type's icon after its name, as tall as the name. Its bite is cut
+        // in Theme::BG, lent the tab's colour for the one call.
+        const int sz = 9, ix = vwid + 7 + Theme::bangersTextWidth(tl, Theme::BangersSize::MD) + 4 + sz * 135 / 100;
+        const uint16_t keep = Theme::BG; Theme::BG = typeCol;
+        Theme::drawTypeIcon(t, s_last.type, ix, (H - 27) / 2 + 24 - sz * 117 / 100, sz);
+        Theme::BG = keep;
+    } else {
+        const int sz = (vwid + twid > w) ? 1 : (sysW(t, vw, 2) + 8 == vwid ? 2 : 1);
+        sysText(t, 4, (H - 8 * sz) / 2, vw, Theme::labelOn(vcol), vcol, sz);
+        sysText(t, vwid + 4, (H - 8 * sz) / 2, tl, Theme::labelOn(typeCol), typeCol, sz);
+    }
+    t.drawFastHLine(0, H, w, typeCol);
+
+    // The chips: owner state, met before, how many wait. Beside the tabs on a
+    // wide panel, on their own row under them when narrow.
+    char own[16] = "", met[24] = "";
+    uint16_t ownCol = Theme::AMBER;
+    if (s_last.owner == OWNER_AWAY) {
+        const uint16_t mins = (uint16_t)((uint16_t)(millis() / 60000u) - s_last.ownerMin);
+        if (mins >= 120) snprintf(own, sizeof own, "AWAY %u H", (unsigned)(mins / 60));
+        else if (mins >= 2) snprintf(own, sizeof own, "AWAY %u MIN", (unsigned)mins);
+        else snprintf(own, sizeof own, "AWAY FROM OWNER");
+    } else if (s_last.owner == OWNER_WITH) {
+        snprintf(own, sizeof own, "WITH OWNER"); ownCol = (uint16_t)0x4208;
+    }
+    if (v == Verdict::SPAM) snprintf(met, sizeof met, "%u FAKES", (unsigned)s_spamFakes);
+    else if (const char* nm = Regulars::nameFor(s_last.mac)) snprintf(met, sizeof met, "%s, %u DAYS", nm, (unsigned)Regulars::daysFor(s_last.mac));
+    else if (s_night) snprintf(met, sizeof met, "AT NIGHT");
+    else if (s_lastFree) snprintf(met, sizeof met, "LAST FREE ALERT");
+    else snprintf(met, sizeof met, "MET NEVER");
+    for (char* p = met; *p; p++) if (*p >= 'a' && *p <= 'z') *p = (char)(*p - 32);
+    if (L.compact) { if (s_last.owner == OWNER_AWAY) snprintf(own, sizeof own, "AWAY"); met[0] = 0; }
+    const int ch = L.compact ? 10 : Y(L, 12);
+    int cx = vwid + twid + 5, cy = L.compact ? 5 : Y(L, 3);
+    int row2 = L.compact ? 11 : Y(L, 17);
+    if (L.narrow) { cx = 4; cy = H + 3; row2 = cy; }
+    int qx, qy, qw, qh; queueRect(L, qx, qy, qw, qh);
+    if (own[0] && (!L.narrow || true)) { const int cw = chip(t, cx, cy, own, ownCol, Theme::labelOn(ownCol), 1, ch); if (L.narrow) cx += cw + 4; }
+    if (met[0]) {
+        const uint16_t mc = (uint16_t)0x2945;
+        const int mw = sysW(t, met, 1) + 8;
+        if (!L.narrow || cx + mw <= (s_queue ? qx - 4 : L.w)) chip(t, cx, row2, met, mc, Theme::WHITE, 1, ch);
+    }
+    if (s_queue) {
+        char q[12]; snprintf(q, sizeof q, "+%u MORE", (unsigned)s_queue);
+        t.fillRect(qx, qy, qw, qh, Theme::BLACK);
+        t.drawRect(qx, qy, qw, qh, Theme::WHITE);
+        sysTextC(t, qx + qw / 2, qy + (qh - 8) / 2, q, Theme::WHITE, Theme::BLACK, 1);
+        Theme::hotButton(qx, qy, qw, qh, "NEXT");
+    }
 }
 
+// ---- the trail -------------------------------------------------------------
+static void drawTrail(TFT_eSPI& t, const Lay& L, uint32_t now, uint16_t typeCol, bool wide) {
+    const int ay = L.compact ? 24 : L.narrow ? L.tabsH + 22 : Y(L, 36);   // the times' row
+    const int ly = L.compact ? 46 : L.narrow ? ay + 30 : Y(L, 66);       // the line
+    const int left = X(L, 20), right = wide ? X(L, 240) : L.w - X(L, 20);
+    const uint8_t n = s_last.stops;
+    const uint8_t cur = Places::current();
+    // Where the stops go along the line: to scale when every leg has a
+    // distance, evenly otherwise.
+    int xs[Detection::STOPS_N];
+    uint16_t legM[Detection::STOPS_N] = {0, 0, 0};
+    bool scaled = n >= 2;
+    uint32_t total = 0;
+    for (uint8_t i = 1; i < n; i++) {
+        legM[i] = Places::distanceM(s_last.stopPlace[i - 1], s_last.stopPlace[i]);
+        if (!legM[i]) scaled = false;
+        total += legM[i];
+    }
+    const int x0 = left + X(L, 14), x1 = right - X(L, 20);
+    if (n <= 1) { xs[0] = x0; }
+    else if (scaled && total) {
+        uint32_t acc = 0; xs[0] = x0;
+        for (uint8_t i = 1; i < n; i++) { acc += legM[i]; xs[i] = x0 + (int)((x1 - x0) * acc / total); }
+    } else {
+        for (uint8_t i = 0; i < n; i++) xs[i] = n == 1 ? x0 : x0 + (x1 - x0) * i / (n - 1);
+    }
+    const int lx1 = n ? xs[n - 1] + X(L, 6) : x0;
+    // The line, and the dotted way on past the last stop.
+    t.fillRect(left, ly - 2, lx1 - left, 5, typeCol);
+    t.fillRect(left, ly - 2, lx1 - left, 1, Theme::blend(typeCol, Theme::WHITE, 100));
+    for (int xx = lx1 + 2; xx < right; xx += 5) t.fillRect(xx, ly, 2, 1, (uint16_t)0x8410);
+    const int ts = L.ts;
+    if (!n) {
+        // Nothing heard anywhere yet: just the line and a word.
+        sysText(t, left, ly + 14, "JUST HEARD. NO TRAIL YET.", (uint16_t)0x8410, Theme::BG, ts);
+        return;
+    }
+    const bool hereLast = s_last.stopPlace[n - 1] == cur;
+    for (uint8_t i = 0; i < n; i++) {
+        const bool last = i == n - 1;
+        const bool here = last && hereLast && !L.compact;
+        const int nx = xs[i], r = (last ? 10 : 8) * (L.kx > 1.4f ? 2 : 1) / (L.kx > 1.4f ? 1 : 1);
+        t.fillCircle(nx, ly, r, Theme::BG);
+        t.drawCircle(nx, ly, r, typeCol);
+        t.drawCircle(nx, ly, r - 1, typeCol);
+        t.drawCircle(nx, ly, r - 2, typeCol);
+        t.fillCircle(nx, ly, last ? 5 : 4, here ? Theme::PINK : typeCol);
+        // The time above, the place and the stay below. HERE's time goes
+        // below with it, because Squachy is standing on the line there.
+        char tm[12]; stampOf(s_last.stopFirstMin[i], tm, sizeof tm);
+        const uint16_t tcol = here ? Theme::PINK : Theme::WHITE;
+        const int big = L.compact ? 1 : 2;
+        if (!here) sysTextC(t, nx, ay, tm, last && hereLast ? Theme::PINK : tcol, Theme::BG, big);
+        char place[12];
+        if (Places::isHome(s_last.stopPlace[i])) snprintf(place, sizeof place, "HOME");
+        else if (last && hereLast)               snprintf(place, sizeof place, "HERE");
+        else                                     snprintf(place, sizeof place, "PLACE %u", (unsigned)(i + 1));
+        int yy = ly + (L.compact ? 11 : 16);
+        sysTextC(t, nx, yy, place, last && hereLast ? Theme::PINK : Theme::W95_FACE, Theme::BG, ts); yy += 10 * ts;
+        if (here) { sysTextC(t, nx, yy, tm, Theme::PINK, Theme::BG, ts); yy += 10 * ts; }
+        if (!L.compact) {
+            const uint16_t stay = (uint16_t)(s_last.stopLastMin[i] - s_last.stopFirstMin[i]);
+            char dw[12];
+            if (here) snprintf(dw, sizeof dw, "%u MIN+", (unsigned)stay);
+            else      snprintf(dw, sizeof dw, "%u MIN", (unsigned)stay);
+            sysTextC(t, nx, yy, dw, (uint16_t)0x8410, Theme::BG, ts);
+        }
+        // The leg before this stop: its distance, when known.
+        if (i && legM[i]) {
+            char km[12]; kmText(legM[i], km, sizeof km);
+            sysTextC(t, (xs[i - 1] + nx) / 2, ly - 6 - 8 * ts, km, (uint16_t)0x8410, Theme::BG, ts);
+        }
+    }
+    // Squachy at HERE with the tag on the line right behind him; or, when the
+    // device was last heard somewhere you have since left, the tag at its
+    // last stop and nobody standing there.
+    // A YOU pin standing on HERE (Squachy used to stand there, too small to
+    // read); the type's icon lives after its name in the header now.
+    const int hx = xs[n - 1];
+    if (hereLast && !L.compact) {
+        const int bob = (int)lroundf(sinf(now / 260.0f) * 1.2f);
+        t.fillCircle(hx, ly - 17 + bob, 7, Theme::PINK);
+        t.fillTriangle(hx - 6, ly - 14 + bob, hx + 6, ly - 14 + bob, hx, ly - 4, Theme::PINK);
+        t.fillCircle(hx, ly - 17 + bob, 3, Theme::BG);
+    }
+}
+
+// ---- the ticks ---------------------------------------------------------------
+static void drawWhy(TFT_eSPI& t, const Lay& L, int y) {
+    const uint16_t span = Trail::spanMin(s_last);
+    char mins[12]; snprintf(mins, sizeof mins, "%u MIN", (unsigned)span);
+    int x = X(L, 8);
+    x = tick(t, x, y, "AWAY", s_last.owner == OWNER_AWAY, 1);
+    x = tick(t, x, y, "EVERY STOP", s_last.stops >= 2 && Trail::atEveryStop(s_last), 1);
+    x = tick(t, x, y, mins, span >= Trail::FOLLOW_MIN, 1);
+    tick(t, x, y, trendWord(Trail::trend(s_last)), Trail::trend(s_last) > 0, 1);
+}
+
+// ---- the ladder ----------------------------------------------------------------
+static void drawLadder(TFT_eSPI& t, const Lay& L) {
+    const int sx = X(L, 246), sy = Y(L, 34), sw = L.w - sx - 4, sh = Y(L, 96);
+    t.fillRect(sx, sy, sw, sh, (uint16_t)0x1108);
+    sysText(t, sx + 3, sy + 2, "LAST 60 S", (uint16_t)0x8410, (uint16_t)0x1108, 1);
+    const uint8_t n = s_last.sparkCount;
+    const int rowH = (sh - 48) / Detection::SPARK_N > 4 ? (sh - 48) / Detection::SPARK_N : 4;
+    for (uint8_t i = 0; i < n; i++) {
+        // Oldest at the top, newest at the bottom in pink.
+        const int8_t v = Trail::sparkAt(s_last, (uint8_t)(n - 1 - i));
+        int len = ((int)v + 100) * (sw - 8) / 60;
+        if (len < 2) len = 2; if (len > sw - 8) len = sw - 8;
+        const bool newest = i == n - 1;
+        const uint16_t col = newest ? Theme::PINK : Theme::blend((uint16_t)0x1108, Theme::CYAN, (uint16_t)(60 + 190 * (i + 1) / n));
+        t.fillRect(sx + 4, sy + 12 + i * rowH, len, rowH > 3 ? 2 : 1, col);
+    }
+    char db[8]; snprintf(db, sizeof db, "%d", (int)s_last.rssi);
+    const int dy = sy + sh - 38;
+    Theme::drawBangersText(t, sx + 4, dy, db, Theme::WHITE, Theme::BangersSize::MD);
+    char tr[16]; snprintf(tr, sizeof tr, "dBm %s", trendWord(Trail::trend(s_last)));
+    sysText(t, sx + 4, sy + sh - 10, tr, Trail::trend(s_last) > 0 ? Theme::GREEN : Theme::W95_FACE, (uint16_t)0x1108, 1);
+}
+
+// ---- the facts ---------------------------------------------------------------
+static void drawFacts(TFT_eSPI& t, const Lay& L, int y, int maxY) {
+    const int ts = L.ts, rh = 10 * ts;
+    const int kx = X(L, 6), vx = kx + 5 * 6 * ts + 4;
+    t.drawFastHLine(kx, y - 4, L.w - 2 * kx, (uint16_t)0x2945);
+    char who[48], up[20];
+    const char* src = s_redacted ? "LOCKED" : vendorText(s_last);
+    size_t i = 0; for (; src[i] && i + 1 < sizeof up; i++) up[i] = (src[i] >= 'a' && src[i] <= 'z') ? (char)(src[i] - 32) : src[i]; up[i] = 0;
+    char pv[40];
+    const char* nm = (s_last.name[0] && !s_redacted) ? Privacy::name(s_last.name, pv, sizeof pv) : "";
+    snprintf(who, sizeof who, "%s %s", up, nm);
+    char mac[24];
+    if (s_redacted) snprintf(mac, sizeof mac, "-- LOCKED --"); else Privacy::mac(mac, sizeof mac, s_last.mac);
+    char seen[48], first[12], last[12];
+    const uint32_t now = millis();
+    if (s_last.restored) Clock::formatEpochStamp(s_last.firstSeen, first, sizeof first);
+    else                 Clock::formatStamp(s_last.firstSeen, first, sizeof first);
+    if (s_last.active && now - s_last.lastSeen < 5000) snprintf(last, sizeof last, "NOW");
+    else Clock::formatStamp(s_last.lastSeen, last, sizeof last);
+    if (s_last.type == DetectionType::LORAWAN || s_last.channel == 0)
+        snprintf(seen, sizeof seen, "FIRST %s  LAST %s  x%u", first, last, (unsigned)s_last.hits);
+    else
+        snprintf(seen, sizeof seen, "FIRST %s  LAST %s  x%u  CH %u", first, last, (unsigned)s_last.hits, (unsigned)s_last.channel);
+    const uint16_t confCol = s_last.conf == Confidence::HIGH_CONF ? Theme::GREEN : s_last.conf == Confidence::MED_CONF ? Theme::AMBER : Theme::RED;
+    char ownerRow[20]; ownerRowText(ownerRow, sizeof ownerRow);
+    const bool hasOwner = ownerRow[0] != 0;
+    struct Row { const char* k; const char* v; uint16_t c; } rows[5] = {
+        { "WHO",  who,  Theme::WHITE }, { "MAC", mac, Theme::WHITE },
+        { "SEEN", seen, Theme::WHITE },
+        { hasOwner ? "OWNER" : "CONF", hasOwner ? ownerRow : confidenceLabel(s_last.conf), hasOwner ? (s_last.owner == OWNER_AWAY ? Theme::AMBER : Theme::WHITE) : confCol },
+        { "CONF", confidenceLabel(s_last.conf), confCol },
+    };
+    for (int r = 0; r < (hasOwner ? 5 : 4) && y + rh <= maxY; r++, y += rh) {
+        sysText(t, kx, y, rows[r].k, (uint16_t)0x8410, Theme::BG, ts);
+        sysText(t, vx, y, rows[r].v, rows[r].c, Theme::BG, ts);
+    }
+}
+
+static void drawSnoozeChips(TFT_eSPI& t, const Lay& L) {
+    int bx, by, bw, bh; chipRect(L, 0, bx, by, bw, bh);
+    t.fillRect(0, by - 14, L.w, bh + 18, Theme::BG);
+    sysText(t, bx, by - 11, "QUIET THIS ONE FOR:", Theme::AMBER, Theme::BG, 1);
+    for (int i = 0; i < 4; i++) {
+        chipRect(L, i, bx, by, bw, bh);
+        Theme::drawButton(t, bx, by, bw, bh, SNZ[i], false, 1);
+    }
+}
+
+static void drawButtons(TFT_eSPI& t, const Lay& L, uint16_t typeCol) {
+    const char* labels[5] = { ringShown() ? "RING" : "HUNT", "WATCH", huntInSnoozeSlot() ? "HUNT" : "SNOOZE", "IGNORE", "INFO" };
+    const bool already = IgnoreList::contains(s_last.mac);
+    for (int i = 0; i < 5; i++) {
+        int bx, by, bw, bh; btnRect(L, i, bx, by, bw, bh);
+        const bool sunk = (i == 0 && s_ringing) || (i == 1 && s_watching) || (i == 3 && already);
+        const char* lab = (i == 3 && already) ? "MUTED" : (i == 1 && s_watching) ? "WATCHING" : labels[i];
+        Theme::drawWin95Button(t, bx, by, bw, bh, lab, sunk, i == 0);
+        if (i == 0 && !sunk) {
+            // The first slot in the type's own colour: it is the one that does
+            // something to the device out there.
+            t.fillRect(bx + 2, by + 2, bw - 4, bh - 4, typeCol);
+            const uint16_t ink = Theme::labelOn(typeCol);
+            t.setTextFont(1); t.setTextSize(1); t.setTextColor(ink, typeCol);
+            const int tw = t.textWidth(lab);
+            t.setCursor(bx + (bw - tw) / 2, by + (bh - 8) / 2); t.print(lab);
+            t.setCursor(bx + (bw - tw) / 2 + 1, by + (bh - 8) / 2); t.print(lab);
+        }
+        Theme::hotButton(bx, by, bw, bh, labels[i]);
+    }
+}
+
+// ---- the card as data, for the skins (alert_skin.h) ---------------------------------
+// The OWNER fact row, trackers only: what the tag's own advert says. Empty for
+// anything that is not a tracker (phones and cameras have no owner state).
+static void ownerRowText(char* out, size_t n) {
+    out[0] = 0;
+    if (!TagRing::canRing(s_last.type) && s_last.type != DetectionType::AIRTAG && s_last.type != DetectionType::SAMSUNG_TAG &&
+        s_last.type != DetectionType::GOOGLE_TAG && s_last.type != DetectionType::TILE) return;
+    if (s_last.owner == OWNER_AWAY) {
+        const uint16_t mins = (uint16_t)((uint16_t)(millis() / 60000u) - s_last.ownerMin);
+        if (mins >= 120) snprintf(out, n, "AWAY %u H", (unsigned)(mins / 60));
+        else if (mins >= 2) snprintf(out, n, "AWAY %u MIN", (unsigned)mins);
+        else snprintf(out, n, "AWAY");
+    } else if (s_last.owner == OWNER_WITH) snprintf(out, n, "WITH OWNER");
+    else if (s_last.type == DetectionType::TILE) snprintf(out, n, "NOT BROADCAST");   // Tile says nothing about it
+    else if (s_last.type == DetectionType::SAMSUNG_TAG) snprintf(out, n, "NOT READ YET");   // its bits are not decoded yet
+    else snprintf(out, n, "NOT SET UP");   // an AirTag or Find Hub tag with no owner frame: never paired
+}
+static void ownerAndMet(Verdict v, char* own, size_t on, bool& away, char* met, size_t mn) {
+    own[0] = 0; away = false;
+    if (s_last.owner == OWNER_AWAY) {
+        away = true;
+        const uint16_t mins = (uint16_t)((uint16_t)(millis() / 60000u) - s_last.ownerMin);
+        if (mins >= 120) snprintf(own, on, "AWAY %u H", (unsigned)(mins / 60));
+        else if (mins >= 2) snprintf(own, on, "AWAY %u MIN", (unsigned)mins);
+        else snprintf(own, on, "AWAY");
+    } else if (s_last.owner == OWNER_WITH) snprintf(own, on, "WITH OWNER");
+    if (v == Verdict::SPAM) snprintf(met, mn, "%u FAKES", (unsigned)s_spamFakes);
+    else if (const char* nm = Regulars::nameFor(s_last.mac)) snprintf(met, mn, "%s, %u DAYS", nm, (unsigned)Regulars::daysFor(s_last.mac));
+    else if (s_night) snprintf(met, mn, "AT NIGHT");
+    else if (s_lastFree) snprintf(met, mn, "LAST FREE ALERT");
+    else snprintf(met, mn, "MET NEVER");
+    for (char* p = met; *p; p++) if (*p >= 'a' && *p <= 'z') *p = (char)(*p - 32);
+}
+static void buildCard(AlertSkin::Card& c, Verdict v) {
+    memset(&c, 0, sizeof c);
+    c.verdict = (AlertSkin::Verdict)v;
+    c.verdictWord = verdictWord(v);
+    c.typeLabel = targetLabel(s_last.type);
+    c.typeShort = shortLabel(s_last.type);
+    c.type = s_last.type;
+    ownerAndMet(v, c.owner, sizeof c.owner, c.ownerAway, c.met, sizeof c.met);
+    ownerRowText(c.ownerRow, sizeof c.ownerRow);
+    // the stops: to scale when every leg has a distance, evenly otherwise
+    const uint8_t n = s_last.stops;
+    c.nStops = n;
+    c.hereLast = n && s_last.stopPlace[n - 1] == Places::current();
+    uint16_t legM[Detection::STOPS_N] = { 0, 0, 0 };
+    bool scaled = n >= 2; uint32_t total = 0;
+    for (uint8_t i = 1; i < n; i++) { legM[i] = Places::distanceM(s_last.stopPlace[i - 1], s_last.stopPlace[i]); if (!legM[i]) scaled = false; total += legM[i]; }
+    uint32_t acc = 0;
+    for (uint8_t i = 0; i < n; i++) {
+        AlertSkin::Stop& st = c.stops[i];
+        if (n == 1) st.pos = 1000;
+        else if (scaled && total) { acc += legM[i]; st.pos = (int16_t)(acc * 1000 / total); }
+        else st.pos = (int16_t)(i * 1000 / (n - 1));
+        stampOf(s_last.stopFirstMin[i], st.time, sizeof st.time);
+        const bool here = i == n - 1 && c.hereLast;
+        if (Places::isHome(s_last.stopPlace[i])) snprintf(st.place, sizeof st.place, "HOME");
+        else if (here) snprintf(st.place, sizeof st.place, "HERE");
+        else snprintf(st.place, sizeof st.place, "PLACE %u", (unsigned)(i + 1));
+        const uint16_t stay = (uint16_t)(s_last.stopLastMin[i] - s_last.stopFirstMin[i]);
+        snprintf(st.dwell, sizeof st.dwell, here ? "%u MIN+" : "%u MIN", (unsigned)stay);
+        if (i && legM[i]) kmText(legM[i], st.leg, sizeof st.leg);
+    }
+    // the reasons
+    const uint16_t span = Trail::spanMin(s_last);
+    const int8_t tr = Trail::trend(s_last);
+    snprintf(c.ticks[0].label, sizeof c.ticks[0].label, "AWAY");
+    c.ticks[0].on = s_preview || s_last.owner == OWNER_AWAY;
+    snprintf(c.ticks[1].label, sizeof c.ticks[1].label, "EVERY STOP");
+    c.ticks[1].on = s_preview || (s_last.stops >= 2 && Trail::atEveryStop(s_last));
+    snprintf(c.ticks[2].label, sizeof c.ticks[2].label, "%u MIN", (unsigned)span);
+    c.ticks[2].on = s_preview || span >= Trail::FOLLOW_MIN;
+    snprintf(c.ticks[3].label, sizeof c.ticks[3].label, "%s", trendWord(tr));
+    c.ticks[3].on = tr > 0;
+    // the last minute of signal, oldest first
+    c.sparkN = s_last.sparkCount;
+    for (uint8_t i = 0; i < c.sparkN; i++) c.spark[i] = Trail::sparkAt(s_last, (uint8_t)(c.sparkN - 1 - i));
+    c.rssi = s_last.rssi;
+    c.trend = trendWord(tr);
+    c.trendUp = tr > 0;
+    // the facts
+    char up[20];
+    const char* src = s_redacted ? "LOCKED" : vendorText(s_last);
+    size_t i = 0; for (; src[i] && i + 1 < sizeof up; i++) up[i] = (src[i] >= 'a' && src[i] <= 'z') ? (char)(src[i] - 32) : src[i]; up[i] = 0;
+    char pv[40];
+    const char* nm = (s_last.name[0] && !s_redacted) ? Privacy::name(s_last.name, pv, sizeof pv) : "";
+    snprintf(c.who, sizeof c.who, "%s %s", up, nm);
+    if (s_redacted) snprintf(c.mac, sizeof c.mac, "-- LOCKED --"); else Privacy::mac(c.mac, sizeof c.mac, s_last.mac);
+    char first[12], last[12];
+    const uint32_t now = millis();
+    if (s_last.restored) Clock::formatEpochStamp(s_last.firstSeen, first, sizeof first);
+    else                 Clock::formatStamp(s_last.firstSeen, first, sizeof first);
+    if ((s_last.active && now - s_last.lastSeen < 5000) || s_preview) snprintf(last, sizeof last, "NOW");
+    else Clock::formatStamp(s_last.lastSeen, last, sizeof last);
+    if (s_last.type == DetectionType::LORAWAN || s_last.channel == 0)
+        snprintf(c.seen, sizeof c.seen, "FIRST %s  LAST %s  x%u", first, last, (unsigned)s_last.hits);
+    else
+        snprintf(c.seen, sizeof c.seen, "FIRST %s  LAST %s  x%u  CH %u", first, last, (unsigned)s_last.hits, (unsigned)s_last.channel);
+    c.conf = confidenceLabel(s_last.conf);
+    c.confLevel = s_last.conf == Confidence::HIGH_CONF ? 2 : s_last.conf == Confidence::MED_CONF ? 1 : 0;
+    // the buttons, as the TRAIL card labels them
+    const bool already = IgnoreList::contains(s_last.mac);
+    static const char* const HOT[5] = { nullptr, "WATCH", "SNOOZE", "IGNORE", "INFO" };
+    c.queue = s_queue;
+    c.btn[0] = ringShown() ? "RING" : "HUNT"; c.hot[0] = c.btn[0];
+    c.btn[1] = s_watching ? "WATCHING" : "WATCH";
+    c.btn[2] = huntInSnoozeSlot() ? "HUNT" : "SNOOZE";
+    c.btn[3] = already ? "MUTED" : "IGNORE";
+    c.btn[4] = "INFO";
+    for (int k = 1; k < 5; k++) c.hot[k] = HOT[k];
+    c.hot[2] = c.btn[2];
+    c.sunk[0] = s_ringing; c.sunk[1] = s_watching; c.sunk[3] = already;
+    c.picking = s_picking;
+}
+
+// ALERT CARD's PREVIEW: an AirTag three stops into following, made up whole.
+// A locally administered address, so it can never be a real device's row.
+void uiAlertMakeSample(Detection& d) {
+    memset(&d, 0, sizeof d);
+    const uint8_t mac[6] = { 0x02, 0x51, 0x55, 0x41, 0x43, 0x48 };
+    memcpy(d.mac, mac, 6);
+    d.type = DetectionType::AIRTAG;
+    d.conf = Confidence::MED_CONF;
+    d.rssi = -58;
+    d.hits = 7;
+    d.channel = 0;
+    d.vendor = "Apple";
+    snprintf(d.name, sizeof d.name, "AirTag");
+    const uint32_t now = millis();
+    const uint16_t nowMin = (uint16_t)(now / 60000u);
+    d.firstSeen = now > 41u * 60000u ? now - 41u * 60000u : 0;
+    d.lastSeen = now;
+    d.active = true;
+    d.owner = OWNER_AWAY;
+    d.ownerMin = (uint16_t)(nowMin - 120u);
+    const uint8_t here = Places::current();
+    d.stops = 3;
+    d.stopPlace[0] = (uint8_t)(here + 1); d.stopPlace[1] = (uint8_t)(here + 2); d.stopPlace[2] = here;
+    const uint16_t firsts[3] = { 41, 24, 7 }, stays[3] = { 4, 5, 7 };
+    for (int i = 0; i < 3; i++) {
+        d.stopFirstMin[i] = (uint16_t)(nowMin - (nowMin >= firsts[i] ? firsts[i] : nowMin));
+        d.stopLastMin[i] = (uint16_t)(d.stopFirstMin[i] + stays[i]);
+    }
+    for (uint8_t i = 0; i < Detection::SPARK_N; i++) d.spark[i] = (int8_t)(-80 + i * 2);
+    d.sparkHead = 0; d.sparkCount = Detection::SPARK_N;
+}
+
+// ---- the style browser (ALERT CARD > STYLE) -----------------------------------------
+// OUTFIT's footer, over the card's buttons (which do nothing on a made-up card):
+// the style's name, which of the twelve, an arrow in each corner.
+static int browseH(int h) { return h >= 300 ? 48 : 36; }
+static void drawBrowseStrip(TFT_eSPI& t, int w, int h) {
+    const int fh = browseH(h), y = h - fh;
+    t.fillRect(0, y, w, fh, Theme::BG);
+    t.drawFastHLine(0, y, w, Theme::CYAN);
+    const uint8_t id = Settings::alertSkin();
+    const char* name = AlertSkin::name(id);
+    t.setTextFont(1); t.setTextSize(2); t.setTextColor(Theme::WHITE, Theme::BG);
+    t.setCursor((w - t.textWidth(name)) / 2, y + 4); t.print(name);
+    char buf[32];
+    const unsigned at = AlertSkin::availableRank(id), of = AlertSkin::availableCount();
+    if (!AlertSkin::fits(w, h)) snprintf(buf, sizeof buf, "%u / %u  (TRAIL ON THIS SCREEN)", at, of);
+    else snprintf(buf, sizeof buf, "%u / %u", at, of);
+    t.setTextSize(1); t.setTextColor(Theme::CYAN, Theme::BG);
+    t.setCursor((w - t.textWidth(buf)) / 2, y + 24); t.print(buf);
+    const int ay = y + fh / 2 - 10;
+    t.fillTriangle(24, ay, 10, ay + 10, 24, ay + 20, Theme::VAPOR_PINK);
+    t.fillTriangle(w - 24, ay, w - 10, ay + 10, w - 24, ay + 20, Theme::CYAN);
+}
+bool uiAlertPreviewArrow(int x, int y, int w, int h) {
+    if (!s_preview || y < h - browseH(h) - 8) return false;
+    const int zone = w / 5;
+    if (x >= zone && x <= w - zone) return false;
+    Settings::cycleAlertSkin(x < zone);
+    s_alertStart = millis();
+    s_queueAt = 0;
+    s_skinned = false;
+    AlertSkin::forget();
+    return true;
+}
+
+// ---- the card -------------------------------------------------------------------
 void uiAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
                  bool infoPending, const char* infoTypeName, const char* infoText) {
-    int w = t.width();
-    int h = t.height();
+    const int w = t.width(), h = t.height();
+    const Lay L = layoutFor(w, h);
+    refresh(eng);
 
-    uint32_t elapsed = now - s_alertStart;
-    // Capped well short of wrapping the uint8_t step counter -- an
-    // alert would need to sit on screen for ~10+ minutes to get here,
-    // at which point it's already been holding at the loudest level
-    // for a long time and one more (or zero more) re-trigger makes no
-    // visible difference.
-    while (s_glitchStep < 200 && elapsed >= glitchStepOffsetMs(s_glitchStep)) {
+    const uint32_t elapsed = now - s_alertStart;
+    const uint8_t skin = Settings::alertSkin();
+    const bool skinned = skin != AlertSkin::TRAIL && AlertSkin::available(skin) && AlertSkin::fits(w, h);
+    // The glitch bursts are TRAIL's way of shouting. A skin opens with its own
+    // flourish instead, and static flashing over a sunset just reads as flicker.
+    while (!skinned && s_glitchStep < 200 && elapsed >= glitchStepOffsetMs(s_glitchStep)) {
         Theme::triggerGlitchBurst(glitchStepLevel(s_glitchStep));
         s_glitchStep++;
     }
 
-    // The player's chosen background runs behind the alert, then the
-    // themed detection FX layer on top of it without their own erase.
-    // Dimmed on the way past: at full brightness a starfield or a fire
-    // competes with the headline type for attention, and this screen has
-    // to stay readable first. ALERT_SHOW_BACKGROUND is the single switch
-    // if that turns out to be the wrong call -- false restores the flat
-    // Theme::BG this screen had before.
-    if (ALERT_SHOW_BACKGROUND) {
-        // Two-stage knock-back, both cheap. The palette dim costs
-        // nothing at all -- the background renderers read these globals,
-        // so they simply draw darker -- but it only reaches colours that
-        // come from the palette, and several backgrounds (the starfield's
-        // tunnel rings and planets especially) pack their own literals.
-        // The scanline pass catches whatever the palette could not.
-        Theme::Palette saved = Theme::dimPaletteForOverlay(ALERT_PALETTE_DIM);
-        Theme::drawActiveBackground(t, now, 0, h, eng);
-        Theme::restorePalette(saved);
-        Theme::dimRegion(t, 0, 0, w, h, ALERT_BACKGROUND_DIM);
-    } else {
-        t.fillRect(0, 0, w, h, Theme::BG);
+    const Verdict v = verdictOf(s_last);
+    if (skinned) {
+        AlertSkin::Card c;
+        buildCard(c, v);
+        AlertSkin::draw(t, skin, c, now, s_alertStart, s_queueAt, Settings::alertAnimate() ? 0 : 2, Settings::alertSunset(), Settings::paletteIndex());
+        s_skinned = true;
+        if (s_preview) drawBrowseStrip(t, w, h);
+        if (infoPending) Theme::drawInfoPanel(t, w, h, now, infoTypeName, infoText);
+        return;
     }
-
-    // ---- header strip ------------------------------------------------
-    // Replaces the pulsing border and the "!! DETECTION !!" headline with
-    // one solid bar in the detection's own colour. Three things fall out of
-    // that. The category is readable before any word is: HACKER and the
-    // attack types come up red, cameras cyan, trackers purple. The border's
-    // six pixels come back on all four sides. And "!! DETECTION !!" stops
-    // spending the best row on the screen restating what the screen is.
-    //
-    // 42 rows because Bangers MD is a 33px cell and it has to sit inside.
+    s_skinned = false;
+    t.fillRect(0, 0, w, h, Theme::BG);
     const uint16_t typeCol = Theme::colorFor(s_last.type);
-    t.fillRect(0, 0, w, stripHOf(w, h), typeCol);
+    drawHeader(t, L, v, typeCol);
 
-    // Inset by the border width. The frame draws last and would otherwise
-    // paint straight over the strip's lit top edge and both its side edges,
-    // leaving only the bottom shadow -- which is not a bevel. The strip sits
-    // INSIDE the frame, so its bevel has to as well.
-    stripBevel(t, BORDER_W, BORDER_W, w - 2 * BORDER_W, stripHOf(w, h) - BORDER_W, typeCol);
-
-    // The label in Bangers MD rather than LG: MD is narrower per glyph, and
-    // the longest labels here ("PROXIMITY BEACON", "HACKER HARDWARE") are
-    // longer than the "CARD SKIMMER" the LG sizing note was written for.
-    // Measured anyway, with a fallback, because a label that runs off the
-    // side of a 240px rotation is not something to find out on hardware.
-    {
-        const char* tgt = targetLabel(s_last.type);
-        // The budget is the space left of the IGNORE button, NOT the screen
-        // width. The button is drawn over this strip's right-hand end, so
-        // measuring against w put "PROXIMITY BEACON" straight through it on
-        // the 240px rotation -- which is exactly the sort of thing that only
-        // shows up on the narrow board. Read from ignoreBtnRect rather than
-        // restated, so the two cannot drift when the button is resized.
-        int ibx, iby, ibw, ibh;
-        ignoreBtnRect(w, h, ibx, iby, ibw, ibh);
-        // The 6 is the gap between this label and the button, down from 8 to
-        // pay for the button's new edge margin without shrinking the button
-        // or pushing "CARD SKIMMER" -- the longest name that still fits the
-        // Bangers face, at 151px -- into the built-in fallback. On the 240px
-        // rotation the budget is now 154, so it clears by 3.
-        const int avail = ibx - 10 - 6;
-        const int tw = Theme::bangersTextWidth(tgt, Theme::BangersSize::MD);
-        if (tw <= avail && !tinyAlert(h)) {
-            Theme::drawBangersText(t, 10, 4, tgt, Theme::BG, Theme::BangersSize::MD);
-        } else {
-            // No smaller Bangers exists, so step down through the built-in
-            // font rather than clip.
-            t.setTextSize(wideAlert(w) ? 3 : 2);
-            if (t.textWidth(tgt) > avail) t.setTextSize(wideAlert(w) ? 2 : 1);
-            t.setTextColor(Theme::BG, typeCol);
-            t.setCursor(10, (stripHOf(w, h) - t.fontHeight()) / 2);
-            t.print(tgt);
+    const bool wide = !L.narrow && !L.compact;
+    drawTrail(t, L, now, typeCol, wide);
+    if (L.compact) {
+        // 240x135: the line, the ticks, one line of signal, one of facts.
+        const int wy = 72;
+        drawWhy(t, L, wy);
+        char sig[40]; snprintf(sig, sizeof sig, "%d dBm %s  x%u", (int)s_last.rssi, trendWord(Trail::trend(s_last)), (unsigned)s_last.hits);
+        sysText(t, 8, wy + 12, sig, Theme::WHITE, Theme::BG, 1);
+        char mac[24]; if (s_redacted) snprintf(mac, sizeof mac, "-- LOCKED --"); else Privacy::mac(mac, sizeof mac, s_last.mac);
+        sysTextR(t, w - 8, wy + 12, mac, (uint16_t)0x8410, Theme::BG, 1);
+    } else {
+        const int wy = L.narrow ? Y(L, 66) + 30 + 50 : Y(L, 116);
+        drawWhy(t, L, wy);
+        if (wide) drawLadder(t, L);
+        else {
+            // No room beside the trail: the signal as a line of its own.
+            char sig[40]; snprintf(sig, sizeof sig, "SIGNAL %d dBm, %s", (int)s_last.rssi, trendWord(Trail::trend(s_last)));
+            sysText(t, X(L, 8), wy + 12, sig, Trail::trend(s_last) > 0 ? Theme::GREEN : Theme::WHITE, Theme::BG, 1);
         }
+        drawFacts(t, L, L.narrow ? wy + 26 : Y(L, 132), L.btnY - 4);
+        if (s_picking) drawSnoozeChips(t, L);
     }
+    drawButtons(t, L, typeCol);
+    if (s_preview) drawBrowseStrip(t, w, h);
 
-    // Just the grade, not the old "~60%": that was a number invented to
-    // sound precise, and the grade is what the ALERT FILTER gates on.
-    Confidence conf = s_last.conf;
-    uint16_t confColor = (conf == Confidence::HIGH_CONF) ? Theme::GREEN
-                        : (conf == Confidence::MED_CONF) ? Theme::AMBER
-                        : Theme::RED;
-
-    // ---- data plate ----------------------------------------------------
-    // A solid ground with a hairline in the type's colour. The background
-    // still runs behind and around it, so the screen keeps its character,
-    // but six-pixel text stops competing with a sunset gradient -- which
-    // was the single worst thing about the old layout.
-    // Two columns when there is width for them: identity on the left,
-    // the gauge on the right. The 240px rotation cannot hold both, so it
-    // keeps the full-width plate and puts a smaller gauge underneath.
-    // Two columns need a LANDSCAPE shape, not just 300 pixels of width. The
-    // 3.5" in portrait is 320x480: wide enough by the old test, so it took the
-    // side-by-side layout meant for 320x240 and left the bottom half of the
-    // screen empty under it. Asking whether the panel is wider than it is tall
-    // sorts that out and cannot change any existing board -- 320x240 is still
-    // wide, 240x320 was already narrow.
-    const bool tiny = tinyAlert(h);
-    const bool wide = (w >= 300 && w > h) || tiny;
-    const int PLATE_X = tiny ? 6 : (wide ? 12 : 14);
-    // Lower on the large panels: the FIRST / AT NIGHT line above it is the
-    // 16-row body font there, and at 12 it sat on the plate's top edge.
-    const int PLATE_Y = stripHOf(w, h) + (tiny ? 4 : Theme::large() ? 20 : 12);
-    // The large panels in portrait take the big plate too: full width there,
-    // and the size-2 readout fits it (the MAC is 204 of its 292 pixels).
-    const bool  bigPlate = wideAlert(w) || (Theme::large() && !wide);
-    const int PLATE_W = tiny ? 156 : (wideAlert(w) ? 250 : (wide ? 168 : (w - 28)));
-    const int PLATE_H = tiny ? 70 : (bigPlate ? 152 : 98);
-
-    // Where each line sits inside the plate. The old numbers were measured
-    // against a 98px card and a size-1 readout; a wide panel gets a 138px card
-    // and a size-2 one, so they are re-measured rather than stretched.
-    const uint8_t readSz = bigPlate ? 2 : 1;
-    const int NAME_DY  = tiny ? 22 : (bigPlate ?  46 : 38);
-    const int MAC_DY   = tiny ? 32 : (bigPlate ?  66 : 50);
-    const int BAR_DY   = tiny ? 45 : (bigPlate ? 112 : 72);
-    const int LABEL_DY = bigPlate ?  22 : 12;   // above the bar
-    const int INFO_DY  = bigPlate ?  22 : 11;   // up from the plate's bottom
-    const int BAR_HH   = tiny ?  8 : (bigPlate ?  14 : 12);
-
-    t.fillRect(PLATE_X, PLATE_Y, PLATE_W, PLATE_H, Theme::BG);
-    t.drawRect(PLATE_X, PLATE_Y, PLATE_W, PLATE_H, typeCol);
-
-    // Vendor in Bangers, upper-cased. Bangers carries A-Z, 0-9, space, '!'
-    // and (since the hyphen was added for exactly this) '-'. Anything else
-    // is SKIPPED by drawBangersText with no advance, so "DroneID" would
-    // come out "DID" -- upper-casing is what makes the vendor strings in
-    // signatures.cpp renderable at all.
-    {
-        const char* src = s_redacted ? "LOCKED" : vendorText(s_last);
-        char up[16];
-        size_t i = 0;
-        for (; src[i] && i + 1 < sizeof(up); i++) {
-            const char c = src[i];
-            up[i] = (c >= 'a' && c <= 'z') ? (char)(c - 32) : c;
-        }
-        up[i] = '\0';
-        const int vw = Theme::bangersTextWidth(up, Theme::BangersSize::MD);
-        if (vw > 0 && vw <= PLATE_W - 8 && !tiny) {
-            Theme::drawBangersText(t, PLATE_X + (PLATE_W - vw) / 2, PLATE_Y + 2, up,
-                                   Theme::CYAN, Theme::BangersSize::MD);
-        } else {
-            t.setTextSize(2);
-            if (tiny && t.textWidth(src) > PLATE_W - 8) t.setTextSize(1);
-            t.setTextColor(Theme::CYAN, Theme::BG);
-            t.setCursor(PLATE_X + (PLATE_W - t.textWidth(src)) / 2, PLATE_Y + (tiny ? 4 : (bigPlate ? 14 : 10)));
-            t.print(src);
-        }
-    }
-
-    // The device's own name, where it has one -- a Flipper's nickname, a
-    // Pwnagotchi's, a drone's serial, an iBeacon's deployment. Carried in
-    // Detection all along and never drawn on this screen.
-    t.setTextSize(readSz);
-    t.setTextColor(Theme::WHITE, Theme::BG);
-    const bool banner = s_spam || s_first || s_night || s_lastFree;
-    if (s_last.name[0] && !s_redacted && !(tiny && banner)) {
-        char pv[40];
-        const char* nm = Privacy::name(s_last.name, pv, sizeof pv);
-        t.setCursor(PLATE_X + (PLATE_W - t.textWidth(nm)) / 2, PLATE_Y + NAME_DY);
-        t.print(nm);
-    }
-
-    char mac[24];
-    if (s_redacted)
-        snprintf(mac, sizeof(mac), "%s", "-- LOCKED --");
-    else
-        Privacy::mac(mac, sizeof mac, s_last.mac);
-    t.setCursor(PLATE_X + (PLATE_W - t.textWidth(mac)) / 2, PLATE_Y + MAC_DY);
-    t.print(mac);
-
-    // Signal as a bar as well as a number: -90 dBm empty, -40 full. The
-    // number is for the log; the bar is what reads from across a room.
-    {
-        const int BAR_X = PLATE_X + 8, BAR_Y = PLATE_Y + BAR_DY;
-        const int BAR_W = PLATE_W - 16, BAR_H = BAR_HH;
-        t.setTextColor(Theme::CYAN, Theme::BG);
-        // Label above the bar rather than beside it: the two-column layout
-        // leaves the plate 168 wide, and a label plus a usable meter do not
-        // both fit on one line at that width. The grade shares that row,
-        // right-aligned -- which is also what takes it out of the readout
-        // line below, where the four fields together ran 174px into a 168px
-        // plate and pushed the sighting count off the edge.
-        t.setCursor(PLATE_X + 8, BAR_Y - LABEL_DY);
-        if (!tiny) t.print("SIGNAL");
-        t.setTextColor(confColor, Theme::BG);
-        const char* cl = confidenceLabel(conf);
-        t.setCursor(PLATE_X + PLATE_W - 8 - t.textWidth(cl), BAR_Y - LABEL_DY);
-        if (!tiny) t.print(cl);
-        int v = s_last.rssi;
-        if (v < -90) v = -90;
-        if (v > -40) v = -40;
-        const int fill = (v + 90) * (BAR_W - 2) / 50;
-        t.drawRect(BAR_X, BAR_Y, BAR_W, BAR_H, Theme::CYAN);
-        if (fill > 0) t.fillRect(BAR_X + 1, BAR_Y + 1, fill, BAR_H - 2, Theme::CYAN);
-    }
-
-    // The numbers, without the grade -- that moved up to the SIGNAL row so
-    // this line fits the narrower plate.
-    char info[40];
-#if SQW_WIFI_5G
-    // A 5 GHz catch says so, in the same width: two spaces where there
-    // were three, so "-72 dBm  5G CH 149  x12" is no longer than before.
-    if (s_last.channel > 14)
-        snprintf(info, sizeof(info), "%d dBm  5G CH %u  x%u",
-                 s_last.rssi, s_last.channel, (unsigned)s_last.hits);
-    else
-#endif
-    snprintf(info, sizeof(info), "%d dBm   CH %u   x%u",
-             s_last.rssi, s_last.channel, (unsigned)s_last.hits);
-    t.setTextColor(confColor, Theme::BG);
-    t.setCursor(PLATE_X + (PLATE_W - t.textWidth(info)) / 2, PLATE_Y + PLATE_H - INFO_DY);
-    t.print(info);
-    // The first one of its kind, ever, on this board: a line in the gap
-    // between the strip and the plate, in the strip's own colour.
-    if (s_spam) {
-        // A flood of fake tags, and this is its one alert. Beats FIRST and
-        // AT NIGHT: they are about one catch, and this is about the room.
-        char fl[32];
-        snprintf(fl, sizeof fl, "* SPAM: %u FAKE TAGS *", (unsigned)s_spamFakes);
-        Theme::bodyFontOn(t);
-        t.setTextColor(Theme::RED, Theme::BG);
-        t.setCursor(PLATE_X + (PLATE_W - t.textWidth(fl)) / 2, tiny ? PLATE_Y + NAME_DY : stripHOf(w, h) + 2);
-        t.print(fl);
-        Theme::bodyFontOff(t);
-    } else if (s_first || s_night) {
-        const char* fl = (s_first && s_night) ? "* FIRST, AND AT NIGHT *"
-                       : s_first ? "* FIRST OF ITS KIND *" : "* AT NIGHT *";
-        Theme::bodyFontOn(t);
-        t.setTextColor(Theme::VAPOR_YELLOW, Theme::BG);
-        t.setCursor(PLATE_X + (PLATE_W - t.textWidth(fl)) / 2, tiny ? PLATE_Y + NAME_DY : stripHOf(w, h) + 2);
-        t.print(fl);
-        Theme::bodyFontOff(t);
-    } else if (s_lastFree) {
-        // Shares the line, and loses it to FIRST or AT NIGHT, both of which
-        // are about the catch itself. This one is housekeeping.
-        const char* fl = "* QUIET UNLESS IT NEARS *";
-        Theme::bodyFontOn(t);
-        t.setTextColor(Theme::CYAN, Theme::BG);
-        t.setCursor(PLATE_X + (PLATE_W - t.textWidth(fl)) / 2, tiny ? PLATE_Y + NAME_DY : stripHOf(w, h) + 2);
-        t.print(fl);
-        Theme::bodyFontOff(t);
-    }
-#if defined(CYD_GPS)
-    // Where it was caught, from a fresh GPS fix. In the banner's line when
-    // there is no banner; else under the plate when the gauge is beside it,
-    // or under the gauge when it is below. Not on the tiny layout, and never
-    // on a locked card: it would show where the owner was.
-    if (s_place && !s_redacted && !tiny) {
-        char la[16], lo[16], pl[40];
-        SdRow::degreesText(la, sizeof la, s_placeLat7, 5);
-        SdRow::degreesText(lo, sizeof lo, s_placeLon7, 5);
-        snprintf(pl, sizeof pl, "%s, %s%s", la, lo, s_placeFake ? " FAKE" : "");
-        const int py = !banner ? stripHOf(w, h) + 2
-                     : wide    ? PLATE_Y + PLATE_H + 3
-                               : PLATE_Y + PLATE_H + 62;
-        t.setTextSize(1);
-        if (py + t.fontHeight() <= h - 56) {
-            t.setTextColor(Theme::CYAN, Theme::BG);
-            t.setCursor(PLATE_X + (PLATE_W - t.textWidth(pl)) / 2, py);
-            t.print(pl);
-        }
-    }
-#endif
-
-    // ---- the gauge -----------------------------------------------------
-    // The detected thing, drawn large with the instrument grid over the top
-    // of it. The old screen had a 22px radar tucked under the readout and a
-    // separate icon at the bottom of the panel, and the two never met -- one
-    // said "a contact is out there", the other said "this is what it is".
-    // One object, one gauge.
-    //
-    // Deliberately NOT viewer-centred with the icon riding a bearing: the
-    // bearing is derived from the MAC so it holds still during an alert, and
-    // it is otherwise arbitrary. One antenna cannot do direction finding, and
-    // putting a recognisable object at a compass position would claim it can.
-    // Distance is honest -- RSSI really does map to a ring -- so that is what
-    // the rings show, with the object at the centre of its own field.
-    {
-        // The band the gauge actually owns: below the header strip, above
-        // the buttons. Centring it on the PLATE instead put its well three
-        // pixels into the strip -- the plate starts 12 rows below the strip,
-        // so a circle centred on the plate is not centred on the gap.
-        const int ceilY  = stripHOf(w, h) + 4;
-        const int floorY = tiny ? h - 28 : h - 56;
-        const int gx = wide ? (PLATE_X + PLATE_W + (w - PLATE_X - PLATE_W) / 2)
-                            : (w / 2);
-        const int gy = wide ? ((ceilY + floorY) / 2)
-                            : (PLATE_Y + PLATE_H + 30);
-        // Bounded by whichever runs out first: the width beside the plate,
-        // or the height of the band -- and the well is 4px larger than the
-        // radius on every side, so that is what has to fit, not the circle.
-        int gr = wide ? ((w - PLATE_X - PLATE_W) / 2 - 6) : 26;
-        if (gy - gr - 4 < ceilY)  gr = gy - ceilY - 4;
-        if (gy + gr + 4 > floorY) gr = floorY - gy - 4;
-        const int grMax = wideAlert(w) ? 92 : 60;
-        if (gr > grMax) gr = grMax;
-        if (gr > 8) {
-            t.fillRect(gx - gr - 4, gy - gr - 4, (gr + 4) * 2, (gr + 4) * 2, Theme::BG);
-            t.drawRect(gx - gr - 4, gy - gr - 4, (gr + 4) * 2, (gr + 4) * 2, typeCol);
-            Theme::drawTypeIcon(t, s_last.type, gx, gy, gr / 2);
-            // Grid over the object, not under it.
-            t.drawCircle(gx, gy, gr,         (uint16_t)0x02CA);
-            t.drawCircle(gx, gy, gr * 2 / 3, (uint16_t)0x0207);
-            t.drawCircle(gx, gy, gr / 3,     (uint16_t)0x0185);
-            t.drawFastHLine(gx - gr, gy, 2 * gr, (uint16_t)0x0144);
-            t.drawFastVLine(gx, gy - gr, 2 * gr, (uint16_t)0x0144);
-            const float sweep = (float)(now % 2000) / 2000.0f * 6.2831853f;
-            t.drawLine(gx, gy, gx + (int)(sinf(sweep) * gr),
-                       gy - (int)(cosf(sweep) * gr), Theme::GREEN);
-            t.drawCircle(gx, gy, gr, Theme::VAPOR_PINK);
-        }
-    }
-
-    // MORE INFO -- opens the same explanation panel LOG's long-press
-    // menu does (see uiAlertHitMoreInfo()), so a fresh detection can be
-    // looked up without having to remember to go find it in LOG after.
-    // "MORE"/"INFO" stacked on two lines (see moreInfoBtnRect()'s
-    // comment) rather than Theme::drawButton()'s usual single-line
-    // label, so this button doesn't need to go wide to stay legible.
-    // IGNORE: stops this exact device raising the alert again. Labelled on
-    // two lines like its neighbours so all three buttons match.
-    {
-        int bx, by, bw, bh;
-        ignoreBtnRect(w, h, bx, by, bw, bh);
-        const bool already = IgnoreList::contains(s_last.mac);
-        // A real system button rather than the vaporwave chrome the rest of
-        // the device wears. It is the one control on this screen that is not
-        // about the detection -- it changes what the firmware will do from
-        // now on -- and looking like it was lifted out of a system dialog is
-        // how that reads at a glance.
-        //
-        // MUTED is the SAME button held down, not a differently coloured
-        // one. Win95 had a word for a button that stays in after you let go
-        // and this is it, so the state costs no new colour, no legend and
-        // nothing to learn: the thing is pushed in, and pushed in means done.
-        // In bold (asked for 2026-10-10): it is the one button here that
-        // changes what the device does from now on.
-        Theme::drawWin95Button(t, bx, by, bw, bh,
-                               already ? "MUTED" : "IGNORE", already, true);
-    }
-
-    {
-        int bx, by, bw, bh;
-        moreInfoBtnRect(w, h, bx, by, bw, bh);
-        t.fillRect(bx, by, bw, bh, Theme::BG);
-        t.drawRect(bx, by, bw, bh, Theme::PURPLE);
-        t.setTextSize(2);
-        t.setTextColor(Theme::CYAN, Theme::BG);
-        t.setTextWrap(false);
-        int lineH = t.fontHeight();
-        const int lineGap = 3;
-        int iw = t.textWidth("INFO");
-        if (tinyAlert(h)) {
-            t.setCursor(bx + (bw - iw) / 2, by + (bh - lineH) / 2);
-            t.print("INFO");
-        } else {
-        int ty = by + (bh - (lineH * 2 + lineGap)) / 2;
-        int mw = t.textWidth("MORE");
-        t.setCursor(bx + (bw - mw) / 2, ty);
-        t.print("MORE");
-        t.setCursor(bx + (bw - iw) / 2, ty + lineH + lineGap);
-        t.print("INFO");
-        }
-    }
-
-    // HUNT -- starts tracking this exact device straight from the alert,
-    // the same engine.huntBle()/huntWifi() call LOG's long-press confirm
-    // panel makes. Without it, chasing a device you were just warned
-    // about meant dismissing the alert, opening LOG, finding the row
-    // again and long-pressing it -- by which point a moving target may
-    // already be out of range. Drawn in AMBER rather than the CYAN
-    // MORE INFO uses: this one changes what the device is doing, the
-    // other only opens a text panel.
-    {
-        int bx, by, bw, bh;
-        huntBtnRect(w, h, bx, by, bw, bh);
-        t.fillRect(bx, by, bw, bh, Theme::BG);
-        t.drawRect(bx, by, bw, bh, Theme::PURPLE);
-        t.setTextSize(2);
-        t.setTextColor(Theme::AMBER, Theme::BG);
-        t.setTextWrap(false);
-        int hw = t.textWidth("HUNT");
-        t.setCursor(bx + (bw - hw) / 2, by + (bh - t.fontHeight()) / 2);
-        t.print("HUNT");
-    }
-    // SNOOZE between the two: this device, quiet for a while. Each tap
-    // steps the time up (main.cpp owns the steps); while one is being
-    // picked the button stays pushed in and wears it, and a line along its
-    // foot runs out as the pick locks in.
-    {
-        int bx, by, bw, bh;
-        snoozeBtnRect(w, h, bx, by, bw, bh);
-        Theme::drawButton(t, bx, by, bw, bh, s_snzLabel ? s_snzLabel : "SNOOZE",
-                          s_snzLabel != nullptr);
-        if (s_snzLabel) {
-            const int barW = (int)((int32_t)(bw - 6) * s_snzLeft / 1000);
-            t.fillRect(bx + 3, by + bh - 4, bw - 6, 2, Theme::BG);
-            if (barW > 0) t.fillRect(bx + 3, by + bh - 4, barW, 2, Theme::AMBER);
-            // Nothing else on the card says the button counts taps, so once
-            // the first one has landed it says so itself, just above.
-            // Asked for 2026-10-22: "no way to realize you have to multi tap".
-            static const char* HINT = "TAP AGAIN: LONGER";
-            t.setTextFont(wideAlert(w) ? 2 : 1);
-            t.setTextSize(1);
-            t.setTextWrap(false);
-            const int hw = t.textWidth(HINT);
-            const int fh = t.fontHeight();
-            const int hx = (w - hw) / 2;
-            // The large panel has 18 rows between the radar's frame and the
-            // button for a 16-row font, so it sits tight against the button.
-            const int hy = by - fh - (wideAlert(w) ? 1 : 5);
-            t.fillRect(hx - 3, hy - 1, hw + 6, fh + 1, Theme::BG);
-            t.setTextColor(Theme::AMBER, Theme::BG);
-            t.setCursor(hx, hy);
-            t.print(HINT);
-            t.setTextFont(1);
-        }
-    }
-
-    // TV-static snow over the whole screen during the same random burst
-    // the Bangers headline text above already glitches on -- drawn
-    // last so it overlays everything, including the MAC/RSSI readout;
-    // briefly obscuring the readout mid-burst reads as "interference"
-    // rather than a bug, which fits an alert about surveillance gear.
     Theme::drawGlitchStatic(t, 0, 0, w, h);
-
-    // The RGB frame, after the static so the chrome stays clean: the static
-    // is meant to read as interference in the CONTENT, and a frame that
-    // breaks up along with it stops reading as a frame at all.
-    drawRgbBorder(t, w, h, now);
-
-    // Info panel drawn last, opaquely on top of everything above
-    // (including the static) -- same "modal drawn every tick on top of
-    // a screen that keeps rendering underneath" pattern LOG's confirm/
-    // info panels use.
     if (infoPending) Theme::drawInfoPanel(t, w, h, now, infoTypeName, infoText);
 }
-
-bool uiAlertTouched() {
-    return s_touched;
-}
-
-// Hook called by main when it polls touch during ALERT.
-void uiAlertNoteTouch() { s_touched = true; }

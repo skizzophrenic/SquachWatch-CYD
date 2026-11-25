@@ -70,6 +70,8 @@ void noteWifi(const uint8_t* bssid, const char* ssid, uint16_t auth, uint8_t cha
 void noteBle(const uint8_t* mac, const char* name, int8_t rssi, bool haveMfgr, uint16_t mfgr);
 
 uint32_t written();        // this boot
+uint32_t writtenWifi();    // ...of which networks
+uint32_t writtenBle();     // ...and Bluetooth devices
 uint32_t skipped();        // this boot: heard again too soon, same place
 uint32_t dropped();        // this boot: the queue was full, or (CYD) memory ran low
 
@@ -90,6 +92,21 @@ void clear();
 // Mounts the region and finds the newest sector. Call once at boot.
 bool begin();
 
+#if !defined(CYD_GPS)
+// For the WiGLE upload: the kept records one at a time, oldest first, each
+// with where it sits -- its sector's sequence number and its slot -- so an
+// upload can remember how far it got. Resumable: a fresh Cursor starts at the
+// oldest, and next() carries on from wherever the last call stopped.
+struct Cursor { uint32_t k = 0, n = 0, sec = 0; uint16_t slot = 0; bool started = false; };
+bool next(Cursor& c, Record& r, uint32_t& seq, uint16_t& slot);
+// How many records were kept after (seq, slot); (0, 0) counts them all.
+// Bench rows included: this is for "how much is waiting", not for the file.
+uint32_t countAfter(uint32_t seq, uint16_t slot);
+// The newest sector's sequence number, 0 when empty. A remembered mark above
+// it was taken before a CLEAR and means nothing now.
+uint32_t newestSeq();
+#endif
+
 #if defined(CYD_GPS)
 // ---- the CYD GPS builds' SD writer (wardrive_sd.cpp) ------------------------
 // Reads the switch. Call once at boot.
@@ -99,10 +116,25 @@ void sdBegin();
 void sdTick(uint32_t nowMs, bool cardMounted);
 enum class SdState : uint8_t { OFF, NO_CARD, LOW_MEMORY, WAITING_FOR_FIX, LOGGING };
 SdState sdState(uint32_t nowMs);
+// WARDRIVE SOUND (the Cardputer): beeps for fix and loss, a tick for new rows.
+bool soundOn();
+void toggleSound();
 // "/wigle-YYYYMMDD-HHMM.csv", or "" until the session's first row.
 const char* sdFileName();
-// Deletes every /wigle-*.csv on the card. The duress wipe calls this.
+// Deletes every /wigle-*.csv on the card, and the uploaded ones in
+// /wigle-sent. The duress wipe calls this.
 void sdWipe();
+
+// For the WiGLE upload (wigle_up.cpp). The files waiting are the session
+// files in the root; one is moved to /wigle-sent once WiGLE has it. The file
+// this session is still writing to is never offered while WARDRIVE is on.
+// Called from the loop only: the card shares a bus with the screen.
+uint8_t  sdWaitingFiles(char (*names)[32], uint32_t* sizes, uint8_t cap);
+uint16_t sdWaitingCount();     // a cached count, refreshed every 15 s by sdTick
+bool     sdOpen(const char* path, uint32_t& size);
+int      sdRead(uint8_t* buf, size_t n);   // -1 on a read error, 0 at the end
+void     sdClose();
+bool     sdMarkSent(const char* path);
 #endif
 
 }  // namespace Wardrive

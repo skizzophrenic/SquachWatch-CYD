@@ -1,6 +1,8 @@
-# LoRa on the CrowPanel 7
+# LoRa
 
-What the Elecrow LoRa module can hear, decode and send, and how it could make
+How SquachWatch uses LoRa on the T-Watch S3 and the T-Deck Plus (the next
+two sections), and the research behind it, done on the CrowPanel 7: what the
+Elecrow LoRa module can hear, decode and send, and how it could make
 SquachWatch a LoRa pocket knife for detection, classification, decoding and
 for the people who run LoRa networks.
 
@@ -18,7 +20,8 @@ that answered them.
 Everything after the next two sections is about the CrowPanel. The T-Watch
 S3 and S3 Plus use the same radio driver and decoders in a much smaller
 package, and so does the LilyGo T-Deck Plus, which can also send; those are
-the next two sections.
+the next two sections. The CrowPanel's own public build no longer carries
+LoRa: the watches and the T-Deck are the boards that ship it.
 
 ## On the T-Watch S3 and S3 Plus
 
@@ -32,18 +35,24 @@ Since v1.26.0 both watches listen to LoRa as well as WiFi and Bluetooth.
 - **Which frequencies:** one Meshtastic preset (LongFast) and one MeshCore
   preset per band. **EU 868** listens on 869.525 MHz (Meshtastic) and
   869.618 MHz (MeshCore); **US 915** on 906.875 MHz (Meshtastic) and
-  910.525 MHz (MeshCore). With both networks on, it takes turns between the
-  two.
+  910.525 MHz (MeshCore); **AU 915** (Australia and New Zealand) on
+  919.875 MHz (Meshtastic) and 915.075 MHz (MeshCore's Australia Mid). With
+  both networks on, it takes turns between the two.
 - **Which band:** picked from the time zone at boot: 915 for the US zones
-  (Alaska and Hawaii included) and the rest of the Americas, 868 everywhere
-  else. `LORA REGION AUTO|EU|US` on the console
-  overrides it; the change takes effect at the next restart.
+  (Alaska and Hawaii included) and the rest of the Americas, AU 915 for the
+  Australian and New Zealand zones, 868 everywhere else. On the watch,
+  `LORA REGION AUTO|EU|US|AU` on the console overrides it (on the T-Deck,
+  LORA SETTINGS > REGION does too); the change takes effect at the next
+  restart.
 - **Where it shows:** a pink **LORA *n* NEW** pill at the top of the main
   screen (tap it), and one buzz per new message, at most one every 30
   seconds. **LORA CHATS** has one tab per network, with who sent each
   message and on which channel. Privacy Mode covers the chats too.
 - **Settings:** WATCH SETTINGS > **LORA** cycles BOTH (the default),
-  MESHTASTIC, MESHCORE and OFF. WATCH SETTINGS > **LORA CHATS** opens the
+  MESHTASTIC, MESHCORE, LORAWAN and OFF. LORAWAN parks the radio where
+  LoRaWAN networks are heard, for the `LORAWAN` detection (one alert per
+  network operator, see [DETECTIONS.md](DETECTIONS.md)); the mesh chats go
+  quiet while it is on. WATCH SETTINGS > **LORA CHATS** opens the
   chats and shows how many are new.
 - **Console:** `LORA` for the status, `LORA NODES`, `LORA MSGS`, and
   `LORA REGION`.
@@ -57,8 +66,8 @@ Since v1.37.0 the T-Deck listens the way the watches do, and because it has
 a keyboard, it can also **send**.
 
 - **Listening:** the same networks, presets, band choice, pill and **LORA
-  CHATS** as the watches. Settings > SYSTEM > **LORA** cycles BOTH,
-  MESHTASTIC, MESHCORE and OFF.
+  CHATS** as the watches. Settings > SYSTEM > **LORA** (or LORA SETTINGS >
+  LISTEN) cycles BOTH, MESHTASTIC, MESHCORE, LORAWAN and OFF.
 - **The LORA page** (since v1.39.0): press **Enter** on the main screen, or
   tap the LORA pill, which stays up whenever the radio is on. A radar of the
   nodes heard: one that has sent its position sits at its real bearing and
@@ -69,8 +78,9 @@ a keyboard, it can also **send**.
   80 seconds: the noise as a line, each packet as a spike in its network's
   colour. Under the radar, the GPS (FIX *n* SATS, SEARCHING or NOT HEARD) and
   the nearest node. Below, one chat window with a MESHTASTIC tab and a
-  MESHCORE tab, and a compose line that sends to the open tab (LORA TX
-  permitting). BACK is in the top-right corner.
+  MESHCORE tab (and a DMs tab, below), and a compose line that sends to the
+  open tab (LORA TX permitting). BACK is in the top-right corner, and the
+  icon in the top-left corner opens LORA SETTINGS.
 - **One row per message.** A message relayed by three nodes used to show up
   three times, and your own send could come back as a second row. Since
   v1.39.0 a repeat of the same message within ten minutes is dropped.
@@ -81,12 +91,35 @@ a keyboard, it can also **send**.
   25 Meshtastic messages with both on. (v1.37.0 took turns and caught only
   about one MeshCore message in four.)
 - **Sending:** Settings > SYSTEM > **LORA TX** is OFF until you change it,
-  then 10 dBm or 20 dBm (14 dBm at most in the EU band). In LORA CHATS, type
-  on the keyboard and press Enter: the text goes out on the open tab's
-  network. Meshtastic: the public LongFast channel under its published key,
-  from a node number made from the board's own address. MeshCore: the Public
-  channel, as *your squad nickname*: *your text* (SQUACHY when no nickname is
-  set). Your message appears in the list as YOU.
+  then 10, 20 or 22 dBm (22 dBm is also the EU band's ceiling; above 14 dBm
+  there, keep under the band's 10% duty cycle). In LORA CHATS or on the LORA
+  page, type on the keyboard and press Enter: the text goes out on the open
+  tab's network. Meshtastic: its public channel (LongFast unless you picked
+  another preset) under the published key. MeshCore: the Public channel, as
+  *your name*: *your text*. The name is LORA SETTINGS > NAME, or your squad
+  nickname, or SQUACHY. Your message appears in the list as YOU.
+- **The channel chip** at the right end of the compose line says which
+  channel Enter sends on. Tap it to step to the next channel you can send
+  on (channels you added in LORA SETTINGS > CHANNELS included), and round
+  again to the default.
+- **Private messages (DMs):** the **DMs** tab holds private conversations
+  on both networks, and its chip reads PRIVATE. To start one, tap a line in
+  the MESHTASTIC tab (it opens a DM with whoever said it), or tap a node's
+  dot on the radar. Meshtastic DMs need the other node's key, which the
+  T-Deck asks for if it doesn't have it yet; a MeshCore node has to have
+  sent an advert first (NOT A CONTACT YET until then). Each message is tried
+  up to three times, and its line shows dots while it is going, a tick when
+  it was delivered and a red cross when it failed. Only the two of you can
+  read it, but anyone can see that a message went out.
+- **Names on Meshtastic:** with **ANNOUNCE NAME** on (the default), the
+  T-Deck sends its name card (NodeInfo) before your first Meshtastic text
+  and again with a text sent three or more hours later. The short name is
+  LORA SETTINGS > SHORT NAME, or SQWT while the name is the default SQUACHY.
+  Names other nodes announce fill in the chat rows and are kept across
+  restarts. With ANNOUNCE NAME off, the mesh sees a node number made from
+  the board's address.
+- **Typing a channel key:** SHIFT+$ types `=`, which Meshtastic's keys end
+  in.
 - **What sending means:** these are public channels. Anyone nearby with a
   Meshtastic or MeshCore radio reads what you send, and anyone can claim any
   name on them, you included.
@@ -94,7 +127,35 @@ a keyboard, it can also **send**.
   bytes go out between frames through the screen's own SPI path, with only
   the speed changed for its turn (src/lora_radio.cpp, the T-Deck branch).
 
+### LORA SETTINGS (T-Deck)
+
+The icon in the top-left corner of the LORA page. Drag, or W and S, to
+scroll; tap a row to change it.
+
+| Row | What it does |
+|---|---|
+| **LISTEN** | BOTH, MESHTASTIC, MESHCORE, LORAWAN or OFF, the same setting as Settings > SYSTEM > LORA |
+| **MESHTASTIC PRESET** | Which Meshtastic preset the radio uses, from the ones the band allows. It shows the frequency, spreading factor and bandwidth |
+| **TX POWER** | OFF, 10, 20 or 22 dBm, the same setting as LORA TX. OFF means the chats cannot send |
+| **HOPS** | How many times a Meshtastic message you send may be relayed, 1 to 7 (3 is stock) |
+| **REGION** | AUTO (from the time zone), EU, US or AU. Takes effect at the next restart |
+| **CHANNELS** | The channels the T-Deck can read and send on. **+ MESHTASTIC** adds one by name and base64 key; **+ MESHCORE** adds a `#tag` (no key needed) or a hex key. REMOVE takes one of yours off; BUILT IN ones stay |
+| **NAME** | Your name on both networks. Empty means the default (squad nickname, or SQUACHY) |
+| **SHORT NAME** | Meshtastic's four letters |
+| **ANNOUNCE NAME** | ON sends your name card before your first Meshtastic text; OFF shows a number instead |
+| **MESSAGE SOUND** | A ding for a new LoRa message while you are on another screen |
+| **SQUACHWATCH DETECTIONS** | ON (WiFi and Bluetooth detection keeps running), OFF ON LORA PAGE (it rests while you are on the LoRa pages and wakes when you leave) or OFF (it rests) |
+| **ON-SCREEN DETECTIONS** | ON lets alerts pop up over the LoRa pages; OFF keeps them caught, logged and counted, without the pop-up |
+| **ONLINE LOOKUPS** | OFF by default. When on, with CALLSIGNS (hamrig.com, for APRS and MeshCom), OGN (the OGN database, for FANET) or MESHCORE FEED switched on too, the board asks those sites about nodes it heard. Plain HTTP, and only while it is already on WiFi for an update; it never joins WiFi for this |
+| **CLEAR CHATS** | Deletes the messages it holds, after a second tap to confirm |
+| **FORGET NAMES** | Forgets the Meshtastic names it has learned, after a second tap to confirm |
+
 ## What is built
+
+> **History.** This section is the CrowPanel bench build of 2026-09-26. The
+> `crowpanel7` build no longer has LoRa, and the LORA screen and SYSTEM rows
+> described here are not in today's firmware. What ships is the T-Watch and
+> T-Deck sections above.
 
 The research below became code on 2026-09-26, in the `crowpanel7` build
 (`-DSQUACH_LORA`), and met the board the same day: the decoders pass their
@@ -433,7 +494,9 @@ EU_868 (869.4–869.65 MHz) has room for one 250 kHz slot, so every 250 kHz
 preset lands on **869.525 MHz**. The rest are:
 
 - LongSlow: 869.4625 MHz. LongMod: 869.5875 MHz.
-- EU_N_868 (NarrowSlow): 869.442 MHz.
+- EU_N_868 (NarrowSlow and NarrowFast, slot 1): 869.442 MHz (869.44165
+  exactly: 10.4 kHz of padding each side). NarrowFast is Norway's
+  mesh since October 2026.
 - EU_433: LongFast on 433.875 MHz.
 - US: LongFast on 906.875 MHz.
 
@@ -1250,8 +1313,13 @@ This detector needs no content at all, only the header fields:
 - plus a maker hint when a join is caught: the DevEUI's OUI belonging to a
   tracker vendor
 
-It fits the existing detection model (`Detection`, alerts, the DEX) as a new
-type, say `LORA_TRACKER`, alongside `LORA_NODE` for plain sightings. Keep it
+The plain sighting is built, one level up from a node: `LORAWAN`, one
+Detection per **operator** heard (`lora_opalert.h`, and `docs/DETECTIONS.md`
+for the rules). It goes through the ALERT, the LOG, IGNORE, SNOOZE and HUNT
+like any other type.
+
+The tracker detector is not. It fits the same model (`Detection`, alerts, the
+DEX) as a further type, say `LORA_TRACKER`. Keep it
 local, as everything else is (see [section 8](#8-the-law)). A DevAddr can
 change on rejoin, so the check has to tolerate gaps.
 

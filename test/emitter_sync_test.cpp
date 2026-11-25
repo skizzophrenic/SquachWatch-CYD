@@ -34,6 +34,7 @@ static const DetectionType kWant[(uint8_t)EmitCategory::COUNT] = {
     DetectionType::CAMERA, DetectionType::SAMSUNG_TAG, DetectionType::GOOGLE_TAG, DetectionType::TILE,
     DetectionType::RING, DetectionType::IBEACON, DetectionType::EVILTWIN, DetectionType::HACKER,
     DetectionType::UNKNOWN,   // SQUACHMESH: a peer, never a detection
+    DetectionType::LISTENER,
 };
 
 // The Flock accessory service, as detection.cpp spells it, little-endian.
@@ -58,7 +59,8 @@ static DetectionType classifyAdvert(const uint8_t* ad, uint8_t len) {
     if (mfg && mfgLen >= 2) {
         t = lookupMfgId((uint16_t)(mfg[0] | (mfg[1] << 8)));
         if (t == DetectionType::AIRTAG && !isAirTagPayload(ad, len))
-            t = isIBeacon(mfg, mfgLen) ? DetectionType::IBEACON : DetectionType::UNKNOWN;
+            t = isIBeacon(mfg, mfgLen) ? DetectionType::IBEACON
+              : isHomePodSiri(mfg, mfgLen) ? DetectionType::LISTENER : DetectionType::UNKNOWN;
     }
     if (t == DetectionType::UNKNOWN && isAirTagPayload(ad, len)) t = DetectionType::AIRTAG;
     if (t == DetectionType::UNKNOWN && isAxonBwcPayload(ad, len)) t = DetectionType::AXON;

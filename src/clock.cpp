@@ -3,12 +3,21 @@
 #include "serial_flush.h"
 #include "security.h"   // a locked device takes no console commands
 #include "ota_wifi.h"    // the WIFI command lists the saved networks
+#if defined(TAB5)
+#include "tab5_radio.h"   // C6UPDATE, for the bench
+#endif
+#if defined(SENSE_CYD_APP)
+#include "sense_cyd.h"      // SENSE <cmd>
+void consoleFrameShot();     // main.cpp: SENSE SHOT
+#endif
 #include "detection.h"   // WINDOW N, for the bench; RADIO
 #if defined(ARDUINO_ARCH_ESP32) && !defined(SQW_NO_RADIO)
 #include <esp_phy_init.h> // RADIO FULLCAL (not on the Tab5: the P4 has no radio of its own)
 #endif
 #include "flood_bench.h" // FLOOD N, for the bench (a no-op outside FLOOD_BENCH builds)
 #include "settings.h"
+#include "wigle_up.h"      // WIGLEKEY, from the flasher page
+#include "encounters.h"    // ENCOUNTER <n>, for the bench
 #include "crowd_bench.h"
 #include "blackbox.h"    // BLACKBOX dumps it
 #include "pet.h"         // YETI DISCO / YETI FLOSS
@@ -22,6 +31,7 @@
 #include "meshtalk.h"    // SQUAD JOIN / SAY / TEXT / EMOTE, for testing the phone app
 #endif
 #include "lora_sniffer.h" // LORA ..., the radio (a no-op on a board without one)
+#include "tag_ring.h"     // RING NAME <text>, for the bench
 
 // RUNTIME: main.cpp lists how long the last few boots ran.
 volatile bool g_consoleRuntime = false;
@@ -67,10 +77,31 @@ extern volatile uint8_t g_consoleHeadsUp;
 extern volatile bool g_consoleClippy;
 extern volatile bool g_consoleToaster;
 extern volatile bool g_consoleBall;
+extern volatile bool g_consoleRing;
 extern volatile bool g_consoleMeaty;
 extern volatile bool g_consolePet;
 extern volatile bool g_consoleJail;
 extern volatile bool g_consoleFree;
+#if SQW_TRACKBALL
+// TBALL: the T-Deck trackball's edges on the console, on or off; TBALL n:
+// how many edges make one step (main.cpp, smallKeysRead).
+extern volatile uint8_t g_ballEdgesPerStep;
+extern volatile bool    g_ballTrace;
+void tdeckBallStatus();   // the counts and the lines' levels, after either
+#endif
+#if SQW_DEVTOOLS
+#include "shake.h"
+extern volatile uint8_t  g_devKey;
+extern volatile uint16_t g_devKeyMs;
+extern char g_devSdPath[48];
+extern volatile bool g_devGpsLogRearm;
+extern volatile bool     g_devShot;
+extern volatile bool g_devShotExt;
+extern volatile bool     g_devQuiet;
+extern volatile uint8_t  g_devImu;
+extern char              g_devType[48];
+extern volatile uint8_t  g_devTypeAt, g_devTypeN;
+#endif
 #if defined(CARDPUTER_ADV)
 extern volatile int8_t g_consoleExt;
 #endif
@@ -524,7 +555,13 @@ void pollSerial() {
     // A line buffer rather than a parser. Anything that is not the one
     // command is answered and dropped -- this is a debug port, and silence
     // in response to a typo is worse than a line of help.
+#if defined(TAB5) && defined(SENSE_CYD_APP)
+    static char line[112];   // WIFISAVE <32-byte name><TAB><64-byte password>
+#elif SQW_WIGLE_UPLOAD
+    static char line[160];   // WIGLEKEY <WiGLE's Encoded for use value, up to about 120>
+#else
     static char line[48];
+#endif
     static uint8_t len = 0;
 
     while (Serial.available() > 0) {
@@ -544,6 +581,28 @@ void pollSerial() {
             Serial.println("[security] locked -- unlock it on the screen first.");
             continue;
         }
+#if defined(TAB5) && defined(SENSE_CYD_APP)
+        // WIFISAVE <name><TAB><password>: the Tab5 has no WIFI NETWORKS screen
+        // yet, so tools/tab5_wifi.py sends this (asking for the password
+        // without showing it). Never echoed; the buffer is wiped after.
+        if (strcasecmp(line, "C6UPDATE") == 0) { Tab5Radio::g_c6UpdateConsole = true; continue; }   // bench
+        if (strcasecmp(line, "WIFI FORGET") == 0) {   // the USE network out of the list
+            const uint8_t before = OtaWifi::savedCount();
+            OtaWifi::forget();
+            Serial.printf("[wifi] %s; %u saved now\n", OtaWifi::savedCount() < before ? "forgotten" : "nothing to forget", (unsigned)OtaWifi::savedCount());
+            continue;
+        }
+        if (strncasecmp(line, "WIFISAVE ", 9) == 0) {
+            char* name = line + 9;
+            char* tab = strchr(name, '\t');
+            if (tab) *tab = 0;
+            const bool ok = tab && OtaWifi::saveNetwork(name, tab + 1);
+            memset(line, 0, sizeof line);
+            Serial.println(ok ? "[wifi] network saved; HUMAN SENSING joins it next time it opens"
+                              : "[wifi] WIFISAVE: not saved (WIFISAVE <name><TAB><password>)");
+            continue;
+        }
+#endif
 
         if (strncasecmp(line, "FLOOD ", 6) == 0) {
             // A thousand a second is five times the loudest room measured;
@@ -576,18 +635,18 @@ void pollSerial() {
             continue;
         }
         if (strncasecmp(line, "CLOCK ", 6) == 0) {
-            // CLOCK <font 0-1> <size 0-2> <backdrop 0-6>: the desk clock's
+            // CLOCK <font 0-1> <size 0-3> <backdrop 0-6>: the desk clock's
             // look, set from the bench, so its frame time can be measured for
             // each without a finger on the glass.
             int f = -1, z = -1, b = -1;
-            if (sscanf(line + 6, "%d %d %d", &f, &z, &b) == 3 && f >= 0 && f < 2 && z >= 0 && z < 3 && b >= 0 && b < 7) {
+            if (sscanf(line + 6, "%d %d %d", &f, &z, &b) == 3 && f >= 0 && f < 2 && z >= 0 && z < 4 && b >= 0 && b < 7) {
                 for (int g = 0; g < 2 && Settings::clockFont() != f; g++)     Settings::cycleClockFont();
-                for (int g = 0; g < 3 && Settings::clockSize() != z; g++)     Settings::cycleClockSize();
+                for (int g = 0; g < 4 && Settings::clockSize() != z; g++)     Settings::cycleClockSize();
                 for (int g = 0; g < 7 && Settings::clockBackdrop() != b; g++) Settings::cycleClockBackdrop();
                 Serial.printf("[clock] look: %s, %s, %s\n", Settings::clockFontName(),
                               Settings::clockSizeName(), Settings::clockBackdropName());
             } else {
-                Serial.println("[clock] CLOCK <font 0-1> <size 0-2> <backdrop 0-6>");
+                Serial.println("[clock] CLOCK <font 0-1> <size 0-3> <backdrop 0-6>");
             }
             continue;
         }
@@ -595,10 +654,78 @@ void pollSerial() {
             OtaWifi::printSaved();
             continue;
         }
+#if defined(SENSE_CYD_APP)
+        // SENSE SHOT: the frame on the console as hex rows (a PNG on the PC).
+        // SENSE OPEN / SENSE CLOSE / SENSE OPEN NOWIFI: open or leave HUMAN SENSING (bench).
+        // SENSE <cmd>: a command to the sensing engine (cal, rates, ...).
+        if (strcasecmp(line, "SENSE SHOT") == 0) { ::consoleFrameShot(); continue; }
+        if (strcasecmp(line, "SENSE OPEN") == 0) { g_senseConsole = 1; continue; }
+        if (strcasecmp(line, "SENSE OPEN NOWIFI") == 0) { g_senseConsole = 3; continue; }   // as if none were saved
+        if (strcasecmp(line, "SENSE CLOSE") == 0) { g_senseConsole = 2; continue; }
+        if (strcasecmp(line, "SENSE NEXT") == 0)  { g_senseConsole = 4; continue; }   // the next page (SCOPE...)
+        if (strcasecmp(line, "SENSE BACK") == 0)  { g_senseConsole = 5; continue; }
+        if (strcasecmp(line, "SENSE SLEEP") == 0) { g_senseConsole = 6; continue; }   // the SLEEP button
+        if (strcasecmp(line, "SENSE WAKE") == 0)  { g_senseConsole = 7; continue; }
+        if (strcasecmp(line, "WIFI ADD") == 0)    { g_senseConsole = 8; continue; }   // the add-a-network screen (its scan), for the bench
+        if (strncasecmp(line, "SENSE ", 6) == 0) { ::senseCydCommand(line + 6); continue; }
+#endif
         if (strcasecmp(line, "INVERT") == 0) { g_consoleInvert = true; continue; }
         if (strcasecmp(line, "ADC") == 0)    { g_consoleAdc = true; continue; }
         if (strcasecmp(line, "XYZZY") == 0)  { g_consoleXyzzy = true; continue; }
+#if SQW_DEVTOOLS
+        if (strcasecmp(line, "SHOT") == 0)      { g_devShot = true; continue; }
+        if (strcasecmp(line, "SHOT EXT") == 0)  { g_devShotExt = true; continue; }
+        if (strcasecmp(line, "POKE") == 0)      { g_devImu = 1; continue; }
+        if (strncasecmp(line, "TYPE ", 5) == 0) {
+            g_devTypeN = 0;
+            strncpy(g_devType, line + 5, sizeof g_devType - 1);
+            g_devType[sizeof g_devType - 1] = 0;
+            g_devTypeAt = 0; g_devTypeN = (uint8_t)strlen(g_devType);
+            continue;
+        }
+        if (strcasecmp(line, "TOSS") == 0)      { g_devImu = 2; continue; }
+        if (strncasecmp(line, "SKIN ", 5) == 0) { Settings::setAlertSkin((uint8_t)atoi(line + 5));
+                                                  Serial.printf("[dev] skin %u\n", Settings::alertSkin()); continue; }
+        if (strcasecmp(line, "QUIET") == 0)     { g_devQuiet = !g_devQuiet;
+                                                  Serial.printf("[dev] alerts %s\n", g_devQuiet ? "QUIET" : "on"); continue; }
+        if (strcasecmp(line, "IMU") == 0)       { static bool on = false; on = !on; Shake::setTrace(on);
+                                                  Serial.printf("[imu] trace %s\n", on ? "on" : "off"); continue; }
+        if (strcasecmp(line, "KEY NEXT") == 0)  { g_devKey = 1; continue; }
+        if (strcasecmp(line, "KEY PREV") == 0)  { g_devKey = 2; continue; }
+        if (strcasecmp(line, "KEY HOME") == 0)  { g_devKey = 3; continue; }
+        if (strcasecmp(line, "KEY BACK") == 0)  { g_devKey = 5; continue; }
+        if (strcasecmp(line, "KEY SELECT") == 0) { g_devKey = 6; continue; }
+        if (strcasecmp(line, "HOTS") == 0)      { g_devKey = 7; continue; }
+        if (strcasecmp(line, "GPSPROBE") == 0)  { g_devKey = 8; continue; }
+        if (strcasecmp(line, "EXTID") == 0)     { g_devKey = 9; continue; }
+        if (strcasecmp(line, "SDTRY") == 0)     { g_devKey = 10; continue; }
+        if (strcasecmp(line, "SD LS") == 0)     { g_devKey = 11; continue; }
+        if (strncasecmp(line, "SD CAT ", 7) == 0) {
+            snprintf(g_devSdPath, sizeof g_devSdPath, "%s%s", line[7] == '/' ? "" : "/", line + 7);
+            g_devKey = 12; continue;
+        }
+        if (strncasecmp(line, "KEY PRESS", 9) == 0) {
+            g_devKeyMs = (uint16_t)atoi(line + 9);
+            g_devKey = 4;
+            continue;
+        }
+#endif
         if (strcasecmp(line, "LEGEND") == 0) { g_consoleLegend = true; continue; }
+#if SQW_TRACKBALL
+        if (strcasecmp(line, "TBALL") == 0) {
+            g_ballTrace = !g_ballTrace;
+            Serial.printf("[ball] trace %s, %u edges a step\n", g_ballTrace ? "on" : "off", (unsigned)g_ballEdgesPerStep);
+            tdeckBallStatus();
+            continue;
+        }
+        if (strncasecmp(line, "TBALL ", 6) == 0) {
+            const int n = atoi(line + 6);
+            if (n >= 1 && n <= 50) g_ballEdgesPerStep = (uint8_t)n;
+            Serial.printf("[ball] %u edges a step\n", (unsigned)g_ballEdgesPerStep);
+            tdeckBallStatus();
+            continue;
+        }
+#endif
 #if defined(CARDPUTER_ADV)
         if (strcasecmp(line, "EXT ON") == 0)  { g_consoleExt = 1; continue; }
         if (strcasecmp(line, "EXT OFF") == 0) { g_consoleExt = 0; continue; }
@@ -609,6 +736,13 @@ void pollSerial() {
         if (strcasecmp(line, "YETI DISCO") == 0) { Pet::yetiDance(0); Serial.println("[yeti] disco"); continue; }
         if (strcasecmp(line, "YETI FLOSS") == 0) { Pet::yetiDance(1); Serial.println("[yeti] floss"); continue; }
         if (strcasecmp(line, "TOASTER") == 0) { g_consoleToaster = true; continue; }
+        // MOTHMAN LOCK: find him again, from the red eyes in the treeline.
+        if (strcasecmp(line, "MOTHMAN LOCK") == 0) {
+            Serial.println(Squachy::relockMothman()
+                ? "[mothman] locked: tap the red eyes in Fireflies"
+                : "[mothman] could not save discovery reset");
+            continue;
+        }
         // MEATY unlocks him; MEATY IGLOO / DOG / SHAKE / SPLIT / DANCE, his shapes on demand.
         if (strcasecmp(line, "MEATY") == 0) { g_consoleMeaty = true; continue; }
         if (strncasecmp(line, "MEATY ", 8) == 0) {
@@ -624,6 +758,14 @@ void pollSerial() {
             continue;
         }
         if (strcasecmp(line, "BALL") == 0)    { g_consoleBall = true; continue; }
+        if (strcasecmp(line, "RING") == 0)    { g_consoleRing = true; continue; }
+#if SQW_RING
+        if (strncasecmp(line, "RING NAME ", 10) == 0) {
+            TagRing::armFind(line + 10);
+            Serial.printf("[ring] waiting for a device named *%s* that takes connections\n", line + 10);
+            continue;
+        }
+#endif
         if (strcasecmp(line, "PET") == 0)     { g_consolePet = true; continue; }
         if (strcasecmp(line, "JAIL") == 0)    { g_consoleJail = true; continue; }
         if (strcasecmp(line, "FREE") == 0)    { g_consoleFree = true; continue; }
@@ -663,6 +805,7 @@ void pollSerial() {
         if (strcasecmp(line, "GPS") == 0)    { g_consoleGps = 1; continue; }
         if (strcasecmp(line, "GPS OFF") == 0) { g_consoleGps = 2; continue; }
         if (strcasecmp(line, "GPS STATUS") == 0) { g_consoleGps = 3; continue; }
+        if (strcasecmp(line, "GPS RAW") == 0)    { g_consoleGps = 10; continue; }
         if (strncasecmp(line, "GPS FAKE ", 9) == 0) {
             // Decimal degrees, e.g. GPS FAKE 40.7128 -74.0060.
             const double la = atof(line + 9);
@@ -678,6 +821,38 @@ void pollSerial() {
         if (strcasecmp(line, "WIGLE") == 0)        { g_consoleGps = 7; continue; }
         if (strcasecmp(line, "WIGLE ALL") == 0)    { g_consoleGps = 8; continue; }
         if (strcasecmp(line, "WIGLE CLEAR") == 0)  { g_consoleGps = 9; continue; }
+        // ENCOUNTER <0-8>, for the bench: that random encounter, now (the
+        // order of Encounters::Kind: DRIFTER GOBLIN ICONS ZOOMIES KAIJU LOST
+        // TWIN ABDUCT ELDER). ENCOUNTER <n> SHINY makes it a shiny.
+        if (strncasecmp(line, "ENCOUNTER ", 10) == 0) {
+            const int k = atoi(line + 10);
+            // ENCOUNTER MISS [1-5]: the die drops and comes to nothing (a 1
+            // bounces off his head). ENCOUNTER FREE puts a free roll's die on
+            // the floor, ENCOUNTER ROLL throws it.
+            if (strncasecmp(line + 10, "MISS", 4) == 0) Encounters::forceMiss((uint8_t)atoi(line + 14));
+            else if (strncasecmp(line + 10, "FREE", 4) == 0) { Encounters::setFree(true); Serial.println("[encounter] a free roll is waiting"); }
+            else if (strncasecmp(line + 10, "ROLL", 4) == 0) Serial.println(uiClearFreeRoll() ? "[encounter] rolling the free one" : "[encounter] no free roll waiting");
+            else if (strncasecmp(line + 10, "PLAY", 4) == 0) uiClearDiePlayNow();   // the waiting die goes over to be booted
+            else if (k >= 0 && k < (int)Encounters::Kind::COUNT) {
+                Encounters::force((Encounters::Kind)k, strcasestr(line, "SHINY") != nullptr);
+            } else Serial.println("[encounter] ENCOUNTER 0-9: DRIFTER GOBLIN ICONS ZOOMIES KAIJU LOST TWIN ABDUCT ELDER MIMIC");
+            continue;
+        }
+        // WIGLEKEY <WiGLE's "Encoded for use" value>, from the flasher page:
+        // the key for UPLOAD NOW. WIGLEKEY CLEAR forgets it. Never echoed.
+        if (strncasecmp(line, "WIGLEKEY", 8) == 0) {
+#if SQW_WIGLE_UPLOAD
+            const char* v = line + 8;
+            while (*v == ' ') v++;
+            if (strcasecmp(v, "CLEAR") == 0) { WigleUp::clearKey(); Serial.println("[wigle] key cleared"); }
+            else if (!*v) Serial.printf("[wigle] key %s\n", WigleUp::hasKey() ? "set" : "not set");
+            else if (WigleUp::setKey(v)) Serial.printf("[wigle] key saved for %s\n", WigleUp::keyName());
+            else Serial.println("[wigle] key refused: not WiGLE's Encoded for use value");
+#else
+            Serial.println("[wigle] no upload on this board: use the flasher page's UPLOAD TO WIGLE");
+#endif
+            continue;
+        }
         if (strcasecmp(line, "RTC") == 0)    { g_consoleRtc = true; continue; }
         if (strcasecmp(line, "BUZZ") == 0)   { g_consoleBuzz = true; continue; }
         if (strcasecmp(line, "MOTION") == 0) { g_consoleMotion = true; continue; }
@@ -741,6 +916,17 @@ void pollSerial() {
                 for (uint8_t i = 0; i < zoneCount(); i++) Serial.printf(" %s,", zoneName(i));
                 Serial.println();
             }
+#if defined(SQW_DEVTOOLS)
+        } else if (strcasecmp(line, "UNCHOOSE ZONE") == 0) {
+            Settings::unmarkTimeZoneChosen();
+            Serial.println("[zone] not chosen: the card will ask again");
+        } else if (strcasecmp(line, "FORGET CLOCK") == 0) {
+            // As after a power-off: the time stays, marked a guess, until a
+            // real source sets it again.
+            setGuess(true);
+            g_devGpsLogRearm = true;
+            Serial.println("[clock] marked a guess until a real source sets it");
+#endif
         } else if (strncasecmp(line, "TIME ", 5) == 0) {
             const uint32_t e = (uint32_t)strtoul(line + 5, nullptr, 10);
             if (setEpoch(e)) {
@@ -840,7 +1026,7 @@ void pollSerial() {
             // a stack size somebody picked, which is the question here.
             static const char* TASKS[] = { "loopTask", "nimble_host", "btController",
                                            "wifi", "tiT", "esp_timer", "arduino_events",
-                                           "sys_evt", "otawifi", "IDLE" };
+                                           "sys_evt", "otawifi", "ping", "IDLE" };
             for (uint8_t i = 0; i < sizeof TASKS / sizeof TASKS[0]; i++) {
                 TaskHandle_t th = xTaskGetHandle(TASKS[i]);
                 if (!th) continue;

@@ -21,3 +21,4 @@ public:
     int read() { return -1; }
 };
 inline TwoWire Wire;
+inline TwoWire Wire1;   // the T-Watch's second bus (PMU, haptics, RTC)

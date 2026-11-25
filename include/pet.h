@@ -21,6 +21,12 @@ namespace Pet {
     // Does nothing at all unless a pet is unlocked AND switched on, so the
     // call site does not need to check either.
     void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom);
+    // ZOOMIES (a random encounter): for `ms`, the pet's own clock runs three
+    // times as fast -- every pet's walk, hop and fidget at triple speed.
+    // Every way into this module takes the caller's time through the same
+    // conversion, so the pet's clock stays one clock, only ever ahead.
+    void zoomies(uint32_t now, uint32_t ms);
+    bool zooming(uint32_t now);
     // 2 on the large panels: the pets live in a half-size world that the
     // caller doubles onto the screen (see pet.cpp's zoom). Positions in and
     // out of this module stay in SCREEN pixels either way; tick()'s
@@ -41,6 +47,13 @@ namespace Pet {
     // screen changes underneath him, so he does not reappear mid-jump on a
     // screen that has been away for a minute.
     void reset();
+    // Mothman. Whether a tap landed on him while he is out (the first one
+    // earns RED WINGS, every one gives the glowing swoop); his drawing, which
+    // the Field Guide borrows at its own scale; and his perch on the DESK
+    // clock's plate.
+    bool mothmanTap(int x, int y, uint32_t now);
+    void drawMothman(TFT_eSPI& t, int x, int y, int scale, uint32_t now, bool powered = false);
+    void drawMothmanPerch(TFT_eSPI& t, int x, int y, uint32_t now);
 
     // C1iPPY. A catch he should have an opinion about (a DetectionType);
     // whether a tap landed on him; a poke; and where he is, for the cursor on

@@ -59,6 +59,7 @@ BOARDS = {
     # line): ST77922 over QSPI, touch in the panel chip. Bring-up began
     # 2026-10-09.
     "b8:1f:3f:c3:fd:58": ("freenove-s3-35", "Freenove ESP32-S3 Display 3.5in (FNK0104N), native USB"),
+    "28:84:85:85:12:0c": ("freenove-s3-35", "Freenove ESP32-S3 Display 3.5in, the second one (identified 2026-11-09: running SquachWatch, 480x320, 8 MB PSRAM)"),
     # Marauder V8 (justcallmekoko): ESP32-C5, 8 MB flash, ILI9341 + resistive
     # touch, GPS, MAX17048 gauge, behind a CP210x. Its Marauder v1.12.1 image
     # was read off first (sim/out/marauder_v8/marauder_v8_factory.bin).
@@ -93,8 +94,21 @@ PY   = os.path.join(PENV, "python.exe")
 PIO  = os.path.join(PENV, "pio.exe")
 
 
+# The C5 toolchain's own venv, whose esptool knows the C5. The shared penv's
+# esptool has gone back to 4.5 before (a PlatformIO update), and 4.5 stops at
+# "Unexpected chip ID value 23" on a C5 -- so that is tried second.
+C5_PY = os.path.join(os.path.expanduser("~"), ".pioarduino", "penv", "Scripts", "python.exe")
+
+
 def read_mac(port):
-    out = subprocess.run([PY, "-m", "esptool", "--port", port, "--baud", "115200", "read_mac"],
+    mac = read_mac_with(PY, port)
+    if not mac and os.path.exists(C5_PY):
+        mac = read_mac_with(C5_PY, port)
+    return mac
+
+
+def read_mac_with(py, port):
+    out = subprocess.run([py, "-m", "esptool", "--port", port, "--baud", "115200", "read_mac"],
                          capture_output=True, text=True).stdout
     mac = None
     for line in out.splitlines():

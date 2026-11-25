@@ -80,7 +80,11 @@ namespace Theme {
                  vaporPink, vaporPurple, vaporBlue, vaporYellow,
                  green, amber, red;
     };
-    static const uint8_t PALETTE_COUNT = 6;
+    static const uint8_t PALETTE_COUNT = 7;
+    // DU5K: the dusk palette off the Ring Ding Dong opener (indigo night, a
+    // peach and rose sun, teal grid). The alert card's skins take their
+    // colours straight from it rather than working them out (alert_skin.h).
+    static const uint8_t PALETTE_DUSK = 6;
     extern const Palette kPalettes[PALETTE_COUNT];
 
     // Overwrites BG/PURPLE/etc. from kPalettes[idx] (clamped). Call
@@ -246,6 +250,8 @@ namespace Theme {
     // like tapping CANCEL, so without this there is no evidence the tap did
     // anything at all. `sub` may be nullptr.
     void showToast(const char* head, const char* sub, uint16_t accent, uint32_t ms = 1500);
+    // A toast is on screen right now (TERMINAL MODE keeps full speed for it).
+    bool toastUp(uint32_t now);
 
     // No-op unless a toast is live. Call last, after the screen has drawn.
     void drawToast(TFT_eSPI& t, uint32_t now);
@@ -337,6 +343,18 @@ namespace Theme {
 
     void drawButton(TFT_eSPI& t, int x, int y, int w, int h,
                     const char* label, bool pressed, uint8_t textSize = 1);
+
+#if defined(CARDPUTER_ADV)
+    // Context hotkeys: every drawButton()/drawWin95Button() records its box
+    // and the first letter of its label. The newest drawing of a box
+    // replaces the old one, and a box not drawn for 400 ms is gone (every
+    // screen redraws each frame). The caller checks the box is a live stop.
+    struct HotButton { int16_t x, y, w, h; char c; uint32_t seq, at; };
+    uint8_t hotButtons(const HotButton** out);
+#endif
+    // A button not drawn by drawButton() names itself for the hotkeys (a
+    // no-op off the Cardputer). Also overrides a label that is not its name.
+    void hotButton(int x, int y, int w, int h, const char* label);
 
     // A real Windows 95/98 push button: silver face, two-pixel bevel, black
     // system-font label. `sunken` inverts the bevel and nudges the label a
@@ -626,6 +644,11 @@ namespace Theme {
     // True once, after three knocks on the igloo that goes by in the SNOWFALL
     // snow. Same contract; main.cpp turns it into Squachy::unlockMeaty().
     bool consumeIglooKnock();
+    // True when a tap lands on the red eyes in the FIREFLIES treeline while
+    // they are showing, and puts them away. main.cpp turns it into
+    // Squachy::unlockMothman(). Once he is found the eyes come back green
+    // and take no taps.
+    bool mothmanEyesTap(int x, int y, uint32_t now);
     // True once, after the owl on the FIRE background was tapped while asking
     // WHAT REEKS?! (every third time he speaks). main.cpp turns it into
     // Squachy::unlockShambler().
@@ -684,7 +707,7 @@ namespace Theme {
     // Covers A-Z, 0-9, space, '!'; anything else is silently skipped.
     // LG is sized for the boot splash title, MD for the ALERT screen's
     // "!! DETECTION !!" — pick whichever fits the string in question.
-    enum class BangersSize { LG, MD };
+    enum class BangersSize { LG, MD, SM };   // SM: the info card (bangers_font.h)
 
     // x,y is the top-left of the font's ascender box, same convention
     // as TFT_eSPI's setCursor for the built-in font.
@@ -728,6 +751,14 @@ namespace Theme {
     // clock draws anything else, or when this is called on leaving the desk.
     void drawClockBackdrop(TFT_eSPI& t, uint32_t now, int x, int y, int w, int h, uint8_t kind);
     void releaseClockBackdrop();
+
+    // FIRE's heat (6.4 KB on a 2.8"), DIGITAL's trails and TERMINAL's columns
+    // are only let go when another background is picked, so a screen with no
+    // background (UPDATE, HUMAN SENSING) would otherwise run with them pinned
+    // in the middle of the heap. Called on the way into those; the next
+    // screen that draws the background takes them back on its first frame.
+    // Not LOG or SETTINGS: those draw the background behind their lists.
+    void releaseBackgroundBuffers();
 
     // True during the shared random glitch burst drawBangersText()
     // already rolls every ~5-10s (see its own comment) -- exposed so

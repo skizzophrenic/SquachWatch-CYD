@@ -489,6 +489,11 @@ public:
     uint16_t color565(uint8_t r, uint8_t g, uint8_t b) const {
         return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
     }
+    // The library's RGB332 -> RGB565, for the Cardputer's EXT SCREEN table.
+    uint16_t color8to16(uint8_t c) const {
+        static const uint8_t blue[] = {0, 11, 21, 31};
+        return (uint16_t)(((c & 0xE0) << 8) | ((c & 0xC0) << 5) | ((c & 0x1C) << 6) | ((c & 0x1C) << 3) | blue[c & 3]);
+    }
 
     // ---- touch/SPI: inert, there's no touchscreen to simulate -------
     bool getTouch(uint16_t*, uint16_t*, uint16_t = 600) { return false; }

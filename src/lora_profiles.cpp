@@ -19,6 +19,10 @@ static const Profile PROFILES_EU[] = {
     // The old MeshCore EU preset: the same PHY as LongFast, only the sync word differs.
     { "MC EU old",      869525000, 2500, 11, 5, 0x12, 16, PF_CRC,          0, Proto::MESHCORE,   PG_MESH_EU },
     { "MT NarrowSlow",  869442000,  625,  8, 6, 0x2B, 16, PF_CRC,          0, Proto::MESHTASTIC, PG_MESH_EU },
+    // NarrowFast (2.8, EU_N_868): NarrowSlow's slot at SF7. Slot 1 is
+    // 869.4 + 0.03125 + 0.0104 padding = 869.44165 MHz, well inside the
+    // radio's tolerance of 869.442. What Norway's mesh moved to in Oct 2026.
+    { "MT NarrowFast",  869442000,  625,  7, 6, 0x2B, 16, PF_CRC,          0, Proto::MESHTASTIC, PG_MESH_EU },
     { "MT LongSlow",    869462500, 1250, 12, 8, 0x2B, 16, PF_CRC,          0, Proto::MESHTASTIC, PG_MESH_EU },
     { "MT LongMod",     869587500, 1250, 11, 8, 0x2B, 16, PF_CRC,          0, Proto::MESHTASTIC, PG_MESH_EU },
     { "MT MediumSlow",  869525000, 2500, 10, 5, 0x2B, 16, PF_CRC,          0, Proto::MESHTASTIC, PG_MESH_EU },
@@ -107,17 +111,58 @@ static const Profile PROFILES_US[] = {
     { "MT 70cm Narrow", 433650000,  625,  8, 6, 0x2B, 16, PF_CRC|PF_HAM|PF_433, 0, Proto::MESHTASTIC, PG_HAM_433 },
 };
 
+// Australia and New Zealand: 915-928 MHz (#129). Meshtastic's ANZ region is
+// 915-928, so its slot rule lands each preset somewhere else than in the US
+// (LongFast slot 20 = 919.875; the two plans agree only where the slot
+// numbers happen to). MeshCore's Australian presets as its app lists them,
+// Mid first. LoRaWAN AU915 sub-band 2, the one TTN uses: the US plan's
+// channel grid moved up to 915.2, with the same downlinks.
+static const Profile PROFILES_AU[] = {
+    { "MT LongFast",    919875000, 2500, 11, 5, 0x2B, 16, PF_CRC,          0, Proto::MESHTASTIC, PG_MESH_US },
+    { "MC AU Mid",      915075000, 1250,  9, 5, 0x12, 32, PF_CRC,          0, Proto::MESHCORE,   PG_MESH_US },
+    { "MT MediumFast",  926125000, 2500,  9, 5, 0x2B, 16, PF_CRC,          0, Proto::MESHTASTIC, PG_MESH_US },
+    { "MT MediumSlow",  927875000, 2500, 10, 5, 0x2B, 16, PF_CRC,          0, Proto::MESHTASTIC, PG_MESH_US },
+    { "MT ShortFast",   918875000, 2500,  7, 5, 0x2B, 16, PF_CRC,          0, Proto::MESHTASTIC, PG_MESH_US },
+    { "MT ShortSlow",   920625000, 2500,  8, 5, 0x2B, 16, PF_CRC,          0, Proto::MESHTASTIC, PG_MESH_US },
+    { "MT LongSlow",    918312500, 1250, 12, 8, 0x2B, 16, PF_CRC,          0, Proto::MESHTASTIC, PG_MESH_US },
+    { "MT LongMod",     925812500, 1250, 11, 8, 0x2B, 16, PF_CRC,          0, Proto::MESHTASTIC, PG_MESH_US },
+    { "MC AU Narrow",   916575000,  625,  7, 8, 0x12, 32, PF_CRC,          0, Proto::MESHCORE,   PG_MESH_US },
+    { "MC AU Wide",     915800000, 2500, 11, 5, 0x12, 32, PF_CRC,          0, Proto::MESHCORE,   PG_MESH_US },
+    { "MC AU SA/WA/Q",  923125000,  625,  8, 8, 0x12, 32, PF_CRC,          0, Proto::MESHCORE,   PG_MESH_US },
+    { "MC AU Legacy",   915800000, 2500, 10, 5, 0x12, 32, PF_CRC,          0, Proto::MESHCORE,   PG_MESH_US },
+
+    // ---- LoRaWAN AU915, sub-band 2 ---------------------------------------------
+    { "WAN 916.8 SF7",  916800000, 1250,  7, 5, 0x34,  8, PF_CRC,          0, Proto::LORAWAN,    PG_LORAWAN },
+    { "WAN 916.8 SF10", 916800000, 1250, 10, 5, 0x34,  8, PF_CRC,          0, Proto::LORAWAN,    PG_LORAWAN },
+    { "WAN 917.0 SF7",  917000000, 1250,  7, 5, 0x34,  8, PF_CRC,          0, Proto::LORAWAN,    PG_LORAWAN },
+    { "WAN 917.2 SF7",  917200000, 1250,  7, 5, 0x34,  8, PF_CRC,          0, Proto::LORAWAN,    PG_LORAWAN },
+    { "WAN 917.4 SF7",  917400000, 1250,  7, 5, 0x34,  8, PF_CRC,          0, Proto::LORAWAN,    PG_LORAWAN },
+    { "WAN 917.6 SF7",  917600000, 1250,  7, 5, 0x34,  8, PF_CRC,          0, Proto::LORAWAN,    PG_LORAWAN },
+    { "WAN 917.8 SF7",  917800000, 1250,  7, 5, 0x34,  8, PF_CRC,          0, Proto::LORAWAN,    PG_LORAWAN },
+    { "WAN 918.0 SF7",  918000000, 1250,  7, 5, 0x34,  8, PF_CRC,          0, Proto::LORAWAN,    PG_LORAWAN },
+    { "WAN 918.2 SF7",  918200000, 1250,  7, 5, 0x34,  8, PF_CRC,          0, Proto::LORAWAN,    PG_LORAWAN },
+    { "WAN 917.5 SF8W", 917500000, 5000,  8, 5, 0x34,  8, PF_CRC,          0, Proto::LORAWAN,    PG_LORAWAN }, // 500 kHz
+    // Downlinks: 500 kHz, inverted IQ, no CRC. RX2 is 923.3 at SF12.
+    { "WAN RX2 SF12",   923300000, 5000, 12, 5, 0x34,  8, PF_INVERT,       0, Proto::LORAWAN,    PG_LORAWAN },
+    { "WAN DN 923.9",   923900000, 5000,  9, 5, 0x34,  8, PF_INVERT,       0, Proto::LORAWAN,    PG_LORAWAN },
+
+    // ---- 433 MHz: the amateur allocations, as in the other tables ---------------
+    { "APRS 433.775",   433775000, 1250, 12, 5, 0x12,  8, PF_CRC|PF_HAM|PF_433, 0, Proto::APRS,    PG_HAM_433 },
+    { "MT 70cm Narrow", 433650000,  625,  8, 6, 0x2B, 16, PF_CRC|PF_HAM|PF_433, 0, Proto::MESHTASTIC, PG_HAM_433 },
+};
+
 static const Profile* s_tab = PROFILES_EU;
 static uint8_t        s_n   = (uint8_t)(sizeof(PROFILES_EU) / sizeof(PROFILES_EU[0]));
 static uint8_t        s_region = REGION_EU;
 
 void setRegion(uint8_t r) {
-    s_region = (r == REGION_US) ? REGION_US : REGION_EU;
-    if (s_region == REGION_US) { s_tab = PROFILES_US; s_n = (uint8_t)(sizeof(PROFILES_US) / sizeof(PROFILES_US[0])); }
-    else                       { s_tab = PROFILES_EU; s_n = (uint8_t)(sizeof(PROFILES_EU) / sizeof(PROFILES_EU[0])); }
+    s_region = (r == REGION_US || r == REGION_AU) ? r : (uint8_t)REGION_EU;
+    if (s_region == REGION_US)      { s_tab = PROFILES_US; s_n = (uint8_t)(sizeof(PROFILES_US) / sizeof(PROFILES_US[0])); }
+    else if (s_region == REGION_AU) { s_tab = PROFILES_AU; s_n = (uint8_t)(sizeof(PROFILES_AU) / sizeof(PROFILES_AU[0])); }
+    else                            { s_tab = PROFILES_EU; s_n = (uint8_t)(sizeof(PROFILES_EU) / sizeof(PROFILES_EU[0])); }
 }
 uint8_t     region()     { return s_region; }
-const char* regionName() { return s_region == REGION_US ? "US 915" : "EU 868"; }
+const char* regionName() { return s_region == REGION_US ? "US 915" : s_region == REGION_AU ? "AU 915" : "EU 868"; }
 
 const Profile* profiles()     { return s_tab; }
 uint8_t        profileCount() { return s_n; }

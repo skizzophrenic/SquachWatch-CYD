@@ -43,6 +43,32 @@ env.Append(BUILD_FLAGS=['-DSQW_ENV=\\"%s\\"' % env["PIOENV"]])
 # a pre: script land before the framework's and lose). C accepts it too.
 env.Append(BUILD_FLAGS=["-fno-exceptions"])
 
+# The Arduino core's own error lines (log_e: "nvs_open failed", "xSemaphore-
+# CreateMutex failed"...) off. They were on at the framework's default level,
+# 158 format strings and their call sites, 9 KB and more of flash on the
+# 2.8in build (measured 2026-11-14), and the firmware never reads them: its
+# own reports go out through Serial.printf, which this does not touch. A
+# board env that sets a level itself (the Tab5 bench builds) keeps it.
+if not any("CORE_DEBUG_LEVEL" in str(f) for f in env.get("BUILD_FLAGS", [])):
+    env.Append(BUILD_FLAGS=["-DCORE_DEBUG_LEVEL=0"])
+
+# HUMAN SENSING (SETTINGS > HUMAN SENSING, src/sense_cyd/) in every build for
+# an ESP32 or an ESP32-S3: the shipping boards, their variants and the bench
+# builds that run the app. Not the ESP32-C5 boards (their radio's channel-state
+# calls differ: a port of its own) and not the Tab5 (no radio of its own), nor
+# the CrowPanel and Tab5 bench builds that have no app. It costs ~33 KB of
+# flash and ~0.3 KB of fixed RAM; its ~8.5 KB of buffers come from the heap
+# only while the screen is open (v1.42.0 had them fixed, and CYDs short of
+# heap went deaf).
+_SENSE_SKIP = ("crowpanel7-paneltest", "crowpanel7-probe", "crowpanel7-touchtrace", "crowpanel7-native")
+if env.BoardConfig().get("build.mcu", "") in ("esp32", "esp32s3") and env["PIOENV"] not in _SENSE_SKIP \
+        and not env["PIOENV"].startswith("tab5"):
+    env.Append(BUILD_FLAGS=["-DSENSE_CYD_APP=1"])
+# The Tab5 (ESP32-P4) senses through its C6 radio (src/sense_cyd/sense_tab5.cpp);
+# its bench envs (tab5-paneltest, tab5-radiotest) stay without it.
+elif env["PIOENV"] == "tab5":
+    env.Append(BUILD_FLAGS=["-DSENSE_CYD_APP=1"])
+
 
 # ---------------------------------------------------------------------------
 # TFT_eSPI, ESP32-C5. Only for the nm-cyd-c5 environment.
@@ -111,7 +137,7 @@ def patch_tft_espi_for_c5(env):
         print("TFT_eSPI: added ESP32-C5 branch to %s" % fname)
 
 
-if env["PIOENV"] in ("nm-cyd-c5", "marauder-v8"):
+if env["PIOENV"] in ("nm-cyd-c5", "marauder-v8", "waveshare-c5-28", "ws-c5-35"):
     patch_tft_espi_for_c5(env)
 
 

@@ -6,8 +6,8 @@
 
 // OUI table. Order MATTERS: lookupOui walks top-to-bottom and returns
 // the first match. Per DESIGN.md §6.2: Axon > Flock > ALPR > cameras >
-// ESP32 family > skimmer. Some Flock hardware uses Espressif modules,
-// so Flock entries for the same prefix must appear before generic ESP32.
+// skimmer. A prefix shared by two makers goes under the more specific
+// row first.
 const OuiEntry kOuiTable[] = {
     // ---- Axon / Taser (priority: highest) ----
     {{0x00, 0x25, 0xDF}, "Axon",         DetectionType::AXON,       Confidence::HIGH_CONF},
@@ -21,6 +21,23 @@ const OuiEntry kOuiTable[] = {
     // 00:90:7F would name every office firewall a police camera.
     {{0x00, 0x1D, 0x96}, "WatchGuard",   DetectionType::AXON,       Confidence::MED_CONF},
     {{0x00, 0x23, 0xBD}, "DigitalAlly",  DetectionType::AXON,       Confidence::MED_CONF},
+
+    // ---- In-vehicle routers (2026-11-20) ----
+    // The two makers whose rugged routers sit in most North American patrol
+    // cars (Cradlepoint IBR/R-series, Sierra Wireless AirLink MG/MP/XR), on
+    // their own IEEE blocks. Filed under AXON, the LE-equipment type, at
+    // LOW with the maker as the label: buses, ambulances and utility trucks
+    // carry the same boxes, so a hit means "a fleet vehicle's router", not
+    // "police". Neither maker documents a default hotspot name for the
+    // current models, so there is no SSID row.
+    {{0x00, 0x30, 0x44}, "Cradlepoint",  DetectionType::AXON,       Confidence::LOW_CONF},
+    {{0x00, 0xE0, 0x1C}, "Cradlepoint",  DetectionType::AXON,       Confidence::LOW_CONF},
+    {{0x00, 0xA0, 0xD5}, "AirLink",      DetectionType::AXON,       Confidence::LOW_CONF},
+    {{0x28, 0xA3, 0x31}, "AirLink",      DetectionType::AXON,       Confidence::LOW_CONF},
+    {{0x50, 0x13, 0x9D}, "AirLink",      DetectionType::AXON,       Confidence::LOW_CONF},
+    {{0x64, 0xCE, 0x6E}, "AirLink",      DetectionType::AXON,       Confidence::LOW_CONF},
+    {{0x84, 0xDB, 0x2F}, "AirLink",      DetectionType::AXON,       Confidence::LOW_CONF},
+    {{0xCC, 0x93, 0x4A}, "AirLink",      DetectionType::AXON,       Confidence::LOW_CONF},
 
     // ---- ShotSpotter / SoundThinking gunshot sensors ----
     // ShotSpotter, Inc.'s own block (IEEE MA-L). Filed with Raven, the other
@@ -120,6 +137,13 @@ const OuiEntry kOuiTable[] = {
     {{0x2C, 0xAA, 0x8E}, "Wyze",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
     {{0xD0, 0x3F, 0x27}, "Wyze",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
     {{0x7C, 0x78, 0xB2}, "Wyze",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    // Wyze's two newer blocks (IEEE MA-L, read 2026-11-20): without them a
+    // recent Wyze camera matched nothing at all.
+    {{0xF0, 0xC8, 0x8B}, "Wyze",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    {{0x80, 0x48, 0x2C}, "Wyze",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    // SimpliSafe's one block. MED, not HIGH: it is their cameras and their
+    // doorbell, and their base station and keypads as well.
+    {{0xF8, 0x51, 0x28}, "SimpliSafe",   DetectionType::CAMERA,     Confidence::MED_CONF},
     {{0xB8, 0xD7, 0xAF}, "Wyze-Mod",     DetectionType::CAMERA,     Confidence::LOW_CONF},
     {{0x34, 0xD2, 0x70}, "Amazon",       DetectionType::CAMERA,     Confidence::MED_CONF},
     // Labelled Hikvision for a long time. The registry says AMAZON
@@ -132,7 +156,24 @@ const OuiEntry kOuiTable[] = {
     // detection stood up while the attribution did not.
     {{0x28, 0x57, 0xBE}, "Hikvision",    DetectionType::CAMERA,     Confidence::HIGH_CONF},
     {{0x00, 0xE0, 0x4C}, "Realtek",      DetectionType::CAMERA,     Confidence::LOW_CONF},
-    {{0xBC, 0xDD, 0xC2}, "Arlo",         DetectionType::CAMERA,     Confidence::LOW_CONF},
+    // Arlo's own MA-L blocks, all three registered to "Arlo Technology",
+    // so High by the rule the other vendor-registered camera rows use.
+    {{0xFC, 0x9C, 0x98}, "Arlo",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    {{0x48, 0x62, 0x64}, "Arlo",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    {{0xA4, 0x11, 0x62}, "Arlo",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    // BC:DD:C2 sat here as "Arlo" and is registered to ESPRESSIF. It was
+    // wrong in both directions: every ESP32 in that block read as a covert
+    // camera, and no real Arlo was ever matched, because none of the three
+    // blocks above were in the table. It also contradicted this project's
+    // own documented decision -- DETECTIONS.md, under the camera section,
+    // says a "flag any Espressif OUI as a possible camera" fallback "would
+    // need a real audit of Espressif's OUI ranges against known false
+    // positives before shipping -- it is NOT built". One was in the table
+    // anyway, mislabelled, so the audit graded it Low as "Arlo" instead of
+    // removing it as Espressif. Same hazard the FLOCK block was cleared of
+    // on 2026-10-14 ("so a SquachWatch is never somebody else's Flock
+    // camera"); a SquachWatch is an ESP32, and this is a SquachWatch
+    // reading another SquachWatch as surveillance.
     {{0x4C, 0x69, 0x05}, "Blink",        DetectionType::CAMERA,     Confidence::LOW_CONF},
     {{0xA4, 0xC1, 0x38}, "Tuya",         DetectionType::CAMERA,     Confidence::LOW_CONF},
     // Blink by Amazon's own blocks (IEEE MA-L, "Blink by Amazon").
@@ -174,12 +215,39 @@ const OuiEntry kOuiTable[] = {
     {{0x00, 0x40, 0x8C}, "Axis",         DetectionType::CAMERA,     Confidence::HIGH_CONF},  // Axis Communications, registered 1998
     {{0xB8, 0xA4, 0x4F}, "Axis",         DetectionType::CAMERA,     Confidence::HIGH_CONF},
 
+    // ---- Dashcams and fleet driver cams (2026-11-20) ----
+    // Registry-checked (IEEE MA-L). Only the brands with their own block:
+    // most consumer dashcams ride a Realtek or Ampak module and are caught
+    // by their hotspot name instead (kSsidPrefixes). The fleet systems
+    // (Lytx DriveCam, Samsara) are the cameras in delivery vans and trucks
+    // that watch the road and the driver; Samsara's block also covers its
+    // plain vehicle gateways, hence LOW. Netradyne and Motive hold only
+    // 28-bit blocks, which this table cannot express yet.
+    {{0x00, 0x25, 0x42}, "BlackVue",     DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    {{0x44, 0x27, 0xF3}, "70mai",        DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    {{0xB8, 0x59, 0xC8}, "70mai",        DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    {{0x00, 0x1F, 0x4F}, "Thinkware",    DetectionType::CAMERA,     Confidence::HIGH_CONF},
+    {{0x00, 0x16, 0xB2}, "Lytx",         DetectionType::CAMERA,     Confidence::MED_CONF},   // registered as DriveCam Inc, Lytx's old name
+    {{0x2C, 0x42, 0x05}, "Lytx",         DetectionType::CAMERA,     Confidence::MED_CONF},
+    {{0x50, 0xDF, 0x95}, "Lytx",         DetectionType::CAMERA,     Confidence::MED_CONF},
+    {{0x70, 0xE4, 0x6E}, "Lytx",         DetectionType::CAMERA,     Confidence::MED_CONF},
+    {{0x58, 0xA7, 0x48}, "Lytx",         DetectionType::CAMERA,     Confidence::MED_CONF},
+    {{0xFC, 0xDB, 0x21}, "Samsara",      DetectionType::CAMERA,     Confidence::LOW_CONF},
+    {{0x28, 0xEA, 0x5B}, "Samsara",      DetectionType::CAMERA,     Confidence::LOW_CONF},
+
     // ---- Camera glasses ----
     // Luxottica Group's own block (IEEE MA-L): Ray-Ban and Oakley Meta's
     // maker. Four other "Meta glasses" OUIs circulate (7C:2A:9E, CC:66:0A,
     // F4:03:43, 5C:E9:1E); the registry gives two to Apple, one to HPE and
     // one to nobody, so they are not here.
     {{0x98, 0x59, 0x49}, "Luxottica",    DetectionType::META,       Confidence::MED_CONF},
+    // Two more camera-glasses makers with their own blocks (2026-11-20).
+    // Rokid's block is registered to Lingban Technology (Hangzhou), the
+    // company's legal name -- a press-and-wiki link, not Rokid's own
+    // site, so LOW. Vuzix makes the Blade and M400 (cameras) and the Z100
+    // (none); one block covers all of them, so LOW too.
+    {{0x28, 0xE8, 0x88}, "Rokid",        DetectionType::META,       Confidence::LOW_CONF},
+    {{0x98, 0xDA, 0x92}, "Vuzix",        DetectionType::META,       Confidence::LOW_CONF},
 
     // ---- Drones, by maker (2026-10-14) ----
     // For the drones that do not broadcast Remote ID, or not yet. All IEEE
@@ -229,6 +297,30 @@ const OuiEntry kOuiTable[] = {
     // higher.
     {{0x02,0xC0,0xCA}, "Hak5-LA",    DetectionType::HACKER, Confidence::LOW_CONF},
     {{0x02,0x13,0x37}, "Hak5-LA",    DetectionType::HACKER, Confidence::LOW_CONF},
+
+    // ---- LISTENER: smart speakers -------------------------------------------
+    // Sonos, Inc.'s fifteen MA-L blocks (IEEE registry, 2026-11-21). Nothing
+    // but Sonos and IKEA's Symfonisk line ships on them. MED, not HIGH: the
+    // maker is certain, the microphone is not -- One SL, Five, Sub, Amp,
+    // Port, Play:1/3, Playbar and Symfonisk have none. 00:04:3C is "SONOS Co.
+    // Ltd", a different (Korean) company, and stays out. Amazon's 205 blocks
+    // and Google's 114 are every Kindle, Fire TV, Pixel and Chromecast too,
+    // so an Echo or a Nest speaker has no prefix of its own to match.
+    {{0x00,0x0E,0x58}, "Sonos",      DetectionType::LISTENER, Confidence::MED_CONF},
+    {{0x34,0x7E,0x5C}, "Sonos",      DetectionType::LISTENER, Confidence::MED_CONF},
+    {{0x38,0x42,0x0B}, "Sonos",      DetectionType::LISTENER, Confidence::MED_CONF},
+    {{0x48,0xA6,0xB8}, "Sonos",      DetectionType::LISTENER, Confidence::MED_CONF},
+    {{0x54,0x2A,0x1B}, "Sonos",      DetectionType::LISTENER, Confidence::MED_CONF},
+    {{0x5C,0xAA,0xFD}, "Sonos",      DetectionType::LISTENER, Confidence::MED_CONF},
+    {{0x60,0xF6,0x20}, "Sonos",      DetectionType::LISTENER, Confidence::MED_CONF},
+    {{0x74,0xCA,0x60}, "Sonos",      DetectionType::LISTENER, Confidence::MED_CONF},
+    {{0x78,0x28,0xCA}, "Sonos",      DetectionType::LISTENER, Confidence::MED_CONF},
+    {{0x80,0x4A,0xF2}, "Sonos",      DetectionType::LISTENER, Confidence::MED_CONF},
+    {{0x94,0x9F,0x3E}, "Sonos",      DetectionType::LISTENER, Confidence::MED_CONF},
+    {{0xB8,0xE9,0x37}, "Sonos",      DetectionType::LISTENER, Confidence::MED_CONF},
+    {{0xC4,0x38,0x75}, "Sonos",      DetectionType::LISTENER, Confidence::MED_CONF},
+    {{0xF0,0xF6,0xC1}, "Sonos",      DetectionType::LISTENER, Confidence::MED_CONF},
+    {{0xF8,0x5C,0x24}, "Sonos",      DetectionType::LISTENER, Confidence::MED_CONF},
 };
 const uint16_t kOuiCount = sizeof(kOuiTable) / sizeof(kOuiTable[0]);
 
@@ -280,6 +372,9 @@ const UuidEntry kUuidTable[] = {
     {0x3081, "Flipper",    DetectionType::HACKER},
     {0x3082, "Flipper",    DetectionType::HACKER},
     {0x3083, "Flipper",    DetectionType::HACKER},
+
+    // Sonos's SIG-assigned service UUID (ESPresense keys Sonos on it too).
+    {0xFE07, "Sonos",      DetectionType::LISTENER},
 };
 const uint16_t kUuidCount = sizeof(kUuidTable) / sizeof(kUuidTable[0]);
 
@@ -318,6 +413,50 @@ const SsidEntry kSsidPrefixes[] = {
     // suffix; MED at best, since somebody can also just name their home
     // network this as a joke.
     {"pwned",   "Deauther",     DetectionType::HACKER},
+
+    // ---- Dashcams (2026-11-20) ----
+    // The hotspot a dashcam puts up for its phone app, named as the maker's
+    // manual says. Most ride a generic WiFi module, so the name is the only
+    // handle. Vantrue puts its name in the MIDDLE ("E1 Lite_VANTRUE_1234"):
+    // that one is a substring rule in lookupSsid(), not a row here. Garmin
+    // and Rexing document no name and have none. Nextbase's is the older
+    // series, with a space ("NEXTBASE 312GW 123"); the newer ones publish
+    // no pattern. The Lytx aux camera's "AuxCamera_" is from one FCC label.
+    {"VIOFO_",     "Viofo",     DetectionType::CAMERA},
+    {"VIOFO-",     "Viofo",     DetectionType::CAMERA},
+    {"BlackVue",   "BlackVue",  DetectionType::CAMERA},
+    {"70mai_",     "70mai",     DetectionType::CAMERA},
+    {"thinkware",  "Thinkware", DetectionType::CAMERA},
+    {"NEXTBASE ",  "Nextbase",  DetectionType::CAMERA},
+    {"ROVE_R",     "Rove",      DetectionType::CAMERA},
+    {"REDTIGER_",  "Redtiger",  DetectionType::CAMERA},
+    {"AuxCamera_", "Lytx",      DetectionType::CAMERA},
+
+    // ---- Hidden and mini cameras in setup mode (2026-11-20) ----
+    // The cheap WiFi cameras that turn up in rentals sit in access-point
+    // mode until paired, under a fixed name from their app's firmware.
+    // The biggest family (LookCam, HDWifiCamPro, JXLCAM, TinyCam Pro)
+    // names the hotspot after the camera's own UID, "ABCD-123456-ABCDE":
+    // that shape is a rule in lookupSsid() (isP2pCamSsid), and the rows
+    // here only put the right family on the label. V380's "MV" + digits
+    // is a rule too. Rejected as too generic: "CAM-", "A9", "HD-",
+    // "Camera-", "IPCAM-", Tuya's "SmartLife-" (every unpaired plug).
+    {"DGK-",       "HDWifiCam", DetectionType::CAMERA},
+    {"ACCQ-",      "LookCam",   DetectionType::CAMERA},
+    {"BCCQ-",      "LookCam",   DetectionType::CAMERA},
+    {"XCCQ-",      "LookCam",   DetectionType::CAMERA},
+    {"HCAM-",      "TinyCam",   DetectionType::CAMERA},
+    {"CLOUDCAM_",  "YCC365",    DetectionType::CAMERA},
+    {"MEYE_",      "Sricam",    DetectionType::CAMERA},
+    {"GW_IPC",     "Yoosee",    DetectionType::CAMERA},
+    {"IPC_AP_",    "Zosi",      DetectionType::CAMERA},
+
+    // ---- LISTENER: a speaker in setup mode ------------------------------
+    // A Google Home or Nest speaker being set up names its hotspot
+    // "GoogleHome" and four digits (Google's own setup help). Once it is
+    // on the room's WiFi this goes away: it is a client then, not a hotspot.
+    // Amazon's "Amazon-XXXX" is left out: other Amazon gear uses it too.
+    {"GoogleHome", "Google speaker", DetectionType::LISTENER},
 };
 const uint16_t kSsidCount = sizeof(kSsidPrefixes) / sizeof(kSsidPrefixes[0]);
 
@@ -352,6 +491,11 @@ const MfgIdEntry kMfgIdTable[] = {
 
     // ---- Trackers ----------------------------------------------------------
     {0x08C3, "Chipolo",    DetectionType::GOOGLE_TAG},
+
+    // ---- Smart speakers ------------------------------------------------------
+    // Sonos, Inc. (SIG). Every Sonos product, the portable Roam and Move with
+    // their microphones among them.
+    {0x05A7, "Sonos",      DetectionType::LISTENER},
 
     // ---- Pentest hardware -----------------------------------------------
     // None. Flipper Devices' SIG company ID is 0x0E29 (not 0x0FBA, which
@@ -456,6 +600,39 @@ DetectionType lookupBtName(const char* name) {
     return DetectionType::UNKNOWN;
 }
 
+bool isP2pCamSsid(const char* ssid) {
+    if (!ssid) return false;
+    const char* p = ssid;
+    int n = 0;
+    while (*p >= 'A' && *p <= 'Z') { p++; n++; }
+    if (n < 3 || n > 4 || *p != '-') return false;
+    p++;
+    for (int i = 0; i < 6; i++, p++) if (*p < '0' || *p > '9') return false;
+    if (*p != '-') return false;
+    p++;
+    for (int i = 0; i < 5; i++, p++) if (*p < 'A' || *p > 'Z') return false;
+    return *p == '\0';
+}
+
+// V380's setup hotspot: "MV" and the camera's UID, six or more digits.
+static bool isV380Ssid(const char* ssid) {
+    if (!ssid || ssid[0] != 'M' || ssid[1] != 'V') return false;
+    const char* p = ssid + 2;
+    int n = 0;
+    while (*p >= '0' && *p <= '9') { p++; n++; }
+    return n >= 6 && *p == '\0';
+}
+
+// The names that are a shape rather than a prefix. Shared by lookupSsid()
+// and ssidVendorName() so the two never disagree.
+static const char* ssidPatternName(const char* ssid) {
+    if (!ssid) return nullptr;
+    if (isP2pCamSsid(ssid))             return "P2P-Cam";
+    if (isV380Ssid(ssid))               return "V380";
+    if (strcasestr(ssid, "_VANTRUE_"))  return "Vantrue";
+    return nullptr;
+}
+
 DetectionType lookupSsid(const char* ssid) {
     if (!ssid) return DetectionType::UNKNOWN;
     // A provisioned camera's bare "Flock" (Flock-You's firmware dump). Exact,
@@ -467,6 +644,8 @@ DetectionType lookupSsid(const char* ssid) {
             return kSsidPrefixes[i].type;
         }
     }
+    // The camera hotspots that are a shape, not a prefix (all CAMERA).
+    if (ssidPatternName(ssid)) return DetectionType::CAMERA;
     return DetectionType::UNKNOWN;
 }
 
@@ -490,7 +669,7 @@ const char* ssidVendorName(const char* ssid) {
             return kSsidPrefixes[i].name;
         }
     }
-    return nullptr;
+    return ssidPatternName(ssid);
 }
 
 DetectionType lookupMfgId(uint16_t mfgId) {
@@ -516,29 +695,100 @@ DetectionType lookupMfgId(uint16_t mfgId) {
 //   Apple, type 0x12 (Find My), payload length 0x19. The beacon a tag
 //   sends once separated from its owner.
 //
-// KNOWN COST, accepted deliberately. Pattern 1 also matches Apple's
-// Proximity Pairing advert (4C 00 07 19 ...), which is likewise 30
-// bytes -- so AirPods and similar accessories will report as AIRTAG
-// again, which is the false positive v1.5.0 removed by dropping 0x07.
-// It is back on purpose: a freshly powered AirTag advertises 0x07, not
-// 0x12, so rejecting it meant the detector could not see a tag at the
-// exact moment someone is most likely to be testing it. Catching the
-// tag matters more than the accessory noise.
+// PATTERN 3: 4C 00 12 02
+//   The same Find My type with a two-byte payload: the "nearby" frame a
+//   tag sends while its owner's phone is within reach. Found on the bench
+//   2026-11-20: an AirTag next to its phone sent nothing the first two
+//   patterns match, and was invisible until this one went in.
 //
-// The way to get both is to look further into the Proximity Pairing
-// payload, which carries a device model ID that separates a tag from
-// headphones. That needs a capture of real bytes from both to get
-// right, and guessing model IDs from memory is how this gets subtly
-// wrong again.
+// PATTERN 4: 4C 00 07 19 xx 00 55
+//   Apple's Proximity Pairing block (type 0x07), which an AirTag sends
+//   while it is NOT set up with a phone: out of the box, or after being
+//   reset. The same block is what AirPods and the other headphones send,
+//   which is why 0x07 alone was a false positive for a long time; the
+//   two bytes after the prefix are the device model, and 00 55 is the
+//   AirTag's. Captured off a real tag on the bench, 2026-11-20:
+//   4c 00 07 19 05 00 55 10 00 00 01 17 17 ...
+//   AirPods send 01 and their own model there (0E 20, 0F 20, 02 20 ...).
+static bool isAirTagPairing(const uint8_t* p, uint8_t left) {
+    // p points at 4C; needs 4C 00 07 19 xx 00 55.
+    return left >= 7 && p[0] == 0x4C && p[1] == 0x00 && p[2] == 0x07 && p[3] == 0x19 &&
+           p[5] == 0x00 && p[6] == 0x55;
+}
+
 bool isAirTagPayload(const uint8_t* payload, uint8_t len) {
     if (!payload || len < 4) return false;
     for (uint8_t i = 0; i + 3 < len; i++) {
         if (payload[i] == 0x1E && payload[i + 1] == 0xFF &&
-            payload[i + 2] == 0x4C && payload[i + 3] == 0x00) return true;
-        if (payload[i] == 0x4C && payload[i + 1] == 0x00 &&
-            payload[i + 2] == 0x12 && payload[i + 3] == 0x19) return true;
+            payload[i + 2] == 0x4C && payload[i + 3] == 0x00) {
+            // A 30-byte Apple block whose type byte is 0x07 is Proximity
+            // Pairing: an AirTag not yet set up (model 00 55), or AirPods and
+            // the other headphones, which used to come up as AIRTAG here.
+            // 0x12 is the offline-finding block a set-up tag sends. Anything
+            // else keeps the old loose match.
+            if (i + 4 < len && payload[i + 4] == 0x07)
+                return isAirTagPairing(payload + i + 2, (uint8_t)(len - i - 2));
+            return true;
+        }
+        if (payload[i] == 0x4C && payload[i + 1] == 0x00 && payload[i + 2] == 0x12 &&
+            (payload[i + 3] == 0x19 || payload[i + 3] == 0x02)) return true;
+        if (isAirTagPairing(payload + i, (uint8_t)(len - i))) return true;
     }
     return false;
+}
+
+// Apple's Continuity "Hey Siri" message (furiousMAC/continuity, hey_siri.md):
+// type 0x08, length 7 -- a perceptual hash (2), SNR (1), confidence (1), the
+// device class (2), a random byte (1). Class 0x0007 is a HomePod, and nothing
+// else sends it. It goes out only when somebody near it says "Hey Siri", so
+// a HomePod shows up rarely, but when it does there is no doubt about it.
+// The class is read both ways round: the write-up gives it as a UINT16
+// without saying which end comes first.
+bool isHomePodSiri(const uint8_t* mfg, uint8_t len) {
+    if (!mfg || len < 4 || mfg[0] != 0x4C || mfg[1] != 0x00) return false;
+    for (uint8_t i = 2; i + 1 < len; ) {
+        const uint8_t type = mfg[i], l = mfg[i + 1];
+        if ((uint16_t)i + 2 + l > len) return false;
+        if (type == 0x08 && l == 7) {
+            const uint8_t* v = mfg + i + 2;
+            return (v[4] == 0x00 && v[5] == 0x07) || (v[4] == 0x07 && v[5] == 0x00);
+        }
+        i = (uint8_t)(i + 2 + l);
+    }
+    return false;
+}
+
+uint8_t airTagFrame(const uint8_t* payload, uint8_t len, uint8_t* status) {
+    if (!payload || len < 4) return 0;
+    for (uint8_t i = 0; i + 3 < len; i++) {
+        if (payload[i] == 0x4C && payload[i + 1] == 0x00 && payload[i + 2] == 0x12 &&
+            (payload[i + 3] == 0x19 || payload[i + 3] == 0x02)) {
+            if (status) *status = (i + 4 < len) ? payload[i + 4] : 0;
+            return payload[i + 3];
+        }
+        // Not set up with a phone yet: 0x07, with the pairing prefix byte
+        // where the status would be.
+        if (isAirTagPairing(payload + i, (uint8_t)(len - i))) {
+            if (status) *status = payload[i + 4];
+            return 0x07;
+        }
+    }
+    return 0;
+}
+
+// The offline-finding block's status byte, when the advert has one:
+// 4C 00 12 19 <status> <key...>. 0 when it is not there. Bits 7-6 are the
+// battery and bit 5 is set while the tag has been near its owner's phone
+// lately (the public Find My write-ups call it "maintained"); clear means
+// it has been apart from its owner, which is the state it beeps in and the
+// state worth knowing about. Read off real tags on the bench before the
+// card leans on it harder than a chip.
+uint8_t airTagStatusByte(const uint8_t* payload, uint8_t len) {
+    if (!payload || len < 5) return 0;
+    for (uint8_t i = 0; i + 4 < len; i++)
+        if (payload[i] == 0x4C && payload[i + 1] == 0x00 &&
+            payload[i + 2] == 0x12 && payload[i + 3] == 0x19) return payload[i + 4];
+    return 0;
 }
 
 // Walks the AD structures of a raw advertisement: length, type, data.
@@ -573,10 +823,20 @@ bool isAxonBwcPayload(const uint8_t* payload, uint8_t len) {
     return false;
 }
 
-bool isFmdnPayload(const uint8_t* payload, uint8_t len) {
-    return forEachAd(payload, len, [](uint8_t type, const uint8_t* d, uint8_t n) {
-        return type == 0x16 && n >= 3 && d[0] == 0xAA && d[1] == 0xFE && (d[2] == 0x40 || d[2] == 0x41);
+uint8_t fmdnFrameType(const uint8_t* payload, uint8_t len) {
+    uint8_t ft = 0;
+    forEachAd(payload, len, [&](uint8_t type, const uint8_t* d, uint8_t n) {
+        if (type == 0x16 && n >= 3 && d[0] == 0xAA && d[1] == 0xFE && (d[2] == 0x40 || d[2] == 0x41)) {
+            ft = d[2];
+            return true;
+        }
+        return false;
     });
+    return ft;
+}
+
+bool isFmdnPayload(const uint8_t* payload, uint8_t len) {
+    return fmdnFrameType(payload, len) != 0;
 }
 
 uint16_t serviceDataUuid(const uint8_t* payload, uint8_t len) {
@@ -626,6 +886,9 @@ Confidence confidenceFor(DetectionType t) {
         // it is NOT is a claim about intent -- see the docs.
         case DetectionType::IBEACON:
         case DetectionType::EVILTWIN:
+        // MY ALERTS: the owner named the network. Whether it is what they
+        // think it is, is theirs to judge; that it matched is certain.
+        case DetectionType::MINE:
             return Confidence::HIGH_CONF;
         // Was High when it was only Ray-Ban Meta's 0xFD5F service UUID, which
         // is specific to the glasses. Broadening it to the Meta, Luxottica and
@@ -652,6 +915,15 @@ Confidence confidenceFor(DetectionType t) {
         // their own. This is the value a caller gets when nothing more
         // specific was established.
         case DetectionType::HACKER:
+        // The base grade, for a DevAddr of type 3 and up: eleven to seventeen
+        // bits of a 21-bit NetID reach the air, so the registry row it lands
+        // on is the likeliest owner and not the only possible one. Types 0-2
+        // carry the whole NetID and are graded HIGH where the sighting is made.
+        case DetectionType::LORAWAN:
+        // Sonos by its own company ID, UUID or prefix: the maker is certain,
+        // the microphone is likely (some Sonos have none). A HomePod's Siri
+        // block is set HIGH where it is matched.
+        case DetectionType::LISTENER:
             return Confidence::MED_CONF;
         default:
             return Confidence::LOW_CONF;

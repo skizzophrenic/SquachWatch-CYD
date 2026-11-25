@@ -152,7 +152,10 @@ void fail(Fail f) {
 void startScan() {
     s_netN = 0;
     WiFi.scanDelete();
-    WiFi.scanNetworks(true /* async */, false /* no hidden */);
+    // Passive, for the same reason startRawWifiScan() is: the default is an
+    // active scan that probes on every channel. Every AP you could join
+    // beacons, and hidden ones were already excluded, so nothing is lost.
+    WiFi.scanNetworks(true /* async */, false /* no hidden */, true /* passive */, 150);
     s_state = State::SCANNING;
 }
 
@@ -244,6 +247,16 @@ char     s_host[48]   = "";
 uint16_t s_port       = 80;
 char     s_prefix[48] = "/";
 bool     s_noName     = false;   // the name lookup failed this session: go straight to the fixed addresses
+// The manual check's patience (#85). Some boards -- the 3.2in capacitive
+// Sunton above all -- join, and then for several seconds nothing unicast
+// reaches them for up to a minute: the name lookup times out, the fixed
+// addresses do not connect, or a connection is made and no reply comes.
+// Three knocks gave up inside that gap. Until this moment the first contact
+// keeps knocking, on a shorter fuse, and asks the name again each time.
+uint32_t s_patientUntil = 0;
+uint32_t s_joinedAt     = 0;
+const uint32_t PATIENCE_MS = 90000;
+const uint32_t PATIENT_REPLY_MS = 6000;   // a knock's wait for a reply while patient
 
 void parseBase() {
     if (s_host[0]) return;
@@ -361,7 +374,8 @@ Reply get(WiFiClient& c, const char* file, uint32_t timeoutMs) {
                           (unsigned)sent, (unsigned long)(millis() - tw), c.connected() ? 1 : 0);
             r.got = Got::NO_ANSWER; noteWhy(r); return r;
         }
-        Serial.printf("[ota] %s: \"%s\" after %lu ms\n", file, line, (unsigned long)(millis() - tw));
+        Serial.printf("[ota] %s: \"%s\" after %lu ms (+%lu ms after the join)\n", file, line,
+                      (unsigned long)(millis() - tw), (unsigned long)(millis() - s_joinedAt));
         if (strncmp(line, "HTTP/", 5) == 0) {
             const char* sp = strchr(line, ' ');
             if (sp) r.code = atoi(sp + 1);
@@ -420,14 +434,22 @@ Reply get(WiFiClient& c, const char* file, uint32_t timeoutMs) {
 // will say the same thing a second later.
 Reply getTries(WiFiClient& c, const char* file, uint32_t timeoutMs, uint8_t tries) {
     Reply r;
-    for (uint8_t i = 0; i < tries; i++) {
-        r = get(c, file, timeoutMs);
+    for (uint8_t i = 0;; i++) {
+        const bool waiting = (int32_t)(s_patientUntil - millis()) > 0;
+        r = get(c, file, waiting && timeoutMs > PATIENT_REPLY_MS ? PATIENT_REPLY_MS : timeoutMs);
         const bool again = r.got == Got::NO_CONNECT || r.got == Got::NO_ANSWER || r.got == Got::SITE_TROUBLE;
-        if (!again || s_cancel || i + 1 == tries) break;
-        Serial.printf("[ota] %s: %s, trying again\n", file, s_why);
+        // Past the usual three only while a manual check is still waiting
+        // for the network to carry anything at all.
+        const bool patient = (r.got == Got::NO_CONNECT || r.got == Got::NO_ANSWER) &&
+                             (int32_t)(s_patientUntil - millis()) > 0;
+        if (!again || s_cancel || (i + 1 >= tries && !patient) || i >= 30) break;
+        Serial.printf("[ota] %s: %s at +%lu ms after the join, trying again\n", file, s_why,
+                      (unsigned long)(millis() - s_joinedAt));
         c.stop();
-        delay(2000u * (i + 1));
+        if (patient) s_noName = false;   // the router may answer names by now
+        delay(i < 2 ? 2000u * (i + 1) : 5000u);
     }
+    if (r.got == Got::OK) s_patientUntil = 0;   // the network works: later files get the usual three
     return r;
 }
 
@@ -564,6 +586,8 @@ bool join() {
         return false;
     }
     Serial.printf("[ota] joined %s as %s, signal %d dBm\n", s_ssid, WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
+    s_joinedAt     = millis();
+    s_patientUntil = s_joinedAt + PATIENCE_MS;
     // The clock rides along: one NTP round trip while the radio is up anyway.
     Clock::syncWait(1500);
     if (s_save && !saveNetwork(s_ssid, s_pass))
@@ -915,7 +939,10 @@ void connect(const char* ssid, const char* pass, bool save) {
     s_fail    = Fail::NONE;
     s_cancel  = s_install = s_downloadStarted = false;
     s_state   = State::CONNECTING;
-    if (xTaskCreatePinnedToCore(run, "otawifi", TASK_STACK, nullptr, 1, &s_task, 1) != pdPASS) {
+    // The second core where there is one. The ESP32-C5 has only core 0, and
+    // asking for core 1 there is an assert, not a failure: every WiFi update
+    // on the NM-CYD-C5 restarted the board (issue #121).
+    if (xTaskCreatePinnedToCore(run, "otawifi", TASK_STACK, nullptr, 1, &s_task, portNUM_PROCESSORS > 1 ? 1 : 0) != pdPASS) {
         s_task = nullptr;
         memset(s_pass, 0, sizeof s_pass);
         Serial.printf("[ota] no room for the update task: %u wanted, heap %lu largest %lu\n", (unsigned)TASK_STACK,

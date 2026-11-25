@@ -303,8 +303,13 @@ void deliverInvite(const Slot& s, uint32_t now, uint32_t ctr, uint8_t kind) {
         }
         ++s_rxInviteComplete;
         Serial.printf("[invite-rx] complete four-part %s for this board\n", role ? "ANSWER" : "OFFER");
-        s_replay.record(s.nmac, ctr);
-        saveReplay();
+        // Not recorded in the replay table. An invite frame carries only a
+        // plain hash, not a tag anybody without the phrase is unable to make,
+        // so recording it broke the table's own rule (record only what
+        // authenticated, include/meshmsg.h): a forged offer "from" a squad
+        // mate's address with counter 0xFFFFFF made every real message from
+        // that mate stale here, across restarts, with nothing on screen.
+        // Repeats of a finished invite are turned away by the invite state.
         if (role == 0) {
             // An offer. Only while nothing else is going on: a second offer
             // mid-invite is ignored, not swapped in.
@@ -593,7 +598,17 @@ uint32_t hwRandom() { return esp_random(); }
 // a counter NVS does not know was handed out is one a reboot can hand out again.
 bool takeCounters(uint8_t n, uint32_t& base) {
     if (s_ctr.needsReserve() || s_ctr.limit - s_ctr.next < n) {
-        const uint32_t hw = s_ctr.reserve(s_prefs.getUInt("ctr", 0));
+        // Nothing stored means a wipe (the PIN's, or a full erase and
+        // reflash) or a first ever message. Starting again at 0 reused the
+        // nonces this board had sent under the same phrase before -- and its
+        // squad mates, whose replay tables still held its old higher count,
+        // dropped everything it sent, silently. So a fresh board starts at a
+        // random point in [4M, 8M): above anything a board has really sent,
+        // which leaves 8M+ of the 24-bit counter, and not something an
+        // onlooker can predict from the wipe.
+        uint32_t stored = s_prefs.getUInt("ctr", 0);
+        if (!s_prefs.isKey("ctr")) stored = 0x400000u + (hwRandom() & 0x3FFFFFu);
+        const uint32_t hw = s_ctr.reserve(stored);
         if (s_prefs.putUInt("ctr", hw) == 0) { s_ctr = MeshMsg::Counter(); return false; }
     }
     base = s_ctr.next;

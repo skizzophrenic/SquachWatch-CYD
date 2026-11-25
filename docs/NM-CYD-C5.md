@@ -1,4 +1,4 @@
-# RockBase NM-CYD-C5 (ESP32-C5) — experimental
+# RockBase NM-CYD-C5 (ESP32-C5) — BETA
 
 A 2.8" CYD built on an **ESP32-C5** instead of an Xtensa ESP32. Same glass as
 the classic board (ST7789 240×320, resistive XPT2046, microSD), same footprint
@@ -118,7 +118,9 @@ the firmware listens for it yet.
 
 ## Validation
 
-Nothing below is confirmed yet. A box is only ticked from the board itself.
+A box under "Confirmed on the board" is only ticked from the board itself.
+It is on the web flasher as a BETA. HUMAN SENSING is not on the ESP32-C5
+boards yet.
 
 ### Built, not yet run on hardware
 - [x] `pio run -e nm-cyd-c5` links a valid ESP32-C5 image

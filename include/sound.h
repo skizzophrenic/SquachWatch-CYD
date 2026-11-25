@@ -18,10 +18,25 @@
 #pragma once
 #include <stdint.h>
 
-#if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)
+// SQUACHSIM: the browser emulator's builds have no speaker to drive.
+#if (defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS) || defined(STICKS3) || defined(CARDPUTER_ADV) || defined(WS_C5_35)) && !defined(SQUACHSIM)
 #define SQW_SPEAKER 1
 #else
 #define SQW_SPEAKER 0
+#endif
+
+// The Freenove boards' power switch, which grew up around their speaker:
+// BOOT held three seconds is POWER OFF (deep sleep, BOOT wakes it), the one
+// restart its wake needs, and the power diary (POWERLOG) that follows a board
+// through it. A separate list from the speaker's, because a board can have a
+// speaker and no BOOT button to hold (the Core2), or a BOOT pin that is
+// something else (the Waveshare C5s). Add a board here only once POWER OFF
+// and its wake have been proven on it.
+// Not in the emulator (SQUACHSIM): a browser tab has no power to switch off.
+#if (defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)) && !defined(SQUACHSIM)
+#define SQW_BOOT_POWEROFF 1
+#else
+#define SQW_BOOT_POWEROFF 0
 #endif
 
 namespace Sound {
@@ -40,6 +55,9 @@ namespace Sound {
         LAND_TOASTER,     // ALL: T0@$TY's landing, a tin clank and a rattle
         LAND_YETI,        // ALL: the yeti's landing, a grumpy "OOF"
         HEADS_UP,         // ALERTS: one Bigfoot whoop, a squadmate's serious catch
+        WD_FIX,           // WARDRIVE SOUND: two rising beeps, the GPS has a fix
+        WD_LOST,          // WARDRIVE SOUND: a falling slide, the fix is gone
+        WD_TICK,          // WARDRIVE SOUND: a soft tick, new rows written
         COUNT
     };
 

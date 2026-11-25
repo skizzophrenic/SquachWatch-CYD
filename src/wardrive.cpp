@@ -98,6 +98,7 @@ uint32_t s_headSeq = 0;
 uint16_t s_used = 0;           // slots taken in the head sector
 uint32_t s_full = 0;           // full sectors behind the head (<= SECTORS-1)
 uint32_t s_written = 0, s_skipped = 0, s_dropped = 0;
+uint32_t s_wWifi = 0, s_wBle = 0;
 
 uint32_t off(uint32_t sec, uint16_t slot) { return sec * SECTOR + (uint32_t)slot * REC; }
 
@@ -256,7 +257,7 @@ void tick(uint32_t nowMs) {
         r.lat7 = f.lat7; r.lon7 = f.lon7; r.altM = f.altM; r.accM = f.accM;
         r.epoch = epoch;
         r.nameLen = p.nameLen; memcpy(r.name, p.name, p.nameLen);
-        if (append(r)) s_written++;
+        if (append(r)) { s_written++; if (r.kind == KIND_WIFI) s_wWifi++; else s_wBle++; }
     }
 }
 
@@ -264,6 +265,46 @@ bool     ready()    { return s_ready; }
 uint32_t capacity() { return SECTORS * PER; }
 uint32_t count()    { return s_head < 0 ? 0 : s_full * PER + s_used; }
 uint32_t written()  { return s_written; }
+uint32_t writtenWifi() { return s_wWifi; }
+uint32_t writtenBle()  { return s_wBle; }
+
+bool next(Cursor& c, Record& r, uint32_t& seq, uint16_t& slot) {
+    if (!s_ready || s_head < 0) return false;
+    if (!c.started) {
+        c.started = true; c.k = 0; c.n = s_full + 1;
+        c.sec = ((uint32_t)s_head + SECTORS - s_full) % SECTORS;
+        c.slot = 0;
+    }
+    uint8_t buf[64];
+    while (c.k < c.n) {
+        uint32_t sq;
+        const uint16_t top = (c.sec == (uint32_t)s_head) ? s_used : PER;
+        if (c.slot == 0 && !readHeader(c.sec, sq)) { c.slot = top; }
+        while (c.slot < top) {
+            const uint16_t s = c.slot++;
+            if (!flashRead(off(c.sec, (uint16_t)(1 + s)), buf, REC)) return false;
+            if (blank(buf, REC) || buf[REC - 1] != crc8(buf, REC - 1)) continue;
+            if (!readHeader(c.sec, sq)) break;
+            memcpy(&r, buf, REC);
+            seq = sq; slot = s;
+            return true;
+        }
+        c.k++; c.sec = (c.sec + 1) % SECTORS; c.slot = 0;
+    }
+    return false;
+}
+
+uint32_t newestSeq() { return s_head < 0 ? 0 : s_headSeq; }
+
+uint32_t countAfter(uint32_t seq, uint16_t slot) {
+    if (!s_ready || s_head < 0) return 0;
+    const uint32_t oldest = s_headSeq > s_full ? s_headSeq - s_full : 1;
+    if (seq == 0 || seq < oldest) return count();
+    if (seq > s_headSeq) return count();   // a mark from before a CLEAR
+    if (seq == s_headSeq) return s_used > slot + 1u ? s_used - (slot + 1u) : 0;
+    const uint32_t restOfThat = PER > slot + 1u ? PER - (slot + 1u) : 0;
+    return restOfThat + (s_headSeq - seq - 1) * PER + s_used;
+}
 uint32_t skipped()  { return s_skipped; }
 uint32_t dropped()  { return s_dropped; }
 

@@ -102,6 +102,21 @@ void note(Proto p, uint8_t chan, uint8_t port, const char* sender, uint64_t send
     m.senderId = senderId;
     put(m.sender, sizeof m.sender, sender);
     put(m.text, sizeof m.text, text);
+    // A line break in a message (MeshCore lets you type one) was printed as a
+    // move to the start of the next row, spilling the rest of the message over
+    // the rows below. Control characters show as spaces, a CR as nothing. The
+    // dedupe key above was taken from the raw text, so a relay's copy still
+    // matches. (From PR #103 by shadowlab.)
+    {
+        char* w = m.text;
+        for (const char* r = m.text; *r; r++) {
+            const uint8_t c = (uint8_t)*r;
+            if (c == '\r') continue;
+            *w++ = (c < 0x20 || c == 0x7F) ? ' ' : (char)c;
+        }
+        *w = '\0';
+    }
+    for (char* s = m.sender; *s; s++) if ((uint8_t)*s < 0x20 || (uint8_t)*s == 0x7F) *s = ' ';
     s_st->head = (uint16_t)((s_st->head + 1) % CAP);
     if (s_st->held < CAP) s_st->held++;
     else                  s_st->dropped++;

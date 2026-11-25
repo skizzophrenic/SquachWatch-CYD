@@ -215,6 +215,23 @@ high.
 
 Not usable on an S3: GPIO 26-32 (flash/PSRAM) and 33-37 (octal PSRAM).
 
+### GPS — `[env:freenove-s3-gps]`
+
+The CYD GPS builds' features: a position on each SD row and alert card, the
+clock set from GPS, and WARDRIVE's WiGLE file on the card. The module goes
+on the **UART** port (5V, GND, TXD, RXD, beside the card slot):
+
+| Module | Freenove UART port |
+|---|---|
+| TX  | RXD (GPIO44) |
+| VCC | 5V |
+| GND | GND |
+| RX  | not connected |
+
+The console is the USB, so UART0 is free. The firmware tries 115200, 9600 and
+38400 baud until a sentence parses. The **GPS** label in the top bar shows,
+in red, only while there is a fix.
+
 ## Marauder V8 (justcallmekoko) — `[env:marauder-v8]`
 
 An ESP32-C5 (8 MB flash, 4 MB PSRAM) behind a CP210x. Marauder's own V8
@@ -250,10 +267,10 @@ board 2026-10-12. The console is the native USB port.
 | Keyboard | the same I2C, address 0x55: one character per read, 0x0D enter, 0x08 backspace. Alt+B toggles its own backlight |
 | SD card (SPI) | CS 39 |
 | Speaker | MAX98357A on I2S: BCK 7, WS 5, DOUT 6 (no codec, no enable pin) |
-| GPS (MIA-M10Q) | its TX into GPIO 44, 9600 baud, on Serial1 |
+| GPS (MIA-M10Q) | its TX into GPIO 44, on Serial1. It talks at 38400 baud out of the box; the firmware tries 9600 and 38400 until a sentence parses |
 | Battery | GPIO 4 through a 1:2 divider |
 | Power enable | GPIO 10, HIGH or nothing past the chip has power on battery |
-| Trackball | GPIO 3, 2, 15, 1; centre button GPIO 0 (not used yet) |
+| Trackball | hall sensors up 3, down 15, left 1, right 2 (each line toggles as the ball rolls); the ball's press GPIO 0 (BOOT, LOW when pressed). It drives the key cursor beside the touch panel |
 | SX1262 LoRa | CS 9, DIO1 45, RST 17, BUSY 13, on the display's bus; TCXO 1.8 V. Its bytes go out through the panel's own SPI registers between frames (src/lora_radio.cpp) |
 
 Not used: 43 (GPS RX), 46 (keyboard INT, polled instead), 48/21/47/14 (the

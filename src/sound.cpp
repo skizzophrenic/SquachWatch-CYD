@@ -37,6 +37,21 @@ namespace Sound {
 #if defined(FREENOVE_S3_35)
 static const int PIN_MCK = 17, PIN_BCK = 18, PIN_WS = 21, PIN_DOUT = 15;
 static const int PIN_AMP = 1;
+#elif defined(STICKS3)
+// The StickS3: an ES8311 on the shared I2C bus (SDA 47 / SCL 48, 0x18) and an
+// AW8737 amp whose enable is the M5PM1's GPIO3, not an ESP32 pin (see amp()).
+// Pins from M5Stack's StickS3 page.
+static const int PIN_MCK = 18, PIN_BCK = 17, PIN_WS = 15, PIN_DOUT = 14;
+static const int PIN_AMP = -1;
+#elif defined(CARDPUTER_ADV)
+// The Cardputer ADV: an ES8311 on the keyboard's bus (SDA 8 / SCL 9, 0x18)
+// with no master clock pin (it makes one from BCLK), and an NS4150B amp with
+// no enable of its own (a headphone plug turns it off). Pins and the clock
+// registers from M5Unified's Cardputer ADV setup. No PSRAM here, so the
+// sounds are tones made on the fly (see playNow).
+static const int PIN_MCK = -1, PIN_BCK = 41, PIN_WS = 43, PIN_DOUT = 42;
+static const int PIN_AMP = -1;
+#pragma GCC diagnostic ignored "-Wunused-function"
 #elif defined(TDECK_PLUS)
 // The T-Deck Plus: a MAX98357A class-D amp straight on I2S (LilyGo's
 // BOARD_I2S_BCK 7 / WS 5 / DOUT 6). No codec to set up, no master clock, and
@@ -44,6 +59,15 @@ static const int PIN_AMP = 1;
 static const int PIN_MCK = -1, PIN_BCK = 7, PIN_WS = 5, PIN_DOUT = 6;
 static const int PIN_AMP = -1;
 #define SOUND_NO_CODEC 1
+#elif defined(WS_C5_35)
+// Waveshare C5 3.5": ESP32-C5 -> I2S -> ES8311 (0x18 on the shared touch bus)
+// -> NS4150B amp -> onboard speaker. NO external MCLK net: the codec clocks off
+// BCLK (see the board's own codecInit). The amp enable is not a GPIO: it is the
+// 0x24 expander's EXIO5, which WsExio::begin() drives high at start-up. The
+// amp quiets when the I2S clocks stop between sounds. Pins from the hardware
+// ref: BCLK 23, LRCK 10, DOUT 25. (Mic/DIN 24 is unused: TX/DAC only.)
+static const int PIN_MCK = -1, PIN_BCK = 23, PIN_WS = 10, PIN_DOUT = 25;
+static const int PIN_AMP = -1;
 #else
 static const int PIN_MCK = 4,  PIN_BCK = 5,  PIN_WS = 7,  PIN_DOUT = 8;
 static const int PIN_AMP = 1;
@@ -104,6 +128,9 @@ static const Part NEW_DEVICE[] = { BEEP(660, 0, 45, TRI, 25), BEEP(880, 0, 45, T
 static const Part THROW[]      = { BEEP(300, 1500, 260, SIN, 0) };
 static const Part LAND[]       = { { NOISE, 0, 0, 0, 30, 0, 4, 60, 100 }, BEEP(180, 70, 60, SQ, 0) };
 static const Part TOAST_POP[]  = { BEEP(200, 1800, 80, SQ, 0) };
+static const Part WD_FIX[]     = { BEEP(880, 0, 70, TRI, 30), BEEP(1320, 0, 110, TRI, 0) };
+static const Part WD_LOST[]    = { BEEP(660, 220, 320, TRI, 0) };
+static const Part WD_TICK[]    = { BEEP(1800, 0, 14, SIN, 0) };
 #undef BEEP
 // The Bigfoot whoop, twice, echoing through the trees.
 static const Part WATCH_HIT[]  = {
@@ -144,6 +171,7 @@ static const Sound SOUNDS[(int)Id::COUNT] = {
     { SND(VISITOR), 70, 0.2f, 0.25f }, { SND(THROW) }, { SND(LAND) }, { SND(CLIPPY) }, { SND(TOAST_POP) },
     { SND(PLUG_IN), 90, 0.3f, 0.35f }, { SND(UNPLUG), 90, 0.3f, 0.35f },
     { SND(LAND_TOASTER) }, { SND(LAND_YETI) }, { SND(HEADS_UP), 190, 0.38f, 0.45f, 0.75f },
+    { SND(WD_FIX) }, { SND(WD_LOST) }, { SND(WD_TICK), 0, 0, 0, 0.35f },
 };
 #undef SND
 
@@ -153,16 +181,76 @@ static bool wr(uint8_t r, uint8_t v) {
     return Wire.endTransmission() == 0;
 }
 static uint8_t rd(uint8_t r) {
+#if defined(WS_C5_35)
+    // The ES8311 shares the FT6336 touch bus (SDA 27 / SCL 26) over a flex at
+    // 100 kHz. A repeated-start read (endTransmission(false)) errors on the C5
+    // and leaves the bus mid-transaction, which then breaks touch. Send a STOP
+    // between the register-pointer write and the read; if it still errors,
+    // reset the bus and retry once so a bad read never wedges touch.
+    for (int attempt = 0; attempt < 2; attempt++) {
+        Wire.beginTransmission(CODEC); Wire.write(r);
+        if (Wire.endTransmission(true) == 0 && Wire.requestFrom(CODEC, (uint8_t)1) == 1)
+            return (uint8_t)Wire.read();
+        Wire.end(); Wire.begin(27, 26, 100000U);
+    }
+    return 0;
+#else
     Wire.beginTransmission(CODEC); Wire.write(r);
     if (Wire.endTransmission(false) != 0) return 0;
     if (Wire.requestFrom(CODEC, (uint8_t)1) != 1) return 0;
     return (uint8_t)Wire.read();
+#endif
 }
 // Espressif's es8311 driver boiled down to one case: slave on the bus, MCLK
 // from its pin at 256 x 16 kHz, 16-bit I2S in, the DAC on, the ADC left
 // asleep. The divider registers (02-08) only matter to the codec as a bus
 // master, but they are set to the table's 4.096 MHz / 16 kHz row anyway, as
 // the driver does. Volume register 32 sits at the driver's 85%.
+#if defined(WS_C5_35)
+// Waveshare C5 3.5": the register sequence of the ESP32-C5-BSP driver, which
+// is the one heard on this board. No MCLK pin, so the codec clocks off SCLK
+// (BCLK x8 = 256 x 16 kHz), which must already be running: begin() installs
+// and starts I2S before this. The short sequence the other boards use left
+// the speaker silent here: it never wrote the analog power registers (10, 11),
+// the internal reference (44) or the DAC unmute (31).
+static bool codecInit() {
+    uint8_t v;
+    if (rd(0x0D) != 0xFA) wr(0x0D, 0xFA);
+    wr(0x44, 0x08); wr(0x44, 0x08);         // I2C noise immunity, twice as the vendor does
+    wr(0x01, 0x30); wr(0x02, 0x00); wr(0x03, 0x10);
+    wr(0x16, 0x24); wr(0x04, 0x10); wr(0x05, 0x00);
+    wr(0x0B, 0x00); wr(0x0C, 0x00); wr(0x10, 0x1F);
+    wr(0x11, 0x7F); wr(0x00, 0x80);
+    v = rd(0x00); wr(0x00, (uint8_t)(v & 0xBF));           // serial port slave
+    wr(0x01, 0xBF);                         // clock from SCLK, every clock on
+    v = rd(0x06); wr(0x06, (uint8_t)(v & ~0x20));          // SCLK not inverted
+    wr(0x13, 0x10); wr(0x1B, 0x0A); wr(0x1C, 0x6A);
+    wr(0x44, 0x58);                         // internal reference
+    v = rd(0x02); wr(0x02, (uint8_t)((v & 0x07) | (3 << 3)));   // SCLK x8
+    wr(0x05, 0x00);                         // ADC and DAC dividers 1
+    v = rd(0x03); wr(0x03, (uint8_t)((v & 0x80) | 0x10));  // single speed, ADC OSR
+    v = rd(0x04); wr(0x04, (uint8_t)((v & 0x80) | 0x10));  // DAC OSR
+    v = rd(0x07); wr(0x07, (uint8_t)(v & 0xC0));           // LRCK divider high
+    wr(0x08, 0xFF);                         // LRCK divider low
+    v = rd(0x06); wr(0x06, (uint8_t)((v & 0xE0) | 0x03));  // BCLK divider 4
+    v = rd(0x09); wr(0x09, (uint8_t)((v | 0x0C) & 0xFC));  // SDP in: 16-bit I2S
+    v = rd(0x0A); wr(0x0A, (uint8_t)((v | 0x0C) & 0xFC));  // SDP out: 16-bit I2S
+    wr(0x00, 0x80); wr(0x01, 0xBF);
+    v = rd(0x09); wr(0x09, (uint8_t)(v & ~0x40));          // DAC serial input on
+    wr(0x17, 0xBF);
+    wr(0x0E, 0x02);                         // PGA and ADC modulator
+    wr(0x12, 0x00);                         // DAC up
+    wr(0x14, 0x1A);
+    v = rd(0x14); wr(0x14, (uint8_t)(v & ~0x40));          // no digital microphone
+    wr(0x0D, 0x01);                         // analog circuitry up
+    wr(0x15, 0x40);
+    wr(0x37, 0x08);                         // DAC equalizer bypass
+    wr(0x45, 0x00);
+    const bool ok = wr(0x32, 0xD8);         // DAC volume, 85%
+    v = rd(0x31); wr(0x31, (uint8_t)(v & 0x9F));           // DAC unmuted
+    return ok;
+}
+#else
 static bool codecInit() {
     if (!wr(0x00, 0x1F)) return false;      // reset everything
     delay(20);
@@ -170,6 +258,10 @@ static bool codecInit() {
     wr(0x00, 0x80);                         // power on
     wr(0x01, 0x3F);                         // MCLK from the MCLK pin, every clock on
     wr(0x02, (uint8_t)(rd(0x02) & 0x07));   // pre-divider 1, multiplier 1x
+#if defined(CARDPUTER_ADV)
+    wr(0x01, 0xBF);                         // MCLK made from BCLK, every clock on
+    wr(0x02, 0x18);                         // BCLK x8 = 256 x 16 kHz
+#endif
     wr(0x03, 0x10);                         // single speed, ADC OSR
     wr(0x04, 0x10);                         // DAC OSR
     wr(0x05, 0x00);                         // ADC and DAC dividers 1
@@ -188,9 +280,25 @@ static bool codecInit() {
     wr(0x32, 0xD8);                         // DAC volume, 85%
     return true;
 }
+#endif
 
 // ---- the amplifier ---------------------------------------------------------
+#if defined(STICKS3)
+// The amp's enable is the M5PM1's GPIO3 (output level, register 0x11), high
+// to play. sticksPowerUp() made it a push-pull output and left it low.
+static void amp(bool on) {
+    Wire.beginTransmission(0x6E);
+    Wire.write(0x11);
+    if (Wire.endTransmission(false) != 0 || Wire.requestFrom((uint8_t)0x6E, (uint8_t)1) != 1) return;
+    uint8_t v = Wire.read();
+    v = on ? (uint8_t)(v | (1 << 3)) : (uint8_t)(v & ~(1 << 3));
+    Wire.beginTransmission(0x6E);
+    Wire.write(0x11); Wire.write(v);
+    Wire.endTransmission();
+}
+#else
 static void amp(bool on) { if (PIN_AMP >= 0) digitalWrite(PIN_AMP, (on == s_ampLow) ? LOW : HIGH); }
+#endif
 
 // ---- rendering -------------------------------------------------------------
 // The whole sound is rendered into a float buffer in PSRAM first (every board
@@ -347,6 +455,82 @@ static void* bigAlloc(size_t bytes) {
     return p ? p : malloc(bytes);
 }
 
+#if defined(CARDPUTER_ADV)
+// Tones only, made as they play: no whole-sound buffer (no PSRAM here). Each
+// part is a pitch glide on its own: a TONE as written, a VOICE as a triangle
+// through the same pitches, a BELL as a ringing sine at its pitch. Noise and
+// air are left out, and so is the echo. Parts that overlap are added.
+static void playNow(Id id) {
+    const Sound& snd = SOUNDS[(int)id];
+    const uint8_t parts = snd.n < 8 ? snd.n : 8;
+    int at[8], len[8], t = 0, last = 0;
+    float ph[8] = {};
+    for (uint8_t i = 0; i < parts; i++) {
+        const Part& st = snd.p[i];
+        const int ms = ((st.flags & WITH) ? last : t) + st.off;
+        last = ms;
+        if (ms + st.ms + st.gap > t) t = ms + st.ms + st.gap;
+        at[i] = ms * (int)RATE / 1000;
+        len[i] = (st.kind == NOISE || st.kind == AIR) ? 0 : st.ms * (int)RATE / 1000;
+    }
+    const int total = (t + 30) * (int)RATE / 1000;
+    const float pct = (float)Settings::soundVolume() / 100.0f;
+    const float vol = pct * pct * 32000.0f, g = snd.gain > 0 ? snd.gain : 1.0f;
+    int16_t buf[CHUNK * 2];
+
+    i2s_start(PORT);
+    silence(buf, 24);
+    amp(true);
+    silence(buf, 16);
+    for (int s = 0; s < total; ) {
+        const int n = (total - s) < CHUNK ? (total - s) : CHUNK;
+        for (int k = 0; k < n; k++, s++) {
+            float v = 0;
+            for (uint8_t i = 0; i < parts; i++) {
+                const int j = s - at[i], N = len[i];
+                if (j < 0 || j >= N) continue;
+                const Part& st = snd.p[i];
+                const float tt = (float)j / RATE, lv = st.lv / 100.0f;
+                float f, e, x;
+                if (st.kind == BELL) {
+                    f = st.p[0];
+                    e = envRing(st, j, N, st.k[2] / 1000.0f);
+                    x = sinf(ph[i] * TAU_F) * 0.55f;
+                } else {
+                    f = along(st.p, (float)j / N);
+                    if (st.kind == VOICE) {
+                        if (st.k[3] > 0) f *= 1 + st.k[3] * sinf(TAU_F * 6 * tt);
+                        x = (ph[i] < 0.5f ? (ph[i] * 4.0f - 1.0f) : (3.0f - ph[i] * 4.0f)) * 0.8f;
+                    } else {
+                        if (st.k[0] > 0) f *= 1 + st.k[0] * sinf(TAU_F * st.k[1] * tt) * (st.k[2] > 0 ? expf(-tt * 1000 / st.k[2]) : 1);
+                        switch (st.wave) {
+                            case SQ:  x = ph[i] < 0.5f ? 0.35f : -0.35f; break;
+                            case TRI: x = (ph[i] < 0.5f ? (ph[i] * 4.0f - 1.0f) : (3.0f - ph[i] * 4.0f)) * 0.7f; break;
+                            case SIN: x = sinf(ph[i] * TAU_F) * 0.7f; break;
+                            default:  x = (ph[i] * 2.0f - 1.0f) * 0.4f; break;
+                        }
+                    }
+                    e = envLin(st, j, N);
+                }
+                v += x * e * lv;
+                ph[i] += f / RATE;
+                if (ph[i] >= 1.0f) ph[i] -= 1.0f;
+            }
+            v *= g;
+            const float a = fabsf(v);
+            const float o = a < 0.7f ? v : copysignf(0.7f + 0.3f * tanhf((a - 0.7f) / 0.3f), v);
+            const int16_t q = (int16_t)(o * vol);
+            buf[k * 2] = q; buf[k * 2 + 1] = q;
+        }
+        writeFrames(buf, n);
+    }
+    silence(buf, 16);
+    amp(false);
+    silence(buf, 24);
+    i2s_zero_dma_buffer(PORT);
+    i2s_stop(PORT);
+}
+#else
 static void playNow(Id id) {
     const Sound& snd = SOUNDS[(int)id];
     // Lay the parts out in time, the way the Lab did.
@@ -421,6 +605,8 @@ static void playNow(Id id) {
     i2s_stop(PORT);
 }
 
+#endif
+
 static void soundTask(void*) {
     uint8_t id;
     for (;;) {
@@ -466,7 +652,7 @@ void begin() {
 #if SOUND_NO_CODEC
     i2s_stop(PORT);
     s_q = xQueueCreate(4, sizeof(uint8_t));
-    xTaskCreatePinnedToCore(soundTask, "sound", 4096, nullptr, 2, &s_task, 1);
+    xTaskCreatePinnedToCore(soundTask, "sound", 4096, nullptr, 2, &s_task, portNUM_PROCESSORS > 1 ? 1 : 0);   // one core on the C5 (#121)
     s_ok = s_q && s_task;
     Serial.printf("[sound] I2S amp ready: BCK %d WS %d DOUT %d%s\n", PIN_BCK, PIN_WS, PIN_DOUT, s_ok ? "" : " -- task failed");
 #else
@@ -475,7 +661,7 @@ void begin() {
     i2s_stop(PORT);
     if (!ok) { Serial.println("[sound] ES8311 setup failed"); return; }
     s_q = xQueueCreate(4, sizeof(uint8_t));
-    xTaskCreatePinnedToCore(soundTask, "sound", 4096, nullptr, 2, &s_task, 1);
+    xTaskCreatePinnedToCore(soundTask, "sound", 4096, nullptr, 2, &s_task, portNUM_PROCESSORS > 1 ? 1 : 0);   // one core on the C5 (#121)
     s_ok = s_q && s_task;
     Serial.printf("[sound] ES8311 id %02X%02X ready: MCK %d BCK %d WS %d DOUT %d, amp on GPIO%d%s\n",
                   id1, id2, PIN_MCK, PIN_BCK, PIN_WS, PIN_DOUT, PIN_AMP, s_ok ? "" : " -- task failed");

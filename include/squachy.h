@@ -77,6 +77,13 @@ namespace Squachy {
     // band under the counter tiles and sends the bubble back up to row 1,
     // above them, where it always sat.
     void setBubbleRiseTo(int y);
+    // The other way: a row his bubble's BOTTOM sits on, or -1 for off. The
+    // small boards' main screen puts it at his feet: at 135 rows he fills
+    // his band, and a bubble at its top sat on his face. Beats the rise.
+    void setBubbleSinkTo(int y);
+    // Anything going on with him that someone else should not talk over:
+    // his bubble, a pet or held reaction still playing, in the air.
+    bool reacting();
     // His own bubble as drawn last frame, if he had one up.
     bool ownBubble(int& x, int& y, int& w, int& h);
 
@@ -192,6 +199,9 @@ namespace Squachy {
     // sequence (9x CLR, 1x SCAN, 1x CLR) and calls this when it
     // completes. Persists immediately, same as any other cosmetic.
     void unlockAllOutfits();
+    // Has it been done on this board? It opens the P key's dice scenes on
+    // the boards with a keyboard (main.cpp).
+    bool superUnlocked();
 
     // ---- the pet -------------------------------------------------------
     // VAPOR SHAGGY, who turns up on CLEAR and climbs him. The unlock lives
@@ -224,7 +234,7 @@ namespace Squachy {
 
     // Which one. There are two now, so the Settings row cycles rather than
     // toggles: OFF, then each companion in turn.
-    enum class PetId : uint8_t { OFF = 0, SHAGGY, YETI, CLIPPY, TOASTER, BALL, MEATY, COUNT };
+    enum class PetId : uint8_t { OFF = 0, SHAGGY, YETI, CLIPPY, TOASTER, BALL, MEATY, MOTHMAN, COUNT };
     PetId       petChoice();
     const char* petName();     // for the row's value column
     void        cyclePet();
@@ -253,6 +263,14 @@ namespace Squachy {
     // he is earned, like the other two.
     bool meatyUnlocked();
     void unlockMeaty(const char* why);
+    // Mothman: found by tapping the red eyes in the FIREFLIES treeline, which
+    // brings MOTH HOOD with him; tapping him while he is out earns RED WINGS.
+    // relockMothman() is the console's MOTHMAN LOCK, false if NVS refused it.
+    bool mothmanUnlocked();
+    void unlockMothman();
+    bool relockMothman();
+    void equipMothman();
+    void unlockMothmanPowerOutfit();
     void relockMeaty();      // the bench's MEATY LOCK: earn him again
     const char* takeMeatyIntro();
     // The ball and chain, as a pet: earned by serving a whole sentence. Out
@@ -413,6 +431,9 @@ namespace Squachy {
     // His bubble saying `text`, centred on cx with its top at topY, no tail:
     // the FONTS page's preview.
     void drawSampleBubble(TFT_eSPI& t, int cx, int topY, const char* text);
+    // A visitor's bubble in his style, its bottom edge at bottomY and its tail
+    // pointing down at tailX: for a guest that is not a Squachy (a goblin).
+    void drawGuestBubble(TFT_eSPI& t, int cx, int bottomY, const char* text, uint32_t now, int tailX);
     // While on, his bubble keeps the 2.8"'s text size on the big panels too.
     // Set around one draw and cleared after, like the previews.
     void setBubbleSmall(bool on);
@@ -452,6 +473,11 @@ namespace Squachy {
     // looks like. It is also just wrong: he should not be muttering about
     // the airwaves while there is somebody standing next to him.
     void setVisiting(bool v);
+    // Hushed: no idle moods, no wander, no idle or watching lines -- what a
+    // visit does to him, for whatever else needs him standing still and
+    // listening (an encounter on the main screen, the emulator's lab clips).
+    // Anything said to him on purpose (announce, a catch) still goes.
+    void setHush(bool on);
     bool visiting();
     // Whether he is dancing right now (a squad DANCE emote, party mode, a
     // milestone): the yeti pet joins in when he is.
@@ -516,6 +542,15 @@ namespace Squachy {
 
     // Say an arbitrary visit line in the host's bubble. Returns its ms.
     uint32_t visitSay(const char* line);
+
+    // A goblin from Network Goblin Scout visiting (goblin.h). His own lines,
+    // and the host's for a goblin: the Squachy pools talk about outfits and
+    // squads a goblin has none of. setGoblinGuest() before the first line.
+    void        setGoblinGuest(const char* name, uint16_t level, uint8_t hoard);
+    const char* goblinGuestLine(VisitMoment m, uint32_t seed);   // his, to draw
+    uint32_t    goblinReaction(VisitMoment m, uint32_t seed);    // the host says it
+    uint32_t    goblinHangHost(uint32_t seed);
+    const char* goblinHangGuest(uint32_t seed);
 
     // The host cracks up: a short, fast bounce, the same one the idle
     // flourish uses. Called when the OTHER one's line lands, which is what
@@ -690,7 +725,13 @@ namespace Squachy {
                                      // three borrow his detection reactions.
                                      LAUGH, SALUTE, BOW, HUG, SAD, GRR, CROUCH, PULL,
                                      WIGGLE, CHEER, SELFIE, HOWL, POINT, STRAIN,
-                                     COVER, LOOK_AROUND, HANDS_UP };
+                                     COVER, LOOK_AROUND, HANDS_UP,
+                                     // Puzzled: a hand scratching the top of
+                                     // his head (the die that rolled nothing).
+                                     SCRATCH,
+                                     // A boot: his right foot out to the side
+                                     // and back, once (the die at his feet).
+                                     KICK };
 #if SQUACH_MESH
     // The host's half of an emote's beat: any VisitPose, held for `ms`. The
     // older ones go through the same moods visitReach() and friends use.

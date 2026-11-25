@@ -22,6 +22,10 @@ void uiMeshPhraseInit(TFT_eSPI& t);
 // than by the clock must sit still for it. Other boards draw once.
 void uiMeshPhraseTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance = true);
 void uiMeshPhraseTouch(int x, int y);
+// The boards with buttons for a finger: every target drawn this frame, as
+// rectangles, for the cursor to step through. Only what is live.
+uint8_t uiMeshPhraseStopRects(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint8_t cap);
+bool    uiMeshPhraseBackRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h);
 // True once BACK is pressed on the first page.
 bool uiMeshPhraseDone();
 // Emulator only: 0 shows the current phrase, 1 a freshly rolled one, 2 the

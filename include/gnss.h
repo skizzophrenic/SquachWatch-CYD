@@ -34,6 +34,8 @@ struct Sky {
 // One character off the UART. Lines are assembled internally; a complete,
 // checksum-valid sentence updates the state. `nowMs` stamps a new fix.
 void feed(char c, uint32_t nowMs);
+// Dev: copy each line the module sends to the console until `untilMs`.
+void echo(uint32_t untilMs);
 // A whole sentence at once, with or without its line ending. For tests.
 bool sentence(const char* s, uint32_t nowMs);
 
@@ -44,11 +46,21 @@ uint32_t utcEpoch();
 // Sentences parsed and rejected (bad checksum), since the last reset.
 uint32_t good();
 uint32_t bad();
+// Raw bytes off the UART, and millis() of the newest good sentence (0: none).
+uint32_t bytes();
+uint32_t lastGoodMs();
+// The module's newest TXT message (e.g. "ANTENNA OPEN"), "" if none, and
+// millis() it came.
+const char* text(uint32_t* atMs);
 
 // A fix older than this is not a position any more (the watch has moved on,
 // or the sky closed). Rows are only written against a fresh one.
 constexpr uint32_t FRESH_MS = 5000;
 bool fresh(uint32_t nowMs);
+
+// In a few words, why there is or is not a fix: NO GPS,
+// FINDING 3 SATS, FIX 9 SATS. Written into `buf`, which is returned.
+const char* status(uint32_t nowMs, char* buf, size_t n);
 
 void reset();
 

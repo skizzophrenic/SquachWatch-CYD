@@ -33,13 +33,24 @@ namespace DetectionInfo {
     // Lives here rather than in the LOG screen's caller so the emulator
     // gets it too -- main.cpp is not part of that build, and a panel that
     // can only be seen on hardware is a panel nobody checks.
-    const char* explainLive(DetectionType t, const DetectionEngine& eng);
+    // `mac` is the row being explained, when known: the decoded Remote ID
+    // belongs to one aircraft (the last heard over Bluetooth), and another
+    // drone's row gets the stock paragraph rather than that one's position.
+    const char* explainLive(DetectionType t, const DetectionEngine& eng, const uint8_t* mac = nullptr);
 
     // The MORE INFO page for one detection: its DEVICE's own page where
     // device_info.cpp has one -- Flipper Zero, not "wireless testing
     // hardware" -- else the type's paragraph, or for a drone what Remote ID
     // has decoded. titleFor() is the heading that goes with it.
     const char* explainFor(DetectionType t, const char* vendor, const char* name,
-                           const DetectionEngine& eng);
+                           const DetectionEngine& eng, const uint8_t* mac = nullptr);
     const char* titleFor(DetectionType t, const char* vendor, const char* name);
+
+    // The info card's three short lines and its colours (tools/card_text.json,
+    // generated into src/card_text.inc): a one-line headline, WHY (the
+    // reason behind SURE / LIKELY / MAYBE), a TIP, and the kind's two
+    // colours for the banner. The device's own page's lines where it has
+    // one, else its type's.
+    struct CardLines { const char* head; const char* why; const char* tip; uint16_t kindA, kindB; };
+    CardLines cardLines(DetectionType t, const char* vendor, const char* name);
 }

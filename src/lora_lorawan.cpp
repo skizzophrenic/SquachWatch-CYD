@@ -440,7 +440,7 @@ bool decode(const Lora::Packet& pk, Decoded& out) {
         for (uint16_t msb = 0; msb < 4 && !out.micOk; msb++) {
             if (!verifyMic(f, s.nwkSKey, msb)) continue;
             out.micOk = true;
-            if (f.hasFPort && f.frmLen) {
+            if (f.hasFPort && f.frmLen && f.frmLen <= sizeof out.plain) {
                 decryptFrm(f, f.fPort == 0 ? s.nwkSKey : s.appSKey, msb, out.plain);
                 out.plainLen = f.frmLen;
                 if (f.fPort == 0 && !out.nMac) out.nMac = parseMacCommands(out.plain, out.plainLen, f.uplink, out.mac, 8);

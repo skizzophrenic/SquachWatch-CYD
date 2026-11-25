@@ -468,4 +468,20 @@ void uiMeshPhraseDemo(uint8_t mode) {
     }
 }
 
+
+uint8_t uiMeshPhraseStopRects(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint8_t cap) {
+    uint8_t n = 0;
+    auto add = [&](const Rect& r) { if (r.w > 0 && r.h > 0 && n < cap) { rx[n] = r.x; ry[n] = r.y; rw[n] = r.w; rh[n] = r.h; n++; } };
+    add(s_showRow);
+    for (uint8_t i = 0; i < 26; i++) if (s_letterOn[i]) add(s_letterRect[i]);
+    for (uint8_t i = 0; i < s_wordN && i < 18; i++) add(s_wordRect[i]);
+    for (uint8_t i = 0; i < 3; i++) if (s_btnOn[i]) add(s_btn[i]);
+    return n;
+}
+
+bool uiMeshPhraseBackRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
+    if (!s_btnOn[0] || s_btn[0].w <= 0) return false;   // the first button is always BACK
+    x = s_btn[0].x; y = s_btn[0].y; w = s_btn[0].w; h = s_btn[0].h; return true;
+}
+
 #endif // SQUACH_MESH

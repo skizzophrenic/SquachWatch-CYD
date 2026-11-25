@@ -111,6 +111,16 @@ const Entry ENTRY[ENTRIES] = {
       "Conferences. The back of a hoodie. Two tables over.",
       "A radio-attack tool is in the room. Act natural. I am a lamp.",
       "A pocket toy for attacking radios. It announces itself." },
+    { DetectionType::LORAWAN, Rarity::UNCOMMON, "LWAN", "NETWORK", "LORA",
+      "A long-range radio network for things that report home twice an hour on one battery: meters, bins, parking bays. The card is whoever runs it, read off the front of every address.",
+      "Meter cupboards. Under streets. A mast you never noticed.",
+      "A network for water meters. They never write to me. I checked.",
+      "Quiet, slow and everywhere. Named for whoever runs it." },
+    { DetectionType::LISTENER, Rarity::UNCOMMON, "MIC", "LISTENER", "WIFI",
+      "A smart speaker: microphones that wait all day for their name. Sonos and HomePod can be told apart. An Echo or a Nest only while it is being set up.",
+      "Hotel rooms. Rentals. Every other kitchen counter.",
+      "It hears everything. I only hear radios. We are not the same.",
+      "A speaker on a shelf. It waits for its own name." },
 };
 
 Record   s_rec[ENTRIES];
@@ -132,11 +142,8 @@ const Entry& entry(DetectionType t) {
 
 }  // namespace
 
-DetectionType typeAt(uint8_t i) { return (DetectionType)(i + 1); }
-uint8_t indexOf(DetectionType t) {
-    const uint8_t v = (uint8_t)t;
-    return (v >= 1 && v < (uint8_t)DetectionType::COUNT) ? (uint8_t)(v - 1) : ENTRIES;
-}
+DetectionType typeAt(uint8_t i) { return catalogueAt(i); }
+uint8_t indexOf(DetectionType t) { return catalogueIndex(t); }
 
 Rarity rarity(DetectionType t)       { return entry(t).rarity; }
 const char* rarityName(Rarity r) {

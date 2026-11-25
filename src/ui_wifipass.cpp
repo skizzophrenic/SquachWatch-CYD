@@ -35,6 +35,11 @@ bool     s_sym     = false;
 bool     s_show    = false;
 uint32_t s_typedAt = 0;               // the last character shows for a moment
 WifiPassResult s_result = WifiPassResult::NONE;
+// What the header asks for and the rules for OK: a password unless
+// uiWifiPassInitText() said otherwise.
+const char* s_prompt     = "PASSWORD FOR";
+uint8_t     s_max        = PASS_MAX;
+bool        s_allowEmpty = false;
 
 // Top of the first key row, as layout() worked it out. The chassis is drawn
 // from here rather than from TOP_H: the rows are bottom-aligned and their
@@ -86,6 +91,13 @@ void put(int x, int y, int w, int h, char ch) {
 
 void layout(int w, int h) {
     s_keyN = 0;
+#if defined(CARDPUTER_ADV)
+    // The Cardputer types on its own keyboard: no keys on the screen, which
+    // at 135 rows covered the field being typed into.
+    (void)w;
+    s_keyTop = h;
+    return;
+#endif
     const int avail = w - 2 * MARGIN;
     const int bandTop = TOP_H + 4, bandBottom = h - 4;
     int rh = (bandBottom - bandTop - 4 * ROW_GAP) / 5;
@@ -162,10 +174,10 @@ void type(char ch, uint32_t now) {
         case K_SHIFT: s_shift = !s_shift; break;
         case K_SYM:   s_sym = !s_sym; s_shift = false; break;
         case K_DEL:   if (s_len) s_buf[--s_len] = '\0'; break;
-        case K_OK:    if (s_len) s_result = WifiPassResult::OK; break;
+        case K_OK:    if (s_len || s_allowEmpty) s_result = WifiPassResult::OK; break;
         case K_NONE:  break;
         default:
-            if (s_len < PASS_MAX) { s_buf[s_len++] = ch; s_buf[s_len] = '\0'; s_typedAt = now; }
+            if (s_len < s_max) { s_buf[s_len++] = ch; s_buf[s_len] = '\0'; s_typedAt = now; }
             break;
     }
 }
@@ -254,7 +266,7 @@ void drawAll(TFT_eSPI& t, uint32_t now) {
     // but floating on black they read as a wireframe of a keyboard rather
     // than as one. The panel is the whole difference.
     const int panelTop = s_keyTop - ROW_GAP;
-    Theme::drawSteelPanel(t, 0, panelTop, w, h - panelTop, false);
+    if (s_keyN) Theme::drawSteelPanel(t, 0, panelTop, w, h - panelTop, false);
     t.setTextWrap(false);
     // Header: BACK, then which network this is for.
     Theme::drawWin95Button(t, BACK_X, BACK_Y, BACK_W, BACK_H, "BACK", false);
@@ -264,9 +276,10 @@ void drawAll(TFT_eSPI& t, uint32_t now) {
     Theme::bodyFontOn(t);
     t.setTextColor(Theme::VAPOR_PINK, Theme::BG);
     t.setCursor(BACK_X + BACK_W + 8, BACK_Y + 1);
-    t.print(big ? "PASSWORD FOR " : "PASSWORD FOR");
+    t.print(s_prompt);
+    if (big) t.print(" ");
     t.setTextColor(Theme::CYAN, Theme::BG);
-    const int sx = BACK_X + BACK_W + 8 + (big ? t.textWidth("PASSWORD FOR ") : 0);
+    const int sx = BACK_X + BACK_W + 8 + (big ? t.textWidth(s_prompt) + t.textWidth(" ") : 0);
     t.setCursor(sx, big ? BACK_Y + 1 : BACK_Y + 11);
     char ssid[40];
     const int maxChars = (w - sx - MARGIN) / t.textWidth("M");
@@ -277,6 +290,17 @@ void drawAll(TFT_eSPI& t, uint32_t now) {
     drawField(t, w, now);
     drawShow(t, w);
     drawKeys(t);
+#if defined(CARDPUTER_ADV)
+    {
+        static const char* const HINT[] = { "Type it on the keyboard.", "ENTER joins.  TAB shows it.", "ESC goes back." };
+        t.setTextSize(1);
+        t.setTextColor(Theme::CYAN, Theme::BLACK);
+        for (int i = 0; i < 3; i++) {
+            t.setCursor((w - t.textWidth(HINT[i])) / 2, FIELD_Y + FIELD_H + 18 + i * 14);
+            t.print(HINT[i]);
+        }
+    }
+#endif
     s_full = false;
 }
 
@@ -287,12 +311,28 @@ void uiWifiPassInit(TFT_eSPI& t, const char* ssid) {
     s_ssid[sizeof s_ssid - 1] = '\0';
     uiWifiPassClear();
     s_shift = s_sym = s_show = false;
+    s_prompt = "PASSWORD FOR";
+    s_max = PASS_MAX;
+    s_allowEmpty = false;
     s_result = WifiPassResult::NONE;
     s_armed = s_lastKey = -1;
     layout(t.width(), t.height());
     s_full   = true;
     s_initAt = millis();
     t.fillRect(0, 0, t.width(), t.height(), Theme::BG);
+}
+
+void uiWifiPassInitText(TFT_eSPI& t, const char* prompt, const char* subject, const char* initial,
+                        uint8_t maxLen, bool allowEmpty) {
+    uiWifiPassInit(t, subject);
+    s_prompt     = prompt ? prompt : "";
+    s_max        = maxLen && maxLen < PASS_MAX ? maxLen : PASS_MAX;
+    s_allowEmpty = allowEmpty;
+    s_show       = true;
+    if (initial) {
+        snprintf(s_buf, (size_t)s_max + 1, "%s", initial);
+        s_len = (uint8_t)strlen(s_buf);
+    }
 }
 
 void uiWifiPassTick(TFT_eSPI& t, uint32_t now) {
@@ -324,6 +364,7 @@ void uiWifiPassTick(TFT_eSPI& t, uint32_t now) {
 // the keyboard's own shift and symbol keys already chose the character.
 void uiWifiPassKey(char c, uint32_t now) {
     if (c == '\r') c = K_OK;
+    if (c == '\t') { s_show = !s_show; return; }
     if (c == K_DEL || c == K_OK || (c >= ' ' && c < 0x7F)) type(c, now);
 }
 
@@ -366,4 +407,10 @@ const char*    uiWifiPassSsid()   { return s_ssid; }
 void uiWifiPassClear() {
     memset(s_buf, 0, sizeof s_buf);
     s_len = 0;
+}
+
+// BACK's rectangle, for the boards that aim a cursor or use ESC.
+bool uiWifiPassBackRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h) {
+    x = BACK_X; y = BACK_Y; w = BACK_W; h = BACK_H;
+    return true;
 }

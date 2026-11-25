@@ -409,6 +409,23 @@ Fail begin(uint32_t size, const uint8_t* sig, uint8_t sigLen) {
         Serial.printf("[ota] esp_ota_begin failed: 0x%x\n", (unsigned)e);
         return Fail::WRITE_ERROR;
     }
+    // The slot's record says what last BOOTED there, and from here on that is
+    // no longer what it holds. Left in place, a download that is then refused
+    // (a bad signature, say) would sit in the slot still labelled as the old
+    // trusted version, and SWITCH TO would boot it. A good image writes its
+    // own record the first time it runs.
+    {
+        Preferences p;
+        p.begin(NVS_NS, false);
+        char key[16];
+        snprintf(key, sizeof key, "v_%s", target->label);
+        p.remove(key);
+        snprintf(key, sizeof key, "e_%s", target->label);
+        p.remove(key);
+        p.end();
+        s_otherOk     = false;
+        s_otherVer[0] = '\0';
+    }
     return Fail::NONE;
 }
 
@@ -458,9 +475,14 @@ Fail finish() {
         }
         Serial.printf("[ota] the image says it is %s\n", s_imgVer);
     } else {
-        // A release from before the marker existed. Its signature still has
-        // to check out; there is simply no version in it to compare.
-        Serial.println("[ota] the image carries no version marker");
+        // No marker that reads: a release from before the marker worked
+        // (v1.19.0 and older), so older than anything that runs this code.
+        // Taken as one, it was the gap in the rule above -- somebody on the
+        // network could answer with an old, genuinely signed release and it
+        // went in, since there was no version to compare.
+        Serial.printf("[ota] refused: the image carries no version marker, so it predates %s\n", runningVersion());
+        abort();
+        return Fail::TOO_OLD;
     }
 
     // esp_ota_end() checks the image itself: its segments and its own hash.

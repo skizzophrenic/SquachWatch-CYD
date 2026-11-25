@@ -24,6 +24,7 @@
  * at 0x5100 so the two can never be confused.
  */
 #include <string.h>
+#include <stdbool.h>
 #include "esp_log.h"
 #include "esp_wifi.h"
 #include "esp_timer.h"
@@ -42,7 +43,7 @@ static const char *TAG = "squach";
 /* Slave -> host */
 #define EVT_ACK         0x5180   /* u16 cmd, i32 status */
 #define EVT_HELLO       0x5181   /* the tag below, plus u8 sniffing */
-#define SQUACH_TAG      "squach-sniff 1"
+#define SQUACH_TAG      "squach-sniff 2"   /* 2: this image also carries the CSI sensing extension (sense_c6.cpp) */
 #define EVT_FRAME       0x5200   /* sniff_evt_t + frame bytes */
 #define EVT_STATS       0x5201   /* every second while sniffing */
 
@@ -77,6 +78,11 @@ static uint16_t       s_dwell = 250;
 static uint32_t       s_hopAt;
 
 typedef struct { sniff_evt_t h; uint8_t b[SNIFF_MAX]; } item_t;
+
+/* The sensing extension shares promiscuous mode: each side switches it off
+ * only when the other is not using it. */
+bool squach_sniff_on(void) { return s_on; }
+extern bool squach_sense_on(void);
 
 static void ack(uint16_t cmd, int32_t status) {
     struct __attribute__((packed)) { uint16_t cmd; int32_t status; } a = { cmd, status };
@@ -172,7 +178,7 @@ static void on_sniff(uint32_t id, const uint8_t *d, size_t n, void *ctx) {
         s_on = (e == ESP_OK);
     } else {
         s_on = false;
-        e = esp_wifi_set_promiscuous(false);
+        if (!squach_sense_on()) e = esp_wifi_set_promiscuous(false);
     }
     ESP_LOGI(TAG, "sniff %s: %s", d[0] ? "on" : "off", esp_err_to_name(e));
     ack(CMD_SNIFF, e);
@@ -199,8 +205,8 @@ static void on_hop(uint32_t id, const uint8_t *d, size_t n, void *ctx) {
 }
 
 static void on_hello(uint32_t id, const uint8_t *d, size_t n, void *ctx) {
-    struct __attribute__((packed)) { char tag[16]; uint8_t on; } h;
-    memset(&h, 0, sizeof h); strncpy(h.tag, SQUACH_TAG, sizeof h.tag - 1); h.on = s_on;
+    struct __attribute__((packed)) { char tag[16]; uint8_t on; uint8_t sensing; } h;
+    memset(&h, 0, sizeof h); strncpy(h.tag, SQUACH_TAG, sizeof h.tag - 1); h.on = s_on; h.sensing = squach_sense_on();
     esp_hosted_send_custom_data(EVT_HELLO, (const uint8_t *)&h, sizeof h);
 }
 

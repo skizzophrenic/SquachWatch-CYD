@@ -32,6 +32,130 @@ CYAN  = (0, 214, 214)
 # ---- the clips ----
 
 CLIPS = {
+    # v1.50.0 "Roll With It", 320x240 doubled, every second frame at real
+    # time ("_EVERY"), each scene on a settings store of its own ("_NVS", so a
+    # waiting free roll never turns up in a scene it was not asked into): the
+    # FREE ROLL's die tapped and thrown, a natural 20 bringing a shiny
+    # visitor through the hole in the sky, a natural 1 off his head, the
+    # mimic, then the Trail card (SYSTEM 7, the CYDs' default) and two more skins.
+    "roll-with-it": [
+        ("clear", 90, 210, ["--bg", "5", "--tap", "124:294:200"], {"_EVERY": 2, "_NVS": 1, "SQUACHSIM_FREEROLL": "1", "SQUACHSIM_T0": "9000", "SQUACHSIM_BATT": "80"}, 900, "A DIE TURNED UP. TAP IT. ROLL WITH IT."),
+        ("clear", 20, 230, ["--bg", "5"], {"_EVERY": 2, "_NVS": 1, "SQUACHSIM_FREEROLL": "0", "SQUACHSIM_T0": "9000", "SQUACHSIM_BATT": "80", "SQUACHSIM_SAYAT": "4:@ENC 0 SHINY"}, 900, "NATURAL 20! SHINIES SPARKLE NOW."),
+        ("clear", 20, 170, ["--bg", "5"], {"_EVERY": 2, "_NVS": 1, "SQUACHSIM_FREEROLL": "0", "SQUACHSIM_T0": "9000", "SQUACHSIM_BATT": "80", "SQUACHSIM_SAYAT": "4:@MISS 1"}, 700, "NATURAL 1. IT BOUNCES OFF HIS HEAD."),
+        ("clear", 20, 190, ["--bg", "5"], {"_EVERY": 2, "_NVS": 1, "SQUACHSIM_FREEROLL": "0", "SQUACHSIM_T0": "9000", "SQUACHSIM_BATT": "80", "SQUACHSIM_SAYAT": "4:@ENC 9"}, 900, "SOMETIMES IT ISN'T A DIE."),
+        ("alert", 40, 40, ["--alert", "6"], {"_EVERY": 2, "_NVS": 1}, 1500, "WHO'S FOLLOWING YOU? THE TRAIL CARD KNOWS."),
+        ("alert", 40, 40, ["--alert", "6", "--skin", "9"], {"_EVERY": 2, "_NVS": 1}, 1100, "DRESS IT UP: XP..."),
+        ("alert", 40, 40, ["--alert", "6", "--skin", "10"], {"_EVERY": 2, "_NVS": 1}, 1300, "...AQUA, GLASS, AMIGA AND MORE."),
+    ],
+    # v1.49.0 "Ring Ding Dong", 320x240 doubled: a Blender opener (3D
+    # Squachy, a T-Deck showing the emulator's real alert, an AirTag going
+    # ding dong; sim/out/ring-3d holds its frames), then RING on the AirTag
+    # alert (squachsim-ring from build_ring_sim.sh: SQW_RING=1, as the S3 and
+    # C5 boards), the RINGING toast, the T-Deck's POCKET MODE note, and
+    # TERMINAL MODE, which now rests between catches.
+    "ring-ding-dong": [
+        ("_png", 0, 0, [], {"_DIR": "out/ring-3d"}, 900, "DING DONG! WHO'S FOLLOWING WHO?"),
+        ("alert", 40, 30, ["--alert", "6"], {"_SIM": "squachsim-ring"}, 1400, "A TRACKER TAGGING ALONG? HIT RING."),
+        ("clear", 60, 30, ["--bg", "5"], {"_SIM": "squachsim-ring", "SQUACHSIM_BATT": "80", "SQUACHSIM_TOAST": "RINGING|Listen for a beep"}, 1400, "IT BEEPS. NOW GO FIND IT."),
+        ("clear", 60, 30, ["--bg", "10"], {"SQUACHSIM_BATT": "80", "SQUACHSIM_TOAST": "POCKET MODE|Press the trackball to wake"}, 1400, "T-DECK: HOLD THE BALL 2 SECONDS. LIGHTS OUT."),
+        ("clear", 60, 40, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_BATT": "80"}, 1600, "TERMINAL MODE NAPS WHEN YOU DO."),
+    ],
+    # v1.48.0 "Every Breath You Take", on the Tab5's 640x360 (its own screens,
+    # squachsim-tab5 from build_tab5_sim.sh: "_SIM" picks the binary): the
+    # four HUMAN SENSING pages, then VITALS on the Freenove S3 3.5in (480x320)
+    # and SCOPE on the T-Deck Plus's 320x240, letterboxed.
+    "every-breath": [
+        ("sensing", 60, 40, [], {"_SIM": "squachsim-tab5", "SQUACHSIM_PAGE": "0", "SQUACHSIM_SENSE": "presence"}, 1500, "THE TAB5 SENSES THE ROOM NOW. ITS OWN RADIO."),
+        ("sensing", 60, 40, [], {"_SIM": "squachsim-tab5", "SQUACHSIM_PAGE": "1", "SQUACHSIM_SENSE": "motion"}, 1500, "SCOPE: EVERY WIFI PATH ON RADAR."),
+        ("sensing", 60, 40, [], {"_SIM": "squachsim-tab5", "SQUACHSIM_PAGE": "2", "SQUACHSIM_SENSE": "clear"}, 1500, "SNEAK: CROSS THE ROOM. DON'T GET CAUGHT."),
+        ("sensing", 60, 40, [], {"_SIM": "squachsim-tab5", "SQUACHSIM_PAGE": "3", "SQUACHSIM_SENSE": "presence"}, 1800, "VITALS: SIT STILL. IT COUNTS YOUR BREATHS."),
+        ("sensing", 60, 40, [], {"_SIZE": "480x320", "SQUACHSIM_PAGE": "3", "SQUACHSIM_SENSE": "presence"}, 1500, "ON THE FREENOVE S3 BOARDS TOO."),
+        ("sensing", 60, 40, [], {"_SIZE": "320x240", "SQUACHSIM_PAGE": "1", "SQUACHSIM_SENSE": "motion"}, 1600, "AND THE T-DECK PLUS. SWIPE FOR PAGES."),
+    ],
+    # v1.47.0 "You Break it You Bought It", 320x240: MODE's three stops
+    # (Squachy, the desk with the X-LARGE clock, TERMINAL MODE, each with the
+    # card the button shows), the desk's BIG CARD alert, then Mothman out on
+    # FIREFLIES (--pet 7) and his page in the Cryptid Field Guide.
+    "you-break-it": [
+        ("clear", 60, 40, ["--bg", "5"], {"SQUACHSIM_BATT": "80", "SQUACHSIM_TOAST": "NORMAL MODE|Squachy's back"}, 1400, "NEW: ONE BUTTON, THREE MODES. MEET MODE."),
+        ("desk", 30, 40, [], {"SQUACHSIM_EPOCH": "1789396740", "SQUACHSIM_CLOCK": "1,3,0", "SQUACHSIM_TOAST": "DESK MODE|MODE again for terminal"}, 1500, "MODE ONCE: THE DESK. NOW EXTRA LARGE."),
+        ("clear", 60, 40, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_BATT": "80", "SQUACHSIM_TOAST": "TERMINAL MODE|MODE again for Squachy"}, 1600, "TWICE: TERMINAL MODE. ALL TOOL, NO MASCOT."),
+        ("desk", 30, 40, [], {"SQUACHSIM_EPOCH": "1789396740", "SQUACHSIM_CLOCK": "1,3,0", "SQUACHSIM_DESKALERT": "1", "SQUACH_ALERT": "1"}, 1500, "THE DESK CAN SHOUT NOW. BIG CARD."),
+        ("clear", 60, 60, ["--bg", "5", "--pet", "7"], {"SQUACHSIM_BATT": "80"}, 1600, "SOMETHING IN THE TREELINE. HE'S OUT NOW."),
+        ("fieldguide", 10, 20, ["--pet", "7"], {}, 1700, "THE CRYPTID FIELD GUIDE. ONE DOWN."),
+    ],
+    # v1.46.0 "They See Me Rollin", 320x240: the main screen, MY ALERTS with
+    # the seeded patrol-car list, a MY ALERT card (--alert 19, MINE) and a
+    # LoRaWAN operator's (--alert 18), HUNT after a long run (no bubble
+    # leftovers up top), and SYNTHWAVE for the trackball and the AU band.
+    "they-see-me-rollin": [
+        ("clear", 60, 40, ["--bg", "5"], {"SQUACHSIM_BATT": "80"}, 1400, "THEY SEE ME ROLLIN'. I SEE THEM TOO."),
+        ("myalerts", 10, 1, [], {}, 2400, "NEW: MY ALERTS. YOUR OWN WIFI NAMES, * AND ?"),
+        ("alert", 40, 40, ["--alert", "19"], {}, 1700, "VEH912? THAT'S A PATROL CAR'S HOTSPOT."),
+        ("alert", 40, 40, ["--alert", "18"], {}, 1600, "LORA BOARDS NAME WHOSE LORAWAN IS NEARBY."),
+        ("hunt", 1500, 30, [], {}, 1400, "HUNT STOPPED HOARDING SPEECH BUBBLES."),
+        ("clear", 60, 40, ["--bg", "10"], {"SQUACHSIM_BATT": "80"}, 1600, "T-DECK TRACKBALL. AUSSIE LORA. ROLL ON."),
+    ],
+    # v1.45.0 "Skate Better", 320x240: the main screen on FIREFLIES, a deauth
+    # flood's alert (--alert 14 DEAUTH) and an AirTag's (--alert 6), the
+    # AQUARIUM with the memory the release handed back, TERMINAL MODE (one tap
+    # now, no panel), and SYNTHWAVE for the self-review.
+    "skate-better": [
+        ("clear", 60, 40, ["--bg", "5"], {"SQUACHSIM_BATT": "80"}, 1500, "SKATE BETTER. SAME BOARD, FEWER FALLS."),
+        ("alert", 40, 40, ["--alert", "14"], {}, 1500, "DEAUTH FLOODS DON'T SNEAK PAST."),
+        ("alert", 40, 40, ["--alert", "6"], {}, 1400, "EVERY CATCH GETS ITS ALERT. EVERY ONE."),
+        ("clear", 60, 40, ["--bg", "3"], {"SQUACHSIM_BATT": "80"}, 1500, "9 KB LIGHTER. MORE ROOM FOR THE RADIOS."),
+        ("clear", 60, 40, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_BATT": "80"}, 1500, "TERMINAL MODE: ONE TAP. NO LECTURE."),
+        ("clear", 60, 40, ["--bg", "10"], {"SQUACHSIM_BATT": "80"}, 1600, "WE PENTESTED OURSELVES. IT FOUND THINGS."),
+    ],
+    # v1.44.0 "Unbreaking Bad", 320x240: the main screen hearing the room
+    # again, SCAN > BLE with its phone labels (the emulator's seeded room,
+    # sim/detection_sim.cpp), HUNT asking about a phone's new ID (--pose 2),
+    # TERMINAL MODE's battery in the LOG title bar, and Squachy back on the
+    # boot screen with TERMINAL MODE on.
+    "unbreaking-bad": [
+        ("clear", 60, 40, ["--bg", "5"], {"SQUACHSIM_BATT": "80"}, 1500, "SCANS HEAR THE ROOM AGAIN. MY BAD."),
+        ("rawscan", 30, 30, [], {}, 1600, "UNNAMED PHONES GET A BEST GUESS."),
+        ("hunt", 30, 30, ["--pose", "2"], {}, 1800, "PHONE CHANGED ITS ID? FOLLOW IT."),
+        ("clear", 60, 40, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_BATT": "80"}, 1500, "TERMINAL MODE GOT A BATTERY."),
+        ("boot", 60, 40, [], {"SQUACHSIM_TERMINAL": "1"}, 1400, "AND SQUACHY STILL WAVES AT BOOT."),
+    ],
+    # v1.43.0 "When You're Bored Then You're Boring", 320x240: TERMINAL MODE
+    # (SQUACHSIM_TERMINAL) on the live log, then sorted by KIND, dBm and
+    # DEVICE (SQUACHSIM_TMSORT), then the StickS3 / Cardputer panel.
+    # SQUACHSIM_T0 pins the first frame's time so the AIR graph is the same
+    # on every render.
+    "bored-then-boring": [
+        ("clear", 60, 40, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000"}, 1500, "NEW: TERMINAL MODE. SQUACHY CLOCKS OUT."),
+        ("clear", 60, 30, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_TMSORT": "1"}, 1400, "TAP A HEADING TO SORT. BY KIND..."),
+        ("clear", 60, 30, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_TMSORT": "3"}, 1400, "...BY SIGNAL, CLOSEST ON TOP..."),
+        ("clear", 60, 30, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "SQUACHSIM_TMSORT": "2"}, 1400, "...OR A TO Z. TAP AGAIN TO FLIP IT."),
+        ("clear", 60, 30, [], {"SQUACHSIM_TERMINAL": "1", "SQUACHSIM_T0": "200000", "_SIZE": "240x135"}, 1600, "ON THE STICKS3 AND CARDPUTER TOO."),
+    ],
+    # v1.42.0, HUMAN SENSING at the 2.8in's 320x240 (the emulator's pretend
+    # radio, sim/sense_cyd_sim.cpp; SQUACHSIM_SENSE picks the room): a still
+    # room, someone walking through, someone sitting still, the watch's and
+    # the Cardputer's layouts (_SIZE), and a router saying no.
+    "breathe-the-pressure": [
+        ("sensing", 30, 40, [], {"SQUACHSIM_SENSE": "clear"}, 1400, "NEW: HUMAN SENSING. YOUR WIFI, WATCHING THE ROOM."),
+        ("sensing", 30, 50, [], {"SQUACHSIM_SENSE": "motion"}, 1500, "WALK IN. THE ROOM NOTICES."),
+        ("sensing", 30, 40, [], {"SQUACHSIM_SENSE": "presence"}, 1500, "SIT STILL. IT STILL KNOWS YOU'RE THERE."),
+        ("sensing", 30, 40, [], {"SQUACHSIM_SENSE": "motion", "_SIZE": "240x240"}, 1300, "ON THE WATCH TOO."),
+        ("sensing", 30, 40, [], {"SQUACHSIM_SENSE": "presence", "_SIZE": "240x135"}, 1300, "AND THE CARDPUTER. AND THE T-DECK. AND..."),
+        ("sensing", 30, 30, [], {"SQUACHSIM_SENSE": "join"}, 1500, "ROUTER SAYS NO? IT WAITS. POLITELY."),
+    ],
+    # v1.41.0 "Return to Sender", at the T-Deck Plus's 320x240: the LORA page
+    # on its DMs tab (--tab 2), the chats' DMs list, a private line typed to
+    # YETI on Meshtastic (SQUACHSIM_DMPEER; dots, then its tick), the MeshCore
+    # one with JERSEY DVL (SQUACHSIM_DMNET), then the CYD's main screen for
+    # the new Waveshare C5 board.
+    "return-to-sender": [
+        ("lora", 40, 40, ["--tab", "2"], {"SQUACHSIM_LORATX": "1"}, 1500, "THE T-DECK LEARNED TO WHISPER."),
+        ("lorachat", 20, 40, ["--tab", "2"], {"SQUACHSIM_LORATX": "1"}, 1500, "DMS: MESHTASTIC AND MESHCORE, ONE LIST."),
+        ("lorachat", 20, 80, ["--tab", "2"], {"SQUACHSIM_LORATX": "1", "SQUACHSIM_DMPEER": "3b1c9a00", "SQUACHSIM_LORATYPE": "SAVE ME SOME JERKY|"}, 1700, "TYPE IT. ONLY YETI HEARS IT."),
+        ("lorachat", 20, 40, ["--tab", "2"], {"SQUACHSIM_LORATX": "1", "SQUACHSIM_DMPEER": "4e0a7f12", "SQUACHSIM_DMNET": "1"}, 1600, "THE TICK MEANS IT GOT THERE."),
+        ("clear", 60, 40, ["--bg", "5"], {"SQUACHSIM_BATT": "80"}, 1400, "NEW BOARD: WAVESHARE C5 2.8 (BETA)"),
+    ],
     # v1.40.0 "Wake Me Up Before You Go-Go", 320x240: SNOOZE mid-pick on the
     # alert card (SQUACHSIM_SNOOZE is the step it shows, its bar running out
     # over the capture), the SNOOZED toast it leaves on CLEAR
@@ -400,6 +524,7 @@ CLIP_SIZE = {
     "squachwatch-squared": (240, 240, 2),
     "the-big-screen": (480, 320, 1),
     "good-company":   (480, 320, 1),
+    "every-breath":   (640, 360, 1),
 }
 
 def clip_geom(clip):
@@ -430,6 +555,16 @@ def render(clip):
     os.makedirs(out)
     man = []
     for i, (screen, warm, n, extra, env, hold, caption) in enumerate(CLIPS[clip]):
+        if screen == "_png":
+            # Frames made elsewhere (a Blender opener): every PNG in "_DIR",
+            # a folder under sim/out, in name order, scaled to the clip.
+            src = env["_DIR"]
+            files = sorted(f for f in os.listdir(os.path.join(HERE, src)) if f.endswith(".png"))
+            if not files:
+                sys.exit("scene %d: no PNG frames in %s" % (i, src))
+            for k, fn in enumerate(files):
+                man.append({"png": src + "/" + fn, "ms": MS if k < len(files) - 1 else MS + hold, "caption": caption})
+            continue
         if isinstance(n, list):
             # A scroll sweep: one frame per value.
             for k, sc in enumerate(n):
@@ -448,16 +583,28 @@ def render(clip):
         # env, for the StickS3); encode() letterboxes it into the clip.
         env = dict(env)
         sw, sh = cw, ch
+        # "_EVERY": keep every Nth captured frame -- 2 plays a long scene at
+        # about real time. "_NVS": the scene gets a settings store of its
+        # own, fresh, under out/ (the emulator's own store is left alone).
+        every = int(env.pop("_EVERY", 1))
+        if env.pop("_NVS", None):
+            nvs = os.path.join(out, "nvs%d" % i)
+            shutil.rmtree(nvs, ignore_errors=True)
+            os.makedirs(nvs)
+            env["SQUACHSIM_NVS"] = nvs
+        # "_SIM": another emulator binary beside this one (squachsim-tab5).
+        ssim = os.path.join(HERE, env.pop("_SIM")) if "_SIM" in env else sim
         if "_SIZE" in env:
             sw, sh = (int(v) for v in env.pop("_SIZE").split("x"))
-        run([sim, screen, os.path.join(out, "x.png"), "--frames", str(warm),
+        run([ssim, screen, os.path.join(out, "x.png"), "--frames", str(warm),
              "--sequence", str(n), "--raw", raw,
              "--size", "%dx%d" % (sw, sh)] + extra, env)
         if os.path.getsize(raw) != sw * sh * 3 * n:
             sys.exit("scene %d: %d bytes, expected %d" % (i, os.path.getsize(raw), sw * sh * 3 * n))
-        for k in range(n):
+        keep = list(range(0, n, every))
+        for j, k in enumerate(keep):
             man.append({"raw": os.path.basename(raw), "index": k, "w": sw, "h": sh,
-                        "ms": MS if k < n - 1 else MS + hold, "caption": caption})
+                        "ms": MS if j < len(keep) - 1 else MS + hold, "caption": caption})
     json.dump(man, open(os.path.join(out, "manifest.json"), "w"))
     print("%d frames rendered into %s" % (len(man), out))
 
@@ -500,6 +647,17 @@ def encode(clip):
     raws, ims = {}, []
     bands = {}
     for f in man:
+        if "png" in f:
+            im = Image.open(os.path.join(HERE, f["png"])).convert("RGB")
+            if im.size != (cw * zoom, ch * zoom):
+                im = im.resize((cw * zoom, ch * zoom), Image.LANCZOS)
+            if f["caption"] not in bands:
+                bands[f["caption"]] = caption_band(f["caption"], im.width)
+            page = Image.new("RGB", (im.width, im.height + BAND), (0, 0, 0))
+            page.paste(im, (0, 0))
+            page.paste(bands[f["caption"]], (0, im.height))
+            ims.append(page)
+            continue
         if f["raw"] not in raws:
             raws[f["raw"]] = open(os.path.join(out, f["raw"]), "rb").read()
         b = raws[f["raw"]]
@@ -523,12 +681,22 @@ def encode(clip):
         page.paste(im, (0, 0))
         page.paste(bands[f["caption"]], (0, im.height))
         ims.append(page)
-    # One palette for the whole clip, so nothing shimmers between scenes.
-    sheet = Image.new("RGB", (ims[0].width, ims[0].height * len(ims)))
-    for i, im in enumerate(ims):
-        sheet.paste(im, (0, ims[0].height * i))
-    ref = sheet.quantize(colors=256, dither=Image.NONE)
-    frames = [im.quantize(palette=ref, dither=Image.NONE) for im in ims]
+    # One palette for the emulator's frames, so nothing shimmers between
+    # scenes; rendered PNG frames (3D, all gradients) get one of their own.
+    # 128 colours for those: every pixel of a moving 3D shot changes each
+    # frame, and at 256 the v1.49.0 opener alone was 5.9 MB.
+    def palette(group, colors):
+        sheet = Image.new("RGB", (group[0].width, group[0].height * len(group)))
+        for i, im in enumerate(group):
+            sheet.paste(im, (0, group[0].height * i))
+        return sheet.quantize(colors=colors, dither=Image.NONE)
+    is_png = ["png" in f for f in man]
+    refs = {}
+    for kind in (False, True):
+        group = [im for im, p in zip(ims, is_png) if p == kind]
+        if group:
+            refs[kind] = palette(group, 128 if kind else 256)
+    frames = [im.quantize(palette=refs[p], dither=Image.NONE) for im, p in zip(ims, is_png)]
     gif = gif_path(clip)
     os.makedirs(os.path.dirname(gif), exist_ok=True)
     frames[0].save(gif, save_all=True, append_images=frames[1:],

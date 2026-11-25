@@ -82,6 +82,7 @@ static void ballSay(const char* line, uint32_t now, uint8_t mood) {
 }
 
 void arrest(uint32_t now) {
+    now = pnow(now);
     if (Squachy::jailed() || s_jArrestAt) return;
     Squachy::jailStart();
     s_jArrestAt = now ? now : 1;

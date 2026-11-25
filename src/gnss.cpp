@@ -2,6 +2,10 @@
 #include "gnss.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
+#if defined(ARDUINO)
+#include <Arduino.h>
+#endif
 
 namespace Gnss {
 
@@ -14,6 +18,8 @@ uint32_t s_rmcEpoch = 0;       // date + time from the newest valid RMC
 uint32_t s_rmcDay   = 0;       // the date alone, for dating a GGA time
 bool     s_faked    = false;
 uint32_t s_good = 0, s_bad = 0;
+uint32_t s_bytes = 0, s_lastGoodMs = 0, s_textMs = 0;
+char     s_text[40] = "";
 
 // In view and heard, per talker, from the GSV cycle in progress and the last
 // complete one. A cycle is messages 1..n of one talker; message 1 restarts it.
@@ -22,6 +28,7 @@ uint8_t s_viewDone[T_N], s_heardDone[T_N], s_heardNow[T_N];
 
 char    s_line[96];
 uint8_t s_len = 0;
+uint32_t s_echoUntil = 0;
 
 int hexVal(char c) {
     if (c >= '0' && c <= '9') return c - '0';
@@ -152,6 +159,7 @@ bool sentence(const char* s, uint32_t nowMs) {
     if (h1 < 0 || h2 < 0 || sum != (uint8_t)(h1 * 16 + h2)) { s_bad++; return false; }
     *star = 0;
     s_good++;
+    s_lastGoodMs = nowMs ? nowMs : 1;
     char* f[24];
     const uint8_t n = split(buf + 1, f, 24);
     const char* type = f[0] + 2;           // after the talker
@@ -159,13 +167,25 @@ bool sentence(const char* s, uint32_t nowMs) {
     if (!strcmp(type, "GGA")) onGga(f, n, nowMs);
     else if (!strcmp(type, "RMC")) onRmc(f, n);
     else if (!strcmp(type, "GSV")) onGsv(f[0], f, n);
+    else if (!strcmp(type, "TXT") && n >= 5) {
+        strncpy(s_text, f[4], sizeof s_text - 1);
+        s_text[sizeof s_text - 1] = 0;
+        s_textMs = nowMs ? nowMs : 1;
+    }
     return true;
 }
 
 void feed(char c, uint32_t nowMs) {
+    s_bytes++;
     if (c == '$') s_len = 0;
     if (c == '\n' || c == '\r') {
-        if (s_len) { s_line[s_len] = 0; sentence(s_line, nowMs); }
+        if (s_len) {
+            s_line[s_len] = 0;
+#if defined(ARDUINO)
+            if (s_echoUntil && (int32_t)(s_echoUntil - nowMs) > 0) Serial.println(s_line);
+#endif
+            sentence(s_line, nowMs);
+        }
         s_len = 0;
         return;
     }
@@ -173,7 +193,19 @@ void feed(char c, uint32_t nowMs) {
     else s_len = 0;                          // overlong: not NMEA, drop it
 }
 
+void echo(uint32_t untilMs) { s_echoUntil = untilMs; }
+
 const Fix& fix() { return s_fix; }
+
+const char* status(uint32_t nowMs, char* buf, size_t n) {
+    const bool talking = s_lastGoodMs && (int32_t)(nowMs - s_lastGoodMs) < 5000;
+    if (!talking) snprintf(buf, n, "NO GPS");
+    else if (fresh(nowMs) && !s_faked) snprintf(buf, n, "FIX %u SATS", s_fix.used);
+    // No antenna verdict from its TXT: the Unit GPS v1.1 says ANTENNA OPEN
+    // with its built-in antenna working. The log keeps the text.
+    else snprintf(buf, n, "FINDING %u SATS", sky().heard);
+    return buf;
+}
 
 Sky sky() {
     Sky k;
@@ -184,6 +216,9 @@ Sky sky() {
 uint32_t utcEpoch() { return s_rmcEpoch; }
 uint32_t good() { return s_good; }
 uint32_t bad()  { return s_bad; }
+uint32_t bytes() { return s_bytes; }
+uint32_t lastGoodMs() { return s_lastGoodMs; }
+const char* text(uint32_t* atMs) { if (atMs) *atMs = s_textMs; return s_text; }
 
 // Signed, because `nowMs` is often a frame's start and the fix can land later
 // in the same frame: unsigned, a fix 3 ms "in the future" wrapped to an age of
@@ -197,6 +232,8 @@ void reset() {
     s_faked = false;
     s_phone = false;
     s_good = s_bad = 0;
+    s_bytes = s_lastGoodMs = s_textMs = 0;
+    s_text[0] = 0;
     memset(s_viewDone, 0, sizeof s_viewDone);
     memset(s_heardDone, 0, sizeof s_heardDone);
     memset(s_heardNow, 0, sizeof s_heardNow);

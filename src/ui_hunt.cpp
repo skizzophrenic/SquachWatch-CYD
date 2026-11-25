@@ -116,13 +116,50 @@ static void drawGauge(TFT_eSPI& t, int cx, int cy, int r, float frac, uint16_t n
     t.fillCircle(cx, cy, 4, needleColor);
 }
 
+static void drawButtons(TFT_eSPI& t, int w, int h, bool ask) {
+    int bx, by, bw, bh;
+    backButtonRect(w, h, bx, by, bw, bh);
+    Theme::drawButton(t, bx, by, bw, bh, ask ? "[ NO ]" : "[ BACK ]", false);
+    stopButtonRect(w, h, bx, by, bw, bh);
+    Theme::drawButton(t, bx, by, bw, bh, ask ? "[ YES ]" : "[ STOP ]", false);
+}
+
 void uiHuntTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance) {
     int w = t.width(), h = t.height();
 
-    Theme::drawTitleBar(t, ">> HUNT MODE <<");
-
     Theme::ButtonBarGeom bar = Theme::computeButtonBar(w, h);
     int bodyTop = 16, bodyBottom = bar.y - 4;
+
+    // The top band from the background first, as every other screen with
+    // this bar does: Squachy's bubble reaches up over it, and the body clear
+    // below starts under it, so each bubble's edges stayed there and piled up
+    // (#77).
+    t.fillRect(0, 0, w, bodyTop, Theme::BG);
+    Theme::drawTitleBar(t, ">> HUNT MODE <<");
+
+    // A phone that went quiet and a new address of its kind that turned up
+    // (DetectionEngine::checkHuntSwap): the gauge and Squachy give way to the
+    // question, and the bar's buttons answer it -- NO where BACK is, so a
+    // BACK key is the safe answer.
+    if (eng.huntSwapOffered()) {
+        t.fillRect(0, bodyTop, w, bar.y - bodyTop, Theme::BG);
+        char pv[40], l2[48], l3[32];
+        snprintf(l2, sizeof l2, "A new %s turned up", Privacy::name(eng.huntLabel(), pv, sizeof pv));
+        snprintf(l3, sizeof l3, "at %d dBm. Follow it?", (int)eng.huntSwapRssi());
+        const char* lines[4] = { "IT WENT QUIET.", "Phones change their ID.", l2, l3 };
+        Theme::bodyFontOn(t);
+        t.setTextWrap(false);
+        const int lh = t.fontHeight() + (Theme::compact() ? 1 : 4);
+        int y = bodyTop + ((bodyBottom - bodyTop) - 4 * lh) / 2;
+        for (int i = 0; i < 4; i++, y += lh) {
+            t.setTextColor(i == 0 ? Theme::AMBER : Theme::WHITE, Theme::BG);
+            t.setCursor((w - t.textWidth(lines[i])) / 2, y);
+            t.print(lines[i]);
+        }
+        Theme::bodyFontOff(t);
+        drawButtons(t, w, h, true);
+        return;
+    }
     t.fillRect(0, bodyTop, w, bodyBottom - bodyTop, Theme::BG);
 
     // Mini Squachy cameo, same reduced-header-strip reuse ui_rawscan.cpp
@@ -134,17 +171,37 @@ void uiHuntTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adva
     const bool tiny = Theme::compact();
     const int colX = tiny ? 70 : 0, colW = w - colX;
     const int sqH = tiny ? bodyBottom - bodyTop - 6 : 44;
+#if defined(SQW_SMALL)
+    // His bubble gets a band of its own across the top (over the title),
+    // and the name and gauge start under it: at the band's usual place it
+    // sat on both.
+    const int BAND = 27;
+    Squachy::setBubbleSinkTo(BAND);
+    Squachy::tick(t, 36, bodyTop, sqH, now, advance, 0.6f, true);
+    Squachy::setBubbleSinkTo(-1);
+#else
     Squachy::tick(t, tiny ? 36 : w / 2, bodyTop, sqH, now, advance, 0.6f, true);
+#endif
 
     Theme::bodyFontOn(t);
     t.setTextWrap(false);
     t.setTextColor(Theme::CYAN, Theme::BG);
+#if defined(SQW_SMALL)
+    int labelY = BAND + 1;
+#else
     int labelY = tiny ? bodyTop + 2 : bodyTop + sqH + 2;
+#endif
     char pv[40];
     const char* label = Privacy::name(eng.huntLabel(), pv, sizeof pv);
     int lw = t.textWidth(label);
     int maxLw = colW - 16;
     t.setCursor(colX + (colW - (lw < maxLw ? lw : maxLw)) / 2, labelY);
+#if defined(SQW_SMALL)
+    // A two-line bubble reaches past the band: the name waits it out
+    // rather than printing through his words.
+    int bbx, bby, bbw, bbh;
+    if (!(Squachy::ownBubble(bbx, bby, bbw, bbh) && bby + bbh > labelY))
+#endif
     t.print(label);
 
     uint8_t rssiN = eng.huntRssiCount();
@@ -165,13 +222,21 @@ void uiHuntTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adva
     }
 
     // Taller on the large panels: a size-3 readout over a body-font trend.
+#if defined(SQW_SMALL)
+    int textBlockH = 29;   // readout + trend, clear of the buttons
+#else
     int textBlockH = tiny ? 26 : Theme::large() ? 52 : 36;
+#endif
     int gaugeTop = labelY + t.fontHeight() + 4;
     int gaugeBottom = bodyBottom - textBlockH;
     int r = gaugeBottom - gaugeTop;
     int maxRw = (colW - 40) / 2;
     if (r > maxRw) r = maxRw;
+#if defined(SQW_SMALL)
+    if (r < 24) r = 24;
+#else
     if (r < 30) r = 30;
+#endif
     int cx = colX + colW / 2, cy = gaugeBottom;
 
     float frac = 0.0f;
@@ -263,9 +328,5 @@ void uiHuntTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adva
     t.print(trend);
     Theme::bodyFontOff(t);
 
-    int bx, by, bw, bh;
-    backButtonRect(w, h, bx, by, bw, bh);
-    Theme::drawButton(t, bx, by, bw, bh, "[ BACK ]", false);
-    stopButtonRect(w, h, bx, by, bw, bh);
-    Theme::drawButton(t, bx, by, bw, bh, "[ STOP ]", false);
+    drawButtons(t, w, h, false);
 }

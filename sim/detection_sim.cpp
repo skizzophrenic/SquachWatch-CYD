@@ -17,6 +17,7 @@
 // screen full of detections, but it is NOT exercising the real matching
 // logic that decides what counts as a detection in the first place.
 #include "detection.h"
+#include "trail.h"
 #include <cstring>
 #if defined(CYD_GPS)
 #include "wardrive.h"
@@ -76,7 +77,7 @@ void DetectionEngine::loop() {
     }
 }
 #else
-void DetectionEngine::loop() {}
+void DetectionEngine::loop() { Places::tick(millis()); }
 #endif
 // No radio, so nothing to restart and nothing freed.
 ScanFlushStats scanFlushStats() { return ScanFlushStats{ 0, 0, 0 }; }
@@ -116,8 +117,10 @@ void DetectionEngine::resetLifetime() {
 
 void DetectionEngine::pushLog(const Detection& d) {
     _log[_logHead] = d;
+    Trail::noteSighting(_log[_logHead], d.rssi, millis());
     _latest = &_log[_logHead];
     _latestNew = true;   // the stand-in only ever pushes; nothing here reactivates
+    _latestSeq = _latestSeq + 1;
     _logHead = (uint8_t)((_logHead + 1) % LOG_CAP);
     if (_logCount < LOG_CAP) _logCount++;
     if ((uint8_t)d.type < (uint8_t)DetectionType::COUNT) {
@@ -146,13 +149,41 @@ void DetectionEngine::mergeRemoteId(const uint8_t* mac, const uint8_t* payload,
     RemoteId::merge(payload, len, _rid, millis());
 }
 void DetectionEngine::postBtClassic(Detection d) { pushLog(d); }
+// A LoRaWAN operator (PR #138), on the LoRa builds: main.cpp posts it.
+void DetectionEngine::postLora(Detection d) { pushLog(d); }
 void DetectionEngine::postRawBle(RawBleResult r) {
     if (_rawBleCount < RAW_BLE_CAP) _rawBle[_rawBleCount++] = r;
 }
 
-// Raw scanner: reports "done, nothing found" so the raw-scan screen
-// renders its empty-result state rather than spinning forever.
-void DetectionEngine::startRawBleScan() { _rawBleCount = 0; }
+// Raw scanner: "done" at once, with a room's worth of devices so the list
+// and its phone labels can be seen. Each is made from advert bytes of the
+// kind the real ones send, through the firmware's own rawBleKindOf().
+static RawBleResult simRaw(uint8_t tag, int8_t rssi, const char* name, const uint8_t* adv, size_t n) {
+    RawBleResult r;
+    memset(&r, 0, sizeof r);
+    const uint8_t mac[6] = { 0x5A, 0x11, 0x5C, 0x00, 0x00, tag };
+    memcpy(r.mac, mac, 6);
+    r.rssi = r.prev = rssi;
+    if (name) strncpy(r.name, name, sizeof r.name - 1);
+    r.kind = rawBleKindOf(adv, n);
+    return r;
+}
+void DetectionEngine::startRawBleScan() {
+    _rawBleCount = 0;
+    static const uint8_t IPHONE[]  = { 0x02, 0x01, 0x1A, 0x0A, 0xFF, 0x4C, 0x00, 0x10, 0x05, 0x03, 0x1C, 0x12, 0x34, 0x56 };
+    static const uint8_t AIRPODS[] = { 0x0B, 0xFF, 0x4C, 0x00, 0x07, 0x06, 0x01, 0x0E, 0x20, 0x55, 0xAA, 0x01 };
+    static const uint8_t ANDROID[] = { 0x02, 0x01, 0x06, 0x03, 0x03, 0xF3, 0xFE, 0x05, 0x16, 0xF3, 0xFE, 0x01, 0x02 };
+    static const uint8_t GALAXY[]  = { 0x02, 0x01, 0x06, 0x07, 0xFF, 0x75, 0x00, 0x42, 0x09, 0x01, 0x02 };
+    static const uint8_t FINDMY[]  = { 0x05, 0xFF, 0x4C, 0x00, 0x12, 0x00 };
+    static const uint8_t PLAIN[]   = { 0x02, 0x01, 0x06 };
+    postRawBle(simRaw(1, -54, nullptr, AIRPODS, sizeof AIRPODS));
+    postRawBle(simRaw(2, -61, nullptr, IPHONE, sizeof IPHONE));
+    postRawBle(simRaw(3, -66, "Flip 5", PLAIN, sizeof PLAIN));
+    postRawBle(simRaw(4, -72, nullptr, ANDROID, sizeof ANDROID));
+    postRawBle(simRaw(5, -77, nullptr, GALAXY, sizeof GALAXY));
+    postRawBle(simRaw(6, -81, nullptr, FINDMY, sizeof FINDMY));
+    postRawBle(simRaw(7, -88, nullptr, PLAIN, sizeof PLAIN));
+}
 bool DetectionEngine::rawBleScanDone() const { return true; }
 const RawBleResult* DetectionEngine::rawBleAt(uint8_t idx) const {
     return idx < _rawBleCount ? &_rawBle[idx] : nullptr;
@@ -201,19 +232,21 @@ void DetectionEngine::recordWatchRssi(int8_t rssi) {
     if (_watchRssiCount < WATCH_RSSI_CAP) _watchRssiCount++;
 }
 
-void DetectionEngine::huntBle(const uint8_t* mac, const char* name) {
+void DetectionEngine::huntBle(const uint8_t* mac, const char* name, uint8_t rawKind) {
+    huntSwapReset(rawKind);
     _huntKind = WatchKind::BLE;
     if (mac) memcpy(_huntMac, mac, 6);
     snprintf(_huntLabel, sizeof(_huntLabel), "%s", name ? name : "");
     _huntRssiCount = 0;
 }
 void DetectionEngine::huntWifi(const uint8_t* bssid, const char* ssid) {
+    huntSwapReset(0);
     _huntKind = WatchKind::WIFI;
     if (bssid) memcpy(_huntMac, bssid, 6);
     snprintf(_huntLabel, sizeof(_huntLabel), "%s", ssid ? ssid : "");
     _huntRssiCount = 0;
 }
-void DetectionEngine::clearHunt() { _huntKind = WatchKind::NONE; _huntLabel[0] = 0; _huntRssiCount = 0; }
+void DetectionEngine::clearHunt() { huntSwapReset(0); _huntKind = WatchKind::NONE; _huntLabel[0] = 0; _huntRssiCount = 0; }
 int8_t DetectionEngine::huntRssiAt(uint8_t idx) const {
     if (idx >= _huntRssiCount) return 0;
     uint8_t slot = (uint8_t)((_huntRssiHead + WATCH_RSSI_CAP - _huntRssiCount + idx) % WATCH_RSSI_CAP);
@@ -223,6 +256,7 @@ int8_t DetectionEngine::huntRssiAt(uint8_t idx) const {
 // hunt screen's CAUGHT state is checked that way (main_sim.cpp, "hunt" --pose 1).
 void DetectionEngine::checkHuntBle(const uint8_t* mac, int8_t rssi) {
     if (_huntKind != WatchKind::BLE || memcmp(mac, _huntMac, 6) != 0) return;
+    _huntSeenMs = millis(); _huntSeenRssi = rssi;
     recordHuntRssi(rssi);
 }
 void DetectionEngine::checkHuntWifi(const uint8_t*, int8_t) {}
@@ -238,3 +272,15 @@ void DetectionEngine::processDeauthQ() {}
 void DetectionEngine::expireStale() {}
 void DetectionEngine::hopChannel() {}
 void DetectionEngine::decayChannelActivity() {}
+
+// The radios' rest, which the T-Deck build's LoRa duty cycle asks for (and
+// the watch's). Nothing here to rest: they report awake.
+bool DetectionEngine::restRadios(bool) { return false; }
+void DetectionEngine::wakeRadios() {}
+bool DetectionEngine::radiosResting() { return false; }
+
+// The watch build's boot report and its count of new Bluetooth arrivals
+// (detection.cpp has the real ones; no radios here, so none arrive).
+char g_bootRadioLine[192] = "";
+uint32_t bleArrivals() { return 0; }
+void bleArrivalsRoll(uint32_t) {}
