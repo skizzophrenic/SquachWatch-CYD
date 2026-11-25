@@ -41,6 +41,9 @@ struct Aes256 {
     void setKey(const uint8_t key[32]);
     void encryptBlock(const uint8_t in[16], uint8_t out[16]) const;
 };
+// The same AES-CTR with a 256-bit key: a Meshtastic channel whose key is 32
+// bytes uses exactly this (the firmware picks AES-256 by key length).
+void ctr(const Aes256& k, const uint8_t nonce[16], uint8_t* buf, size_t len);
 // AES-CCM the way Meshtastic runs it (src/mesh/aes-ccm.cpp there, which is
 // wpa_supplicant's): a 13-byte nonce, so a two-byte length (L = 2), an 8-byte
 // tag, no associated data. Seal writes len bytes of ciphertext to `out` and

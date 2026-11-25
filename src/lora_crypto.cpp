@@ -142,7 +142,9 @@ void Aes128::decryptBlock(const uint8_t in[16], uint8_t out[16]) const {
     memcpy(out, s, 16);
 }
 
-void ctr(const Aes128& k, const uint8_t nonce[16], uint8_t* buf, size_t len) {
+// One CTR loop for both key sizes.
+template <typename Aes>
+static void ctrWith(const Aes& k, const uint8_t nonce[16], uint8_t* buf, size_t len) {
     uint8_t ctr[16], ks[16];
     memcpy(ctr, nonce, 16);
     for (size_t off = 0; off < len; off += 16) {
@@ -154,6 +156,9 @@ void ctr(const Aes128& k, const uint8_t nonce[16], uint8_t* buf, size_t len) {
         for (int i = 15; i >= 0 && ++ctr[i] == 0; i--) {}
     }
 }
+
+void ctr(const Aes128& k, const uint8_t nonce[16], uint8_t* buf, size_t len) { ctrWith(k, nonce, buf, len); }
+void ctr(const Aes256& k, const uint8_t nonce[16], uint8_t* buf, size_t len) { ctrWith(k, nonce, buf, len); }
 
 // ---- AES-CCM, L = 2, M = 8, no associated data ------------------------------
 // RFC 3610's construction with the fields Meshtastic fixes. B0 is the flags

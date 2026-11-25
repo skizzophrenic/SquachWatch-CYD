@@ -555,12 +555,10 @@ void pollSerial() {
     // A line buffer rather than a parser. Anything that is not the one
     // command is answered and dropped -- this is a debug port, and silence
     // in response to a typo is worse than a line of help.
-#if defined(TAB5) && defined(SENSE_CYD_APP)
-    static char line[112];   // WIFISAVE <32-byte name><TAB><64-byte password>
-#elif SQW_WIGLE_UPLOAD
+#if SQW_WIGLE_UPLOAD
     static char line[160];   // WIGLEKEY <WiGLE's Encoded for use value, up to about 120>
 #else
-    static char line[48];
+    static char line[128];   // WIFISAVE <name><TAB><password> on the Tab5; LORA CHAN MT <name> <32-byte base64 key>
 #endif
     static uint8_t len = 0;
 
