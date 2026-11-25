@@ -2348,9 +2348,10 @@ void DetectionEngine::startRawWifiScan() {
     s_hostScanDone = false; s_hostCollected = false;
     wifi_scan_config_t cfg = {};
     cfg.show_hidden = false;
-    cfg.scan_type = WIFI_SCAN_TYPE_ACTIVE;
-    cfg.scan_time.active.min = 60;
-    cfg.scan_time.active.max = 120;
+    // Passive, like every other scan here: listen for beacons, send nothing
+    // (tools/check_emissions.sh). 150 ms a channel catches a 102 ms beacon.
+    cfg.scan_type = WIFI_SCAN_TYPE_PASSIVE;
+    cfg.scan_time.passive = 150;
     const esp_err_t e = esp_wifi_scan_start(&cfg, false);
     s_hostScanOk = e == ESP_OK;
     s_hostScanAt = millis();
