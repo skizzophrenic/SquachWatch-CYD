@@ -232,6 +232,14 @@ const char* mtPrimary() {
     return strncmp(n, "MT ", 3) == 0 ? n + 3 : "LongFast";
 }
 uint8_t txPick(Proto p) { return txPick(p, mtPrimary()); }
+bool primaryIsPublic() {
+    const int i = Meshtastic::findChannel(mtPrimary());
+    if (i < 0) return true;
+    const Meshtastic::Channel c = Meshtastic::channel((uint8_t)i);
+    uint8_t def[16];
+    Meshtastic::expandPsk(1, def);
+    return c.keyLen == 0 || (c.keyLen == 16 && memcmp(c.key, def, 16) == 0);
+}
 uint8_t txStep(Proto p) { return txStep(p, mtPrimary()); }
 bool    txIsDefault(Proto p) { const char* m = mtPrimary(); return txPick(p, m) == txDefault(p, m); }
 void txName(Proto p, uint8_t idx, char* out, size_t cap) {
