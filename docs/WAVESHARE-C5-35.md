@@ -11,6 +11,12 @@ differences live behind `-DWS_C5_35`.
 pio run -e ws-c5-35 -t upload
 ```
 
+With Waveshare's LC76G GPS on the header (see GPS below):
+
+```
+pio run -e ws-c5-35-gps -t upload
+```
+
 Download mode if it won't auto-enter: **hold BOOT, tap RST, release BOOT**, then
 upload. The board self-powers over its own USB-C. Boot and panic logs come out
 the **native USB** (USB-Serial-JTAG), read at 115200.
@@ -30,6 +36,7 @@ Display · touch · Wi-Fi (2.4 + 5 GHz) · BLE · SquachMesh · SD · **audio
 | Audio (ES8311) | codec @ `0x18` on the touch bus → I2S BCK 23, WS 10, DOUT 25 (no MCLK) → NS4150B amp |
 | Battery (AXP2101) | PMU on the touch bus; MX1.25 2-pin 3.7 V LiPo header (cell optional) |
 | SD | CS 9 |
+| GPS (LC76G, optional) | I2C on the touch bus via the J3 header (SDA 27 / SCL 26), addr `0x50` / `0x54` / `0x58`; `ws-c5-35-gps` build only |
 
 ## Board-specific notes
 
@@ -43,3 +50,25 @@ Display · touch · Wi-Fi (2.4 + 5 GHz) · BLE · SquachMesh · SD · **audio
   `NONE` (the AXP2101 still answers and reports USB/charge state). An 80 MHz
   display push clock is the default (`-fast`-free); it's above the panel's rated
   60 MHz but holds on the units tested.
+
+## GPS
+
+The 3.5" has no GPS of its own, and its header UART is not connected to the
+chip, so a GPS wired to the header's RX/TX stays silent. Waveshare's LC76G
+also speaks I2C, and the header's SDA and SCL do reach the chip, so the GPS
+goes there:
+
+| LC76G | J3 header |
+|---|---|
+| VCC | 3V3 |
+| GND | GND |
+| SDA | SDA (GPIO27) |
+| SCL | SCL (GPIO26) |
+
+Build `ws-c5-35-gps`. It reads the module over I2C, so the fix, the SD
+rows, the clock and `GPS STATUS` work as on the UART boards. The red GPS
+label in the header shows while there is a fix. Like the other GPS
+builds, it is not in the web flasher, CI or releases.
+
+Checked on one board, module on the header next to a window: first fix
+38 s after boot, 6 satellites used, 1194 sentences good, 0 bad.
