@@ -6,12 +6,14 @@
 // The rest of the surface exists so a board-guarded caller compiles the
 // same way it does on the device.
 //
-// The answers say "no network": OFF mode, idle status, zero networks.
-// NTP/OTA over Wi-Fi (Phase 4's join logic) will find the same truth the
-// device's own radio reports when it is not associated.
+// mode() says OFF (the OS owns the radio's role, not the app); status()
+// says the truth -- whether wlan0 holds an address -- because the LoRa
+// enrichment's transport gates on it (lora_enrich.cpp, wifiUp()).
 #pragma once
 #include <cstdint>
+#include <cstring>
 #include <string>
+#include <ifaddrs.h>
 
 // The raw scan's screen reads (detection.cpp, the non-hosted branch) use
 // the ESP32 core's WString type under this name.
@@ -34,6 +36,8 @@ enum WiFiStatus_t {
     WL_CONNECTION_LOST,
     WL_AUTH_FAILED
 };
+// The ESP32 core's alias (lora_enrich.cpp compares against it).
+#define WL_CONNECTED WL_GOT_IP
 
 class WiFiClass {
 public:
@@ -43,7 +47,20 @@ public:
     }
     bool mode(WiFiMode_t m) { return m == WIFI_OFF || m == WIFI_STA; }
     WiFiMode_t mode() { return WIFI_OFF; }
-    WiFiStatus_t status() { return WL_IDLE_STATUS; }
+    // The truth, not a stub answer: the app lives on the stock OS and the
+    // network is the OS's, so "associated" is "wlan0 holds an address"
+    // (getifaddrs). The LoRa enrichment asks this to decide whether its
+    // online lookups may run at all (lora_enrich.cpp, wifiUp()).
+    WiFiStatus_t status() {
+        struct ifaddrs* a = nullptr;
+        if (getifaddrs(&a) != 0) return WL_IDLE_STATUS;
+        WiFiStatus_t s = WL_IDLE_STATUS;
+        for (struct ifaddrs* p = a; p; p = p->ifa_next)
+            if (!std::strcmp(p->ifa_name, "wlan0") && p->ifa_addr
+                && p->ifa_addr->sa_family == AF_INET) { s = WL_GOT_IP; break; }
+        freeifaddrs(a);
+        return s;
+    }
 
     // The scan is real (radio_stub.cpp -> wifi_mon's passive sweep on the
     // sniffer): the raw Wi-Fi screen's scanNetworks(async, no hidden,

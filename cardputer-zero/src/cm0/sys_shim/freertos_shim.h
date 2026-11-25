@@ -18,13 +18,37 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cerrno>
+#include <ctime>
 #include <pthread.h>
 
 #define portMAX_DELAY 0xFFFFFFFFu
 #define pdTRUE        1
 #define pdFALSE       0
+#define pdPASS        pdTRUE
 typedef int      BaseType_t;
 typedef uint32_t UBaseType_t;
+struct ShimTask;
+typedef ShimTask* TaskHandle_t;
+
+// The task deletes itself at the end of its run (lora_enrich.cpp's
+// one-shot worker). Pthreads are not killable from outside; the task
+// simply returns and dies with the process, so this is the no-op the
+// contract allows.
+inline void vTaskDelete(TaskHandle_t) {}
+
+// Ticks are milliseconds: the engine never computes anything but
+// pdMS_TO_TICKS (lora_sniffer.cpp, lora_enrich.cpp), so the conversion is
+// the identity and portTICK_PERIOD_MS is 1.
+#define pdMS_TO_TICKS(ms) (ms)
+#define portTICK_PERIOD_MS 1
+
+// The engine's radio task sleeps between its polls; so does the enrich
+// worker. A nanosleep, retried on EINTR like the kernel's would be.
+inline void vTaskDelay(uint32_t ticks) {
+    struct timespec ts = { (time_t)(ticks / 1000u), (long)(ticks % 1000u) * 1000000L };
+    while (nanosleep(&ts, &ts) == -1 && errno == EINTR) {}
+}
 
 // sound.cpp pins its task to core 1 when there is one: the core number is
 // ignored here (pthreads), so any answer works; the Pi Zero 2 has four.
@@ -49,6 +73,31 @@ inline BaseType_t xSemaphoreTakeRecursive(SemaphoreHandle_t m, uint32_t) {
     return pthread_mutex_lock(m) == 0 ? pdTRUE : pdFALSE;   // portMAX_DELAY everywhere
 }
 inline BaseType_t xSemaphoreGiveRecursive(SemaphoreHandle_t m) {
+    return pthread_mutex_unlock(m) == 0 ? pdTRUE : pdFALSE;
+}
+
+// The plain mutex: the engine's data locks (lora_sniffer.cpp's s_lock, the
+// enrich/feed step locks) are single-threaded in their use -- one task
+// takes and gives -- so a normal pthread mutex matches the contract, and
+// the timed take reports a miss (pdFALSE) instead of blocking forever, as
+// FreeRTOS does when the timeout expires (lora_sniffer.cpp waits 50 ms and
+// drops the frame rather than queueing up).
+inline SemaphoreHandle_t xSemaphoreCreateMutex() {
+    auto* m = new pthread_mutex_t;
+    pthread_mutex_init(m, nullptr);
+    return m;
+}
+inline BaseType_t xSemaphoreTake(SemaphoreHandle_t m, uint32_t ticks) {
+    if (ticks == portMAX_DELAY)
+        return pthread_mutex_lock(m) == 0 ? pdTRUE : pdFALSE;
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += ticks / 1000u;
+    ts.tv_nsec += (long)(ticks % 1000u) * 1000000L;
+    if (ts.tv_nsec >= 1000000000L) { ts.tv_sec++; ts.tv_nsec -= 1000000000L; }
+    return pthread_mutex_timedlock(m, &ts) == 0 ? pdTRUE : pdFALSE;
+}
+inline BaseType_t xSemaphoreGive(SemaphoreHandle_t m) {
     return pthread_mutex_unlock(m) == 0 ? pdTRUE : pdFALSE;
 }
 

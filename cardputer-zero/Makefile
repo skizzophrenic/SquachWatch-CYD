@@ -105,7 +105,19 @@ else
 MBEDTLS_LIBS := $(if $(MBEDTLS_LIBDIR),-L$(MBEDTLS_LIBDIR)) -lmbedcrypto
 endif
 
-CXXFLAGS := -std=c++17 -O2 -g -Wall -Wno-unused-parameter $(EXTRA_CXXFLAGS) \
+# The LoRa engine and its UI pages compile under -DSQUACH_LORA=1 for every
+# translation unit when they are linked (the sources below), so the define
+# must be global then -- main.cpp's LORA states and Lora::begin()/tick()
+# only exist under it. Off by default: a bare `make` builds the app the
+# device has always run.
+LORA_DEFS :=
+ifeq ($(SQUACH_LORA),1)
+LORA_DEFS := -DSQUACH_LORA=1
+endif
+
+# Recursive on purpose: every use of CXXFLAGS is in a recipe, and flags may
+# be added later in this file.
+CXXFLAGS = -std=c++17 -O2 -g -Wall -Wno-unused-parameter $(EXTRA_CXXFLAGS) \
             -DFIRMWARE_VERSION=\"$(FIRMWARE_VERSION)\" \
             -I$(CM0)/sys_shim -I$(STUB) -I$(CM0) -I$(SIM) -I$(INC) \
             $(MBEDTLS_CFLAGS) \
@@ -114,7 +126,8 @@ CXXFLAGS := -std=c++17 -O2 -g -Wall -Wno-unused-parameter $(EXTRA_CXXFLAGS) \
             -DSQUACH_MESH=1 -DCYD_GPS=1 \
             -DCARDPUTER_ADV=1 -DSQW_SMALL=1 -DSQUACHSIM=1 -DSQW_DEVTOOLS=1 \
             -DSQW_WIFI_5G=1 \
-            -DCYD_GPS_BAUD=115200
+            -DCYD_GPS_BAUD=115200 \
+            $(LORA_DEFS)
 
 LDLIBS := -lSDL2 $(MBEDTLS_LIBS) -lpthread -lasound
 
@@ -236,6 +249,23 @@ APP_SRCS := $(SRC)/main.cpp \
             $(CM0)/sound_log.cpp \
             $(CM0)/shake_iio.cpp
 
+# Phase 7 LoRa (receive-only). Off by default; enable with
+# `make SQUACH_LORA=1`. Links the upstream LoRa engine and its UI pages
+# (everything the firmware's own T-Deck/T-Watch builds would link under
+# SQUACH_LORA), with one substitution: lora_radio.cpp is the ESP32
+# SX1262 backend for the LoraRadio:: symbols and is never compiled here --
+# src/cm0/lora_lx.cpp is this board's (SPI EXT bus, gpiochip0, cap power;
+# docs/LORA_CM0.md). The wildcard picks up new engine files on an upstream
+# bump; lora_radio.cpp is the one permanent exclusion. The filter also
+# drops any engine file the sim list already links (lora_myname.cpp,
+# which the mesh name path uses without SQUACH_LORA): it compiles under
+# the global define in its original list, twice-linked is an ld error.
+ifeq ($(SQUACH_LORA),1)
+APP_SRCS += $(CM0)/lora_lx.cpp $(CM0)/lora_home.cpp \
+            $(filter-out $(SRC)/lora_radio.cpp $(UI_SRCS) $(RADIO_SRCS), \
+                $(wildcard $(SRC)/lora_*.cpp) $(wildcard $(SRC)/ui_lora*.cpp))
+endif
+
 SRCS := $(UI_SRCS) $(RADIO_SRCS) $(APP_SRCS)
 
 # Settings for features this board does not have yet (EXT SCREEN, UPDATE
@@ -277,13 +307,71 @@ all: $(BIN)
 VERSION_STAMP := $(OBJ_DIR)/firmware-version
 $(shell mkdir -p $(OBJ_DIR); [ "$$(cat $(VERSION_STAMP) 2>/dev/null)" = "$(FIRMWARE_VERSION)" ] || echo "$(FIRMWARE_VERSION)" > $(VERSION_STAMP))
 
-$(OBJ_DIR)/ui/%.o: %.cpp Makefile $(VERSION_STAMP)
+# SQUACH_LORA flips -DSQUACH_LORA for every object, so a toggle between
+# `make` and `make SQUACH_LORA=1` must rebuild everything: same stamp
+# trick, or the link would mix flagged and unflagged objects. A missing stamp
+# is written too: with the flag unset, "missing" and "empty" would compare
+# equal and a fresh OBJ_DIR would have no stamp file to depend on.
+LORA_FLAG_STAMP := $(OBJ_DIR)/lora-flag
+$(shell mkdir -p $(OBJ_DIR); [ -f $(LORA_FLAG_STAMP) ] && [ "$$(cat $(LORA_FLAG_STAMP))" = "$(SQUACH_LORA)" ] || echo "$(SQUACH_LORA)" > $(LORA_FLAG_STAMP))
+
+$(OBJ_DIR)/ui/%.o: %.cpp Makefile $(VERSION_STAMP) $(LORA_FLAG_STAMP)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
 
-$(OBJ_DIR)/cm0/%.o: %.cpp Makefile $(VERSION_STAMP)
+$(OBJ_DIR)/cm0/%.o: %.cpp Makefile $(VERSION_STAMP) $(LORA_FLAG_STAMP)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -MMD -MP -c $< -o $@
+
+# Patched copies of upstream sources (tools/fw_patch.py): whole-line
+# substitutions into $(OBJ_DIR)/gen/, so the firmware's sources are never edited. Each
+# old line must occur exactly once (or N times, "N:") or the build stops -- upstream moved it,
+# re-check the substitution by hand. Used for parity with the T-Deck, the only
+# upstream board with a keyboard and LoRa, where upstream gates a feature on
+# TDECK_PLUS (defining TDECK_PLUS itself would drag in its battery, trackball
+# and other board code).
+FW_PATCH := python3 tools/fw_patch.py
+define GPS_MARGIN_CM0
+                               + (gpsLabelShown() ? gpsLabelW() + 2 : 0)   // the GPS label, left of the icons
+#endif
+#if SQUACH_LORA
+                               + cm0LoraPillReserve()   // CM0: the LORA pill, left of the tiles
+endef
+export GPS_MARGIN_CM0
+define PILL_DECL_CM0
+void twatchLoraBadge(TFT_eSPI& t);  // CM0: src/cm0/lora_home.cpp (upstream's is main.cpp's, T-Watch/T-Deck)
+int  cm0LoraPillReserve();          // CM0: the pill's width, for the tiles beside it
+endef
+export PILL_DECL_CM0
+#
+# ui_settings.cpp: the LoRa rows on SETTINGS > SYSTEM (LORA CHATS / LORA /
+# LORA TX). main.cpp already handles all three rows under SQUACH_LORA alone.
+$(OBJ_DIR)/gen/ui_settings.cpp: $(SRC)/ui_settings.cpp tools/fw_patch.py Makefile
+	@mkdir -p $(dir $@)
+	@$(FW_PATCH) $< $@ \
+	  '#if SQUACH_LORA && defined(TDECK_PLUS)' '#if SQUACH_LORA   // CM0: the T-Deck'"'"'s LoRa rows (see Makefile)'
+#
+# ui_clear.cpp: the LORA pill on the home screen. Upstream's T-Deck puts it
+# top centre and drops the counter tiles under it; here (user, 2026-11-25) the
+# two share the top row: the pill left, by the menu icon, and the tiles
+# centred in the room left -- reserved through iconMargin, the way upstream
+# reserves the corner GPS label's width. upstream's twatchLoraBadge lives in
+# main.cpp under the T-Deck's #if, so this build's copy is src/cm0/lora_home.cpp's.
+$(OBJ_DIR)/gen/ui_clear.cpp: $(SRC)/ui_clear.cpp tools/fw_patch.py Makefile
+	@mkdir -p $(dir $@)
+	@$(FW_PATCH) $< $@ \
+	  '#if SQUACH_LORA && (defined(TWATCH_S3) || defined(TDECK_PLUS))' '#if SQUACH_LORA   // CM0: the LORA pill (see Makefile)' \
+	  '3:#if SQUACH_LORA && defined(TDECK_PLUS)' '#if SQUACH_LORA   // CM0: the LORA pill (include, tiles, draw)' \
+	  '                          || Settings::loraListen() != 0   // the LORA pill is up whenever the radio is on (2026-10-15)' \
+	  '                          // CM0: the tiles stay on the top row, beside the pill (iconMargin below)' \
+	  '                               + (gpsLabelShown() ? gpsLabelW() + 2 : 0)   // the GPS label, left of the icons' \
+	  "$$GPS_MARGIN_CM0" \
+	  'void twatchLoraBadge(TFT_eSPI& t);  // main.cpp: LORA n NEW, under it, while chats are unread' \
+	  "$$PILL_DECL_CM0"
+
+$(OBJ_DIR)/ui/ui_settings.o $(OBJ_DIR)/ui/ui_clear.o: $(OBJ_DIR)/ui/%.o: $(OBJ_DIR)/gen/%.cpp Makefile $(VERSION_STAMP) $(LORA_FLAG_STAMP)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -iquote $(SRC) -MMD -MP -c $< -o $@
 
 # The detection log on the "card" (a folder, see radio_stub/SD.h). Up to
 # v1.41 the firmware's SdLog::begin() refused on every SQW_SMALL build, so

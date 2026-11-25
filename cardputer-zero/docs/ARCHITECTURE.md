@@ -44,6 +44,13 @@ From the sim and test Makefiles (both already build these files on a host):
   radio shim (the contract in §4), SDL2 display (Wayland window on labwc),
   keyboard input (SDL scancodes; evdev fallback), ALSA audio, SD/preferences
   files, OTA swap, main bootstrap.
+- **Compiled from patched copies** (2026-11-25): `ui_settings.cpp` and
+  `ui_clear.cpp`, where upstream gates a LoRa feature on `TDECK_PLUS` — the
+  SYSTEM page's LoRa rows, the home-screen LORA pill. `tools/fw_patch.py`
+  writes the copy to `build/gen/` with whole-line substitutions, each of
+  which must match an exact line a known number of times or the build stops;
+  the firmware's own files are never edited. Defining `TDECK_PLUS` instead would bring
+  the T-Deck's battery, trackball and other board code with it.
 - **Excluded on CM0:** the ESP32 `main.cpp` (setup/loop/hardware init —
   replaced by `main_linux.cpp`); touch code (no touch on the board).
 

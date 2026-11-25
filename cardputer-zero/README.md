@@ -92,6 +92,10 @@ Under emulation the first build takes a while (tens of minutes on a desktop;
 A change of firmware version (a new commit or tag) rebuilds everything, on
 purpose — the version is compiled in and shared with your squad.
 
+LoRa (the Cap LoRa-1262) is in the build only with `SQUACH_LORA=1` —
+`make -j4 SQUACH_LORA=1`, then `make SQUACH_LORA=1 deb`. Switching the flag
+rebuilds everything.
+
 The package version is the latest release tag plus the commits since it, e.g.
 `1.49.0+cm0.3.g7645468` (`.dirty` if built from uncommitted changes).
 
@@ -253,6 +257,29 @@ password, the PIN and the lock screen — the keyboard types: **ENTER** saves,
 **Backspace/DEL** deletes, **ESC** leaves without saving, **TAB** shows or hides
 a password, and the arrows still move. (`~` and `^` cannot be typed.)
 
+**LoRa** (with the M5Stack Cap LoRa-1262 seated, in a build made with
+`SQUACH_LORA=1`) works as on upstream's T-Deck, the SquachWatch board with a
+keyboard and LoRa:
+
+- A pink **LORA** pill at the top left of the home screen while the radio is
+  on — **LORA n NEW** with chats unread — beside the counter tiles.
+- **R** on the home screen opens the LORA page: the radar dish, signal tiles
+  and strip, the chats, and a compose line. **TAB**/arrows move the cursor
+  (BACK, the tabs, the chats, the network switch), **ENTER** presses; typing
+  goes into the compose line and **ENTER** sends. The switch picks the
+  network the page shows and sends to; it does not retune the radio.
+- **SETTINGS > SYSTEM** has the LoRa rows: **LORA CHATS** (the chat list),
+  **LORA** (what the radio listens to: Meshtastic, MeshCore, both in turn, or
+  off — saved) and **LORA TX** (OFF / 10 / 20 / 22 dBm; off by default). The
+  compose line says *LORA TX IS OFF: SETTINGS* until it is on.
+- A new chat message plays the two-note MESSAGE chime, as on the T-Deck: only
+  with **SOUND = ALL** (it is not an alert sound), not on the LORA page or
+  in the chats, not at night or with the screen dimmed, at most every 30 s.
+- Listen on **MESHTASTIC** (or MESHCORE) rather than both: "both in turn"
+  hops between the networks and misses single messages easily. The same goes
+  for the node you talk to — a T-LoRa Pager set to both missed the Zero's
+  messages until it was set to Meshtastic.
+
 After 60 seconds without a key the screen dims (any key, or a shake, brings
 it back); alerts still sound while it is dimmed. SETTINGS > BRIGHTNESS sets
 the screen's brightness while the app runs; on exit the launcher's own level
@@ -289,7 +316,7 @@ speaker).
 
 **Not available on the Cardputer Zero (yet)** — the firmware's features
 that need hardware or ESP32 internals this board does not have: LoRa
-(needs an external radio), HUMAN SENSING (ESP32 Wi-Fi CSI), RING (Bluetooth
+without the Cap LoRa-1262 (or in a build without `SQUACH_LORA=1`), HUMAN SENSING (ESP32 Wi-Fi CSI), RING (Bluetooth
 connections), the EXT SCREEN and firmware updates. The last two show
 **FEATURE COMING SOON** when selected.
 
@@ -309,6 +336,12 @@ Then review what changed under `CARDPUTER_ADV` and
 ADV's keyboard and small-screen code), so new code for that board also runs
 here. `make test` flags the cases that would break silently: a new sound
 (`sound-enum-check`) or a changed shake detector (`shake-sync-check`).
+A few firmware files are compiled from patched copies (`tools/fw_patch.py`,
+rules in the `Makefile`: the T-Deck's LoRa settings rows and home-screen
+pill, enabled for this board) so the firmware's own sources stay as they are;
+when a change moves one of the patched lines the build stops with
+`fw_patch: ... expected 1 line ...` — check the new code and update the line
+in the `Makefile`.
 Finally, test on the device.
 
 ## Layout
@@ -319,6 +352,8 @@ Paths are relative to this folder (`cardputer-zero/`).
 |---|---|
 | `..` | the SquachWatch firmware (`src/`, `include/`, and `sim/`, whose shims this build reuses) |
 | `src/cm0/` | the Cardputer Zero side: `main_linux.cpp` (harness: SDL / framebuffer, keys, loop), `wifi_mon.cpp` (monitor mode + channel hopping), `ble_scan.cpp` (raw HCI LE scan), `i2s_alsa.cpp` (sound), `shake_iio.cpp` (motion sensor), `gps_serial.cpp`, `sd_card.cpp`, `prefs_store.cpp`, `dimmer.cpp`, `battery.cpp`, the unit tests and `selftest.cpp` |
+| `src/cm0/lora_lx.cpp`, `src/cm0/lora_home.cpp` | LoRa: the SX1262 driver on the Cap's SPI bus, and the LORA page (the T-Deck's page at 320×170), the home-screen pill |
+| `tools/fw_patch.py` | copies a firmware source into `build/gen/` with whole-line changes (see "Updating"); the firmware's own files are never edited |
 | `src/cm0/sys_shim/`, `src/cm0/radio_stub/` | headers that stand in for ESP32/Arduino APIs the firmware calls |
 | `docker/Dockerfile` | the arm64 build environment |
 | `scripts/build-deb.sh` | builds the Debian package (`make deb`) |

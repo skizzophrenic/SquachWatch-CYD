@@ -70,6 +70,12 @@
 #include "ui_clear.h"
 #include "sound.h"
 #include "settings.h"
+#if SQUACH_LORA
+#include "lora_sniffer.h"
+#include "ui_lorachat.h"
+#include <Preferences.h>
+#endif
+#include "lora_home.h"
 
 // Defined by the firmware's main.cpp, which this target compiles.
 void setup();
@@ -78,6 +84,8 @@ extern TFT_eSPI tft;
 extern AppState state;
 extern uint8_t  screenRotation;
 extern DetectionEngine engine;
+extern uint32_t    transitionStart;   // main.cpp: the screen transition's clock
+extern TFT_eSPI*   canvas;            // main.cpp: the active draw target (the frame sprite)
 
 // The card keys the firmware's smallKeysRead() reports, with SQUACHSIM
 // (main.cpp, simCardKey): 0 = level (uses down), 1 = next, 2 = previous,
@@ -86,6 +94,12 @@ extern DetectionEngine engine;
 extern void simCardKey(int what, bool down);
 // Characters for the firmware's text screens and hotkeys (see "typing" below).
 static void typeChar(char c);
+
+#if SQUACH_LORA
+// The page is up (harness-owned, overdraws the firmware). Declared here so
+// dispatchLine() can route the console's typing to its compose box.
+static bool s_loraPage = false;
+#endif
 
 // The firmware's own step rate (main_live.cpp), one loop() per frame.
 static const uint32_t STEP_MS = 33;
@@ -110,12 +124,65 @@ static void usePanelGeometry() {
     tft = TFT_eSPI(PANEL_W, PANEL_H);
 }
 
+#if SQUACH_LORA
+// The chime for a new LoRa chat message: upstream's tdeckLoraSoundTick
+// (main.cpp), which the firmware compiles for the T-Deck and the T-LoRa
+// Pager only -- the keyboard+speaker LoRa boards this page copies. Same
+// rules: the squad's MESSAGE sound when the chats' unread count rises, not
+// with the chats or the LORA page open, at most once in thirty seconds,
+// MESSAGE SOUND on; Sound::play() keeps to SOUND (MESSAGE plays only on
+// ALL, as upstream), night and the dimmed screen.
+static void loraSoundTick(uint32_t now) {
+    static uint32_t lastCheck = 0, lastDing = 0;
+    static uint16_t lastUnread = 0;
+    if (now - lastCheck < 1000) return;
+    lastCheck = now;
+    const uint16_t u = uiLoraChatUnread();
+    if (u > lastUnread && Settings::loraMsgSound() && state != AppState::LORA_CHAT &&
+        state != AppState::LORA_HOME && (!lastDing || now - lastDing > 30000)) {
+        lastDing = now;
+        Sound::play(Sound::Id::MESSAGE);
+        fprintf(stderr, "[lora] new chat message: MESSAGE chime (SOUND %u)\n", (unsigned)Settings::soundMode());
+    }
+    lastUnread = u;
+}
+#endif
+
 // One firmware step: queued sniffer frames and BLE adverts first, then
 // the loop.
 static void step() {
+#if SQUACH_LORA
+    // The first frame: the CM0's LoRa listen target, EVERY boot. The
+    // firmware only auto-applies the saved choice on the TWATCH_S3 and
+    // T-Deck boards (lora_sniffer.cpp's setup, board #if) -- the CM0 is
+    // neither, so without this the radio silently runs the factory
+    // default: the CAD survey, whose short low-duty window misses
+    // one-shot messages (a pager's message + a few retransmits).
+    // Continuous RX (FOCUS) catches everything on a known network: apply
+    // the saved choice every boot, and where there is none (factory
+    // default 3 = survey) park on Meshtastic (the user's pager and the
+    // SquashWatch nodes) and remember it. SETTINGS > SYSTEM > LORA and the
+    // console's LORA LISTEN change it and persist (LORA LISTEN 3 gives a
+    // session-only survey: the next boot re-parks Meshtastic, like any
+    // unset choice).
+    static bool s_loraListenApplied = false;
+    if (!s_loraListenApplied) {
+        s_loraListenApplied = true;
+        uint8_t lstn = Settings::loraListen();
+        if (lstn == 3) {   // factory default (survey): park Meshtastic
+            Settings::setLoraListen(1);
+            lstn = 1;
+            fprintf(stderr, "[cm0] lora: no saved listen choice; listening Meshtastic (continuous RX: the survey's CAD window misses one-shot messages)\n");
+        }
+        Lora::applyListen(lstn);
+    }
+#endif
     cm0::wifiMonPump();
     cm0::blePump();
     loop();
+#if SQUACH_LORA
+    loraSoundTick(millis());
+#endif
 }
 
 // --------------------------------------------------------------- the frame
@@ -229,9 +296,21 @@ static void dispatchLine(const char* in, bool& quit) {
         const char* t = l + 1;
         if (*t == ' ') t++;
         for (; *t && *t != '\n'; t++) {
-            if (t[0] == '\\' && t[1] == 'n') { typeChar('\n'); t++; }
-            else if (t[0] == '\\' && t[1] == 'b') { typeChar('\b'); t++; }
-            else typeChar(*t);
+            if (t[0] == '\\' && (t[1] == 'n' || t[1] == 'b')) {
+                const char c = t[1] == 'n' ? '\n' : '\b';
+                t++;
+#if SQUACH_LORA
+                if (s_loraPage) cm0::loraHomeChar(c, SDL_GetTicks());   // the page's compose box, not the firmware console
+                else
+#endif
+                    typeChar(c);
+                continue;
+            }
+            if (t[0] == '\\') continue;   // unknown escape: skip
+#if SQUACH_LORA
+            if (s_loraPage) { cm0::loraHomeChar(t[0], SDL_GetTicks()); continue; }
+#endif
+            typeChar(t[0]);
         }
     } else if (cmd == 'N') {
         simCardKey(1, true);   // next: a down edge, consumed at the next loop()
@@ -274,11 +353,20 @@ static void dispatchLine(const char* in, bool& quit) {
 // which is the cue.
 static uint32_t s_escDownAt = 0;   // 0 = ESC not held
 
+#if SQUACH_LORA
+#endif
+
 
 // ------------------------------------------------------------------ main
 
 // Headless: virtual time, boot the real setup(), run the loop until the
 // boot splash has long since finished, and write one frame to a PNG.
+static const std::vector<uint16_t>& frameFor(uint32_t now);
+
+#if SQUACH_LORA
+static void enterLoraPage();   // the page-open path (below, LoRa block)
+#endif
+
 static int runShot(const char* outPath) {
     unsetenv("SQUACHSIM_SD");   // no card: a shot is the same on every machine
     SimClock::virtualTime = true;
@@ -290,10 +378,34 @@ static int runShot(const char* outPath) {
         SimClock::nowMs += STEP_MS;
         step();
     }
+    // Dev channel: SQW_SHOT_CMDS="T camera -50;T airtag -60" runs console
+    // lines (the stdin commands, ';'-separated) before the last frames, so a
+    // screen with detections on it can be shot headlessly.
+    if (const char* cmds = getenv("SQW_SHOT_CMDS")) {
+        std::string all(cmds);
+        size_t at = 0;
+        bool quit = false;
+        while (at <= all.size()) {
+            const size_t semi = all.find(';', at);
+            std::string line = all.substr(at, semi == std::string::npos ? std::string::npos : semi - at);
+            line += '\n';
+            dispatchLine(line.c_str(), quit);
+            if (semi == std::string::npos) break;
+            at = semi + 1;
+        }
+        for (int i = 0; i < 60; i++) { SimClock::nowMs += STEP_MS; step(); }
+    }
+#if SQUACH_LORA
+    // Dev channel: SQW_SHOT_PAGE=1 opens the LORA page for the shot, so the
+    // page can be screenshotted headlessly. Unset (the normal --shot) leaves
+    // the home screen as before.
+    if (getenv("SQW_SHOT_PAGE")) { enterLoraPage(); }
+    for (int i = 0; i < 12; i++) { SimClock::nowMs += STEP_MS; step(); }
+#endif
     cm0::bleScanShutdown();
     cm0::wifiMonStop();
     const int w = tft.width(), h = tft.height();
-    const std::vector<uint16_t>& px = tft.pixelsRGB565();
+    const std::vector<uint16_t>& px = frameFor(SimClock::nowMs);
     if (px.size() < (size_t)w * h) {
         fprintf(stderr, "[shot] framebuffer not full yet (%zu px)\n", px.size());
         return 1;
@@ -337,6 +449,9 @@ static int runSelftestMode() {
 // s_escDownAt (SDL ticks or monoMs, per front end).
 static std::vector<uint16_t> s_composed;
 static const std::vector<uint16_t>& frameFor(uint32_t now) {
+#if SQUACH_LORA
+    if (s_loraPage) cm0::loraHomeDraw(tft, now);   // the page owns the screen while it is up
+#endif
     const std::vector<uint16_t>& px = tft.pixelsRGB565();
     if (s_escDownAt && (int32_t)(now - s_escDownAt) >= (int32_t)cm0::EXIT_HINT_MS) {
         const float p = (float)(now - s_escDownAt) / (float)ESC_EXIT_MS;
@@ -353,11 +468,61 @@ static const std::vector<uint16_t>& frameFor(uint32_t now) {
 //   --fb       /dev/fb0 + the keyboard's event device -- how the device's
 //              app launcher runs its apps (fb_io.h).
 
+// --------------------------------------------------------------- the LORA page
+//
+// The firmware's LORA page is wired for the watch and the T-Deck only:
+// their settings rows, the console block, the key routing -- all behind
+// those board definitions. On the CM0 the page is replaced by a harness-
+// owned one (src/cm0/lora_home.{h,cpp}) that replicates the T-Deck's
+// landing page on the panel. R on the home screen opens it (the firmware
+// state is still set, exactly as the chat page does it, so BACK takes the
+// app home as it does everywhere else). While the page is up, the card
+// keys drive the page: arrows scroll the message list, LEVEL cycles the
+// tab. The page draws over the firmware's
+// own chat page every frame (frameFor()).
+#if SQUACH_LORA
+static void enterLoraPage() {
+    s_loraPage = true;
+    cm0::loraHomeEnter();
+    state = AppState::LORA_CHAT;
+    transitionStart = millis();
+    uiLoraChatInit(*canvas);
+}
+static void leaveLoraPage() {
+    s_loraPage = false;
+    cm0::loraHomeLeave();
+}
+#endif
+
+static void hotkeyLetter(char c) {
+#if SQUACH_LORA
+    if (c == 'r' && state == AppState::CLEAR) { enterLoraPage(); return; }
+#endif
+    typeChar(c);
+}
+
 // The card keys, from either front end. ESC also arms the long-press exit.
 enum class CardKey { NONE, LEVEL, NEXT, PREV, BACK };
 
 static void cardKeyEvent(CardKey k, bool isEsc, bool down, uint32_t nowMs) {
     if (isEsc) s_escDownAt = down ? (nowMs ? nowMs : 1) : 0;
+#if SQUACH_LORA
+    if (s_loraPage && down) {
+        // The page owns the nav keys while it is up. BACK closes it (the
+        // firmware's own back transition then runs, exactly as it does
+        // for the chat page).
+        if (k == CardKey::BACK) {
+            leaveLoraPage();
+            simCardKey(3, true);
+            return;
+        }
+        // The keyboards' keys arrive by direction (loraPageKey, below);
+        // what still comes here is the card-key path (the dev console).
+        const LmKey lk = k == CardKey::LEVEL ? LmKey::Enter : k == CardKey::NEXT ? LmKey::Tab : k == CardKey::PREV ? LmKey::Up : LmKey::None;
+        if (lk != LmKey::None && cm0::loraHomeKey(lk, nowMs)) { leaveLoraPage(); simCardKey(3, true); }
+        return;
+    }
+#endif
     switch (k) {
         case CardKey::LEVEL: simCardKey(0, down); break;   // a state: down and up
         case CardKey::NEXT:  if (down) simCardKey(1, true); break;
@@ -366,6 +531,37 @@ static void cardKeyEvent(CardKey k, bool isEsc, bool down, uint32_t nowMs) {
         default: break;
     }
 }
+
+#if SQUACH_LORA
+// The LORA page's keys, by direction: the card keys fold Down/Right/TAB into
+// one NEXT, and the page's cursor needs them apart. ESC is not here: it goes
+// the card-key way, which also arms the long-press exit.
+static bool loraPageKey(LmKey k, bool down, uint32_t nowMs) {
+    if (!s_loraPage || k == LmKey::None) return false;
+    if (down && cm0::loraHomeKey(k, nowMs)) { leaveLoraPage(); simCardKey(3, true); }
+    return true;
+}
+static LmKey pageKeyEvdev(uint16_t c) {
+    switch (c) {
+        case KEY_ENTER: case KEY_KPENTER: case KEY_SPACE: return LmKey::Enter;
+        case KEY_UP: return LmKey::Up;       case KEY_DOWN:  return LmKey::Down;
+        case KEY_LEFT: return LmKey::Left;   case KEY_RIGHT: return LmKey::Right;
+        case KEY_TAB: return LmKey::Tab;
+        case KEY_BACKSPACE: case KEY_DELETE: return LmKey::Back;
+        default: return LmKey::None;
+    }
+}
+static LmKey pageKeySdl(SDL_Keycode c) {
+    switch (c) {
+        case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE: return LmKey::Enter;
+        case SDLK_UP: return LmKey::Up;       case SDLK_DOWN:  return LmKey::Down;
+        case SDLK_LEFT: return LmKey::Left;   case SDLK_RIGHT: return LmKey::Right;
+        case SDLK_TAB: return LmKey::Tab;
+        case SDLK_BACKSPACE: case SDLK_DELETE: return LmKey::Back;
+        default: return LmKey::None;
+    }
+}
+#endif
 
 static CardKey fromSdl(SDL_Keycode s) {
     switch (s) {
@@ -418,6 +614,20 @@ static CardKey fromEvdev(uint16_t c) {
 // One key from the device keyboard (--fb). SHIFT is tracked by the caller.
 static void evdevKey(uint16_t code, bool down, bool shift, uint32_t nowMs) {
     if (code == KEY_ESC) { cardKeyEvent(CardKey::BACK, true, down, nowMs); return; }
+#if SQUACH_LORA
+    if (s_loraPage && down) {
+        // The page is the compose box first: typed text and its editing keys
+        // go straight to it, not to the firmware's dev console.
+        if (cm0::loraHomeComposing()) {
+            if (code == KEY_ENTER || code == KEY_KPENTER) { cm0::loraHomeChar('\n', nowMs); return; }
+            if (code == KEY_BACKSPACE || code == KEY_DELETE) { cm0::loraHomeChar('\b', nowMs); return; }
+        }
+        if (const char c = cm0::evdevChar(code, shift)) {
+            if (c >= ' ' && c <= '~') { cm0::loraHomeChar(c, nowMs); return; }
+        }
+    }
+    if (loraPageKey(pageKeyEvdev(code), down, nowMs)) return;
+#endif
     if (typingScreen()) {
         if (code == KEY_UP || code == KEY_DOWN || code == KEY_LEFT || code == KEY_RIGHT) {
             cardKeyEvent(fromEvdev(code), false, down, nowMs);   // arrows still move
@@ -432,7 +642,11 @@ static void evdevKey(uint16_t code, bool down, bool shift, uint32_t nowMs) {
     }
     if (down && !shift) {
         const char c = cm0::evdevChar(code, false);
-        if (c >= 'a' && c <= 'z') { typeChar(c); return; }   // a hotkey
+#if SQUACH_LORA
+        if (c >= 'a' && c <= 'z' && !s_loraPage) { hotkeyLetter(c); return; }   // a hotkey
+#else
+        if (c >= 'a' && c <= 'z') { hotkeyLetter(c); return; }   // a hotkey
+#endif
     }
     cardKeyEvent(fromEvdev(code), false, down, nowMs);
 }
@@ -643,17 +857,30 @@ static int runSdl() {
                 if (ev.type == SDL_QUIT) quit = true;
                 else if (ev.type == SDL_TEXTINPUT) {
                     // Characters (with SHIFT and the desktop's layout applied):
-                    // typed on a text screen, a hotkey letter anywhere else.
+                    // typed on a text screen, a hotkey letter anywhere else --
+                    // or into the LORA page's compose box while it is up.
                     for (const char* t = ev.text.text; *t; t++) {
                         const char c = *t;
                         if (c < ' ' || c > '~') continue;
-                        if (typingScreen() || (c >= 'a' && c <= 'z')) typeChar(c);
+#if SQUACH_LORA
+                        if (s_loraPage) { cm0::loraHomeChar(c, SDL_GetTicks()); continue; }
+#endif
+                        if (typingScreen()) typeChar(c);
+                        else if (c >= 'a' && c <= 'z') hotkeyLetter(c);
                     }
                     dirty = true;
                 }
                 else if ((ev.type == SDL_KEYDOWN && !ev.key.repeat) || ev.type == SDL_KEYUP) {
                     const SDL_Keycode sym = ev.key.keysym.sym;
                     const bool down = ev.type == SDL_KEYDOWN;
+#if SQUACH_LORA
+                    if (s_loraPage && down && cm0::loraHomeComposing() &&
+                        (sym == SDLK_RETURN || sym == SDLK_KP_ENTER || sym == SDLK_BACKSPACE || sym == SDLK_DELETE)) {
+                        cm0::loraHomeChar((sym == SDLK_BACKSPACE || sym == SDLK_DELETE) ? '\b' : '\n', SDL_GetTicks());
+                        dirty = true; continue;
+                    }
+                    if (loraPageKey(pageKeySdl(sym), down, SDL_GetTicks())) { dirty = true; continue; }
+#endif
                     if (typingScreen() && sym != SDLK_ESCAPE && sym != SDLK_UP && sym != SDLK_DOWN &&
                         sym != SDLK_LEFT && sym != SDLK_RIGHT) {
                         // The text arrives as SDL_TEXTINPUT; only the editing keys here.
