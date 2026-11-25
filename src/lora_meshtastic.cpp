@@ -619,6 +619,7 @@ bool decode(const Lora::Packet& pk, Decoded& out) {
         case PORT_TEXT: case PORT_RANGE_TEST: case PORT_DETECTION: case PORT_ALERT: {
             const uint8_t m = n < sizeof out.text - 1 ? n : (uint8_t)(sizeof out.text - 1);
             memcpy(out.text, p, m); out.text[m] = '\0';
+            Pb::asciiFold(out.text, true);
             break;
         }
         case PORT_NODEINFO:     parseUser(p, n, out.user); break;
