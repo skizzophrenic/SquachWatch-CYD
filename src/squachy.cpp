@@ -28,6 +28,7 @@ static inline uint32_t tempo(uint32_t ms) { return ms * s_tempoPct / 100; }
 #endif
 #include <Arduino.h>
 #include <Preferences.h>
+#include "december.h"
 // -DSQW_SQUACHY_LAPS splits his draw time onto the [frame] line's x slots:
 // x6 tick() before drawBody, x1 drawBody's start, x2 the fur colours, x3 a
 // costume's back layer, x4 the aura, x5 everything from the outline to the
@@ -4545,11 +4546,16 @@ static void yzFront(TFT_eSPI& t, int cx2, int hh, uint32_t now, Mood m, float sc
     // Outlined by one copy a pixel bigger, like the robe and the beard: the
     // hat is the biggest thing on his head, and four shifted copies of it
     // under the real one was a tenth of everything he drew.
+    // December 1 to 26 (december.h): a Santa wizard hat -- red, trimmed in
+    // white, a bobble where the star was. The emblem and the gem stay.
+    const bool xmas = December::active(now);
+    const uint16_t hatC = xmas ? (uint16_t)0xD8A3 : YZ_ROBE, hatD = xmas ? (uint16_t)0x9000 : YZ_DARK;
+    const uint16_t trim = xmas ? (uint16_t)TFT_WHITE : YZ_GOLD;
     t.fillEllipse(cx2, brimY, brimRx + 1, brimRy + 1, ink);
     yzCone(t, cx2, hh, scale, 0, 0, ink, 0, 1);
-    t.fillEllipse(cx2, brimY, brimRx, brimRy, YZ_ROBE);
-    yzCone(t, cx2, hh, scale, 0, 0, YZ_ROBE);
-    yzCone(t, cx2, hh, scale, 0, 0, YZ_DARK, 62);
+    t.fillEllipse(cx2, brimY, brimRx, brimRy, xmas ? (uint16_t)TFT_WHITE : YZ_ROBE);
+    yzCone(t, cx2, hh, scale, 0, 0, hatC);
+    yzCone(t, cx2, hh, scale, 0, 0, hatD, 62);
     // Half-width of the cone at yu units above its base.
     auto coneW = [&](float yu) {
         return (int)((yu <= 13.0f ? 11.0f - 6.0f * yu / 13.0f : 5.0f - 5.0f * (yu - 13.0f) / 11.0f) * scale);
@@ -4557,15 +4563,15 @@ static void yzFront(TFT_eSPI& t, int cx2, int hh, uint32_t now, Mood m, float sc
     auto band = [&](float y0, float y1) {
         const int wa = coneW(y0), wb = coneW(y1);
         const int ya = hh - (int)(y0 * scale), yb = hh - (int)(y1 * scale);
-        t.fillTriangle(cx2 - wa, ya, cx2 + wa, ya, cx2 + wb, yb, YZ_GOLD);
-        t.fillTriangle(cx2 - wa, ya, cx2 + wb, yb, cx2 - wb, yb, YZ_GOLD);
+        t.fillTriangle(cx2 - wa, ya, cx2 + wa, ya, cx2 + wb, yb, trim);
+        t.fillTriangle(cx2 - wa, ya, cx2 + wb, yb, cx2 - wb, yb, trim);
     };
     band(0.5f, 3.5f);
     band(15.0f, 16.5f);
     // Gold along the front edge of the brim.
     for (int dx = -brimRx + 2; dx <= brimRx - 2; dx++) {
         const int dy = (int)((float)brimRy * sqrtf(1.0f - (float)(dx * dx) / (float)(brimRx * brimRx)));
-        t.drawFastVLine(cx2 + dx, brimY + dy - 2, 2, YZ_GOLD);
+        t.drawFastVLine(cx2 + dx, brimY + dy - 2, 2, xmas ? (uint16_t)0xB5B6 : YZ_GOLD);
     }
     // A gem in the band and one emblem you can read from across a room, both
     // lit in whatever colour the magic is.
@@ -4575,7 +4581,13 @@ static void yzFront(TFT_eSPI& t, int cx2, int hh, uint32_t now, Mood m, float sc
     t.fillRect(cx2 - 1, hh - S(9) - 1, 3, 3, mc);
     // The star on the point: gold, flaring white; red and bigger when he is
     // startled; out when he is asleep.
-    if (m != Mood::SLEEPY) {
+    if (xmas) {
+        // The bobble, bouncing a little.
+        const int bob = (int)(fabsf(sinf((float)now / 380.0f)) * (float)S(1));
+        const int br = S(3) + 1;
+        t.fillCircle(cx2, hh - S(25) + bob, br + 1, ink);
+        t.fillCircle(cx2, hh - S(25) + bob, br, TFT_WHITE);
+    } else if (m != Mood::SLEEPY) {
         const bool alarm = (m == Mood::SHOCKED);
         const uint32_t pp = alarm ? 300u : 1400u;
         const bool up = sinf((float)(now % pp) / (float)pp * 6.2831853f) > 0.3f;
@@ -5601,9 +5613,15 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
             // top. Greys from the same RGB332 ramp SHARK SUIT uses -- the only
             // cool neutrals the frame buffer has.
             const uint16_t ink = BLACK;
-            const uint16_t fDk = (uint16_t)0x4A4A;
-            const uint16_t fMd = (uint16_t)0x9495;
-            const uint16_t fLt = (uint16_t)0xDEDF;
+            // December 1 to 26 (december.h): red foil on a white brim -- his
+            // own Santa hat, propeller and all.
+            const bool xmas = December::active(now);
+            const uint16_t fDk = xmas ? (uint16_t)0x9000 : (uint16_t)0x4A4A;
+            const uint16_t fMd = xmas ? (uint16_t)0xD8A3 : (uint16_t)0x9495;
+            const uint16_t fLt = xmas ? (uint16_t)0xFB2C : (uint16_t)0xDEDF;
+            const uint16_t bDk = xmas ? (uint16_t)0xB5B6 : fDk;
+            const uint16_t bMd = xmas ? (uint16_t)WHITE  : fMd;
+            const uint16_t bLt = xmas ? (uint16_t)WHITE  : fLt;
             const int ax = cx2 + S(2), ay = hy - S(12);
             const int by = hy + S(1);
             const int bx[5] = { cx2 - S(14), cx2 - S(6), cx2 + S(1), cx2 + S(8), cx2 + S(14) };
@@ -5622,11 +5640,11 @@ static void drawOutfit(TFT_eSPI& t, int cx2, int hy, uint32_t now, Mood m, float
             t.drawLine(cx2 + S(4), hy - S(1), cx2 + S(6), hy - S(6), fMd);
             t.drawLine(bx[0] + S(3), by - S(2), ax - S(1), ay + S(2), WHITE);
             // The rolled brim: lit along the top, shaded underneath, crinkled.
-            t.fillRoundRect(cx2 - S(16), hy - S(1), S(32), S(5), S(2), fMd);
-            t.fillRect(cx2 - S(15), hy - S(1), S(30), S(1) > 0 ? S(1) : 1, fLt);
-            t.fillRect(cx2 - S(15), hy + S(3), S(30), 1, fDk);
+            t.fillRoundRect(cx2 - S(16), hy - S(1), S(32), S(5), S(2), bMd);
+            t.fillRect(cx2 - S(15), hy - S(1), S(30), S(1) > 0 ? S(1) : 1, bLt);
+            t.fillRect(cx2 - S(15), hy + S(3), S(30), 1, bDk);
             for (int k = -12; k <= 12; k += 4)
-                t.drawFastVLine(cx2 + S(k), hy + S(1), S(2), (k & 4) ? fDk : fLt);
+                t.drawFastVLine(cx2 + S(k), hy + S(1), S(2), (k & 4) ? bDk : bLt);
             // The propeller: two blades seen side on, so a turn is each one
             // shrinking to the hub and growing out the other side. Whichever
             // blade is swinging toward us is drawn last, over the other.
@@ -7810,6 +7828,12 @@ static void drawBody(TFT_eSPI& t, int cx, int hy, int headTopY, uint32_t now, Mo
     }   // end if (!hideFace)
 
     drawOutfit(t, cx2, hh, now, m, scale, outfitNow);
+    // December 1 to 26: a Santa hat over whatever he wears (december.h). Ears,
+    // horns and hair poke out round it, which is the joke. The two outfits that
+    // are hats already turn their own hat into a Santa one instead: YZZERD's
+    // poked out from under this one and TINFOIL's disappeared inside it.
+    if (outfitNow != OutfitId::YZZERD && outfitNow != OutfitId::TINFOIL && December::active(now))
+        December::hat(t, cx2, hh, now, scale);
     if (t3) t3Front(t, cx2, hh, now, m, scale);
     if (s_outfitOverride < 0 && !hideFace) drawScouter(t, cx2, hh, now, scale);
 

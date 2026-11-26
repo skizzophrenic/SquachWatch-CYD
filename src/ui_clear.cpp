@@ -8,6 +8,7 @@
 #include "pet.h"        // ZOOMIES, and the Kaiju's Mothman
 #include "sound.h"      // yoo-hoo, when a visitor walks in
 #include "draw_band.h"
+#include "december.h"
 #include "frame_prof.h"
 // Needed this early: the message helpers sit up with the visit machine,
 // above where the rest of this file pulls these in.
@@ -5202,6 +5203,10 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
     else if (Settings::boringMode())  uiTerminalDraw(t, now, eng, titleBottom + 2, bar.y - 2);
     else                              Theme::drawActiveBackground(t, now, 0, h, eng, advance);
     Theme::clearBackgroundFloor();
+    // December 1 to 26: snow, lights under the tiles, a drift at his feet.
+    // Over the scene only, not TERMINAL MODE or the info-only screen.
+    const bool december = !s_infoOnly && !Settings::boringMode() && December::active(now);
+    if (december) December::back(t, now, w, bandTop, squachyBottom + 1);
     FrameProf::lap(FrameProf::BG);
     // The battery lamp, under everything that moves for the same reason as
     // the corner clock: a speech bubble that reaches up there covers it.
@@ -5362,6 +5367,7 @@ void uiClearTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool adv
         IdleEvents::tick(t, now, 0, bandTop, w, squachyBottom, step);
     }
     FrameProf::lap(FrameProf::IDLE);
+    if (december) December::front(t, now, w, bandTop, squachyBottom + 1);
 
     // Whatever the background wants on top of the mascot. Right now
     // that is the werewolf's speech bubble: drawFire computes it but

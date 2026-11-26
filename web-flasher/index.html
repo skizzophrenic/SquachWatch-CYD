@@ -913,7 +913,7 @@
         <summary>More about these tools</summary>
     <p class="browser-note"><strong>Download WiGLE File</strong> is for a T-Watch S3 Plus with WARDRIVE on (WATCH SETTINGS): it saves every network and device the watch logged, with where, as a WiGLE file. The log stays on the watch until you clear it.</p>
     <p class="browser-note"><strong>Upload to WiGLE</strong> sends wardrive files straight from this page to your <a href="https://wigle.net/account" target="_blank" rel="noopener">WiGLE account</a>: the watch's download, or the <code>wigle-*.csv</code> files a CYD, Cardputer or Marauder writes to its SD card. <strong>Send Key to My Board</strong> gives a T-Deck Plus, T-Watch S3 Plus or Freenove S3 GPS build your key over the cable, and from then on it uploads by itself over your saved WiFi.</p>
-    <p class="browser-note">After flashing, <strong>Set Time &amp; Zone</strong> tells the board this computer's clock and time zone over the same cable. The zone is kept for good; the clock lasts until the board is unplugged, and a saved WiFi network puts it back at every boot. A T-Watch has its clock set for it after installing, and keeps the time from then on, even through a flat battery.</p>
+    <p class="browser-note">After flashing, <strong>Set Time &amp; Zone</strong> tells the board this computer's clock and time zone over the same cable. The zone is kept for good; the clock lasts until the board is unplugged, and a saved WiFi network puts it back at every boot. Installing from this page does it for you once the board reaches its main screen, so keep the page open for a moment after it says done. A T-Watch keeps the time from then on, even through a flat battery.</p>
       </details>
     </section>
   </div>
@@ -1615,6 +1615,7 @@
         if (state === 'INSTALL' || state === 'ASK_ERASE') wasInstalling = true;
         if (state === 'DASHBOARD' && wasInstalling) {
           wasInstalling = false;
+          window.squachJustInstalled = true;   // the clock is set once this dialog closes
           if (window.squachWildHit) window.squachWildHit();
           if (phase === 'auto') {
             mode = 'dance';
@@ -1925,21 +1926,30 @@
       clockBtn.textContent = '[ SET TIME & ZONE ] (needs a desktop browser)';
     } else {
       clockBtn.addEventListener('click', setBoardClock);
-      // After a T-Watch install, set its clock without being asked: the watch
-      // keeps the time in its battery-backed clock chip from then on. The
-      // install dialog is removed from the page when it closes, which is the
-      // one signal that the port is free again.
+      // After an install, set the board's clock and zone without being asked,
+      // so a board with no WiFi, GPS or clock chip still knows the date (the
+      // December look, the trail times, DESK MODE). Only after a finished
+      // install, not after Connect just to look. The install dialog is removed
+      // from the page when it closes, which is the one signal that the port
+      // is free again; it carries the port it used.
       new MutationObserver(function (muts) {
         muts.forEach(function (m) {
           m.removedNodes.forEach(function (n) {
             if (!n.tagName || n.tagName.toLowerCase() !== 'ewt-install-dialog') return;
+            if (!window.squachJustInstalled || clockBtn.disabled) return;
+            window.squachJustInstalled = false;
             var mf = (document.getElementById('installBtn') || { getAttribute: function () { return ''; } }).getAttribute('manifest') || '';
-            if (mf.indexOf('twatch') < 0 || clockBtn.disabled) return;
-            navigator.serial.getPorts().then(function (ports) {
-              var p = ports.filter(isNativeUsb)[0];
+            var watch = mf.indexOf('twatch') >= 0;
+            var go = function (p) {
               if (!p) return;
               clockResult.scrollIntoView({ block: 'center', behavior: 'smooth' });
-              setBoardClock(null, { port: p });
+              setBoardClock(null, { port: p, watch: watch });
+            };
+            if (n.port) { go(n.port); return; }
+            navigator.serial.getPorts().then(function (ports) {
+              // The install's port when there is only one to choose from; a
+              // watch is the one on the S3's own USB.
+              go(watch ? ports.filter(isNativeUsb)[0] : (ports.length === 1 ? ports[0] : null));
             });
           });
         });
@@ -2005,12 +2015,13 @@
     return info.usbVendorId === 0x303A;
   }
 
-  // auto: { port } -- the flasher's own call after a watch install. No port
-  // picker (the install already has permission), and instead of a fixed
-  // boot wait it waits for the watch's main loop: a fresh install starts
-  // with touch calibration and the colour check, and nothing reads the
-  // console until those are done, so a line sent early would be read late
-  // and set the clock minutes slow.
+  // auto: { port, watch } -- the flasher's own call after an install. No
+  // port picker (the install already has permission), and instead of a
+  // fixed boot wait it waits for the board's main loop (its [frame] line,
+  // every ten seconds): a fresh install can start with touch targets, and
+  // on a watch the colour check, and nothing reads the console until those
+  // are done, so a line sent early would be read late and set the clock
+  // minutes slow.
   async function setBoardClock(ev, auto) {
     clockBtn.disabled = true;
     clockResult.className = 'identify-result';
@@ -2036,7 +2047,9 @@
         var seen = '', r0 = port.readable.getReader(), d0 = new TextDecoder(), w0 = Date.now(), up = false;
         while (Date.now() - w0 < 240000) {
           var left = Math.ceil((240000 - (Date.now() - w0)) / 1000);
-          clockResult.textContent = 'Setting the watch’s clock once it is on its main screen. Finish the touch targets and the colour check on the watch... (' + left + ' s)';
+          clockResult.textContent = auto.watch
+            ? 'Setting the watch’s clock once it is on its main screen. Finish the touch targets and the colour check on the watch... (' + left + ' s)'
+            : 'Setting the board’s clock and time zone once it is on its main screen. If it shows touch targets, tap them first. Keep this page open... (' + left + ' s)';
           var c0 = await Promise.race([r0.read(), new Promise(function (r) { setTimeout(function () { r({ done: false, value: null }); }, 1000); })]);
           if (c0.done) break;
           if (c0.value) seen += d0.decode(c0.value, { stream: true });
@@ -2044,7 +2057,7 @@
           if (seen.length > 20000) seen = seen.slice(-2000);
         }
         await r0.cancel(); r0.releaseLock();
-        if (!up) throw new Error('the watch never reached its main screen. Press Set Time & Zone once it does');
+        if (!up) throw new Error((auto.watch ? 'the watch' : 'the board') + ' never reached its main screen. Press Set Time & Zone once it does');
       } else {
         for (var sec = 9; sec > 0; sec--) {
           clockResult.textContent = 'Letting the board boot... ' + sec;

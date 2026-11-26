@@ -49,6 +49,8 @@ static bool        s_rotationLocked = DEFAULT_ROTATION_LOCK;
 static bool        s_aura = true;
 static bool        s_detXp = true;
 static bool        s_lavaLamp = true;
+static bool        s_seasonal = true;     // SEASONAL: AUTO (the December look) or OFF
+static uint16_t    s_seasonAsk = 0;       // the year the HOLIDAY MODE card last asked
 // The alert card's window. A skin the S3 boards can afford in glass; the
 // ESP32 boards get System 7, which costs nothing to read back.
 #if defined(SQW_S3)
@@ -633,6 +635,8 @@ void load() {
     s_aura           = s_prefs.getBool("aura", true);
     s_detXp          = s_prefs.getBool("detxp", true);
     s_lavaLamp       = s_prefs.getBool("lavalamp", true);
+    s_seasonal       = s_prefs.getBool("seasonal", true);
+    s_seasonAsk      = (uint16_t)s_prefs.getUInt("seasonAsk", 0);
     s_alertSkin      = s_prefs.getUChar("askin", DEFAULT_ALERT_SKIN);
     // A pick this board does not carry (a settings file from a bigger board,
     // or a list that has since shrunk) comes up as the default instead.
@@ -1026,6 +1030,18 @@ bool alertSunset() { return s_alertSunset; }
 void toggleAlertSunset() {
     s_alertSunset = !s_alertSunset;
     s_prefs.putBool("asunset", s_alertSunset);
+}
+
+bool seasonal() { return s_seasonal; }
+void setSeasonal(bool on) {
+    s_seasonal = on;
+    s_prefs.putBool("seasonal", s_seasonal);
+}
+void toggleSeasonal() { setSeasonal(!s_seasonal); }
+uint16_t seasonAskedYear() { return s_seasonAsk; }
+void setSeasonAskedYear(uint16_t y) {
+    s_seasonAsk = y;
+    s_prefs.putUInt("seasonAsk", s_seasonAsk);
 }
 
 bool lavaLamp() { return s_lavaLamp; }

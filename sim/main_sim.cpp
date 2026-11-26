@@ -21,6 +21,7 @@
 
 #include <TFT_eSPI.h>
 #include "theme.h"
+#include "december.h"
 #include "settings.h"
 #include "squachy.h"
 #include "pet.h"
@@ -481,6 +482,8 @@ int main(int argc, char** argv) {
         else if (a == "--size" && i + 1 < argc) sizeArg = argv[++i];
     }
     if (sequence < 1) sequence = 1;
+    // SQUACHSIM_XMAS=1 shows the December look whatever the date (december.h).
+    if (const char* xm = getenv("SQUACHSIM_XMAS")) December::setForce((uint8_t)atoi(xm));
 
     // --size WxH renders at another panel's dimensions. Every screen already
     // composes itself against t.width()/t.height(), so this shows the 3.5"'s
@@ -896,6 +899,7 @@ int main(int argc, char** argv) {
         else if (screen == "diary")    uiDiaryTick(frame, t, engine);
         else if (screen == "desk")     uiDeskTick(frame, t, engine);
         else if (screen == "zonecard") { uiClearTick(frame, t, engine, true, false); uiZoneCardDraw(frame, t); }
+        else if (screen == "holidaycard") { December::setForce(1); uiClearTick(frame, t, engine, true, false); December::cardDraw(frame, t); }
         else if (screen == "hunt")     uiHuntTick(frame, t, engine);
         // SQUACHSIM_SCANNING=1: still listening (the SCAN.LOG feed); =wifi for a WiFi scan.
         else if (screen == "rawscan")  uiRawScanTick(frame, t, engine, !(getenv("SQUACHSIM_SCANNING") && !strcmp(getenv("SQUACHSIM_SCANNING"), "wifi")),
@@ -1090,7 +1094,7 @@ int main(int argc, char** argv) {
     };
 
     // Per-screen init, where the screen has one.
-    if      (screen == "clear" || screen == "zonecard") {
+    if      (screen == "clear" || screen == "zonecard" || screen == "holidaycard") {
         uiClearInit(frame);
         // SQUACHSIM_ZONE=<index into Clock's table> shows the zone card on
         // that zone, for rendering one of them.
@@ -1449,6 +1453,8 @@ int main(int argc, char** argv) {
                         break;
                     default: break;
                 }
+                // SQUACHSIM_OWNER=0/1/2: the tag's owner state (0 never set up, 1 with, 2 away).
+                if (const char* ow = getenv("SQUACHSIM_OWNER")) row.owner = (uint8_t)atoi(ow);
                 row.hits = 7;
                 row.firstSeen = t0;
                 row.lastSeen  = tEnd;

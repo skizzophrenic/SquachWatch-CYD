@@ -163,6 +163,15 @@ namespace Settings {
     // screen's battery lamp, on (the default) or off (issue #132).
     bool       lavaLamp();
     void       toggleLavaLamp();
+    // SEASONAL on the APPEARANCE page: AUTO shows the December look from
+    // December 1 to 26 (december.h); OFF never does. The HOLIDAY MODE card
+    // asks once a year, and the year it last asked is kept so it does not
+    // ask again.
+    bool       seasonal();
+    void       setSeasonal(bool on);
+    void       toggleSeasonal();
+    uint16_t   seasonAskedYear();
+    void       setSeasonAskedYear(uint16_t year);
 
     // ALERT CARD on the APPEARANCE page (see alert_skin.h): which window the
     // alert card is drawn in (0 is the TRAIL card itself, then the eleven

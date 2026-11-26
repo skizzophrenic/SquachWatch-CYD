@@ -178,7 +178,7 @@ static const SettingsRow APPEARANCE_ROWS[] = {
 #endif
     // Then how the SCREEN looks.
     SettingsRow::THEME, SettingsRow::BACKGROUND, SettingsRow::BACKGROUND_LOCK, SettingsRow::DET_STYLE,
-    SettingsRow::LAVA_LAMP, SettingsRow::BRIGHTNESS,
+    SettingsRow::LAVA_LAMP, SettingsRow::SEASONAL, SettingsRow::BRIGHTNESS,
     SettingsRow::INVERT, SettingsRow::RGB_SWAP, SettingsRow::ROTATION_LOCK,
     // And the one light that is not on the screen at all.
     SettingsRow::STATUS_LIGHT,
@@ -426,6 +426,7 @@ static RowGroupId groupFor(SettingsRow r) {
         case SettingsRow::BANTER:
         case SettingsRow::DET_STYLE:
         case SettingsRow::LAVA_LAMP:
+        case SettingsRow::SEASONAL:
         case SettingsRow::FONTS:
         case SettingsRow::ALERT_CARD:
             return RowGroupId::APPEARANCE;
@@ -1738,6 +1739,10 @@ static void rowContent(SettingsRow r, const DetectionEngine& eng, char* valBuf, 
         case SettingsRow::LAVA_LAMP:
             label = "LAVA LAMP";
             value = Settings::lavaLamp() ? "ON" : "OFF";
+            break;
+        case SettingsRow::SEASONAL:
+            label = "SEASONAL";
+            value = Settings::seasonal() ? "AUTO" : "OFF";
             break;
         case SettingsRow::VIEW_DIARY:
             label = "SQUACHY'S DIARY";

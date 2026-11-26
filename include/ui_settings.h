@@ -96,6 +96,7 @@ enum class SettingsRow : uint8_t {
     EXT_SCREEN,      // the Cardputer ADV only: a second panel on the EXT header
     DET_STYLE,       // on the APPEARANCE page: XP or CLASSIC detection counters
     LAVA_LAMP,       // on the APPEARANCE page, boards with a battery: the home screen's lamp, on or off
+    SEASONAL,        // on the APPEARANCE page: AUTO (the December look, Dec 1-26) or OFF
     CLOCK_FORMAT,    // on the DESK MODE page: 12-hour or 24-hour time
     FONTS,           // on the APPEARANCE page: opens the FONTS page
     FONT_MENUS,      // on the FONTS page: list and settings rows

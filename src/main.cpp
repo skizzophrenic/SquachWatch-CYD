@@ -376,6 +376,7 @@ static void drawCrashCard(TFT_eSPI& t) {
 #include "clock.h"
 #include "ui_desk.h"
 #include "ui_zone.h"
+#include "december.h"
 #include "ui_wifinets.h"
 #include "ui_myalerts.h"
 #include "my_alerts.h"
@@ -1810,6 +1811,13 @@ static uint8_t stickStopsBuild(StickPt* out, uint8_t cap) {
         int16_t xs[3], ys[3];
         uiZoneCardStops(w, h, xs, ys);
         for (int i = 0; i < 3; i++) add(xs[i], ys[i]);
+        return n;
+    }
+    if (state == AppState::CLEAR && December::cardWanted(millis())) {
+        // The HOLIDAY MODE card: TURN OFF and KEEP IT are the stops.
+        int16_t xs[2], ys[2];
+        December::cardStops(w, h, xs, ys);
+        for (int i = 0; i < 2; i++) add(xs[i], ys[i]);
         return n;
     }
     if (state == AppState::CLEAR && Settings::boringMode()) {
@@ -9666,6 +9674,18 @@ void loop() {
                         break;
                     }
                 }
+            } else if (December::cardWanted(now)) {
+                // December's first day on: HOLIDAY MODE, KEEP IT or TURN OFF,
+                // once a year (december.h). Taps beside it are the screen's.
+                December::cardDraw(*canvas, now);
+                if (touchJustDown && (now - lastTouch) > TOUCH_DEBOUNCE_MS) {
+                    const December::CardHit dh = December::cardHit(tp.x, tp.y, tft.width(), tft.height());
+                    if (dh != December::CardHit::NONE) {
+                        lastTouch = now;
+                        if (dh != December::CardHit::CARD) December::cardAnswer(dh == December::CardHit::KEEP);
+                        break;
+                    }
+                }
             }
 #if CROWD_BENCH
             // The crowd benchmark (a test build): its numbers or its table go
@@ -11213,6 +11233,7 @@ void loop() {
                         case SettingsRow::AURA:        Settings::toggleAura(); break;
                         case SettingsRow::DET_STYLE:   Settings::toggleDetXp(); break;
                         case SettingsRow::LAVA_LAMP:   Settings::toggleLavaLamp(); break;
+                        case SettingsRow::SEASONAL:    Settings::toggleSeasonal(); break;
                         // FONTS: the page, then a slider per kind of text. The
                         // rows and the preview box redraw at the new size
                         // straight away.

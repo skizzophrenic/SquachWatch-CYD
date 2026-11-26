@@ -336,6 +336,21 @@ static const char* infoLabel(int n, int i) {
     return n == 3 ? L3[i] : L2[i];
 }
 
+// The fact rows, in order WHO, MAC, SEEN, OWNER (a tracker), CONF. When only
+// `rows` fit, CONF goes first, then SEEN, then MAC: a tracker's OWNER row
+// always shows (NOT SET UP has no chip, so the row is the only place it says
+// it). Returns how many rows it filled in.
+static int factRows(const Card& c, int rows, const char* keys[5], const char* vals[5]) {
+    static const uint8_t byRank[5] = { 0, 3, 1, 2, 4 };   // WHO, OWNER, MAC, SEEN, CONF
+    static const char* const allK[5] = { "WHO", "MAC", "SEEN", "OWNER", "CONF" };
+    const char* allV[5] = { c.who, c.mac, c.seen, c.ownerRow, c.conf };
+    bool on[5] = { false, false, false, false, false };
+    for (int r = 0, n = 0; r < 5 && n < rows; r++) { const uint8_t i = byRank[r]; if (i == 3 && !c.ownerRow[0]) continue; on[i] = true; n++; }
+    int n = 0;
+    for (int i = 0; i < 5; i++) if (on[i]) { keys[n] = allK[i]; vals[n] = allV[i]; n++; }
+    return n;
+}
+
 static void content(SC& s, const Card& c, Box B, const K& k, const Clk& ck, CO o = CO()) {
     if (s_infoBody) { infoBody(s, B, k.bg); return; }   // the info card's middle instead
     if (o.fill) s.fillRect(B.x, B.y, B.w, B.h, k.bg);
@@ -374,20 +389,19 @@ static void content(SC& s, const Card& c, Box B, const K& k, const Clk& ck, CO o
     trail(s, c, B.x, R, y + 2, k, ck, dwell); y += dwell ? 74 : 64;
     ticks(s, c, B.x + 6, y, k, R - B.x < 236); y += 14;
     s.hline(B.x + 6, y - 2, R - B.x - 4, k.rule);
-    // WHO, MAC, SEEN, OWNER (a tracker), CONF. When only four fit, the OWNER
-    // row goes if the chip beside the verdict already says it; CONF goes
-    // otherwise, and CONF goes before OWNER when nothing else shows the owner.
-    const bool showOwner = ownerRow && (rows >= 5 || !chipsDone);
-    const char* keys[5] = { "WHO", "MAC", "SEEN", showOwner ? "OWNER" : "CONF", "CONF" };
-    const char* vals[5] = { c.who, c.mac, c.seen, showOwner ? c.ownerRow : c.conf, c.conf };
+    const char* keys[5]; const char* vals[5];
+    const int nRows = factRows(c, rows, keys, vals);
     const uint16_t confCol = c.confLevel >= 2 ? k.good : c.confLevel == 1 ? k.warn : P.rose;
-    const float vx = B.x + 36, maxW = R - vx - (chipsDone ? 0 : 60);
-    for (int i = 0; i < rows; i++) {
+    const float vx = B.x + (ownerRow ? 42 : 36), maxW = R - vx - (chipsDone ? 0 : 60);
+    for (int i = 0; i < nRows; i++) {
         const bool isConf = keys[i][0] == 'C', isOwner = keys[i][0] == 'O';
         s.text(B.x + 6, y + 1 + i * 10, keys[i], k.key);
         s.text(vx, y + 1 + i * 10, fitTo(s, vals[i], i < 2 ? maxW : R - vx, buf, sizeof buf), isConf ? confCol : isOwner ? (c.ownerAway ? k.chipA : k.text) : k.text);
     }
-    if (!chipsDone) { if (c.owner[0]) s.textR(R, y + 1, c.owner, c.ownerAway ? k.chipA : k.muted); s.textR(R, y + 11, fitTo(s, c.met, 58, buf, sizeof buf), k.chipB); }
+    // No room for the chips: MET goes at the right of the rows (the OWNER row
+    // already says what the owner chip would).
+    if (!chipsDone) s.textR(R, ownerRow ? y + 1 : y + 11, fitTo(s, c.met, 58, buf, sizeof buf), k.chipB);
+    if (!chipsDone && !ownerRow && c.owner[0]) s.textR(R, y + 1, c.owner, c.ownerAway ? k.chipA : k.muted);
     // the ladder column
     const float ly0 = o.verdict ? B.y + 30 : B.y + 4; float lh = B.y + B.h - 4 - ly0; if (lh > 126) lh = 126;
     s.fillRect(px, ly0, o.ladW, lh, k.ladBg); s.drawRect(px, ly0, o.ladW, lh, k.ladEdge);
@@ -670,10 +684,10 @@ static void sTiling(SC& s, const Card& c, const Clk& ck, bool) {
         const float yf = yw + 24, hf = 205 - yf - 2; tile(s, 2, yf, 316, hf, "facts", false);
         const int want = c.ownerRow[0] ? 5 : 4, fit = (int)((hf - 4) / 9);
         const int rows = fit > want ? want : fit;
-        const bool ownerRow = c.ownerRow[0] && rows >= 5;   // the status bar says AWAY already
         char buf[48];
-        const char* keys[5] = { "WHO", "MAC", "SEEN", ownerRow ? "OWNER" : "CONF", "CONF" }; const char* vals[5] = { c.who, c.mac, c.seen, ownerRow ? c.ownerRow : c.conf, c.conf };
-        for (int i = 0; i < rows; i++) { const bool isConf = keys[i][0] == 'C', isOwner = keys[i][0] == 'O'; s.text(8, yf + 4 + i * 9, keys[i], P.dim); s.text(38, yf + 4 + i * 9, fitTo(s, vals[i], i < 1 ? 210 : 270, buf, sizeof buf), isConf ? (c.confLevel >= 2 ? P.mint : c.confLevel ? P.gold : P.rose) : isOwner ? (c.ownerAway ? P.gold : P.pale) : P.pale); }
+        const char* keys[5]; const char* vals[5];
+        const int nRows = factRows(c, rows, keys, vals);
+        for (int i = 0; i < nRows; i++) { const bool isConf = keys[i][0] == 'C', isOwner = keys[i][0] == 'O'; s.text(8, yf + 4 + i * 9, keys[i], P.dim); s.text(c.ownerRow[0] ? 44 : 38, yf + 4 + i * 9, fitTo(s, vals[i], i < 1 ? 210 : 264, buf, sizeof buf), isConf ? (c.confLevel >= 2 ? P.mint : c.confLevel ? P.gold : P.rose) : isOwner ? (c.ownerAway ? P.gold : P.pale) : P.pale); }
         s.textR(312, yf + 5, fitTo(s, c.met, 60, buf, sizeof buf), P.lav);
     }
     snoozeChips(s, c, BK::TAB, bo, ck, P.night, P.peach, P.pale);

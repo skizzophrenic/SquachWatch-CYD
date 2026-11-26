@@ -64,6 +64,7 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/squachmesh.cpp \
             $(SRC)/mesh.cpp \
             $(SRC)/goblin.cpp \
+            $(SRC)/december.cpp \
             $(SRC)/encounters.cpp \
             $(SRC)/meshmsg.cpp \
             $(SRC)/emote_script.cpp \

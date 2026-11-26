@@ -41,6 +41,11 @@ bool isSet();
 // for a real answer. Any real set replaces the guess.
 bool trusted();
 bool guessed();
+// Cold boots that started from the note since a real source last set the
+// clock: each one hides an unknown stretch with the power off. 0 once a real
+// time arrives. (The December look stops believing a guess after a week of
+// them; see december.cpp.)
+uint8_t guessBoots();
 // From loop(): writes the note when it is due.
 void tick(uint32_t now);
 

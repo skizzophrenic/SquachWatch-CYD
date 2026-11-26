@@ -575,9 +575,18 @@ static void drawFacts(TFT_eSPI& t, const Lay& L, int y, int maxY) {
         { hasOwner ? "OWNER" : "CONF", hasOwner ? ownerRow : confidenceLabel(s_last.conf), hasOwner ? (s_last.owner == OWNER_AWAY ? Theme::AMBER : Theme::WHITE) : confCol },
         { "CONF", confidenceLabel(s_last.conf), confCol },
     };
-    for (int r = 0; r < (hasOwner ? 5 : 4) && y + rh <= maxY; r++, y += rh) {
+    // When they do not all fit, CONF goes first, then SEEN, then MAC: a
+    // tracker's OWNER row always shows (alert_skin.cpp's factRows() does the same).
+    const int want = hasOwner ? 5 : 4;
+    int fit = 0; for (int yy = y; fit < want && yy + rh <= maxY; yy += rh) fit++;
+    static const uint8_t byRank[5] = { 0, 3, 1, 2, 4 };   // WHO, OWNER, MAC, SEEN, CONF
+    bool on[5] = { false, false, false, false, false };
+    for (int r = 0; r < fit; r++) on[hasOwner ? byRank[r] : r] = true;
+    for (int r = 0; r < want; r++) {
+        if (!on[r]) continue;
         sysText(t, kx, y, rows[r].k, (uint16_t)0x8410, Theme::BG, ts);
         sysText(t, vx, y, rows[r].v, rows[r].c, Theme::BG, ts);
+        y += rh;
     }
 }
 
