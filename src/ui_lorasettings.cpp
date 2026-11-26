@@ -30,7 +30,7 @@ enum Id : uint8_t {
     NONE = 0,
     // the main list
     LISTEN, PRESET, TX, HOPS, REGION, CHANNELS,
-    NAME, SHORTNAME, ANNOUNCE,
+    NAME, SHORTNAME, ANNOUNCE, BEACON,
     MSGSOUND,
     DETECT, ONSCREEN,
     LOOKUPS, LK_CALL, LK_OGN, LK_FEED,
@@ -203,6 +203,21 @@ void buildMain() {
         Row& r = add(ANNOUNCE, "ANNOUNCE NAME");
         onOff(r, Settings::loraAnnounce());
         snprintf(r.hint, sizeof r.hint, Settings::loraAnnounce() ? "NODEINFO BEFORE THE FIRST TEXT" : "MESHTASTIC SEES A NUMBER");
+    }
+    {
+        // Our name on both meshes on a timer, so other nodes list this board
+        // without a text from it first. The console's LORA BEACON sets any
+        // minute count; a tap here steps through the usual ones.
+        Row& r = add(BEACON, "BEACON");
+        const uint16_t m = Settings::loraBeaconMin();
+        if (!m)            snprintf(r.value, sizeof r.value, "OFF");
+        else if (m % 60)   snprintf(r.value, sizeof r.value, "%u MIN", (unsigned)m);
+        else               snprintf(r.value, sizeof r.value, "%u H", (unsigned)(m / 60));
+        r.valCol = m ? Theme::CYAN : dim(Theme::WHITE, 150);
+        if (!m)                           snprintf(r.hint, sizeof r.hint, "SHOWN ONLY AFTER A TEXT");
+        else if (!Settings::loraTxDbm())  snprintf(r.hint, sizeof r.hint, "TX POWER IS OFF: NOTHING SENT");
+        else if (!Settings::loraAnnounce()) snprintf(r.hint, sizeof r.hint, "MESHCORE ADVERT (NAME OFF: NO NODEINFO)");
+        else                              snprintf(r.hint, sizeof r.hint, "MESHCORE ADVERT + MESHTASTIC NODEINFO");
     }
 
     section("CHATS");
@@ -553,6 +568,17 @@ void tapRow(const Row& r) {
             Settings::toggleLoraAnnounce();
             if (Settings::loraAnnounce()) Lora::identityChanged();
             break;
+        case BEACON: {
+            // OFF -> 30 MIN -> 1 H -> 3 H -> 6 H -> 12 H -> OFF; a console-set
+            // value in between goes on to the next step up.
+            static const uint16_t STEP[] = { 30, 60, 180, 360, 720 };
+            const uint16_t m = Settings::loraBeaconMin();
+            uint16_t next = 0;
+            for (uint16_t s : STEP) if (s > m) { next = s; break; }
+            Settings::setLoraBeaconMin(next);
+            Lora::beaconChanged();
+            break;
+        }
         case MSGSOUND: Settings::toggleLoraMsgSound(); break;
         case DETECT:   Settings::cycleLoraDetect(); break;
         case ONSCREEN: Settings::toggleLoraAlerts(); break;
