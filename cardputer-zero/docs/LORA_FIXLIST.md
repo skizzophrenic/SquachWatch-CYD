@@ -21,7 +21,25 @@ encodings, `readReg`, the device-error read in `begin()`, sync-word register
 format, SetBufferBaseAddress, boosted gain, TCXO command) is verified
 correct and should be kept.
 
-## Status (2026-11-24)
+## Status (2026-11-25)
+
+### Sessions 8–9 — TX, upstream parity, released
+
+- **TX** (session 8): real SX1262 transmit; the LORA page's compose line
+  sends, gated by SETTINGS > SYSTEM > LORA TX. Seen on the user's pager.
+- **Parity with upstream's T-Deck** (session 9): the SYSTEM rows LORA
+  CHATS / LORA / LORA TX are back (patched copies of the firmware's
+  `ui_settings.cpp`/`ui_clear.cpp` via `tools/fw_patch.py`); the page's
+  switch only picks the shown/sent network (upstream's
+  `uiLoraHomeToggleNet`), which fixed receive dying after a switch; the
+  `r` radio-swap key is gone; new-message chime (SOUND = ALL); the LORA
+  pill on the home screen beside the counter tiles.
+- **Installed** on the test device 2026-11-25 as a clean package build.
+- **Still open**: G4 (MeshCore on air: set SETTINGS > SYSTEM > LORA to
+  MESHCORE, then send MeshCore from another node) and G6 (frame parity
+  with pocket-lorascan). The older "press R on the page" instruction
+  below predates the SYSTEM-row LORA setting.
+
 
 ### Session 6 — engine + LORA page integrated (G5)
 

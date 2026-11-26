@@ -3,7 +3,9 @@
 > Status (2026-11-25): **receive and transmit working on the device**,
 > with upstream's T-Deck behaviour (see "Current behaviour" below). G1–G3
 > and G5 pass; G4 (MeshCore on air) and G6 (pocket-lorascan side by side)
-> are still open. Phase A history is kept below as written. Session-state and gates are tracked in
+> are still open. The current build is installed and running on the
+> test device (2026-11-25).
+> Phase A history is kept below as written. Session-state and gates are tracked in
 > `SESSION_STATE.md`; the per-fix status of the backend is in
 > `docs/LORA_FIXLIST.md` (its "Status" section is the up-to-date
 > record).
@@ -211,5 +213,7 @@ G3/G4/G5.
 ## Approval
 
 Phase A started on the user's go-ahead (chat, 2026-11-23/24); the backend
-is built and being verified per the gates above. Phase B (TX) still needs
-separate approval.
+is built and being verified per the gates above. Phase B (TX) was
+approved and built in session 8 (2026-11-25): send works from the LORA
+page's compose line, gated by SETTINGS > SYSTEM > LORA TX (off by
+default), and was seen on the user's T-LoRa Pager.
