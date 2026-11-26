@@ -1,0 +1,55 @@
+name: Hosyond CYD 4.0 Firmware
+
+on:
+  push:
+    branches: [master, "feature/hosyond-cyd40", "feature/hosyond-cyd40-upstream"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-cyd40:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [cyd40, cyd40-fast]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: platformio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
+          restore-keys: platformio-${{ runner.os }}-
+      - name: Install PlatformIO
+        run: python -m pip install --upgrade platformio
+      - name: Validate board port
+        run: |
+          test -f include/cyd40_user_setup.h
+          test -f src/board_audio.cpp
+          grep -Fq '[env:cyd40]' platformio.ini
+          grep -Fq '[env:cyd40-fast]' platformio.ini
+          grep -Fq 'void alertBeep()' src/board_audio.cpp
+          grep -Fq 'Settings::soundVolume()' src/board_audio.cpp
+      - name: Compile firmware
+        run: pio run -e ${{ matrix.environment }}
+      - name: Collect flash components
+        run: |
+          mkdir -p artifacts
+          cp ".pio/build/${{ matrix.environment }}/firmware.bin" artifacts/firmware.bin
+          cp ".pio/build/${{ matrix.environment }}/partitions.bin" artifacts/partitions.bin
+          cp ".pio/build/${{ matrix.environment }}/bootloader.bin" artifacts/bootloader.bin
+          printf 'Board: Hosyond E32R40T CYD 4.0\nEnvironment: %s\nApplication offset: 0x10000\nPartition-table offset: 0x8000\nBootloader offset: 0x1000\n' "${{ matrix.environment }}" > artifacts/FLASH_INFO.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: squachwatch-hosyond-${{ matrix.environment }}
+          path: artifacts/
+          if-no-files-found: error
+          retention-days: 30
