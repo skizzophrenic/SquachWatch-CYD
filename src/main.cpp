@@ -180,6 +180,18 @@ static bool takeBootCheckSkip() {
     g_bootCheckSkip = 0;
     return esp_reset_reason() == ESP_RST_SW && v == CHKSKIP_MAGIC;
 }
+#if SQW_BOOT_CLOCK
+// The boot clock join restarts the board once it has asked (see setup()), and
+// this says, across that restart, that it has: the second boot goes straight
+// on, whether the time came back or not, rather than ask again forever.
+static const uint32_t CLOCKTRIED_MAGIC = 0xC10C7EDu;
+RTC_NOINIT_ATTR static uint32_t g_bootClockTried;
+static bool takeBootClockTried() {
+    const uint32_t v = g_bootClockTried;
+    g_bootClockTried = 0;
+    return esp_reset_reason() == ESP_RST_SW && v == CLOCKTRIED_MAGIC;
+}
+#endif
 #if SQW_BOOT_POWEROFF
 // The Freenove boards' wake from POWER OFF restarts once, at the very top of
 // setup(), before anything runs. A deep-sleep wake brings the native USB port
@@ -6484,8 +6496,14 @@ void setup() {
     // the SD log wrote every row to the nodate file until someone noticed.
     // The same join for the time alone, and only when the time was lost: a
     // software restart keeps it, and costs no WiFi.
-    else if (!Settings::updateCheck() && !Clock::trusted() && !Security::locked() && OtaWifi::hasSaved()) {
-        bootCheckRan = true;
+    //
+    // Then a restart, whatever the answer. The join leaves the heap cut up
+    // even with the driver torn down: on the 3.5" the block the SD card mounts
+    // into came out 17 KB instead of 25, and the first loop ran on a 3.4 KB
+    // largest block. The restart keeps the time it fetched and boots clean,
+    // about five seconds once per power cut.
+    else if (!takeBootClockTried() && !Settings::updateCheck() && !Clock::trusted() && !Security::locked() &&
+             OtaWifi::hasSaved()) {
 #if defined(CROWPANEL7)
         CrowBL::set(24);
 #elif defined(TAB5)
@@ -6508,7 +6526,11 @@ void setup() {
             panelShow();
         }
         OtaWifi::bootCheck(9000, false);   // the update check's budget: 6000 gave up mid-join
-        if (panelTextOk()) { PANEL.fillRect(0, 0, tft.width(), tft.height(), Theme::BG); panelShow(); }
+        Serial.printf("[clock] boot join done (%s): restarting for a clean heap\n",
+                      Clock::trusted() ? "set" : "not set");
+        g_bootClockTried = CLOCKTRIED_MAGIC;
+        serialFlush();
+        ESP.restart();
     }
 #endif
 
