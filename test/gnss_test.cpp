@@ -43,6 +43,7 @@ int main() {
     ck("the fix is dated by the RMC and timed by the GGA", f.epoch == Gnss::toEpoch(2026, 9, 28, 12, 35, 20));
     ck("fresh at once", Gnss::fresh(2000 + 100));
     ck("stale after FRESH_MS", !Gnss::fresh(2000 + Gnss::FRESH_MS + 1));
+    ck("fresh when asked with a time a little before the fix landed", Gnss::fresh(2000 - 3));
 
     suite("Hemispheres");
     Gnss::sentence(nmea("GNGGA,000000.00,3351.00000,S,15112.00000,W,1,05,1.2,10.0,M,0.0,M,,"), 3000);

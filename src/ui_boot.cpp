@@ -175,10 +175,10 @@ void uiBootTick(TFT_eSPI& t, uint32_t now) {
     // everything spins up. Sized as big as the gap between the
     // subtitle and INITIALIZING... below allows — dropping the v1.0
     // line and tightening the title stack above is what buys him the
-    // extra room to be this big. Skipped in "boring mode" — the rest
-    // of the boot splash (wordmark, subtitle, INITIALIZING...) is
-    // unaffected, this only cuts the mascot cameo.
-    if (!Settings::boringMode()) {
+    // extra room to be this big. Shown in TERMINAL MODE too (asked for
+    // 2026-11-14): the terminal takes his place on the main screen, but
+    // he still clocks in on the boot screen. Old Boring Mode cut him here.
+    {
         // 2.0, up from 1.6, standing on h-19 rather than yHoriz+50.
         //
         // Measured off a render: the subtitle's ink ends at row 67 and

@@ -63,6 +63,8 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/squachy.cpp \
             $(SRC)/squachmesh.cpp \
             $(SRC)/mesh.cpp \
+            $(SRC)/goblin.cpp \
+            $(SRC)/encounters.cpp \
             $(SRC)/meshmsg.cpp \
             $(SRC)/emote_script.cpp \
             $(SRC)/crowd_bench.cpp \
@@ -82,6 +84,7 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/ui_meshphrase.cpp \
             $(SRC)/ui_meshcompose.cpp \
             $(SRC)/settings.cpp \
+            $(SRC)/lora_myname.cpp \
             $(SRC)/signatures.cpp \
             $(SRC)/remote_id.cpp \
             $(SRC)/clock.cpp \
@@ -91,9 +94,12 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/ui_bingo.cpp \
             $(SRC)/dex.cpp \
             $(SRC)/regulars.cpp \
+            $(SRC)/places.cpp \
             $(SRC)/notices.cpp \
             $(SRC)/ui_dex.cpp \
+            $(SRC)/ui_cryptid_guide.cpp \
             $(SRC)/detection_info.cpp \
+            $(SRC)/info_card.cpp \
             $(SRC)/device_info.cpp \
             $(SRC)/idle_events.cpp \
             $(SRC)/ui_clear.cpp \
@@ -103,6 +109,9 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/pet.cpp \
             $(SRC)/ui_log.cpp \
             $(SRC)/ui_alert.cpp \
+            $(SRC)/alert_skin.cpp \
+            $(SRC)/alert_skin_roles.cpp \
+            $(SRC)/tag_ring.cpp \
             $(SRC)/ui_settings.cpp \
             $(SRC)/ui_boot.cpp \
             $(SRC)/ui_colorcheck.cpp \
@@ -125,10 +134,11 @@ UI_SRCS  := $(SRC)/theme.cpp \
             $(SRC)/ui_wifipass.cpp \
             $(SRC)/ui_sysprops.cpp \
             $(SRC)/ui_wifinets.cpp \
+            $(SRC)/ui_myalerts.cpp \
+            $(SRC)/my_alerts.cpp \
             $(SRC)/frame_push.cpp \
             $(SRC)/frame_prof.cpp \
             $(SRC)/fast_sprite.cpp \
-            $(SRC)/gnss.cpp \
             $(SRC)/wardrive_fmt.cpp \
             $(SRC)/wifi_auth.cpp \
             $(SRC)/wardrive_seen.cpp \
@@ -139,6 +149,30 @@ UI_SRCS  := $(SRC)/theme.cpp \
 # touch_cal.cpp for the touchcal screen, which runs the real calibration flow
 # with a scripted finger. Only here: the live and web builds already compile it.
 SIM_SRCS := $(SIM_DIR)/main_sim.cpp $(SIM_DIR)/detection_sim.cpp $(SRC)/touch_cal.cpp
+
+# The T-Deck's LORA page (the `lora` screen), driven by a made-up band:
+# sim/lora_sim.cpp stands in for the sniffer the way detection_sim.cpp stands
+# in for the detection engine, and the profile table is the real one.
+# SQUACH_LORA_FAKE (on this renderer's own objects only, below) makes
+# include/lora_sniffer.h declare the real calls instead of its no-ops, and is
+# what src/ui_lorahome.cpp is built under here. Not -DSQUACH_LORA: that also
+# switches on the network halves of lora_feed.cpp and lora_enrich.cpp. The
+# live and web builds never see it, so their main.cpp is the CYD's as before.
+# The chats screen (`lorachat`) and the compose lines' channel chip read the
+# decoders' real channel tables and Lora::Chan's pick, so those come too.
+SIM_SRCS += $(SRC)/ui_lorahome.cpp $(SRC)/ui_lorasettings.cpp $(SIM_DIR)/lora_sim.cpp             $(SRC)/lora_profiles.cpp $(SRC)/lora_crypto.cpp
+SIM_SRCS += $(SRC)/ui_lorachat.cpp $(SRC)/lora_meshtastic.cpp $(SRC)/lora_meshcore.cpp $(SRC)/lora_channels.cpp
+SIM_FLAGS := -DSQUACH_LORA_FAKE=1
+
+# HUMAN SENSING's screen (the `sensing` screen): the real screen and store from
+# src/sense_cyd/, fed by sim/sense_cyd_sim.cpp in place of the radio. Built
+# with SENSE_CYD_APP on these objects alone (build/sense/): the flag also adds a
+# Settings row, and the rest of the emulator must keep drawing the shipping
+# builds' Settings.
+# SENSE_RICH_SIM: the render tool also draws SCOPE, SNEAK and VITALS (the
+# SENSE_RICH boards' screens) at any size; SQUACHSIM_PAGE=1..3 picks one. The
+# web build is left without it: it plays the boards that do not have them.
+SENSE_SRCS := $(SRC)/sense_cyd/ui_sensing_cyd.cpp $(SRC)/sense_cyd/ui_sensing_tab5.cpp $(SRC)/sense_cyd/sense_store.cpp $(SRC)/sense_cyd/sense_vitals.cpp $(SIM_DIR)/sense_cyd_sim.cpp
 
 # The interactive target additionally compiles the firmware's real
 # main.cpp -- its actual setup()/loop(), state machine, gesture handling
@@ -179,7 +213,8 @@ WASM_SRCS := $(UI_SRCS) \
              $(SRC)/cap_touch.cpp \
              $(SRC)/touch_cal.cpp \
              $(SIM_DIR)/main_wasm.cpp \
-             $(SIM_DIR)/detection_sim.cpp
+             $(SIM_DIR)/detection_sim.cpp \
+             $(SENSE_SRCS)
 WASM_DIR  := web
 WASM_OUT  := $(WASM_DIR)/squachsim.js
 # -Os over -O2: this ships over the wire, and the emulator spends its
@@ -196,9 +231,15 @@ WASM_OUT  := $(WASM_DIR)/squachsim.js
 # -DSQUACH_MESH=1 as the native build has it. It was missing, so the web
 # emulator compiled every SquachMesh screen out and never showed the feature
 # that every shipping board has had since v1.5.23.
+# -DSQUACHSIM_BOOT=1 compiles POCKET MODE in and gives the page sw_boot, so
+# the BOOT button drawn on the board does what the real one does.
+# -DSENSE_CYD_APP=1: HUMAN SENSING, in every board's build since v1.42.0, so
+# here too, on the fake engine in sim/sense_cyd_sim.cpp (DEMO). It was left out
+# while sensing was lab-only and v1.42.0's emulator shipped without it: the
+# web build has to carry every feature the release does.
 # -Os keeps the website's download small; the phone app builds with -O3 for speed.
 WASM_OPT ?= -Os
-WASM_FLAGS := -std=c++17 $(WASM_OPT) -I$(SIM_DIR) -I$(INC) -DSQUACH_MESH=1 \
+WASM_FLAGS := -std=c++17 $(WASM_OPT) -I$(SIM_DIR) -I$(INC) -DSQUACH_MESH=1 -DSQUACHSIM_BOOT=1 -DSENSE_CYD_APP=1 \
               -Wno-unused-parameter \
               -include $(SIM_DIR)/Arduino.h \
               -include $(INC)/cyd_user_setup.h \
@@ -228,13 +269,14 @@ OBJ_DIR  := build
 UI_OBJS   := $(patsubst %.cpp,$(OBJ_DIR)/ui/%.o,$(notdir $(UI_SRCS)))
 SIM_OBJS  := $(patsubst %.cpp,$(OBJ_DIR)/sim/%.o,$(notdir $(SIM_SRCS)))
 LIVE_OBJS := $(patsubst %.cpp,$(OBJ_DIR)/live/%.o,$(notdir $(LIVE_SRCS)))
-DEPS      := $(UI_OBJS:.o=.d) $(SIM_OBJS:.o=.d) $(LIVE_OBJS:.o=.d)
+SENSE_OBJS := $(patsubst %.cpp,$(OBJ_DIR)/sense/%.o,$(notdir $(SENSE_SRCS)))
+DEPS      := $(UI_OBJS:.o=.d) $(SIM_OBJS:.o=.d) $(LIVE_OBJS:.o=.d) $(SENSE_OBJS:.o=.d)
 
 # Where a .cpp can come from. make looks in this directory first (the
 # cwd always wins over vpath), then the firmware tree -- so a file here
 # that shared a name with one in src/ would silently shadow it. None do
 # today; the guard keeps it that way.
-vpath %.cpp $(SRC) $(SIM_DIR)
+vpath %.cpp $(SRC) $(SIM_DIR) $(SRC)/sense_cyd
 CLASH := $(filter $(notdir $(wildcard $(SIM_DIR)/*.cpp)),$(notdir $(wildcard $(SRC)/*.cpp)))
 ifneq ($(CLASH),)
 $(error same basename in $(SRC) and $(SIM_DIR), vpath would pick the wrong one: $(CLASH))
@@ -243,6 +285,67 @@ endif
 all: $(BIN) $(LIVE_BIN)
 live: $(LIVE_BIN)
 wasm: $(WASM_OUT)
+
+# The T-Deck Plus, for the web page's T-Deck: the same firmware built as the
+# board is (-DTDECK_PLUS, -DSQUACH_LORA), so its LORA page, chats, DMs and
+# keyboard are the real ones. sim/lora_sim.cpp is the radio (a made-up band
+# around Bluff Creek) and sim/gt911_sim.cpp the touch chip. SQUACHSIM leaves
+# out what a browser cannot do: the speaker and POWER OFF (include/sound.h).
+# No BOOT button: the T-Deck's POCKET MODE is not wired on the board either.
+WASM_TDECK_OUT  := $(WASM_DIR)/squachsim-tdeck.js
+WASM_TDECK_SRCS := $(UI_SRCS) $(SRC)/main.cpp $(SRC)/cap_touch.cpp $(SRC)/touch_cal.cpp \
+             $(SRC)/ui_lorahome.cpp $(SRC)/ui_lorasettings.cpp $(SRC)/ui_lorachat.cpp \
+             $(SRC)/lora_profiles.cpp $(SRC)/lora_crypto.cpp $(SRC)/lora_meshtastic.cpp \
+             $(SRC)/lora_meshcore.cpp $(SRC)/lora_channels.cpp \
+             $(SIM_DIR)/lora_sim.cpp $(SIM_DIR)/gt911_sim.cpp $(SIM_DIR)/main_wasm.cpp $(SIM_DIR)/detection_sim.cpp \
+             $(SENSE_SRCS)
+WASM_TDECK_FLAGS := $(filter-out -DSQUACHSIM_BOOT=1,$(WASM_FLAGS)) \
+             -DTDECK_PLUS=1 -DSQUACH_LORA=1 -DCYD_GPS=1 -DSQW_RING=1 -DSQUACHSIM=1
+
+wasm-tdeck: $(WASM_TDECK_OUT)
+
+$(WASM_TDECK_OUT): $(WASM_TDECK_SRCS) $(wildcard $(SIM_DIR)/*.h) $(wildcard $(INC)/*.h)
+	@command -v em++ >/dev/null || { echo "em++ not found -- run: source ~/emsdk/emsdk_env.sh"; exit 1; }
+	@mkdir -p $(WASM_DIR)
+	em++ $(WASM_TDECK_FLAGS) -sEXPORT_NAME=SquachSimTDeck -o $@ $(WASM_TDECK_SRCS)
+
+# The T-Watch S3 and the Cardputer ADV, built as the boards are, for the
+# page's watch and Cardputer. The watch has its own screens, the crown
+# (sim/XPowersLib.h stands in for its power chip, which reads it) and LoRa
+# listening on the same made-up band as the T-Deck; its touch falls back to
+# the CYD's path here, as its FT6336 does not answer. The Cardputer has no
+# touch at all: its keyboard drives a cursor (sw_cardkey).
+WASM_TWATCH_OUT  := $(WASM_DIR)/squachsim-twatch.js
+WASM_TWATCH_SRCS := $(UI_SRCS) $(SRC)/main.cpp $(SRC)/cap_touch.cpp $(SRC)/touch_cal.cpp \
+             $(SRC)/ui_lorahome.cpp $(SRC)/ui_lorasettings.cpp $(SRC)/ui_lorachat.cpp \
+             $(SRC)/lora_profiles.cpp $(SRC)/lora_crypto.cpp $(SRC)/lora_meshtastic.cpp \
+             $(SRC)/lora_meshcore.cpp $(SRC)/lora_channels.cpp \
+             $(SRC)/wardrive.cpp $(SIM_DIR)/lora_sim.cpp $(SIM_DIR)/main_wasm.cpp $(SIM_DIR)/detection_sim.cpp \
+             $(SENSE_SRCS)
+WASM_TWATCH_FLAGS := $(filter-out -DSQUACHSIM_BOOT=1,$(WASM_FLAGS)) \
+             -DTWATCH_S3=1 -DSQUACH_LORA=1 -DSQW_RING=1 -DSQUACHSIM=1
+
+wasm-twatch: $(WASM_TWATCH_OUT)
+
+$(WASM_TWATCH_OUT): $(WASM_TWATCH_SRCS) $(wildcard $(SIM_DIR)/*.h) $(wildcard $(INC)/*.h)
+	@command -v em++ >/dev/null || { echo "em++ not found -- run: source ~/emsdk/emsdk_env.sh"; exit 1; }
+	@mkdir -p $(WASM_DIR)
+	em++ $(WASM_TWATCH_FLAGS) -sEXPORT_NAME=SquachSimTWatch -o $@ $(WASM_TWATCH_SRCS)
+
+WASM_CARD_OUT  := $(WASM_DIR)/squachsim-cardputer.js
+WASM_CARD_SRCS := $(WASM_SRCS)
+WASM_CARD_FLAGS := $(filter-out -DSQUACHSIM_BOOT=1,$(WASM_FLAGS)) \
+             -DCARDPUTER_ADV=1 -DSQW_SMALL=1 -DSQW_RING=1 -DSQUACHSIM=1
+
+wasm-cardputer: $(WASM_CARD_OUT)
+
+$(WASM_CARD_OUT): $(WASM_CARD_SRCS) $(wildcard $(SIM_DIR)/*.h) $(wildcard $(INC)/*.h)
+	@command -v em++ >/dev/null || { echo "em++ not found -- run: source ~/emsdk/emsdk_env.sh"; exit 1; }
+	@mkdir -p $(WASM_DIR)
+	em++ $(WASM_CARD_FLAGS) -sEXPORT_NAME=SquachSimCardputer -o $@ $(WASM_CARD_SRCS)
+
+# Every browser build the web page loads.
+wasm-all: wasm wasm-tdeck wasm-twatch wasm-cardputer
 
 $(WASM_OUT): $(WASM_SRCS) $(wildcard $(SIM_DIR)/*.h) $(wildcard $(INC)/*.h)
 	@command -v em++ >/dev/null || { echo "em++ not found -- run: source ~/emsdk/emsdk_env.sh"; exit 1; }
@@ -255,13 +358,17 @@ $(OBJ_DIR)/ui/%.o: %.cpp Makefile
 
 $(OBJ_DIR)/sim/%.o: %.cpp Makefile
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -MMD -MP -c -o $@ $<
+	$(CXX) $(CXXFLAGS) $(SIM_FLAGS) -MMD -MP -c -o $@ $<
 
 $(OBJ_DIR)/live/%.o: %.cpp Makefile
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(LIVE_FLAGS) -MMD -MP -c -o $@ $<
 
-$(BIN): $(UI_OBJS) $(SIM_OBJS)
+$(OBJ_DIR)/sense/%.o: %.cpp Makefile
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(SIM_FLAGS) -DSENSE_CYD_APP=1 -DSENSE_RICH_SIM=1 -MMD -MP -c -o $@ $<
+
+$(BIN): $(UI_OBJS) $(SIM_OBJS) $(SENSE_OBJS)
 	$(CXX) $(CXXFLAGS) -o $@ $^ -lm
 
 $(LIVE_BIN): $(LIVE_UI_OBJS) $(LIVE_OBJS)
@@ -282,6 +389,6 @@ clean:
 	# Leftovers from the old single-shot build, which Apple clang gave
 	# debug bundles; the object build never makes them.
 	rm -rf $(BIN).dSYM $(LIVE_BIN).dSYM
-	rm -rf out .nvs $(WASM_DIR)/squachsim.js $(WASM_DIR)/squachsim.wasm
+	rm -rf out .nvs $(WASM_DIR)/squachsim.js $(WASM_DIR)/squachsim.wasm $(WASM_DIR)/squachsim-*.js $(WASM_DIR)/squachsim-*.wasm
 
 .PHONY: all live wasm shots clean

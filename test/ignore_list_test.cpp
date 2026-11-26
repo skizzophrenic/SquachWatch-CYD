@@ -14,6 +14,7 @@
 // many bytes the next boot would find.
 #include "ignore_list.h"
 #include "test_util.h"
+#include <Arduino.h>
 #include <Preferences.h>
 #include <cstdlib>
 #include <filesystem>
@@ -79,6 +80,27 @@ int main() {
         ck("heard the new way round, still ignored", IgnoreList::contains(fwd));
         ck("not added twice either way", !IgnoreList::add(fwd, DetectionType::AIRTAG));
         ck("UN-IGNORE the new way round takes it off", IgnoreList::remove(fwd) && !IgnoreList::contains(old));
+    }
+
+    suite("Timed snoozes run out when they should");
+    {
+        SimClock::virtualTime = true;
+        SimClock::nowMs = 1000;
+        const uint8_t C[6] = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66 };
+        const uint8_t D[6] = { 0x66, 0x55, 0x44, 0x33, 0x22, 0x10 };
+        ck("10 min snooze taken", IgnoreList::snooze(C, IgnoreList::SnoozeDuration::MIN_10));
+        ck("4 hour snooze taken", IgnoreList::snooze(D, IgnoreList::SnoozeDuration::HOUR_4));
+        ck("both quiet now", IgnoreList::silenced(C) && IgnoreList::silenced(D));
+        SimClock::nowMs += 11UL * 60 * 1000;
+        ck("10 min one is back after 11 min", !IgnoreList::snoozed(C));
+        ck("4 hour one still quiet after 11 min", IgnoreList::snoozed(D));
+        SimClock::nowMs += 3UL * 60 * 60 * 1000;
+        ck("4 hour one still quiet after 3 h 11 min", IgnoreList::snoozed(D));
+        SimClock::nowMs += 50UL * 60 * 1000;
+        ck("4 hour one back after 4 h 1 min", !IgnoreList::snoozed(D));
+        ck("a timed snooze writes nothing to disk", []{
+            Preferences p; p.begin(NS, false); return p.getBytesLength("snz") == 0; }());
+        SimClock::virtualTime = false;
     }
 
     std::filesystem::remove_all(dir);

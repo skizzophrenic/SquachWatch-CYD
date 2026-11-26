@@ -13,7 +13,7 @@ namespace CapTouch {
 //   0x06: Y low byte
 static uint8_t ADDR = 0x15;
 
-void begin(int sda, int scl, int rst, uint8_t addr) {
+void begin(int sda, int scl, int rst, uint8_t addr, uint32_t hz) {
     ADDR = addr;
     if (rst >= 0) {
         pinMode(rst, OUTPUT);
@@ -22,7 +22,7 @@ void begin(int sda, int scl, int rst, uint8_t addr) {
         digitalWrite(rst, HIGH);
         delay(50);  // chip boot time after reset release
     }
-    Wire.begin(sda, scl);
+    Wire.begin(sda, scl, hz);
 }
 
 bool probe() {

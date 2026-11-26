@@ -8,9 +8,12 @@
 // so software AES costs nothing worth measuring.
 //
 // This is not the SquachMesh cipher (include/meshcrypto.h); that one stays
-// on mbedtls with its own self-test. Nothing here is used to protect anything
-// of ours: it only opens what other networks publish the keys to, or what the
-// user holds the keys to.
+// on mbedtls with its own self-test. Most of this only opens what other
+// networks publish the keys to, or what the user holds the keys to. The one
+// exception is Meshtastic's direct messages (2026-10-23): AES-256-CCM under
+// an X25519 key agreement, which seals the owner's own private messages and
+// is checked against vectors made by an independent library
+// (test/lora_crypto_test.cpp, test/lora_meshtastic_test.cpp).
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
@@ -31,6 +34,46 @@ void ctr(const Aes128& k, const uint8_t nonce[16], uint8_t* buf, size_t len);
 
 // AES-CMAC (RFC 4493), the LoRaWAN MIC's primitive.
 void cmac(const Aes128& k, const uint8_t* msg, size_t len, uint8_t mac[16]);
+
+// ---- AES-256 and CCM (Meshtastic's direct messages) -------------------------
+struct Aes256 {
+    uint32_t rk[60];
+    void setKey(const uint8_t key[32]);
+    void encryptBlock(const uint8_t in[16], uint8_t out[16]) const;
+};
+// AES-CCM the way Meshtastic runs it (src/mesh/aes-ccm.cpp there, which is
+// wpa_supplicant's): a 13-byte nonce, so a two-byte length (L = 2), an 8-byte
+// tag, no associated data. Seal writes len bytes of ciphertext to `out` and
+// the tag to `tag`; open writes the plaintext and says whether the tag held.
+// `in` and `out` may be the same buffer. len is at most 65535.
+void ccmSeal(const Aes256& k, const uint8_t nonce[13], const uint8_t* in, size_t len,
+             uint8_t* out, uint8_t tag[8]);
+bool ccmOpen(const Aes256& k, const uint8_t nonce[13], const uint8_t* in, size_t len,
+             const uint8_t tag[8], uint8_t* out);
+
+// ---- X25519 (RFC 7748) --------------------------------------------------------
+// The scalar is clamped here, so a raw 32 random bytes is a private key.
+// x25519() returns false when the result is all zero -- the other side's key
+// was a low-order point, and nothing sealed with it would be secret.
+bool x25519(uint8_t out[32], const uint8_t scalar[32], const uint8_t point[32]);
+void x25519Base(uint8_t pub[32], const uint8_t priv[32]);
+
+// ---- SHA-512 and Ed25519 (MeshCore's identities, 2026-10-23) -----------------
+struct Sha512Ctx { uint64_t h[8]; uint8_t buf[128]; uint64_t total; size_t fill; };
+void sha512Init(Sha512Ctx& c);
+void sha512Update(Sha512Ctx& c, const uint8_t* p, size_t n);
+void sha512Final(Sha512Ctx& c, uint8_t out[64]);
+void sha512(const uint8_t* msg, size_t len, uint8_t out[64]);
+// MeshCore keeps a key pair the way orlp's ed25519 does: the 64-byte private
+// key is SHA-512 of a 32-byte seed with its first half clamped -- the scalar
+// -- and its second half the signing nonce's prefix. The public key is the
+// standard Ed25519 one for that seed (RFC 8032).
+void ed25519KeyPair(const uint8_t seed[32], uint8_t pub[32], uint8_t prv[64]);
+void ed25519Sign(uint8_t sig[64], const uint8_t* msg, size_t len, const uint8_t pub[32], const uint8_t prv[64]);
+// orlp's ed25519_key_exchange, MeshCore's shared secret: their Ed25519 public
+// key turned into a Montgomery u, (1 + y) / (1 - y), then X25519 with our
+// scalar. The same 32 bytes from either end. False for a bad key.
+bool ed25519KeyExchange(uint8_t shared[32], const uint8_t theirPub[32], const uint8_t prv[64]);
 
 // ---- SHA-256 --------------------------------------------------------------
 void sha256(const uint8_t* msg, size_t len, uint8_t out[32]);

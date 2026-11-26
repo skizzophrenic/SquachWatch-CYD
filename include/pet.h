@@ -21,12 +21,24 @@ namespace Pet {
     // Does nothing at all unless a pet is unlocked AND switched on, so the
     // call site does not need to check either.
     void tick(TFT_eSPI& t, uint32_t now, int screenW, int bandTop, int bandBottom);
+    // ZOOMIES (a random encounter): for `ms`, the pet's own clock runs three
+    // times as fast -- every pet's walk, hop and fidget at triple speed.
+    // Every way into this module takes the caller's time through the same
+    // conversion, so the pet's clock stays one clock, only ever ahead.
+    void zoomies(uint32_t now, uint32_t ms);
+    bool zooming(uint32_t now);
     // 2 on the large panels: the pets live in a half-size world that the
     // caller doubles onto the screen (see pet.cpp's zoom). Positions in and
     // out of this module stay in SCREEN pixels either way; tick()'s
     // arguments are the exception, in the pets' own (layer) pixels.
     void setZoom(int k);
     int  zoom();
+    // Whether a squad crowd is on screen this frame: M3@ty steps down a size
+    // so he doesn't stand in front of them.
+    void setCrowd(bool on);
+    // The line Squachy's feet stand on, in screen pixels. The pets stand on
+    // their own line above it (the old counter line); M3@ty stands here.
+    void setGround(int y);
     // Whether tick() can draw anything this frame (a pet earned and chosen,
     // or the ball out). The caller skips the double-size layer when not.
     bool anyOut(uint32_t now);
@@ -35,6 +47,13 @@ namespace Pet {
     // screen changes underneath him, so he does not reappear mid-jump on a
     // screen that has been away for a minute.
     void reset();
+    // Mothman. Whether a tap landed on him while he is out (the first one
+    // earns RED WINGS, every one gives the glowing swoop); his drawing, which
+    // the Field Guide borrows at its own scale; and his perch on the DESK
+    // clock's plate.
+    bool mothmanTap(int x, int y, uint32_t now);
+    void drawMothman(TFT_eSPI& t, int x, int y, int scale, uint32_t now, bool powered = false);
+    void drawMothmanPerch(TFT_eSPI& t, int x, int y, uint32_t now);
 
     // C1iPPY. A catch he should have an opinion about (a DetectionType);
     // whether a tap landed on him; a poke; and where he is, for the cursor on
@@ -43,7 +62,7 @@ namespace Pet {
     bool clippyHit(int x, int y);
     void clippyPoke(uint32_t now);
     bool clippyCenter(int& x, int& y);
-    // The pet as drawn this frame (C1iPPY, T0@$TY or the ball), top left, in
+    // The pet as drawn this frame (C1iPPY, T0@$TY, MEATY or the ball), top left, in
     // the pet's own coordinates; false when none is on screen. For the
     // emulator's motion checks.
     bool drawnAt(int& x, int& y);
@@ -51,6 +70,9 @@ namespace Pet {
     // layer, drawn now at the screen's own size. Call after the layer is
     // laid down; does nothing when none is waiting.
     void drawHeldBalloons(TFT_eSPI& t);
+    // A pet's balloon saying `text`, its tail on a box at (x, y) w wide: the
+    // FONTS page's preview of PETS.
+    void drawSampleBalloon(TFT_eSPI& t, int x, int y, int w, const char* text);
     // Picking him up. A touch that lands on him grabs him at once; every
     // frame it is held drags him; letting go is a poke when the finger never
     // went anywhere, a throw when it was still moving, and a drop otherwise.
@@ -67,4 +89,9 @@ namespace Pet {
     // He dances it now if he is standing there, otherwise he comes on next
     // and dances it. The console's YETI DISCO / YETI FLOSS and the emulator.
     void yetiDance(int8_t which);
+
+    // MEATY's shapes on demand (pet_meaty.inc): 0 the igloo, 1 the hot dog,
+    // 2 Shake it, 3 three of him. The console's MEATY IGLOO and the rest, and
+    // the emulator.
+    void meatyAct(int8_t which);
 }

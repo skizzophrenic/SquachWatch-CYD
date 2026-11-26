@@ -9,21 +9,16 @@
 #include "detection.h"
 
 void uiRawScanInit(TFT_eSPI& t, bool isBle);
+// Back from a card opened on a result: a clean screen, the scan, the list and
+// where it was scrolled all kept.
+void uiRawScanResume(TFT_eSPI& t);
 
 // done: pass DetectionEngine::rawBleScanDone()/rawWifiScanDone() for
 // whichever mode isBle selects -- draws a "SCANNING..." state until
 // then, the results list after.
-// confirmPending/confirmLabel: draws a modal "TRACK THIS TARGET?"
-// panel with WATCH/HUNT/CANCEL over everything else instead of the
-// normal list -- see uiRawScanHitConfirm() below. confirmLabel is
-// ignored when confirmPending is false.
-// confirmWatched: whether the device the panel is asking about is the one
-// already being watched -- the address itself lives in main.cpp, so the
-// comparison happens there and only the answer comes through here. Turns the
-// panel's WATCH button into UNWATCH; see drawConfirmPanel().
+// Holding a result opens its alert card (main.cpp); there is no panel here.
 void uiRawScanTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng,
-                    bool isBle, bool done, bool confirmPending, const char* confirmLabel,
-                    bool confirmWatched, bool confirmHunted, bool confirmIgnored,
+                    bool isBle, bool done,
                     // false on the second of the 3.5"'s band passes: the same
                     // frame again, so the mascot must not step twice.
                     bool advance = true);
@@ -38,18 +33,8 @@ RawScanTap uiRawScanHitTest(int x, int y, int screenW, int screenH);
 
 // Row index (0 = topmost visible, already adjusted for scroll) a tap
 // at (x,y) falls within, or -1 if it's outside the list entirely --
-// used by main.cpp to long-press-select a device/network to watch
-// (see DetectionEngine::watchBle/watchWifi). Needs a live TFT_eSPI&
+// used by main.cpp to long-press a device/network and open its card. Needs a live TFT_eSPI&
 // (not just the screen dimensions) since row height depends on actual
 // font metrics.
 int uiRawScanRowAt(TFT_eSPI& t, int x, int y, int screenW, int screenH);
 
-// Hit test for the confirm panel's WATCH/HUNT/CANCEL buttons -- only
-// meaningful while uiRawScanTick() is being called with
-// confirmPending true; main.cpp owns that flag, not this module. WATCH
-// sets the target and returns to CLEAR (fires the full-screen
-// WATCH_ALERT later, passively, whenever it's next seen); HUNT sets
-// the same target but goes straight into the live-tracking HUNT screen
-// instead.
-enum class RawScanConfirmTap { NONE, WATCH, HUNT, IGNORE, CANCEL };
-RawScanConfirmTap uiRawScanHitConfirm(int x, int y, int screenW, int screenH);

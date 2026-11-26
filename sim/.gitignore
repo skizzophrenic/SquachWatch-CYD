@@ -5,3 +5,7 @@ out/
 __pycache__/
 squachsim.png
 build/
+squachsim-tab5
+squachsim-ring
+squachsim-all
+build-all/

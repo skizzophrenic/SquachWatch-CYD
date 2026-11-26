@@ -57,7 +57,17 @@ public:
         // walkthrough on every page load is a worse demo. _path is a
         // localStorage key here, not a filesystem path. Scoped per
         // namespace, same as the one-file-per-namespace native layout.
+        // Each board's own build keeps its own (squachsim.tdeck.nvs.* etc.): a CYD's
+        // saved touch calibration would put a T-Deck's taps anywhere.
+#if defined(TDECK_PLUS)
+        _path = "squachsim.tdeck.nvs." + _ns;
+#elif defined(TWATCH_S3)
+        _path = "squachsim.twatch.nvs." + _ns;
+#elif defined(CARDPUTER_ADV)
+        _path = "squachsim.cardputer.nvs." + _ns;
+#else
         _path = "squachsim.nvs." + _ns;
+#endif
         load();
 #else
         const char* dir = getenv("SQUACHSIM_NVS");

@@ -68,6 +68,19 @@ int16_t rssiNow();
 // Tune only (no modem reconfiguration), for a sweep; the modem stays in RX.
 bool tuneHz(uint32_t hz);
 
+// A run of calls that should take ONE turn on a shared bus (a hop: apply()
+// then startCad(); after a hit, the flag read and clear). On the T-Deck each
+// exchange otherwise pays its own hand-over with the screen push, about 3 ms,
+// forty times a hop (measured 2026-10-13: 130 ms a hop, every preamble
+// missed). Nests; no-ops where the radio has a bus of its own.
+void busHold();
+void busRelease();
+
+// One frame at `dbm`, on whatever apply() last set, blocking until it is sent
+// (the T-Deck's chat compose; the bench's test frames). The caller parks the
+// sniffer first: see Lora::sendText().
+bool transmit(const uint8_t* d, uint8_t n, int8_t dbm);
+
 #if LORA_BENCH_TX
 // BENCH ONLY, never in a release: one frame at `dbm`, on whatever apply()
 // last set, blocking until it is sent. Exists so one watch can prove another

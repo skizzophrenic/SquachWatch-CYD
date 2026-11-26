@@ -50,11 +50,13 @@ class TFT_eSPI;
   #define SQW_FRAME_PUSH    1
   #define SQW_PUSH_DMA_ONLY 1
   #define SQW_PUSH_QSPI     1
-#elif defined(ARDUINO_ARCH_ESP32) && defined(FREENOVE_S3)
+#elif defined(ARDUINO_ARCH_ESP32) && (defined(FREENOVE_S3) || defined(TDECK_PLUS))
+  // The T-Deck Plus takes the Freenove S3's route: the same chip, an SPI
+  // panel, and pushSprite() cost it 40 of every 48 ms (measured 2026-10-12).
   #define SQW_FRAME_PUSH    1
   #define SQW_PUSH_DMA_ONLY 1
   #define SQW_PUSH_QSPI     0
-#elif defined(ARDUINO_ARCH_ESP32) && !defined(SQW_S3) && !defined(CROWPANEL7)
+#elif defined(ARDUINO_ARCH_ESP32) && !defined(SQW_S3) && !defined(CROWPANEL7) && !defined(TAB5)
   #define SQW_FRAME_PUSH    1
   #define SQW_PUSH_DMA_ONLY 0
   #define SQW_PUSH_QSPI     0
@@ -184,7 +186,14 @@ bool asyncBegin(TFT_eSPI& tft);
 bool asyncSubmit(const uint8_t* src, int32_t w, int32_t h, int32_t x, int32_t y);
 void asyncWait();                 // until the panel holds the last frame handed over
 bool asyncOn();
+// Before busLock() from something that cannot wait a whole frame (the LoRa
+// radio): a push in flight finishes its current chunk and steps aside.
+void busWant();
 void busLock();
 void busUnlock();
+// Whether the panel's device holds the IDF driver's bus right now (a frame in
+// flight, the radio let in between its chunks). A caller that needs that hold
+// for a register-fed transfer takes one only when this is false.
+bool pushHoldsBus();
 
 }  // namespace FramePush

@@ -1,5 +1,9 @@
 // SquachWatch-CYD — persisted user settings implementation
 #include "settings.h"
+#include "alert_skin.h"   // which alert card skins this board carries
+#include "lora_myname.h"
+#include <stdio.h>
+#include <strings.h>
 #include <string.h>
 #include "clock.h"
 #include "theme.h"
@@ -33,7 +37,10 @@ static bool        s_pocketNoteShown = false;
 // Locked on the CrowPanel too, for a different reason: an RGB panel has no
 // MADCTL, so rotating it would be a per-pixel software transform of an
 // 800x480 buffer every frame -- and the panel is natively landscape anyway.
-#if defined(TWATCH_S3) || defined(CROWPANEL7)
+// And on the T-Deck: a keyboard under the screen has exactly one way up.
+// And on the Tab5 for now: the blit turns the frame landscape and has no
+// portrait mapping yet (tab5_board.h).
+#if defined(TWATCH_S3) || defined(CROWPANEL7) || defined(TDECK_PLUS) || defined(TAB5)
 static const bool DEFAULT_ROTATION_LOCK = true;
 #else
 static const bool DEFAULT_ROTATION_LOCK = false;
@@ -41,12 +48,23 @@ static const bool DEFAULT_ROTATION_LOCK = false;
 static bool        s_rotationLocked = DEFAULT_ROTATION_LOCK;
 static bool        s_aura = true;
 static bool        s_detXp = true;
+static bool        s_lavaLamp = true;
+// The alert card's window. A skin the S3 boards can afford in glass; the
+// ESP32 boards get System 7, which costs nothing to read back.
+#if defined(SQW_S3)
+static const uint8_t DEFAULT_ALERT_SKIN = 4;   // GLASS
+#else
+static const uint8_t DEFAULT_ALERT_SKIN = 3;   // SYSTEM 7
+#endif
+static uint8_t     s_alertSkin = DEFAULT_ALERT_SKIN;
+static bool       s_alertAnimate = true;
+static bool        s_alertSunset = true;
 // Eight is the ceiling because the radio's own squad ring holds eight (see
 // SQUAD_N in mesh.cpp). A menu that offered thirty would be offering something
 // the hardware cannot hear: the ninth board in the room evicts the first, and
 // the screen would still show eight.
 static const uint8_t CROWD_MAX = 8;
-static uint8_t     s_meshCrowd = 1;   // how many on screen at once, 1..CROWD_MAX
+static uint8_t     s_meshCrowd = 1;   // how many on screen at once, 1..CROWD_MAX; 0 = NONE
 static bool        s_deskSquad     = false;   // the squad on the desk clock as well
 static uint8_t     s_deskCrowd     = 1;       // the desk's own HOW MANY
 static bool        s_deskFullVisit = false;   // one visitor: the whole visit, not a chat
@@ -54,8 +72,8 @@ static bool        s_deskFullVisit = false;   // one visitor: the whole visit, n
 // one step round from that with its crown on the right (LilyGo's default).
 #if defined(TWATCH_S3)
 static const uint8_t DEFAULT_ROTATION = 2;
-#elif defined(CROWPANEL7)
-static const uint8_t DEFAULT_ROTATION = 0;   // the panel is landscape as wired
+#elif defined(CROWPANEL7) || defined(TAB5)
+static const uint8_t DEFAULT_ROTATION = 0;   // the panel is landscape as wired (the Tab5: as blitted)
 #else
 static const uint8_t DEFAULT_ROTATION = 1;
 #endif
@@ -67,8 +85,26 @@ static bool        s_backgroundLocked = false;
 static uint8_t     s_deskBg     = 255;     // 255: not picked yet, follow s_background
 static bool        s_deskActive = false;
 static uint8_t     s_clockFont     = 0;   // 0 segments, 1 Bangers
-static uint8_t     s_clockSize     = 1;   // 0 small, 1 medium, 2 large
+static uint8_t     s_clockSize     = 1;   // 0 small, 1 medium, 2 large, 3 XL
+static bool        s_deskAlertFull = false;   // a desk detection opens the full ALERT by itself
+static bool        s_deskAlertBig  = false;   // the desk alert: a near full-screen box, not the small card
 static uint8_t     s_clockBackdrop = 0;   // 0 plain, 1 rain, 2 snow, 3 toasters, 4 fire, 5 stars, 6 fireflies
+static bool        s_clock24Hour   = false;
+// FONTS: per kind of text, 0..4 for -2..+2 around the built size (2 is as
+// built). Keys fntMenu, fntText, fntBtn, fntBub, fntXp, fntPet. And a face
+// per kind, 0 as built, 1 PIXEL, 2 SMOOTH: keys fcMenu .. fcPet.
+// What a board starts on before anyone touches FONTS. The Tab5's picks from
+// its size lab (2026-10-20): button labels a step bigger and the counter
+// tiles a step smaller on its 5" glass, everything else as built.
+#if defined(TAB5)
+static const uint8_t FONT_DEFAULT[(int)FontKind::COUNT] = { 2, 2, 3, 2, 1, 2 };
+#else
+static const uint8_t FONT_DEFAULT[(int)FontKind::COUNT] = { 2, 2, 2, 2, 2, 2 };
+#endif
+static uint8_t     s_fontStep[(int)FontKind::COUNT] = { FONT_DEFAULT[0], FONT_DEFAULT[1], FONT_DEFAULT[2], FONT_DEFAULT[3], FONT_DEFAULT[4], FONT_DEFAULT[5] };
+static uint8_t     s_fontFace[(int)FontKind::COUNT] = { 0, 0, 0, 0, 0, 0 };
+static const char* const FONT_KEYS[(int)FontKind::COUNT] = { "fntMenu", "fntText", "fntBtn", "fntBub", "fntXp", "fntPet" };
+static const char* const FACE_KEYS[(int)FontKind::COUNT] = { "fcMenu", "fcText", "fcBtn", "fcBub", "fcXp", "fcPet" };
 static const uint8_t CLOCK_BG_N  = 7;
 // Bit N = DetectionType N enabled. UNKNOWN (0) is never included -- see
 // Types that arrive switched OFF, on a fresh install and on upgrade alike.
@@ -80,13 +116,18 @@ static const uint8_t CLOCK_BG_N  = 7;
 // rather than on type, so with an exact-match signature every one of them
 // would take over the display. Off by default, one tap away in DETECTION
 // FILTER, and everything about the detection itself is honest either way.
-static const uint32_t DEFAULT_OFF = (1u << (uint8_t)DetectionType::IBEACON);
+//
+// LISTENER joined it: a smart speaker on a kitchen counter is not something
+// to be alerted about at home, only when it is somewhere it should not be,
+// and the owner who wants the room check turns it on.
+static const uint32_t DEFAULT_OFF = (1u << (uint8_t)DetectionType::IBEACON) |
+                                    (1u << (uint8_t)DetectionType::LISTENER);
 
 // typeEnabled()'s comment. Default has bits 1..(COUNT-1) set (every real
 // type on), computed once at namespace-init time rather than a hand-
 // maintained literal so it can never drift out of sync with COUNT.
 // 32-bit, not 16. DetectionType::COUNT reached 17 when IBEACON was added
-// (and 18 with HACKER),
+// (18 with HACKER, 19 with LORAWAN),
 // and bit 16 does not exist in a uint16_t -- the shift is undefined and the
 // last type silently loses its switch. NVS has always stored this through
 // putUInt/getUInt, so the saved format is unchanged and nothing migrates.
@@ -117,15 +158,27 @@ static const uint8_t  CPU_MHZ_N         = sizeof(CPU_MHZ) / sizeof(CPU_MHZ[0]);
 // someone changes them.
 #if defined(TWATCH_S3)
 static const bool DEFAULT_POWER_SAVER = true;
+#elif defined(STICKS3)
+// The StickS3 is a keychain on a small cell: a screen and a scan left on
+// all day is not a fob. On by default, with a minute before the screen goes
+// dark, and a shake brings it back (see shake.cpp).
+static const bool DEFAULT_POWER_SAVER = true;
 #else
 static const bool DEFAULT_POWER_SAVER = false;
+#endif
+#if defined(STICKS3)
+static const uint8_t DEFAULT_SCR_TIMEOUT_IX = 3;   // 60 s
+static const uint8_t DEFAULT_DIM_LEVEL      = 0;   // dark: the backlight is the fob's biggest draw
+#else
+static const uint8_t DEFAULT_SCR_TIMEOUT_IX = 2;   // 30 s
+static const uint8_t DEFAULT_DIM_LEVEL      = 16;  // ~6%, dim but not off
 #endif
 static bool     s_powerSaver   = DEFAULT_POWER_SAVER;
 #if SQW_WIFI_5G
 static bool     s_wifi5        = true;
 #endif
-static uint8_t  s_scrTimeoutIx = 2;    // 30 s
-static uint8_t  s_dimLevel     = 16;   // ~6%, dim but not off
+static uint8_t  s_scrTimeoutIx = DEFAULT_SCR_TIMEOUT_IX;
+static uint8_t  s_dimLevel     = DEFAULT_DIM_LEVEL;
 static uint8_t  s_idleFpsIx    = 2;    // 12 fps
 static uint8_t  s_idleAfterIx  = 1;    // 10 s
 static uint8_t  s_cpuIx        = 0;    // 240 MHz, the stock clock
@@ -143,6 +196,8 @@ static uint8_t  s_idleCpuIx    = IDLE_CPU_DEFAULT;
 static bool     s_wakeOnAlert  = true;
 static bool     s_quietTrack   = true;
 static bool     s_privacy      = false;
+static bool     s_sensing      = false;
+static uint8_t  s_sensePage    = 0;
 static bool     s_extScreen    = false;
 struct __attribute__((packed)) RunEntry { uint16_t boot, minutes; };
 static const uint8_t RUNS_N = 8;
@@ -179,12 +234,24 @@ static uint8_t  s_loraMode     = 2;
 static uint8_t  s_loraFocus    = 0;
 static uint8_t  s_loraRegion   = 0;   // AUTO
 static uint8_t  s_loraListen   = 3;   // BOTH
+static uint8_t  s_loraTx       = 0;   // LORA TX: 0 off, else dBm
 // The online lookups, all four OFF. See Settings::loraLookups() for why the
 // default is the opposite of the update check's.
 static bool     s_loraLookups  = false;
 static bool     s_loraLkCall   = false;
 static bool     s_loraLkOgn    = false;
 static bool     s_loraLkFeed   = false;
+// The LORA SETTINGS page's: the name on the air, the NodeInfo switch, and how
+// detection behaves around the LoRa pages. See settings.h.
+static char     s_loraName[Lora::MyName::NAME_LEN + 1]   = { 0 };
+static char     s_loraShort[Lora::MyName::SHORT_LEN + 1] = { 0 };
+static bool     s_loraAnnounce = true;
+static uint8_t  s_loraDetect   = 0;   // ON
+static bool     s_loraAlerts   = true;
+static uint8_t  s_loraHops     = 3;
+static bool     s_loraMsgSnd   = true;
+static char     s_loraMtPre[16] = { 0 };   // "" = LongFast
+static char     s_loraTxCh[2][24] = { { 0 }, { 0 } };   // [0] Meshtastic, [1] MeshCore; "" = default
 
 // ---- status light --------------------------------------------------------
 static bool    s_lightOn     = true;
@@ -247,6 +314,8 @@ uint16_t cpuMhz()           { return s_powerSaver ? CPU_MHZ[s_cpuIx] : 240; }
 bool     wakeOnAlert()      { return s_wakeOnAlert; }
 bool     quietTrackers()    { return s_quietTrack; }
 bool     privacyMode()      { return s_privacy; }
+bool     sensing()          { return s_sensing; }
+uint8_t  sensePage()        { return s_sensePage; }
 bool     extScreen()        { return s_extScreen; }
 bool     watchPlus()        { return s_watchPlus; }
 bool     buzz()             { return s_buzzMode != 0; }
@@ -343,6 +412,15 @@ void togglePrivacyMode() {
     s_privacy = !s_privacy;
     s_prefs.putBool("privacy", s_privacy);
 }
+void setSensing(bool on) {
+    s_sensing = on;
+    s_prefs.putBool("sensing", s_sensing);
+}
+void setSensePage(uint8_t p) {
+    if (p == s_sensePage) return;
+    s_sensePage = p;
+    s_prefs.putUChar("sensePg", p);
+}
 void toggleQuietTrackers() {
     s_quietTrack = !s_quietTrack;
     s_prefs.putBool("qTrack", s_quietTrack);
@@ -375,18 +453,28 @@ void adjustSoundVolume(int8_t delta) {
 uint8_t loraMode()  { return s_loraMode; }
 void cycleLoraMode() { s_loraMode = (uint8_t)((s_loraMode + 1) % 3); s_prefs.putUChar("loraMode", s_loraMode); }
 uint8_t loraListen() { return s_loraListen; }
-// BOTH, MESHTASTIC, MESHCORE, OFF, and round.
+// BOTH, MESHTASTIC, MESHCORE, LORAWAN, OFF, and round. 0-3 are a bit each
+// for the two meshes, which the LORA page reads as such; 4 is neither of
+// them: the radio parked on LoRaWAN's downlink channel, where the meshes are
+// not heard and the LORAWAN detection is.
 void cycleLoraListen() {
-    static const uint8_t NEXT[4] = { 3, 2, 0, 1 };
-    s_loraListen = NEXT[s_loraListen & 3];
+    static const uint8_t NEXT[5] = { 3, 2, 4, 1, 0 };
+    s_loraListen = NEXT[s_loraListen <= 4 ? s_loraListen : 0];
     s_prefs.putUChar("loraLstn", s_loraListen);
 }
+void setLoraListen(uint8_t v) { s_loraListen = v > 4 ? 3 : v; s_prefs.putUChar("loraLstn", s_loraListen); }
 const char* loraListenName() {
-    static const char* const N[4] = { "OFF", "MESHTASTIC", "MESHCORE", "BOTH" };
-    return N[s_loraListen & 3];
+    static const char* const N[5] = { "OFF", "MESHTASTIC", "MESHCORE", "BOTH", "LORAWAN" };
+    return N[s_loraListen <= 4 ? s_loraListen : 3];
 }
+uint8_t loraTxDbm() { return s_loraTx; }
+void cycleLoraTx() {
+    s_loraTx = s_loraTx == 0 ? 10 : s_loraTx == 10 ? 20 : s_loraTx == 20 ? 22 : 0;
+    s_prefs.putUChar("loraTx", s_loraTx);
+}
+const char* loraTxName() { return s_loraTx == 0 ? "OFF" : s_loraTx == 10 ? "10 dBm" : s_loraTx == 20 ? "20 dBm" : "22 dBm"; }
 uint8_t loraRegion() { return s_loraRegion; }
-void setLoraRegion(uint8_t r) { s_loraRegion = r > 2 ? 0 : r; s_prefs.putUChar("loraRgn", s_loraRegion); }
+void setLoraRegion(uint8_t r) { s_loraRegion = r > 3 ? 0 : r; s_prefs.putUChar("loraRgn", s_loraRegion); }   // 0 AUTO, 1 EU, 2 US, 3 AU
 uint8_t loraFocus() { return s_loraFocus; }
 void setLoraFocus(uint8_t ix) { s_loraFocus = ix; s_prefs.putUChar("loraFocus", ix); }
 // Keys: 8, 9, 9 and 9 characters, inside NVS's limit of 15, and none of them is
@@ -401,6 +489,54 @@ bool loraLookupOgn()       { return s_loraLkOgn; }
 void toggleLoraLookupOgn() { s_loraLkOgn = !s_loraLkOgn; s_prefs.putBool("loraLkOgn", s_loraLkOgn); }
 bool loraLookupFeed()       { return s_loraLkFeed; }
 void toggleLoraLookupFeed() { s_loraLkFeed = !s_loraLkFeed; s_prefs.putBool("loraLkMcF", s_loraLkFeed); }
+
+// Keys 8, 9, 8, 7 and 8 characters; none begins "loraChans". An empty name
+// removes its key rather than storing "": the default is the absence.
+const char* loraName() { return s_loraName; }
+void setLoraName(const char* n) {
+    snprintf(s_loraName, sizeof s_loraName, "%s", n ? n : "");
+    Lora::MyName::clean(s_loraName, Lora::MyName::NAME_LEN);
+    if (s_loraName[0]) s_prefs.putString("loraName", s_loraName);
+    else               s_prefs.remove("loraName");
+}
+const char* loraShortName() { return s_loraShort; }
+void setLoraShortName(const char* n) {
+    snprintf(s_loraShort, sizeof s_loraShort, "%s", n ? n : "");
+    Lora::MyName::clean(s_loraShort, Lora::MyName::SHORT_LEN);
+    if (s_loraShort[0]) s_prefs.putString("loraShort", s_loraShort);
+    else                s_prefs.remove("loraShort");
+}
+bool loraAnnounce()       { return s_loraAnnounce; }
+void toggleLoraAnnounce() { s_loraAnnounce = !s_loraAnnounce; s_prefs.putBool("loraAnnc", s_loraAnnounce); }
+uint8_t loraDetect() { return s_loraDetect; }
+void cycleLoraDetect() { s_loraDetect = (uint8_t)((s_loraDetect + 1) % 3); s_prefs.putUChar("loraDet", s_loraDetect); }
+const char* loraDetectName() {
+    static const char* const N[3] = { "ON", "OFF ON LORA PAGE", "OFF" };
+    return N[s_loraDetect < 3 ? s_loraDetect : 0];
+}
+bool loraAlerts()       { return s_loraAlerts; }
+void toggleLoraAlerts() { s_loraAlerts = !s_loraAlerts; s_prefs.putBool("loraAlrt", s_loraAlerts); }
+uint8_t loraHops() { return s_loraHops; }
+void cycleLoraHops() { s_loraHops = (uint8_t)(s_loraHops >= 7 ? 1 : s_loraHops + 1); s_prefs.putUChar("loraHops", s_loraHops); }
+bool loraMsgSound()       { return s_loraMsgSnd; }
+void toggleLoraMsgSound() { s_loraMsgSnd = !s_loraMsgSnd; s_prefs.putBool("loraMsgSnd", s_loraMsgSnd); }
+const char* loraMtPreset() { return s_loraMtPre; }
+void setLoraMtPreset(const char* name) {
+    snprintf(s_loraMtPre, sizeof s_loraMtPre, "%s", name ? name : "");
+    // LongFast is the default, and the default is the absence of the key.
+    if (s_loraMtPre[0] && strcasecmp(s_loraMtPre, "LongFast") != 0) s_prefs.putString("loraMtPre", s_loraMtPre);
+    else { s_loraMtPre[0] = '\0'; s_prefs.remove("loraMtPre"); }
+}
+
+// Keys 10 characters each, and neither begins "loraChans".
+const char* loraTxChan(bool meshcore) { return s_loraTxCh[meshcore ? 1 : 0]; }
+void setLoraTxChan(bool meshcore, const char* name) {
+    char* s = s_loraTxCh[meshcore ? 1 : 0];
+    snprintf(s, sizeof s_loraTxCh[0], "%s", name ? name : "");
+    const char* key = meshcore ? "loraTxChMc" : "loraTxChMt";
+    if (s[0]) s_prefs.putString(key, s);
+    else      s_prefs.remove(key);
+}
 
 // The channel list. Bytes in, bytes out: the store does not know or care what
 // a MeshCore hashtag is, which is why this pair takes a blob and the record
@@ -470,7 +606,7 @@ void load() {
     // Both off unless asked for. See the note in settings.h.
     s_meshDetect   = s_prefs.getBool("meshrx", false);
     s_meshCrowd    = s_prefs.getUChar("crowd", 1);
-    if (s_meshCrowd < 1 || s_meshCrowd > CROWD_MAX) s_meshCrowd = 1;
+    if (s_meshCrowd > CROWD_MAX) s_meshCrowd = 1;
     // Two draws exactly what one does -- see cycleMeshCrowd(). An older build
     // could not have stored it, but a hand-edited NVS can, and a setting that
     // does nothing is worse than one that moved.
@@ -479,7 +615,8 @@ void load() {
     // Follows the main screen's until the desk has one of its own: the two
     // were one setting, and a board upgraded mid-use should look the same.
     s_deskCrowd     = s_prefs.getUChar("dskcrwd", s_meshCrowd);
-    if (s_deskCrowd < 1 || s_deskCrowd > CROWD_MAX || s_deskCrowd == 2) s_deskCrowd = s_meshCrowd;
+    // NONE is the main screen's alone (the desk has SQUAD ON DESK for that).
+    if (s_deskCrowd < 1 || s_deskCrowd > CROWD_MAX || s_deskCrowd == 2) s_deskCrowd = s_meshCrowd ? s_meshCrowd : 1;
     s_deskFullVisit = s_prefs.getBool("dskvisit", false);
     s_meshTransmit = s_prefs.getBool("meshtx", false);
     s_meshConsent  = s_prefs.getBool("meshok", false);
@@ -495,15 +632,35 @@ void load() {
     // anything about the aura, and should see it once before deciding.
     s_aura           = s_prefs.getBool("aura", true);
     s_detXp          = s_prefs.getBool("detxp", true);
+    s_lavaLamp       = s_prefs.getBool("lavalamp", true);
+    s_alertSkin      = s_prefs.getUChar("askin", DEFAULT_ALERT_SKIN);
+    // A pick this board does not carry (a settings file from a bigger board,
+    // or a list that has since shrunk) comes up as the default instead.
+    if (!AlertSkin::available(s_alertSkin)) s_alertSkin = DEFAULT_ALERT_SKIN;
+    // Stored as it was when it had three steps: 2 was OFF.
+    s_alertAnimate   = s_prefs.getUChar("amotion", 0) != 2;
+    s_alertSunset    = s_prefs.getBool("asunset", true);
     s_rotation = s_prefs.getUChar("rot", DEFAULT_ROTATION);
     if (s_rotation > 3) s_rotation = DEFAULT_ROTATION;
+#if defined(TDECK_PLUS)
+    s_rotation = DEFAULT_ROTATION;   // landscape, keyboard down: the one way the T-Deck is held
+#endif
     s_backgroundLocked = s_prefs.getBool("bglock", false);
     s_deskBg = s_prefs.getUChar("deskBg", 255);
     s_clockFont     = s_prefs.getUChar("clkfont", 0);
     s_clockSize     = s_prefs.getUChar("clksize", 1);
+    s_deskAlertBig  = s_prefs.getBool("dskabig", false);
+    s_deskAlertFull = s_prefs.getBool("dskafull", false);
+    for (int i = 0; i < (int)FontKind::COUNT; i++) {
+        s_fontStep[i] = s_prefs.getUChar(FONT_KEYS[i], FONT_DEFAULT[i]);
+        if (s_fontStep[i] > 4) s_fontStep[i] = FONT_DEFAULT[i];
+        s_fontFace[i] = s_prefs.getUChar(FACE_KEYS[i], 0);
+        if (s_fontFace[i] > 2) s_fontFace[i] = 0;
+    }
     s_clockBackdrop = s_prefs.getUChar("clkbg", 0);
+    s_clock24Hour   = s_prefs.getBool("clk24", false);
     if (s_clockFont > 1)     s_clockFont = 0;
-    if (s_clockSize > 2)     s_clockSize = 1;
+    if (s_clockSize > 3)     s_clockSize = 1;
     if (s_clockBackdrop >= CLOCK_BG_N) s_clockBackdrop = 0;
     if (s_deskBg != 255 && s_deskBg >= BACKGROUND_COUNT) s_deskBg = 255;
     s_brightness = s_prefs.getUChar("bri", 255);
@@ -540,8 +697,8 @@ void load() {
         s_prefs.putBool("pwrWatch1", true);
     }
 #endif
-    s_scrTimeoutIx = s_prefs.getUChar("pwrScrnT", 2);
-    s_dimLevel     = s_prefs.getUChar("pwrDim", 16);
+    s_scrTimeoutIx = s_prefs.getUChar("pwrScrnT", DEFAULT_SCR_TIMEOUT_IX);
+    s_dimLevel     = s_prefs.getUChar("pwrDim", DEFAULT_DIM_LEVEL);
     s_idleFpsIx    = s_prefs.getUChar("pwrFps", 2);
     s_idleAfterIx  = s_prefs.getUChar("pwrIdleT", 1);
     s_cpuIx        = s_prefs.getUChar("pwrCpu", 0);
@@ -552,6 +709,8 @@ void load() {
     s_wakeOnAlert  = s_prefs.getBool("pwrWake", true);
     s_quietTrack   = s_prefs.getBool("qTrack", true);
     s_privacy      = s_prefs.getBool("privacy", false);
+    s_sensing      = s_prefs.getBool("sensing", false);
+    s_sensePage    = s_prefs.getUChar("sensePg", 0);
     s_extScreen    = s_prefs.getBool("extscr", false);
     if (s_prefs.getBytesLength("runs") == sizeof s_runs) s_prefs.getBytes("runs", s_runs, sizeof s_runs);
     s_watchPlus    = s_prefs.getBool("wPlus", false);
@@ -572,13 +731,32 @@ void load() {
     s_loraFocus    = s_prefs.getUChar("loraFocus", 0);
     s_loraRegion   = s_prefs.getUChar("loraRgn", 0);
     s_loraListen   = s_prefs.getUChar("loraLstn", 3);
-    if (s_loraListen > 3) s_loraListen = 3;
-    if (s_loraRegion > 2) s_loraRegion = 0;
+    if (s_loraListen > 4) s_loraListen = 3;
+    s_loraTx = s_prefs.getUChar("loraTx", 0);
+    if (s_loraTx != 10 && s_loraTx != 20 && s_loraTx != 22) s_loraTx = 0;   // 22 came with #138 and was lost at every restart
+    if (s_loraRegion > 3) s_loraRegion = 0;
     // False, every time, unless somebody has said otherwise on this board.
     s_loraLookups  = s_prefs.getBool("loraLkup", false);
     s_loraLkCall   = s_prefs.getBool("loraLkCal", false);
     s_loraLkOgn    = s_prefs.getBool("loraLkOgn", false);
     s_loraLkFeed   = s_prefs.getBool("loraLkMcF", false);
+    s_loraName[0] = s_loraShort[0] = '\0';
+    if (s_prefs.isKey("loraName"))  s_prefs.getString("loraName", s_loraName, sizeof s_loraName);
+    if (s_prefs.isKey("loraShort")) s_prefs.getString("loraShort", s_loraShort, sizeof s_loraShort);
+    Lora::MyName::clean(s_loraName, Lora::MyName::NAME_LEN);
+    Lora::MyName::clean(s_loraShort, Lora::MyName::SHORT_LEN);
+    s_loraAnnounce = s_prefs.getBool("loraAnnc", true);
+    s_loraDetect   = s_prefs.getUChar("loraDet", 0);
+    if (s_loraDetect > 2) s_loraDetect = 0;
+    s_loraAlerts   = s_prefs.getBool("loraAlrt", true);
+    s_loraHops     = s_prefs.getUChar("loraHops", 3);
+    if (s_loraHops < 1 || s_loraHops > 7) s_loraHops = 3;
+    s_loraMsgSnd   = s_prefs.getBool("loraMsgSnd", true);
+    s_loraMtPre[0] = '\0';
+    if (s_prefs.isKey("loraMtPre")) s_prefs.getString("loraMtPre", s_loraMtPre, sizeof s_loraMtPre);
+    s_loraTxCh[0][0] = s_loraTxCh[1][0] = '\0';
+    if (s_prefs.isKey("loraTxChMt")) s_prefs.getString("loraTxChMt", s_loraTxCh[0], sizeof s_loraTxCh[0]);
+    if (s_prefs.isKey("loraTxChMc")) s_prefs.getString("loraTxChMc", s_loraTxCh[1], sizeof s_loraTxCh[1]);
     s_lightOn      = s_prefs.getBool("ltOn", true);
     s_lightAlerts  = s_prefs.getBool("ltAlert", true);
     s_lightMsgs    = s_prefs.getBool("ltMsg", true);
@@ -607,7 +785,7 @@ void load() {
     if (s_lightBright < 1 || s_lightBright > 7) s_lightBright = 4;
     // A saved index from a build with more steps than this one must not walk
     // off the end of the table.
-    if (s_scrTimeoutIx >= SCREEN_TIMEOUTS_N) s_scrTimeoutIx = 2;
+    if (s_scrTimeoutIx >= SCREEN_TIMEOUTS_N) s_scrTimeoutIx = DEFAULT_SCR_TIMEOUT_IX;
     if (s_idleFpsIx    >= IDLE_FPS_N)        s_idleFpsIx    = 2;
     if (s_idleAfterIx  >= IDLE_AFTER_N)      s_idleAfterIx  = 1;
     if (s_cpuIx        >= CPU_MHZ_N)         s_cpuIx        = 0;
@@ -673,8 +851,19 @@ uint8_t     clockFont()         { return s_clockFont; }
 const char* clockFontName()     { return s_clockFont ? "BANGERS" : "DIGITAL"; }
 void        cycleClockFont()    { s_clockFont = (uint8_t)((s_clockFont + 1) % 2); s_prefs.putUChar("clkfont", s_clockFont); }
 uint8_t     clockSize()         { return s_clockSize; }
-const char* clockSizeName()     { static const char* const N[3] = { "SMALL", "MEDIUM", "LARGE" }; return N[s_clockSize]; }
-void        cycleClockSize()    { s_clockSize = (uint8_t)((s_clockSize + 1) % 3); s_prefs.putUChar("clksize", s_clockSize); }
+const char* clockSizeName()     { static const char* const N[4] = { "SMALL", "MEDIUM", "LARGE", "X-LARGE" }; return N[s_clockSize]; }
+void        cycleClockSize()    { s_clockSize = (uint8_t)((s_clockSize + 1) % 4); s_prefs.putUChar("clksize", s_clockSize); }
+bool        deskAlertBig()      { return s_deskAlertBig; }
+bool        deskAlertFull()     { return s_deskAlertFull; }
+// CARD -> BIG CARD -> FULL SCREEN -> CARD, kept as the two switches.
+void        cycleDeskAlert() {
+    if (s_deskAlertFull)     { s_deskAlertFull = false; s_deskAlertBig = false; }
+    else if (s_deskAlertBig) { s_deskAlertFull = true; }
+    else                     { s_deskAlertBig = true; }
+    s_prefs.putBool("dskafull", s_deskAlertFull);
+    s_prefs.putBool("dskabig", s_deskAlertBig);
+}
+const char* deskAlertName() { return s_deskAlertFull ? "FULL SCREEN" : s_deskAlertBig ? "BIG CARD" : "CARD"; }
 uint8_t     clockBackdrop()     { return s_clockBackdrop; }
 const char* clockBackdropName() {
     static const char* const N[CLOCK_BG_N] = { "PLAIN", "RAIN", "SNOW", "TOASTERS", "FIRE", "STARFIELD", "FIREFLIES" };
@@ -682,6 +871,8 @@ const char* clockBackdropName() {
 }
 void        cycleClockBackdrop() { s_clockBackdrop = (uint8_t)((s_clockBackdrop + 1) % CLOCK_BG_N); s_prefs.putUChar("clkbg", s_clockBackdrop); }
 void        cyclePrevClockBackdrop() { s_clockBackdrop = (uint8_t)((s_clockBackdrop + CLOCK_BG_N - 1) % CLOCK_BG_N); s_prefs.putUChar("clkbg", s_clockBackdrop); }
+bool        clock24Hour() { return s_clock24Hour; }
+void        toggleClock24Hour() { s_clock24Hour = !s_clock24Hour; s_prefs.putBool("clk24", s_clock24Hour); }
 
 Background deskBackground() {
     if (s_deskBg != 255 && backgroundSelectable((Background)s_deskBg)) return (Background)s_deskBg;
@@ -713,12 +904,18 @@ bool previewBackground(Background b) {
     return true;
 }
 
+// A tap on the screen edge steps the background, and a flash write in the
+// same frame stalls the very frame that should show the new one (and a
+// row of taps is a row of writes). The choice is saved once the taps stop.
+static const uint32_t BG_SAVE_AFTER_MS = 1500;
+static uint32_t s_bgDirtyAt = 0;   // 0 = saved
+
 void cycleBackground() {
     for (uint8_t i = 0; i < BACKGROUND_COUNT; i++) {
         s_background = (Background)(((uint8_t)s_background + 1) % BACKGROUND_COUNT);
         if (backgroundSelectable(s_background)) break;
     }
-    s_prefs.putUChar("bg", (uint8_t)s_background);
+    s_bgDirtyAt = millis() | 1u;
 }
 
 void cyclePrevBackground() {
@@ -726,7 +923,14 @@ void cyclePrevBackground() {
         s_background = (Background)(((uint8_t)s_background + BACKGROUND_COUNT - 1) % BACKGROUND_COUNT);
         if (backgroundSelectable(s_background)) break;
     }
-    s_prefs.putUChar("bg", (uint8_t)s_background);
+    s_bgDirtyAt = millis() | 1u;
+}
+
+void tick(uint32_t now) {
+    if (s_bgDirtyAt && now - s_bgDirtyAt >= BG_SAVE_AFTER_MS) {
+        s_bgDirtyAt = 0;
+        s_prefs.putUChar("bg", (uint8_t)s_background);
+    }
 }
 
 bool inverted() { return s_inverted; }
@@ -780,9 +984,54 @@ bool auraShown() { return s_aura; }
 
 bool detXp() { return s_detXp; }
 
+uint8_t fontStep(FontKind k) { return (uint8_t)k < (uint8_t)FontKind::COUNT ? s_fontStep[(int)k] : 1; }
+uint8_t fontFace(FontKind k) { return (uint8_t)k < (uint8_t)FontKind::COUNT ? s_fontFace[(int)k] : 0; }
+void setFontFace(FontKind k, uint8_t face) {
+    if ((uint8_t)k >= (uint8_t)FontKind::COUNT || face > 2 || s_fontFace[(int)k] == face) return;
+    s_fontFace[(int)k] = face;
+    s_prefs.putUChar(FACE_KEYS[(int)k], face);
+}
+void setFontStep(FontKind k, uint8_t step) {
+    if ((uint8_t)k >= (uint8_t)FontKind::COUNT || step > 4 || s_fontStep[(int)k] == step) return;
+    s_fontStep[(int)k] = step;
+    s_prefs.putUChar(FONT_KEYS[(int)k], step);
+}
+
 void toggleDetXp() {
     s_detXp = !s_detXp;
     s_prefs.putBool("detxp", s_detXp);
+}
+
+uint8_t alertSkin() { return s_alertSkin; }
+void setAlertSkin(uint8_t id) {
+    if (!AlertSkin::available(id)) id = DEFAULT_ALERT_SKIN;
+    s_alertSkin = id;
+    s_prefs.putUChar("askin", s_alertSkin);
+}
+// The next (or the one before) of the skins this board carries.
+void cycleAlertSkin(bool back) {
+    uint8_t id = s_alertSkin;
+    for (uint8_t k = 0; k < AlertSkin::COUNT; k++) {
+        id = (uint8_t)((id + (back ? AlertSkin::COUNT - 1 : 1)) % AlertSkin::COUNT);
+        if (AlertSkin::available(id)) break;
+    }
+    setAlertSkin(id);
+}
+bool alertAnimate() { return s_alertAnimate; }
+void toggleAlertAnimate() {
+    s_alertAnimate = !s_alertAnimate;
+    s_prefs.putUChar("amotion", s_alertAnimate ? 0 : 2);
+}
+bool alertSunset() { return s_alertSunset; }
+void toggleAlertSunset() {
+    s_alertSunset = !s_alertSunset;
+    s_prefs.putBool("asunset", s_alertSunset);
+}
+
+bool lavaLamp() { return s_lavaLamp; }
+void toggleLavaLamp() {
+    s_lavaLamp = !s_lavaLamp;
+    s_prefs.putBool("lavalamp", s_lavaLamp);
 }
 
 void toggleAura() {
@@ -849,6 +1098,9 @@ bool        timeZoneChosen(){ return s_tzChosen; }
 void markTimeZoneChosen() {
     if (!s_tzChosen) { s_tzChosen = true; s_prefs.putBool("tzSet", true); }
 }
+#if defined(SQW_DEVTOOLS)
+void unmarkTimeZoneChosen() { s_tzChosen = false; s_prefs.putBool("tzSet", false); }
+#endif
 void setTimeZone(uint8_t i) {
     if (i >= Clock::zoneCount()) return;
     s_timeZone = i;
@@ -968,7 +1220,8 @@ uint8_t deskCrowd() { return s_deskCrowd; }
 static const char* crowdLabel(uint8_t n) {
     // ONE is a different thing, not a count of one: it is the ordinary visit,
     // with the set pieces and the emotes that a crowd stands down.
-    if (n <= 1) return "ONE";
+    if (n == 0) return "NONE";
+    if (n == 1) return "ONE";
     static char b[10];
     snprintf(b, sizeof b, "UP TO %u", (unsigned)n);
     return b;
@@ -992,8 +1245,11 @@ static uint8_t nextCrowd(uint8_t c) {
     if (n == 2) n = 3;
     return n;
 }
+// The main screen's goes NONE -> ONE -> 3 .. 8 -> NONE. NONE keeps everybody
+// off the screen -- no visit, no crowd -- while the squad badge, messages and
+// heads-ups carry on: one Squachy each when a desk full of boards is under test.
 void cycleMeshCrowd() {
-    s_meshCrowd = nextCrowd(s_meshCrowd);
+    s_meshCrowd = s_meshCrowd >= CROWD_MAX ? 0 : nextCrowd(s_meshCrowd);
     s_prefs.putUChar("crowd", s_meshCrowd);
 }
 void cycleDeskCrowd() {
@@ -1066,12 +1322,15 @@ void cycleSquachySize() {
 bool typeEnabled(DetectionType t) {
     uint8_t idx = (uint8_t)t;
     if (idx == 0 || idx >= (uint8_t)DetectionType::COUNT) return true;  // UNKNOWN, or out of range -- never gated
+    // MY ALERTS has no row in TYPE FILTER: the list is its switch, and an
+    // empty list matches nothing.
+    if (t == DetectionType::MINE) return true;
     return (s_typeMask & (1u << idx)) != 0;
 }
 
 void toggleType(DetectionType t) {
     uint8_t idx = (uint8_t)t;
-    if (idx == 0 || idx >= (uint8_t)DetectionType::COUNT) return;
+    if (idx == 0 || idx >= (uint8_t)DetectionType::COUNT || t == DetectionType::MINE) return;
     s_typeMask ^= (1u << idx);
     s_prefs.putUInt("typemask", s_typeMask);
     // Stamped alongside the mask so a later firmware can tell which
@@ -1081,8 +1340,8 @@ void toggleType(DetectionType t) {
 
 uint8_t enabledTypeCount() {
     uint8_t n = 0;
-    for (uint8_t t = 1; t < (uint8_t)DetectionType::COUNT; t++) {
-        if (s_typeMask & (1u << t)) n++;
+    for (uint8_t i = 0; i < CATALOGUE_N; i++) {
+        if (s_typeMask & (1u << (uint8_t)catalogueAt(i))) n++;
     }
     return n;
 }

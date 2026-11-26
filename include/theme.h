@@ -5,6 +5,8 @@
 #include <TFT_eSPI.h>
 #include "state.h"
 
+namespace Settings { enum class FontKind : uint8_t; }
+
 class DetectionEngine;
 
 namespace Theme {
@@ -78,7 +80,11 @@ namespace Theme {
                  vaporPink, vaporPurple, vaporBlue, vaporYellow,
                  green, amber, red;
     };
-    static const uint8_t PALETTE_COUNT = 6;
+    static const uint8_t PALETTE_COUNT = 7;
+    // DU5K: the dusk palette off the Ring Ding Dong opener (indigo night, a
+    // peach and rose sun, teal grid). The alert card's skins take their
+    // colours straight from it rather than working them out (alert_skin.h).
+    static const uint8_t PALETTE_DUSK = 6;
     extern const Palette kPalettes[PALETTE_COUNT];
 
     // Overwrites BG/PURPLE/etc. from kPalettes[idx] (clamped). Call
@@ -108,6 +114,9 @@ namespace Theme {
 
     // Linear blend between two RGB565 colors. t is 0..256 (8.8 fixed).
     uint16_t blend(uint16_t a, uint16_t b, uint16_t t);
+    // Sine in whole numbers: a 16-bit turn in, -256..256 out. For the boards
+    // with no floating-point unit (the ESP32-C5s); costs the others nothing.
+    int isin256(uint16_t a);
     // Black or white, whichever reads on `fill`. A selected button or tab is
     // filled with PURPLE and used to keep a white label whatever the theme;
     // GH0ST's PURPLE is near white, and three other themes' are pale enough
@@ -241,6 +250,8 @@ namespace Theme {
     // like tapping CANCEL, so without this there is no evidence the tap did
     // anything at all. `sub` may be nullptr.
     void showToast(const char* head, const char* sub, uint16_t accent, uint32_t ms = 1500);
+    // A toast is on screen right now (TERMINAL MODE keeps full speed for it).
+    bool toastUp(uint32_t now);
 
     // No-op unless a toast is live. Call last, after the screen has drawn.
     void drawToast(TFT_eSPI& t, uint32_t now);
@@ -274,10 +285,76 @@ namespace Theme {
     // long-standing habit so drawing and hit-testing cannot drift, which
     // means the rows get taller by themselves and the targets grow with the
     // letters. Narrow panels get 2 back and nothing about them moves.
+    // MENUS moves it a size either way (1 to 4).
     uint8_t uiMenuTextSize(TFT_eSPI& t);
+
+    // ---- FONTS (Settings > APPEARANCE > FONTS) ----
+    // Each kind of text is a step from the size the board was built with:
+    // -2..+2, a slider on the FONTS page. Only the faces every board has are
+    // used (the 6x8 system font at whole sizes, and font 2), so fontRange()
+    // says how far each kind can actually go on this panel; consumers clamp
+    // the stored step to what they can draw.
+    //   MENUS    list and settings rows, the BACK strip (uiMenuTextSize)
+    //   TEXT     the body font, headings, upSize(): down to the 2.8in's
+    //            sizes on the large panels, never up -- ~70 layouts place
+    //            their lines for the size they were built with
+    //   BUTTONS  drawButton() and drawWin95Button() labels, measured
+    //            against their boxes
+    //   BUBBLES  his speech bubble and the pets' balloons
+    //   XP_TILES the counter tiles' scale, 1x or 2x (xpTileScale())
+    //   PETS     the pets' balloons (petFontOn())
+    // MENUS, BUTTONS, BUBBLES and PETS also take a face: PIXEL (the 6x8 system
+    // font) or SMOOTH (font 2), the two every board has. Until one is picked
+    // each keeps the face it was built with.
+    int8_t      fontDelta(Settings::FontKind k);
+    bool        fontHasFace(Settings::FontKind k);
+    bool        fontSmooth(Settings::FontKind k);          // the face in use, picked or as built
+    void        toggleFontFace(Settings::FontKind k);      // PIXEL <-> SMOOTH
+    int         xpTileScale();
+    void        fontRange(TFT_eSPI& t, Settings::FontKind k, int8_t& lo, int8_t& hi);
+    void        setFontDelta(TFT_eSPI& t, Settings::FontKind k, int step);   // clamped to fontRange()
+    const char* fontStepName(int8_t step);
+    // A settings or list row's face: the system font at uiMenuTextSize(), or
+    // for a narrow (portrait) row the smaller face it always used, both moved
+    // by MENUS. menuFontSmaller() steps down one size for a row too long for
+    // the screen; false when there is nothing smaller.
+    void menuFontOn(TFT_eSPI& t, bool narrow);
+    // A menu face asked for as the system font at `size`, in MENUS' face.
+    void menuFontSized(TFT_eSPI& t, int size);
+    bool menuFontSmaller(TFT_eSPI& t);
+    // The sub-lists (POWER SAVER, STATUS LIGHT, SECURITY): their rows' system
+    // font size, 2 (1 when compact) moved by MENUS, stepped back down where a
+    // bigger label and value would not fit across w.
+    void subListTextSize(TFT_eSPI& t, bool compact, const char* label, const char* value, int w);
+    // His speech bubble. `small` is the boot splash's 2.8in-sized bubble,
+    // which no step moves. speechFontOn() picks the face; the rest answer for
+    // the face it picked, and speechFontSmaller() steps down one (for a
+    // bigger bubble that would run out of lines).
+    void speechFontOn(TFT_eSPI& t, bool small);
+    bool speechAboveNormal();
+    void speechFontSmaller(TFT_eSPI& t);
+    int  speechScale();
+    int  speechTextH();
+    int  speechAscent();
+    // The pets' balloons: the face and size PETS asks for, and one smaller
+    // for a line too wide for the panel (false when there is nothing smaller).
+    void petFontOn(TFT_eSPI& t);
+    bool petFontSmaller(TFT_eSPI& t);
 
     void drawButton(TFT_eSPI& t, int x, int y, int w, int h,
                     const char* label, bool pressed, uint8_t textSize = 1);
+
+#if defined(CARDPUTER_ADV)
+    // Context hotkeys: every drawButton()/drawWin95Button() records its box
+    // and the first letter of its label. The newest drawing of a box
+    // replaces the old one, and a box not drawn for 400 ms is gone (every
+    // screen redraws each frame). The caller checks the box is a live stop.
+    struct HotButton { int16_t x, y, w, h; char c; uint32_t seq, at; };
+    uint8_t hotButtons(const HotButton** out);
+#endif
+    // A button not drawn by drawButton() names itself for the hotkeys (a
+    // no-op off the Cardputer). Also overrides a label that is not its name.
+    void hotButton(int x, int y, int w, int h, const char* label);
 
     // A real Windows 95/98 push button: silver face, two-pixel bevel, black
     // system-font label. `sunken` inverts the bevel and nudges the label a
@@ -564,6 +641,14 @@ namespace Theme {
     // consume-once contract as the three above; main.cpp turns it into the
     // PARKA unlock.
     bool consumeLodgeKnock();
+    // True once, after three knocks on the igloo that goes by in the SNOWFALL
+    // snow. Same contract; main.cpp turns it into Squachy::unlockMeaty().
+    bool consumeIglooKnock();
+    // True when a tap lands on the red eyes in the FIREFLIES treeline while
+    // they are showing, and puts them away. main.cpp turns it into
+    // Squachy::unlockMothman(). Once he is found the eyes come back green
+    // and take no taps.
+    bool mothmanEyesTap(int x, int y, uint32_t now);
     // True once, after the owl on the FIRE background was tapped while asking
     // WHAT REEKS?! (every third time he speaks). main.cpp turns it into
     // Squachy::unlockShambler().
@@ -622,7 +707,7 @@ namespace Theme {
     // Covers A-Z, 0-9, space, '!'; anything else is silently skipped.
     // LG is sized for the boot splash title, MD for the ALERT screen's
     // "!! DETECTION !!" — pick whichever fits the string in question.
-    enum class BangersSize { LG, MD };
+    enum class BangersSize { LG, MD, SM };   // SM: the info card (bangers_font.h)
 
     // x,y is the top-left of the font's ascender box, same convention
     // as TFT_eSPI's setCursor for the built-in font.
@@ -666,6 +751,14 @@ namespace Theme {
     // clock draws anything else, or when this is called on leaving the desk.
     void drawClockBackdrop(TFT_eSPI& t, uint32_t now, int x, int y, int w, int h, uint8_t kind);
     void releaseClockBackdrop();
+
+    // FIRE's heat (6.4 KB on a 2.8"), DIGITAL's trails and TERMINAL's columns
+    // are only let go when another background is picked, so a screen with no
+    // background (UPDATE, HUMAN SENSING) would otherwise run with them pinned
+    // in the middle of the heap. Called on the way into those; the next
+    // screen that draws the background takes them back on its first frame.
+    // Not LOG or SETTINGS: those draw the background behind their lists.
+    void releaseBackgroundBuffers();
 
     // True during the shared random glitch burst drawBangersText()
     // already rolls every ~5-10s (see its own comment) -- exposed so

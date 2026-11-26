@@ -45,7 +45,7 @@ static void drawRow(TFT_eSPI& t, int w, int y, int hgt, uint8_t idx) {
     // muted something without telling you what, and the log entry that would
     // have answered that has usually scrolled out of the ring by then.
     const DetectionType ty = IgnoreList::typeAt(idx);
-    t.setTextSize(Theme::uiMenuTextSize(t));
+    Theme::menuFontOn(t, false);   // FONTS > MENUS
     t.setTextColor(Theme::colorFor(ty), Theme::BG);
     t.setCursor(6, y + 3);
     t.print(detectionTypeName(ty));
@@ -90,7 +90,11 @@ void uiIgnoreListTick(TFT_eSPI& t, uint32_t now) {
         t.print(m1);
         Theme::bodyFontOn(t);
         t.setTextColor(Theme::CYAN, Theme::BG);
+#if defined(SQW_SMALL)
+        const char* m2 = "Pick IGNORE on an alert to mute";
+#else
         const char* m2 = "Tap IGNORE on an alert to mute";
+#endif
         const char* m3 = "a device you own.";
         t.setCursor((w - t.textWidth(m2)) / 2, h / 2 + 2);
         t.print(m2);

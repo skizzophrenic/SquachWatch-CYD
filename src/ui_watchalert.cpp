@@ -324,7 +324,11 @@ void uiWatchAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, boo
                                      : "It's holding still. The nearer the middle, the nearer to you.");
                 break;
             default:
+#if defined(SQW_SMALL)
+                snprintf(s_line, sizeof s_line, "BACK closes this. The button stops watching it.");
+#else
                 snprintf(s_line, sizeof s_line, "Tap anywhere to close this. The button stops watching it.");
+#endif
                 break;
         }
         s_lineStep = (uint8_t)((s_lineStep + 1) % 3);
@@ -338,7 +342,11 @@ void uiWatchAlertTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, boo
         Theme::drawButton(t, bx, by, bw, bh, removeLabel(t, bw), false, 1);
         return;
     }
+#if defined(SQW_SMALL)
+    const char* tapMsg = "BACK to dismiss";
+#else
     const char* tapMsg = "tap anywhere to dismiss";
+#endif
     Theme::bodyFontOn(t);
     t.setTextColor(Theme::WHITE);
     t.setCursor((w - t.textWidth(tapMsg)) / 2, hintY);

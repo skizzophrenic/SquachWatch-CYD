@@ -58,14 +58,14 @@ void save() {
 
 uint32_t weekOfDay(uint32_t day) { return day / 7u; }
 
-// A card: sixteen of the seventeen types, so exactly one sits out. The one
-// that sits out is picked from the types this board has never seen, which is
+// A card: sixteen of the nineteen types, so three sit out. The ones that sit
+// out are picked from the types this board has never seen, which is
 // what keeps a card winnable somewhere quiet -- a card that keeps every rare
 // type is a card nobody finishes.
 void deal(const DetectionEngine* eng) {
     uint8_t pool[(uint8_t)DetectionType::COUNT];
     uint8_t n = 0;
-    for (uint8_t t = 1; t < (uint8_t)DetectionType::COUNT; t++) pool[n++] = t;
+    for (uint8_t i = 0; i < CATALOGUE_N; i++) pool[n++] = (uint8_t)catalogueAt(i);   // MY ALERTS is nobody else's card
 
     if (n > CELLS) {
         // Drop (n - CELLS) of them, preferring ones never seen here.

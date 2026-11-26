@@ -81,7 +81,7 @@ static void drawRow(TFT_eSPI& t, int w, int y, int hgt, LightRow r, bool compact
 
     Theme::drawListRowPanel(t, w, y, hgt);
 
-    t.setTextSize(compact ? 1 : 2);
+    Theme::subListTextSize(t, compact, label, value, w);   // FONTS > MENUS
     const uint16_t lab = dimmed ? Theme::blend(Theme::BG, Theme::CYAN, 110) : Theme::CYAN;
     t.setTextColor(lab, Theme::BG);
     t.setCursor(8, y + (hgt - t.fontHeight()) / 2);
@@ -94,6 +94,7 @@ static void drawRow(TFT_eSPI& t, int w, int y, int hgt, LightRow r, bool compact
         t.setCursor(w - 18 - vw, y + (hgt - t.fontHeight()) / 2);
         t.print(value);
     }
+    t.setTextFont(1);
 }
 
 void uiLightTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {

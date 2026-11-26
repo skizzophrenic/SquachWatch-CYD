@@ -1,0 +1,29 @@
+{
+  "name": "SquachWatch-CYD (LilyGo T-Deck Plus)",
+  "version": "0.0.0",
+  "funding_url": "https://talkingsasquach.com",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "esp32s3-bootloader.bin",
+          "offset": 0
+        },
+        {
+          "path": "twatch-s3-partitions.bin",
+          "offset": 32768
+        },
+        {
+          "path": "esp32-otadata.bin",
+          "offset": 57344
+        },
+        {
+          "path": "tdeck-plus-firmware.bin",
+          "offset": 65536
+        }
+      ]
+    }
+  ]
+}

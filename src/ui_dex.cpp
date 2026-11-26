@@ -24,7 +24,7 @@ void panel(TFT_eSPI& t, int x, int y, int w, int h, uint16_t edge) {
 }
 
 // ---- the index -----------------------------------------------------------
-// Six across in landscape, four in portrait, however many rows the seventeen
+// Six across in landscape, four in portrait, however many rows the eighteen
 // need. The tiles fill the space between the heading and the BACK strip.
 void grid(int w, int h, int& cols, int& rows, int& gx, int& gy, int& cw, int& ch) {
     cols = w > h ? 6 : 4;

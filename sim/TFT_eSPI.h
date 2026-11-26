@@ -43,6 +43,7 @@
 #include <algorithm>
 #include "glcdfont_data.h"
 #include "font16_data.h"
+#include "font32_data.h"
 #include "gfxff/gfxfont.h"
 
 // The GLCD font's cell, matching the real library exactly. Five glyph
@@ -192,6 +193,32 @@ public:
         return width * textsize;
     }
 
+    // Font 4: the library's 26-row run-length face. Each byte is a run, MSB
+    // set for ink: (b & 0x7F) + 1 pixels of text colour, else b + 1 of
+    // background, filling the glyph's width row by row -- TFT_eSPI's own
+    // decoder. Only the Tab5 build loads it (LOAD_FONT4).
+    int16_t drawChar4(uint16_t c, int32_t x, int32_t y) {
+        if (c < 32 || c > 127) return 0;
+        const unsigned char* g = chrtbl_f32[c - 32];
+        const int width = widtbl_f32[c - 32];
+        const int total = width * chr_hgt_f32;
+        int pc = 0;
+        while (pc < total) {
+            const uint8_t line = *g++;
+            const bool on = line & 0x80;
+            int run = (line & 0x7F) + 1;
+            while (run-- && pc < total) {
+                const int col = pc % width, row = pc / width;
+                pc++;
+                if (!on && transparent) continue;
+                const uint16_t col565 = on ? textcolor : textbgcolor;
+                if (textsize == 1) drawPixel(x + col, y + row, col565);
+                else fillRect(x + col * textsize, y + row * textsize, textsize, textsize, col565);
+            }
+        }
+        return width * textsize;
+    }
+
     // An Adafruit GFX face, the way the real library prints one: the cursor
     // is the BASELINE, glyphs sit at (x + xOffset, y + yOffset), bits packed
     // row-major with no padding, and the cursor moves on by xAdvance.
@@ -214,6 +241,7 @@ public:
     virtual int16_t drawChar(uint16_t c, int32_t x, int32_t y, uint8_t /*font*/ = 1) {
         if (gfxFont) return drawCharGfx(c, x, y);
         if (textfont == 2) return drawChar2(c, x, y);
+        if (textfont == 4) return drawChar4(c, x, y);
         if (c > 255) return GLCD_ADVANCE * textsize;
         // GLCD_ADVANCE columns, not GLCD_W. The sixth is always blank and
         // exists to be painted in the background colour: real TFT_eSPI writes
@@ -236,6 +264,26 @@ public:
             }
         }
         return GLCD_ADVANCE * textsize;
+    }
+    // The library's other drawChar: one GLCD glyph at (x, y) in `color` over
+    // `bg`, at `size`, leaving the text colour, size and cursor alone. As in
+    // real TFT_eSPI, a bg equal to the colour means NO background -- only the
+    // glyph's own pixels land, and the blank sixth column is not painted.
+    // The LORA page's chat rain draws its glyphs this way.
+    void drawChar(int32_t x, int32_t y, uint16_t c, uint32_t color, uint32_t bg, uint8_t size) {
+        if (c > 255) return;
+        if (size < 1) size = 1;
+        const bool fillbg = bg != color;
+        for (int col = 0; col < (fillbg ? GLCD_ADVANCE : GLCD_W); col++) {
+            const uint8_t bits = (col >= GLCD_W) ? 0x00 : font[(size_t)c * GLCD_W + col];
+            for (int row = 0; row < GLCD_H; row++) {
+                const bool on = (bits >> row) & 1;
+                if (!on && !fillbg) continue;
+                const uint32_t c565 = on ? color : bg;
+                if (size == 1) drawPixel(x + col, y + row, c565);
+                else           fillRect(x + col * size, y + row * size, size, size, c565);
+            }
+        }
     }
 
     // ---- shape primitives, built on the virtuals above (same split
@@ -382,6 +430,8 @@ public:
 
     // ---- text ------------------------------------------------------
     void setCursor(int32_t x, int32_t y) { cursor_x = x; cursor_y = y; }
+    int16_t getCursorX() const { return (int16_t)cursor_x; }
+    int16_t getCursorY() const { return (int16_t)cursor_y; }
     void setTextColor(uint16_t fg) { textcolor = fg; textbgcolor = fg; transparent = true; }
     void setTextColor(uint16_t fg, uint16_t bg) { textcolor = fg; textbgcolor = bg; transparent = false; }
     void setTextSize(uint8_t s) { textsize = s ? s : 1; }
@@ -394,9 +444,9 @@ public:
     // (not "helpfully" treating the argument as a size) is deliberate:
     // it's what would surface a real latent bug in the caller instead
     // of hiding it.
-    int16_t fontHeight(int font) const { return font == 1 ? GLCD_H * textsize : (font == 2 ? 16 * textsize : 0); }
+    int16_t fontHeight(int font) const { return font == 1 ? GLCD_H * textsize : font == 2 ? 16 * textsize : font == 4 ? chr_hgt_f32 * textsize : 0; }
     int16_t fontHeight() const { return gfxFont ? gfxFont->yAdvance * textsize : fontHeight(textfont); }
-    void setTextFont(uint8_t f) { textfont = (f == 2) ? 2 : 1; gfxFont = nullptr; }
+    void setTextFont(uint8_t f) { textfont = (f == 2 || f == 4) ? f : 1; gfxFont = nullptr; }
     void setFreeFont(const GFXfont* f) { gfxFont = f; textfont = 1; }
     int16_t textWidth(const char* s) const {
         int16_t w = 0;
@@ -412,6 +462,10 @@ public:
         }
         if (textfont == 2) {
             for (; *s; s++) { const unsigned char c = (unsigned char)*s; if (c >= 32 && c <= 127) w += widtbl_f16[c - 32] * textsize; }
+            return w;
+        }
+        if (textfont == 4) {
+            for (; *s; s++) { const unsigned char c = (unsigned char)*s; if (c >= 32 && c <= 127) w += widtbl_f32[c - 32] * textsize; }
             return w;
         }
         for (; *s; s++) w += GLCD_ADVANCE * textsize;
@@ -434,6 +488,11 @@ public:
 
     uint16_t color565(uint8_t r, uint8_t g, uint8_t b) const {
         return (uint16_t)(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+    }
+    // The library's RGB332 -> RGB565, for the Cardputer's EXT SCREEN table.
+    uint16_t color8to16(uint8_t c) const {
+        static const uint8_t blue[] = {0, 11, 21, 31};
+        return (uint16_t)(((c & 0xE0) << 8) | ((c & 0xC0) << 5) | ((c & 0x1C) << 6) | ((c & 0x1C) << 3) | blue[c & 3]);
     }
 
     // ---- touch/SPI: inert, there's no touchscreen to simulate -------

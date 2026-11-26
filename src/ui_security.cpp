@@ -86,7 +86,7 @@ static void drawRow(TFT_eSPI& t, int w, int y, int hgt, SecurityRow r, bool comp
 
     Theme::drawListRowPanel(t, w, y, hgt);
 
-    t.setTextSize(compact ? 1 : 2);
+    Theme::subListTextSize(t, compact, label, value, w);   // FONTS > MENUS
     const uint16_t lab = dimmed ? Theme::blend(Theme::BG, Theme::VAPOR_PURPLE, 110) : Theme::VAPOR_PURPLE;
     t.setTextColor(lab, Theme::BG);
     t.setCursor(8, y + (hgt - t.fontHeight()) / 2);
@@ -106,6 +106,7 @@ static void drawRow(TFT_eSPI& t, int w, int y, int hgt, SecurityRow r, bool comp
         t.print(value);
     }
     t.drawFastHLine(4, y + hgt - 1, w - 8, Theme::PURPLE);
+    t.setTextFont(1);
 }
 
 void uiSecurityTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {

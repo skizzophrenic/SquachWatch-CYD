@@ -115,6 +115,9 @@ static const char* toastCatchLine(uint8_t type) {
         case DetectionType::EVILTWIN:    return "An evil twin network. I only have good twins.";
         case DetectionType::HACKER:      return "A hacker tool! I am mostly brave.";
         case DetectionType::IBEACON:     return "A shop beacon. I'm not for sale.";
+        case DetectionType::LORAWAN:     return "A LoRaWAN network. Long range. I'm short range.";
+        case DetectionType::MINE:        return "That's the one you told me to watch for!";
+        case DetectionType::LISTENER:    return "A smart speaker. Don't tell it my secrets.";
         default:                         return nullptr;
     }
 }
@@ -135,8 +138,10 @@ static uint8_t toastBrowning(uint8_t type) {
         case DetectionType::IBEACON:     return 0;
         case DetectionType::AIRTAG: case DetectionType::SAMSUNG_TAG:
         case DetectionType::GOOGLE_TAG: case DetectionType::TILE: case DetectionType::DRONE: return 1;
-        case DetectionType::CAMERA: case DetectionType::RING: case DetectionType::META:    return 2;
-        case DetectionType::SKIMMER: case DetectionType::ALPR: case DetectionType::RAVEN:  return 3;
+        case DetectionType::CAMERA: case DetectionType::RING: case DetectionType::META:
+        case DetectionType::LISTENER:                                                       return 2;
+        case DetectionType::SKIMMER: case DetectionType::ALPR: case DetectionType::RAVEN:
+        case DetectionType::MINE:                                                           return 3;
         default:                         return 4;
     }
 }
@@ -172,9 +177,9 @@ static uint32_t    s_tSmokeAt = 0;
 static int16_t     s_tSmokeX = 0, s_tSmokeY = 0;
 // Thrown.
 static TPhase      s_tPh = TPhase::NONE;
-static float       s_tfX = 0, s_tfY = 0, s_tvX = 0, s_tvY = 0;
+static Fling       s_tF;
 static Grip        s_tG;
-static uint32_t    s_tThLast = 0, s_tThAt = 0, s_tSqAt = 0;
+static uint32_t    s_tThAt = 0, s_tSqAt = 0;
 static float       s_tSqK = 0, s_tSq = 1.0f;
 static bool        s_tFlung = false, s_tHard = false;
 static uint8_t     s_tBounces = 0;
@@ -340,7 +345,7 @@ static void toasterPoke(uint32_t now) {
 static void toasterGrab(int x, int y, uint32_t now) {
     if (s_tX < -50) return;
     s_tPh = TPhase::HELD;
-    s_tfX = (float)s_tX; s_tfY = (float)s_tY;
+    s_tF.x = (float)s_tX; s_tF.y = (float)s_tY;
     gripStart(s_tG, x, y, s_tX, s_tY, now);
     s_tHop.at = 0;
     s_tCatchAt = 0;
@@ -350,13 +355,9 @@ static void toasterDrag(int x, int y, uint32_t now) {
     gripMove(s_tG, x, y, now);
 }
 static void toastLaunch(float vx, float vy, uint32_t now) {
-    if (vx > CLIP_MAX_V) vx = CLIP_MAX_V;
-    if (vx < -CLIP_MAX_V) vx = -CLIP_MAX_V;
-    if (vy > CLIP_MAX_V) vy = CLIP_MAX_V;
-    if (vy < -CLIP_MAX_V) vy = -CLIP_MAX_V;
-    s_tvX = vx; s_tvY = vy;
+    flingLaunch(s_tF, vx, vy, now);
     s_tPh = TPhase::AIR;
-    s_tThAt = s_tThLast = now;
+    s_tThAt = now;
     s_tBounces = 0;
     s_tSqAt = 0;
     s_tHard = false;
@@ -495,47 +496,32 @@ static void toasterTick(TFT_eSPI& t, uint32_t now, int screenW, int floorY) {
         bool flip = false;
         s_tSq = 1.0f;
         if (s_tPh == TPhase::HELD) {
-            s_tfX = (float)(s_tG.fingerX - s_tG.offX);
-            s_tfY = (float)(s_tG.fingerY - s_tG.offY);
-            if (s_tfX < leftX) s_tfX = leftX;
-            if (s_tfX > rightX) s_tfX = rightX;
-            if (s_tfY < ceilY) s_tfY = ceilY;
-            if (s_tfY > floorBox) s_tfY = floorBox;
+            flingHold(s_tF, s_tG, leftX, rightX, ceilY, floorBox);
             if (!s_tG.moved) tf = TFace::IDLE;
             if (now - s_tG.gT > 600 && s_tG.moved) toastLaunch(0, 0, now);
         } else if (s_tPh == TPhase::AIR) {
-            uint32_t dt = now - s_tThLast;
-            if (dt > 60) dt = 60;
-            s_tThLast = now;
+            uint32_t dt = flingDt(s_tF, now);
             while (dt && s_tPh == TPhase::AIR) {
-                const float st = (float)(dt > 8 ? 8 : dt);
-                dt -= (dt > 8 ? 8 : dt);
-                s_tvY += TOAST_G * st;
-                s_tfX += s_tvX * st;
-                s_tfY += s_tvY * st;
-                if (s_tfX < leftX && s_tvX < 0)  { s_tfX = leftX;  s_tvX = -s_tvX * 0.5f; }
-                if (s_tfX > rightX && s_tvX > 0) { s_tfX = rightX; s_tvX = -s_tvX * 0.5f; }
-                if (s_tfY < ceilY && s_tvY < 0)  { s_tfY = ceilY;  s_tvY = -s_tvY * 0.3f; }
-                if (s_tfY >= floorBox && s_tvY > 0) {
+                const float st = flingTake(dt);
+                if (flingStep(s_tF, st, TOAST_G, leftX, rightX, ceilY, floorBox, 0.5f, 0.3f)) {
                     // He is a toaster: a thud, crumbs, and at most one small hop.
-                    s_tfY = floorBox;
                     s_tSqAt = now;
-                    s_tSqK = s_tvY > 0.9f ? 1.0f : s_tvY / 0.9f;
+                    s_tSqK = s_tF.vy > 0.9f ? 1.0f : s_tF.vy / 0.9f;
                     if (s_tBounces == 0) {
-                        toastCrumbs((int)s_tfX + TOAST_W / 2, (int)s_tfY + TOAST_H, now);
-                        if (s_tFlung) { zLandedAt((int)s_tfX + TOAST_W / 2); Sound::play(Sound::Id::LAND); }
+                        toastCrumbs((int)s_tF.x + TOAST_W / 2, (int)s_tF.y + TOAST_H, now);
+                        if (s_tFlung) { zLandedAt((int)s_tF.x + TOAST_W / 2); Sound::play(Sound::Id::LAND_TOASTER); }
                         if (s_tFlung) {
                             s_tlLive = true; s_tlBorn = now;
-                            s_tlX = s_tfX + 8; s_tlY = s_tfY; s_tlVX = -0.03f; s_tlVY = -0.4f;
+                            s_tlX = s_tF.x + 8; s_tlY = s_tF.y; s_tlVX = -0.03f; s_tlVY = -0.4f;
                         }
-                        if (s_tvY > 0.75f) s_tHard = true;
+                        if (s_tF.vy > 0.75f) s_tHard = true;
                     }
-                    if (s_tvY > 0.35f && s_tBounces < 1) {
-                        s_tvY = -s_tvY * 0.25f;
-                        s_tvX *= 0.5f;
+                    if (s_tF.vy > 0.35f && s_tBounces < 1) {
+                        s_tF.vy = -s_tF.vy * 0.25f;
+                        s_tF.vx *= 0.5f;
                         s_tBounces++;
                     } else {
-                        s_tvY = 0;
+                        s_tF.vy = 0;
                         s_tThAt = now;
                         const char* streak = s_tFlung ? toastStreakLine(now) : nullptr;
                         if (s_tHard && s_tFlung) {
@@ -550,7 +536,7 @@ static void toasterTick(TFT_eSPI& t, uint32_t now, int screenW, int floorY) {
                     }
                 }
             }
-            if (s_tPh == TPhase::AIR && now - s_tThAt > 5000) { s_tfY = floorBox; s_tPh = TPhase::SIT; s_tThAt = now; }
+            if (s_tPh == TPhase::AIR && now - s_tThAt > 5000) { s_tF.y = floorBox; s_tPh = TPhase::SIT; s_tThAt = now; }
         } else if (s_tPh == TPhase::FLIPPED) {
             tf = TFace::DIZZY;
             flip = true;
@@ -559,14 +545,14 @@ static void toasterTick(TFT_eSPI& t, uint32_t now, int screenW, int floorY) {
             tf = TFace::DIZZY;
             if (now - s_tThAt > TOAST_SIT_MS) {
                 s_tPh = TPhase::NONE;
-                petHopStart(s_tHop, (int)lroundf(s_tfX), 0.0f, to, now, TOAST_HOP_MS, 16.0f);
+                petHopStart(s_tHop, (int)lroundf(s_tF.x), 0.0f, to, now, TOAST_HOP_MS, 16.0f);
             }
         }
         if (s_tPh != TPhase::NONE) {
             if (s_tSqAt && now - s_tSqAt < TOAST_LAND_MS + 60)
                 s_tSq = 1.0f - 0.22f * s_tSqK * (1.0f - (float)(now - s_tSqAt) / (float)(TOAST_LAND_MS + 60));
-            s_tX = (int16_t)lroundf(s_tfX);
-            s_tY = (int16_t)lroundf(s_tfY);
+            s_tX = (int16_t)lroundf(s_tF.x);
+            s_tY = (int16_t)lroundf(s_tF.y);
             // On his back he rocks, the first second or so.
             const int rock = (flip && now - s_tThAt < 1200) ? (int)((now / 110) & 1) : 0;
             drawSlice();

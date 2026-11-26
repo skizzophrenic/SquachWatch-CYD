@@ -1,6 +1,6 @@
 // SquachWatch-CYD — the SQUACHY-DEX: one entry per detection type.
 //
-// BINGO is a card you fill once a week. The DEX never finishes: seventeen
+// BINGO is a card you fill once a week. The DEX never finishes: eighteen
 // numbered entries, a silhouette for every type never caught, and a card
 // behind each with what it is, where it lives, what Squachy thinks of it,
 // and this board's own record against it. The counts come from the
@@ -14,9 +14,9 @@ class DetectionEngine;
 
 namespace Dex {
 
-static const uint8_t ENTRIES = (uint8_t)DetectionType::COUNT - 1;   // UNKNOWN has no card
+static const uint8_t ENTRIES = CATALOGUE_N;    // UNKNOWN and MINE have no card
 
-// Entry i (0-based) is DetectionType i+1.
+// Entry i (0-based) is catalogueAt(i): the types in order, MINE stepped over.
 DetectionType typeAt(uint8_t i);
 uint8_t       indexOf(DetectionType t);
 

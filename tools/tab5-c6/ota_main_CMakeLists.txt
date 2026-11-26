@@ -1,0 +1,11 @@
+# The C6 firmware is embedded in the application, put it in firmware/network_adapter.bin (see README.md)
+set(C6_FIRMWARE "${CMAKE_CURRENT_SOURCE_DIR}/../firmware/network_adapter.bin")
+if(NOT EXISTS "${C6_FIRMWARE}")
+    message(FATAL_ERROR "Missing ${C6_FIRMWARE}\n"
+        "Download network_adapter_esp32c6_v3.0.9.bin from the latest release and save it there as network_adapter.bin.")
+endif()
+
+idf_component_register(SRCS "main.c" "tab5_power.c"
+                       INCLUDE_DIRS "."
+                       REQUIRES espressif__esp_hosted nvs_flash esp_event esp_timer esp_driver_i2c
+                       EMBED_FILES "${C6_FIRMWARE}")

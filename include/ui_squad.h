@@ -36,4 +36,8 @@ void     uiSquadInit(TFT_eSPI& t, bool roster = false);
 // than by the clock must sit still for it. Other boards draw once.
 void     uiSquadTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng, bool advance = true);
 SquadHit uiSquadTouch(int x, int y, uint32_t now);
+// The boards with buttons for a finger: every target drawn this frame, as
+// rectangles, for the cursor to step through. Only what is live.
+uint8_t uiSquadStopRects(int16_t* rx, int16_t* ry, int16_t* rw, int16_t* rh, uint8_t cap);
+bool    uiSquadBackRect(int16_t& x, int16_t& y, int16_t& w, int16_t& h);
 #endif

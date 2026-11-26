@@ -27,8 +27,8 @@ static const uint32_t YETI_DISCO_MS = 6000, YETI_FLOSS_MS = 5200;
 
 static Grip     s_yG;
 static YPhase   s_yBefore = YPhase::AWAY;   // what he was doing when a finger landed on him
-static float    s_yfX = 0, s_yfY = 0, s_yvX = 0, s_yvY = 0;   // centre and feet, off the ground
-static uint32_t s_yThLast = 0, s_yLandAt = 0;
+static Fling    s_yF;                 // centre and feet, off the ground
+static uint32_t s_yLandAt = 0;
 static uint8_t  s_yBounces = 0;
 static bool     s_yFlung = false, s_yDust = false;
 static int      s_yFloor = 0;               // last frame's floor, for the hit test
@@ -134,15 +134,15 @@ static void yetiDanceDraw(TFT_eSPI& t, int x, int baseY, uint32_t now) {
 static bool yetiHit(int x, int y) {
     if (s_yPhase == YPhase::AWAY) return false;
     const bool off = yetiAirborne();
-    const float cx = off ? s_yfX : s_yX;
-    const float fy = off ? s_yfY : (float)s_yFloor;
+    const float cx = off ? s_yF.x : s_yX;
+    const float fy = off ? s_yF.y : (float)s_yFloor;
     return (float)x >= cx - 16.0f && (float)x <= cx + 16.0f && (float)y >= fy - 58.0f && (float)y <= fy + 2.0f;
 }
 static bool yetiCenter(int& x, int& y) {
     if (s_yPhase == YPhase::AWAY) return false;
     const bool off = yetiAirborne();
-    x = (int)(off ? s_yfX : s_yX);
-    y = (int)(off ? s_yfY : (float)s_yFloor) - 28;
+    x = (int)(off ? s_yF.x : s_yX);
+    y = (int)(off ? s_yF.y : (float)s_yFloor) - 28;
     return true;
 }
 // A tap makes him dance -- the other one, if he is already dancing. Tapping
@@ -164,23 +164,19 @@ static void yetiGrab(int x, int y, uint32_t now) {
     if (s_yPhase == YPhase::AWAY || s_yPhase == YPhase::HELD) return;
     if (!yetiAirborne()) {
         s_yBefore = s_yPhase;
-        s_yfX = s_yX; s_yfY = (float)s_yFloor;
+        s_yF.x = s_yX; s_yF.y = (float)s_yFloor;
     }
     s_yPhase = YPhase::HELD;
-    gripStart(s_yG, x, y, (int)s_yfX, (int)s_yfY, now);
+    gripStart(s_yG, x, y, (int)s_yF.x, (int)s_yF.y, now);
 }
 static void yetiDrag(int x, int y, uint32_t now) {
     if (s_yPhase != YPhase::HELD) return;
     gripMove(s_yG, x, y, now);
 }
 static void yetiLaunch(float vx, float vy, uint32_t now) {
-    if (vx >  CLIP_MAX_V) vx =  CLIP_MAX_V;
-    if (vx < -CLIP_MAX_V) vx = -CLIP_MAX_V;
-    if (vy >  CLIP_MAX_V) vy =  CLIP_MAX_V;
-    if (vy < -CLIP_MAX_V) vy = -CLIP_MAX_V;
-    s_yvX = vx; s_yvY = vy;
+    flingLaunch(s_yF, vx, vy, now);
     s_yPhase = YPhase::AIR;
-    s_yThLast = s_yAt = now;
+    s_yAt = now;
     s_yBounces = 0;
 }
 static void yetiRelease(uint32_t now) {
@@ -189,7 +185,7 @@ static void yetiRelease(uint32_t now) {
     switch (gripLetGo(s_yG, now, vx, vy)) {
         case 0:   // a tap: he was never really picked up, and it made him jump
             if (s_yBefore == YPhase::AIR || s_yBefore == YPhase::FLOPPED || s_yBefore == YPhase::STOMP) { yetiLaunch(0, 0, now); s_yFlung = false; }
-            else { s_yPhase = s_yBefore; s_yAt = now; s_yX = s_yfX; }
+            else { s_yPhase = s_yBefore; s_yAt = now; s_yX = s_yF.x; }
             yetiPoke(now);
             break;
         case 1:
@@ -210,56 +206,41 @@ static void yetiFlightTick(TFT_eSPI& t, uint32_t now, int screenW, int floorY) {
     const float leftX = 16.0f, rightX = (float)(screenW - 16), ceilY = 62.0f;
     const float floorF = (float)floorY;
     if (s_yPhase == YPhase::HELD) {
-        s_yfX = (float)(s_yG.fingerX - s_yG.offX);
-        s_yfY = (float)(s_yG.fingerY - s_yG.offY);
-        if (s_yfX < leftX) s_yfX = leftX;
-        if (s_yfX > rightX) s_yfX = rightX;
-        if (s_yfY < ceilY) s_yfY = ceilY;
-        if (s_yfY > floorF) s_yfY = floorF;
+        flingHold(s_yF, s_yG, leftX, rightX, ceilY, floorF);
         if (now - s_yG.gT > 600 && s_yG.moved) { yetiLaunch(0, 0, now); s_yFlung = false; }
     } else if (s_yPhase == YPhase::AIR) {
-        uint32_t dt = now - s_yThLast;
-        if (dt > 60) dt = 60;
-        s_yThLast = now;
+        uint32_t dt = flingDt(s_yF, now);
         while (dt && s_yPhase == YPhase::AIR) {
-            const float st = (float)(dt > 8 ? 8 : dt);
-            dt -= (dt > 8 ? 8 : dt);
-            s_yvY += YETI_G * st;
-            s_yfX += s_yvX * st;
-            s_yfY += s_yvY * st;
-            if (s_yfX < leftX && s_yvX < 0)  { s_yfX = leftX;  s_yvX = -s_yvX * 0.4f; }
-            if (s_yfX > rightX && s_yvX > 0) { s_yfX = rightX; s_yvX = -s_yvX * 0.4f; }
-            if (s_yfY < ceilY && s_yvY < 0)  { s_yfY = ceilY;  s_yvY = -s_yvY * 0.3f; }
-            if (s_yfY >= floorF && s_yvY > 0) {
-                s_yfY = floorF;
+            const float st = flingTake(dt);
+            if (flingStep(s_yF, st, YETI_G, leftX, rightX, ceilY, floorF, 0.4f, 0.3f)) {
                 if (s_yBounces == 0) {
                     s_yLandAt = now ? now : 1;
                     s_yDust = s_yFlung;
-                    if (s_yFlung) { zLandedAt((int)s_yfX); Sound::play(Sound::Id::LAND); }
+                    if (s_yFlung) { zLandedAt((int)s_yF.x); Sound::play(Sound::Id::LAND_YETI); }
                 }
                 // Heavy: one small bounce at most, and he does not slide.
-                if (s_yvY > 0.35f && s_yBounces < 1) {
-                    s_yvY = -s_yvY * 0.2f;
-                    s_yvX *= 0.4f;
+                if (s_yF.vy > 0.35f && s_yBounces < 1) {
+                    s_yF.vy = -s_yF.vy * 0.2f;
+                    s_yF.vx *= 0.4f;
                     s_yBounces++;
                 } else {
-                    s_yvY = 0;
+                    s_yF.vy = 0;
                     s_yAt = now;
                     if (s_yFlung) s_yPhase = YPhase::FLOPPED;
-                    else { s_yX = s_yfX; s_yPhase = YPhase::OUT; }   // set down: he walks off
+                    else { s_yX = s_yF.x; s_yPhase = YPhase::OUT; }   // set down: he walks off
                 }
             }
         }
-        if (s_yPhase == YPhase::AIR && now - s_yAt > 5000) { s_yfY = floorF; s_yX = s_yfX; s_yPhase = YPhase::OUT; s_yAt = now; }
+        if (s_yPhase == YPhase::AIR && now - s_yAt > 5000) { s_yF.y = floorF; s_yX = s_yF.x; s_yPhase = YPhase::OUT; s_yAt = now; }
     } else if (s_yPhase == YPhase::FLOPPED) {
         if (now - s_yAt >= YETI_FLOP_MS) { s_yPhase = YPhase::STOMP; s_yAt = now; }
     } else if (s_yPhase == YPhase::STOMP) {
-        if (now - s_yAt >= YETI_STOMP_MS) { s_yX = s_yfX; s_yPhase = YPhase::OUT; s_yAt = now; }
+        if (now - s_yAt >= YETI_STOMP_MS) { s_yX = s_yF.x; s_yPhase = YPhase::OUT; s_yAt = now; }
     }
     if (s_yPhase == YPhase::OUT) return;          // back on his feet; the walk-off draws him
 
-    const int x  = (int)lroundf(s_yfX);
-    const int fy = (int)lroundf(s_yfY);
+    const int x  = (int)lroundf(s_yF.x);
+    const int fy = (int)lroundf(s_yF.y);
     // The thud: a pixel's shudder for the first moment after he lands.
     const int shake = (s_yDust && s_yLandAt && now - s_yLandAt < 300) ? (int)(((now - s_yLandAt) / 40) % 2) : 0;
     const char* line = nullptr;
@@ -308,7 +289,7 @@ void yetiDance(int8_t which) {
     if (which < 0 || which > 1) return;
     if (s_yPhase == YPhase::TALK || s_yPhase == YPhase::IN || s_yPhase == YPhase::NAP) {
         s_yDance = (uint8_t)which; s_yDanceVisit = true;
-        if (s_yPhase != YPhase::IN) { s_yPhase = YPhase::DANCE; s_yAt = millis(); s_yAnswered = false; }
+        if (s_yPhase != YPhase::IN) { s_yPhase = YPhase::DANCE; s_yAt = pnow(millis()); s_yAnswered = false; }
         return;
     }
     s_yForce = which;

@@ -41,6 +41,60 @@ selects between them via their respective `CS` lines. The SD card
 is optional — if no card is inserted at boot, the firmware just
 skips SD logging and everything else works.
 
+## DIYmalls 2.8" — JC2432W328C
+
+The JC2432W328C uses the shared `cyd` / `cyd-fast` firmware, but its
+touchscreen and backlight wiring differ from the original resistive CYD.
+The display pins are the ST7789 CYD pins above; the touchscreen and
+backlight below are the JC2432W328C assignments used by the firmware. See
+[the board guide](DIYMALLS-28.md) for support and battery limitations.
+
+### Capacitive touch — CST816/CST820 family, I²C
+
+| Signal | GPIO / value |
+|---|---:|
+| SDA | 33 |
+| SCL | 32 |
+| Reset | 25 |
+| I²C address | `0x15` |
+| Interrupt | Not used by firmware |
+
+At startup, `cyd` and `cyd-fast` probe this I²C address. An answering
+controller selects capacitive touch; otherwise the firmware initializes the
+original CYD's XPT2046 resistive touchscreen on its separate SPI bus.
+
+### Backlight
+
+| Signal | GPIO |
+|---|---:|
+| Backlight, active-high PWM | 27 |
+
+This replaces GPIO21 for the JC2432W328C only. The original CYD continues to
+use GPIO21.
+
+### microSD
+
+The shared CYD firmware configures its SD card on the classic CYD's separate
+SPI bus: SCK 18, MISO 19, MOSI 23, CS 5. The board has a microSD slot, but
+mounting/logging on all JC2432W328C revisions still needs physical
+verification.
+
+### Battery, USB and other connectors
+
+The board has a two-pin 1.25 mm BAT connector and a dedicated battery power
+switch. The connector polarity and any battery-sense connection have not
+been established from a JC2432W328C schematic or measurement. Do not copy the
+Freenove S3 battery divider on GPIO9: GPIO6–11 are reserved for flash on this
+classic ESP32. There is no JC2432W328C battery monitor in the current
+firmware, and USB charging is not verified. A protected 1S LiPo only adds
+cell protection; that is not evidence that the board provides compatible
+charge management. Details are in [DIYMALLS-28.md](DIYMALLS-28.md).
+
+The USB-C connector provides the board's USB/data connection and 5 V input.
+The board also has a two-pin speaker connector, but its mapping and electrical
+requirements have not been verified for this model; the shared CYD firmware
+does not drive it.
+
 ## Spare GPIOs
 
 The spare pins on the connectors are GPIO 22 and 35. GPIO 27 on CN1 is
@@ -161,6 +215,23 @@ high.
 
 Not usable on an S3: GPIO 26-32 (flash/PSRAM) and 33-37 (octal PSRAM).
 
+### GPS — `[env:freenove-s3-gps]`
+
+The CYD GPS builds' features: a position on each SD row and alert card, the
+clock set from GPS, and WARDRIVE's WiGLE file on the card. The module goes
+on the **UART** port (5V, GND, TXD, RXD, beside the card slot):
+
+| Module | Freenove UART port |
+|---|---|
+| TX  | RXD (GPIO44) |
+| VCC | 5V |
+| GND | GND |
+| RX  | not connected |
+
+The console is the USB, so UART0 is free. The firmware tries 115200, 9600 and
+38400 baud until a sentence parses. The **GPS** label in the top bar shows,
+in red, only while there is a fix.
+
 ## Marauder V8 (justcallmekoko) — `[env:marauder-v8]`
 
 An ESP32-C5 (8 MB flash, 4 MB PSRAM) behind a CP210x. Marauder's own V8
@@ -180,6 +251,45 @@ found on the board (2026-10-12); the rest are from Marauder's `configs.h`.
 
 Not used: 27 (an unfitted WS2812 in Marauder's build, and a strapping pin),
 15-22 (flash and PSRAM), 11/12 (the console), 13 (GPS RX, nothing to send).
+
+## LilyGo T-Deck Plus — `[env:tdeck-plus]`
+
+An ESP32-S3FN16R8 (16 MB flash, 8 MB PSRAM) handheld with a keyboard. Pins
+from LilyGo's `utilities.h` (T-Deck repo, examples/UnitTest), confirmed on a
+board 2026-10-12. The console is the native USB port.
+
+| Part | Pins |
+|---|---|
+| SPI bus (screen, SD, LoRa) | SCK 40, MOSI 41, MISO 38 |
+| ST7789 2.8" 240×320 | CS 12, DC 11, no reset line; inversion on; 40 MHz |
+| Backlight | GPIO 42, a 16-step driver chip: HIGH is full, each pulse steps it down (not PWM) |
+| GT911 capacitive touch | I2C SDA 18, SCL 8, INT 16, address 0x5D |
+| Keyboard | the same I2C, address 0x55: one character per read, 0x0D enter, 0x08 backspace. Alt+B toggles its own backlight |
+| SD card (SPI) | CS 39 |
+| Speaker | MAX98357A on I2S: BCK 7, WS 5, DOUT 6 (no codec, no enable pin) |
+| GPS (MIA-M10Q) | its TX into GPIO 44, on Serial1. It talks at 38400 baud out of the box; the firmware tries 9600 and 38400 until a sentence parses |
+| Battery | GPIO 4 through a 1:2 divider |
+| Power enable | GPIO 10, HIGH or nothing past the chip has power on battery |
+| Trackball | hall sensors up 3, down 15, left 1, right 2 (each line toggles as the ball rolls); the ball's press GPIO 0 (BOOT, LOW when pressed). It drives the key cursor beside the touch panel |
+| SX1262 LoRa | CS 9, DIO1 45, RST 17, BUSY 13, on the display's bus; TCXO 1.8 V. Its bytes go out through the panel's own SPI registers between frames (src/lora_radio.cpp) |
+
+Not used: 43 (GPS RX), 46 (keyboard INT, polled instead), 48/21/47/14 (the
+ES7210 microphones), 19/20 (USB).
+
+## M5Stack Tab5 — `[env:tab5]`
+
+An ESP32-P4 (no radio of its own) with an ESP32-C6 for WiFi and Bluetooth on
+SDIO. Pins from M5GFX and M5Stack's reference board support; the board, the
+radio link and what is proven are in [TAB5.md](TAB5.md).
+
+| Part | Pins |
+|---|---|
+| MIPI-DSI panel, 720×1280 as wired | two DSI lanes, driven by M5GFX; backlight GPIO 22 |
+| Touch (inside the ST7123 panel chip) | I2C SDA 31, SCL 32, INT 23, address 0x55 |
+| I/O expander 0x43 | P4 panel reset, P5 touch reset, P1 speaker enable, P2 5 V out |
+| I/O expander 0x44 | P0 C6 power, P3 USB 5 V, P7 charge enable |
+| ESP32-C6 on SDIO | CLK 12, CMD 13, D0 11, D1 10, D2 9, D3 8 |
+| ESP32-C6 reset | GPIO 15, **active-high** on this unit |
 
 ## Sources
 

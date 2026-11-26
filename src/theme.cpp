@@ -1,6 +1,7 @@
 // SquachWatch-CYD — theme implementation
 #include "theme.h"
 #include "draw_band.h"
+#include "info_card.h"
 #include "frame_prof.h"
 #include "caustic_tile.h"
 #include "lil_guy.h"
@@ -9,6 +10,8 @@
 #include "squachy.h"
 #include "settings.h"
 #include "security.h"
+#include <new>
+#include <type_traits>
 
 namespace Theme {
 
@@ -74,6 +77,10 @@ const Palette kPalettes[PALETTE_COUNT] = {
     { "BUBBL3GUM",  0x1002, 0x2004, 0xF81F, 0xFB9D, 0xF96F, 0xFB99, 0xE01F, 0xFA1F, 0xFFF0, 0xFB56, 0xFD20, 0xF800 },
     { "GH0ST",      0x0000, 0x2104, 0xFFFF, 0xF79E, 0xC638, 0xEF7D, 0xB5B6, 0xDEFB, 0xFFFF, 0xFFFF, 0xFFFF, 0xF800 },
     { "BL00D",      0x1000, 0x2000, 0xF800, 0xFB2C, 0xFAEB, 0xF9AB, 0xC0C4, 0xF9CB, 0xFC60, 0xF800, 0xFD20, 0xF800 },
+    // The opener's dusk, every value one an 8-bit frame holds exactly: an
+    // indigo night, plum, aqua, dusty pink, peach, lavender, teal, the sun's
+    // yellow, mint, gold, and a rose for RED. Softer than the rest on purpose.
+    { "DU5K",       0x200A, 0x000A, 0x4935, 0x6EDF, 0xDB75, 0xFDB5, 0xB5BF, 0x05B5, 0xFECA, 0x6ED5, 0xFDAA, 0xDA4A },
 };
 
 void applyPalette(uint8_t idx) {
@@ -118,6 +125,10 @@ uint16_t colorFor(DetectionType t) {
             return VAPOR_YELLOW;
         case DetectionType::RAVEN:
         case DetectionType::ALPR:
+        // MY ALERTS: amber, with the police kit. It was asked for to spot
+        // patrol cars by their routers, and whatever else it ends up
+        // watching for, it is something the owner wanted to be warned about.
+        case DetectionType::MINE:
             return AMBER;
         case DetectionType::AIRTAG:
         case DetectionType::DRONE:
@@ -131,6 +142,8 @@ uint16_t colorFor(DetectionType t) {
             return VAPOR_PURPLE;
         case DetectionType::CAMERA:
         case DetectionType::RING:
+        // A microphone in the room, filed with the cameras in the room.
+        case DetectionType::LISTENER:
             return CYAN;
         case DetectionType::DEAUTH:
         case DetectionType::EVILTWIN:
@@ -141,6 +154,11 @@ uint16_t colorFor(DetectionType t) {
         // flood or a rogue AP -- and often literally the box producing one.
         case DetectionType::HACKER:
             return RED;
+        // Infrastructure, and said so: a utility's meter network is not
+        // watching anybody and is not attacking anything. It gets the colour
+        // nothing else on this screen uses for a warning.
+        case DetectionType::LORAWAN:
+            return GREEN;
         default:
             return GREEN;
     }
@@ -374,7 +392,7 @@ int listHeadingY(TFT_eSPI& t) {
 }
 
 void drawListHeading(TFT_eSPI& t, const char* text, uint16_t color) {
-    t.setTextSize(large() ? 2 : 1);
+    t.setTextSize(large() && fontDelta(Settings::FontKind::TEXT) >= 0 ? 2 : 1);
     t.setTextColor(color, BG);
     t.setCursor(8, listHeadingY(t));
     t.print(text);
@@ -382,13 +400,13 @@ void drawListHeading(TFT_eSPI& t, const char* text, uint16_t color) {
 }
 
 void bodyFontOn(TFT_eSPI& t) {
-    t.setTextFont(large() ? 2 : 1);
+    t.setTextFont(large() && fontDelta(Settings::FontKind::TEXT) >= 0 ? 2 : 1);
     t.setTextSize(1);
 }
 void bodyFontOff(TFT_eSPI& t) { t.setTextFont(1); }
 int bodyY(int px)              { return large() ? px * 19 / 12 : px; }
 int dialogBtnH(int base)       { return large() ? base + 8 : base; }
-uint8_t upSize(uint8_t base)   { return large() ? base + 1 : base; }
+uint8_t upSize(uint8_t base)   { return large() && fontDelta(Settings::FontKind::TEXT) >= 0 ? base + 1 : base; }
 
 void drawListRowPanel(TFT_eSPI& t, int w, int y, int hgt) {
     // Four rows of backdrop between tiles, not two, so they read as tiles
@@ -467,11 +485,286 @@ uint8_t uiTextSize(TFT_eSPI& t, uint8_t base) {
 
 uint8_t uiMenuTextSize(TFT_eSPI& t) {
     if (t.height() < 200) s_compact = true;
-    return t.width() >= 400 ? 3 : 2;
+    const int s = (t.width() >= 400 ? 3 : 2) + fontDelta(Settings::FontKind::MENUS);
+    return (uint8_t)(s < 1 ? 1 : s > 4 ? 4 : s);
 }
+
+// ---- FONTS ------------------------------------------------------------------
+#ifdef LOAD_FONT4
+static const int PET_FACES_N = 4;   // the pets' ladder, below
+#else
+static const int PET_FACES_N = 3;
+#endif
+// See theme.h. A stored step is -2..+2 around the size each board was built
+// with; every consumer clamps it to the sizes it actually has. A stored face
+// is 0 (as built), 1 PIXEL (the 6x8 system font) or 2 SMOOTH (font 2).
+int8_t fontDelta(Settings::FontKind k) {
+    int s = (int)Settings::fontStep(k) - 2;
+    return (int8_t)(s < -2 ? -2 : s > 2 ? 2 : s);
+}
+void fontRange(TFT_eSPI& t, Settings::FontKind k, int8_t& lo, int8_t& hi) {
+    using Settings::FontKind;
+    switch (k) {
+        case FontKind::MENUS: {
+            // The system font at sizes 1 to 4, around the 2 or 3 rows are.
+            const int base = t.width() >= 400 ? 3 : 2;
+            lo = (int8_t)(1 - base);
+            hi = (int8_t)(s_compact ? 0 : 4 - base);
+            break;
+        }
+        // Down to the 2.8in's sizes on the large panels, and never up: the
+        // screens place their lines for the size they were built with.
+        case FontKind::TEXT:     lo = s_large ? -1 : 0; hi = 0; break;
+        // Labels are measured against their boxes, so up is always safe to
+        // ask for; down only where they were stepped up to begin with.
+        case FontKind::BUTTONS:  lo = s_large ? -1 : 0; hi = 2; break;
+        // His bubble: four rungs (see speechApply()).
+        case FontKind::BUBBLES:  lo = (int8_t)(s_large ? -2 : -1); hi = (int8_t)(s_compact ? 0 : s_large ? 1 : 2); break;
+        // The XP tiles come in two sizes, 1x and 2x; a compact screen draws
+        // its own mini tiles and has neither.
+        case FontKind::XP_TILES: lo = (int8_t)(s_large && !s_compact ? -1 : 0); hi = (int8_t)(s_large || s_compact ? 0 : 1); break;
+        // The pets' balloons: the 6x8 font, font 2, (font 4,) font 2 doubled.
+        case FontKind::PETS:     lo = (int8_t)(s_large ? -1 : 0); hi = (int8_t)(s_compact ? 0 : PET_FACES_N - 1 - (s_large ? 1 : 0)); break;
+        default:                 lo = hi = 0; break;
+    }
+}
+const char* fontStepName(int8_t step) {
+    static const char* const N[5] = { "TINY", "SMALLER", "NORMAL", "BIGGER", "HUGE" };
+    return N[(step < -2 ? -2 : step > 2 ? 2 : step) + 2];
+}
+void setFontDelta(TFT_eSPI& t, Settings::FontKind k, int step) {
+    int8_t lo, hi;
+    fontRange(t, k, lo, hi);
+    if (step < lo) step = lo;
+    if (step > hi) step = hi;
+    Settings::setFontStep(k, (uint8_t)(step + 2));
+}
+bool fontHasFace(Settings::FontKind k) {
+    return k == Settings::FontKind::MENUS || k == Settings::FontKind::BUTTONS ||
+           k == Settings::FontKind::BUBBLES || k == Settings::FontKind::PETS;
+}
+bool fontSmooth(Settings::FontKind k) {
+    const uint8_t f = fontHasFace(k) ? Settings::fontFace(k) : 0;
+    if (f == 1) return false;
+    if (f == 2) return true;
+    // As built: menus in the system font, buttons in font 2 on the large
+    // panels; his bubble and the pets' balloons in font 2 from the rung that
+    // has it (the 6x8 font below that).
+    if (k == Settings::FontKind::BUBBLES) return (s_large ? 2 : 1) + fontDelta(k) >= 1;
+    if (k == Settings::FontKind::PETS)    return (s_large ? 1 : 0) + fontDelta(k) >= 1;
+    return k == Settings::FontKind::BUTTONS && s_large;
+}
+void toggleFontFace(Settings::FontKind k) {
+    if (fontHasFace(k)) Settings::setFontFace(k, fontSmooth(k) ? 1 : 2);
+}
+int xpTileScale() {
+    const int k = (s_large ? 2 : 1) + fontDelta(Settings::FontKind::XP_TILES);
+    return k < 1 ? 1 : k > 2 ? 2 : k;
+}
+
+// How tall a face is: the system font 8 rows a size, font 2 16, font 4 26.
+static int faceH(uint8_t font, uint8_t size) { return (font == 4 ? 26 : font == 2 ? 16 : 8) * size; }
+
+// The face menuFontOn() last set, for menuFontSmaller() to step down from.
+// Asked for as the system font at a size; a menu set to SMOOTH gets the
+// smooth face nearest below it -- font 2 (16 rows), font 4 (26) on the boards
+// that carry it, font 2 doubled (32) -- and one set to PIXEL gets the system
+// font where it would have had font 2.
+static uint8_t s_menuFont = 1, s_menuSize = 1;
+static void menuFace(TFT_eSPI& t, uint8_t font, uint8_t size) {
+    const uint8_t face = Settings::fontFace(Settings::FontKind::MENUS);
+    if (face == 2 && font == 1) {
+#ifdef LOAD_FONT4
+        if (size == 3) { font = 4; size = 1; }
+        else
+#endif
+        { font = 2; size = size >= 4 ? 2 : 1; }
+    }
+    else if (face == 1 && font == 2) { font = 1; size = (uint8_t)(size * 2); }
+    s_menuFont = font; s_menuSize = size;
+    t.setTextFont(font);
+    t.setTextSize(size);
+}
+void menuFontSized(TFT_eSPI& t, int size) { menuFace(t, 1, (uint8_t)(size < 1 ? 1 : size > 4 ? 4 : size)); }
+void menuFontOn(TFT_eSPI& t, bool narrow) {
+    if (!narrow) {
+        menuFontSized(t, uiMenuTextSize(t));
+        return;
+    }
+    // A narrow row's face was the body font -- font 2 on the large panels,
+    // the system font elsewhere -- and that, not TEXT, is what MENUS moves:
+    // down to the system font, up through its sizes 2 and 3.
+    const int8_t s = fontDelta(Settings::FontKind::MENUS);
+    if (s < 0)        menuFace(t, 1, 1);
+    else if (s > 0)   menuFace(t, 1, (uint8_t)(1 + s));
+    else              menuFace(t, s_large ? 2 : 1, 1);
+}
+void subListTextSize(TFT_eSPI& t, bool compact, const char* label, const char* value, int w) {
+    const int base = compact ? 1 : 2;
+    int ts = base + fontDelta(Settings::FontKind::MENUS);
+    if (ts < 1) ts = 1;
+    if (ts > 4) ts = 4;
+    menuFontSized(t, ts);
+    while (ts > base && t.textWidth(label) + (value ? t.textWidth(value) + 8 : 0) > w - 26) menuFontSized(t, --ts);
+}
+bool menuFontSmaller(TFT_eSPI& t) {
+    if (s_menuFont == 4) { s_menuFont = 2; t.setTextFont(2); return true; }
+    if (s_menuSize > 1)  { s_menuSize--; t.setTextSize(s_menuSize); return true; }
+    if (s_menuFont == 2) { s_menuFont = 1; t.setTextFont(1); return true; }
+    return false;
+}
+
+// His bubble, a rung at a time. In font 2 (SMOOTH, as built): the 6x8 font,
+// font 2, font 2 doubled, font 2 tripled -- the 2.8in boards speak on the
+// second rung and the large panels on the third. In PIXEL: the system font
+// at 1, 2, 3, 4. BUBBLES moves the rung. speechFontOn() picks it and the
+// rest answer for the rung it picked, so a caller that steps down with
+// speechFontSmaller() gets measurements that match.
+static int  s_speechLvl = 1, s_speechBase = 1;
+static bool s_speechPixel = false;
+static void speechApply(TFT_eSPI& t) {
+    if (s_speechPixel)    { t.setTextFont(1); t.setTextSize((uint8_t)(s_speechLvl + 1)); return; }
+    if (s_speechLvl == 0) { t.setTextFont(1); t.setTextSize(1); return; }
+    bubbleFontOn(t);
+    t.setTextSize(s_speechLvl);
+}
+void speechFontOn(TFT_eSPI& t, bool small) {
+    s_speechBase  = small ? 1 : (s_large ? 2 : 1);
+    s_speechPixel = !small && Settings::fontFace(Settings::FontKind::BUBBLES) == 1;
+    int lvl = small ? 1 : s_speechBase + fontDelta(Settings::FontKind::BUBBLES);
+    s_speechLvl = lvl < 0 ? 0 : lvl > 3 ? 3 : lvl;
+    speechApply(t);
+}
+bool speechAboveNormal()        { return s_speechLvl > s_speechBase; }
+void speechFontSmaller(TFT_eSPI& t) { if (s_speechLvl > 0) { s_speechLvl--; speechApply(t); } }
+int speechScale()  { return s_speechPixel ? s_speechLvl + 1 : (s_speechLvl == 0 ? 1 : s_speechLvl); }
+int speechTextH()  { return (s_speechPixel || s_speechLvl == 0) ? 8 : bubbleTextH(); }
+int speechAscent() { return (s_speechPixel || s_speechLvl == 0) ? 0 : bubbleAscent(); }
+
+// A button label's faces, smallest first: the system font, font 2 (as tall
+// as size 2, about as narrow as size 1), then the system font at 2, 3, 4.
+// BUTTONS moves a label along this from the face it would have had, and the
+// label takes the biggest face at or below that which its box can hold. Set
+// to PIXEL or SMOOTH, it moves along that face's own sizes instead.
+struct LabelFace { uint8_t font, size; };
+static const LabelFace LABEL_FACES[]  = { {1, 1}, {2, 1}, {1, 2}, {1, 3}, {1, 4} };
+static const LabelFace PIXEL_FACES[]  = { {1, 1}, {1, 2}, {1, 3}, {1, 4} };
+#ifdef LOAD_FONT4
+static const LabelFace SMOOTH_FACES[] = { {2, 1}, {4, 1}, {2, 2}, {2, 3} };
+#else
+static const LabelFace SMOOTH_FACES[] = { {2, 1}, {2, 2}, {2, 3} };
+#endif
+static const int SMOOTH_N = sizeof(SMOOTH_FACES) / sizeof(SMOOTH_FACES[0]);
+// The pets' balloons, smallest first. As built: the 6x8 font on the small
+// panels, font 2 (bold) on the large ones; PETS moves along this, and a
+// PIXEL or SMOOTH pick along that face's own sizes.
+#ifdef LOAD_FONT4
+static const LabelFace PET_FACES[] = { {1, 1}, {2, 1}, {4, 1}, {2, 2} };
+#else
+static const LabelFace PET_FACES[] = { {1, 1}, {2, 1}, {2, 2} };
+#endif
+static const LabelFace PET_PIXEL[] = { {1, 1}, {1, 2}, {1, 3} };
+static uint8_t s_petFont = 1, s_petSize = 1;
+static void petFace(TFT_eSPI& t, uint8_t font, uint8_t size) {
+    s_petFont = font; s_petSize = size;
+    t.setTextFont(font);
+    t.setTextSize(size);
+}
+void petFontOn(TFT_eSPI& t) {
+    const uint8_t face = Settings::fontFace(Settings::FontKind::PETS);
+    const LabelFace* L = face == 1 ? PET_PIXEL : face == 2 ? PET_FACES + 1 : PET_FACES;
+    const int n = face == 1 ? 3 : face == 2 ? PET_FACES_N - 1 : PET_FACES_N;
+    // The rung the board was built with, on this ladder.
+    const int native = face == 2 ? 0 : (s_large ? 1 : 0);
+    int lvl = native + fontDelta(Settings::FontKind::PETS);
+    if (lvl < 0) lvl = 0;
+    if (lvl >= n) lvl = n - 1;
+    petFace(t, L[lvl].font, L[lvl].size);
+}
+bool petFontSmaller(TFT_eSPI& t) {
+    if (s_petFont == 4) { petFace(t, 2, 1); return true; }
+    if (s_petSize > 1)  { petFace(t, s_petFont, s_petSize - 1); return true; }
+    if (s_petFont == 2) { petFace(t, 1, 1); return true; }
+    return false;
+}
+
+// Moves from (font, size) by the BUTTONS step to the biggest face that fits
+// maxW x maxH, and leaves it set. Nothing smaller than the ladder's first.
+static void labelFaceStep(TFT_eSPI& t, const char* label, uint8_t& font, uint8_t& size, int maxW, int maxH) {
+    const int8_t step = fontDelta(Settings::FontKind::BUTTONS);
+    const uint8_t face = Settings::fontFace(Settings::FontKind::BUTTONS);
+    if (step == 0 && face == 0) return;
+    const LabelFace* L = face == 1 ? PIXEL_FACES : face == 2 ? SMOOTH_FACES : LABEL_FACES;
+    const int n = face == 1 ? 4 : face == 2 ? SMOOTH_N : 5;
+    // Where the face it would have had sits on this ladder: the tallest
+    // rung no taller than it (the first, if all are).
+    const int h0 = faceH(font, size);
+    int at = 0;
+    for (int i = 0; i < n; i++) {
+        const int hi = faceH(L[i].font, L[i].size);
+        if (hi < h0 || (hi == h0 && (face != 0 || (L[i].font == font && L[i].size == size)))) at = i;
+    }
+    int target = at + step;
+    if (target < 0) target = 0;
+    if (target >= n) target = n - 1;
+    // The biggest that fits; when not even the ladder's first does (a box
+    // sized for the 6x8 font, set to SMOOTH), the face it would have had.
+    for (int i = target; i >= 0; i--) {
+        t.setTextFont(L[i].font);
+        t.setTextSize(L[i].size);
+        if (t.textWidth(label) <= maxW && t.fontHeight() <= maxH) {
+            font = L[i].font; size = L[i].size;
+            break;
+        }
+    }
+    t.setTextFont(font);
+    t.setTextSize(size);
+}
+
+#if defined(CARDPUTER_ADV)
+static const uint8_t HOT_MAX = 32;
+static HotButton s_hot[HOT_MAX];
+static uint8_t   s_hotN = 0;
+static uint32_t  s_hotSeq = 0;
+
+void hotButton(int x, int y, int w, int h, const char* label) {
+    if (!label) return;
+    char c = 0;
+    for (const char* p = label; *p; p++) {
+        const char u = (*p >= 'a' && *p <= 'z') ? (char)(*p - 32) : *p;
+        if (u >= 'A' && u <= 'Z') { c = (char)(u + 32); break; }
+    }
+    uint8_t slot = HOT_MAX;
+    for (uint8_t i = 0; i < s_hotN; i++)
+        if (s_hot[i].x == x && s_hot[i].y == y && s_hot[i].w == w && s_hot[i].h == h) { slot = i; break; }
+    if (slot == HOT_MAX) {
+        if (s_hotN < HOT_MAX) slot = s_hotN++;
+        else {
+            slot = 0;
+            for (uint8_t i = 1; i < HOT_MAX; i++) if (s_hot[i].seq < s_hot[slot].seq) slot = i;
+        }
+    }
+    s_hot[slot] = { (int16_t)x, (int16_t)y, (int16_t)w, (int16_t)h, c, ++s_hotSeq, millis() };
+}
+
+uint8_t hotButtons(const HotButton** out) {
+    const uint32_t now = millis();
+    uint8_t k = 0;
+    for (uint8_t i = 0; i < s_hotN; i++)
+        if (now - s_hot[i].at <= 400) s_hot[k++] = s_hot[i];
+    s_hotN = k;
+    *out = s_hot;
+    return s_hotN;
+}
+#else
+void hotButton(int, int, int, int, const char*) {}
+#endif
 
 void drawButton(TFT_eSPI& t, int x, int y, int w, int h,
                 const char* label, bool pressed, uint8_t textSize) {
+#if defined(CARDPUTER_ADV)
+    hotButton(x, y, w, h, label);
+#endif
     uint16_t fill = pressed ? PURPLE : BG;
     uint16_t fg   = pressed ? labelOn(PURPLE) : CYAN;
     t.fillRect(x, y, w, h, fill);
@@ -488,25 +781,33 @@ void drawButton(TFT_eSPI& t, int x, int y, int w, int h,
         t.setTextSize(ts);
         if (t.textWidth(label) > w - 6 || t.fontHeight() > h - 2) ts = textSize;
     }
-    // A large panel's label that cannot take size 2 gets the body font
-    // rather than the 8-row system font: about as wide, half again as tall.
+    // A large panel's label that cannot take size 2 gets font 2 rather than
+    // the 8-row system font: about as wide, half again as tall.
     bool body = false;
     if (ts == 1 && textSize == 1 && large() && h >= 20) {
-        bodyFontOn(t);
+        t.setTextFont(2);
+        t.setTextSize(1);
         body = t.textWidth(label) <= w - 6;
-        if (!body) bodyFontOff(t);
+        if (!body) t.setTextFont(1);
     }
+    // FONTS > BUTTONS moves that along the label faces, measured against
+    // the box like the step-up above.
+    uint8_t font = body ? 2 : 1;
     t.setTextSize(ts);
+    labelFaceStep(t, label, font, ts, w - 6, h - 2);
     t.setTextColor(fg, fill);
     int tw = t.textWidth(label);
     int th = t.fontHeight();
     t.setCursor(x + (w - tw) / 2, y + (h - th) / 2);
     t.print(label);
-    if (body) bodyFontOff(t);
+    if (font != 1) t.setTextFont(1);
 }
 
 void drawWin95Button(TFT_eSPI& t, int x, int y, int w, int h,
                      const char* label, bool sunken, bool bold) {
+#if defined(CARDPUTER_ADV)
+    hotButton(x, y, w, h, label);
+#endif
     // Face first, inset by the two bevel rings so the edges below draw over
     // nothing they need to keep.
     t.fillRect(x + 2, y + 2, w - 4, h - 4, W95_FACE);
@@ -545,10 +846,14 @@ void drawWin95Button(TFT_eSPI& t, int x, int y, int w, int h,
     t.setTextWrap(false);
     t.setTextColor(BLACK, W95_FACE);
     const bool swapped = large() && h >= 20;
+    uint8_t font = 1, size = 1;
     if (swapped) {
         t.setTextFont(2);
         if (t.textWidth(label) > w - 8) t.setTextFont(1);
+        else font = 2;
     }
+    // FONTS > BUTTONS moves the face, measured against the button's face.
+    labelFaceStep(t, label, font, size, w - 8, h - 4);
     const int tw = t.textWidth(label) + (bold ? 1 : 0);
     const int th = t.fontHeight();
     const int ox = sunken ? 1 : 0;
@@ -560,7 +865,7 @@ void drawWin95Button(TFT_eSPI& t, int x, int y, int w, int h,
     t.setCursor(lx, ly);
     t.print(label);
     if (bold) { t.setCursor(lx + 1, ly); t.print(label); }
-    if (swapped) t.setTextFont(callerFont);   // only ever touched here
+    if (swapped || font != 1 || size != 1) { t.setTextSize(1); t.setTextFont(callerFont); }   // only ever touched here
 }
 
 int drawWin95Window(TFT_eSPI& t, int x, int y, int w, int h, const char* title) {
@@ -620,7 +925,13 @@ void drawButtonBar(TFT_eSPI& t, ButtonId highlighted, ButtonBarMode mode) {
     }
     drawButton(t, g.x[0], g.y, g.w[0], g.h, "[ SCAN ]", highlighted == ButtonId::SCAN);
     drawButton(t, g.x[1], g.y, g.w[1], g.h, "[ LOG ]",  highlighted == ButtonId::LOG);
-    drawButton(t, g.x[2], g.y, g.w[2], g.h, mode == ButtonBarMode::LOG ? "[ CLR ]" : "[ DESK ]",
+#if defined(STICKS3)
+    // On the StickS3 that slot opens FOB MODE, the keychain screen.
+    drawButton(t, g.x[2], g.y, g.w[2], g.h, mode == ButtonBarMode::LOG ? "[ CLR ]" : "[ FOB ]",
+#else
+    // MODE: the main screen, the desk and TERMINAL MODE in turn (main.cpp).
+    drawButton(t, g.x[2], g.y, g.w[2], g.h, mode == ButtonBarMode::LOG ? "[ CLR ]" : "[ MODE ]",
+#endif
                highlighted == ButtonId::CLR);
 }
 
@@ -640,7 +951,28 @@ void drawScanline(TFT_eSPI& t, int y, uint16_t color) {
 void drawScrollbar(TFT_eSPI& t, int x, int y, int h,
                    int totalItems, int visibleItems, int scrollOffset) {
     if (totalItems <= visibleItems || visibleItems <= 0) return;
-    t.drawFastVLine(x, y, h, PURPLE);
+#if defined(SQW_SMALL)
+    // Shown while the list moves, then gone: on a 240x135 screen a bar that
+    // never leaves is one more thing in the way. A new list, or the same
+    // list scrolled, brings it back for SB_SHOW_MS and it fades out over
+    // the last SB_FADE_MS.
+    static const uint32_t SB_SHOW_MS = 1200, SB_FADE_MS = 400;
+    static int sbX = -1, sbY = -1, sbH = -1, sbTotal = -1, sbOff = -1;
+    static uint32_t sbAt = 0;
+    const uint32_t nowMs = millis();
+    if (x != sbX || y != sbY || h != sbH || totalItems != sbTotal || scrollOffset != sbOff) {
+        sbX = x; sbY = y; sbH = h; sbTotal = totalItems; sbOff = scrollOffset;
+        sbAt = nowMs;
+    }
+    const uint32_t age = nowMs - sbAt;
+    if (age >= SB_SHOW_MS + SB_FADE_MS) return;
+    const uint16_t fade = age <= SB_SHOW_MS ? 0 : (uint16_t)((age - SB_SHOW_MS) * 256 / SB_FADE_MS);
+    const uint16_t lineCol  = blend(PURPLE, BG, fade);
+    const uint16_t thumbCol = blend(CYAN, BG, fade);
+#else
+    const uint16_t lineCol = PURPLE, thumbCol = CYAN;
+#endif
+    t.drawFastVLine(x, y, h, lineCol);
     int thumbH = h * visibleItems / totalItems;
     if (thumbH < 6) thumbH = 6;
     int maxScroll = totalItems - visibleItems;
@@ -648,7 +980,7 @@ void drawScrollbar(TFT_eSPI& t, int x, int y, int h,
     if (scrollOffset < 0) scrollOffset = 0;
     int travel = h - thumbH;
     int thumbY = y + (maxScroll > 0 ? (travel * scrollOffset / maxScroll) : 0);
-    t.fillRect(x - 1, thumbY, 3, thumbH, CYAN);
+    t.fillRect(x - 1, thumbY, 3, thumbH, thumbCol);
 }
 
 // The per-type artwork. Positionable, because the ALERT screen now draws it
@@ -875,6 +1207,33 @@ void drawTypeIcon(TFT_eSPI& t, DetectionType type, int cx, int cy, int s) {
         t.fillRect(cx+s/2-s/5,cy+s/4-3,s*2/5,6,ICO_INK);
         t.fillRect(cx+s/2-3,cy+s/4-s/5,6,s*2/5,ICO_INK);
         break;
+    case DetectionType::LORAWAN:
+        // A mast on its foot, and two rings of what comes off the top of it.
+        t.fillTriangle(cx-s/2,cy+s,cx+s/2,cy+s,cx,cy+s/4,SHELL_LO);
+        t.fillRect(cx-1,cy-s/2,3,s*3/2,ICO_METAL);
+        for(int i=1;i<=2;i++) t.drawCircle(cx,cy-s/2,s/4+i*s/4,ICO_LENS);
+        t.fillCircle(cx,cy-s/2,3,ICO_LED);
+        break;   // it fell through into MINE's router, drawn over the mast
+    case DetectionType::LISTENER:
+        // A smart speaker: what it hears coming off it, a fabric body with a
+        // grille, and the light ring on top that says it is listening.
+        for(int i=1;i<=2;i++) t.drawCircle(cx,cy,s*2/3+i*s/4,ICO_LENS);
+        t.fillRoundRect(cx-s*2/3,cy-s,s*4/3,s*2,s/3,SHELL_LO);
+        for(int r=0;r<3;r++) for(int c=0;c<3;c++)
+            t.fillCircle(cx-s/3+c*s/3,cy-s/6+r*s/3,s/10+1,ICO_INK);
+        t.fillRect(cx-s/2,cy-s+3,s,3,ICO_LED);
+        break;
+    case DetectionType::MINE:
+        // A plain router -- the in-car kind it was asked for -- with its
+        // two aerials and the name it shouts drawn as a tag on a string.
+        housing(t, cx-s, cy, s*2, s/2);
+        for(int i=0;i<3;i++) t.fillCircle(cx-s/2+i*s/3, cy+s/4, s/12, ICO_LED);
+        t.fillRect(cx-s*3/4, cy-s*3/4, 3, s*3/4, ICO_METAL);
+        t.fillRect(cx+s*3/4-3, cy-s*3/4, 3, s*3/4, ICO_METAL);
+        for(int i=1;i<=2;i++) t.drawCircle(cx, cy, i*s/3, ICO_WARN);
+        t.fillRect(cx-s/2, cy-s, s, s/3, ICO_PLASTIC);                    // the name tag
+        t.fillRect(cx-s/2+3, cy-s+s/8, s-6, s/12, SHELL_LO);
+        break;
     default:
         t.drawCircle(cx,cy,s,ICO_METAL);
         t.drawCircle(cx,cy,s-1,ICO_METAL);
@@ -909,13 +1268,90 @@ void drawPulsingBorder(TFT_eSPI& t, uint32_t now, uint16_t a, uint16_t b,
 // A pointer-to-array rather than a flat block so every charBuf[i][j] below
 // still reads as a grid. The two numbers that give it its shape live out
 // here with it rather than inside the function that draws.
-static const int MAX_COLS = 96;
+// The widest band a background is ever asked to fill on this build, in the
+// app's own (logical) pixels. The fixed-size buffers below are sized from it,
+// so a board with a small screen does not carry a big one's arrays. Every
+// board draws at 320 or less across, except the 3.5" (480) and the Tab5
+// (640x360 doubled up to its 1280x720 panel). The Tab5 is also the one with
+// RAM to spare, so it gets a little more of everything: SQW_BG_DENSITY is
+// how many times the usual number of toasters, stars and so on a background
+// spreads across the extra room. The emulator can be built with either set
+// by hand (EXTRA_CXXFLAGS) to render a Tab5-sized band the way the board does.
+#ifndef SQW_BG_MAX_W
+#if defined(TAB5)
+#define SQW_BG_MAX_W 640
+#elif defined(CYD35)
+#define SQW_BG_MAX_W 480
+#else
+#define SQW_BG_MAX_W 320
+#endif
+#endif
+#ifndef SQW_BG_DENSITY
+#if defined(TAB5)
+#define SQW_BG_DENSITY 2
+#else
+#define SQW_BG_DENSITY 1
+#endif
+#endif
+
+// One column every 5 px (drawDigitalRain's SPACING). 96 was set for the
+// 3.5"'s 480 and stays the floor so no board's rain changes; the Tab5's 640
+// needs 128, or the right half of its screen has no rain at all.
+static const int MAX_COLS = (SQW_BG_MAX_W / 5 > 96) ? SQW_BG_MAX_W / 5 : 96;
 static const int MAXTRAIL = 24;
 static uint8_t (*s_rainBuf)[MAXTRAIL] = nullptr;
 static bool      s_rainInited = false;
 static void releaseRain() {
     if (s_rainBuf) { free(s_rainBuf); s_rainBuf = nullptr; s_rainInited = false; }
 }
+
+// ---- one block of RAM for whichever background is showing -----------------
+// Every animated background keeps its flock, school, columns or sparks between
+// frames. As plain statics that was all of them at once, 7.7 KB of fixed RAM
+// on a 320-wide board, although only one background is ever drawn: the list
+// screens that draw one behind them all draw the same Settings::background().
+// Sharing one block makes it 1.5 KB (FIREFLIES is the largest), 6 KB back.
+// SYNTHWAVE is not in here: it is small, and the boot splash draws it before
+// the main background, so it would only cost the other one a fresh start.
+//
+// So each background's state is a struct (bgst_*::State, next to its draw
+// function), and they take turns in one arena the size of the largest. A
+// background claims it at the top of its draw call; if another one held it,
+// the struct is built fresh, which is the same start every static had at boot.
+// Coming back to a background starts it over rather than resuming it.
+//
+// bgState() and the arena are defined at the end of the file, after every
+// State, so the arena can be sized as the largest of them and each claim can
+// check at compile time that its State fits.
+enum BgStateId : uint8_t {
+    BGS_NONE = 0, BGS_RAIN, BGS_STARS, BGS_TOASTERS, BGS_AQUARIUM,
+    BGS_FIREFLIES, BGS_FIRE, BGS_SNOW, BGS_GIBSON
+};
+template <typename T> static T& bgState(uint8_t id);
+
+namespace bgst_rain {
+static const uint8_t NPOP = 5;
+struct State {
+    int16_t  yPos[MAX_COLS] = {};
+    uint8_t  ySpeed[MAX_COLS] = {};
+    float    yTick[MAX_COLS] = {};
+    uint8_t  colHue[MAX_COLS] = {};
+    uint8_t  colLen[MAX_COLS] = {};
+    uint8_t  colDepth[MAX_COLS] = {};
+    bool     colSurge[MAX_COLS] = {};
+    uint16_t popX[NPOP] = {}, popY[NPOP] = {};
+    uint8_t  popAge[NPOP] = {}, popHue[NPOP] = {}, popCh[NPOP] = {};
+    uint32_t boltAt = 0, boltNext = 0;
+    uint32_t sweepAt = 0;
+    uint32_t tearAt = 0, tearNext = 0;
+    uint16_t splashX[6] = {};
+    uint8_t  splashAge[6] = {}, splashHue[6] = {};
+    bool     fxInit = false;
+    int      lastCols = -1;
+    int      redCol = -1;
+    uint32_t redFrom = 0, redNext = 0;
+};
+}  // namespace bgst_rain
 
 // TH3 0N3's door. Every half a minute to a minute, one glyph in one slow
 // column falls red -- drawn big, so it is a target and not a speck -- and a
@@ -958,28 +1394,29 @@ void drawDigitalRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advan
     // One switch back to the old behaviour, where hue was rolled at random
     // per drop and had nothing to do with how far away it was.
     static const bool RAIN_DEPTH_HUE = true;
+    bgst_rain::State& bgS = bgState<bgst_rain::State>(BGS_RAIN);
 
     int cols = t.width() / SPACING;
     if (cols > MAX_COLS) cols = MAX_COLS;
     if (cols < 1) cols = 1;
 
-    static int16_t yPos[MAX_COLS];
-    static uint8_t ySpeed[MAX_COLS];
-    static float   yTick[MAX_COLS];      // frames' worth, in s_animK units
+    auto& yPos   = bgS.yPos;
+    auto& ySpeed = bgS.ySpeed;
+    auto& yTick  = bgS.yTick;            // frames' worth, in s_animK units
     // Per-DROP, re-rolled every time a column recycles. Hue used to be
     // HUES[i % 3], which made column 0 permanently pink, column 1
     // permanently cyan and so on -- a fixed stripe pattern across the whole
     // screen that never changed for the life of the boot, and the most
     // obviously machine-made thing about the effect.
-    static uint8_t colHue[MAX_COLS];
-    static uint8_t colLen[MAX_COLS];
+    auto& colHue = bgS.colHue;
+    auto& colLen = bgS.colLen;
     // Depth, 0 far .. 255 near, driving brightness and fall speed together.
     // Deliberately a NARROW range: pushing the far end down to 27% made half
     // the screen look washed out rather than distant.
-    static uint8_t colDepth[MAX_COLS];
+    auto& colDepth = bgS.colDepth;
     // A rare drop that is longer, faster and burns white most of the way
     // down. Costs nothing extra -- it is a column that already exists.
-    static bool    colSurge[MAX_COLS];
+    auto& colSurge = bgS.colSurge;
     if (!s_rainBuf) {
         s_rainBuf = (uint8_t(*)[MAXTRAIL])malloc(MAX_COLS * MAXTRAIL);
         // No room for it: a flat band, the same answer fire gives. The
@@ -994,19 +1431,19 @@ void drawDigitalRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advan
     // Glyphs that break loose, grow and fade. Drawn with a transparent
     // background so they read as rising OFF the rain rather than punching
     // holes in it -- at most five, so a handful of extra glyphs a frame.
-    static const uint8_t NPOP = 5;
-    static uint16_t popX[NPOP], popY[NPOP];
-    static uint8_t  popAge[NPOP], popHue[NPOP], popCh[NPOP];
-    static uint32_t boltAt = 0, boltNext = 0;
+    using bgst_rain::NPOP;
+    auto& popX = bgS.popX;     auto& popY = bgS.popY;
+    auto& popAge = bgS.popAge; auto& popHue = bgS.popHue; auto& popCh = bgS.popCh;
+    auto& boltAt = bgS.boltAt; auto& boltNext = bgS.boltNext;
     // CRT roll bar and the VHS head-switch tear. Both are decided once per
     // frame and applied as a per-cell comparison, so neither draws a single
     // extra glyph.
-    static uint32_t sweepAt = 0;
-    static uint32_t tearAt = 0, tearNext = 0;
-    static uint16_t splashX[6];
-    static uint8_t  splashAge[6], splashHue[6];
-    static bool     fxInit = false;
-    static int     lastCols = -1;
+    auto& sweepAt = bgS.sweepAt;
+    auto& tearAt = bgS.tearAt; auto& tearNext = bgS.tearNext;
+    auto& splashX = bgS.splashX;
+    auto& splashAge = bgS.splashAge; auto& splashHue = bgS.splashHue;
+    auto& fxInit = bgS.fxInit;
+    auto& lastCols = bgS.lastCols;
 
     auto respawn = [&](int i, bool anywhere) {
         colSurge[i] = (random(0, 14) == 0);
@@ -1100,8 +1537,8 @@ void drawDigitalRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advan
     // The red glyph: which column carries it, when it started, when the next.
     // Picked from the columns whose heads have just come in at the top, the
     // slowest of them, and never one falling behind him.
-    static int      redCol = -1;
-    static uint32_t redFrom = 0, redNext = 0;
+    auto& redCol = bgS.redCol;
+    auto& redFrom = bgS.redFrom; auto& redNext = bgS.redNext;
     const bool redHere = s_redGlyphOn && s_redGlyphSaid && (uint32_t)(millis() - s_redGlyphSaid) < 500u;
     if (!redHere) redCol = -1;
     if (advance && redHere) {
@@ -1250,8 +1687,10 @@ void drawDigitalRain(TFT_eSPI& t, uint32_t now, int yStart, int yEnd, bool advan
                 // drawn either way, so it is tinted rather than left at BG.
                 bg = blend(BG, hue, (uint16_t)(a / (surge ? 3u : 4u)));
             } else {
-                const float f = 1.0f - (float)(j - hot) / (float)(len - hot);
-                uint32_t a = (uint32_t)((surge ? 245.0f : 225.0f) * f * f);
+                // (len - j) / (len - hot), squared, in integers: a float
+                // divide per glyph is ~1,300 a frame, and the C5s have no FPU.
+                const uint32_t fn = (uint32_t)(len - j), fd = (uint32_t)(len - hot);
+                uint32_t a = ((surge ? 245u : 225u) * fn * fn) / (fd * fd);
                 a = (a * deep) / 255u;
                 a = (a * edge) / 255u;
                 // Lightning lifts the trail toward white without touching
@@ -1669,7 +2108,36 @@ static void bandLine(TFT_eSPI& t, int x0, int y0, int x1, int y1,
     t.drawLine(x0, y0, x1, y1, col);
 }
 
+namespace bgst_stars {
+static const uint8_t NS = 72;     // warp stars
+static const uint8_t NP = 2;      // planets
+static const uint8_t NJ = 2;      // junk
+struct State {
+    float    sx[NS] = {}, sy[NS] = {}, sz[NS] = {};
+    bool     starsInit = false;
+    uint32_t warpNext = 0;
+    float    warp = 1.0f;
+    uint32_t tunLast  = 0;
+    float    tunPhase = 0.0f, tunSpin = 0.0f;
+    float    px_[NP] = {}, py_[NP] = {}, pvx[NP] = {};
+    uint8_t  pr_[NP] = {}, ppal[NP] = {};
+    bool     planetsInit = false;
+    float    jx[NJ] = {}, jy[NJ] = {}, jz[NJ] = {};
+    uint8_t  jkind[NJ] = {};
+    bool     jlive[NJ] = {};
+    bool     junkInit = false;
+    uint32_t jNextAt = 0;
+    uint32_t glitchAt = 0;
+    bool     glitchInit = false;
+};
+}  // namespace bgst_stars
+
+// The eye catch keeps per-slot bookkeeping beside the junk; a fresh junk
+// field has nothing in flight, so it is cleared with it. Defined below.
+static void bigEyesForget();
+
 void drawStarfield(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
+    bgst_stars::State& bgS = bgState<bgst_stars::State>(BGS_STARS);
     const int w     = t.width();
     const int bandH = yEnd - yStart;
     if (bandH < 8) return;
@@ -1694,11 +2162,11 @@ void drawStarfield(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     t.fillRect(0, yStart, w, bandH, BG);
 
     // ---- warp stars, behind the tube ------------------------------------
-    static const uint8_t NS = 72;
-    static float  sx[NS], sy[NS], sz[NS];
-    static bool   starsInit = false;
-    static uint32_t warpNext = 0;
-    static float  warp = 1.0f;
+    using bgst_stars::NS;
+    auto& sx = bgS.sx; auto& sy = bgS.sy; auto& sz = bgS.sz;
+    auto& starsInit = bgS.starsInit;
+    auto& warpNext = bgS.warpNext;
+    auto& warp = bgS.warp;
     if (!starsInit) {
         for (uint8_t i = 0; i < NS; i++) {
             sx[i] = (float)random(-200, 201);
@@ -1776,8 +2244,8 @@ void drawStarfield(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // jumping, because the value has to stay continuous while its
     // derivative changes. dt is clamped so a long stall (a scan, a screen
     // that blocked) cannot fling the tunnel forward on the next frame.
-    static uint32_t tunLast  = 0;
-    static float    tunPhase = 0.0f, tunSpin = 0.0f;
+    auto& tunLast  = bgS.tunLast;
+    auto& tunPhase = bgS.tunPhase; auto& tunSpin = bgS.tunSpin;
     uint32_t dt = (tunLast && now > tunLast) ? (now - tunLast) : 16u;
     if (dt > 100u) dt = 100u;
     tunLast = now;
@@ -1844,10 +2312,10 @@ void drawStarfield(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // Drawn as horizontal chords rather than stacked circles: one span per
     // row means the bands and the terminator come out of the same loop,
     // and a planet costs about 2r line draws instead of a pile of fills.
-    static const uint8_t NP = 2;
-    static float   px_[NP], py_[NP], pvx[NP];
-    static uint8_t pr_[NP], ppal[NP];
-    static bool    planetsInit = false;
+    using bgst_stars::NP;
+    auto& px_ = bgS.px_; auto& py_ = bgS.py_; auto& pvx = bgS.pvx;
+    auto& pr_ = bgS.pr_; auto& ppal = bgS.ppal;
+    auto& planetsInit = bgS.planetsInit;
     if (!planetsInit) {
         for (uint8_t i = 0; i < NP; i++) {
             px_[i]  = (float)random(0, w);
@@ -1898,14 +2366,15 @@ void drawStarfield(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // one turning up every 4-7 seconds, flying out of the vanishing point
     // straight at the viewer. Five of them milling about was both busier
     // than the scene wanted and, measured on hardware, about 14ms a frame.
-    static const uint8_t NJ = 2;
-    static float   jx[NJ], jy[NJ], jz[NJ];
-    static uint8_t jkind[NJ];
-    static bool    jlive[NJ];
-    static bool    junkInit = false;
-    static uint32_t jNextAt = 0;
+    using bgst_stars::NJ;
+    auto& jx = bgS.jx; auto& jy = bgS.jy; auto& jz = bgS.jz;
+    auto& jkind = bgS.jkind;
+    auto& jlive = bgS.jlive;
+    auto& junkInit = bgS.junkInit;
+    auto& jNextAt = bgS.jNextAt;
     if (!junkInit) {
         for (uint8_t i = 0; i < NJ; i++) jlive[i] = false;
+        bigEyesForget();
         jNextAt  = now + (uint32_t)random(1500, 4000);
         junkInit = true;
     }
@@ -1962,8 +2431,8 @@ void drawStarfield(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     drawEyeCatchFx(t, now);
 
     // ---- channel change ---------------------------------------------------
-    static uint32_t glitchAt = 0;
-    static bool     glitchInit = false;
+    auto& glitchAt = bgS.glitchAt;
+    auto& glitchInit = bgS.glitchInit;
     if (!glitchInit) { glitchAt = now + (uint32_t)random(6000, 14000); glitchInit = true; }
     if (now >= glitchAt && now < glitchAt + 240) {
         for (int k = 0; k < 5; k++) {
@@ -2394,65 +2863,104 @@ static void publishGoldToaster(int cx, int cy, int hw, int hh, uint32_t now);
 static void publishFlockToaster(uint8_t i, int cx, int cy, int hw, int hh, uint32_t now);
 static int8_t s_flockTaken = -1;     // a toaster tapped three times, to be dropped from the flock
 
+namespace bgst_toast {
+static const uint8_t N = 5 * SQW_BG_DENSITY;     // more of everything where the band is bigger
+static const uint8_t NT = 6 * SQW_BG_DENSITY;
+static const uint8_t NSTAR = 44 * SQW_BG_DENSITY;
+static const uint8_t CMTRAIL = 30;
+static const uint8_t GRASSW = 80;
+struct State {
+    float    tx[N] = {}, ty[N] = {}, tscale[N] = {};
+    uint16_t tcol[N] = {};
+    float    ox[NT] = {}, oy[NT] = {}, oscale[NT] = {};
+    bool     oface[NT] = {}, oburnt[NT] = {};
+    bool     inited = false;
+    float    starX[NSTAR] = {}, starY[NSTAR] = {};
+    uint8_t  starMag[NSTAR] = {}, starPh[NSTAR] = {};
+    float    ssX = 0, ssY = 0, ssVX = 0, ssVY = 0;
+    float    ssAge  = 0.0f;
+    uint16_t ssLife = 0;
+    uint32_t ssNext = 0;
+    float    cmX = 0, cmY = 0, cmVX = 0, cmVY = 0, cmTurn = 0;
+    bool     cmLive = false;
+    uint32_t cmNext = 0;
+    float    cmHx[CMTRAIL] = {}, cmHy[CMTRAIL] = {};
+    uint8_t  cmHn = 0;
+    float    boX = 0, boY = 0, boS = 1.0f;
+    bool     boLive = false;
+    uint32_t boNext = 0;
+    float    mmX = 0;
+    bool     mmLive = false;
+    uint32_t mmNext = 0;
+    float    lgX = -40.0f;
+    bool     lgLive = false;
+    uint32_t lgNext = 0;
+    uint32_t lgLast = 0;
+    uint8_t  grass[GRASSW] = {};
+};
+}  // namespace bgst_toast
+
 void drawFlyingToasters(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
-    static const uint8_t N = 5;
-    static float    tx[N], ty[N], tscale[N];
-    static uint16_t tcol[N];
-    static const uint8_t NT = 6;
-    static float    ox[NT], oy[NT], oscale[NT];
-    static bool      oface[NT], oburnt[NT];
-    static bool      inited = false;
+    bgst_toast::State& bgS = bgState<bgst_toast::State>(BGS_TOASTERS);
+    using bgst_toast::N;
+    auto& tx = bgS.tx; auto& ty = bgS.ty; auto& tscale = bgS.tscale;
+    auto& tcol = bgS.tcol;
+    using bgst_toast::NT;
+    auto& ox = bgS.ox; auto& oy = bgS.oy; auto& oscale = bgS.oscale;
+    auto& oface = bgS.oface; auto& oburnt = bgS.oburnt;
+    auto& inited = bgS.inited;
 
     // Deep space behind the flock. The original art is just toasters on
     // black; this is a deliberate addition, so it stays quiet -- the
     // toasters are the subject and none of this is allowed to compete
     // with them for attention.
-    static const uint8_t NSTAR = 44;
-    static float   starX[NSTAR], starY[NSTAR];
-    static uint8_t starMag[NSTAR], starPh[NSTAR];
+    using bgst_toast::NSTAR;
+    auto& starX = bgS.starX; auto& starY = bgS.starY;
+    auto& starMag = bgS.starMag; auto& starPh = bgS.starPh;
 
     // One shooting star and one comet at a time, both usually absent.
     // Rarity is the whole point: something that happens continuously is
     // texture, and texture here would just be visual noise.
-    static float    ssX = 0, ssY = 0, ssVX = 0, ssVY = 0;
-    static float    ssAge  = 0.0f;       // frames' worth, in s_animK units
-    static uint16_t ssLife = 0;
-    static uint32_t ssNext = 0;
-    static float    cmX = 0, cmY = 0, cmVX = 0, cmVY = 0, cmTurn = 0;
-    static bool     cmLive = false;
-    static uint32_t cmNext = 0;
+    auto& ssX = bgS.ssX; auto& ssY = bgS.ssY; auto& ssVX = bgS.ssVX; auto& ssVY = bgS.ssVY;
+    auto& ssAge  = bgS.ssAge;            // frames' worth, in s_animK units
+    auto& ssLife = bgS.ssLife;
+    auto& ssNext = bgS.ssNext;
+    auto& cmX = bgS.cmX; auto& cmY = bgS.cmY; auto& cmVX = bgS.cmVX; auto& cmVY = bgS.cmVY;
+    auto& cmTurn = bgS.cmTurn;
+    auto& cmLive = bgS.cmLive;
+    auto& cmNext = bgS.cmNext;
     // The tail is drawn through where the comet has actually BEEN, not
     // back along its current heading. A heading-derived tail is rigid: it
     // pivots as one piece and reads as a painted-on cone. A position
     // history lags, curves when the flight path curves, and straightens
     // out again behind -- which is the whole difference between a comet
     // and an arrow.
-    static const uint8_t CMTRAIL = 30;
-    static float    cmHx[CMTRAIL], cmHy[CMTRAIL];
-    static uint8_t  cmHn = 0;
+    using bgst_toast::CMTRAIL;
+    auto& cmHx = bgS.cmHx; auto& cmHy = bgS.cmHy;
+    auto& cmHn = bgS.cmHn;
 
     // Two After Dark cameos, both rare enough to be a surprise rather than
     // scenery: Boris chasing a slice, and Mowin' Man working the bottom
     // edge. Neither is ever on screen at the same time as the other.
-    static float    boX = 0, boY = 0, boS = 1.0f;
-    static bool     boLive = false;
-    static uint32_t boNext = 0;
-    static float    mmX = 0;
-    static bool     mmLive = false;
-    static uint32_t mmNext = 0;
+    auto& boX = bgS.boX; auto& boY = bgS.boY; auto& boS = bgS.boS;
+    auto& boLive = bgS.boLive;
+    auto& boNext = bgS.boNext;
+    auto& mmX = bgS.mmX;
+    auto& mmLive = bgS.mmLive;
+    auto& mmNext = bgS.mmNext;
     // The lil guy walks the mower's line, so the two are interlocked and
     // whichever is already out keeps it until he leaves. His state lives up
     // here rather than in his own block for the same reason: the mower's
     // block runs first and has to be able to see him.
-    static float    lgX = -40.0f;
-    static bool     lgLive = false;
-    static uint32_t lgNext = 0;
-    static uint32_t lgLast = 0;
+    auto& lgX = bgS.lgX;
+    auto& lgLive = bgS.lgLive;
+    auto& lgNext = bgS.lgNext;
+    auto& lgLast = bgS.lgLast;
     // Grass Mowin' Man cuts. One byte per column: height now, regrowing
     // slowly behind him. A strip rather than a full lawn, because the flock
     // is the subject and a mown lawn across the whole band would take over.
-    static const uint8_t GRASSW = 80;
-    static uint8_t  grass[GRASSW];
+    using bgst_toast::GRASSW;
+    auto& grass = bgS.grass;
 
     int w = t.width();
     int bandH = yEnd - yStart;
@@ -2869,7 +3377,7 @@ static uint16_t ditherRGBi(TFT_eSPI& t, int r, int g, int b, uint8_t cell) {
 // those was a few hundred instructions of software arithmetic, and the
 // tank drew at eight frames a second (bg 77 ms, 2026-10-02). The Xtensa
 // boards have the unit and never noticed; this costs them nothing either.
-static int isin256(uint16_t a) {
+int isin256(uint16_t a) {   // in theme.h too: the pets use it
     static const uint16_t Q[65] = {
           0,   6,  13,  19,  25,  31,  38,  44,  50,  56,  62,  68,  74,  80,  86,  92,
          98, 104, 109, 115, 121, 126, 132, 137, 142, 147, 152, 157, 162, 167, 172, 177,
@@ -3204,18 +3712,47 @@ static void drawShark(TFT_eSPI& t, int snoutX, int cy, int8_t swim, int ss, uint
     }
 }
 
+namespace bgst_aqua {
+// species: 0 = minnow, 1 = angelfish, 2 = puffer, 3 = jellyfish
+// (its own drift-and-pulse motion instead of side-to-side swimming).
+// depth: 0 = right at the glass, 1 = far back. Drives size,
+// speed, haze and whether the fish gets drawn with fins at all.
+struct Fish { float x, y, speed, phase, depth; int8_t dir; uint8_t size, species; uint16_t col; };
+static const uint8_t N = 8;
+static const uint8_t NB = 10;
+static const uint8_t NRAY = 3;
+static const uint8_t NSNOW = 34;
+static const uint8_t NS = 26;
+struct State {
+    Fish     fish[N] = {};
+    bool     fInited = false;
+    float    bubX[NB] = {}, bubY[NB] = {};
+    bool     bInited = false;
+    float    sharkX = 0, sharkY = 0;
+    int8_t   sharkDir = 1;
+    bool     sharkActive = false;
+    uint32_t sharkNextAt = 0;
+    bool     sharkInited = false;
+    bool     sharkFast = false;
+    float    rayX[NRAY] = {}, rayW[NRAY] = {}, raySpd[NRAY] = {};
+    bool     rayInited = false;
+    float    snowX[NSNOW] = {}, snowY[NSNOW] = {}, snowPh[NSNOW] = {};
+    bool     snowInited = false;
+    float    shX[NS] = {}, shY[NS] = {}, shVX[NS] = {}, shVY[NS] = {};
+    bool     shInited = false;
+};
+}  // namespace bgst_aqua
+
 void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
-    // species: 0 = minnow, 1 = angelfish, 2 = puffer, 3 = jellyfish
-    // (its own drift-and-pulse motion instead of side-to-side swimming).
-    // depth: 0 = right at the glass, 1 = far back. Drives size,
-    // speed, haze and whether the fish gets drawn with fins at all.
-    struct Fish { float x, y, speed, phase, depth; int8_t dir; uint8_t size, species; uint16_t col; };
-    static const uint8_t N = 8;
-    static Fish  fish[N];
-    static bool  fInited = false;
-    static const uint8_t NB = 10;
-    static float bubX[NB], bubY[NB];
-    static bool  bInited = false;
+    bgst_aqua::State& bgS = bgState<bgst_aqua::State>(BGS_AQUARIUM);
+    // Fish (species, depth): see bgst_aqua above.
+    using bgst_aqua::Fish;
+    using bgst_aqua::N;
+    auto& fish = bgS.fish;
+    auto& fInited = bgS.fInited;
+    using bgst_aqua::NB;
+    auto& bubX = bgS.bubX; auto& bubY = bgS.bubY;
+    auto& bInited = bgS.bInited;
     // The rare big shark — mostly parked off-screen, only swims through
     // once in a while. sharkDir is fixed once at spawn (see the spawn
     // block below) -- it used to be recomputed every frame from
@@ -3224,14 +3761,14 @@ void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // oscillating around center forever instead of ever reaching an
     // edge and despawning. Committing to one direction for the whole
     // pass is what actually lets it cross the tank and leave.
-    static float    sharkX, sharkY;
-    static int8_t   sharkDir = 1;
-    static bool     sharkActive = false;
-    static uint32_t sharkNextAt = 0;
-    static bool     sharkInited = false;
+    auto& sharkX = bgS.sharkX; auto& sharkY = bgS.sharkY;
+    auto& sharkDir = bgS.sharkDir;
+    auto& sharkActive = bgS.sharkActive;
+    auto& sharkNextAt = bgS.sharkNextAt;
+    auto& sharkInited = bgS.sharkInited;
     // Set once he has turned on you: the pass coming back is faster than the
     // one he was making before you touched him.
-    static bool     sharkFast = false;
+    auto& sharkFast = bgS.sharkFast;
 
     int w = t.width();
     int bandH = yEnd - yStart;
@@ -3301,9 +3838,9 @@ void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // at 4px cells it reads as brick-textured noise rather than
     // gradient, because with two levels to work with there is nothing
     // subtle for the pattern to interpolate between.
-    static const uint8_t NRAY = 3;
-    static float   rayX[NRAY], rayW[NRAY], raySpd[NRAY];
-    static bool    rayInited = false;
+    using bgst_aqua::NRAY;
+    auto& rayX = bgS.rayX; auto& rayW = bgS.rayW; auto& raySpd = bgS.raySpd;
+    auto& rayInited = bgS.rayInited;
     if (!rayInited) {
         for (uint8_t i = 0; i < NRAY; i++) {
             rayX[i]   = (float)random(0, w);
@@ -3425,9 +3962,9 @@ void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // Suspended particulate drifting down. Almost invisible individually
     // and the single strongest "this is a volume of water, not empty
     // space" cue there is.
-    static const uint8_t NSNOW = 34;
-    static float snowX[NSNOW], snowY[NSNOW], snowPh[NSNOW];
-    static bool  snowInited = false;
+    using bgst_aqua::NSNOW;
+    auto& snowX = bgS.snowX; auto& snowY = bgS.snowY; auto& snowPh = bgS.snowPh;
+    auto& snowInited = bgS.snowInited;
     if (!snowInited) {
         for (uint8_t i = 0; i < NSNOW; i++) {
             snowX[i]  = (float)random(0, w);
@@ -3624,9 +4161,9 @@ void drawAquarium(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // scales as 1/d^2, so a pass through the middle blows the school
     // apart and the cohesion rule pulls it back together afterwards
     // without anyone scripting the recovery.
-    static const uint8_t NS = 26;
-    static float shX[NS], shY[NS], shVX[NS], shVY[NS];
-    static bool  shInited = false;
+    using bgst_aqua::NS;
+    auto& shX = bgS.shX; auto& shY = bgS.shY; auto& shVX = bgS.shVX; auto& shVY = bgS.shVY;
+    auto& shInited = bgS.shInited;
     if (!shInited) {
         for (uint8_t i = 0; i < NS; i++) {
             shX[i]  = (float)random(0, w);
@@ -3897,7 +4434,12 @@ static void drawXyzzy(TFT_eSPI& t, uint32_t now, int yStart, int bandH) {
 // Two independently-scrolling columns (different add intervals so they
 // never sync up) side by side, so the log fills the full screen width
 // instead of a narrow strip down the left.
-struct TermCol { char lines[20][40]; bool special[20]; uint8_t count; uint32_t lastAdd; };
+// Lines kept per column, and columns across. Two columns of twenty lines fill
+// a 320 or 480 band; the Tab5's 640x360 had a third of its width and half its
+// height empty, so a band 600 or wider gets three columns of up to forty.
+static const uint8_t TERM_LINES = (SQW_BG_MAX_W >= 600) ? 40 : 20;
+static const uint8_t TERM_COLS  = (SQW_BG_MAX_W >= 600) ? 3 : 2;
+struct TermCol { char lines[TERM_LINES][40]; bool special[TERM_LINES]; uint8_t count; uint32_t lastAdd; };
 
 static void termGenLine(char* out, size_t outSize) {
     static const char* VERBS[] = { "INIT", "PROBE", "SCAN", "MOUNT", "AUTH", "PARSE", "TRACE", "PING", "SYNC", "LOAD" };
@@ -3930,8 +4472,8 @@ static const uint8_t TERM_EGG_COUNT = sizeof(TERM_EGG_LINES) / sizeof(TERM_EGG_L
 static void termAdvance(TermCol& c, uint32_t now, uint32_t interval) {
     if (now - c.lastAdd <= interval) return;
     c.lastAdd = now;
-    if (c.count < 20) c.count++;
-    for (uint8_t i = 19; i > 0; i--) {
+    if (c.count < TERM_LINES) c.count++;
+    for (uint8_t i = TERM_LINES - 1; i > 0; i--) {
         memcpy(c.lines[i], c.lines[i - 1], sizeof(c.lines[i]));
         c.special[i] = c.special[i - 1];
     }
@@ -3969,7 +4511,7 @@ void drawTerminalLog(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     if (!s_termCols) {
         // calloc, not malloc: a TermCol is only correct starting empty, and
         // a static one used to get that for free.
-        s_termCols = (TermCol*)calloc(2, sizeof(TermCol));
+        s_termCols = (TermCol*)calloc(TERM_COLS, sizeof(TermCol));
         if (!s_termCols) { t.fillRect(0, yStart, t.width(), yEnd - yStart, BG); return; }
     }
     TermCol* const cols = s_termCols;
@@ -3977,17 +4519,21 @@ void drawTerminalLog(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     int bandH = yEnd - yStart;
     if (bandH < 20) return;
     int visLines = bandH / 9;
-    if (visLines > 20) visLines = 20;
+    if (visLines > TERM_LINES) visLines = TERM_LINES;
+    // Three only where they fit: a line is about 130 px, so 600 across.
+    const uint8_t nCols = (TERM_COLS > 2 && w >= 600) ? 3 : 2;
 
     termAdvance(cols[0], now, 180);
     termAdvance(cols[1], now, 230);   // offset cadence so the two columns don't lock-step
+    if (nCols > 2) termAdvance(cols[2], now, 205);
 
     t.fillRect(0, yStart, w, bandH, BG);
     t.setTextSize(1);
     t.setTextWrap(false);
-    termRender(t, cols[0], 4, yStart, visLines);
-    termRender(t, cols[1], w / 2 + 4, yStart, visLines);
-    t.drawFastVLine(w / 2, yStart, bandH, blend(BG, GREEN, 60));
+    for (uint8_t k = 0; k < nCols; k++) {
+        termRender(t, cols[k], k * w / nCols + 4, yStart, visLines);
+        if (k) t.drawFastVLine(k * w / nCols, yStart, bandH, blend(BG, GREEN, 60));
+    }
 
     // Rare dramatic beat: a full-width banner line flashes across both
     // columns for under a second, breaking the indifferent scroll with
@@ -4054,15 +4600,22 @@ struct Fly {
     uint8_t tone, pat;
     bool    rolled;
 };
-static Fly      s_ffFar[FF_FAR], s_ffMid[FF_MID], s_ffNear[FF_NEAR];
-static bool     s_ffInit = false;
+// The flies themselves take turns in the background arena (see bgState).
+// The clocks below stay plain statics: s_ffInit starting over re-arms them.
+namespace bgst_flies {
+struct State {
+    Fly  s_ffFar[FF_FAR] = {}, s_ffMid[FF_MID] = {}, s_ffNear[FF_NEAR] = {};
+    bool s_ffInit = false;
+};
+}  // namespace bgst_flies
 static uint32_t s_ffLastMs = 0;
 // Events, each on its own clock. 0 in a *Start means not running.
 static uint32_t s_ffWaveAt = 0,  s_ffWaveStart = 0;   // the sync ripple
 static uint32_t s_ffGustAt = 0,  s_ffGustStart = 0;   // wind through the grass
 static uint32_t s_ffEyesAt = 0,  s_ffEyesStart = 0;   // something in the treeline
 static uint32_t s_ffLantAt = 0,  s_ffLantStart = 0;   // one passes close to the lens
-static int      s_ffEyesX = 0;
+static int      s_ffEyesX = 0, s_ffEyesY = 0;
+static uint32_t s_ffEyesDrawnAt = 0;
 static float    s_ffLantY = 0.0f;
 
 static void ffSpawn(Fly& f, int w, int y0, int y1, float spd) {
@@ -4172,6 +4725,9 @@ static void ffGlow(TFT_eSPI& t, int x, int y, int r, uint16_t col, uint16_t bg,
 }
 
 void drawFireflies(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
+    bgst_flies::State& bgS = bgState<bgst_flies::State>(BGS_FIREFLIES);
+    auto& s_ffFar = bgS.s_ffFar; auto& s_ffMid = bgS.s_ffMid; auto& s_ffNear = bgS.s_ffNear;
+    auto& s_ffInit = bgS.s_ffInit;
     const int w = t.width();
     // Same floor rule as SNOWFALL, and for the same reason: stop a pixel
     // short of the counters, which are plain text with no outline. Also
@@ -4190,7 +4746,7 @@ void drawFireflies(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         s_ffLastMs = now;
         s_ffWaveAt = now + (uint32_t)random(9000, 16000);
         s_ffGustAt = now + (uint32_t)random(18000, 30000);
-        s_ffEyesAt = now + (uint32_t)random(14000, 26000);
+        s_ffEyesAt = now + (uint32_t)random(6500, 11000);
         s_ffLantAt = now + (uint32_t)random(20000, 34000);
         s_ffInit = true;
     }
@@ -4303,15 +4859,26 @@ void drawFireflies(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         }
     }
 
-    // Something in the trees. Two green eyes, for three seconds, with
-    // one blink. Nothing else about it is ever shown.
+    // Something in the trees: two red eyes for five seconds, with one blink.
+    // They are Mothman's, and a tap on them while they show finds him (see
+    // mothmanEyesTap()). Only the visible pair can be tapped, including when
+    // the screen is drawn in two bands. Once he is found they come back as
+    // the old green ones, and take no taps.
+    s_ffEyesDrawnAt = 0;
     if (s_ffEyesStart) {
-        const uint32_t ea = now - s_ffEyesStart;
-        if (ea > 3200u) { s_ffEyesStart = 0; s_ffEyesAt = now + (uint32_t)random(16000, 30000); }
-        else if (!(ea > 1700u && ea < 1850u)) {
-            const uint16_t eye = (uint16_t)0x97ED;
-            t.fillRect(s_ffEyesX - 4, horizon - 9, 2, 2, eye);
-            t.fillRect(s_ffEyesX + 2, horizon - 9, 2, 2, eye);
+        const uint32_t age = now - s_ffEyesStart;
+        if (age > 5000u) {
+            s_ffEyesStart = 0;
+            s_ffEyesAt = now + (uint32_t)random(9000, 16000);
+        } else if (age < 2350u || age >= 2500u) {
+            const bool found = Squachy::mothmanUnlocked();
+            s_ffEyesY = horizon - 9;
+            for (int side : {-1, 1}) {
+                const int x = s_ffEyesX + 5 * side;
+                t.fillCircle(x, s_ffEyesY, 3, found ? 0x3243 : 0x5800);
+                t.fillCircle(x, s_ffEyesY, 2, found ? 0x97ED : 0xFA08);
+            }
+            if (!found) s_ffEyesDrawnAt = now;
         }
     }
 
@@ -4532,8 +5099,10 @@ void dimRegion(TFT_eSPI& t, int x, int y, int w, int h, uint8_t amount) {
         t.drawFastHLine(x, yy, w, BG);
 }
 
-static char     s_toastHead[18] = {0};
-static char     s_toastSub[22]  = {0};
+// 18 and 22 used to cut lines short ("Press the trackball to wake" showed
+// as "Press the trackball t"); drawToast() keeps the box on the screen.
+static char     s_toastHead[24] = {0};
+static char     s_toastSub[40]  = {0};
 static uint16_t s_toastAccent   = 0;
 static uint32_t s_toastUntil    = 0;
 
@@ -4545,6 +5114,8 @@ void showToast(const char* head, const char* sub, uint16_t accent, uint32_t ms) 
     s_toastAccent = accent;
     s_toastUntil  = millis() + ms;
 }
+
+bool toastUp(uint32_t now) { return s_toastUntil && (int32_t)(now - s_toastUntil) < 0; }
 
 void drawToast(TFT_eSPI& t, uint32_t now) {
     if (!s_toastUntil) return;
@@ -4574,8 +5145,13 @@ void drawToast(TFT_eSPI& t, uint32_t now) {
     if (s_toastSub[0]) {
         bodyFontOn(t);
         t.setTextColor(WHITE, BG);
-        t.setCursor(bx + (bw - t.textWidth(s_toastSub)) / 2, by + 31);
-        t.print(s_toastSub);
+        // A narrow panel (the StickS3, the watch) can't fit the longest
+        // lines: drop letters off the end rather than spill past the box.
+        char sub[sizeof(s_toastSub)];
+        strcpy(sub, s_toastSub);
+        for (size_t n = strlen(sub); n > 1 && t.textWidth(sub) > bw - 8; ) sub[--n] = 0;
+        t.setCursor(bx + (bw - t.textWidth(sub)) / 2, by + 31);
+        t.print(sub);
         bodyFontOff(t);
     }
 }
@@ -4609,6 +5185,8 @@ static bool     s_fireInited = false;
 static void releaseFire() {
     if (s_fireHeat) { free(s_fireHeat); s_fireHeat = nullptr; s_fireInited = false; }
 }
+
+void releaseBackgroundBuffers() { releaseFire(); releaseRain(); releaseTerm(); }
 
 static bool s_stillBackdrop = false;
 void setStillBackdrop(bool on) { s_stillBackdrop = on; }
@@ -4799,6 +5377,15 @@ static void bigEyeGone(int8_t slot) {
     if (s_eyeSlot == slot) s_eyeSlot = -1;
 }
 
+// A fresh junk field (the starfield's state starting over after another
+// background had the arena): whatever was in flight never left by an edge,
+// so neither slot counts as a miss, and neither stays "caught" for the next
+// eye to arrive in it.
+static void bigEyesForget() {
+    for (uint8_t k = 0; k < 2; k++) { s_eyeBig[k] = false; s_eyeGot[k] = false; }
+    s_eyeSlot = -1;
+}
+
 static void drawEyeCatchFx(TFT_eSPI& t, uint32_t now) {
     if (!s_eyeFxAt || (now - s_eyeFxAt) > EYE_FX_MS) return;
     const uint32_t age = now - s_eyeFxAt;
@@ -4821,6 +5408,17 @@ static uint32_t s_lodgeAt = 0;
 static uint8_t  s_lodgeKnocks = 0;
 static uint32_t s_lodgeKnockAt = 0;
 static bool     s_lodgePending = false;
+// The igloo that turns up in the SNOWFALL snow: three knocks and MEATY rolls
+// out of it. The lodge's box-and-freshness rule; the two eyes in its door are
+// the tell, and each knock opens them wider. Meant to be EASY (asked for
+// 2026-10-13): it comes by about every half minute, the target is generous,
+// and the knocks can be slow.
+static const uint8_t  IGLOO_KNOCKS_NEEDED = 3;
+static const uint32_t IGLOO_KNOCK_WINDOW  = 6000;
+static int      s_iglooHitX = -1, s_iglooHitY = 0;
+static uint32_t s_iglooAt = 0, s_iglooKnockAt = 0;
+static uint8_t  s_iglooKnocks = 0;
+static bool     s_iglooPending = false;
 // The FIRE owl while he asks WHAT REEKS?!: where he and his bubble were the
 // last frame he asked it, and when. backgroundTap() only believes a frame
 // from the last quarter second, the same freshness rule as the eye.
@@ -4878,9 +5476,28 @@ bool consumeLodgeKnock() {
     return true;
 }
 
+bool consumeIglooKnock() {
+    if (!s_iglooPending) return false;
+    s_iglooPending = false;
+    return true;
+}
+
 bool consumeEyeCatch() {
     if (!s_eyePairPending) return false;
     s_eyePairPending = false;
+    return true;
+}
+
+// Generous by a few pixels round the pair, the way the lil guy's box is: they
+// are small and only up for five seconds. A hit puts them away and keeps them
+// away for twelve, so the discovery toast is not followed by the same eyes.
+bool mothmanEyesTap(int x, int y, uint32_t now) {
+    if (Settings::background() != Settings::Background::FIREFLIES ||
+        !s_ffEyesDrawnAt || now - s_ffEyesDrawnAt > 250 ||
+        abs(x - s_ffEyesX) > 17 || abs(y - s_ffEyesY) > 13) return false;
+    s_ffEyesDrawnAt = 0;
+    s_ffEyesStart = 0;
+    s_ffEyesAt = now + 12000u;
     return true;
 }
 
@@ -4976,6 +5593,21 @@ bool backgroundTap(int x, int y, uint32_t now) {
         }
     }
 
+    // Three knocks on the igloo in the snow. A box again: it is a building
+    // too, and a small one, so a few pixels of slack round it.
+    if (s_iglooAt && (now - s_iglooAt) <= 250 && !Squachy::meatyUnlocked()) {
+        const int idx = x - s_iglooHitX, idy = y - s_iglooHitY;
+        if (idx >= -24 && idx <= 24 && idy >= -30 && idy <= 8) {
+            if ((now - s_iglooKnockAt) > IGLOO_KNOCK_WINDOW) s_iglooKnocks = 0;
+            s_iglooKnockAt = now;
+            if (++s_iglooKnocks >= IGLOO_KNOCKS_NEEDED) {
+                s_iglooKnocks = 0;
+                s_iglooPending = true;
+            }
+            return true;
+        }
+    }
+
     // The Aquarium shark. The FIRST touch never catches him -- it turns him
     // round -- and the second one, on the pass he makes coming back, does.
     if (s_sharkX >= 0 && (now - s_sharkAt) <= 250) {
@@ -5045,8 +5677,45 @@ bool backgroundTap(int x, int y, uint32_t now) {
     return true;
 }
 
+// The heat grid's dice: two or three a cell, about ten thousand a frame. The
+// core's random() goes to the hardware generator, which is made to wait
+// between reads; for flames a small xorshift is the same dice at a fraction
+// of the cost. random() still seeds it, and everything outside the per-cell
+// loop keeps random().
+static uint32_t s_fireRng = 0;
+static inline int fireRand(int lo, int hi) {   // [lo, hi), like random()
+    uint32_t x = s_fireRng;
+    if (!x) x = (uint32_t)random(1, 0x7FFFFFFF);
+    x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+    s_fireRng = x;
+    return lo + (int)(((uint64_t)x * (uint32_t)(hi - lo)) >> 32);
+}
+
+namespace bgst_fire {
+static const int CW = 4;
+static const int MAXFW = SQW_BG_MAX_W / CW;          // see drawFire()
+static const uint8_t NSRC = 7 * SQW_BG_DENSITY;
+static const uint8_t HEAT_MAX = 48;
+static const uint8_t NSTARS = 12;
+static const uint8_t NE = 8 * SQW_BG_DENSITY;
+// The heat grid itself is not in here: it is a heap block, s_fireHeat.
+struct State {
+    float    acc[MAXFW] = {};
+    float    srcX[NSRC] = {}, srcPhase[NSRC] = {}, srcFreq[NSRC] = {}, srcJitterPh[NSRC] = {};
+    bool     srcInited = false;
+    uint16_t fireLUT[HEAT_MAX + 1] = {};
+    uint16_t lutBG = 0xFFFF;
+    float    litSmooth = 0.0f;
+    uint8_t  skyX[NSTARS] = {}, skyY[NSTARS] = {}, skyPh[NSTARS] = {};
+    bool     skyInited = false;
+    float    ex[NE] = {}, ey[NE] = {}, evy[NE] = {};
+    bool     emberInited = false;
+};
+}  // namespace bgst_fire
+
 void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
-    static const int CW = 4;
+    bgst_fire::State& bgS = bgState<bgst_fire::State>(BGS_FIRE);
+    using bgst_fire::CW;
     // Grid is sized to the widest panel the build can actually run on.
     // fw below is w/CW, so the cap only ever binds at the panel's own
     // width: 480px on cyd35 needs 120 cells, but every shipping board
@@ -5055,27 +5724,29 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // bytes) allocated and never once written or read, since fw simply
     // never reaches them there. MAXFH stays 80 for both: the tallest
     // band any board renders is 320px, which is the same 80 cells.
-#if defined(CYD35)
-    static const int MAXFW = 120, MAXFH = 80;
-#else
-    static const int MAXFW = 80, MAXFH = 80;
-#endif
+    // SQW_BG_MAX_W gives 80 cells on those boards and 120 on cyd35, as
+    // before, and 160 on the Tab5, whose 640px band was half empty at 80.
+    // Its height is the same 160 so the grid also covers the band when the
+    // Tab5 turns portrait (640 tall).
+    using bgst_fire::MAXFW;
+    static const int MAXFH = (SQW_BG_MAX_W > 480) ? SQW_BG_MAX_W / CW : 80;
     if (!s_fireHeat) {
         s_fireHeat = (uint8_t*)malloc(MAXFW * MAXFH);
         if (!s_fireHeat) { t.fillRect(0, yStart, t.width(), yEnd - yStart, BG); return; }
         s_fireInited = false;
     }
     uint8_t* const   heat = s_fireHeat;
-    static float     acc[MAXFW];
+    auto&            acc = bgS.acc;
     bool&            inited = s_fireInited;
     // Independent flame sources, each with its own flicker rate and
     // phase — a shared single traveling wave here is exactly what made
     // the old version look like one repeating pattern sliding sideways
     // instead of separate flames. Each source also jitters its own
     // base position a little so the flames don't sit glued in place.
-    static const uint8_t NSRC = 7;
-    static float srcX[NSRC], srcPhase[NSRC], srcFreq[NSRC], srcJitterPh[NSRC];
-    static bool  srcInited = false;
+    using bgst_fire::NSRC;                            // the same flame width on a wider band
+    auto& srcX = bgS.srcX; auto& srcPhase = bgS.srcPhase;
+    auto& srcFreq = bgS.srcFreq; auto& srcJitterPh = bgS.srcJitterPh;
+    auto& srcInited = bgS.srcInited;
 
     int w = t.width();
     int bandH = yEnd - yStart;
@@ -5110,9 +5781,9 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
                                             4, -4,  6, -2,
                                            -5,  3, -7,  1,
                                             7, -1,  5, -3 };
-    static const uint8_t HEAT_MAX = 48;
-    static uint16_t fireLUT[HEAT_MAX + 1];
-    static uint16_t lutBG = 0xFFFF;
+    using bgst_fire::HEAT_MAX;
+    auto& fireLUT = bgS.fireLUT;
+    auto& lutBG = bgS.lutBG;
     if (lutBG != BG) {
         const float bgR = (float)((BG >> 8) & 0xF8);
         const float bgG = (float)((BG >> 3) & 0xFC);
@@ -5214,11 +5885,11 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         float bf = 48.0f * (v / 1.25f) * (1.0f + wolfSurge * 0.25f);
         if (bf > (float)HEAT_MAX) bf = (float)HEAT_MAX;
         uint8_t base = (uint8_t)bf;
-        heat[(fh - 1) * MAXFW + x] = (random(0, 6) == 0) ? 0 : base;
+        heat[(fh - 1) * MAXFW + x] = (fireRand(0, 6) == 0) ? 0 : base;
         // The bed above the seed row: glowing rather than blazing, and a
         // little uneven, so it reads as coals and not as a solid bar.
         for (int r = 1; r < bedRows; r++) {
-            const int coal = (int)base - random(4, 14);
+            const int coal = (int)base - fireRand(4, 14);
             heat[(fh - 1 - r) * MAXFW + x] = (uint8_t)(coal < 0 ? 0 : coal);
         }
         litSum += (float)base;
@@ -5228,7 +5899,7 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // scene lighting below flickers rather than strobes. Taken from
     // the seed row because that is the fuel, and it leads the visible
     // flame by the few frames heat takes to propagate up.
-    static float litSmooth = 0.0f;
+    auto& litSmooth = bgS.litSmooth;
     float lit = litSum / ((float)fw * 34.0f);
     if (lit > 1.0f) lit = 1.0f;
     litSmooth += (lit - litSmooth) * 0.25f;
@@ -5252,8 +5923,8 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // leaves the flame body exactly as it was.
     for (int y = 0; y < fh - bedRows; y++) {
         for (int x = 0; x < fw; x++) {
-            int drift = random(-1, 2);
-            if (windChance > 0 && random(0, 100) < windChance) drift += windDir;
+            int drift = fireRand(-1, 2);
+            if (windChance > 0 && fireRand(0, 100) < windChance) drift += windDir;
             // Reflect at the edges rather than clamp. Clamping means a
             // cell at the downwind edge samples nx == itself every row,
             // so that column stops mixing sideways and becomes a solid
@@ -5267,7 +5938,7 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             if (nx < 0)   nx = 0;
             if (nx >= fw) nx = fw - 1;
             int src = heat[(y + 1) * MAXFW + nx];
-            int decay = (src < 10) ? random(0, 4) : random(0, 3);
+            int decay = (src < 10) ? fireRand(0, 4) : fireRand(0, 3);
             int val = src - decay;
             if (val < 0) val = 0;
             heat[y * MAXFW + x] = (uint8_t)val;
@@ -5282,9 +5953,9 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // Night sky. Drawn before the flames, so a star is hidden by fire
     // or smoke simply because the fire paints over it later -- no heat
     // test needed. Same twinkle mechanic as drawSunsetSky.
-    static const uint8_t NSTARS = 12;
-    static uint8_t skyX[NSTARS], skyY[NSTARS], skyPh[NSTARS];
-    static bool    skyInited = false;
+    using bgst_fire::NSTARS;
+    auto& skyX = bgS.skyX; auto& skyY = bgS.skyY; auto& skyPh = bgS.skyPh;
+    auto& skyInited = bgS.skyInited;
     if (!skyInited) {
         for (uint8_t i = 0; i < NSTARS; i++) {
             skyX[i]  = (uint8_t)random(2, w > 2 ? w - 2 : w);
@@ -5838,7 +6509,13 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
                 ? SCARED[((now - s_wolfAt) / 1400) % (sizeof(SCARED) / sizeof(SCARED[0]))]
                 : reek ? "WHAT REEKS?!"
                 : QUIPS[(slot * 5 + 2) % NQUIP];
-            t.setTextSize(1);
+            // The pets' face, so FONTS > PETS sizes him with them and the
+            // large panels get their bigger balloon: the 6x8 font at size 1
+            // on the small boards, exactly as before. A line too wide for
+            // the band steps down, as a pet's does.
+            const uint8_t callerFont = t.textfont;
+            petFontOn(t);
+            while (t.textWidth(q) + 8 > w - 4 && petFontSmaller(t)) {}
             const int bw = t.textWidth(q) + 8;
             // Derived, not the hard-coded 11 this used to be. Squachy's
             // bubbles and the pet's both size themselves off fontHeight();
@@ -5857,11 +6534,12 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             // clears the top of his head, and only then falls back to
             // clamping against the screen edge.
             const int squachyLeft = (int)(w * 0.34f);
+            // Heights from the balloon's own: 14 and 26 at the 6x8 font.
             int bx = owlX + 10;
-            int by = owlY - 14;
+            int by = owlY - 1 - bh;
             if (bx + bw > squachyLeft) {
                 bx = owlX - bw / 2 + 4;      // centred over the owl
-                by = owlY - 26;
+                by = owlY - 2 * bh;
             }
             if (bx + bw > w - 2)    bx = w - 2 - bw;
             if (bx < 1)             bx = 1;
@@ -5884,6 +6562,8 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             t.setTextColor(ink, paper);
             t.setCursor(bx + 4, by + 3);
             t.print(q);
+            t.setTextFont(callerFont);
+            t.setTextSize(1);
             if (reek) {
                 // Where he is and where his bubble is, for the tap.
                 s_owlX = owlX; s_owlY = owlY;
@@ -5923,9 +6603,9 @@ void drawFire(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
     // at a randomly chosen flame source rather than anywhere across
     // the width, which is what the old version did: an ember could pop
     // out of bare ground where there was no flame at all.
-    static const uint8_t NE = 8;
-    static float    ex[NE], ey[NE], evy[NE];
-    static bool     emberInited = false;
+    using bgst_fire::NE;
+    auto& ex = bgS.ex; auto& ey = bgS.ey; auto& evy = bgS.evy;
+    auto& emberInited = bgS.emberInited;
     if (!emberInited) {
         for (uint8_t i = 0; i < NE; i++) { ex[i] = -1; ey[i] = -1; evy[i] = 0; }
         emberInited = true;
@@ -5991,7 +6671,17 @@ static const float   PL_NEAR   = 2.40f;
 struct SnowFlake { float x, y; uint8_t layer, ph; };
 struct SnowObj   { float x; uint8_t a, b; };      // a: height/kind, b: spare
 
-static SnowFlake s_flk[SNOW_N];
+// The flakes take turns in the background arena (see bgState), and the init
+// flag with them: when it starts over, drawSnowfall() lays the whole hill out
+// again, trees, riders and all. The rest stays plain statics -- small, and
+// read by the helpers and the knock tests.
+namespace bgst_snow {
+struct State {
+    SnowFlake s_flk[SNOW_N] = {};
+    bool      s_snowInit = false;
+    float     acc = 0.0f;                         // the bank's settle timer
+};
+}  // namespace bgst_snow
 static SnowObj   s_far[TREE_FAR];
 static SnowObj   s_act[TREE_ACT];
 static SnowObj   s_prop[PROP_N];                  // kind in .b: 0 rock 1 stump 2 jump
@@ -6001,9 +6691,9 @@ static SnowObj   s_prop[PROP_N];                  // kind in .b: 0 rock 1 stump 
 // where every tree whitens on the same frame reads as a palette swap.
 static float     s_lodgeX = 0.0f;                 // the lodge, on the far plane
 static float     s_nearX = 0.0f;                  // one foreground tree
+static float     s_iglooX = 0.0f;                 // the igloo, now and then on the slope
 static uint8_t   s_bankD[SNOW_COLS];
 static uint8_t   s_trackD[SNOW_COLS];             // carved tracks, fill back in
-static bool      s_snowInit = false;
 
 static float    s_wxInten = 0.18f, s_wxTarget = 0.35f, s_wxWind = 0.0f;
 static uint32_t s_wxNextAt = 0, s_snLastMs = 0;
@@ -6105,8 +6795,13 @@ static uint32_t    s_saySkiTil = 0, s_sayYetTil = 0, s_sayNextAt = 0;
 // and ink the werewolf uses on FIRE, at half the size.
 static void snowSay(TFT_eSPI& t, int x, int topY, const char* txt) {
     if (!txt) return;
-    t.setTextSize(1);
-    const int bw = t.textWidth(txt) + 6, bh = 11;
+    // The pets' face, as the fire owl's: unchanged on the small boards
+    // (11 high at the 6x8 font), bigger on the large ones, and FONTS > PETS
+    // moves it.
+    const uint8_t callerFont = t.textfont;
+    petFontOn(t);
+    while (t.textWidth(txt) + 6 > t.width() - 2 && petFontSmaller(t)) {}
+    const int bw = t.textWidth(txt) + 6, bh = t.fontHeight() + 3;
     int bx = x - bw / 2;
     if (bx < 1) bx = 1;
     if (bx + bw > t.width() - 1) bx = t.width() - 1 - bw;
@@ -6122,6 +6817,8 @@ static void snowSay(TFT_eSPI& t, int x, int topY, const char* txt) {
     t.setTextColor(ink, paper);
     t.setCursor(bx + 3, by + 2);
     t.print(txt);
+    t.setTextFont(callerFont);
+    t.setTextSize(1);
 }
 
 // THE EAT. The payoff, and it runs about one chase in six, so it has to
@@ -6304,6 +7001,45 @@ static void snowAurora(TFT_eSPI& t, int w, int yStart, int bandH,
                                        (uint16_t)((y - yStart) * 255 / (bandH > 0 ? bandH : 1)));
             t.drawFastHLine(x0, y, x1 - x0, blend(sky, hue, (uint16_t)a));
         }
+    }
+}
+
+// The igloo on the slope, 24 wide and 13 tall, its base on the snow at
+// (x, gy). Snow blocks, a dark door, and -- until MEATY is earned -- two
+// eyes in the door that blink and open wider with each knock.
+static void snowIgloo(TFT_eSPI& t, int x, int gy, uint32_t now, uint16_t lit, uint16_t dim) {
+    const int R = 12, Hh = 13;
+    const uint16_t edge = blend(dim, (uint16_t)0x4A69, 110);
+    for (int i = 0; i < Hh; i++) {
+        const int d = Hh - i;
+        int hw = 0;
+        while ((hw + 1) * (hw + 1) * Hh * Hh <= R * R * (Hh * Hh - d * d + d)) hw++;
+        t.drawFastHLine(x - hw - 1, gy - Hh + i, 2 * hw + 2, edge);
+        if (hw > 0) t.drawFastHLine(x - hw, gy - Hh + i, 2 * hw, lit);
+    }
+    t.drawFastHLine(x - 3, gy - Hh - 1, 6, edge);
+    // block lines
+    for (int y = gy - 4, row = 0; y > gy - Hh + 2; y -= 4, row++) {
+        const int d = gy - y;
+        int hw = 0;
+        while ((hw + 1) * (hw + 1) * Hh * Hh <= R * R * (Hh * Hh - d * d)) hw++;
+        if (hw > 2) t.drawFastHLine(x - hw + 1, y, 2 * hw - 2, dim);
+        for (int bx = x - hw + 3 + (row & 1) * 3; bx < x + hw - 1; bx += 6) t.drawFastVLine(bx, y - 3, 3, dim);
+    }
+    // the door, a little left of centre
+    const int dx = x - 3;
+    t.fillRect(dx - 4, gy - 6, 9, 6, (uint16_t)0x18A2);
+    t.drawFastHLine(dx - 3, gy - 7, 7, (uint16_t)0x18A2); t.drawFastHLine(dx - 2, gy - 8, 5, (uint16_t)0x18A2);
+    if (Squachy::meatyUnlocked()) return;              // he lives with you now
+    // two eyes in the dark, blinking; wider with every knock
+    const bool blink = (now % 3700u) < 160;
+    const int open = s_iglooKnocks;                      // 0, 1 or 2
+    for (int e = 0; e < 2; e++) {
+        const int ex = dx - 3 + e * 4, ey = gy - 5 - (open ? 1 : 0);
+        if (blink && !open) { t.drawFastHLine(ex, ey + 1, 3, (uint16_t)0xFFFF); continue; }
+        // half shut until knocked; wide open, pupils up, after one
+        t.fillRect(ex, ey, 3, open ? 3 : 2, (uint16_t)0xFFFF);
+        t.drawPixel(ex + 1, ey + (open ? 0 : 1), (uint16_t)0x0000);
     }
 }
 
@@ -6926,9 +7662,12 @@ void drawBackgroundOverlay(TFT_eSPI& t, uint32_t now) {
     const int w = s_wolfSayW;
     const int yStart = s_wolfSayTop;
         auto wolfBubble = [&](const char* txt, int by, uint8_t dim, bool big) {
-            t.setTextSize(big ? 2 : 1);
+            // The howl is the 6x8 font doubled everywhere; the lines are the
+            // pets' face, like the owl's (11 high at the 6x8 font, as before).
+            const uint8_t callerFont = t.textfont;
+            if (big) { t.setTextFont(1); t.setTextSize(2); } else petFontOn(t);
             const int bw = t.textWidth(txt) + (big ? 11 : 7);
-            const int bh = big ? 20 : 11;
+            const int bh = big ? 20 : t.fontHeight() + 3;
             int bx = w - 2 - bw;
             if (bx < 1)          bx = 1;
             if (by < yStart + 1) by = yStart + 1;
@@ -6946,6 +7685,7 @@ void drawBackgroundOverlay(TFT_eSPI& t, uint32_t now) {
             t.setTextColor(ink, paper);
             t.setCursor(bx + 4, by + (big ? 4 : 2));
             t.print(txt);
+            t.setTextFont(callerFont);
             t.setTextSize(1);
         };
 
@@ -6977,6 +7717,9 @@ void drawBackgroundOverlay(TFT_eSPI& t, uint32_t now) {
 }
 
 void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
+    bgst_snow::State& bgS = bgState<bgst_snow::State>(BGS_SNOW);
+    auto& s_flk = bgS.s_flk;
+    auto& s_snowInit = bgS.s_snowInit;
     const int w = t.width();
     // One pixel of air above the counters. The bank already runs down
     // OVER the headline row -- that text sits at
@@ -7011,6 +7754,7 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         s_lodgeX = (float)(w + 140);
         for (uint8_t i = 0; i < PROP_N; i++)   { s_prop[i].x = (float)(i * (w + 70) / PROP_N); s_prop[i].b = (uint8_t)(i % 3); }
         s_nearX = (float)(w + 120);
+        s_iglooX = (float)(w + 40);         // the first one soon
         s_snLastMs = now; s_dawnAt = now;
         for (uint8_t i = 0; i < RIDER_N; i++) {
             s_rid[i].x = -40.0f; s_rid[i].air = 0.0f; s_rid[i].vy = 0.0f;
@@ -7058,7 +7802,7 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
 
     // ---- bank, and the tracks filling back in ------------------------
     if (step) {
-        static float acc = 0.0f;
+        float& acc = bgS.acc;
         acc += ds;
         if (acc > 6.0f) {
             acc = 0.0f;
@@ -7333,6 +8077,13 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
         }
         s_nearX -= WORLD_SPD * PL_NEAR * ds;
         if (s_nearX < -60.0f) s_nearX = (float)(w + 60 + random(0, 700));
+        // The igloo goes by on the slope about every half minute, so nobody
+        // waits long for a knock -- and less often once he's yours.
+        s_iglooX -= WORLD_SPD * PL_ACT * ds;
+        if (s_iglooX < -40.0f) {
+            s_iglooX = Squachy::meatyUnlocked() ? (float)(w + 200 + random(0, 1400)) : (float)(w + 60 + random(0, 240));
+            s_iglooKnocks = 0;          // a fresh igloo, and a fresh count
+        }
     }
     for (uint8_t i = 0; i < PROP_N; i++) {
         const int px = (int)s_prop[i].x;
@@ -7350,6 +8101,14 @@ void drawSnowfall(TFT_eSPI& t, uint32_t now, int yStart, int yEnd) {
             for (int k = 0; k < 14; k++)
                 t.fillRect(px - 7 + k, gy - 1 - k, 1, k + 2, snowLit);
             t.fillRect(px + 5, gy - 15, 3, 3, snowDim);
+        }
+    }
+    {
+        const int ix = (int)s_iglooX;
+        if (ix > -30 && ix < w + 30) {
+            const int gy = groundAt(ix) + 2;
+            snowIgloo(t, ix, gy, now, snowLit, snowDim);
+            s_iglooHitX = ix; s_iglooHitY = gy; s_iglooAt = now;
         }
     }
     for (uint8_t i = 0; i < TREE_ACT; i++) {
@@ -7831,11 +8590,33 @@ static uint32_t s_gs[6], s_gsAt = 0;
 #define GP_MARK(i) do {} while (0)
 #define GS_MARK(i) do {} while (0)
 #endif
+namespace bgst_gib {
+// xf/wf are thousandths of the panel width and hf thousandths of the band
+// height, measured at closest approach.
+struct Tw { int16_t xf; uint16_t wf, hf, z0; uint8_t hue; };
+struct CityB { uint16_t xf, wf, hf; uint8_t hue, tone; };
+struct State {
+    Tw       tw[GIB_N] = {};
+    bool     inited = false;
+    uint32_t lastMs = 0;
+    float    flyZ   = 0.0f;
+    uint32_t lockAt = 0, lockFirst = 0, lockMac = 0;
+    int8_t   lockIdx  = -1;
+    DetectionType lockType = DetectionType::UNKNOWN;
+    CityB    city[GIB_CITY] = {};
+    uint8_t  cityN   = 0;
+    bool     cityGen = false;
+    uint8_t  peak[14] = {0};
+    uint32_t peakAt = 0;
+};
+}  // namespace bgst_gib
+
 void drawGibson(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
                 const DetectionEngine& eng) {
 #if SQW_GIB_PROFILE
     s_gpAt = micros();
 #endif
+    bgst_gib::State& bgS = bgState<bgst_gib::State>(BGS_GIBSON);
     const int w = t.width();
     if (yEnd - yStart < 48) return;
 
@@ -7898,10 +8679,9 @@ void drawGibson(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
 
     // ---- the corridor, laid out once ---------------------------------
     // xf/wf are thousandths of the panel width and hf thousandths of the band
-    // height, measured at closest approach.
-    struct Tw { int16_t xf; uint16_t wf, hf, z0; uint8_t hue; };
-    static Tw   tw[GIB_N];
-    static bool inited = false;
+    // height, measured at closest approach (bgst_gib::Tw).
+    auto& tw = bgS.tw;
+    auto& inited = bgS.inited;
     if (!inited) {
         for (uint8_t i = 0; i < GIB_N; i++) {
             const uint32_t r = (uint32_t)(i + 1) * 2654435761u;
@@ -7947,8 +8727,8 @@ void drawGibson(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
 
     // Frame-rate independent flight, with the same dt clamp the starfield uses
     // so one stalled frame does not teleport the camera down the corridor.
-    static uint32_t lastMs = 0;
-    static float    flyZ   = 0.0f;
+    auto& lastMs = bgS.lastMs;
+    auto& flyZ   = bgS.flyZ;
     uint32_t dt = (lastMs && now > lastMs) ? (now - lastMs) : 16u;
     if (dt > 100u) dt = 100u;
     lastMs = now;
@@ -7971,9 +8751,9 @@ void drawGibson(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
     // firstSeen plus the MAC is what separates "a new thing" from "that thing
     // again".
     static const uint32_t LOCK_MS = 4200;
-    static uint32_t lockAt = 0, lockFirst = 0, lockMac = 0;
-    static int8_t   lockIdx  = -1;
-    static DetectionType lockType = DetectionType::UNKNOWN;
+    auto& lockAt = bgS.lockAt; auto& lockFirst = bgS.lockFirst; auto& lockMac = bgS.lockMac;
+    auto& lockIdx  = bgS.lockIdx;
+    auto& lockType = bgS.lockType;
 
     if (eng.logCount()) {
         const Detection* d = eng.logAt(0);
@@ -8202,10 +8982,9 @@ void drawGibson(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
         // height, so anything baked in pixels is right on one of them and wrong
         // on the other two.
         GS_MARK(2);
-        struct CityB { uint16_t xf, wf, hf; uint8_t hue, tone; };
-        static CityB  city[GIB_CITY];
-        static uint8_t cityN   = 0;
-        static bool    cityGen = false;
+        auto& city    = bgS.city;            // bgst_gib::CityB
+        auto& cityN   = bgS.cityN;
+        auto& cityGen = bgS.cityGen;
         if (!cityGen) {
             cityGen = true;
             uint16_t cx = 6;
@@ -8452,8 +9231,8 @@ void drawGibson(TFT_eSPI& t, uint32_t now, int yStart, int yEnd,
             // and decays it 4 every 200 ms, which is fast enough that the bars
             // twitch; without a slower mark on top there is nothing steady
             // enough to actually read a level off.
-            static uint8_t  peak[14] = {0};
-            static uint32_t peakAt = 0;
+            auto& peak   = bgS.peak;
+            auto& peakAt = bgS.peakAt;
             if (now - peakAt > 90u) {
                 peakAt = now;
                 for (uint8_t c = 1; c <= 13; c++) if (peak[c]) peak[c]--;
@@ -9296,8 +10075,10 @@ void drawSignalRadar(TFT_eSPI& t, int cx, int cy, int r, uint32_t now,
 }
 
 static const BangersFont::Glyph* bangersFind(char c, BangersSize size) {
-    const BangersFont::Glyph* table = (size == BangersSize::LG) ? BangersFont::LG_GLYPHS : BangersFont::MD_GLYPHS;
-    uint8_t count = (size == BangersSize::LG) ? BangersFont::LG_GLYPH_COUNT : BangersFont::MD_GLYPH_COUNT;
+    const BangersFont::Glyph* table = size == BangersSize::LG ? BangersFont::LG_GLYPHS
+                                    : size == BangersSize::SM ? BangersFont::SM_GLYPHS : BangersFont::MD_GLYPHS;
+    uint8_t count = size == BangersSize::LG ? BangersFont::LG_GLYPH_COUNT
+                  : size == BangersSize::SM ? BangersFont::SM_GLYPH_COUNT : BangersFont::MD_GLYPH_COUNT;
     for (uint8_t i = 0; i < count; i++) {
         if (table[i].ch == c) return &table[i];
     }
@@ -9894,7 +10675,14 @@ uint8_t wrapText(TFT_eSPI& t, const char* text, int maxW,
 
 // Info panel geometry -- see theme.h's comment on drawInfoPanel() for
 // what this is/who uses it.
-static const uint8_t INFO_MAX_LINES = 7;
+// The compact panels' rows (and the small panels' narrow ones) and the large
+// panels' rows. A board is one or the
+// other (or neither), never both, so they share one block: 2.5 KB, not 3.6.
+static const uint8_t INFO_COMPACT_MAX = 24, INFO_WIDE_MAX = 32;
+static union {
+    char compact[INFO_COMPACT_MAX][48];
+    char wide[INFO_WIDE_MAX][80];
+} s_infoRows;
 
 static void infoRects(int screenW, int screenH,
                        int& px, int& py, int& pw, int& ph,
@@ -9939,6 +10727,8 @@ static void infoRects(int screenW, int screenH,
 static uint8_t  s_infoPage = 0, s_infoPages = 1;
 static uint32_t s_infoDrawnAt = 0;
 bool infoPanelHitDismiss(int x, int y, int screenW, int screenH) {
+    // The new card (info_card.h) takes the tap while it is the one up.
+    if (!s_compact && InfoCard::fresh(millis())) return InfoCard::tapCloses(x, y, screenW, screenH);
     if (s_compact) {
         const int bw = screenW - 28, bh = 18, bx = 14, by = screenH - 4 - 4 - bh;
         if (!(x >= bx && x <= bx + bw && y >= by && y <= by + bh)) return false;
@@ -9955,9 +10745,10 @@ bool infoPanelHitDismiss(int x, int y, int screenW, int screenH) {
     infoRects(screenW, screenH, px, py, pw, ph, headingY, squachyCx, squachyBaseY, squachyScale, squachyWander,
               textTop, textMaxW, btnX, btnY, btnW, btnH);
     if (!(x >= btnX && x <= btnX + btnW && y >= btnY && y <= btnY + btnH)) return false;
-    // The large panels page their size-2 text the way the compact ones do:
-    // the button reads MORE until the last page.
-    if (s_large) {
+    // Every panel pages its text the way the compact ones do: the button
+    // reads MORE until the last page. Only the large panels used to, so on
+    // the 2.8" and the watch a long paragraph ran on behind the button.
+    {
         static uint32_t last = 0;
         const uint32_t now = millis();
         if (now - last < 250) return false;     // one press, one page
@@ -9970,6 +10761,9 @@ bool infoPanelHitDismiss(int x, int y, int screenW, int screenH) {
 
 void drawInfoPanel(TFT_eSPI& t, int w, int h, uint32_t now,
                    const char* typeName, const char* text) {
+    // A detection's MORE INFO: the card main.cpp fed this frame. The primer
+    // (no typeName), Bingo and the small boards keep the panel below.
+    if (!s_compact && typeName && InfoCard::fresh(now)) { InfoCard::draw(t, w, h, now); return; }
     if (s_compact) {
         if (now - s_infoDrawnAt > 400) s_infoPage = 0;
         s_infoDrawnAt = now;
@@ -9987,10 +10781,9 @@ void drawInfoPanel(TFT_eSPI& t, int w, int h, uint32_t now,
         }
         const int btnH = 18, btnY = py + ph - btnH - 4;
         const int per = (btnY - 3 - ly) / 10;
-        static const uint8_t MAXL = 24;
-        static char lines[MAXL][48];
+        char (*lines)[48] = s_infoRows.compact;
         t.setTextSize(1);
-        const uint8_t n = wrapText(t, text, pw - 10, lines, MAXL);
+        const uint8_t n = wrapText(t, text, pw - 10, lines, INFO_COMPACT_MAX);
         s_infoPages = (uint8_t)(per > 0 ? (n + per - 1) / per : 1);
         if (!s_infoPages) s_infoPages = 1;
         if (s_infoPage >= s_infoPages) s_infoPage = 0;
@@ -10027,19 +10820,21 @@ void drawInfoPanel(TFT_eSPI& t, int w, int h, uint32_t now,
 
     // The large panels set it at size 2, a page of as many lines as fit
     // above the button; everywhere else the size-1 seven it always had.
-    t.setTextSize(s_large ? 2 : 1);
+    // TEXT smaller sets it at size 1 there too, still paged.
+    t.setTextSize(s_large && fontDelta(Settings::FontKind::TEXT) >= 0 ? 2 : 1);
     t.setTextWrap(false);
     t.setTextColor(WHITE, BG);
     const int step = s_large ? t.fontHeight() + 3 : 12;
-    static const uint8_t WIDE_MAX = 32;
-    static char wide[WIDE_MAX][80];
-    char narrow[INFO_MAX_LINES][48];
+    char (*wide)[80] = s_infoRows.wide;
+    // The narrow rows share the compact panel's buffer: room for a long
+    // paragraph, paged above. (Seven lines on the stack cut the rest off.)
+    char (*narrow)[48] = s_infoRows.compact;
     int per = (btnY - 4 - textTop) / step;
     if (per < 1) per = 1;
-    const uint8_t n = s_large ? wrapText(t, text, textMaxW, wide, WIDE_MAX)
-                              : wrapText(t, text, textMaxW, narrow, INFO_MAX_LINES);
+    const uint8_t n = s_large ? wrapText(t, text, textMaxW, wide, INFO_WIDE_MAX)
+                              : wrapText(t, text, textMaxW, narrow, INFO_COMPACT_MAX);
     int first = 0, last = n;
-    if (s_large) {
+    {
         if (now - s_infoDrawnAt > 400) s_infoPage = 0;   // a new panel opens on page one
         s_infoDrawnAt = now;
         s_infoPages = (uint8_t)((n + per - 1) / per);
@@ -10059,9 +10854,40 @@ void drawInfoPanel(TFT_eSPI& t, int w, int h, uint32_t now,
     t.setTextSize(1);
 
     char lbl[24];
-    if (s_large && s_infoPage + 1 < s_infoPages) snprintf(lbl, sizeof lbl, "[ MORE %u/%u ]", s_infoPage + 1, s_infoPages);
+    if (s_infoPage + 1 < s_infoPages) snprintf(lbl, sizeof lbl, "[ MORE %u/%u ]", s_infoPage + 1, s_infoPages);
     else                                         snprintf(lbl, sizeof lbl, "[ GOT IT ]");
     drawButton(t, btnX, btnY, btnW, btnH, lbl, false, 2);
+}
+
+// ---- the background arena (see BgStateId near the top) --------------------
+// Sized as the largest State on this build -- they all scale with
+// SQW_BG_MAX_W and SQW_BG_DENSITY -- so a background that outgrows it is a
+// compile error in bgState() below, never a quiet overrun. A new background
+// with state goes in this list as well as in BgStateId.
+template <typename T> constexpr size_t bgMaxSize() { return sizeof(T); }
+template <typename T, typename U, typename... R> constexpr size_t bgMaxSize() {
+    return sizeof(T) > bgMaxSize<U, R...>() ? sizeof(T) : bgMaxSize<U, R...>();
+}
+static const size_t BG_ARENA_BYTES =
+    bgMaxSize<bgst_rain::State, bgst_stars::State, bgst_toast::State, bgst_aqua::State,
+              bgst_flies::State, bgst_fire::State, bgst_snow::State, bgst_gib::State>();
+alignas(8) static uint8_t s_bgArena[BG_ARENA_BYTES];
+static uint8_t s_bgOwner = BGS_NONE;
+
+// The arena, as background `id`'s State. If another background (or nobody)
+// held it, the State is built fresh first: every member back to its default,
+// exactly as the old statics started at boot. Only ever called from that
+// background's own draw function, so nothing reads the arena as one
+// background's State while another's is in it.
+template <typename T> static T& bgState(uint8_t id) {
+    static_assert(sizeof(T) <= sizeof(s_bgArena), "background state outgrew the arena -- add it to BG_ARENA_BYTES");
+    static_assert(alignof(T) <= 8, "background state needs more alignment than the arena has");
+    static_assert(std::is_trivially_destructible<T>::value, "the arena never runs destructors");
+    if (s_bgOwner != id) {
+        new (s_bgArena) T();
+        s_bgOwner = id;
+    }
+    return *reinterpret_cast<T*>(s_bgArena);
 }
 
 }  // namespace Theme

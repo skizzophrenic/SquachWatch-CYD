@@ -55,9 +55,11 @@ void uiZoneCardDraw(TFT_eSPI& t, uint32_t now) {
     Theme::bodyFontOn(t);
     char tm[8], date[20], line[32];
     bool pm = false;
-    Clock::formatTime(tm, sizeof tm, true, &pm);
+    const bool twelveHour = !Settings::clock24Hour();
+    Clock::formatTime(tm, sizeof tm, twelveHour, &pm);
     Clock::formatDate(date, sizeof date);
-    snprintf(line, sizeof line, "%s %s  %s", tm, pm ? "PM" : "AM", date);
+    if (twelveHour) snprintf(line, sizeof line, "%s %s  %s", tm, pm ? "PM" : "AM", date);
+    else            snprintf(line, sizeof line, "%s  %s", tm, date);
     t.setTextColor(Theme::VAPOR_YELLOW, Theme::BG);
     t.setCursor(x + (cardW() - t.textWidth(line)) / 2, ly);
     t.print(line);
@@ -79,4 +81,15 @@ ZoneHit uiZoneCardHit(int tx, int ty, int screenW, int screenH) {
     if (tx < okx - 3)       return ZoneHit::PREV;
     if (tx >= nx - 3)       return ZoneHit::NEXT;
     return ZoneHit::OK;
+}
+
+void uiZoneCardStops(int screenW, int screenH, int16_t xs[3], int16_t ys[3]) {
+    int x, y;
+    cardRect(screenW, screenH, x, y);
+    int px, okx, okw, nx, by;
+    buttonRects(x, y, px, okx, okw, nx, by);
+    const int cy = by + btnH() / 2;
+    xs[0] = (int16_t)(px + 17);         ys[0] = (int16_t)cy;
+    xs[1] = (int16_t)(okx + okw / 2);   ys[1] = (int16_t)cy;
+    xs[2] = (int16_t)(nx + 17);         ys[2] = (int16_t)cy;
 }

@@ -5,6 +5,7 @@
 #include "detection.h"
 
 void uiLogInit(TFT_eSPI& t);
+void uiLogLeave();                   // from loop() whenever the LOG is not up: lets its index go
 // confirmPending/confirmLabel: draws a modal "TRACK THIS TARGET?"
 // panel with WATCH/HUNT/MORE INFO/CANCEL over everything else instead
 // of the normal list -- see uiLogHitConfirm() below. confirmLabel is
@@ -55,5 +56,9 @@ int uiLogRowAt(TFT_eSPI& t, int x, int y, int screenW, int screenH);
 // Hit test for the confirm panel's WATCH/HUNT/INFO/CANCEL buttons --
 // only meaningful while uiLogTick() is being called with confirmPending
 // true; main.cpp owns that flag, not this module.
-enum class LogConfirmTap { NONE, WATCH, HUNT, INFO, IGNORE, CANCEL };
+enum class LogConfirmTap { NONE, WATCH, HUNT, INFO, IGNORE, CANCEL, RING };
 LogConfirmTap uiLogHitConfirm(int x, int y, int screenW, int screenH);
+// RING on the panel: shown for a tracker on the boards built with it (set
+// when the panel opens), and held down while a ring is under way.
+void uiLogSetConfirmRing(bool show);
+void uiLogSetRinging(bool on);

@@ -1,0 +1,6 @@
+dependencies:
+  espressif/esp_hosted:
+    version: ==2.12.13   # must match the P4 Arduino core (framework 3.3.12) and the C6 image
+    rules:
+    - if: target == esp32p4
+  espressif/esp_wifi_remote: ==1.6.4

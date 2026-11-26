@@ -1,0 +1,29 @@
+{
+  "name": "SquachWatch-CYD (M5Stack Tab5, 5\" on an ESP32-P4)",
+  "version": "0.0.0",
+  "funding_url": "https://talkingsasquach.com",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-P4",
+      "parts": [
+        {
+          "path": "tab5-bootloader.bin",
+          "offset": 8192
+        },
+        {
+          "path": "tab5-partitions.bin",
+          "offset": 32768
+        },
+        {
+          "path": "tab5-boot_app0.bin",
+          "offset": 57344
+        },
+        {
+          "path": "tab5-firmware.bin",
+          "offset": 65536
+        }
+      ]
+    }
+  ]
+}

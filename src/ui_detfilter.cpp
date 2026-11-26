@@ -10,8 +10,8 @@ static int g_scroll = 0;
 
 // Real types only (1..COUNT-1) -- UNKNOWN is the "matched something but
 // not a specific brand" fallback, not a type someone would toggle off.
-static uint8_t rowCount() { return (uint8_t)DetectionType::COUNT - 1; }
-static DetectionType rowType(uint8_t i) { return (DetectionType)(i + 1); }
+static uint8_t rowCount() { return CATALOGUE_N; }   // MY ALERTS is switched by its own list
+static DetectionType rowType(uint8_t i) { return catalogueAt(i); }
 
 // Same fixed-height-at-size-2 approach Settings uses -- needs a live
 // TFT_eSPI& since it depends on actual font metrics, shared by drawing
@@ -39,7 +39,7 @@ void uiDetFilterScroll(int delta) {
 static void drawRow(TFT_eSPI& t, int w, int y, int hgt, DetectionType type) {
     bool on = Settings::typeEnabled(type);
     Theme::drawListRowPanel(t, w, y, hgt);
-    t.setTextSize(Theme::uiMenuTextSize(t));
+    Theme::menuFontOn(t, false);   // FONTS > MENUS
     t.setTextColor(Theme::AMBER, Theme::BG);
     t.setCursor(8, y + (hgt - t.fontHeight()) / 2);
     t.print(detectionTypeName(type));
@@ -49,6 +49,7 @@ static void drawRow(TFT_eSPI& t, int w, int y, int hgt, DetectionType type) {
     int vw = t.textWidth(value);
     t.setCursor(w - 18 - vw, y + (hgt - t.fontHeight()) / 2);
     t.print(value);
+    t.setTextFont(1);
 }
 
 void uiDetFilterTick(TFT_eSPI& t, uint32_t now, const DetectionEngine& eng) {

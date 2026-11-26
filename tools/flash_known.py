@@ -16,6 +16,7 @@ import os, subprocess, sys
 BOARDS = {
     "d4:8a:fc:c8:e5:e4": ("cyd-fast",    "soak, 2.8in ST7789"),
     "8c:94:df:4e:84:10": ("cyd-fast",    "2.8in ST7789, the newer one"),
+    "8c:94:df:4e:ec:ec": ("cyd-ili9341", "2.8in ILI9341, no 80 MHz (the fast build showed a wrong picture, 2026-10-14)"),
     "78:42:1c:94:e7:5c": ("rlphantom-r", "RL Phantom 2.4in, resistive"),
     "78:42:1c:8e:df:f8": ("awok",        "AWOK, touch on the display bus"),
     "88:57:21:2e:ba:34": ("cyd-ili9341", "2.8in ILI9341, no 80 MHz"),
@@ -58,11 +59,23 @@ BOARDS = {
     # line): ST77922 over QSPI, touch in the panel chip. Bring-up began
     # 2026-10-09.
     "b8:1f:3f:c3:fd:58": ("freenove-s3-35", "Freenove ESP32-S3 Display 3.5in (FNK0104N), native USB"),
+    "28:84:85:85:12:0c": ("freenove-s3-35", "Freenove ESP32-S3 Display 3.5in, the second one (identified 2026-11-09: running SquachWatch, 480x320, 8 MB PSRAM)"),
     # Marauder V8 (justcallmekoko): ESP32-C5, 8 MB flash, ILI9341 + resistive
     # touch, GPS, MAX17048 gauge, behind a CP210x. Its Marauder v1.12.1 image
     # was read off first (sim/out/marauder_v8/marauder_v8_factory.bin).
     # Bring-up began 2026-10-12.
     "3c:dc:75:81:0a:7c": ("marauder-v8", "Marauder V8, ESP32-C5 behind a CP210x"),
+    # LilyGo T-Deck Plus: ESP32-S3FN16R8, 16 MB flash, 8 MB PSRAM, 2.8in ST7789,
+    # GT911 touch, keyboard, trackball, SX1262, GPS. Native USB with its MAC as
+    # the serial number. Its factory image was read off first
+    # (sim/out/tdeck_plus/tdeck_plus_factory.bin). Bring-up began 2026-10-12.
+    "30:ed:a0:a5:c3:f8": ("tdeck-plus",  "LilyGo T-Deck Plus, ESP32-S3, native USB"),
+    # M5Stack Tab5: ESP32-P4 with an ESP32-C6 radio over SDIO (esp-hosted),
+    # 1280x720 MIPI-DSI, ST7123 panel+touch on this unit. Native USB with its
+    # MAC as the serial number. Refused here on purpose from 2026-09-29 until
+    # 2026-10-19, when the owner said to build it: its MonsterC5 app is backed
+    # up whole in sim/out/tab5/. Builds from ~/.pioarduino like the C5s.
+    "30:ed:a0:e3:24:83": ("tab5",        "M5Stack Tab5, ESP32-P4 + C6, native USB"),
     # 88:57:21:2e:e6:e0 runs SquachEmit, not this firmware. It is the only
     # CAPACITIVE 2.8in; to test capacitive touch, list it here as cyd-fast
     # for the test and comment it out again after (done 2026-09-21).
@@ -81,8 +94,21 @@ PY   = os.path.join(PENV, "python.exe")
 PIO  = os.path.join(PENV, "pio.exe")
 
 
+# The C5 toolchain's own venv, whose esptool knows the C5. The shared penv's
+# esptool has gone back to 4.5 before (a PlatformIO update), and 4.5 stops at
+# "Unexpected chip ID value 23" on a C5 -- so that is tried second.
+C5_PY = os.path.join(os.path.expanduser("~"), ".pioarduino", "penv", "Scripts", "python.exe")
+
+
 def read_mac(port):
-    out = subprocess.run([PY, "-m", "esptool", "--port", port, "--baud", "115200", "read_mac"],
+    mac = read_mac_with(PY, port)
+    if not mac and os.path.exists(C5_PY):
+        mac = read_mac_with(C5_PY, port)
+    return mac
+
+
+def read_mac_with(py, port):
+    out = subprocess.run([py, "-m", "esptool", "--port", port, "--baud", "115200", "read_mac"],
                          capture_output=True, text=True).stdout
     mac = None
     for line in out.splitlines():
@@ -138,7 +164,7 @@ def main():
                             "0x8000", os.path.join(build, "partitions.bin"),
                             "0xe000", boot_app0,
                             "0x10000", os.path.join(build, "firmware.bin")], cwd=ROOT)
-    elif env in ("nm-cyd-c5", "marauder-v8"):
+    elif env in ("nm-cyd-c5", "marauder-v8", "tab5"):
         # The C5's toolchain (pioarduino) installs its own core into whatever
         # penv runs it, and run from the shared one it broke `pio` for every
         # board (2026-10-02). It lives in a core dir of its own, and its

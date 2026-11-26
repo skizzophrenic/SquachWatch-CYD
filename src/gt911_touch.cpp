@@ -1,10 +1,25 @@
-#if defined(CROWPANEL7) || defined(CYD32C) || defined(CYD35C)
+#if defined(CROWPANEL7) || defined(CYD32C) || defined(CYD35C) || defined(TDECK_PLUS)
 #include "gt911_touch.h"
 #include <Arduino.h>
 #include <Wire.h>
 #if defined(CROWPANEL7)
 #include "crowpanel7_board.h"
 #include "crowpanel7_backlight.h"
+#elif defined(TDECK_PLUS)
+// The LilyGo T-Deck Plus: the GT911 on the board's one I2C bus (SDA 18,
+// SCL 8), shared with the keyboard's helper chip at 0x55. INT on 16; no reset
+// line is wired, so the chip keeps whatever address it latched at power-on
+// (0x5D on the units LilyGo's driver expects; identify() tries both).
+#define PIN_I2C_SDA    18
+#define PIN_I2C_SCL     8
+#define PIN_TOUCH_RST  -1
+#define PIN_TOUCH_INT  16
+#define I2C_HZ         400000
+#define GT911_ADDR_A   0x5D
+#define GT911_ADDR_B   0x14
+#define GT911_REG_PRODUCT_ID 0x8140
+#define GT911_REG_STATUS     0x814E
+#define GT911_REG_POINT1     0x814F
 #else
 // The Sunton ESP32-2432S032C, and the 3.5" ESP32-3248S035C: the GT911 on the I2C pins the capacitive 2.8"
 // CYDs use for their CST816 (SDA 33, SCL 32, reset 25), and its INT on 21 --
@@ -69,7 +84,12 @@ static bool i2cPresent(uint8_t addr) {
 // of reset is also what latches its address to 0x5D rather than 0x14, which
 // is why this runs before the identify rather than after a failed one.
 static void wake() {
-#if defined(CYD32C) || defined(CYD35C)
+#if defined(TDECK_PLUS)
+    // No reset line to pulse: the chip woke with the power rail. INT is
+    // left as the chip's output.
+    pinMode(PIN_TOUCH_INT, INPUT);
+    delay(20);
+#elif defined(CYD32C) || defined(CYD35C)
     // Goodix's own power-on sequence: INT low across the release of reset
     // latches 0x5D, then INT goes back to being the chip's output.
     pinMode(PIN_TOUCH_RST, OUTPUT);

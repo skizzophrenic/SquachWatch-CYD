@@ -114,7 +114,63 @@ struct GroupText {
 };
 bool parseGroupText(const uint8_t* plain, uint8_t len, GroupText& g);
 
+// A group text from us on channel `c`, sealed the way openSealed() opens one:
+// a flood GRP_TXT header (0x15), no path, the channel's hash, two bytes of
+// HMAC-SHA256 over the ciphertext, then AES-128-ECB over {timestamp, flags 0,
+// "name: text"} zero-padded to a block. Hashtag and keyed channels alike --
+// both are sixteen bytes of key by the time they are a Channel. `f` needs 5 +
+// 192 bytes; a long text is cut to fit. `echo`, when given, gets what a relay's
+// copy decodes to (the chat's dedupe key is made from it). Returns the frame's
+// length, 0 for a muted or empty channel. Pure, for test/lora_meshcore_test.cpp.
+uint16_t sealGroupText(const Channel& c, uint32_t stamp, const char* name, const char* text, uint8_t* f,
+                       GroupText* echo = nullptr);
+
 // ---- trace and control ----------------------------------------------------
+// ---- direct messages (2026-10-23) ----------------------------------------------------
+// MeshCore's DMs, from src/Mesh.cpp and src/helpers/BaseChatMesh.cpp there:
+//
+//   The two nodes' shared secret is orlp's ed25519_key_exchange of their
+//   identities (LoraCrypto::ed25519KeyExchange), 32 bytes. Utils::
+//   encryptThenMAC seals with it: AES-128-ECB under the first 16 bytes,
+//   zero-padded, then two bytes of HMAC-SHA256 under all 32, in front.
+//   A TXT_MSG's payload is dest hash, src hash (one byte of each public key),
+//   then the seal of: timestamp (4, LE), (txt type << 2) | attempt, the text.
+//   The receiver answers with sha256(those bytes || SENDER's public key),
+//   first four bytes, plus an attempt byte and a random one: inside a PATH
+//   return (dest, src, seal of path length byte, path, 0x03, the ACK) when
+//   the message came by flood, or as a bare ACK frame when it came direct.
+//   A node only opens a DM from a contact: it learns contacts from adverts.
+//
+// The secret-based seal and its opening. `out` gets mac(2) | cipher; open
+// does not trim the padding (an ACK inside a PATH can end in zero bytes).
+uint16_t sealSecret(const uint8_t secret[32], const uint8_t* plain, uint16_t len, uint8_t* out);
+bool     openSecret(const uint8_t secret[32], const uint8_t* in, uint8_t len, uint8_t* plain, uint8_t& plainLen);
+// The ACK a receiver sends for one TXT_MSG plaintext (stamp, flags, text --
+// no terminator), from the sender's public key.
+void     ackFor(const uint8_t* plain, size_t len, const uint8_t senderPub[32], uint8_t ack[4]);
+// A TXT_MSG by flood, no path yet. The text is cut at 160 (MAX_TEXT_LEN).
+// `ack` gets the four bytes the recipient will answer with. Returns the
+// frame's length.
+uint16_t buildDirectText(const uint8_t secret[32], const uint8_t destPub[32], const uint8_t ourPub[32],
+                         uint32_t stamp, uint8_t attempt, const char* text, uint8_t* f, uint8_t ack[4]);
+// The receipt for a DM that came by flood: a PATH return by flood carrying
+// the path it took (pathLenByte as the frame had it) and the 6-byte ACK.
+uint16_t buildPathReturn(const uint8_t secret[32], uint8_t destHash, uint8_t ourHash, uint8_t pathLenByte,
+                         const uint8_t* path, const uint8_t ack[6], uint8_t* f);
+// The receipt for a DM that came direct: a bare ACK, by flood (we keep no
+// path to answer along).
+uint16_t buildAck(const uint8_t ack[6], uint8_t* f);
+// Our advert by flood: public key, timestamp, Ed25519 signature over the
+// three, app data = flags 0x81 (a chat node, with a name) and the name.
+uint16_t buildAdvert(const uint8_t pub[32], const uint8_t prv[64], uint32_t stamp, const char* name, uint8_t* f);
+// An opened TXT_MSG plaintext.
+struct DirectText { uint32_t timestamp; uint8_t txtType, attempt; char text[161]; uint8_t textLen; };
+bool     parseDirectText(const uint8_t* plain, uint8_t len, DirectText& t);
+// An opened PATH plaintext: the path back to its sender, and what rode along.
+struct PathReturn { uint8_t pathLenByte; uint8_t hops, hashSize; const uint8_t* path; uint8_t extraType;
+                    const uint8_t* extra; uint8_t extraLen; };
+bool     parsePathReturn(const uint8_t* plain, uint8_t len, PathReturn& p);
+
 struct Trace {
     uint32_t tag, auth;
     uint8_t  flags;

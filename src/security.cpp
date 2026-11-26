@@ -164,11 +164,19 @@ void begin() {
     s_waitStart = 0;   // set on the next real millis() in lockoutRemainingMs()
 }
 
-bool    enabled()   { return s_enabled; }
 uint8_t pinLength() { return s_len; }
 PinLen  pinLen()    { return (PinLen)s_len; }
+#if defined(STICKS3)
+// The StickS3 cannot type a PIN, so it never locks. A PIN saved by an
+// older build stays stored, untouched: no padlock, never asked for.
+bool    enabled()   { return false; }
+bool    locked()    { return false; }
+void    lock()      {}
+#else
+bool    enabled()   { return s_enabled; }
 bool    locked()    { return s_enabled && s_locked; }
 void    lock()      { if (s_enabled) s_locked = true; }
+#endif
 
 void setPinLength(PinLen n) {
     if (s_enabled) return;                 // length is fixed once a PIN exists
@@ -183,6 +191,10 @@ bool setPin(const char* digits) {
     s_prefs.putBytes("salt", s_salt, 8);
     s_prefs.putBytes("hash", s_hash, 32);
     s_prefs.putBool("on", true);
+    // A first PIN locks at boot too: otherwise RST, or pulling the cable,
+    // brings the board back unlocked, which is the snoop at the table the
+    // lock is for. Changing an existing PIN leaves the choice as it was.
+    if (!s_enabled) setLockAtBoot(true);
     s_enabled = true;
     s_fails = 0; s_prefs.putUChar("fails", 0);
     return true;

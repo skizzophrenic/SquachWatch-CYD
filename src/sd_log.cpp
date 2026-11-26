@@ -1,4 +1,6 @@
 // SquachWatch-CYD — SD log implementation
+#include <fcntl.h>
+#include <unistd.h>
 #include "sd_log.h"
 #include "frame_push.h"   // busLock(): the card shares the panel's bus
 #include "sd_row.h"
@@ -20,7 +22,11 @@
 // The Phantoms define CYD (they ARE a CYD) but still need this reference,
 // because their touch shares the display's bus and SdLog::begin() has to hand
 // SD the display's own SPI instance -- see the comment on that branch below.
-#if !defined(CYD) || defined(RLPHANTOM) || defined(RLPHANTOM_R)
+// NM_CYD_C5 (and so WS_C5_35) also needs the `tft` reference: its branch below
+// hands SD the display's own SPI instance. The NM-CYD-C5 env gets here via its
+// -DRLPHANTOM_R, but the Waveshare C5 build does not set that flag, so key the
+// reference on NM_CYD_C5 directly rather than relying on RLPHANTOM_R.
+#if !defined(CYD) || defined(RLPHANTOM) || defined(RLPHANTOM_R) || defined(NM_CYD_C5)
 #include <TFT_eSPI.h>
 #include <esp_heap_caps.h>
 // The single TFT_eSPI instance main.cpp already owns and has already
@@ -39,10 +45,23 @@ extern TFT_eSPI tft;
 // NM-CYD-C5: CS=10, on the DISPLAY's bus (SCK 6, MISO 2, MOSI 7), from
 // RockBase's connections.md. Not 5 -- GPIO5 on this board is the GPS header's
 // UART, and the card simply never answers.
+// Waveshare ESP32-C5-Touch-LCD-2.8: CS=23, on the display's bus (SCK 6,
+// MISO 8, MOSI 7), per Waveshare's pin table. It takes the NM-CYD-C5's
+// shared-bus branch below.
 #if defined(AWOK)
     #define SD_CS_PIN 14
+#elif defined(WAVESHARE_C5)
+    #define SD_CS_PIN 23
+#elif defined(WS_C5_35)
+    // Waveshare C5 3.5": SD CS 9 on the display's shared bus (SCK 6/MISO 2/MOSI 7).
+    #define SD_CS_PIN 9
 #elif defined(NM_CYD_C5)
     #define SD_CS_PIN 10
+#elif defined(CARDPUTER_ADV)
+    #define SD_CS_PIN 12   // SCK 40, MISO 39, MOSI 14: the EXT screen's bus
+    extern SPIClass g_cardSpi;   // main.cpp, the EXT screen's
+#elif defined(TDECK_PLUS)
+    #define SD_CS_PIN 39   // on the display's bus (40/38/41), per LilyGo's utilities.h
 #else
     #define SD_CS_PIN 5
 #endif
@@ -56,7 +75,7 @@ static const uint8_t SD_MAX_FILES = 2;
 
 bool SdLog::begin() {
     if (_ready) return true;
-#if defined(TWATCH_S3) || defined(SQW_SMALL)   // the Cardputer has a slot, on pins of its own: not brought up yet
+#if defined(TWATCH_S3) || (defined(SQW_SMALL) && !defined(CARDPUTER_ADV))   // the Cardputer's slot: see below
     return false;   // no card slot; GPIO19/20 are the S3's USB pins
 #endif
 #if defined(CROWPANEL7)
@@ -65,7 +84,14 @@ bool SdLog::begin() {
     // sits on the amplifier. So no log and no wipe of it here.
     return false;
 #endif
-    Serial.printf("[sd] mounting: heap %lu, largest block %lu\n", (unsigned long)ESP.getFreeHeap(), (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    // INTERNAL SRAM, not whatever pool happens to have the biggest block in
+    // it: what a failed mount runs out of is the driver's own buffers, and
+    // those are internal. MALLOC_CAP_8BIT alone also matches PSRAM on the
+    // boards that build with -DBOARD_HAS_PSRAM, so on those this line used to
+    // print a megabyte-scale number and say nothing at all about the pool the
+    // mount was actually short of. See the note at the top of detection.cpp.
+    Serial.printf("[sd] mounting: heap %lu, largest block %lu\n", (unsigned long)ESP.getFreeHeap(),
+                  (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35)
     // SDMMC on the S3's GPIO matrix. Pins from Freenove's own SDMMC sketch and
     // the schematic: CLK 38, CMD 40, D0 39, D1 41, D2 48, D3 47 on the 2.8",
@@ -145,6 +171,19 @@ bool SdLog::begin() {
     // the additive GPIO-matrix attach the comment above warns about lands on
     // the display's own chip select.
     if (!SD.begin(SD_CS_PIN, tft.getSPIinstance(), 4000000, "/sd", SD_MAX_FILES)) {
+#elif defined(TDECK_PLUS)
+    // The T-Deck's slot is on the DISPLAY's bus too (SCK 40, MISO 38, MOSI 41,
+    // CS 39), with the SX1262 beside it on CS 9: the same shared-bus treatment
+    // as the C5 above, TFT_eSPI's own instance and nothing extra attached.
+    if (!SD.begin(SD_CS_PIN, tft.getSPIinstance(), 4000000, "/sd", SD_MAX_FILES)) {
+#elif defined(CARDPUTER_ADV)
+    // The slot shares SCK 40 and MOSI 14 with the EXT screen (main.cpp), so
+    // both use one SPIClass on one host: two hosts on the same pins fight in
+    // the GPIO matrix. The EXT panel's CS is parked high first, so a panel
+    // that was never switched on does not listen in.
+    pinMode(5, OUTPUT); digitalWrite(5, HIGH);
+    g_cardSpi.begin(40, 39, 14, -1);
+    if (!SD.begin(SD_CS_PIN, g_cardSpi, 4000000, "/sd", SD_MAX_FILES)) {
 #elif defined(AWOK)
     if (!SD.begin(SD_CS_PIN, SPI, 4000000, "/sd", SD_MAX_FILES)) {
 #else
@@ -189,12 +228,32 @@ void SdLog::openDaily() {
 
 void SdLog::logEvent(const Detection& d) {
     if (!_ready) return;
+    char line[SdRow::ROW_MAX];
+#if defined(CYD_GPS)
+    // Where the board is now. The queue drains on the loop task within a
+    // frame or two of the detection, so this is where it was seen.
+    SdRow::line(line, sizeof(line), d,
+                Clock::trusted() ? Clock::nowEpoch() : 0, millis(),
+                &Gnss::fix(), Gnss::faked(), millis());
+#else
+    SdRow::line(line, sizeof(line), d,
+                Clock::trusted() ? Clock::nowEpoch() : 0, millis(),
+                nullptr, false, 0);
+#endif
+    // Straight to the file through the VFS (every board mounts the card at
+    // "/sd"), not through CARD.open(): the Arduino File puts a 4 KB stdio
+    // buffer on the heap at the first write and frees it at close, so every
+    // logged detection needed 4 KB in one piece on a board with ~25 KB of
+    // largest block, while WiFi's receive buffers came and went around it.
+    // The FAT file slot this uses was set aside at mount (SD_MAX_FILES).
+    char path[48];
+    snprintf(path, sizeof path, "/sd%s", _filename);
     // The card shares the panel's SPI bus on the boards that have it there;
     // on the C5 the push runs in a task, so the write waits for a frame in
     // flight (a no-op everywhere else).
     FramePush::busLock();
-    File f = CARD.open(_filename, FILE_APPEND);
-    if (!f) {
+    const int fd = ::open(path, O_WRONLY | O_APPEND | O_CREAT, 0644);
+    if (fd < 0) {
         FramePush::busUnlock();
 #if defined(NM_CYD_C5)
         // Once, not once per detection: a card that mounts but cannot be
@@ -216,21 +275,11 @@ void SdLog::logEvent(const Detection& d) {
 #endif
         return;
     }
-    char line[SdRow::ROW_MAX];
-#if defined(CYD_GPS)
-    // Where the board is now. The queue drains on the loop task within a
-    // frame or two of the detection, so this is where it was seen.
-    SdRow::line(line, sizeof(line), d,
-                Clock::trusted() ? Clock::nowEpoch() : 0, millis(),
-                &Gnss::fix(), Gnss::faked(), millis());
-#else
-    SdRow::line(line, sizeof(line), d,
-                Clock::trusted() ? Clock::nowEpoch() : 0, millis(),
-                nullptr, false, 0);
-#endif
-    f.print(line);
-    f.close();
+    const size_t n = strlen(line);
+    const ssize_t w = ::write(fd, line, n);
+    ::close(fd);
     FramePush::busUnlock();
+    (void)w;
 }
 
 void SdLog::wipe() {

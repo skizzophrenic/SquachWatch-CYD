@@ -43,6 +43,9 @@ static void invalidatePage() { s_pageOk = false; }
 // device from yesterday seen again today moves to the live rows, and its grey
 // copy has to go -- but at most once a second, since a rebuild reads the
 // whole flash history and a busy room adds rows several times a second.
+// Three seconds, not one: each rebuild is a run of allocations up to 16 KB
+// with the radios running, and a grey copy lingering two more seconds costs
+// nothing. The index is let go when the LOG closes (uiLogLeave).
 static bool     s_indexWanted = true;
 static uint8_t  s_sigCount    = 0xFF;
 static uint32_t s_sigNewest   = 0;
@@ -57,7 +60,7 @@ static void ensureIndex(const DetectionEngine& eng) {
     const bool cleared = kept < s_sigKept;   // a CLR: positions mean nothing now
     const bool changed = n != s_sigCount || newestKey != s_sigNewest;
     if (!s_indexWanted && !cleared && !changed) return;
-    if (!s_indexWanted && !cleared && millis() - s_indexAt < 1000) return;
+    if (!s_indexWanted && !cleared && millis() - s_indexAt < 3000) return;
 
     uint32_t keys[64];   // the ring's LOG_CAP; logCount() never exceeds it
     for (uint8_t i = 0; i < n; i++) {
@@ -126,6 +129,13 @@ const Detection* uiLogRow(const DetectionEngine& eng, int idx) {
     return &row;
 }
 
+void uiLogLeave() {
+    // The index's position list (up to 4 KB) is only for this screen; it
+    // used to stay allocated from the first LOG visit until a restart.
+    if (LogIndex::filtering()) LogIndex::release();
+    s_indexWanted = true;
+}
+
 void uiLogInit(TFT_eSPI& t) {
     g_scroll = 0;
     invalidatePage();
@@ -141,6 +151,15 @@ void uiLogScroll(int delta) {
     g_scroll += delta;
     if (g_scroll < 0) g_scroll = 0;
 }
+
+// RING (tag_ring.h): on a tracker's panel, on the boards built with it, a
+// full-width row of its own between IGNORE/MORE INFO and CANCEL. The panel
+// grows by that row; nothing else moves.
+static bool s_ringRow = false;
+static bool s_ringing = false;
+static int  s_rgX, s_rgY, s_rgW, s_rgH;
+void uiLogSetConfirmRing(bool show) { s_ringRow = show; }
+void uiLogSetRinging(bool on)       { s_ringing = on; }
 
 // Confirm panel geometry/drawing/hit-test. A 2x2 grid (WATCH/HUNT on
 // top, INFO/CANCEL below) rather than the single row of three
@@ -161,13 +180,14 @@ static void confirmRects(int screenW, int screenH,
         // 135 rows: no question line, the name in the built-in face, and
         // shorter buttons closer together. Same five, same places.
         pw = screenW - 16;
-        ph = 104;
+        const int margin = 6, gap = 4, btnH = 20;
+        ph = 104 + (s_ringRow ? btnH + gap : 0);
         px = (screenW - pw) / 2;
         py = (screenH - ph) / 2;
-        const int margin = 6, gap = 4, btnH = 20;
         const int btnW = (pw - 2 * margin - gap) / 2;
         cnY = py + ph - btnH - margin; cnH = btnH; cnX = px + margin; cnW = pw - 2 * margin;
-        igY = infY = cnY - gap - btnH; igH = infH = btnH;
+        s_rgX = cnX; s_rgW = cnW; s_rgH = btnH; s_rgY = cnY - gap - btnH;
+        igY = infY = (s_ringRow ? s_rgY : cnY) - gap - btnH; igH = infH = btnH;
         igX = px + margin; igW = btnW; infX = igX + btnW + gap; infW = btnW;
         wY = huY = igY - gap - btnH; wH = huH = btnH;
         wX = px + margin; wW = btnW; huX = wX + btnW + gap; huW = btnW;
@@ -177,18 +197,19 @@ static void confirmRects(int screenW, int screenH,
     // IGNORE/MORE INFO, then CANCEL alone across the bottom. CANCEL gets
     // the full width because it is the one button you hit by reflex and
     // the one that must never be mistaken for its neighbour.
-    ph = 164;
+    const int margin = 10, gap = 8, btnH = 24;
+    ph = 164 + (s_ringRow ? btnH + gap : 0);
     px = (screenW - pw) / 2;
     py = (screenH - ph) / 2;
-    const int margin = 10, gap = 8, btnH = 24;
     int btnW = (pw - 2 * margin - gap) / 2;
 
     cnY = py + ph - btnH - margin;
     cnH = btnH;
     cnX = px + margin;
     cnW = pw - 2 * margin;
+    s_rgX = cnX; s_rgW = cnW; s_rgH = btnH; s_rgY = cnY - gap - btnH;
 
-    igY = infY = cnY - gap - btnH;
+    igY = infY = (s_ringRow ? s_rgY : cnY) - gap - btnH;
     igH = infH = btnH;
     igX  = px + margin;       igW  = btnW;
     infX = igX + btnW + gap;  infW = btnW;
@@ -209,6 +230,7 @@ LogConfirmTap uiLogHitConfirm(int x, int y, int screenW, int screenH) {
     if (x >= igX && x <= igX + igW && y >= igY && y <= igY + igH) return LogConfirmTap::IGNORE;
     if (x >= infX && x <= infX + infW && y >= infY && y <= infY + infH) return LogConfirmTap::INFO;
     if (x >= cnX && x <= cnX + cnW && y >= cnY && y <= cnY + cnH) return LogConfirmTap::CANCEL;
+    if (s_ringRow && x >= s_rgX && x <= s_rgX + s_rgW && y >= s_rgY && y <= s_rgY + s_rgH) return LogConfirmTap::RING;
     return LogConfirmTap::NONE;
 }
 
@@ -249,6 +271,7 @@ static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label, bool 
         Theme::drawButton(t, huX, huY, huW, huH, hunted ? "STOP HUNT" : "HUNT", hunted, 1);
         Theme::drawButton(t, igX, igY, igW, igH, ignored ? "UN-IGNORE" : "IGNORE", ignored, 1);
         Theme::drawButton(t, infX, infY, infW, infH, "MORE INFO", false, 1);
+        if (s_ringRow) Theme::drawButton(t, s_rgX, s_rgY, s_rgW, s_rgH, s_ringing ? "RINGING..." : "RING IT", s_ringing, 1);
         Theme::drawButton(t, cnX, cnY, cnW, cnH, "CANCEL", false, 1);
         return;
     }
@@ -288,6 +311,8 @@ static void drawConfirmPanel(TFT_eSPI& t, int w, int h, const char* label, bool 
     // to be tapping IGNORE again and reading which toast came back.
     Theme::drawButton(t, igX, igY, igW, igH, ignored ? "UN-IGNORE" : "IGNORE", ignored);
     Theme::drawButton(t, infX, infY, infW, infH, "MORE INFO", false);
+    // RING: asks the tracker to beep (tag_ring.h). Held down while it does.
+    if (s_ringRow) Theme::drawButton(t, s_rgX, s_rgY, s_rgW, s_rgH, s_ringing ? "RINGING..." : "RING IT", s_ringing);
     Theme::drawButton(t, cnX, cnY, cnW, cnH, "CANCEL", false);
 }
 
@@ -466,7 +491,14 @@ if (!Theme::stillBackdrop(t)) switch (Settings::background()) {
             else { char mac[24]; Privacy::mac(mac, sizeof mac, d->mac); const size_t ml = strlen(mac);
                    snprintf(nm, sizeof nm, "%s", ml > 8 ? mac + ml - 8 : mac); }
             if (IgnoreList::contains(d->mac)) { char tmp[40]; snprintf(tmp, sizeof tmp, "(IGN) %s", nm); snprintf(nm, sizeof nm, "%s", tmp); }
+#if defined(SQW_SMALL)
+            // After the type, whichever is wider: GOOGLE_TAG ran into the name.
+            int typeW = t.textWidth(detectionTypeName(d->type));
+            if (typeW < t.textWidth("EVIL TWIN")) typeW = t.textWidth("EVIL TWIN");
+            const int nx = 6 + typeW + 6, nmax = rsX - 6 - nx;
+#else
             const int nx = 6 + t.textWidth("EVIL TWIN") + 6, nmax = rsX - 6 - nx;
+#endif
             while (nm[0] && t.textWidth(nm) > nmax) nm[strlen(nm) - 1] = '\0';
             t.setTextColor(kept ? dim : (reg ? Theme::VAPOR_PINK : Theme::WHITE), Theme::BG);
             t.setCursor(nx, ty);

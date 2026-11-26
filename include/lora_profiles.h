@@ -8,13 +8,14 @@
 
 namespace Lora {
 
-// Which table: EU 868 (with its 433 rows) or US 915. Chosen once, before the
-// sniffer starts (Lora::begin), because profile indices are only stable
-// within one table. EU until told otherwise, which is what the host tests get.
-enum : uint8_t { REGION_EU = 0, REGION_US = 1 };
+// Which table: EU 868 (with its 433 rows), US 915 or AU 915 (Australia and
+// New Zealand, 915-928 MHz). Chosen once, before the sniffer starts
+// (Lora::begin), because profile indices are only stable within one table.
+// EU until told otherwise, which is what the host tests get.
+enum : uint8_t { REGION_EU = 0, REGION_US = 1, REGION_AU = 2 };
 void        setRegion(uint8_t r);
 uint8_t     region();
-const char* regionName();   // "EU 868", "US 915"
+const char* regionName();   // "EU 868", "US 915", "AU 915"
 
 // The table and its length. Indices are stable within a build and are what
 // a Packet's `profile` field holds, so nothing persists them.
@@ -25,6 +26,15 @@ const Profile& profile(uint8_t i);   // clamped
 // The index the survey starts on, and what FOCUS mode falls back to: the
 // German Meshtastic default.
 uint8_t defaultProfile();
+
+// A network's mesh preset by name in this band plan: the row "MT <preset>"
+// for Meshtastic (case aside), or the network's first mesh row -- LongFast,
+// MeshCore's regional preset -- when `preset` is empty or this plan has no
+// such row. -1 when the plan has no mesh row for the network at all.
+int16_t meshPresetFind(Proto p, const char* preset);
+// Every mesh row a network has in this band plan, table order (the first is
+// the default). Returns how many went into out.
+uint8_t meshPresetRows(Proto p, uint8_t* out, uint8_t cap);
 
 // Meshtastic's frequency-slot rule (RadioInterface.cpp), for a channel with a
 // name that is not a preset's: the slot is a djb2 hash of the name. Region

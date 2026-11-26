@@ -33,6 +33,7 @@
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
+#include "lora_pkt.h"
 
 namespace Lora {
 namespace Chan {
@@ -63,6 +64,52 @@ uint8_t replay(const uint8_t* rec, size_t n);
 // store that quietly is not one.
 bool    save();
 uint8_t restore();
+
+// ---- the channel a text goes out on -----------------------------------------
+// The T-Deck's CHANNEL CHIP, on the LORA page's compose line and the chats'.
+// One pick per network, kept by NAME in Settings::loraTxChan() (an index
+// shifts when a channel above it is removed); everything here reads the
+// decoders' own tables on every call, so a channel added, muted or removed
+// is reflected the next time anything asks.
+//
+// WHAT CAN BE PICKED, AND WHAT CANNOT:
+//   Meshtastic -- the preset's own channel (`mtPrimary`: "LongFast",
+//     "MediumFast"..., its default-key row), which is the default, and every
+//     one of the user's channels that is switched on and has a 16-byte key or
+//     none at all (Meshtastic::canSend). Not the other thirteen presets'
+//     default-key rows: a stock node on this modem preset holds only its own
+//     preset's channel, so a text under another preset's name reaches nobody.
+//     Not the fourteen built-in ham-mode rows: they are there to READ licensed
+//     operators, they share their names with the keyed rows (two "LongFast"s
+//     on a chip), and going out in the clear is a licensee's decision -- a
+//     user channel added with no key is that decision made, and IS pickable.
+//     Not a 32-byte key: lora_crypto has no AES-256, so such a channel can be
+//     neither read nor sealed (it is the only "cannot send" case, and it is
+//     also a "cannot read" one).
+//   MeshCore -- Public, the default, and every user channel that is switched
+//     on, hashtag or keyed: all of them are sixteen bytes of key.
+// A muted pick is not removed, only stepped round: while it is muted the
+// default is used (and the chip shows the default), and unmuting brings the
+// pick back. A REMOVED pick is forgotten (txPrune, run by save()), so adding a
+// channel of the same name later does not quietly start sending there again.
+bool        txSendable(Proto p, uint8_t idx, const char* mtPrimary);
+uint8_t     txDefault(Proto p, const char* mtPrimary);
+// The pick as a decoder index, the default when nothing (or nothing that
+// still exists and can be sent on) is stored.
+uint8_t     txPick(Proto p, const char* mtPrimary);
+// The next channel of that network that can be sent on, after the current
+// pick, wrapping round; stored, and returned.
+uint8_t     txStep(Proto p, const char* mtPrimary);
+// A stored pick whose channel is no longer in the list goes back to "".
+void        txPrune();
+// Meshtastic's own preset channel from the MESHTASTIC PRESET setting and the
+// band plan ("LongFast" when the plan has no such preset), and the calls above
+// with it filled in -- what the screens use.
+const char* mtPrimary();
+uint8_t     txPick(Proto p);
+uint8_t     txStep(Proto p);
+bool        txIsDefault(Proto p);
+void        txName(Proto p, uint8_t idx, char* out, size_t cap);
 
 // ---- named groups of open channels -----------------------------------------
 // A hashtag channel holds no secret: the tag IS the key, so a list of tags is

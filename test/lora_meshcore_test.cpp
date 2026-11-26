@@ -145,5 +145,119 @@ int main() {
         ck("two SNRs", d.trace.nSnr == 2 && d.trace.snr4[0] == 26 && d.trace.snr4[1] == -10);
     }
 
+    // The channel chip's send path: sealGroupText() is what Lora::sendText
+    // puts on the air, and decode() is what a receiver holding the same
+    // channel makes of it.
+    suite("A group text we seal on a hashtag channel opens on that channel");
+    {
+        clearUserChannels();
+        ck("#hiking added", addChannel("#hiking", nullptr));
+        const uint8_t hi = (uint8_t)findChannel("#hiking");
+        const Channel h = channel(hi);
+        uint8_t k[16]; hashtagKey("#hiking", k);
+        ck("its key is SHA256(\"#hiking\")", memcmp(h.key, k, 16) == 0 && h.derived);
+        uint8_t f[256];
+        GroupText echo;
+        const uint16_t n = sealGroupText(h, 1790000123u, "SQUACHY", "trailhead at noon", f, &echo);
+        ck("a frame came out", n > 5 && ((n - 5) % 16) == 0);
+        ck("flood GRP_TXT, no path", f[0] == 0x15 && f[1] == 0x00);
+        ck("its hash byte is the channel's", f[2] == h.hash && f[2] == channelHash(k));
+        ck("and not Public's", f[2] != 0x11 || h.hash == 0x11);
+        ck("the echo is what a relay's copy reads", !strcmp(echo.sender, "SQUACHY") && !strcmp(echo.text, "trailhead at noon") && echo.timestamp == 1790000123u);
+        memset(&pk, 0, sizeof pk);
+        pk.flags = Lora::PK_CRC_PRESENT | Lora::PK_CRC_OK;
+        memcpy(pk.data, f, n); pk.len = (uint8_t)n;
+        Decoded d;
+        ck("decodes", decode(pk, d) && d.haveGroup);
+        ck("on that channel", d.haveChannel && d.channelIdx == hi);
+        ck("sender and text", !strcmp(d.grp.sender, "SQUACHY") && !strcmp(d.grp.text, "trailhead at noon"));
+        ck("the stamp", d.grp.timestamp == 1790000123u);
+        // A board without #hiking cannot read it.
+        clearUserChannels();
+        ck("without the channel it stays shut", decode(pk, d) && !d.haveGroup);
+    }
+
+    suite("A keyed channel, and Public");
+    {
+        clearUserChannels();
+        ck("a keyed channel added", addChannel("RidgeCrew", "3c910e5d77a2481fb62be0946cd3058e"));
+        const uint8_t ri = (uint8_t)findChannel("RidgeCrew");
+        uint8_t f[256];
+        uint16_t n = sealGroupText(channel(ri), 1790000200u, "SQUACHY", "radio check", f);
+        memset(&pk, 0, sizeof pk); memcpy(pk.data, f, n); pk.len = (uint8_t)n;
+        Decoded d;
+        ck("opens on it", decode(pk, d) && d.haveGroup && d.channelIdx == ri && f[2] == channel(ri).hash);
+        n = sealGroupText(channel(0), 1790000201u, "SQUACHY", "hi all", f);
+        memset(&pk, 0, sizeof pk); memcpy(pk.data, f, n); pk.len = (uint8_t)n;
+        ck("Public: hash 0x11, opens on channel 0", f[2] == 0x11 && decode(pk, d) && d.haveGroup && d.channelIdx == 0 && !strcmp(d.grp.text, "hi all"));
+        setChannelEnabled(ri, false);
+        ck("a muted channel seals nothing", sealGroupText(channel(ri), 1, "a", "b", f) == 0);
+        clearUserChannels();
+    }
+
+    suite("A direct message, against frames built by Python's cryptography (scratchpad mc_vectors.py)");
+    {
+        uint8_t pubA[32], pubB[32], prvA[64], prvB[64], seedA[32], seedB[32], secret[32], f[256], want[256];
+        LoraCrypto::fromHex("101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f", seedA, 32);
+        LoraCrypto::fromHex("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f", seedB, 32);
+        LoraCrypto::ed25519KeyPair(seedA, pubA, prvA);
+        LoraCrypto::ed25519KeyPair(seedB, pubB, prvB);
+        ck("the shared secret", LoraCrypto::ed25519KeyExchange(secret, pubB, prvA));
+
+        uint8_t ack[4];
+        const uint16_t n = buildDirectText(secret, pubB, pubA, 1790000123u, 0, "anyone at the fire tower?", f, ack);
+        const size_t wn = LoraCrypto::fromHex("0900cd77184403dfbee7d563d2c149c5d570a10be0040cb9439d265f150bc31f8a431e77ec9c", want, sizeof want);
+        ck("TXT_MSG by flood, byte for byte", n == wn && !memcmp(f, want, wn));
+        char hex[80]; LoraCrypto::toHex(ack, 4, hex);
+        ck("the ACK it should bring back", !strcmp(hex, "da5b666c"));
+
+        // B's side: the frame decodes as a TXT_MSG to B from A, and opens with B's secret.
+        Lora::Packet pk; memset(&pk, 0, sizeof pk); memcpy(pk.data, f, n); pk.len = (uint8_t)n;
+        Decoded d;
+        ck("decodes: TXT_MSG, dest B, src A", decode(pk, d) && d.f.type == TYPE_TXT_MSG && d.destHash == pubB[0] && d.srcHash == pubA[0]);
+        uint8_t sB[32]; LoraCrypto::ed25519KeyExchange(sB, pubA, prvB);
+        uint8_t plain[192], pl = 0;
+        DirectText t;
+        ck("and opens with the other end's secret", openSecret(sB, d.f.payload + 2, (uint8_t)(d.f.payloadLen - 2), plain, pl) &&
+           parseDirectText(plain, pl, t) && t.timestamp == 1790000123u && t.attempt == 0 && t.txtType == 0 &&
+           !strcmp(t.text, "anyone at the fire tower?"));
+        uint8_t ack2[4];
+        ackFor(plain, (size_t)(5 + t.textLen), pubA, ack2);
+        ck("whose ACK is the one the sender expects", !memcmp(ack, ack2, 4));
+        plain[0] ^= 1;
+        uint8_t bad[192]; memcpy(bad, d.f.payload + 2, d.f.payloadLen - 2); bad[5] ^= 1;
+        ck("a touched frame does not open", !openSecret(sB, bad, (uint8_t)(d.f.payloadLen - 2), plain, pl));
+
+        // B's PATH return with the ACK inside, the way BaseChatMesh answers a flood.
+        const uint8_t ack6[6] = { ack[0], ack[1], ack[2], ack[3], 0x00, 0x5A };
+        const uint16_t pn = buildPathReturn(sB, pubA[0], pubB[0], 0x00, nullptr, ack6, f);
+        const size_t pw = LoraCrypto::fromHex("210077cd077e72f26f15ef64f53fd794d8d488d0486f", want, sizeof want);
+        ck("PATH return with the ACK, byte for byte", pn == pw && !memcmp(f, want, pw));
+        memset(&pk, 0, sizeof pk); memcpy(pk.data, f, pn); pk.len = (uint8_t)pn;
+        PathReturn pr;
+        ck("A opens it and finds the ACK", decode(pk, d) && d.f.type == TYPE_PATH &&
+           openSecret(secret, d.f.payload + 2, (uint8_t)(d.f.payloadLen - 2), plain, pl) && parsePathReturn(plain, pl, pr) &&
+           pr.hops == 0 && pr.extraType == TYPE_ACK && pr.extraLen >= 4 && !memcmp(pr.extra, ack, 4));
+
+        const uint16_t an = buildAck(ack6, f);
+        memset(&pk, 0, sizeof pk); memcpy(pk.data, f, an); pk.len = (uint8_t)an;
+        ck("a bare ACK decodes with its four bytes", decode(pk, d) && d.f.type == TYPE_ACK && !memcmp(d.ackCrc, ack, 4));
+    }
+
+    suite("Our advert");
+    {
+        uint8_t seedA[32], pubA[32], prvA[64], f[256], sig[64];
+        LoraCrypto::fromHex("101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f", seedA, 32);
+        LoraCrypto::ed25519KeyPair(seedA, pubA, prvA);
+        const uint16_t n = buildAdvert(pubA, prvA, 1790000000u, "SQUACHY", f);
+        Lora::Packet pk; memset(&pk, 0, sizeof pk); memcpy(pk.data, f, n); pk.len = (uint8_t)n;
+        Decoded d;
+        ck("decodes as a chat node named SQUACHY", decode(pk, d) && d.haveAdvert && d.adv.hasName &&
+           !strcmp(d.adv.name, "SQUACHY") && d.adv.nodeType == NODE_CHAT && d.adv.timestamp == 1790000000u &&
+           !memcmp(d.adv.pubkey, pubA, 32));
+        LoraCrypto::fromHex("ba7d7e548a9935dc61db359a3e1babd1ae0195d8cb25fdb267f79b18b625d71fef201e5e520c502e28a34fd82cc80a552bf9505e028e1a517e934723fa21f004", sig, 64);
+        ck("signed exactly as Python's Ed25519 signs key | time | app data", !memcmp(d.adv.signature, sig, 64));
+    }
+
     return report();
 }
