@@ -135,11 +135,11 @@ scroll; tap a row to change it.
 | Row | What it does |
 |---|---|
 | **LISTEN** | BOTH, MESHTASTIC, MESHCORE, LORAWAN or OFF, the same setting as Settings > SYSTEM > LORA |
-| **MESHTASTIC PRESET** | Which Meshtastic preset the radio uses, from the ones the band allows. It shows the frequency, spreading factor and bandwidth |
+| **MESHTASTIC PRESET** | Which Meshtastic preset the radio uses, from the ones the band allows (the Turbo presets, ShortTurbo, MediumTurbo and LongTurbo, where the band permits them). It shows the frequency, spreading factor and bandwidth |
 | **TX POWER** | OFF, 10, 20 or 22 dBm, the same setting as LORA TX. OFF means the chats cannot send |
 | **HOPS** | How many times a Meshtastic message you send may be relayed, 1 to 7 (3 is stock) |
 | **REGION** | AUTO (from the time zone), EU, US or AU. Takes effect at the next restart |
-| **CHANNELS** | The channels the T-Deck can read and send on. **+ MESHTASTIC** adds one by name and base64 key; **+ MESHCORE** adds a `#tag` (no key needed) or a hex key. REMOVE takes one of yours off; BUILT IN ones stay |
+| **CHANNELS** | The channels the T-Deck can read and send on. **+ MESHTASTIC** adds one by name and base64 key (16 bytes for AES-128 or 32 for AES-256, the kind the Meshtastic apps make for a new private channel); **+ MESHCORE** adds a `#tag` (no key needed) or a hex key. REMOVE takes one of yours off; BUILT IN ones stay |
 | **NAME** | Your name on both networks. Empty means the default (squad nickname, or SQUACHY) |
 | **SHORT NAME** | Meshtastic's four letters |
 | **ANNOUNCE NAME** | ON sends your name card before your first Meshtastic text; OFF shows a number instead |

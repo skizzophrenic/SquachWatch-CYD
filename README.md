@@ -131,13 +131,14 @@ whole firmware but has had fewer hours on it. The longer answer is in
 | RL Phantom 2.4" — ESP32-2432S024R | Yes | Status light on the front |
 | AWOK 2.4" — ESP32 Marauder v6.1 | Yes | |
 | 3.5" resistive / capacitive — ESP32-3248S035R / C | BETA | |
-| ESP32-32E 2.8" / 3.5" — E32R28T / E32R35T | Via another build | Takes the 2.8" CYD ILI9341 build and the 3.5" resistive one; type the code into the flasher's board finder |
+| ESP32-32E 2.8" / 3.5" — E32R28T / E32R35T | Via another build | Takes the 2.8" CYD ILI9341 build and the 3.5" resistive one; type the code into the flasher's board finder. The 2.8" also has a build of its own that reads its battery: `pio run -e cyd-e32r28t -t upload` |
 | Freenove ESP32-S3 2.8" — FNK0104B | BETA | Capacitive touch, SDMMC card slot, WS2812 light, battery connector. Torn screen? On the flasher, untick 80 MHz under Advanced for the 40 MHz build. A GPS module on its UART port works with the `freenove-s3-gps` build (build it yourself). Pins in [docs/PINOUT.md](docs/PINOUT.md) |
 | Freenove ESP32-S3 4.0" — FNK0104S | BETA (build it yourself) | The 2.8"'s board with a 320×480 ST7796: `pio run -e freenove-s3-40 -t upload`. Not on the flasher yet |
 | Freenove ESP32-S3 3.5" — FNK0104N | BETA | The black 3.5": a 320×480 panel on its own QSPI driver, capacitive touch, SDMMC card slot, WS2812 light, battery connector. Big text, and pets at double size |
 | Elecrow CrowPanel Advance 7.0 | BETA | 800×480, drawn at 400×240 doubled on purpose. Has a buzzer, silent unless you switch it on. [docs/CROWPANEL7.md](docs/CROWPANEL7.md) |
 | RockBase NM-CYD-C5 | BETA | The 2.8" CYD's glass on an ESP32-C5, the first RISC-V chip here. Scans **5 GHz** too (WIFI BANDS in Settings). [docs/NM-CYD-C5.md](docs/NM-CYD-C5.md) |
 | Marauder V8 (justcallmekoko) | BETA | The ESP32-C5 Marauder: 2.8" screen, GPS for **wardriving** to the SD card (a WiGLE file), and a battery gauge. Scans 5 GHz too |
+| Waveshare ESP32-C5-Touch-LCD-3.5 | BETA (build it yourself) | An ESP32-C5 with a 3.5" 320×480 capacitive touchscreen, speaker and battery. Scans 5 GHz too. `pio run -e ws-c5-35 -t upload`, or `ws-c5-35-gps` with Waveshare's LC76G GPS on the header. [docs/WAVESHARE-C5-35.md](docs/WAVESHARE-C5-35.md) |
 | Waveshare ESP32-C5-Touch-LCD-2.8 | BETA | An ESP32-C5 with a 2.8" capacitive touchscreen and 32 MB flash. Scans 5 GHz too. Not yet on the flasher: `pio run -e waveshare-c5-28 -t upload`. [docs/WAVESHARE-C5-28.md](docs/WAVESHARE-C5-28.md) |
 | LilyGo T-Deck Plus | BETA | ESP32-S3 handheld: 2.8" screen, capacitive touch, a real keyboard that types into the message and password screens, speaker, GPS for **wardriving**, SD card, 2000 mAh battery, and **LoRa**: it listens to Meshtastic and MeshCore at once like the T-Watch, and can **send** to their public channels from the keyboard (off until you turn on LORA TX), with private messages too. The trackball moves a cursor through every screen and presses where it is; Backspace is BACK. LoRa details in [docs/LORA.md](docs/LORA.md#on-the-lilygo-t-deck-plus), pins in [docs/PINOUT.md](docs/PINOUT.md) |
 | M5Stack StickS3 | BETA | 1.14" screen, landscape, two buttons. A keychain: shake and knock poke Squachy, FOB MODE. [docs/SMALL-BOARDS.md](docs/SMALL-BOARDS.md) |
@@ -160,8 +161,8 @@ from your browser:
 Works in Firefox, Chrome, Edge, or Brave on desktop. Pick your board from
 the list (it is grouped by family, and there is a box for the code printed
 on the back if you are not sure which you have), plug in, click Connect &
-Install, done. A T-Watch has its clock set for it once the install
-finishes.
+Install, done. Leave the page open a moment afterwards: once the board
+reaches its main screen, the page sets its clock and time zone.
 
 ## Build
 
@@ -247,7 +248,8 @@ none of the saved networks is in range. REMOVE takes one off the list.
 4. The three soft buttons at the bottom:
    - **`[ SCAN ]`** — swaps the bar for **`[ BLE ]`** **`[ WIFI ]`**
      **`[ BACK ]`**. BLE lists the Bluetooth devices in range, WIFI the
-     networks, each with its signal. Hold a row for WATCH, HUNT or IGNORE.
+     networks, each with its signal: a green-screen SCAN.LOG while it
+     listens, then RESULTS.LOG. Hold a result to open its alert card.
      The WiFi sweep only listens; it sends nothing.
    - **`[ LOG ]`** — open the detection log, each device once. It survives
      a restart: about 1,800 sightings are kept in flash.
@@ -285,8 +287,8 @@ they have a fix. The board never joins a network to scan. But it
 does join one for the update check at boot, and for UPDATE OVER WIFI, and the
 clock rides along: one NTP round trip while the radio is up anyway, about a
 second. The zone is yours to pick, and there are three ways: the web
-flasher's **Set Time & Zone** button sends this computer's clock and zone
-down the same cable right after flashing; the first time the clock is set
+flasher sends this computer's clock and zone down the same cable after
+every install (and its **Set Time & Zone** button does it again any time); the first time the clock is set
 with no zone chosen, a card on the main screen asks, with the live time in
 the zone it shows so you can see when it's right; and the **ZONE** row on the
 DESK SETTINGS page changes it later (tap its left half to step west, its right
@@ -303,7 +305,8 @@ note of the time in flash every ten minutes, and a cold boot with no clock
 starts from that note: not the right time, since nobody knows how long the
 power was off, but never earlier than the note, which keeps the day count
 honest. Such a clock is used for the date only; the LOG times, the night
-tag, the hour lines and the desk digits wait for a real answer.
+tag, the hour lines and the desk digits wait for a real answer. After seven
+cold boots in a row on a guess, the December look stops trusting it too.
 
 Once it is set, the LOG shows the real time of each catch (or the date, for
 one from another day); the alert card says **AT NIGHT** for anything caught
@@ -423,7 +426,8 @@ owner, at EVERY STOP, how many MIN it has been with you, CLOSER), a ladder
 shows the last minute of its signal, and the rows under it give the rest:
 who, the address, first and last seen, and for a tracker an OWNER row (WITH
 OWNER, AWAY and for how long, or NOT SET UP for a tag nobody has paired),
-then confidence. Catches that arrive while a card
+then confidence. Every skin keeps the OWNER row; on a card short of room,
+confidence goes first. Catches that arrive while a card
 is up wait behind it and the **+N MORE** chip steps through them; before
 this they were dropped.
 
@@ -440,6 +444,12 @@ address for most of a day, which is exactly what makes the check work.
 Five buttons along the bottom: **RING** (or **HUNT** where RING does not
 apply), **WATCH**, **SNOOZE**, **IGNORE**, **INFO**. On the keyboards they
 are their first letters, and **N** steps to the next waiting catch.
+
+**INFO** opens the MORE INFO card, in the type's colour: a plain-English
+headline, a **SURE**, **LIKELY** or **MAYBE** pill and WHY it says that,
+the description (MORE pages through it), a TIP, and tiles for how often and
+where you have seen it. On the T-Deck, the 3.5" and a sideways 2.8" it opens
+inside your alert card skin.
 
 **Hold a LOG row** and that device's card opens, the same card a catch
 brings up, so its trail, owner state and signal are a press away. A card
@@ -825,6 +835,7 @@ None of this finds anything. All of it is why you leave him on.
 | **THEME** | Settings → APPEARANCE | Seven palettes: VAPRW4VE, CYB3RGR33N, AMB3RTERM, BUBBL3GUM, GH0ST, BL00D and DU5K, the dusk the alert card skins were designed in |
 | **ALERT CARD** | Settings → APPEARANCE | The alert card's window: TRAIL or one of eleven operating-system skins, picked from a live card with arrows; whether it opens with its animation; the sunset behind it or not (see [Alert card skins](#alert-card-skins)) |
 | **BACKGROUND** | Settings → APPEARANCE | Ten animated scenes: DIGITAL RAIN, STARFIELD, FLYING TOASTERS, AQUARIUM, TERMINAL LOG, FIREFLIES, FIRE, SNOWFALL, THE GIBSON (drawn from your own log) and SYNTHWAVE. Some of them hide things. A tap at the left or right edge of the main screen changes it too |
+| **SEASONAL** | Settings → APPEARANCE | AUTO: from December 1 to 26 the main screen snows, three strings of lights hang across the top (the bulbs are the detection colours, and one flares at each new catch) and he wears a Santa hat over any outfit. The first time it comes on each year a HOLIDAY MODE card offers KEEP IT or TURN OFF. OFF keeps December plain. It needs the board to know the date |
 | **LOCK BACKGROUND** | Settings → APPEARANCE | ON stops edge taps from changing the background, on the main screen and the desk |
 | **OUTFIT** | Settings → APPEARANCE | Pick from the costumes he has earned; see [Every outfit](#every-outfit) |
 | **SIZE** | Settings → APPEARANCE | How big he is drawn: SMALL, MEDIUM or LARGE |
@@ -842,7 +853,7 @@ None of this finds anything. All of it is why you leave him on.
 | **REPLAY INTRO** | Settings | Runs the first-boot walkthrough again, after asking |
 | **RESET STATS** | Settings → SYSTEM | Clears every detection total, after asking. Outfits earned by count lock again; ones you found stay yours |
 | **Regulars** | Automatic | A device seen on three different days gets a name, on its LOG row and when he greets it |
-| **TERMINAL MODE** | MODE on the main screen (Settings on the StickS3) | Swaps Squachy and the pets for a desktop of windows: a LOG you can sort by time, kind, device or signal (tap a heading, tap again to flip), the AIR graph, COUNTS by kind and the LATEST catch. Tap a picked line again, or LATEST, for WATCH / HUNT / INFO / IGNORE. For when you just want a detector (it used to be BORING MODE) |
+| **TERMINAL MODE** | MODE on the main screen (Settings on the StickS3) | Swaps Squachy and the pets for a desktop of windows: a LOG you can sort by time, kind, device or signal (tap a heading, tap again to flip), the AIR graph, COUNTS by kind and the LATEST catch. Tap a picked line again, or LATEST, and its alert card opens; closing it goes back to the terminal. For when you just want a detector (it used to be BORING MODE) |
 | **DESK MODE** | MODE on the main screen; its settings in Settings → DESK SETTINGS | The clock, [above](#desk-mode) |
 
 And he can be thrown: press and hold him until he notices, drag, and let go
@@ -1000,6 +1011,10 @@ SquachWatch-CYD/
 - Freenove 3.2" pin work: **DevOpsDAdams**.
 - 3.5" capacitive (ESP32-3248S035C) build: **VV-B0Y**.
 - Waveshare ESP32-C5-Touch-LCD-2.8 port: **bobsdinner-cell**.
+- Waveshare ESP32-C5-Touch-LCD-3.5 port and its LC76G GPS: **slickrick773**.
+- The E32R28T build with its battery reading: **phreakmonkey**.
+- Meshtastic channels with 32-byte keys: **rbales79**. The Meshtastic Turbo
+  presets: **Bandicoot**.
 - The emulator building on macOS, and its incremental build: **aroth**.
 - Testing every single build, boot loops and green skies included: **Houdini**.
 - Goblin visitors: **MostlyWithinSpec**, maker of Network Goblin Scout, who

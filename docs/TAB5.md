@@ -37,7 +37,7 @@ next time. See [The C6 needs our firmware](#the-c6-needs-our-firmware).
 | Portrait | Not yet. The picture is locked landscape |
 | SD card | Not driven yet |
 | Speaker, battery, power button | Not driven yet |
-| HUMAN SENSING | Works, on the C6: it joins your saved network, pings the router 50 times a second and reads the C6's channel data. All four pages (SENSING, plus SCOPE, SNEAK and VITALS tagged EXPERIMENTAL); VITALS' 20 s fit runs on the P4 |
+| HUMAN SENSING | Works, on the C6: it joins your saved network, pings the router 50 times a second and reads the C6's channel data. All four pages (SENSING, plus SCOPE, SNEAK and VITALS tagged EXPERIMENTAL); VITALS' 20 s fit runs on the P4. With an M5MonsterC5 on the M5-Bus (UART1, TX 37 / RX 38), found at boot, the Monster runs it instead, VITALS included, and hears 5 GHz too; a MONSTER C5 or TAB5 C6 badge on each page says which |
 | Updates over WiFi or Bluetooth | Not yet. The radio joins a network only for HUMAN SENSING |
 | Web flasher | Yes, from v1.47.0 (BETA) |
 | Radio update | The app updates the C6 itself on first boot (proven on the bench from Espressif's stock 2.12.13; not yet from M5Stack's factory 1.4.1) |

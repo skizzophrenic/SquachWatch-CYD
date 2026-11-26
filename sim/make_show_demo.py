@@ -32,6 +32,19 @@ CYAN  = (0, 214, 214)
 # ---- the clips ----
 
 CLIPS = {
+    # v1.51.0 "Let It Snow", 320x240 doubled, December forced on
+    # (SQUACHSIM_XMAS=1): the snow, lights and Santa hat on two outfits, the
+    # HOLIDAY MODE card, YZZERD's own hat gone red, then SCAN.LOG listening,
+    # the new MORE INFO card, and a never-set-up AirTag's OWNER row on System 7.
+    "let-it-snow": [
+        ("clear", 120, 150, ["--bg", "5"], {"_EVERY": 2, "_NVS": 1, "SQUACHSIM_XMAS": "1", "SQUACHSIM_FREEROLL": "0", "SQUACHSIM_HUSH": "1", "SQUACHSIM_BATT": "80"}, 900, "IT'S DECEMBER. LET IT SNOW."),
+        ("holidaycard", 30, 30, ["--bg", "5"], {"_EVERY": 2, "_NVS": 1, "SQUACHSIM_XMAS": "1", "SQUACHSIM_FREEROLL": "0", "SQUACHSIM_BATT": "80"}, 1500, "NOT FEELING FESTIVE? ONE TAP TURNS IT OFF."),
+        ("clear", 120, 110, ["--bg", "5", "--outfit", "10"], {"_EVERY": 2, "_NVS": 1, "SQUACHSIM_XMAS": "1", "SQUACHSIM_FREEROLL": "0", "SQUACHSIM_HUSH": "1", "SQUACHSIM_BATT": "80"}, 900, "EVERY OUTFIT GETS A SANTA HAT."),
+        ("clear", 120, 110, ["--bg", "5", "--outfit", "15"], {"_EVERY": 2, "_NVS": 1, "SQUACHSIM_XMAS": "1", "SQUACHSIM_FREEROLL": "0", "SQUACHSIM_HUSH": "1", "SQUACHSIM_BATT": "80"}, 900, "EVEN THE WIZARD'S."),
+        ("rawscan", 20, 80, [], {"_EVERY": 2, "_NVS": 1, "SQUACHSIM_SCANNING": "1"}, 900, "SCAN.LOG: WATCH IT LISTEN."),
+        ("info", 20, 20, [], {"_EVERY": 2, "_NVS": 1, "SQUACHSIM_INFO_TYPE": "6"}, 1700, "A NEW MORE INFO CARD. PLAIN ENGLISH."),
+        ("alert", 40, 30, ["--alert", "6", "--skin", "3"], {"_EVERY": 2, "_NVS": 1, "SQUACHSIM_OWNER": "0"}, 1700, "AN AIRTAG NOBODY SET UP? EVERY CARD SAYS SO."),
+    ],
     # v1.50.0 "Roll With It", 320x240 doubled, every second frame at real
     # time ("_EVERY"), each scene on a settings store of its own ("_NVS", so a
     # waiting free roll never turns up in a scene it was not asked into): the

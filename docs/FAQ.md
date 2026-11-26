@@ -74,7 +74,7 @@ No compiler, no IDE, no account.
 
 **On the newest build and stuck in a boot loop?** The flasher can install an older release too. Flash the one before it and [tell me](https://github.com/skizzophrenic/SquachWatch-CYD/issues).
 
-On first boot it'll walk you through a touch calibration, a colour check and a quick intro from Squachy. Then it's detecting.
+On first boot it'll walk you through a touch calibration, a colour check and a quick intro from Squachy. Then it's detecting. Leave the flasher page open until it says the clock is set: it sends the board the time and your time zone once the board reaches its main screen.
 
 Want to build from source instead? Grab [PlatformIO](https://platformio.org/) and follow [BUILD.md](BUILD.md).
 
@@ -265,6 +265,8 @@ A squad gets you:
 ## What's with the Sasquach on the screen?
 
 That's Squachy. The detection is the *why*, Squachy is the *fun*. He reacts to what the board catches, cracks jokes when nothing's happening, grows through stages as your lifetime catch count climbs (his fur changes at 25, 100 and 500 catches, and at 500 he is a Legend with a flame aura), and earns outfits and pets along the way. Some of those you earn by catching things; some are hidden, and I'm not telling you where. Tap him. He likes that.
+
+**Why is it snowing?** It's December. From the 1st to the 26th he gets snow, string lights and a Santa hat over whatever he's wearing. The first time it comes on, a card offers to turn it off; it's also **SEASONAL** under **Settings > APPEARANCE**. It goes by the board's clock, which the web flasher sets after every install.
 
 Other things hiding in Settings: the SQUACHY-DEX (a card per detection type with your record), BINGO, Squachy's diary, and DESK SETTINGS, for the desk clock that MODE opens.
 
