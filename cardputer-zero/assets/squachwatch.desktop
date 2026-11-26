@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=SquachWatch
+Comment=Passive Wi-Fi/BLE watcher: cameras, trackers, deauth floods, wardriving
+Exec=/usr/local/bin/squachd --fb
+Icon=share/images/squachwatch.png
+Terminal=false
+Categories=Network;Utility;
+StartupNotify=false
