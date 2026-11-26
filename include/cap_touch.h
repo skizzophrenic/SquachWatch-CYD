@@ -27,6 +27,11 @@ namespace CapTouch {
     // trusted without a confirmed probe.
     bool probe();
 
+    // FT6336: normal coordinate reporting (gesture mode off, gesture result
+    // cleared). The chip keeps its registers across an ESP32 reset on boards
+    // whose power chip stays up, so a previous firmware's mode can linger.
+    void ft6336Normal();
+
     // True and fills x/y (native controller coordinates, NOT yet
     // rotated/calibrated to the display's coordinate space) if a
     // finger is currently down.

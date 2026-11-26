@@ -222,6 +222,13 @@ bool holdSample(const Screen& s, RawReader readRaw, int cx, int cy, bool dot, ui
     const uint32_t SETTLE_MS          = 60;   // skip the press itself
     const int      MAX_MISSES         = 6;    // ~60 ms of dropout is a lift
     const int      CAP                = 64;
+#if defined(WS_S3_35)
+    // The check dot is TAPPED, not held: on this board it used to need 260 ms
+    // of contact and silently ignored a normal tap.
+    const uint32_t settle             = dot ? 25 : SETTLE_MS;
+#else
+    const uint32_t settle             = SETTLE_MS;
+#endif
     static int16_t as[CAP], bs[CAP];
 
     drawTarget(s, cx, cy, dot);
@@ -236,17 +243,21 @@ bool holdSample(const Screen& s, RawReader readRaw, int cx, int cy, bool dot, ui
         const uint32_t down = millis();
         int n = 0, misses = 0;
         bool lifted = false;
-        while (millis() - down < SETTLE_MS + holdMs) {
+        while (millis() - down < settle + holdMs) {
             if (readRaw(a, b)) {
                 misses = 0;
-                if (millis() - down >= SETTLE_MS && n < CAP) { as[n] = a; bs[n] = b; n++; }
+                if (millis() - down >= settle && n < CAP) { as[n] = a; bs[n] = b; n++; }
             } else if (++misses > MAX_MISSES) {
                 lifted = true;
                 break;
             }
             delay(8);
         }
+#if defined(WS_S3_35)
+        if (dot ? n < 2 : (lifted || n < 5)) {
+#else
         if (lifted || n < 5) {
+#endif
             // Back to an empty ring and wait again.
             eraseTarget(s, cx, cy);
             drawTarget(s, cx, cy, dot);
@@ -361,6 +372,8 @@ Outcome runInteractive(TFT_eSPI& t, RawReader readRaw, uint8_t rot,
     const float residualTol = fmaxf(9.0f, 0.04f * shortSide) * s_density;
     const float verifyTol   = fmaxf(12.0f, 0.05f * shortSide) * s_density;
 
+    bool haveFit = false;
+    TouchFit::Fit lastFit;
     for (int attempt = 0; attempt < 2; attempt++) {
         t.fillRect(0, 0, w, h, bg);
         float a[TouchFit::TARGETS], b[TouchFit::TARGETS];
@@ -381,6 +394,7 @@ Outcome runInteractive(TFT_eSPI& t, RawReader readRaw, uint8_t rot,
                 return Outcome::NO_TOUCH;
             }
             a[i] = ra; b[i] = rb;
+            Serial.printf("[touchcal] target %d at (%d,%d): raw (%d,%d)\n", i + 1, (int)sxs[i], (int)sys[i], (int)ra, (int)rb);
             TouchFit::screenToNative(sxs[i], sys[i], rot, w0, h0, nx[i], ny[i]);
         }
 
@@ -408,6 +422,8 @@ Outcome runInteractive(TFT_eSPI& t, RawReader readRaw, uint8_t rot,
             continue;
         }
 
+        haveFit = true; lastFit = fit;
+
         // The proof: one more dot, somewhere none of the five were, mapped
         // through the new fit. Shows where it landed either way.
         t.fillRect(0, 0, w, h, bg);
@@ -425,7 +441,8 @@ Outcome runInteractive(TFT_eSPI& t, RawReader readRaw, uint8_t rot,
         TouchFit::toScreen(fit, ra, rb, rot, gx, gy);
         const float err = hypotf(gx - dx, gy - dy);
         const bool good = err <= verifyTol;
-        Serial.printf("[touchcal] check tap off by %.1f px (limit %.1f)\n", err, verifyTol);
+        Serial.printf("[touchcal] check dot (%d,%d): raw (%d,%d) landed (%.0f,%.0f), off by %.1f px (limit %.1f)\n",
+                      dx, dy, (int)ra, (int)rb, gx, gy, err, verifyTol);
         t.fillCircle(dx, dy, 6, s.accent);
         const uint16_t mark = good ? GREEN : RED;
         t.drawLine((int)gx - 6, (int)gy - 6, (int)gx + 6, (int)gy + 6, mark);
@@ -440,6 +457,18 @@ Outcome runInteractive(TFT_eSPI& t, RawReader readRaw, uint8_t rot,
         if (attempt == 0) notice(s, AMBER, "ONCE MORE", "That tap missed the dot.", nullptr, 1600);
     }
 
+#if defined(WS_S3_35)
+    // Five targets fitted within tolerance and only the proof tap missed:
+    // keep that fit rather than the compiled-in default. Recalibrate any time
+    // from SETTINGS (or hold the screen at boot to reset it).
+    if (haveFit) {
+        notice(s, AMBER, "TOUCH SAVED", "Check tap was off.", "Recalibrate in SETTINGS.", 2200);
+        t.fillRect(0, 0, w, h, bg);
+        out = lastFit;
+        return Outcome::SAVED;
+    }
+#endif
+    (void)haveFit; (void)lastFit;
     notice(s, RED, "NOT SAVED", "Touch is unchanged.", "Try again from SETTINGS.", 2200);
     t.fillRect(0, 0, w, h, bg);
     return Outcome::FAILED;

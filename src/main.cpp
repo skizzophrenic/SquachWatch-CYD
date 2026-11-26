@@ -426,7 +426,7 @@ static void drawCrashCard(TFT_eSPI& t) {
 #include "ui_security.h"
 #include "squachy.h"
 #include "cap_touch.h"
-#if defined(TWATCH_S3) || defined(WS_C5_35)
+#if defined(TWATCH_S3) || defined(WS_C5_35) || defined(WS_S3_35)
 #define XPOWERS_CHIP_AXP2101
 #include <XPowersLib.h>
 #endif
@@ -543,6 +543,8 @@ static void drawCrashCard(TFT_eSPI& t) {
 #define BL_PIN_AWOK 32
 #if defined(SQW_SMALL)
 #define BL_PIN_S3   38   // the StickS3's and the Cardputer ADV's
+#elif defined(WS_S3_35)
+#define BL_PIN_S3   6    // the Waveshare 3.5"'s, straight from the pin (HIGH is on)
 #elif defined(FREENOVE_S3_35)
 #define BL_PIN_S3   41   // the Freenove 3.5"'s, through a BSS138 (HIGH is on)
 #elif defined(TDECK_PLUS)
@@ -911,6 +913,14 @@ static uint16_t CAP_NY_MIN = CROW_CAP_NY_MIN, CAP_NY_MAX = CROW_CAP_NY_MAX;
 // M5GFX reports panel pixels of the rotated panel; a divide by TAB5_SCALE.
 static uint16_t CAP_NX_MIN = TAB5_CAP_NX_MIN, CAP_NX_MAX = TAB5_CAP_NX_MAX;
 static uint16_t CAP_NY_MIN = TAB5_CAP_NY_MIN, CAP_NY_MAX = TAB5_CAP_NY_MAX;
+#elif defined(WS_S3_35)
+// The Waveshare 3.5"'s FT6336 reports the panel's own 320x480 pixels (Waveshare's
+// examples hand them to the display unscaled), so until a five-target
+// calibration is saved the map is the identity. The generic default below is a
+// 2.8" board's 32..166 x 10..308, which put every tap past x=166 on the right
+// edge: a screen that "felt smaller".
+static uint16_t CAP_NX_MIN = 0, CAP_NX_MAX = 320;
+static uint16_t CAP_NY_MIN = 0, CAP_NY_MAX = 480;
 #elif defined(FREENOVE_S3_35)
 // The ST77922's own touch reports panel pixels too: a pass-through.
 static uint16_t CAP_NX_MIN = St77922Touch::NX_MIN, CAP_NX_MAX = St77922Touch::NX_MAX;
@@ -3471,7 +3481,9 @@ static bool    s_confirmArmed = false;
 // The compiled-in ranges are a 2.8" board's. Anywhere else -- the digitisers
 // on the display's own bus -- they put taps nowhere near the finger, so a
 // board with nothing better has no SKIP to offer.
-#if defined(TOUCH_SHARES_DISPLAY_BUS) || defined(CYD35R) || defined(SQW_S3)
+#if defined(WS_S3_35)
+static const bool DEFAULT_TOUCH_USABLE = true;   // the identity map is the panel's own pixels
+#elif defined(TOUCH_SHARES_DISPLAY_BUS) || defined(CYD35R) || defined(SQW_S3)
 static const bool DEFAULT_TOUCH_USABLE = false;
 #else
 static const bool DEFAULT_TOUCH_USABLE = true;
@@ -4944,13 +4956,166 @@ static void sticksPowerUp() {
 }
 #endif
 
+#if defined(WS_S3_35)
+// ---- Waveshare ESP32-S3-Touch-LCD-3.5: power, expander, clock chip --------
+// Everything here lives on ONE I2C bus (SDA 8 / SCL 7): the AXP2101 power
+// chip (0x34), the TCA9554 expander (0x20), the FT6336 touch (0x38), the
+// ES8311 codec (0x18), the PCF85063 RTC (0x51) and the QMI8658 IMU (0x6B).
+// Pins and sequence from Waveshare's own examples and BSP
+// (github.com/waveshareteam/ESP32-S3-Touch-LCD-3.5).
+static XPowersAXP2101 s_wsPmu;
+static bool           s_wsPmuOk = false;
+static const uint8_t  WS_TCA = 0x20;
+
+static bool wsTcaWrite(uint8_t reg, uint8_t v) {
+    Wire.beginTransmission(WS_TCA); Wire.write(reg); Wire.write(v);
+    return Wire.endTransmission() == 0;
+}
+// Runs first thing in setup(), before tft.init(): the panel's reset line is
+// the expander's EXIO1, and nothing on the bus answers until the PMU's rails
+// are up. EXIO1 = LCD + touch reset, EXIO7 = speaker amp enable (held high,
+// as Waveshare's firmware does), EXIO6 = PWR button, EXIO3 = card detect.
+static void ws35PowerUp() {
+    Wire.begin(8, 7, 400000);
+    s_wsPmuOk = s_wsPmu.begin(Wire, AXP2101_SLAVE_ADDRESS, 8, 7);
+    if (!s_wsPmuOk) {
+        Serial.println("[pmu] AXP2101 did not answer");
+    } else {
+        // The rails Waveshare's BSP sets. The PMU watchdog their firmware
+        // arms is switched OFF: nothing here feeds it.
+        s_wsPmu.disableWatchdog();
+        s_wsPmu.setVbusVoltageLimit(XPOWERS_AXP2101_VBUS_VOL_LIM_4V36);
+        s_wsPmu.setVbusCurrentLimit(XPOWERS_AXP2101_VBUS_CUR_LIM_1500MA);
+        s_wsPmu.setSysPowerDownVoltage(2600);
+        s_wsPmu.setDC1Voltage(3300);
+        s_wsPmu.setDC3Voltage(3300);
+        s_wsPmu.setDC5Voltage(3300);
+        s_wsPmu.setALDO1Voltage(3300); s_wsPmu.setALDO2Voltage(3300);
+        s_wsPmu.setALDO3Voltage(3300); s_wsPmu.setALDO4Voltage(3300);
+        s_wsPmu.setBLDO1Voltage(1500); s_wsPmu.setBLDO2Voltage(2800);
+        s_wsPmu.setDLDO1Voltage(3300);
+        s_wsPmu.enableDC3(); s_wsPmu.enableDC5();
+        s_wsPmu.enableALDO1(); s_wsPmu.enableALDO2(); s_wsPmu.enableALDO3(); s_wsPmu.enableALDO4();
+        s_wsPmu.enableBLDO1(); s_wsPmu.enableBLDO2(); s_wsPmu.enableDLDO1();
+        s_wsPmu.settDC1WorkModeToPwm(true);   // Waveshare's fix for low-brightness flicker
+        s_wsPmu.disableTSPinMeasure();
+        s_wsPmu.enableBattDetection();
+        s_wsPmu.enableVbusVoltageMeasure();
+        s_wsPmu.enableBattVoltageMeasure();
+        s_wsPmu.enableSystemVoltageMeasure();
+        s_wsPmu.setChargingLedMode(XPOWERS_CHG_LED_CTRL_CHG);
+        s_wsPmu.disableIRQ(XPOWERS_AXP2101_ALL_IRQ);
+        s_wsPmu.clearIrqStatus();
+        s_wsPmu.setPrechargeCurr(XPOWERS_AXP2101_PRECHARGE_50MA);
+        s_wsPmu.setChargerConstantCurr(XPOWERS_AXP2101_CHG_CUR_500MA);
+        s_wsPmu.setChargerTerminationCurr(XPOWERS_AXP2101_CHG_ITERM_25MA);
+        s_wsPmu.setChargeTargetVoltage(XPOWERS_AXP2101_CHG_VOL_4V2);
+        s_wsPmu.enableButtonBatteryCharge();
+        s_wsPmu.setButtonBatteryChargeVoltage(3300);
+    }
+    // Expander: EXIO1 and EXIO7 outputs (config bit 0 = output), the rest in.
+    // Reset pulse on EXIO1 with EXIO7 high, the BSP's own order and delays.
+    wsTcaWrite(0x01, 0x80);
+    wsTcaWrite(0x03, 0x7D);
+    delay(100);
+    wsTcaWrite(0x01, 0x82);
+    delay(100);
+    Serial.printf("[pmu] AXP2101 %s: battery %d%%, %s\n", s_wsPmuOk ? "up" : "DOWN",
+                  s_wsPmuOk ? (int)s_wsPmu.getBatteryPercent() : -1,
+                  s_wsPmuOk && s_wsPmu.isVbusIn() ? "on USB" : "on battery");
+}
+
+// The PCF85063's registers are NOT the PCF8563's (the watch's): seconds sit at
+// 0x04, with a RAM byte at 0x03 that carries our mark. Kept in UTC.
+static const uint8_t WS_RTC = 0x51;
+static const uint8_t WS_RTC_MARK = 0x5A;
+static bool s_wsRtcLoading = false;
+static uint8_t wsBcd(uint8_t v) { return (uint8_t)((v / 10) << 4 | (v % 10)); }
+static uint8_t wsUnbcd(uint8_t v) { return (uint8_t)((v >> 4) * 10 + (v & 0x0F)); }
+static int32_t wsDays(int y, unsigned m, unsigned d) {
+    y -= m <= 2;
+    const int era = (y >= 0 ? y : y - 399) / 400;
+    const unsigned yoe = (unsigned)(y - era * 400);
+    const unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    return era * 146097 + (int32_t)doe - 719468;
+}
+static void wsCivil(int32_t z, int& y, unsigned& m, unsigned& d) {
+    z += 719468;
+    const int era = (z >= 0 ? z : z - 146096) / 146097;
+    const unsigned doe = (unsigned)(z - era * 146097);
+    const unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    y = (int)yoe + era * 400;
+    const unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    const unsigned mp = (5 * doy + 2) / 153;
+    d = doy - (153 * mp + 2) / 5 + 1;
+    m = mp < 10 ? mp + 3 : mp - 9;
+    y += (m <= 2);
+}
+static void wsRtcWrite(uint32_t epoch) {
+    if (s_wsRtcLoading) return;
+    int y; unsigned mo, d;
+    wsCivil((int32_t)(epoch / 86400u), y, mo, d);
+    const uint32_t sod = epoch % 86400u;
+    Wire.beginTransmission(WS_RTC);
+    Wire.write(0x00); Wire.write(0x00); Wire.write(0x00);          // control 1 (running, 24 h), control 2
+    bool ok = Wire.endTransmission() == 0;
+    Wire.beginTransmission(WS_RTC);
+    Wire.write(0x03); Wire.write(WS_RTC_MARK);                      // our mark in the RAM byte
+    ok = (Wire.endTransmission() == 0) && ok;
+    Wire.beginTransmission(WS_RTC);
+    Wire.write(0x04);
+    Wire.write(wsBcd((uint8_t)(sod % 60)));                         // seconds, OS flag cleared
+    Wire.write(wsBcd((uint8_t)(sod / 60 % 60)));
+    Wire.write(wsBcd((uint8_t)(sod / 3600)));
+    Wire.write(wsBcd((uint8_t)d));
+    Wire.write((uint8_t)((epoch / 86400u + 4) % 7));                // 1970-01-01 was a Thursday
+    Wire.write(wsBcd((uint8_t)mo));
+    Wire.write(wsBcd((uint8_t)(y % 100)));
+    ok = (Wire.endTransmission() == 0) && ok;
+    Serial.printf("[rtc] clock chip %s\n", ok ? "written" : "write FAILED");
+}
+static uint32_t wsRtcRead(bool* lost = nullptr, bool* foreign = nullptr) {
+    if (lost) *lost = false;
+    if (foreign) *foreign = false;
+    Wire.beginTransmission(WS_RTC);
+    Wire.write(0x03);
+    if (Wire.endTransmission(false) != 0 || Wire.requestFrom(WS_RTC, (uint8_t)8) != 8) return 0;
+    uint8_t r[8];
+    for (uint8_t i = 0; i < 8; i++) r[i] = Wire.read();
+    if (r[0] != WS_RTC_MARK) { if (foreign) *foreign = true; return 0; }   // factory firmware's time: not ours
+    if (r[1] & 0x80) { if (lost) *lost = true; return 0; }                 // oscillator stopped
+    const int y = 2000 + wsUnbcd(r[7]);
+    const unsigned mo = wsUnbcd(r[6] & 0x1F), d = wsUnbcd(r[4] & 0x3F);
+    if (mo < 1 || mo > 12 || d < 1 || d > 31) return 0;
+    return (uint32_t)wsDays(y, mo, d) * 86400u + wsUnbcd(r[3] & 0x3F) * 3600u
+         + wsUnbcd(r[2] & 0x7F) * 60u + wsUnbcd(r[1] & 0x7F);
+}
+static void ws35RtcBegin() {
+    bool lost = false, foreign = false;
+    const uint32_t t = wsRtcRead(&lost, &foreign);
+    if (t) {
+        s_wsRtcLoading = true;
+        const bool ok = Clock::setEpoch(t) && Clock::isSet();
+        s_wsRtcLoading = false;
+        Serial.printf("[rtc] clock chip says %lu: %s\n", (unsigned long)t, ok ? "clock set from it" : "not believable");
+    } else {
+        Serial.printf("[rtc] clock chip has no time (%s)\n", lost ? "backup ran out" : foreign ? "not set by SquachWatch" : "not answering");
+    }
+    Clock::onSet(wsRtcWrite);
+    if (!t && Clock::trusted()) wsRtcWrite(Clock::nowEpoch());
+}
+#endif
+
 #if defined(FREENOVE_S3) || defined(FREENOVE_S3_35) || defined(TDECK_PLUS)
 // The Freenove S3's battery: a 1-cell LiPo on its JST, a TP4054 charging it
 // from USB, and a 200K/200K divider from the cell to GPIO9 (ADC1, so WiFi does
 // not take it away) -- GPIO8 on the 3.5", per Freenove's battery sketch. The
 // T-Deck Plus is the same shape: its 2000 mAh cell through a 1:2 divider on
 // GPIO4 (LilyGo's BOARD_BAT_ADC), and a charger whose LED is the only status.
-#if defined(FREENOVE_S3_35)
+#if defined(WS_S3_35)
+#define BOARD_BAT_ADC 0   // no divider: the AXP2101 reads the cell
+#elif defined(FREENOVE_S3_35)
 #define BOARD_BAT_ADC 8
 #elif defined(TDECK_PLUS)
 #define BOARD_BAT_ADC 4
@@ -4962,6 +5127,10 @@ static void sticksPowerUp() {
 // from the voltage jumping (see boardBatteryState). On the cable the cell
 // reads the charger's ~4.2 V, which is the honest reading.
 static uint16_t boardBatteryMv() {
+#if defined(WS_S3_35)
+    if (!s_wsPmuOk || !s_wsPmu.isBatteryConnect()) return 0;
+    return (uint16_t)s_wsPmu.getBattVoltage();
+#endif
     uint32_t sum = 0;
     for (int i = 0; i < 8; i++) sum += analogReadMilliVolts(BOARD_BAT_ADC);
     return (uint16_t)(sum / 8 * 2);   // the divider halves it
@@ -5014,12 +5183,18 @@ static bool boardBatteryState(uint8_t& pct, bool& charging) {
         has = mv >= 2500;
         if (has) {
             p = boardBatteryPct(mv);
+#if defined(WS_S3_35)
+            { const int gp = s_wsPmu.getBatteryPercent(); if (gp >= 0 && gp <= 100) p = (uint8_t)gp; }   // the chip's own gauge
+#endif
             hist[hi] = mv; hi = (uint8_t)((hi + 1) % 30); if (hn < 30) hn++;
             uint16_t lo = 0xFFFF, top = 0;
             for (uint8_t i = 0; i < hn; i++) { if (hist[i] < lo) lo = hist[i]; if (hist[i] > top) top = hist[i]; }
             const bool wasChg = chg;
             if (!chg && mv >= lo + 40) chg = true;
             else if (chg && mv + 40 <= top) chg = false;
+#if defined(WS_S3_35)
+            chg = s_wsPmu.isCharging();   // read, not guessed
+#endif
             // The speaker's two cable sounds and its low-battery sigh. Not in
             // the first minute: the history is still filling and a board
             // booted on the cable would otherwise "see" it plugged in. The
@@ -6124,6 +6299,9 @@ void setup() {
     twatchPowerUp();
     uiClearSetBatterySource(twatchBatteryState);
 #endif
+#if defined(WS_S3_35)
+    ws35PowerUp();   // before tft.init(): the panel's reset is on the expander
+#endif
 #if defined(STICKS3)
     sticksPowerUp();
 #endif
@@ -6239,6 +6417,9 @@ void setup() {
     Clock::begin();   // after Settings: the zone is applied there, the history here
 #if defined(CYD_GPS)
     cydGpsStart();
+#endif
+#if defined(WS_S3_35)
+    ws35RtcBegin();        // after Clock::begin(): a real time beats the note's guess
 #endif
 #if defined(TWATCH_S3)
     twatchRtcBegin();      // after Clock::begin(): a real time beats the note's guess
@@ -6628,6 +6809,18 @@ void setup() {
     uiClearSetBatterySource(boardBatteryState);
     Sound::begin();                       // the codec is on the touch bus, now up
     Serial.printf("[power] boot: %s, wake cause %d\n", resetReasonName(), (int)(s_wokeFromOff ? s_offWakeCause : esp_sleep_get_wakeup_cause()));
+#elif defined(WS_S3_35)
+    // The Waveshare 3.5"'s FT6336 on the shared I2C bus (SDA 8 / SCL 7, 0x38).
+    // Its reset is the LCD's (EXIO1), already pulsed by ws35PowerUp(); no INT
+    // pin, so it is polled. The chip needs a moment after that reset.
+    CapTouch::begin(8, 7, -1, 0x38, 400000);
+    for (int i = 0; i < 20 && !(usingCapTouch = CapTouch::probe()); i++) delay(25);
+    if (usingCapTouch) CapTouch::ft6336Normal();   // factory firmware may have left gesture mode on
+    Serial.println(usingCapTouch ? "Waveshare S3 3.5 -- FT6336 capacitive touch answered."
+                                 : "Waveshare S3 3.5 -- FT6336 did not answer; no touch.");
+    { char b[16]; boardBatteryLine(b, sizeof b); Serial.printf("[batt] %s\n", b); }
+    uiClearSetBatterySource(boardBatteryState);
+    Sound::begin();                       // the codec is on this bus, now up
 #elif defined(FREENOVE_S3)
     // The Freenove S3 2.8"'s FT6336, on I2C SDA 16 / SCL 15 at 0x38, reset on
     // GPIO18 (active low). The ES8311 codec shares the bus at 0x18. FNK0104A
@@ -12329,6 +12522,8 @@ void loop() {
             info.boardName = "Cardputer ADV LAB";
 #elif defined(TDECK_PLUS)
             info.boardName = "tdeck-plus LAB";
+#elif defined(WS_S3_35)
+            info.boardName = "waveshare-s3-35";
 #elif defined(FREENOVE_S3_35)
             info.boardName = "freenove-s3-35 BETA";
 #elif defined(FREENOVE_S3_40)

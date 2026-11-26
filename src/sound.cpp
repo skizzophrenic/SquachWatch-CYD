@@ -34,7 +34,13 @@
 
 namespace Sound {
 
-#if defined(FREENOVE_S3_35)
+#if defined(WS_S3_35)
+// The Waveshare 3.5": ES8311 on the shared I2C bus (0x18), NS4150B amp whose
+// enable is the expander's EXIO7, held high from ws35PowerUp(); no MCU pin.
+// I2S per Waveshare's BSP: MCLK 12, BCLK 13, LRCK 15, data to the codec 16.
+static const int PIN_MCK = 12, PIN_BCK = 13, PIN_WS = 15, PIN_DOUT = 16;
+static const int PIN_AMP = -1;
+#elif defined(FREENOVE_S3_35)
 static const int PIN_MCK = 17, PIN_BCK = 18, PIN_WS = 21, PIN_DOUT = 15;
 static const int PIN_AMP = 1;
 #elif defined(STICKS3)

@@ -135,6 +135,7 @@ whole firmware but has had fewer hours on it. The longer answer is in
 | Freenove ESP32-S3 2.8" — FNK0104B | BETA | Capacitive touch, SDMMC card slot, WS2812 light, battery connector. Torn screen? On the flasher, untick 80 MHz under Advanced for the 40 MHz build. A GPS module on its UART port works with the `freenove-s3-gps` build (build it yourself). Pins in [docs/PINOUT.md](docs/PINOUT.md) |
 | Freenove ESP32-S3 4.0" — FNK0104S | BETA (build it yourself) | The 2.8"'s board with a 320×480 ST7796: `pio run -e freenove-s3-40 -t upload`. Not on the flasher yet |
 | Freenove ESP32-S3 3.5" — FNK0104N | BETA | The black 3.5": a 320×480 panel on its own QSPI driver, capacitive touch, SDMMC card slot, WS2812 light, battery connector. Big text, and pets at double size |
+| Waveshare ESP32-S3-Touch-LCD-3.5 / -C | BETA (build it yourself) | 320×480 ST7796, FT6336 touch, AXP2101 battery gauge, RTC, speaker, SD. No LoRa or status light. `pio run -e waveshare-s3-35 -t upload`. [docs/WAVESHARE-S3-35.md](docs/WAVESHARE-S3-35.md) |
 | Elecrow CrowPanel Advance 7.0 | BETA | 800×480, drawn at 400×240 doubled on purpose. Has a buzzer, silent unless you switch it on. [docs/CROWPANEL7.md](docs/CROWPANEL7.md) |
 | RockBase NM-CYD-C5 | BETA | The 2.8" CYD's glass on an ESP32-C5, the first RISC-V chip here. Scans **5 GHz** too (WIFI BANDS in Settings). [docs/NM-CYD-C5.md](docs/NM-CYD-C5.md) |
 | Marauder V8 (justcallmekoko) | BETA | The ESP32-C5 Marauder: 2.8" screen, GPS for **wardriving** to the SD card (a WiGLE file), and a battery gauge. Scans 5 GHz too |
