@@ -38,9 +38,9 @@ extern TFT_eSPI tft;
 // CYD SD card CS — see docs/PINOUT.md. AWOK: CS=14 on the on-board
 // slot, sharing the DISPLAY'S VSPI bus (18/23/19). GPIO5 on this board
 // is TFT_RST — reusing the CYD's CS=5 would fight the display. cyd35
-// shares its display's VSPI bus too (14/13/12, not 18/19/23) but its
-// real SD-slot CS is unconfirmed -- 5 is a placeholder guess (SD has
-// failed to mount on every real unit tested so far regardless).
+// does NOT share its display's bus: the slot is wired to 18/19/23 with CS 5,
+// like the original CYD's (Sunton's schematic, and LCDwiki's E32R35T table).
+// See the CYD35 branch in begin().
 //
 // NM-CYD-C5: CS=10, on the DISPLAY's bus (SCK 6, MISO 2, MOSI 7), from
 // RockBase's connections.md. Not 5 -- GPIO5 on this board is the GPS header's
@@ -155,7 +155,18 @@ bool SdLog::begin() {
     // no-op, and AWOK's touch chip is apparently more sensitive to
     // that than cyd35's) -- so it keeps the plain no-args SD.begin()
     // below, same as before this fix existed.
-    if (!SD.begin(SD_CS_PIN, tft.getSPIinstance(), 4000000, "/sd", SD_MAX_FILES)) {
+    //
+    // ...and on the 3.5" that was the bug, the same one the RL Phantom had:
+    // the slot is not on the display's pins at all. It is wired to 18/19/23
+    // with CS 5, and the display's SPI engine (VSPI, routed to 14/13/12)
+    // never clocked those, so the card never answered ("Select Failed").
+    // So the card gets the other engine, HSPI, routed to its own pins. Nothing
+    // is added to VSPI, so the display and the touch on it are untouched.
+    // Its own instance, never the global `SPI`: that one is VSPI too.
+    // CYD35C lands here too: the same board with I2C touch, the same slot.
+    static SPIClass sdSpi(HSPI);
+    sdSpi.begin(18, 19, 23, SD_CS_PIN);  // SCK, MISO, MOSI, CS
+    if (!SD.begin(SD_CS_PIN, sdSpi, 4000000, "/sd", SD_MAX_FILES)) {
 #elif defined(NM_CYD_C5)
     // Same shape as cyd35 above, and for the same reason: the card is on the
     // DISPLAY's SPI bus here (SCK 6, MISO 2, MOSI 7), so it gets TFT_eSPI's
@@ -213,33 +224,24 @@ void SdLog::openDaily() {
     // gets the nodate file, because its date can be days behind.
     _day = Clock::trusted() ? Clock::localDay() : 0;
     SdRow::fileName(_filename, sizeof(_filename), _day);
-#if defined(NM_CYD_C5)
     // Say what is already on the card for today. Mounting proves the card
     // answers; it does not prove a single row ever reached it, and until this
     // line existed the only way to tell the two apart was to pull the card.
-    // Board-gated for the same reason as the branch in logEvent() below.
+    // On every board now: the 3.5" had a card that mounted and logged nothing,
+    // and serial said only "card mounted".
     FramePush::busLock();
     File f = CARD.open(_filename, FILE_READ);
     if (f) { Serial.printf("[sd] %s: %lu bytes already\n", _filename, (unsigned long)f.size()); f.close(); }
     else   { Serial.printf("[sd] %s: new file\n", _filename); }
     FramePush::busUnlock();
-#endif
 }
 
 void SdLog::logEvent(const Detection& d) {
-    if (!_ready) return;
-    char line[SdRow::ROW_MAX];
-#if defined(CYD_GPS)
-    // Where the board is now. The queue drains on the loop task within a
-    // frame or two of the detection, so this is where it was seen.
-    SdRow::line(line, sizeof(line), d,
-                Clock::trusted() ? Clock::nowEpoch() : 0, millis(),
-                &Gnss::fix(), Gnss::faked(), millis());
-#else
-    SdRow::line(line, sizeof(line), d,
-                Clock::trusted() ? Clock::nowEpoch() : 0, millis(),
-                nullptr, false, 0);
-#endif
+    logEvents(&d, 1, 0, 1);
+}
+
+void SdLog::logEvents(const Detection* ring, uint8_t cap, uint8_t from, uint8_t n) {
+    if (!_ready || !n) return;
     // Straight to the file through the VFS (every board mounts the card at
     // "/sd"), not through CARD.open(): the Arduino File puts a 4 KB stdio
     // buffer on the heap at the first write and frees it at close, so every
@@ -255,31 +257,40 @@ void SdLog::logEvent(const Detection& d) {
     const int fd = ::open(path, O_WRONLY | O_APPEND | O_CREAT, 0644);
     if (fd < 0) {
         FramePush::busUnlock();
-#if defined(NM_CYD_C5)
         // Once, not once per detection: a card that mounts but cannot be
         // opened for append reads exactly like a card that was logging, and
         // begin()'s own comment two screens up says that is the thing to
         // avoid. A write-protected card, a full one, or a filesystem the
-        // driver mounted but cannot write all land here.
-        //
-        // Board-gated ON PURPOSE. It is worth having on every board and costs
-        // ~288 bytes of flash, but this is a board-port PR: no existing board
-        // should change by a byte on account of it. Lift the guard if you want
-        // it everywhere -- see the note in the PR description.
+        // driver mounted but cannot write all land here. Once board-gated to
+        // the C5; on every board now, for the same reason as openDaily().
         static bool said = false;
         if (!said) {
             said = true;
             Serial.printf("[sd] cannot open %s for append: mounted, but nothing is being logged\n",
                           _filename);
         }
-#endif
         return;
     }
-    const size_t n = strlen(line);
-    const ssize_t w = ::write(fd, line, n);
+    // Every row waiting, through the one open.
+    char line[SdRow::ROW_MAX];
+    for (uint8_t i = 0; i < n; i++) {
+        const Detection& d = ring[(from + i) % cap];
+#if defined(CYD_GPS)
+        // Where the board is now. The queue drains on the loop task within a
+        // frame or two of the detection, so this is where it was seen.
+        SdRow::line(line, sizeof(line), d,
+                    Clock::trusted() ? Clock::nowEpoch() : 0, millis(),
+                    &Gnss::fix(), Gnss::faked(), millis());
+#else
+        SdRow::line(line, sizeof(line), d,
+                    Clock::trusted() ? Clock::nowEpoch() : 0, millis(),
+                    nullptr, false, 0);
+#endif
+        const ssize_t w = ::write(fd, line, strlen(line));
+        (void)w;
+    }
     ::close(fd);
     FramePush::busUnlock();
-    (void)w;
 }
 
 void SdLog::wipe() {

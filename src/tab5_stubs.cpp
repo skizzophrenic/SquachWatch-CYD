@@ -22,6 +22,7 @@
 // ---- SdLog: no card driven on this board yet ------------------------------
 bool SdLog::begin() { _ready = false; return false; }
 void SdLog::logEvent(const Detection&) {}
+void SdLog::logEvents(const Detection*, uint8_t, uint8_t, uint8_t) {}
 void SdLog::tick() {}
 void SdLog::wipe() {}
 void SdLog::openDaily() {}
@@ -144,7 +145,7 @@ const Net*  net(uint8_t)          { return nullptr; }
 void        connectSavedAt(uint8_t) {}
 void        connect(const char*, const char*, bool) { s_state = State::FAILED; }
 void        connectSaved()        { s_state = State::FAILED; }
-bool        bootCheck(uint32_t)   { return false; }
+bool        bootCheck(uint32_t, bool) { return false; }
 const char* network()             { return ""; }
 const char* latestVersion()       { return ""; }
 bool        upToDate()            { return true; }

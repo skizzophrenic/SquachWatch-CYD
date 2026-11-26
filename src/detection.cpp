@@ -876,7 +876,14 @@ static void onWifiFrame(const uint8_t* frame, uint16_t sigLen, uint16_t avail, i
         // Data frame: addr1 (DA) and addr2 (SA) both interesting
         g_engine->postWiFi(frame + 4,  rssi, channel);
         g_engine->postWiFi(frame + 10, rssi, channel);
-    } else if (type == 0 && subtype == 8) {
+    } else if (type == 0 && (subtype == 8 || subtype == 5)) {
+        // A probe response (5) is laid out as a beacon is, and it is how a
+        // karma attack answers: a phone asks for its home network by name
+        // and the Pineapple says yes, from its own address. Probe responses
+        // take the same SSID parse and go to the karma check and the
+        // signature tables, but not the AP table (see processWiFiQ) or the
+        // wardrive, Remote ID and pwnagotchi reads, which are about beacons.
+        const bool probeResp = subtype == 5;
         // Beacon: fixed params (timestamp+interval+capability) run
         // 12 bytes after the 24-byte header, then the information
         // elements. They end four bytes before the end of the frame (the
@@ -910,7 +917,7 @@ static void onWifiFrame(const uint8_t* frame, uint16_t sigLen, uint16_t avail, i
 #if defined(TWATCH_S3) || defined(CYD_GPS)
         // Wardriving: every access point, with its security read from the
         // RSN and WPA elements.
-        if (Wardrive::enabled() && ieLen) {
+        if (!probeResp && Wardrive::enabled() && ieLen) {
             const uint16_t cap = (uint16_t)(frame[34] | (frame[35] << 8));
             Wardrive::noteWifi(frame + 16, ssid, WifiAuth::parse(cap, ies, ieLen), channel, rssi);
         }
@@ -920,7 +927,9 @@ static void onWifiFrame(const uint8_t* frame, uint16_t sigLen, uint16_t avail, i
         // element (issue #15): posted as a drone, named by its serial
         // when the pack carried its Basic ID.
         RemoteId::Info rid;
-        if (ieLen && RemoteId::mergeBeacon(ies, ieLen, rid, 0)) {
+        if (probeResp) {
+            g_engine->postWiFi(frame + 16, rssi, channel, ssid, enc, false, false, true);
+        } else if (ieLen && RemoteId::mergeBeacon(ies, ieLen, rid, 0)) {
             g_engine->postWiFi(frame + 10, rssi, channel, rid.haveBasic ? rid.serial : "", false, false, true);
         } else if (pwnagotchiName(frame, (uint32_t)(avail < sigLen ? avail : sigLen), pwnName, sizeof(pwnName))) {
             g_engine->postWiFi(frame + 10, rssi, channel, pwnName, false, true);
@@ -1824,9 +1833,22 @@ void DetectionEngine::loop() {
     decayChannelActivity();
     saveLifetime(millis());
     drainBlackBox(millis());
-    if (_sdQTail != _sdQHead) {
-        _sd.logEvent(_sdQ[_sdQTail]);
-        _sdQTail = (uint8_t)((_sdQTail + 1) % SD_Q_CAP);
+    {
+        const uint8_t head = _sdQHead;
+        const uint8_t n = (uint8_t)((head + SD_Q_CAP - _sdQTail) % SD_Q_CAP);
+        if (n) {
+            _sd.logEvents(_sdQ, SD_Q_CAP, _sdQTail, n);
+            _sdQTail = head;
+        }
+        // Said, not silent: a lost line looks just like a device never seen.
+        static uint16_t toldDropped = 0;
+        static uint32_t toldAt = 0;
+        const uint16_t dropped = _sdDropped;
+        if (dropped != toldDropped && millis() - toldAt > 10000) {
+            Serial.printf("[sd] %u log line(s) lost to a full queue since boot\n", (unsigned)dropped);
+            toldDropped = dropped;
+            toldAt = millis();
+        }
     }
     _sd.tick();
 }
@@ -1972,7 +1994,7 @@ void DetectionEngine::clearLog() {
 
 void IRAM_ATTR DetectionEngine::postWiFi(const uint8_t* mac, int8_t rssi, uint8_t channel,
                                          const char* ssid, bool encrypted,
-                                         bool pwnagotchi, bool drone) {
+                                         bool pwnagotchi, bool drone, bool probeResp) {
     if (!mac) return;
     // Group-addressed (broadcast/multicast) destinations can never be a
     // real device: bit 0 of byte 0 is the I/G bit, and every OUI in
@@ -2004,6 +2026,7 @@ void IRAM_ATTR DetectionEngine::postWiFi(const uint8_t* mac, int8_t rssi, uint8_
     e.encrypted = encrypted;
     e.pwnagotchi = pwnagotchi;
     e.drone      = drone;
+    e.probeResp  = probeResp;
     _wifiQHead = next;
 }
 
@@ -2116,6 +2139,7 @@ void DetectionEngine::processDeauthQ() {
                 _latest = &row;
                 _latestNew = false;      // the row the first flood made
                 _latestSeq = _latestSeq + 1;
+                queueSd(row);
                 queueBlackBox(row, true);
                 return;
             }
@@ -2202,6 +2226,7 @@ void DetectionEngine::postBle(Detection d) {
                 _latest = &_log[slot];
                 _latestNew = false;                // ...but a device we had already
                 _latestSeq = _latestSeq + 1;
+                queueSd(_log[slot]);
                 queueBlackBox(_log[slot], true);
             }
             return;
@@ -2240,6 +2265,7 @@ void DetectionEngine::postLora(Detection d) {
             _latest = &row;
             _latestNew = false;
             _latestSeq = _latestSeq + 1;
+            queueSd(row);
             queueBlackBox(row, true);
         }
         return;
@@ -2763,6 +2789,49 @@ bool DetectionEngine::noteApBeacon(const uint8_t* bssid, const char* ssid, bool 
     return false;
 }
 
+// See the karma table's comment in detection.h.
+bool DetectionEngine::noteKarma(const uint8_t* bssid, const char* ssid) {
+    const uint32_t now = millis() | 1u;   // 0 marks an empty slot
+    uint32_t h = 2166136261u;
+    for (const char* p = ssid; *p; p++) { h ^= (uint8_t)*p; h *= 16777619u; }
+    KarmaEntry* k = nullptr;
+    KarmaEntry* victim = nullptr;
+    for (uint8_t i = 0; i < KARMA_CAP; i++) {
+        KarmaEntry& e = _karma[i];
+        if (e.since && memcmp(e.bssid, bssid, 6) == 0) { k = &e; break; }
+        // An empty slot first; then the oldest one-name address; then the
+        // oldest of anything.
+        if (!e.since) { if (!victim || victim->since) victim = &e; continue; }
+        if (!victim) { victim = &e; continue; }
+        if (!victim->since) continue;
+        const bool vOne = victim->n <= 1, eOne = e.n <= 1;
+        if (eOne != vOne) { if (eOne) victim = &e; continue; }
+        if (now - e.seen > now - victim->seen) victim = &e;
+    }
+    if (!k) {
+        k = victim;
+        memset(k, 0, sizeof(*k));
+        memcpy(k->bssid, bssid, 6);
+        k->since = now;
+    } else if (now - k->seen > KARMA_WINDOW_MS || (!k->flagged && now - k->since > KARMA_WINDOW_MS)) {
+        // Quiet for a whole window, or a window gone by without tripping:
+        // count again from this name.
+        k->n = 0;
+        k->flagged = false;
+        k->since = now;
+    }
+    k->seen = now;
+    if (k->flagged) return true;
+    for (uint8_t i = 0; i < k->n; i++) if (k->names[i] == h) return false;
+    k->names[k->n++] = h;
+    if (k->n < KARMA_NAMES) return false;
+    k->flagged = true;
+    Serial.printf("[karma] %02x:%02x:%02x:%02x:%02x:%02x went by %u network names in %lu s, the last \"%s\"\n",
+                  bssid[0], bssid[1], bssid[2], bssid[3], bssid[4], bssid[5], (unsigned)KARMA_NAMES,
+                  (unsigned long)((now - k->since) / 1000), ssid);
+    return true;
+}
+
 void DetectionEngine::processWiFiQ() {
     while (_wifiQTail != _wifiQHead) {
         LogLock lock;   // per frame, so the host task is never kept waiting long
@@ -2816,6 +2885,7 @@ void DetectionEngine::processWiFiQ() {
         // throwaway SSID must not be fed to the AP tracker as if it were a
         // network somebody might be impersonating.
         bool evilTwin = false;
+        bool karma = false;
         // MY ALERTS: the owner's own patterns. After the evil-twin check, so
         // the AP tracker still hears every named network, and ahead of the
         // signature tables: somebody who typed "veh*" wants to hear about
@@ -2828,7 +2898,15 @@ void DetectionEngine::processWiFiQ() {
             // The same claim the Bluetooth form makes, in the same bytes.
             t = DetectionType::DRONE;
             conf = confidenceFor(t);
-        } else if ((evilTwin = (e.ssid[0] && noteApBeacon(e.mac, e.ssid, e.encrypted)))) {
+        } else if ((karma = (e.ssid[0] && noteKarma(e.mac, e.ssid)))) {
+            // Ahead of the evil-twin check: a karma box is also an evil twin
+            // of every name it answers to, and filed under that it would be
+            // one row per network it copied rather than one row for the box.
+            // MEDIUM: the behaviour is the tool's, but it is behaviour, not
+            // a signature.
+            t = DetectionType::HACKER;
+            conf = Confidence::MED_CONF;
+        } else if ((evilTwin = (e.ssid[0] && !e.probeResp && noteApBeacon(e.mac, e.ssid, e.encrypted)))) {
             t = DetectionType::EVILTWIN;
         } else if (e.ssid[0] && (mine = MyAlerts::match(e.ssid)) >= 0) {
             t = DetectionType::MINE;
@@ -2886,6 +2964,7 @@ void DetectionEngine::processWiFiQ() {
                     _latest = &_log[slot];
                     _latestNew = false;            // came back; not new to the log
                     _latestSeq = _latestSeq + 1;
+                    queueSd(_log[slot]);
                     queueBlackBox(_log[slot], true);
                 }
                 merged = true;
@@ -2906,6 +2985,11 @@ void DetectionEngine::processWiFiQ() {
         // impersonated, so the SSID goes in as the name.
         if (t == DetectionType::EVILTWIN) {
             d.vendor = "EvilTwin";
+            strncpy(d.name, e.ssid, sizeof(d.name) - 1);
+        } else if (karma) {
+            // The name it was answering to when it tripped: the network it is
+            // pretending to be.
+            d.vendor = "Karma";
             strncpy(d.name, e.ssid, sizeof(d.name) - 1);
         } else if (e.pwnagotchi) {
             d.vendor = "Pwnagotchi";
@@ -2978,12 +3062,25 @@ void DetectionEngine::pushLog(const Detection& d) {
     _lifetimeDirty = true;
     Bingo::note(d.type);
     Dex::note(d.type, d.rssi);
-    const uint8_t next = (uint8_t)((_sdQHead + 1) % SD_Q_CAP);
-    if (next != _sdQTail) { _sdQ[_sdQHead] = d; _sdQHead = next; }
+    queueSd(d);
     queueBlackBox(d, false);
 }
 
 static portMUX_TYPE s_bbMux = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE s_sdMux = portMUX_INITIALIZER_UNLOCKED;
+
+// A row for the SD log: every first sight, and every return of a device the
+// log already held (the black box's "again"), so a day's file has everything
+// the screen showed that day, not only what was new to the board. Filled from
+// the host task and loop() both, so under a lock; drained by loop().
+void DetectionEngine::queueSd(const Detection& d) {
+    if (!_sd.ready()) return;
+    portENTER_CRITICAL(&s_sdMux);
+    const uint8_t next = (uint8_t)((_sdQHead + 1) % SD_Q_CAP);
+    if (next != _sdQTail) { _sdQ[_sdQHead] = d; _sdQHead = next; }
+    else _sdDropped++;
+    portEXIT_CRITICAL(&s_sdMux);
+}
 
 
 void DetectionEngine::queueBlackBox(const Detection& d, bool again) {

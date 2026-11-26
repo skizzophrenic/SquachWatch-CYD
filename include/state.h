@@ -262,7 +262,8 @@ enum class AppState : uint8_t {
     SENSING          = 41, // HUMAN SENSING (SENSE_CYD_APP builds): WiFi motion sensing on the CYD's own
                            // radio, from Settings > HUMAN SENSING. See ui_sensing_cyd.h and sense_cyd.h.
     MY_ALERTS        = 42, // MY ALERTS, from Settings: the owner's own WiFi names. See ui_myalerts.h.
-    CRYPTID_GUIDE    = 43  // CRYPTID FIELD GUIDE, from Settings: Mothman's page. See ui_cryptid_guide.h.
+    CRYPTID_GUIDE    = 43, // CRYPTID FIELD GUIDE, from Settings: Mothman's page. See ui_cryptid_guide.h.
+    LOG_SHARE        = 44  // SHARE LOGS, from the SYSTEM page (-DSQW_LOG_SHARE=1). See ui_logshare.h.
 };
 
 enum class ButtonId : uint8_t {

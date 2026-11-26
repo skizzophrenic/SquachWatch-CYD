@@ -77,7 +77,7 @@ keychain mode, so TERMINAL MODE is a row in its Settings instead.)
 | `EVILTWIN` | Rogue / spoofed access points | One SSID beaconing from two BSSIDs that disagree about encryption |
 | `IBEACON` | Retail proximity beacons | Exact Apple header `4C 00 02 15` — **off by default**, see below |
 | `MY ALERT` | WiFi networks whose names match your own patterns | Settings → MY ALERTS; see [Alert controls](#alert-controls) |
-| `HACKER` | Flipper Zero, Pwnagotchi, WiFi Pineapple, ESP deauthers | Flipper Zero's service UUIDs `0x3081`–`0x3083` and its name (not Flipper's company ID or OUI, which the BUSY Bar desk sign uses); the Pwnagotchi's own beacon payload; `Pineapple_` and `pwned` SSIDs |
+| `HACKER` | Flipper Zero, Pwnagotchi, WiFi Pineapple, ESP deauthers | Flipper Zero's service UUIDs `0x3081`–`0x3083` and its name (not Flipper's company ID or OUI, which the BUSY Bar desk sign uses); the Pwnagotchi's own beacon payload; `Pineapple_` and `pwned` SSIDs; one radio using four or more network names in two minutes (karma) |
 | `LISTENER` | Smart speakers with microphones (Sonos, HomePod; Echo and Google speakers only while being set up) | 15 Sonos WiFi OUI, Sonos company ID `0x05A7` and UUID `0xFE07`, a HomePod's "Hey Siri" block, the `GoogleHome` setup hotspot — **off by default**, see below |
 | `LORAWAN` | A LoRaWAN operator's network in range (a utility's meters, city sensors, The Things Network) | LoRa boards only, with LORA set to LORAWAN: the DevAddr prefix of a data frame, looked up in the LoRa Alliance NetID registry. One alert per operator, not per device |
 
@@ -277,6 +277,10 @@ the clock is set). Each row is CSV: `time,type,rssi,mac,channel,vendor,name`,
 where the time is UTC once the clock is set and milliseconds since boot
 before that. Boards with GPS add `lat,lon,accuracy` columns, filled in
 while they have a fresh fix.
+
+On the 2.8" CYD, Freenove 3.2" and 3.5" resistive builds, **Settings → SYSTEM → SHARE LOGS** serves those
+files and the black box to a browser on your WiFi network; see
+[docs/LOG-SHARE.md](docs/LOG-SHARE.md).
 
 ### The clock
 

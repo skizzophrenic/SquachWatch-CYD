@@ -106,7 +106,8 @@ void connectSaved();
 // before there is a screen to hold up: on a running board the same job is a
 // whole mode, so detection is paused properly rather than stalled.
 // False when there is no saved network, or nothing came back in time.
-bool bootCheck(uint32_t budgetMs);
+// askSite false skips the manifest and only sets the clock (SQW_BOOT_CLOCK).
+bool bootCheck(uint32_t budgetMs, bool askSite = true);
 
 const char* network();          // the one being joined or used
 const char* latestVersion();    // meaningful from READY on

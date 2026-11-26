@@ -119,6 +119,7 @@ inline const SimDetectionProfile kSimProfiles[] = {
     { DetectionType::HACKER,      {0x80, 0xE1, 0x26}, "Flipper",     "Flipper Ozzyx",  -49, false, "Flipper Zero" },
     { DetectionType::HACKER,      {0x02, 0x50, 0x57}, "Pwnagotchi",  "rikki",          -62, true,  "Pwnagotchi" },
     { DetectionType::HACKER,      {0x06, 0x50, 0x49}, "Pineapple",   "",               -60, true,  "WiFi Pineapple" },
+    { DetectionType::HACKER,      {0x0A, 0x4B, 0x41}, "Karma",       "Home WiFi",      -59, true,  "Karma attack" },
     { DetectionType::HACKER,      {0x06, 0xDE, 0xA7}, "Deauther",    "",               -57, true,  "ESP deauther" },
     { DetectionType::HACKER,      {0x02, 0xC0, 0xCA}, "Hak5-LA",     "",               -63, true,  "Hak5 address" },
     // LORAWAN -- the made-up address Lora::OpAlert::macFor gives an operator,

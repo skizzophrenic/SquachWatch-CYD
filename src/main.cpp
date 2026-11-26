@@ -181,6 +181,18 @@ static bool takeBootCheckSkip() {
     g_bootCheckSkip = 0;
     return esp_reset_reason() == ESP_RST_SW && v == CHKSKIP_MAGIC;
 }
+#if SQW_BOOT_CLOCK
+// The boot clock join restarts the board once it has asked (see setup()), and
+// this says, across that restart, that it has: the second boot goes straight
+// on, whether the time came back or not, rather than ask again forever.
+static const uint32_t CLOCKTRIED_MAGIC = 0xC10C7EDu;
+RTC_NOINIT_ATTR static uint32_t g_bootClockTried;
+static bool takeBootClockTried() {
+    const uint32_t v = g_bootClockTried;
+    g_bootClockTried = 0;
+    return esp_reset_reason() == ESP_RST_SW && v == CLOCKTRIED_MAGIC;
+}
+#endif
 #if SQW_BOOT_POWEROFF
 // The Freenove boards' wake from POWER OFF restarts once, at the very top of
 // setup(), before anything runs. A deep-sleep wake brings the native USB port
@@ -378,6 +390,19 @@ static void drawCrashCard(TFT_eSPI& t) {
 #include "ui_zone.h"
 #include "december.h"
 #include "ui_wifinets.h"
+#if SQW_LOG_SHARE
+#include "log_share.h"
+#include "ui_logshare.h"
+#endif
+// SHARE LOGS holds the WiFi radio the way an update does: nothing else may
+// rest it, scan with it or call it deaf while it is serving.
+static inline bool logShareActive() {
+#if SQW_LOG_SHARE
+    return LogShare::active();
+#else
+    return false;
+#endif
+}
 #include "ui_myalerts.h"
 #include "my_alerts.h"
 #include "flood_bench.h"
@@ -4380,6 +4405,63 @@ static void enterWifiNets() {
     transitionStart = millis();
     uiWifiNetsInit(*canvas);
 }
+#if SQW_LOG_SHARE
+// SHARE LOGS, from the SYSTEM page. Detection is paused first, as for an
+// update; loop() starts it again whenever the share ends, by STOP, a timeout
+// or the lock.
+static bool s_logShareOn = false;
+// The 3.5"'s half-height frame (~77 KB) is lent to the share. With the SD
+// card mounted that board runs at ~22 KB free and a 3 KB largest block, and
+// the WiFi driver and TCP stack take every packet from the heap: the login
+// prompt went out, the page after it never did. The screen draws straight to
+// the panel meanwhile, the fallback a failed rotate already uses. On the way
+// out the frame comes back, or, if the heap will not give 77 KB in one piece
+// again, the board restarts rather than run unbuffered until it does.
+static bool s_shareFrameLent = false;
+static void lendFrameToShare() {
+#if defined(CYD35)
+    if (!frameBufferOk || !frame.created()) return;
+    FramePush::asyncWait();                   // the push task may still be reading it
+    frame.deleteSprite();
+    frameBufferOk = false;
+    s_shareFrameLent = true;
+    tft.fillScreen(Theme::BG);
+    Serial.printf("[share] frame buffer lent: largest block %lu\n",
+                  (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+#endif
+}
+static void restoreFrameFromShare() {
+#if defined(CYD35)
+    if (!s_shareFrameLent) return;
+    s_shareFrameLent = false;
+    frame.setColorDepth(8);
+    if (frame.createSprite(tft.width(), tft.height() / 2)) {
+        frame.setTextSize(1);
+        frameBufferOk = true;
+        Serial.println("[share] frame buffer back");
+        return;
+    }
+    Serial.printf("[share] frame buffer could not come back (largest block %lu): restarting\n",
+                  (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+    serialFlush();
+    ESP.restart();
+#endif
+}
+static void enterLogShare() {
+    engine.startUpdateRadio();
+    lendFrameToShare();
+    if (!LogShare::begin(millis())) {
+        restoreFrameFromShare();
+        engine.stopUpdateRadio();
+        Theme::showToast("CAN'T SHARE", LogShare::whyNot(), Theme::AMBER);
+        return;
+    }
+    s_logShareOn = true;
+    state = AppState::LOG_SHARE;
+    transitionStart = millis();
+    uiLogShareInit(*canvas);
+}
+#endif
 // MY ALERTS, and the two trips to the keyboard it makes: the pattern, then
 // its label (or a new label for one already saved). The keyboard is the
 // WiFi password one in its plain-text mode; this says what it is typing for.
@@ -4825,7 +4907,7 @@ static void loraRadioTick(uint32_t now) {
     static uint32_t triedAt = 0;
     const uint8_t mode = Settings::loraDetect();
     bool want = mode == 2 || (mode == 1 && onLoraPage());
-    if (state == AppState::UPDATE || OtaWifi::state() != OtaWifi::State::OFF || onRawScanScreen()) want = false;
+    if (state == AppState::UPDATE || OtaWifi::state() != OtaWifi::State::OFF || logShareActive() || onRawScanScreen()) want = false;
     if (want) {
         if (engine.radiosResting()) return;
         if (now - triedAt < 1000) return;                  // a refusal tries again in a second
@@ -5656,7 +5738,7 @@ static void twatchRadioTick(uint32_t now) {
     // few seconds, so WiFi never got a rest at home.
     const bool alerting = (state == AppState::WATCH_ALERT);
     const bool wantOn = duty == 0 || (!g_consoleRadioTest && (usb || !s_panelAsleep)) || alerting ||
-                        state == AppState::UPDATE || OtaWifi::state() != OtaWifi::State::OFF;
+                        state == AppState::UPDATE || OtaWifi::state() != OtaWifi::State::OFF || logShareActive();
     uint32_t onMs = 5000, offMs = 25000;
     if (duty == 2) { onMs = 10000; offMs = 50000; }
     if (wantOn) {
@@ -5733,7 +5815,7 @@ static bool bleShouldHear() {
     // Resting with Bluetooth off (the 5/30 and 10/60 duties), a raw scan, an
     // update: none of those are the radio's fault.
     if (s_radiosResting && Settings::radioDuty() != 3) return false;
-    if (onRawScanScreen() || state == AppState::UPDATE || OtaWifi::state() != OtaWifi::State::OFF) return false;
+    if (onRawScanScreen() || state == AppState::UPDATE || OtaWifi::state() != OtaWifi::State::OFF || logShareActive()) return false;
     return true;
 }
 static void twatchRadioHealTick(uint32_t now) {
@@ -6443,6 +6525,49 @@ void setup() {
         OtaWifi::bootCheck(9000);
         if (panelTextOk()) { PANEL.fillRect(0, 0, tft.width(), tft.height(), Theme::BG); panelShow(); }
     }
+#if SQW_BOOT_CLOCK
+    // UPDATE CHECK off -- a board kept on a build of its own has every reason
+    // to turn it off -- left nothing to set the clock after a power cut, and
+    // the SD log wrote every row to the nodate file until someone noticed.
+    // The same join for the time alone, and only when the time was lost: a
+    // software restart keeps it, and costs no WiFi.
+    //
+    // Then a restart, whatever the answer. The join leaves the heap cut up
+    // even with the driver torn down: on the 3.5" the block the SD card mounts
+    // into came out 17 KB instead of 25, and the first loop ran on a 3.4 KB
+    // largest block. The restart keeps the time it fetched and boots clean,
+    // about five seconds once per power cut.
+    else if (!takeBootClockTried() && !Settings::updateCheck() && !Clock::trusted() && !Security::locked() &&
+             OtaWifi::hasSaved()) {
+#if defined(CROWPANEL7)
+        CrowBL::set(24);
+#elif defined(TAB5)
+        Tab5Panel::backlight(24);
+#elif defined(TDECK_PLUS)
+        tdeckBacklight(24);
+#else
+        ledcWrite(BL_CH_ORIG, 24);
+        ledcWrite(BL_CH_CAP,  24);
+        ledcWrite(BL_CH_AWOK, 24);
+#endif
+        if (panelTextOk()) {
+            PANEL.fillRect(0, 0, tft.width(), tft.height(), Theme::BG);
+            PANEL.setTextSize(1);
+            PANEL.setTextWrap(false);
+            PANEL.setTextColor(Theme::CYAN, Theme::BG);
+            const char* m = "SETTING THE CLOCK...";
+            PANEL.setCursor((tft.width() - PANEL.textWidth(m)) / 2, tft.height() / 2 - 4);
+            PANEL.print(m);
+            panelShow();
+        }
+        OtaWifi::bootCheck(9000, false);   // the update check's budget: 6000 gave up mid-join
+        Serial.printf("[clock] boot join done (%s): restarting for a clean heap\n",
+                      Clock::trusted() ? "set" : "not set");
+        g_bootClockTried = CLOCKTRIED_MAGIC;
+        serialFlush();
+        ESP.restart();
+    }
+#endif
 
 
 #if defined(CYD35)
@@ -8788,6 +8913,19 @@ void loop() {
     OtaCore::tick(now);
     OtaBle::tick(now);
     OtaWifi::tick(now);
+#if SQW_LOG_SHARE
+    LogShare::tick(now);
+    if (s_logShareOn && !LogShare::active()) {
+        s_logShareOn = false;
+        restoreFrameFromShare();
+        engine.stopUpdateRadio();
+        if (state == AppState::LOG_SHARE) {
+            if (LogShare::endedByTimeout()) Theme::showToast("SHARING STOPPED", "Timed out", Theme::CYAN);
+            enterSettings();
+            uiSettingsOpenPage(SettingsPage::SYSTEM);
+        }
+    }
+#endif
     if (state == AppState::CLEAR) {
         const char* sub = nullptr;
         bool good = false;
@@ -11181,6 +11319,9 @@ void loop() {
                         case SettingsRow::CHECK_COLORS: enterColorCheck(true); break;
                         case SettingsRow::DIAGNOSTICS:  enterDiagnostics(); break;
                         case SettingsRow::WIFI_NETWORKS: enterWifiNets(); break;
+#if SQW_LOG_SHARE
+                        case SettingsRow::SHARE_LOGS:   enterLogShare(); break;
+#endif
                         case SettingsRow::DESK_MODE:    uiSettingsOpenPage(SettingsPage::DESK); break;
                         case SettingsRow::DESK_OPEN:
                             // Settings' BACK from the desk comes back to it;
@@ -11551,6 +11692,32 @@ void loop() {
             }
             break;
         }
+#if SQW_LOG_SHARE
+        case AppState::LOG_SHARE: {
+            // Sharing owns the screen, as an update does: no dimming and no
+            // auto-lock under it. Its own timers stop it (log_share.h).
+            lastTouch = now;
+            if (frameBufferOk) {
+                drawTwoBand([&](TFT_eSPI& t, bool) { uiLogShareTick(t, now); });
+            } else {
+                // Straight to the panel (the 3.5" lends its frame to the
+                // share): a full repaint every frame would flicker, so only
+                // when something on it changes -- at most once a second.
+                static uint32_t lastKey = 0xFFFFFFFFUL;
+                const uint32_t key = ((uint32_t)LogShare::state() << 28) |
+                                     ((uint32_t)(LogShare::requests() & 0xFFF) << 16) |
+                                     (LogShare::secondsLeft(now) & 0xFFFF) |
+                                     (LogShare::state() == LogShare::State::JOINING ? (now / 400) % 4 : 0);
+                if (key != lastKey) {
+                    uiLogShareTick(*canvas, now);
+                    lastKey = key;
+                }
+            }
+            if (touchJustDown && uiLogShareHit(*canvas, tp.x, tp.y) == LogShareHit::STOP)
+                LogShare::end();   // loop() resumes detection and leaves, next pass
+            break;
+        }
+#endif
         case AppState::MY_ALERTS: {
             drawTwoBand([&](TFT_eSPI& t, bool) { uiMyAlertsTick(t, now); });
             if (touchJustDown) {

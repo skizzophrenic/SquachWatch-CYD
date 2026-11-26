@@ -106,6 +106,7 @@ enum class SettingsRow : uint8_t {
     FONT_XP,         // on the FONTS page: the XP counter tiles, 1x or 2x
     FONT_PETS,       // on the FONTS page: the pets' balloons
     FONT_PREVIEW,    // on the FONTS page: a sample of the last kind moved, at its size
+    SHARE_LOGS,      // on the SYSTEM page (-DSQW_LOG_SHARE=1 builds): the logs to a computer over WiFi
     ALERT_CARD,      // on the APPEARANCE page: opens the ALERT CARD page
     ALERT_STYLE,     // on the ALERT CARD page: opens the style browser (a live card, arrows to step)
     ALERT_MOTION,    // on the ALERT CARD page: OPEN WITH ANIMATION, yes or no

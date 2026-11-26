@@ -4,6 +4,8 @@
 #include "gnss.h"
 #include <Arduino.h>
 #include <string.h>
+#include <stdarg.h>
+#include <stdio.h>
 
 #if __has_include(<esp_flash.h>)
 #include <esp_flash.h>
@@ -491,28 +493,49 @@ bool testNextDetectionSlot(uint32_t& offset) {
 }
 #endif
 
+namespace {
+struct DumpSink {
+    void (*line)(const char* s, void* ctx);
+    void* ctx;
+    void printf(const char* fmt, ...) __attribute__((format(printf, 2, 3))) {
+        char buf[192];
+        va_list ap;
+        va_start(ap, fmt);
+        vsnprintf(buf, sizeof buf, fmt, ap);
+        va_end(ap);
+        line(buf, ctx);
+    }
+};
+}  // namespace
+
 void dump() {
-    if (!s_ready) { Serial.println("[blackbox] off"); return; }
-    Serial.printf("[blackbox] boot %u; %u detections, %u crashes kept\n",
-                  (unsigned)s_bootNo, (unsigned)s_detKept, (unsigned)s_crashes);
-    Serial.println("boot,reason,epoch,version,up_s,heap_free,heap_block,screen,task,pc,cause");
-    forEachBoot([](const BootRecord& r, void*) {
-        Serial.printf("%u,%s,%lu,%s,%lu,%lu,%lu,%u,%s,%08lx,%lu\n", (unsigned)r.boot, reasonName(r.reason),
+    dumpTo([](const char* s, void*) { Serial.print(s); }, nullptr);
+}
+
+void dumpTo(void (*line)(const char* s, void* ctx), void* ctx) {
+    DumpSink out = { line, ctx };
+    if (!s_ready) { out.printf("[blackbox] off\n"); return; }
+    out.printf("[blackbox] boot %u; %u detections, %u crashes kept\n",
+               (unsigned)s_bootNo, (unsigned)s_detKept, (unsigned)s_crashes);
+    out.printf("boot,reason,epoch,version,up_s,heap_free,heap_block,screen,task,pc,cause\n");
+    forEachBoot([](const BootRecord& r, void* c) {
+        ((DumpSink*)c)->printf("%u,%s,%lu,%s,%lu,%lu,%lu,%u,%s,%08lx,%lu\n", (unsigned)r.boot, reasonName(r.reason),
                       (unsigned long)r.epoch, r.version, (unsigned long)r.upSec,
                       (unsigned long)r.heapFree, (unsigned long)r.heapBlock, (unsigned)r.screen,
                       (r.flags & BOOT_DUMP) ? r.task : "", (unsigned long)r.pc, (unsigned long)r.cause);
         return true;
-    }, nullptr);
-    Serial.println("boot,epoch,up_s,type,mac,rssi,channel,hits,again,vendor,name,lat,lon");
+    }, &out);
+    out.printf("boot,epoch,up_s,type,mac,rssi,channel,hits,again,vendor,name,lat,lon\n");
     // Everything the ring holds, CLR or not. The LOG screen stops at the mark
     // a CLR leaves (a restart must not bring back what was cleared), but this
     // is the record: it prints the mark as a line and carries on, so a
     // morning cleared at lunch is still here to read (2026-09-26).
-    s_dets.walk([](const uint8_t* p, void*) {
+    s_dets.walk([](const uint8_t* p, void* c) {
+        DumpSink& o = *(DumpSink*)c;
         if (p[0] == KIND_CLEAR) {
-            const DetRecord& c = *(const DetRecord*)p;
-            Serial.printf("# LOG CLEARED here (boot %u, epoch %lu): the rows below were hidden from the LOG screen\n",
-                          (unsigned)c.boot, (unsigned long)c.epoch);
+            const DetRecord& cl = *(const DetRecord*)p;
+            o.printf("# LOG CLEARED here (boot %u, epoch %lu): the rows below were hidden from the LOG screen\n",
+                     (unsigned)cl.boot, (unsigned long)cl.epoch);
             return true;
         }
         if (p[0] != KIND_DET) return true;
@@ -524,15 +547,15 @@ void dump() {
             snprintf(pos, sizeof pos, "%s%ld.%07ld,%s%ld.%07ld",
                      la < 0 ? "-" : "", labs((long)la) / 10000000L, labs((long)la) % 10000000L,
                      lo < 0 ? "-" : "", labs((long)lo) / 10000000L, labs((long)lo) % 10000000L);
-        Serial.printf("%u,%lu,%lu,%s,%02x:%02x:%02x:%02x:%02x:%02x,%d,%u,%u,%u,%s,%s,%s\n",
-                      (unsigned)r.boot, (unsigned long)r.epoch, (unsigned long)r.upSec,
-                      detectionTypeName((DetectionType)r.type),
-                      r.mac[0], r.mac[1], r.mac[2], r.mac[3], r.mac[4], r.mac[5],
-                      (int)r.rssi, (unsigned)r.channel, (unsigned)r.hits,
-                      (r.flags & DET_AGAIN) ? 1u : 0u, r.vendor, r.name, pos);
+        o.printf("%u,%lu,%lu,%s,%02x:%02x:%02x:%02x:%02x:%02x,%d,%u,%u,%u,%s,%s,%s\n",
+                 (unsigned)r.boot, (unsigned long)r.epoch, (unsigned long)r.upSec,
+                 detectionTypeName((DetectionType)r.type),
+                 r.mac[0], r.mac[1], r.mac[2], r.mac[3], r.mac[4], r.mac[5],
+                 (int)r.rssi, (unsigned)r.channel, (unsigned)r.hits,
+                 (r.flags & DET_AGAIN) ? 1u : 0u, r.vendor, r.name, pos);
         return true;
-    }, nullptr);
-    Serial.println("[blackbox] end");
+    }, &out);
+    out.printf("[blackbox] end\n");
 }
 
 }  // namespace BlackBox

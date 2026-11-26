@@ -23,6 +23,8 @@ const Device kDevices[] = {
       "A Pwnagotchi: a tiny computer that collects WiFi handshakes so passwords can be cracked later. It broadcasts its own name and catch count to find others like it -- that is what matched." },
     { DetectionType::HACKER, "PINEAPPLE", "Pineapple", nullptr,
       "A Hak5 WiFi Pineapple, spotted by its setup network. It pretends to be WiFi your phone already trusts and watches whatever joins. Security testers carry them; so do people up to no good." },
+    { DetectionType::HACKER, "KARMA ATTACK", "Karma", nullptr,
+      "One radio using four or more WiFi names in two minutes. Real routers give each network its own address; this one answers to any name a phone asks for. A WiFi Pineapple does this, renamed or not." },
     { DetectionType::HACKER, "DEAUTHER", "Deauther", nullptr,
       "An ESP8266 or ESP32 deauther, spotted by its default network name, \"pwned\". It kicks devices off WiFi on command. Popular with hobbyists -- or it is just somebody's joke network name." },
     { DetectionType::HACKER, "HAK5 ADDRESS", "Hak5-LA", nullptr,
