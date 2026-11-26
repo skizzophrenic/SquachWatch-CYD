@@ -7,15 +7,17 @@
 // the scanlines; the tabbed chat window with its CHAT RAIN; the compose
 // line, channel chip, bar and double-height switch. Only the vertical layout
 // is compressed (240 -> 170): a smaller dish, a shorter strip, three chat
-// rows. What differs on purpose, because this board has no touch panel and
-// no LoRa transmit:
+// What differs on purpose, because this board has no touch panel:
 //   * keys instead of taps: a cursor (TAB/arrows/ENTER) over BACK, the
 //     tabs, the chat rows and the switch; BACK leaves (the bar says so);
-//  * transmit is real: the compose line takes typed text and Enter sends
-//    it with Lora::sendText. As upstream: the LORA TX power and what the
-//    radio listens to live on SETTINGS > SYSTEM (rows LORA TX / LORA), and
-//    the switch only picks which network the page shows and sends to
-//    (uiLoraHomeToggleNet) -- it never retunes the radio.
+//   * transmit is real: the compose line takes typed text and Enter sends
+//    it with Lora::sendText (the LORA TX power lives on SETTINGS > SYSTEM);
+//   * the tabs and the switch pick which network the page shows and sends
+//    to, and retune the radio to listen to it (Lora::applyListen,
+//    session-only). Upstream's switch (uiLoraHomeToggleNet) never retunes,
+//    the T-Deck's listen living on the saved LORA row; here that row still
+//    sets what the radio hears at boot, and the page follows it while you
+//    are in it (user decision 2026-11-26: the tab IS the network switch).
 // Compare against upstream's own render: firmware/sim `squachsim lora
 // out.png --size 320x240` (build it from a copy, outside the submodule).
 #include "lora_home.h"
@@ -52,6 +54,7 @@ const int BAR_Y = 160;
 // ---- state -----------------------------------------------------------------------
 bool     s_active = false;
 uint8_t  s_net = 0;                      // 0 Meshtastic, 1 MeshCore
+bool     s_netTouched = false;           // the page picked a network this run
 bool     s_dmTab = false;
 uint16_t s_scroll = 0;                   // rows scrolled down the open tab
 // The cursor's stops, top to bottom as they sit on the page.
@@ -829,8 +832,8 @@ void drawBar(TFT_eSPI& t) {
     small(t, 96, BAR_Y + 2, "ENTER SENDS", dim(Theme::WHITE, 110), 0x0862);
 }
 
-// The switch: which network the page shows and Enter sends to (upstream's
-// s_net), twice the compose line's height, over the bar's right end.
+// The switch: which network the page shows, sends to and the radio listens
+// to (s_net), twice the compose line's height, over the bar's right end.
 void drawSwitch(TFT_eSPI& t) {
     const bool mc = s_net != 0;
     const uint16_t accent = mc ? Theme::PINK : Theme::CYAN;
@@ -842,7 +845,12 @@ void drawSwitch(TFT_eSPI& t) {
     small(t, sx + (sw - t.textWidth(lab)) / 2, COMPOSE_Y + (h - 8) / 2, lab, accent, dim(accent, 40));
 }
 
+// Page entry: the tab matches the radio. Only before the page has picked a
+// network this run -- the sniffer runs app-wide, so the page's choice (and
+// the radio it retuned) must outlive a page exit, not snap back to the saved
+// row until the next boot.
 void syncNetToListen() {
+    if (s_netTouched) return;
     if (Settings::loraListen() == 1) s_net = 0;
     else if (Settings::loraListen() == 2) s_net = 1;
 }
@@ -906,13 +914,24 @@ void cm0::loraHomeDraw(TFT_eSPI& t, uint32_t now) {
 }
 
 namespace {
+// The page's network: the tab shown and sent to. CM0: the radio follows
+// the page -- applyListen retunes it. Session-only: the saved LORA row on
+// SETTINGS > SYSTEM is what the CM0 applies at boot, so an exploratory tab
+// never parks the radio for the next launch.
+void setNet(uint8_t net) {
+    s_net = net;
+    s_dmTab = false;
+    s_scroll = 0;
+    s_netTouched = true;
+    Lora::applyListen(net ? 2 : 1);
+}
 // The tabs in order: MESHTASTIC, MESHCORE, DMs.
 void stepTab(int d) {
     int k = openTab() + d;
     if (k < 0) k = 0;
     if (k > 2) k = 2;
     s_dmTab = k == 2;
-    if (k < 2) s_net = (uint8_t)k;
+    if (k < 2) setNet((uint8_t)k);
     s_scroll = 0;
 }
 }  // namespace
@@ -974,12 +993,10 @@ void cm0::loraHomeChar(char c, uint32_t now) {
 
 bool cm0::loraHomeComposing() { return s_composeN > 0; }
 
-// Upstream's uiLoraHomeToggleNet: the page's network only. The radio's
-// listen target is the LORA row on SETTINGS > SYSTEM (saved), as upstream.
+// The double-height switch: flips the page's network and retunes the radio
+// to it (setNet). Upstream's uiLoraHomeToggleNet never retunes.
 void cm0::loraHomeToggleNet() {
-    s_net = (uint8_t)(s_net ? 0 : 1);
-    s_dmTab = false;
-    s_scroll = 0;
+    setNet(s_net ? 0 : 1);
 }
 
 // ---- the LORA pill on the home screen ------------------------------------------------

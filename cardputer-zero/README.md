@@ -266,8 +266,10 @@ keyboard and LoRa:
 - **R** on the home screen opens the LORA page: the radar dish, signal tiles
   and strip, the chats, and a compose line. **TAB**/arrows move the cursor
   (BACK, the tabs, the chats, the network switch), **ENTER** presses; typing
-  goes into the compose line and **ENTER** sends. The switch picks the
-  network the page shows and sends to; it does not retune the radio.
+  goes into the compose line and **ENTER** sends. The tabs and the switch
+  pick the network the page shows and sends to, and retune the radio to
+  listen to it for this run; what the radio hears at boot is the saved
+  SYSTEM > LORA row.
 - **SETTINGS > SYSTEM** has the LoRa rows: **LORA CHATS** (the chat list),
   **LORA** (what the radio listens to: Meshtastic, MeshCore, both in turn, or
   off — saved) and **LORA TX** (OFF / 10 / 20 / 22 dBm; off by default). The

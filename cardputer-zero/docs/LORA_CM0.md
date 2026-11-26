@@ -27,12 +27,17 @@ or a harness copy of the function — never an edit to the firmware's own files.
 - **Listening** is chosen on SETTINGS > SYSTEM > **LORA** (saved) or the
   console's `LORA LISTEN`. The harness applies the saved choice every boot
   (upstream does so only on the T-Watch/T-Deck) and parks an unset device on
-  Meshtastic (continuous RX).
+  Meshtastic (continuous RX). For the running app, the LORA page's tabs and
+  switch retune the radio too (below).
 - **The LORA page** (`src/cm0/lora_home.cpp`, upstream's `ui_lorahome.cpp`
-  drawn at 320×170) is opened with **R** on the home screen. Its switch,
-  as upstream's `uiLoraHomeToggleNet`, only picks the network the page shows
-  and sends to — an earlier harness version retuned the radio from it, one
-  way only, and left the Zero deaf to Meshtastic. No `r` key on the page:
+  drawn at 320×170) is opened with **R** on the home screen. Its tabs and
+  switch pick the network the page shows and sends to **and retune the
+  radio to listen to it** (user decision 2026-11-26: on this board the tab
+  IS the network switch — upstream's `uiLoraHomeToggleNet` never retunes).
+  The retune is session-only: the saved SYSTEM > LORA row is what the radio
+  hears at boot, so an exploratory tab never parks it for the next launch;
+  while the app runs, the radio stays where the page last put it (the
+  sniffer runs app-wide, not just on the page). No `r` key on the page:
   every printable key goes to the compose line.
 - **Transmit** (`lora_lx.cpp` `transmit()`): real SX1262 TX — PA config, TX
   power, payload length in SetPacketParams, SetTx, wait for TxDone, then the
