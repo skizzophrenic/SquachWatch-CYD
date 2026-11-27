@@ -767,6 +767,7 @@ bool begin() {
         }
         setRegion(r == 2 ? REGION_US : r == 3 ? REGION_AU : REGION_EU);
         Serial.printf("[lora] band plan %s (%s)\n", regionName(), Settings::loraRegion() == 0 ? "from the time zone" : "set by LORA REGION");
+        Chan::applyMeshtastic();   // the override's row follows the band plan
     }
     uint64_t mask = 0;
     for (uint8_t i = 0; i < profileCount() && i < 64; i++)
@@ -948,8 +949,13 @@ static Meshtastic::Channel presetChannelKey(const Profile& prof) {
     Meshtastic::Channel c;
     memset(&c, 0, sizeof c);
     snprintf(c.name, sizeof c.name, "%s", presetChannel(prof));
-    Meshtastic::expandPsk(1, c.key);
-    c.keyLen = 16;
+    if (Settings::loraMtKeyCustom()) {                // LORA SETTINGS' CHANNEL KEY
+        Settings::loraMtKey(c.key);
+        c.keyLen = Settings::loraMtKeyLen();
+    } else {
+        Meshtastic::expandPsk(1, c.key);
+        c.keyLen = 16;
+    }
     c.hash = Meshtastic::channelHash(c.name, c.key, 16);
     c.enabled = true;
     return c;
@@ -967,18 +973,28 @@ static uint16_t meshtasticFrame(uint8_t port, const uint8_t* payload, size_t ple
     return Meshtastic::buildFrame(ch, from, id, Settings::loraHops(), port, payload, plen, f);
 }
 
-// The most the EU mesh profiles send at. Every PG_MESH_EU profile sits in
-// 869.4-869.65 MHz (ERC 70-03 band h1.4 / ETSI EN 300 220 sub-band g3), where
-// 500 mW ERP (27 dBm) is allowed with a 10 % duty cycle -- not the 25 mW of
-// the 868.0-868.6 sub-band this used to assume. The SX1262 tops out at 22 dBm
-// (LoraRadio::transmit clamps there too), so that is the ceiling. The duty
-// cycle is the operator's to keep: chat text and the occasional NodeInfo stay
-// far under 10 %, a flood of DMs would not.
-static const int8_t EU_MESH_DBM_MAX = 22;
-
 // The sniffer parked, the preset applied, the frame out, and back to whatever
 // the radio was doing.
 static bool transmitOn(const Profile& prof, const uint8_t* f, uint16_t n, int8_t dbm) {
+    // A Meshtastic region below the module's band (EU_433 and friends) is
+    // listen-only: see docs/LORA.md section 1.
+    if (prof.flags & PF_433) { Serial.println("[lora] send refused: this region is below the module's band"); return false; }
+    // The power the profile allows, whatever the caller asked for: every frame,
+    // texts, DMs, ACKs and anything else, goes out through here.
+    dbm = (int8_t)txLimitDbm(prof, (uint8_t)dbm);
+    // The region's duty cycle, kept as an hour at a time: a frame that would
+    // take the hour past what it allows is not sent.
+    static uint32_t dutyStart = 0, dutyMs = 0;
+    const uint32_t toaMs = timeOnAirUs(prof.sf, prof.bwKhz10, prof.cr, prof.preamble, (uint8_t)n, true, false, false) / 1000 + 1;
+    const uint16_t duty = txDutyPermille(prof);
+    if (duty) {
+        const uint32_t now = millis();
+        if (!dutyStart || now - dutyStart >= 3600000u) { dutyStart = now; dutyMs = 0; }
+        if (dutyMs + toaMs > (uint32_t)duty * 3600u) {
+            Serial.printf("[lora] send refused: %u.%u %% duty cycle for this band is used up for the hour\n", (unsigned)(duty / 10), (unsigned)(duty % 10));
+            return false;
+        }
+    }
     const Mode was = s_mode;
     s_parked = false;
     setMode(Mode::OFF);
@@ -987,6 +1003,7 @@ static bool transmitOn(const Profile& prof, const uint8_t* f, uint16_t n, int8_t
     const bool ok = LoraRadio::transmit(f, (uint8_t)n, dbm);
     LoraRadio::standby();
     setMode(was);
+    if (ok && duty) dutyMs += toaMs;
     return ok;
 }
 
@@ -1060,7 +1077,7 @@ bool sendText(Proto p, const char* name, const char* text, int8_t dbm, int16_t c
     uint8_t idx = 0;
     if (!meshProfile(p, idx)) return false;
     const Profile& prof = profile(idx);
-    if (prof.group == PG_MESH_EU && dbm > EU_MESH_DBM_MAX) dbm = EU_MESH_DBM_MAX;
+    dbm = (int8_t)txLimitDbm(prof, (uint8_t)dbm);
     // Which channel: the default when none is named, else exactly the one
     // named -- or nothing at all (see the header).
     const char* primary = presetChannel(prof);
@@ -1124,7 +1141,7 @@ static void dmTick(uint32_t now) {
     if (!meshProfile(Proto::MESHTASTIC, idx)) return;
     const Profile& prof = profile(idx);
     int8_t dbm = (int8_t)Settings::loraTxDbm();
-    if (prof.group == PG_MESH_EU && dbm > EU_MESH_DBM_MAX) dbm = EU_MESH_DBM_MAX;
+    dbm = (int8_t)txLimitDbm(prof, (uint8_t)dbm);
     const uint32_t me = myMeshtasticNum();
     for (int k = 0; k < 2; k++) {
         Dm::Out o;
@@ -1234,7 +1251,7 @@ static void mcTick(uint32_t now) {
     if (!meshProfile(Proto::MESHCORE, idx)) return;
     const Profile& prof = profile(idx);
     int8_t dbm = (int8_t)Settings::loraTxDbm();
-    if (prof.group == PG_MESH_EU && dbm > EU_MESH_DBM_MAX) dbm = EU_MESH_DBM_MAX;
+    dbm = (int8_t)txLimitDbm(prof, (uint8_t)dbm);
     const char* name = MyName::longName(Settings::loraName(), Squachy::nickname());
     for (int k = 0; k < 2; k++) {
         McDm::Out o;

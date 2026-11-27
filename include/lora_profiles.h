@@ -17,6 +17,38 @@ void        setRegion(uint8_t r);
 uint8_t     region();
 const char* regionName();   // "EU 868", "US 915", "AU 915"
 
+// The Meshtastic override: a region, modem preset and frequency slot of the
+// user's choosing, applied as one extra row at the END of the table (and
+// returned by meshPresetFind for Meshtastic) whenever it differs from the band
+// plan's own rows. `region` is 0 for "follow the band plan", else 1 + an index
+// into the region list; `preset` a name from the preset list ("" = LongFast);
+// `slot` 0 for Meshtastic's default (a hash of the preset's name), else 1..N.
+// A preset too wide for the region falls back to the first that fits, as the
+// firmware refuses it. Rebuilds the table, so call it before the sniffer
+// starts or follow it with Lora::applyListen().
+void        setMeshtasticOverride(uint8_t region, const char* preset, uint16_t slot);
+bool        meshtasticOverrideActive();
+uint8_t     mtRegionCount();                 // the lists the settings page steps through
+const char* mtRegionName(uint8_t i);         // 0-based; override value is i + 1
+uint8_t     mtPresetCount();
+const char* mtPresetName(uint8_t i);
+bool        mtPresetFits(uint8_t region, uint8_t preset);          // region as setMeshtasticOverride's
+uint16_t    mtSlotCount(uint8_t region, const char* preset);       // slots in that region at that preset
+uint32_t    mtSlotHz(uint8_t region, const char* preset, uint16_t slot);  // slot 0 = the default
+
+// The most the EU mesh profiles send at. Every PG_MESH_EU profile sits in
+// 869.4-869.65 MHz (ERC 70-03 band h1.4 / ETSI EN 300 220 sub-band g3), where
+// 500 mW ERP (27 dBm) is allowed with a 10 % duty cycle -- not the 25 mW of
+// the 868.0-868.6 sub-band this used to assume. The SX1262 tops out at 22 dBm
+// (LoraRadio::transmit clamps there too), so that is the ceiling.
+static const uint8_t EU_MESH_DBM_MAX = 22;
+// What a profile may be sent at, and the part of an hour it may be on the air
+// (permille, 0 = no figure). Every transmit goes through both: the EU rule
+// as it was, and for a Meshtastic override row the chosen region's own
+// ceiling (JP 13 dBm, TH 16, UA_868 14 and 1 % duty, ...).
+uint8_t     txLimitDbm(const Profile& p, uint8_t wanted);
+uint16_t    txDutyPermille(const Profile& p);
+
 // The table and its length. Indices are stable within a build and are what
 // a Packet's `profile` field holds, so nothing persists them.
 const Profile* profiles();

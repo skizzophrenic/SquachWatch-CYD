@@ -563,5 +563,58 @@ int main() {
         C::save();
     }
 
+    suite("The default channel's key");
+    {
+        namespace C = Lora::Chan;
+        uint8_t def[16]; Meshtastic::expandPsk(1, def);
+        ck("untouched: LongFast is the published key", Meshtastic::channel(0).keyLen == 16 && !memcmp(Meshtastic::channel(0).key, def, 16));
+        const uint8_t oldHash = Meshtastic::channel(0).hash;
+        uint8_t k[16], n = 0;
+        ck("base64 parses", Meshtastic::parsePrimaryKey("AAECAwQFBgcICQoLDA0ODw==", k, n) && n == 16 && k[15] == 15);
+        ck("a one-byte PSK is the default key bumped", Meshtastic::parsePrimaryKey("Ag==", k, n) && n == 16 && k[15] == (uint8_t)(def[15] + 1));
+        ck("none is in the clear", Meshtastic::parsePrimaryKey("none", k, n) && n == 0);
+        ck("32 bytes is refused", !Meshtastic::parsePrimaryKey("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", k, n));
+        ck("rubbish is refused", !Meshtastic::parsePrimaryKey("not a key!", k, n));
+        Meshtastic::parsePrimaryKey("AAECAwQFBgcICQoLDA0ODw==", k, n);
+        Settings::setLoraMtKey(k, n);
+        C::applyMeshtastic();
+        const Meshtastic::Channel c = Meshtastic::channel(0);
+        ck("LongFast now opens with it, and its hash follows", !memcmp(c.key, k, 16) && c.hash != oldHash &&
+           c.hash == Meshtastic::channelHash("LongFast", k, 16));
+        ck("MediumFast is untouched", !memcmp(Meshtastic::channel(1).key, def, 16));
+        Settings::setLoraMtPreset("MediumFast");
+        C::applyMeshtastic();
+        ck("the key moves to the preset in use", !memcmp(Meshtastic::channel(1).key, k, 16) && !memcmp(Meshtastic::channel(0).key, def, 16));
+        ck("and the compose line still sends on it", C::txDefault(Lora::Proto::MESHTASTIC, C::mtPrimary()) == 1);
+        Settings::setLoraMtKey(nullptr, 0);
+        Settings::setLoraMtPreset("");
+        C::applyMeshtastic();
+        ck("back to the default", !Settings::loraMtKeyCustom() && Meshtastic::channel(0).hash == oldHash);
+    }
+
+    suite("Typing a channel key: the one-byte PSK spellings");
+    {
+        uint8_t def[16]; Meshtastic::expandPsk(1, def);
+        uint8_t k[16], n = 0;
+        ck("psk77 is the default key with its last byte +76", Meshtastic::parsePrimaryKey("psk77", k, n) && n == 16 &&
+           !memcmp(k, def, 15) && k[15] == (uint8_t)(def[15] + 76));
+        ck("PSK 77 and #77 are the same key", [&] { uint8_t a[16], b[16], na, nb;
+            return Meshtastic::parsePrimaryKey("PSK 77", a, na) && Meshtastic::parsePrimaryKey("#77", b, nb) && !memcmp(a, b, 16) && na == nb; }());
+        ck("AQ== is PSK 1, the default key", Meshtastic::parsePrimaryKey("AQ==", k, n) && n == 16 && !memcmp(k, def, 16));
+        ck("psk0 and none are no key", Meshtastic::parsePrimaryKey("psk0", k, n) && n == 0 && Meshtastic::parsePrimaryKey("none", k, n) && n == 0);
+        ck("psk256 is not a key", !Meshtastic::parsePrimaryKey("psk256", k, n));
+        ck("a bare 77 is read as hex, not as the one base64 byte it also spells",
+           Meshtastic::parsePrimaryKey("77", k, n) && n == 16 && k[15] == (uint8_t)(def[15] + 118));
+        char d[48];
+        ck("the prompt says what psk77 will save", Meshtastic::describePrimaryKey("psk77", d, sizeof d) && strstr(d, "PSK 77") && strstr(d, "+76"));
+        ck("and that a 32-byte key cannot be", !Meshtastic::describePrimaryKey("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", d, sizeof d) && strstr(d, "AES-256"));
+        Meshtastic::clearUserChannels();
+        ck("a channel added with psk77 takes the same key", Meshtastic::addChannel("Hikers", "psk77") &&
+           Meshtastic::channel((uint8_t)Meshtastic::findChannel("Hikers")).key[15] == (uint8_t)(def[15] + 76));
+        ck("and one added as default takes the default key", Meshtastic::addChannel("Pub", "default") &&
+           !memcmp(Meshtastic::channel((uint8_t)Meshtastic::findChannel("Pub")).key, def, 16));
+        Meshtastic::clearUserChannels();
+    }
+
     return report();
 }
